@@ -83,7 +83,7 @@ function _updateDiffUI(){
   if(typeof currentDiff!=='undefined') currentDiff=_diffs[_diffIdx];
 }
 window.updateStreak=function(){var n=parseInt(localStorage.getItem('cg_streak')||'0');n++;localStorage.setItem('cg_streak',n);renderStreak(n);};
-window.doLogout=function(){fetch('/auth/logout',{method:'POST'}).then(function(){myGlicko={r:800,d:500,v:0.09};myRating=800;location.reload();});};
+window.doLogout=function(){puzzle=null;solution=[];solved=false;solIdx=0;window._hintShown=false;window._submittedFalse=false;fetch('/auth/logout',{method:'POST'}).then(function(){myGlicko={r:800,d:500,v:0.09};myRating=800;location.reload();});};
 window.setDiff=function(v){var i=["easiest","easier","normal","harder","hardest"].indexOf(v);if(i>=0){_diffIdx=i;_updateDiffUI();if(typeof loadNext==="function")loadNext();}};
 window.continuePlay = function(){ loadNextClean(); };
 window.diffStep = function(dir){
@@ -141,6 +141,7 @@ function loadNextClean(){
   solved=false;
   solIdx=0;
   window._hintShown=false;
+  window._submittedFalse=false;
   document.getElementById("rDiff").textContent="";
   // Hide Complete banner and show Next button area cleanly
   var pfc=document.getElementById("pfComplete");
@@ -169,7 +170,7 @@ function showPuzzle(p){try{localStorage.setItem("cg_puzzle",p.id||p._id);}catch(
   var m0=solution[0];
   var r0=chess.move({from:m0.slice(0,2),to:m0.slice(2,4),promotion:m0[4]||"q"});
   if(!r0){dbg("ERR move0 "+m0+" in "+p.fen);setFB("bad","X","Error","Bad move: "+m0);return;}
-  solution=solution.slice(1);
+  solution=solution.slice(1);navHistory=[{fen:chess.fen()}];navIdx=0;
   var pc=chess.turn()==="w"?"white":"black";window.playerColor=pc;
   refreshBoard(pc);
   document.getElementById("pId").textContent="#"+p.id;
@@ -200,10 +201,10 @@ function onMove(from,to){
     document.getElementById("btnSol").style.display="inline-block";cg.set({movable:{color:undefined}});submit(true,window._hintShown);setFB("after","Puzzle complete!","");return;}
     setFB("good","&#10003;","Best move!","Keep going...");setTimeout(function(){oppReply();},600);
   }else{
-    cg.set({fen:chess.fen()});refreshBoard(pc);
+    cg.set({fen:chess.fen()});refreshBoard(pc);navHistory=[{fen:chess.fen()}];navIdx=0;
     setFB("bad","&#10007;","Not the best","Try again.");toast("Not the best!");
     setTimeout(function(){setFB("wait","&#9822;","Your turn","Try again.");refreshBoard(pc);document.getElementById("btnHint").style.display="inline-block";document.getElementById("btnSol").style.display="inline-block";},1500);
-    if(!window._hintShown)submit(false);
+    if(!window._hintShown&&!window._submittedFalse){window._submittedFalse=true;submit(false);}
   }
 }
 function oppReply(){
@@ -226,10 +227,10 @@ function buildMoves(){
   var hist=chess.history(),row,n=1;
   hist.forEach(function(san,i){
     if(i%2===0){row=document.createElement("div");row.className="mr";var idx=document.createElement("index");idx.textContent=n+++".";row.appendChild(idx);ml.appendChild(row);}
-    var mv=document.createElement("move");mv.className=i===hist.length-1?"active":"";mv.textContent=san;row.appendChild(mv);
+    var mv=document.createElement("move");mv.className=i===navIdx?"active":"";mv.textContent=san;row.appendChild(mv);
   });ml.scrollTop=ml.scrollHeight;
 }
-function flip(){if(cg)cg.toggleOrientation();}
+function flip(){if(cg){cg.toggleOrientation();window.playerColor=window.playerColor==="white"?"black":"white";refreshBoard(window.playerColor);}}
 function changeTheme(t){currentTheme=t;try{localStorage.setItem("cg_theme",t);localStorage.removeItem("cg_puzzle");}catch(e){}loadNext();}
 function setFB(type,icon,title,desc){
   var fb=document.getElementById("pzFeedback");
@@ -323,7 +324,8 @@ function navPrev(){
   navIdx--;
   var state=navHistory[navIdx];
   chess.load(state.fen);
-  cg.set({fen:state.fen,lastMove:state.lastMove||undefined,movable:{color:undefined}});
+  var isLast=(navIdx===navHistory.length-1);
+  cg.set({fen:state.fen,lastMove:state.lastMove||undefined,movable:{color:isLast?window.playerColor:undefined}});
   buildMoves();
 }
 function navNext(){
