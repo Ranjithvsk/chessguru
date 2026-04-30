@@ -83,7 +83,7 @@ function _updateDiffUI(){
   if(typeof currentDiff!=='undefined') currentDiff=_diffs[_diffIdx];
 }
 window.updateStreak=function(){var n=parseInt(localStorage.getItem('cg_streak')||'0');n++;localStorage.setItem('cg_streak',n);renderStreak(n);};
-window.doLogout=function(){fetch('/auth/logout',{method:'POST'}).then(function(){location.reload();});};
+window.doLogout=function(){fetch('/auth/logout',{method:'POST'}).then(function(){myGlicko={r:800,d:500,v:0.09};myRating=800;location.reload();});};
 window.setDiff=function(v){var i=["easiest","easier","normal","harder","hardest"].indexOf(v);if(i>=0){_diffIdx=i;_updateDiffUI();if(typeof loadNext==="function")loadNext();}};
 window.continuePlay = function(){ loadNextClean(); };
 window.diffStep = function(dir){
@@ -100,7 +100,7 @@ fetch('/api/me/rating').then(function(r){return r.json();}).then(function(rd){
   window._userId=rd.userId;
   var ui=document.getElementById('userInfo'),lb=document.getElementById('loginBtn'),nd=document.getElementById('userNameDisplay');
   if(ui)ui.style.display='flex';if(lb)lb.style.display='none';if(nd)nd.textContent=rd.userId;}
-  else{var lb=document.getElementById('loginBtn');if(lb)lb.style.display='block';}
+  else{var lb=document.getElementById('loginBtn');if(lb)lb.style.display='block';};
 }).catch(function(){});
 
 var puzzle=null,cg=null,chess=null,solution=[],solIdx=0,solved=false;
