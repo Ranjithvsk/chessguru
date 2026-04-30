@@ -195,7 +195,7 @@ function onMove(from,to){
   if(solved)return;
   var uci=from+to,exp=solution[solIdx],pc=chess.turn()==="w"?"white":"black";
   if(uci===exp||uci+"q"===exp){
-    chess.move({from:from,to:to,promotion:exp[4]||"q"});solIdx++;buildMoves();
+    chess.move({from:from,to:to,promotion:exp[4]||"q"});solIdx++;buildMoves();navHistory.push({fen:chess.fen(),lastMove:[from,to]});navIdx=navHistory.length-1;
     if(solIdx>=solution.length){solved=true;setFB("good","&#10003;","Solved!","Excellent!");document.getElementById("btnN").style.display="block";
     document.getElementById("btnHint").style.display="inline-block";
     document.getElementById("btnSol").style.display="inline-block";cg.set({movable:{color:undefined}});submit(true,window._hintShown);setFB("after","Puzzle complete!","");return;}
@@ -255,6 +255,9 @@ function setFB(type,icon,title,desc){
     var pc=window.playerColor||"white";
     if(pfIcon)pfIcon.innerHTML='<piece class="king '+pc+'" id="kingPiece"></piece>';
     if(fbD)fbD.innerHTML='Find the best move for <strong id="pfColor">'+pc+'</strong>.';
+    if(btnHint)btnHint.style.display="inline-block";
+    if(btnHint)btnHint.disabled=false;
+    if(btnSol)btnSol.style.display="inline-block";
   } else if(type==="good"){
     // LICHESS: good state — ✓ icon
     fb.className="puzzle__feedback good";
@@ -315,7 +318,7 @@ function viewSolution(){
   playNext();
   // LICHESS after.ts: show "Puzzle complete!" + Continue training button
   var totalMoves=solution.length-solIdx;
-  setTimeout(function(){setFB("after","","Puzzle complete!","");},totalMoves*600+800);
+  
 
 }
 var navHistory=[],navIdx=-1;
@@ -333,7 +336,8 @@ function navNext(){
   navIdx++;
   var state=navHistory[navIdx];
   chess.load(state.fen);
-  cg.set({fen:state.fen,lastMove:state.lastMove||undefined});
+  var isLast=(navIdx===navHistory.length-1);
+  cg.set({fen:state.fen,lastMove:state.lastMove||undefined,movable:{color:isLast?window.playerColor:undefined}});
   buildMoves();
 }
 function fmt(t){if(!t)return"Mix";return t.replace(/([A-Z])/g," $1").replace(/^./,function(s){return s.toUpperCase();});}
