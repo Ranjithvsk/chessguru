@@ -197,7 +197,7 @@ function onMove(from,to){
     chess.move({from:from,to:to,promotion:exp[4]||"q"});solIdx++;buildMoves();
     if(solIdx>=solution.length){solved=true;setFB("good","&#10003;","Solved!","Excellent!");document.getElementById("btnN").style.display="block";
     document.getElementById("btnHint").style.display="inline-block";
-    document.getElementById("btnSol").style.display="inline-block";cg.set({movable:{color:undefined}});submit(true,window._hintShown);return;}
+    document.getElementById("btnSol").style.display="inline-block";cg.set({movable:{color:undefined}});submit(true,window._hintShown);setFB("after","Puzzle complete!","");return;}
     setFB("good","&#10003;","Best move!","Keep going...");setTimeout(function(){oppReply();},600);
   }else{
     cg.set({fen:chess.fen()});refreshBoard(pc);
@@ -215,11 +215,11 @@ function oppReply(){
 }
 function submit(win,hint){
   if(!puzzle)return;
-  // Show complete UI immediately on win
-  if(win){ setFB("after","Puzzle complete!",""); solved=true; }
-  else { setFB("fail","Not the best",""); }
   fetch(API+"/puzzles/"+(puzzle.id||puzzle._id)+"/complete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({win:win,hint:!!hint,difficulty:currentDiff,userId:window._userId||null})})
-  .then(function(r){return r.json();}).then(function(d){if(d.ratingDiff){var el=document.getElementById("rDiff");el.textContent=(d.ratingDiff>0?"+":"")+d.ratingDiff;el.className="rd "+(d.ratingDiff>=0?"pos":"neg");}if(d.glicko){myGlicko=d.glicko;myRating=Math.round(d.glicko.r);document.getElementById("myRating").textContent=myRating;}}).catch(function(){});
+  .then(function(r){return r.json();}).then(function(d){
+    if(d.ratingDiff){var el=document.getElementById("rDiff");el.textContent=(d.ratingDiff>0?"+":"")+d.ratingDiff;el.className="rd "+(d.ratingDiff>=0?"pos":"neg");}
+    if(d.glicko){myGlicko=d.glicko;myRating=Math.round(d.glicko.r);document.getElementById("myRating").textContent=myRating;}
+  }).catch(function(){});
 }
 function buildMoves(){
   var ml=document.getElementById("mvList");ml.innerHTML="";if(!chess)return;
@@ -299,7 +299,7 @@ function viewSolution(){
   window._hintShown=true;
   if(document.getElementById("btnHint"))document.getElementById("btnHint").className="button";
 
-  if(!puzzle||solved)return;
+  if(!puzzle)return;
   document.getElementById("btnSol").style.display="none";
   document.getElementById("btnHint").disabled=true;
   var idx=solIdx;
