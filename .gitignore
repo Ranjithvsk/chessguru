@@ -1,0 +1,8 @@
+node_modules/
+*.csv
+import2.js
+add_piece_count.js
+gen_paths2.js
+lichess_db_puzzle.csv
+.env
+npm-debug.log*

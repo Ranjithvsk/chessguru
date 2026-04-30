@@ -1,0 +1,134 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in • ChessGuru</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#161512;color:#bababa;font-family:Noto Sans,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px}
+.card{background:#262421;border-radius:12px;padding:32px 40px;width:100%;max-width:420px;box-shadow:0 8px 32px rgba(0,0,0,.5)}
+.logo{text-align:center;margin-bottom:24px}
+.logo svg{width:50px;height:50px;fill:none;stroke:#fff;stroke-width:2}
+.logo-name{font-size:18px;font-weight:600;color:#fff;margin-top:8px}
+.tabs{display:flex;border-bottom:1px solid #3d3a37;margin-bottom:28px}
+.tab{flex:1;text-align:center;padding:10px;cursor:pointer;font-size:15px;color:#8a8886;text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px;transition:color .15s}
+.tab.active{color:#d97b2b;border-bottom-color:#d97b2b;font-weight:600}
+.tab:hover:not(.active){color:#ccc}
+.field{margin-bottom:20px}
+.field label{display:block;font-size:13px;color:#9a9895;margin-bottom:6px;font-weight:500}
+.field-wrap{position:relative}
+input[type=text],input[type=password],input[type=email]{width:100%;background:#1a1816;border:1px solid #3d3a37;border-radius:8px;color:#e0e0e0;font-size:15px;padding:12px 14px;outline:none;transition:border-color .15s}
+input:focus{border-color:#5895d4}
+.eye{position:absolute;right:12px;top:50%;transform:translateY(-50%);cursor:pointer;color:#666;font-size:18px;user-select:none;line-height:1}
+.eye:hover{color:#999}
+.hint{font-size:12px;color:#6e6c6a;margin-top:6px;line-height:1.4}
+.keep{display:flex;align-items:center;gap:8px;margin-bottom:20px;font-size:13px;color:#9a9895;cursor:pointer}
+.keep input{width:18px;height:18px;accent-color:#5895d4;cursor:pointer}
+.btn{width:100%;background:#5895d4;color:#fff;border:none;border-radius:8px;padding:13px;font-size:15px;font-weight:600;cursor:pointer;transition:background .15s}
+.btn:hover{background:#4a84c3}
+.btn:disabled{background:#3a5a8a;cursor:not-allowed}
+.err{background:#3a1a1a;border:1px solid #8b2020;border-radius:6px;color:#e07070;font-size:13px;padding:10px 14px;margin-bottom:16px;display:none}
+.err.show{display:block}
+.ok{background:#1a3a1a;border:1px solid #208b20;border-radius:6px;color:#70e070;font-size:13px;padding:10px 14px;margin-bottom:16px;display:none}
+.ok.show{display:block}
+.notice{background:#1e2a38;border-left:3px solid #5895d4;border-radius:0 6px 6px 0;color:#8ab4d4;font-size:12px;padding:10px 14px;margin-top:16px;line-height:1.5}
+</style></head><body>
+<div class="card">
+  <div class="logo">
+    <svg viewBox="0 0 50 50"><path d="M25 5 C15 5 10 12 10 20 C10 26 13 31 18 34 L16 45 L34 45 L32 34 C37 31 40 26 40 20 C40 12 35 5 25 5Z" stroke-linejoin="round"/><line x1="16" y1="40" x2="34" y2="40"/></svg>
+    <div class="logo-name">ChessGuru</div>
+  </div>
+
+  <div class="tabs">
+    <a class="tab active" id="tabSignin" href="#" onclick="showTab('signin');return false">Sign in</a>
+    <a class="tab" id="tabRegister" href="#" onclick="showTab('register');return false">Register</a>
+  </div>
+
+  <!-- SIGN IN -->
+  <div id="formSignin">
+    <div class="err" id="siErr"></div>
+    <div class="field"><label>Username or email</label><input type="text" id="siUser" autocomplete="username" placeholder=""></div>
+    <div class="field"><label>Password</label>
+      <div class="field-wrap"><input type="password" id="siPass" autocomplete="current-password" placeholder="">
+      <span class="eye" onclick="togglePw('siPass',this)">👁</span></div>
+    </div>
+    <label class="keep"><input type="checkbox" id="siKeep" checked> Keep me logged in</label>
+    <button class="btn" onclick="doSignin()">Sign in</button>
+  </div>
+
+  <!-- REGISTER -->
+  <div id="formRegister" style="display:none">
+    <div class="err" id="regErr"></div>
+    <div class="ok" id="regOk"></div>
+    <div class="field"><label>Username</label>
+      <input type="text" id="regUser" autocomplete="username" placeholder="">
+      <div class="hint">Letters and numbers only. Cannot be changed later.</div>
+    </div>
+    <div class="field"><label>Password</label>
+      <div class="field-wrap"><input type="password" id="regPass" autocomplete="new-password" placeholder="">
+      <span class="eye" onclick="togglePw('regPass',this)">👁</span></div>
+    </div>
+    <div class="field"><label>Email <span style="color:#6e6c6a;font-weight:400">(optional)</span></label>
+      <input type="email" id="regEmail" autocomplete="email" placeholder="">
+      <div class="hint">Only used for password reset. Never shared.</div>
+    </div>
+    <button class="btn" onclick="doRegister()">Create account</button>
+    <div class="notice">&#9432; Play fair. Engine assistance is forbidden. Accounts with inappropriate usernames will be closed.</div>
+  </div>
+</div>
+
+<script>
+function showTab(t){
+  document.getElementById('formSignin').style.display=t==='signin'?'':'none';
+  document.getElementById('formRegister').style.display=t==='register'?'':'none';
+  document.getElementById('tabSignin').classList.toggle('active',t==='signin');
+  document.getElementById('tabRegister').classList.toggle('active',t==='register');
+}
+function togglePw(id,el){
+  var inp=document.getElementById(id);
+  inp.type=inp.type==='password'?'text':'password';
+  el.style.opacity=inp.type==='text'?'0.4':'1';
+}
+function showErr(id,msg){var e=document.getElementById(id);e.textContent=msg;e.className='err show';}
+function hideErr(id){document.getElementById(id).className='err';}
+function showOk(id,msg){var e=document.getElementById(id);e.textContent=msg;e.className='ok show';}
+
+async function doSignin(){
+  hideErr('siErr');
+  var user=document.getElementById('siUser').value.trim();
+  var pass=document.getElementById('siPass').value;
+  var keep=document.getElementById('siKeep').checked;
+  if(!user||!pass)return showErr('siErr','Please fill in all fields.');
+  var btn=document.querySelector('#formSignin .btn');
+  btn.disabled=true;btn.textContent='Signing in…';
+  try{
+    var r=await fetch('/auth/signin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:user,password:pass,keep})});
+    var d=await r.json();
+    if(d.ok){var back=new URLSearchParams(location.search).get('back');location.href=back||'/';}
+    else showErr('siErr',d.error||'Invalid username or password.');
+  }catch(e){showErr('siErr','Network error. Try again.');}
+  btn.disabled=false;btn.textContent='Sign in';
+}
+
+async function doRegister(){
+  hideErr('regErr');
+  var user=document.getElementById('regUser').value.trim();
+  var pass=document.getElementById('regPass').value;
+  var email=document.getElementById('regEmail').value.trim();
+  if(!user||!pass)return showErr('regErr','Username and password are required.');
+  if(!/^[a-zA-Z0-9_-]{2,20}$/.test(user))return showErr('regErr','Username: 2–20 chars, letters/numbers/_ only.');
+  if(pass.length<6)return showErr('regErr','Password must be at least 6 characters.');
+  var btn=document.querySelector('#formRegister .btn');
+  btn.disabled=true;btn.textContent='Creating…';
+  try{
+    var r=await fetch('/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:user,password:pass,email})});
+    var d=await r.json();
+    if(d.ok){showOk('regOk','Account created! Signing you in…');setTimeout(()=>location.href='/',1200);}
+    else showErr('regErr',d.error||'Registration failed.');
+  }catch(e){showErr('regErr','Network error. Try again.');}
+  btn.disabled=false;btn.textContent='Create account';
+}
+
+document.addEventListener('keydown',function(e){if(e.key==='Enter'){var t=document.getElementById('tabSignin').classList.contains('active');if(t)doSignin();else doRegister();}});
+
+// Auto-open register tab if ?tab=register
+if(new URLSearchParams(location.search).get('tab')==='register')showTab('register');
+</script>
+</body></html>

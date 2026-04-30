@@ -1,0 +1,13 @@
+const mongoose=require("mongoose");
+const GS={r:{type:Number,default:1500},d:{type:Number,default:500},v:{type:Number,default:0.09}};
+const PS=new mongoose.Schema({gl:GS,nb:{type:Number,default:0},re:{type:[Number],default:[]},la:{type:Date}},{_id:false,versionKey:false});
+const PuzPS=new mongoose.Schema({nb:{type:Number,default:0},w:{type:Number,default:0},last:{type:Number}},{_id:false,versionKey:false});
+const UserPerfsSchema=new mongoose.Schema({_id:{type:String},bullet:{type:PS,default:()=>({})},blitz:{type:PS,default:()=>({})},rapid:{type:PS,default:()=>({})},classical:{type:PS,default:()=>({})},correspondence:{type:PS,default:()=>({})},ultraBullet:{type:PS,default:()=>({})},chess960:{type:PS,default:()=>({})},kingOfTheHill:{type:PS,default:()=>({})},threeCheck:{type:PS,default:()=>({})},antichess:{type:PS,default:()=>({})},atomic:{type:PS,default:()=>({})},horde:{type:PS,default:()=>({})},racingKings:{type:PS,default:()=>({})},crazyhouse:{type:PS,default:()=>({})},puzzle:{type:PS,default:()=>({})},storm:{type:PuzPS,default:()=>({})},racer:{type:PuzPS,default:()=>({})},streak:{type:PuzPS,default:()=>({})},blindfold:{type:PS,default:()=>({gl:{r:800,d:500,v:0.09},nb:0,re:[],la:null})}},{_id:false,versionKey:false});
+const UserSchema=new mongoose.Schema({_id:{type:String},username:{type:String,required:true},count:{game:{type:Number,default:0},rated:{type:Number,default:0},win:{type:Number,default:0},loss:{type:Number,default:0},draw:{type:Number,default:0}},enabled:{type:Boolean,default:true},roles:{type:[String],default:[]},profile:{flag:String,location:String,bio:String,realName:String,fideRating:Number,links:String},toints:{type:Number,default:0},time:{total:{type:Number,default:0},tv:{type:Number,default:0}},lang:{type:String},kid:{type:Boolean,default:false},marks:{type:[String],default:[]},bpass:{type:Buffer},email:{type:String},seenAt:{type:Date},createdAt:{type:Date,default:Date.now}},{_id:false,versionKey:false});
+const RoundSchema=new mongoose.Schema({_id:{type:String},w:{type:Boolean},d:{type:Date},f:{type:Date},v:{type:Number},t:{type:[String]}},{_id:false,versionKey:false});
+const User=mongoose.model("User",UserSchema,"users");
+const UserPerfs=mongoose.model("UserPerfs",UserPerfsSchema,"userperfs");
+const Round=mongoose.model("Round",RoundSchema,"rounds");
+function newUser(username){const id=username.toLowerCase();return{_id:id,username};}
+function defaultPuzzlePerf(){return{gl:{r:1500,d:500,v:0.09},nb:0,re:[],la:null};}
+module.exports={User,UserPerfs,Round,newUser,defaultPuzzlePerf};

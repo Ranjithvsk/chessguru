@@ -1,0 +1,25 @@
+?? .gitignore
+?? PROJECT_MASTER.md
+?? auth.js
+?? build_pools.js
+?? build_pools2.js
+?? build_pools_fast.js
+?? dbcheck.js
+?? gen_bf_pools.js
+?? gen_bf_pools_v2.js
+?? gen_piece_pools.js
+?? glicko2.js
+?? models.js
+?? models/
+?? package-lock.json
+?? package.json
+?? public/blindfold.html
+?? public/css/
+?? public/exit.txt
+?? public/index.html
+?? public/index.html.bak2
+fee66f9 fix: bugs 5-8 - reset rating on logout, catch cleanup, clarify glicko/storage
+85e1bfa fix: theme.html bugs - script merge, diffStep scope, continuePlay, state resets on loadNextClean
+---
+* master
+  remotes/origin/main

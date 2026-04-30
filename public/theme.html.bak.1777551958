@@ -1,0 +1,360 @@
+<!DOCTYPE html><html lang=en><head><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><title>ChessGuru</title><link rel=preconnect href=https://fonts.googleapis.com><link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Serif+Display:ital@0;1&display=swap" rel=stylesheet><script src=/js/chess.min.js></script><script src=/js/chessground.min.js></script><style>*{box-sizing:border-box;margin:0;padding:0}:root{--w:#fff;--w2:#f5f5f5;--w3:#ebebeb;--w4:#d0d0d0;--b:#000;--b2:#0f0f0f;--b3:#1a1a1a;--b4:#2a2a2a;--b5:#3a3a3a;--g1:#888;--g2:#555;--g3:#333;--r:8px;--r-sm:5px;--r-lg:12px;--cp:var(--b3);--cz:var(--b4);--cz2:var(--b2);--bdr:var(--b4);--cfd:var(--g1);--cfc:var(--w);--cf:var(--w);--pri:#629032}html,body{background:var(--b);color:var(--w);font-family:"Inter",sans-serif;min-height:100vh}#hdr{height:54px;display:flex;align-items:center;padding:0 28px;background:var(--b);border-bottom:1px solid var(--b4);position:sticky;top:0;z-index:100}.logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit;margin-right:4px}.logo-sq{width:30px;height:30px;border-radius:var(--r-sm);background:var(--w);display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--b);line-height:1;flex-shrink:0}.logo-name{font-family:"DM Serif Display",serif;font-size:17px;color:var(--w);letter-spacing:.02em}#hdr nav{display:flex;align-items:center;gap:6px;flex:1;margin-left:8px}.tsel{background:none;border:1px solid var(--b4);color:var(--g1);border-radius:var(--r-sm);font-size:11px;padding:5px 8px;cursor:pointer;max-width:150px}#userWidget{margin-left:auto;display:flex;align-items:center;gap:8px;position:relative}#loginBtn{color:var(--g1);padding:4px 10px;border-radius:var(--r-sm);text-decoration:none;background:none;border:1px solid var(--b4);font-size:12px;white-space:nowrap;display:none}#userInfo{display:none;align-items:center;font-size:12px}#userMenuBtn{background:rgba(255,255,255,.05);border:1px solid var(--b4);color:var(--g2);font-size:12px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:var(--r-sm);white-space:nowrap;transition:all .15s;font-family:"Inter",sans-serif}#userMenuBtn:hover{background:rgba(255,255,255,.09);color:var(--w)}#userNameDisplay{max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#userMenu{display:none;position:absolute;top:calc(100% + 6px);right:0;background:var(--b3);border:1px solid var(--b4);border-radius:var(--r);min-width:130px;box-shadow:0 4px 20px rgba(0,0,0,.6);z-index:9999;overflow:hidden}#userMenu button{width:100%;background:none;border:none;color:var(--g1);padding:10px 14px;text-align:left;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:8px;transition:background .15s;font-family:"Inter",sans-serif}#userMenu button:hover{background:var(--b4);color:var(--w)}main{display:grid;grid-template-areas:"board side" "tools side";grid-template-columns:auto 1fr;max-width:1080px;margin:0 auto;padding:28px 28px 28px 36px;gap:0;align-items:start}.pb{grid-area:board;position:relative;width:clamp(300px,50vw,500px);aspect-ratio:1;align-self:start;overflow:visible}.cg-wrap{display:block;height:100%;width:100%}cg-board{position:absolute;top:0;left:0;width:100%;height:100%;display:block;background-color:#ffffff;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2' height='2'%3E%3Crect width='1' height='1' fill='%238c8c8c'/%3E%3Crect x='1' y='1' width='1' height='1' fill='%238c8c8c'/%3E%3C/svg%3E");background-size:25% 25%}.cg-wrap{display:block;height:100%;width:100%}
+cg-container{position:absolute;width:100%;height:100%;display:block;top:0}piece{position:absolute;top:0;left:0;width:12.5%;height:12.5%;background-size:cover;background-repeat:no-repeat;z-index:2;will-change:transform;pointer-events:none}square{width:46px;height:46px;flex-shrink:0}
+  .puzzle__feedback .icon{width:46px;height:46px;font-size:28px;flex-shrink:0}
+  .puzzle__feedback .instruction strong{font-size:15px}
+  .puzzle__feedback .instruction em{font-size:12px}
+
+  /* === BUTTONS - Hint/View Solution === */
+  .view_solution{flex-direction:row;gap:8px}
+  .view_solution .button{flex:1;font-size:13px;padding:8px 10px;text-align:center}
+
+  /* === NEXT PUZZLE BUTTON === */
+  .bn{max-width:100%;width:100%;font-size:15px;padding:12px;display:flex;margin-top:4px}
+
+  /* === DIFFICULTY + STATS ROW === */
+  .sc{padding:8px 12px;gap:8px;flex-wrap:wrap;font-size:12px}
+  .sc label{font-size:12px}
+  #diffSel{font-size:12px;padding:4px 8px;flex:1}
+
+  /* === MOVE LIST === */
+  #mvList{max-height:56px;font-size:11px;overflow-y:auto}
+  .mr{font-size:11px}
+
+  /* === PUZZLE INFO ROW === */
+  .pz-meta,#puzzleMeta{font-size:11px;flex-wrap:wrap;gap:4px}
+  #myRating,#rDiff{font-size:14px}
+
+  /* === BOARD CONTROLS (  ) === */
+  .pc{padding:4px 6px;gap:2px}
+  .pc button{padding:4px 10px;font-size:14px}
+}
+
+cg-board{position:absolute;top:0;left:0;width:100%;height:100%;display:block;background-color:#ffffff;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2' height='2'%3E%3Crect width='1' height='1' fill='%238c8c8c'/%3E%3Crect x='1' y='1' width='1' height='1' fill='%238c8c8c'/%3E%3C/svg%3E");background-size:25% 25%}.cg-wrap{display:block;height:100%;width:100%}
+cg-container{position:absolute;width:100%;height:100%;display:block;top:0}
+
+piece{position:absolute;top:0;left:0;width:12.5%;height:12.5%;background-size:cover;background-repeat:no-repeat;z-index:2;will-change:transform;pointer-events:none}
+square{position:absolute;top:0;left:0;width:12.5%;height:12.5%;pointer-events:none}
+square.last-move{background-color:rgba(20,85,30,.5)}
+square.selected{background-color:rgba(20,85,0,.5)}
+square.move-dest{background:radial-gradient(rgba(20,85,30,.5) 22%,rgba(0,0,0,.3) 0)}
+square.move-dest.oc{background:radial-gradient(transparent 0%,transparent 79%,rgba(20,85,30,.3) 80%)}square.check{background:radial-gradient(ellipse at center,rgba(255,0,0,1) 0%,rgba(231,0,0,1) 25%,rgba(169,0,0,0) 89%,rgba(158,0,0,0) 100%)}cg-auto-pieces,coords{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
+coords{display:flex;pointer-events:none}
+/* === RANKS: right side OUTSIDE the board === */
+coords.ranks{position:absolute;right:-15px;top:0;width:15px;height:100%;flex-direction:column-reverse;left:auto;bottom:auto}
+/* black: rank 1 at top visually */
+coords.ranks.black{flex-direction:column}
+/* === FILES: bottom side OUTSIDE the board === */
+coords.files{position:absolute;bottom:-15px;left:0;width:100%;height:15px;flex-direction:row;top:auto;right:auto}
+/* black: h at left */
+coords.files.black{flex-direction:row-reverse}
+/* === each coord cell === */
+coord{flex:1;display:flex;font-size:max(.7vw,9px);font-weight:700;opacity:1;line-height:1;color:var(--cfd)}
+/* rank: right-align, vertically centered */
+coords.ranks coord{align-items:center;justify-content:flex-start;padding-left:2px}
+/* file: centered horizontally, top-aligned */
+coords.files coord{align-items:flex-start;justify-content:center;padding-top:1px}
+/* alternating colors matching square color under the label */
+coord.coord-light{color:#888}
+coord.coord-dark{color:#ccc}cg-board{border-radius:var(--r-sm)}.pt{grid-area:tools;padding-top:10px}.tools-bar{border:1px solid var(--b4);border-radius:var(--r-sm);overflow:hidden;background:var(--b2);display:flex;align-items:stretch}.tv-wrap{flex:1;padding:7px 12px;min-height:38px}#mvList{display:flex;flex-wrap:wrap;gap:2px;align-items:center}.mr{display:flex;align-items:baseline;gap:3px;font-size:13px}.mr index{color:var(--g1);font-size:11px;margin-right:2px}.mr move{padding:2px 7px;border-radius:4px;cursor:pointer;color:var(--g2);transition:all .1s}.mr move:hover{color:var(--w);background:rgba(255,255,255,.06)}.mr move.active{color:var(--w);font-weight:600;background:rgba(255,255,255,.1)}.nb-wrap{display:flex;border-left:1px solid var(--b4)}.nb-wrap button{width:36px;height:38px;display:flex;align-items:center;justify-content:center;background:none;border:none;border-right:1px solid var(--b4);color:var(--g1);font-size:13px;cursor:pointer;transition:all .1s}.nb-wrap button:hover{color:var(--w);background:rgba(255,255,255,.05)}.nb-wrap button:last-child{border-right:none}.ps{grid-area:side;padding:0 0 0 36px;display:flex;flex-direction:column}.eyebrow{font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--g2);margin-bottom:12px;display:flex;align-items:center;gap:10px}.eyebrow::after{content:"";flex:1;height:1px;background:var(--b4)}.pz-title{font-family:"DM Serif Display",serif;font-size:30px;line-height:1.15;color:var(--w);margin-bottom:5px;font-weight:400}.pz-title em{font-style:italic;color:var(--g1)}.pz-desc{font-size:13px;color:var(--g2);margin-bottom:22px;line-height:1.6;font-weight:300}.sm{margin-bottom:18px;border:1px solid var(--b4);border-radius:var(--r);overflow:hidden}.sa{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--b4)}#aIcon.si{width:34px;height:34px;border-radius:6px;background:var(--b4);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}.sn h2{font-family:"DM Serif Display",serif;font-size:16px;font-weight:400;color:var(--w)}.sn p{font-size:12px;color:var(--g1);margin-top:1px}.sr{display:flex}.sr>span{flex:1;padding:11px 14px;text-align:center;border-right:1px solid var(--b4);font-size:12px;color:var(--g2)}.sr>span:last-child{border-right:none}.sr a{color:var(--g1);text-decoration:none;font-size:13px;font-weight:500}.sr strong{display:block;font-family:"DM Serif Display",serif;font-size:18px;font-weight:400;color:var(--w);margin-bottom:2px}.sr em{font-size:9px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;font-style:normal;color:var(--g1)}.rr{display:flex;align-items:center;gap:12px;padding:14px 16px;border:1px solid var(--b4);border-radius:var(--r);background:var(--b3);margin-bottom:18px;font-size:12px;color:var(--g1)}#myRating{font-size:14px;font-weight:700;color:var(--w)}.rr-side{display:none}.rr-lbl{font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--g1)}#rDiff{font-size:12px;color:var(--g2)}.rr-sub{font-size:11px;color:var(--g2)}.puzzle__feedback{border:1px solid var(--b4);border-radius:var(--r);overflow:hidden;background:var(--b3);margin-bottom:16px;display:flex;flex-direction:column;padding:0}.player{display:flex;align-items:center;gap:12px;padding:14px 16px;border-left:3px solid var(--w)}.no-square{width:42px;height:42px;flex-shrink:0;position:relative}.icon{width:42px;height:42px;display:flex;align-items:center;justify-content:center;font-size:26px;color:var(--g1);border-radius:6px;background:var(--b4)}.instruction{display:flex;flex-direction:column;gap:2px}.instruction strong{font-size:15px;font-weight:500;color:var(--w)}.instruction em{font-size:12px;color:var(--g1);font-style:normal}.instruction em strong{color:var(--w);font-size:12px}.complete{font-size:16px;font-weight:600;color:var(--w);text-align:center;padding:16px}.view_solution{display:flex;gap:8px;margin-bottom:12px}.view_solution .button{padding:6px 14px;border-radius:4px;font-size:13px;font-weight:400;cursor:pointer;text-align:center;transition:all .15s;border:1px solid var(--b4);background:var(--b3);color:var(--g1);font-family:"Inter",sans-serif;display:inline-block}.view_solution .button:hover{border-color:var(--b5);color:var(--w);background:var(--b4)}.view_solution .button:not(.button-empty){background:var(--b3);color:var(--w);border-color:var(--b4)}.view_solution .button:not(.button-empty):hover{background:var(--b4)}.view_solution .button.button-empty{background:none;border-color:var(--b4)}button.continue{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:11px;background:#629032;color:#fff;border:none;border-radius:var(--r-sm);font-size:12px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;cursor:pointer;transition:background .15s;font-family:"Inter",sans-serif;margin-bottom:10px}button.continue:hover{background:#70a038}.bn{width:100%;padding:10px 28px;border-radius:4px;background:#3692e7;border:none;color:#fff;font-size:14px;font-weight:600;cursor:pointer;font-family:"Inter",sans-serif;transition:all .15s;text-align:center;margin-bottom:12px}.bn:hover{background:#2a7fd4}.sc{padding:0;margin-bottom:12px;display:flex;flex-direction:column;gap:6px}.diff-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:18px}.diff-lbl{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--g2);white-space:nowrap}.diff-opts{display:flex;flex:1;border:1px solid var(--b4);border-radius:var(--r-sm);overflow:hidden}.diff-opt{flex:1;text-align:center;padding:6px 0;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;border-right:1px solid var(--b4);color:var(--g2);transition:all .15s;background:none;border-top:none;border-bottom:none;font-family:"Inter",sans-serif}.diff-opt:last-child{border-right:none}.diff-opt.on{background:var(--w);color:var(--b)}.diff-opt:hover:not(.on){color:var(--w);background:rgba(255,255,255,.05)}.streak-block{margin-bottom:18px}.st-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}.st-lbl{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--g2)}.st-num{font-family:"DM Serif Display",serif;font-size:20px;color:var(--w)}.st-bars{display:flex;gap:4px}.stb{flex:1;height:3px;border-radius:2px;background:var(--b4)}.stb.on{background:var(--w)}.quote-block{border-radius:var(--r);border:1px solid var(--b4);padding:14px 16px;background:var(--b3)}.quote-text{font-family:"DM Serif Display",serif;font-style:italic;font-size:13px;color:var(--g2);line-height:1.7}.quote-attr{font-size:10px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--g1);margin-top:6px}#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--b3);color:var(--w);padding:10px 20px;border-radius:var(--r);font-size:13px;opacity:0;transition:.3s;pointer-events:none;z-index:9999;border:1px solid var(--b4)}#toast.show{opacity:1}#dbg{display:none}@media(max-width:700px){main{grid-template-areas:"board" "side" "tools";grid-template-columns:1fr;padding:6px 6px 24px}.pb{width:calc(100vw - 12px)}.ps{padding:14px 0 0}.pt{padding-top:8px}}
+piece.king.white{background-image:url("/pieces/wK.svg")}piece.queen.white{background-image:url("/pieces/wQ.svg")}piece.rook.white{background-image:url("/pieces/wR.svg")}piece.bishop.white{background-image:url("/pieces/wB.svg")}piece.knight.white{background-image:url("/pieces/wN.svg")}piece.pawn.white{background-image:url("/pieces/wP.svg")}piece.king.black{background-image:url("/pieces/bK.svg")}piece.queen.black{background-image:url("/pieces/bQ.svg")}piece.rook.black{background-image:url("/pieces/bR.svg")}piece.bishop.black{background-image:url("/pieces/bB.svg")}piece.knight.black{background-image:url("/pieces/bN.svg")}piece.pawn.black{background-image:url("/pieces/bP.svg")}
+
+.diff-slider-wrap{display:flex;align-items:center;gap:8px}
+.diff-circle{position:relative;width:56px;height:56px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.diff-ring{position:absolute;top:0;left:0;width:100%;height:100%;transform:rotate(-90deg)}
+.diff-ring-bg{fill:none;stroke:var(--b4);stroke-width:3}
+.diff-ring-fill{fill:none;stroke:var(--w);stroke-width:3;stroke-linecap:round;stroke-dasharray:113;stroke-dashoffset:113;transition:stroke-dashoffset .3s ease,stroke .3s}
+.diff-val{position:relative;font-size:9px;font-weight:600;letter-spacing:.04em;color:var(--w);text-align:center;line-height:1.2;text-transform:uppercase;z-index:1;pointer-events:none}
+.diff-arrow{background:none;border:1px solid var(--b4);color:var(--g1);width:26px;height:26px;border-radius:50%;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0}
+.diff-arrow:hover{border-color:var(--w);color:var(--w)}
+.eyebrow,.pz-desc,.sr>span,.rr-lbl,.rr,.rr span,.diff-lbl,.st-lbl,.quote-attr,.sr em,.sn p,.pz-title em,.rr-sub,.rd{text-shadow:0 0 8px rgba(255,255,255,.25)}#pfIcon piece{width:100%!important;height:100%!important;background-size:contain!important;background-repeat:no-repeat!important;background-position:center!important;display:block!important;filter:drop-shadow(0 0 2px rgba(255,255,255,.8))}.rd.pos{color:#629032}.rd.neg{color:#c0392b}button.continue{display:none;align-items:center;justify-content:center;gap:8px;width:100%;padding:10px;background:#629032;color:#fff;border:none;border-radius:4px;font-size:13px;font-weight:700;cursor:pointer;font-family:"Inter",sans-serif;margin-bottom:8px}button.continue:hover{background:#70a038}</style></head><body><header id=hdr><a class=logo href=/><div class=logo-sq>&#9819;</div><span class=logo-name>ChessGuru</span></a><nav><a href=/ style="color:var(--g1);font-size:12px;font-weight:500;text-decoration:none;padding:0 10px">Puzzles</a><select class=tsel id=themeSelect onchange="changeTheme(this.value)"><option value=mix>All themes</option></select><div id=userWidget><a id=loginBtn href=/login>Sign in</a><span id=userInfo><button id=userMenuBtn onclick="toggleUserMenu()"><span id=userNameDisplay></span><svg xmlns=http://www.w3.org/2000/svg width=14 height=14 viewBox="0 0 24 24" fill=currentColor style="opacity:.6;flex-shrink:0"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg></button><div id=userMenu><button onclick="doLogout()">&#x23FB; Sign out</button></div></span></div></nav></header><main><div class=pb><div id=board class=cg-wrap></div></div><aside class=ps><div class=eyebrow id=themeEyebrow>All Themes</div><div class=pz-title>Find the<br><em>decisive</em> move.</div><div class=pz-desc>One move. No hesitation. The position demands clarity.</div><div class=sm><div class=sa><div id=aIcon class=si>&#9822;</div><div class=sn><h2 id=aTitle>Loading&hellip;</h2><p>Find the best move</p></div></div><div class=sr><span><strong><a id=pId href=# target=_blank>&mdash;</a></strong><em>Puzzle</em></span><span><strong id=pRating>&mdash;</strong><em>Rating</em></span><span><strong id=pPlays>&mdash;</strong><em>Played</em></span></div></div><div class=rr><span>Your rating</span><strong id=myRating>&mdash;</strong><span class="rd" id=rDiff></span><span id=eMR style="font-size:11px;margin-left:4px"></span><span id=eMI style="font-size:11px"></span><span id=eMD style="font-size:11px"></span></div><div id=pzFeedback class="puzzle__feedback play"><div id=pfPlayer class=player><div id=pfIcon class=no-square><piece id=kingPiece class="king black"></piece></div><div class=instruction><strong id=fbT>Your turn</strong><em id=fbD>Find the best move for <strong id=pfColor>black</strong>.</em></div></div><div id=pfComplete class=complete>Puzzle complete</div></div><div class=sc><div class=view_solution id=viewSolBox><button id=btnHint class="button button-empty" onclick="doHint()">&#128161; Hint</button><button id=btnSol class="button button-empty" onclick="viewSolution()">View Solution</button></div><button class=continue id=btnContinue style="display:none" onclick="continuePlay()">Continue &rarr;</button><button id=btnN class=bn onclick="loadNextClean()">Next puzzle &rarr;</button></div><div class=diff-row><span class=diff-lbl>Difficulty</span><div class=diff-slider-wrap><button class=diff-arrow onclick="diffStep(-1)">&#8592;</button><div class=diff-circle id=diffCircle><svg viewBox="0 0 44 44" class=diff-ring><circle cx=22 cy=22 r=18 class=diff-ring-bg></circle><circle cx=22 cy=22 r=18 class=diff-ring-fill id=diffArc></circle></svg><span class=diff-val id=diffVal>Normal</span></div><button class=diff-arrow onclick="diffStep(1)">&#8594;</button></div></div><div class=streak-block><div class=st-head><span class=st-lbl>Daily Streak</span><span class=st-num id=stNum>0</span></div><div class=st-bars id=stBars></div></div><div class=quote-block><div class=quote-text>&ldquo;Chess is not about the pieces. It is about the silence between moves.&rdquo;</div><div class=quote-attr>&mdash; Unknown master</div></div></aside><div class=pt><div class=tools-bar><div class=tv-wrap><div id=mvList></div></div><div class=nb-wrap><button id=btnPrev onclick="navPrev()">&#8592;</button><button id=btnNext onclick="navNext()">&#8594;</button><button onclick="flip()">&#8661;</button></div></div></div></main><div id=toast></div><div id=dbg></div><script>
+var _diffs = ['easiest','easier','normal','harder','hardest'];
+var _diffLabels = ['Easiest','Easier','Normal','Harder','Hardest'];
+var _diffIdx = 2;
+var _diffColors = ['#aaa','#ccc','#fff','#aaa','#888'];
+function _updateDiffUI(){
+  var arc = document.getElementById('diffArc');
+  var val = document.getElementById('diffVal');
+  if(!arc||!val) return;
+  var pct = (_diffIdx+1)/_diffs.length;
+  var circ = 2*Math.PI*18;
+  arc.style.strokeDashoffset = circ*(1-pct);
+  arc.style.stroke = _diffIdx<=1?'#aaa':_diffIdx===2?'#fff':_diffIdx===3?'#bbb':'#888';
+  val.textContent = _diffLabels[_diffIdx];
+  if(typeof currentDiff!=='undefined') currentDiff=_diffs[_diffIdx];
+}
+window.updateStreak=function(){var n=parseInt(localStorage.getItem('cg_streak')||'0');n++;localStorage.setItem('cg_streak',n);renderStreak(n);};
+window.doLogout=function(){fetch('/auth/logout',{method:'POST'}).then(function(){location.reload();});};
+window.setDiff=function(v){var i=["easiest","easier","normal","harder","hardest"].indexOf(v);if(i>=0){_diffIdx=i;_updateDiffUI();if(typeof loadNext==="function")loadNext();}};
+window.diffStep = function(dir){
+  _diffIdx = Math.max(0,Math.min(_diffs.length-1,_diffIdx+dir));
+  _updateDiffUI();
+  if(typeof loadNext==='function') loadNext();
+};
+setTimeout(_updateDiffUI, 100);
+function setThemeDiff(el,val){document.querySelectorAll(".diff-opt").forEach(d=>d.classList.remove("on"));el.classList.add("on");if(typeof currentDiff!=="undefined")currentDiff=val;}function renderStreak(n){var b=document.getElementById("stBars"),num=document.getElementById("stNum");if(!b)return;b.innerHTML="";for(var i=0;i<14;i++){var d=document.createElement("div");d.className="stb"+(i<n?" on":"");b.appendChild(d);}if(num)num.textContent=n;}function updateEyebrow(t){var el=document.getElementById("themeEyebrow");if(!el)return;if(t==="mix"){el.textContent="All Themes";return;}var s=t.replace(/([A-Z])/ g," $1").trim();el.textContent=s.charAt(0).toUpperCase()+s.slice(1);var s=t.replace(/([A-Z])/g,' $1').trim();s=s.charAt(0).toUpperCase()+s.slice(1);el.textContent=s;}window.toggleUserMenu=function(){var m=document.getElementById("userMenu");if(m)m.style.display=m.style.display==="block"?"none":"block";};document.addEventListener("click",function(e){var btn=document.getElementById("userMenuBtn"),menu=document.getElementById("userMenu");if(menu&&btn&&!btn.contains(e.target)&&!menu.contains(e.target))menu.style.display="none";});setTimeout(function(){renderStreak(parseInt(localStorage.getItem("cg_streak")||"0"));if(typeof changeTheme==="function"){var orig=changeTheme;window.changeTheme=function(t){orig(t);updateEyebrow(t);};var sel=document.getElementById("themeSelect");if(sel&&sel.value)updateEyebrow(sel.value);}},600);</script><script>
+var API=location.origin+"/api",myRating=800,myGlicko={r:800,d:500,v:0.09},currentTheme="mix",currentDiff="normal";
+fetch('/api/me/rating').then(function(r){return r.json();}).then(function(rd){
+  if(rd.loggedIn){myRating=rd.rating;myGlicko={r:myRating,d:200,v:0.09};
+  document.getElementById('myRating').textContent=myRating;
+  window._userId=rd.userId;
+  var ui=document.getElementById('userInfo'),lb=document.getElementById('loginBtn'),nd=document.getElementById('userNameDisplay');
+  if(ui)ui.style.display='flex';if(lb)lb.style.display='none';if(nd)nd.textContent=rd.userId;}
+  else{var lb=document.getElementById('loginBtn');if(lb)lb.style.display='block';}
+}).catch(function(){});
+
+var puzzle=null,cg=null,chess=null,solution=[],solIdx=0,solved=false;
+function dbg(msg){var d=document.getElementById("dbg");if(false){d.style.display="block";d.innerHTML+=msg+"<br>";}}
+window.onerror=function(m,s,l,c,e){dbg("ONERROR: "+m+" "+s+":"+l);};
+window.addEventListener("load",function(){
+  dbg("load: CG="+typeof window.Chessground+" Chess="+typeof window.Chess);
+  if(!window.Chessground){dbg("ERR: no CG");return;}
+  if(!window.Chess){dbg("ERR: no Chess");return;}
+  var CG=window.Chessground;
+  var fn=typeof CG==="function"?CG:(CG.Chessground||null);
+  if(!fn){dbg("ERR: CG.Chessground not found, keys="+Object.keys(CG));return;}
+  try{
+    cg=fn(document.getElementById("board"),{
+      movable:{free:false,color:undefined,showDests:true,events:{after:onMove}},
+      animation:{enabled:true,duration:200},highlight:{lastMove:true,check:true},coordinates:true
+    });
+    dbg("CG OK");var _st=null;try{_st=localStorage.getItem("cg_theme");}catch(e){}if(_st){currentTheme=_st;var _sd=document.getElementById("themeSelect");if(_sd)_sd.value=_st;}loadNext();
+  }catch(e){dbg("CG ERR: "+e.message);}
+});
+function loadNext(){
+  var _pzParam=(new URLSearchParams(window.location.search)).get('puzzle');if(!_pzParam){try{_pzParam=localStorage.getItem("cg_puzzle");}catch(e){}}
+  if(_pzParam){
+    fetch(API+'/puzzles/'+encodeURIComponent(_pzParam))
+      .then(function(r){return r.json();})
+      .then(function(p){
+        if(!p.id&&!p._id){loadNextClean();return;}
+        puzzle=p;showPuzzle(p);
+        // clear param so next/prev work normally
+        history.replaceState(null,'',window.location.pathname);
+      }).catch(function(){loadNextClean();});
+    return;
+  }
+  loadNextClean();
+}
+function loadNextClean(){try{localStorage.removeItem("cg_puzzle");}catch(e){}
+  setFB("wait","&#9822;","Loading...","");
+  document.getElementById("btnN").style.display="none";
+  document.getElementById("btnHint").style.display="none";
+  document.getElementById("btnSol").style.display="none";
+  solved=false;solIdx=0;document.getElementById("rDiff").textContent="";
+  fetch(API+"/puzzles/random?theme="+currentTheme+"&rating="+myRating+"&difficulty="+currentDiff)
+    .then(function(r){return r.json();})
+    .then(function(p){
+      if(!p.id)throw new Error("no id");
+      dbg("P:"+p.id);
+      puzzle=p;showPuzzle(p);
+    }).catch(function(e){dbg("loadNext ERR:"+e.message);setFB("bad","X","Error",e.message);});
+
+}
+function showPuzzle(p){try{localStorage.setItem("cg_puzzle",p.id||p._id);}catch(e){}
+  solution=Array.isArray(p.solution)?p.solution:(p.line?p.line.trim().split(" "):[]);navHistory=[{fen:p.fen}];navIdx=0;
+  chess=new Chess();
+  chess.load(p.fen);
+  var m0=solution[0];
+  var r0=chess.move({from:m0.slice(0,2),to:m0.slice(2,4),promotion:m0[4]||"q"});
+  if(!r0){dbg("ERR move0 "+m0+" in "+p.fen);setFB("bad","X","Error","Bad move: "+m0);return;}
+  solution=solution.slice(1);
+  var pc=chess.turn()==="w"?"white":"black";window.playerColor=pc;
+  refreshBoard(pc);
+  document.getElementById("pId").textContent="#"+p.id;
+  document.getElementById("pId").href="https://lichess.org/training/"+p.id;
+  document.getElementById("pRating").textContent=Math.round(p.rating||(p.glicko&&p.glicko.r)||1500);
+  document.getElementById("pPlays").textContent=(p.plays||0).toLocaleString();
+  document.getElementById("aTitle").textContent=currentTheme==="mix"?fmt((p.themes||[])[0]):((window.themeLabels||{})[currentTheme]||fmt(currentTheme));
+  // side set via fbD html below
+  setFB("wait","&#9822;","Your turn","Find the best move for "+pc+".");document.getElementById("btnHint").style.display="inline-block";document.getElementById("btnSol").style.display="inline-block";document.getElementById("btnHint").disabled=false;
+  buildMoves();dbg("showPuzzle OK pc="+pc);
+}
+function refreshBoard(pc){
+  if(!cg||!chess)return;
+  var dests=new Map();
+  chess.moves({verbose:true}).forEach(function(m){if(!dests.has(m.from))dests.set(m.from,[]);dests.get(m.from).push(m.to);});
+  var hist=chess.history({verbose:true});
+  var lm=hist.length?[hist[hist.length-1].from,hist[hist.length-1].to]:undefined;
+  cg.set({fen:chess.fen(),orientation:pc,turnColor:chess.turn()==="w"?"white":"black",
+    movable:{color:solved?undefined:pc,dests:dests},lastMove:lm,check:chess.in_check()});
+}
+function onMove(from,to){
+  if(solved)return;
+  var uci=from+to,exp=solution[solIdx],pc=chess.turn()==="w"?"white":"black";
+  if(uci===exp||uci+"q"===exp){
+    chess.move({from:from,to:to,promotion:exp[4]||"q"});solIdx++;buildMoves();
+    if(solIdx>=solution.length){solved=true;setFB("good","&#10003;","Solved!","Excellent!");document.getElementById("btnN").style.display="block";
+    document.getElementById("btnHint").style.display="inline-block";
+    document.getElementById("btnSol").style.display="inline-block";cg.set({movable:{color:undefined}});submit(true,window._hintShown);return;}
+    setFB("good","&#10003;","Best move!","Keep going...");setTimeout(function(){oppReply();},600);
+  }else{
+    cg.set({fen:chess.fen()});refreshBoard(pc);
+    setFB("bad","&#10007;","Not the best","Try again.");toast("Not the best!");
+    setTimeout(function(){setFB("wait","&#9822;","Your turn","Try again.");refreshBoard(pc);document.getElementById("btnHint").style.display="inline-block";document.getElementById("btnSol").style.display="inline-block";},1500);
+    if(!window._hintShown)submit(false);
+  }
+}
+function oppReply(){
+  if(solIdx>=solution.length)return;
+  var m=solution[solIdx];chess.move({from:m.slice(0,2),to:m.slice(2,4),promotion:m[4]||"q"});solIdx++;
+  cg.move(m.slice(0,2),m.slice(2,4));cg.set({fen:chess.fen(),lastMove:[m.slice(0,2),m.slice(2,4)]});buildMoves();navHistory.push({fen:chess.fen(),lastMove:[m.slice(0,2),m.slice(2,4)]});navIdx=navHistory.length-1;
+  if(solIdx>=solution.length){solved=true;setFB("good","&#10003;","Solved!","Excellent!");document.getElementById("btnN").style.display="block";cg.set({movable:{color:undefined}});return;}
+  var pc=chess.turn()==="w"?"white":"black";setFB("wait","&#9822;","Your turn","Continue.");refreshBoard(pc);document.getElementById("btnHint").style.display="inline-block";document.getElementById("btnSol").style.display="inline-block";document.getElementById("btnHint").disabled=false;
+}
+function submit(win,hint){
+  if(!puzzle)return;
+  fetch(API+"/puzzles/"+(puzzle.id||puzzle._id)+"/complete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({win:win,hint:!!hint,difficulty:currentDiff,userId:window._userId||null})})
+    .then(function(r){return r.json();}).then(function(d){if(d.ratingDiff){var el=document.getElementById("rDiff");el.textContent=(d.ratingDiff>0?"+":"")+d.ratingDiff;el.className="rd "+(d.ratingDiff>=0?"pos":"neg");}if(d.glicko){myGlicko=d.glicko;myRating=Math.round(d.glicko.r);document.getElementById("myRating").textContent=myRating;}}).catch(function(){});
+}
+function buildMoves(){
+  var ml=document.getElementById("mvList");ml.innerHTML="";if(!chess)return;
+  var hist=chess.history(),row,n=1;
+  hist.forEach(function(san,i){
+    if(i%2===0){row=document.createElement("div");row.className="mr";var idx=document.createElement("index");idx.textContent=n+++".";row.appendChild(idx);ml.appendChild(row);}
+    var mv=document.createElement("move");mv.className=i===hist.length-1?"active":"";mv.textContent=san;row.appendChild(mv);
+  });ml.scrollTop=ml.scrollHeight;
+}
+function flip(){if(cg)cg.toggleOrientation();}
+function changeTheme(t){currentTheme=t;try{localStorage.setItem("cg_theme",t);localStorage.removeItem("cg_puzzle");}catch(e){}loadNext();}
+function setFB(type,icon,title,desc){
+  var fb=document.getElementById("pzFeedback");
+  if(!fb)return;
+  var pfPlayer=document.getElementById("pfPlayer");
+  var pfIcon=document.getElementById("pfIcon");
+  var fbT=document.getElementById("fbT");
+  var fbD=document.getElementById("fbD");
+  var pfComplete=document.getElementById("pfComplete");
+  var viewSolBox=document.getElementById("viewSolBox");
+  var btnN=document.getElementById("btnN");
+  var btnHint=document.getElementById("btnHint");
+  var btnSol=document.getElementById("btnSol");
+  if(type==="wait"){
+    // LICHESS: initial state — show king piece
+    fb.className="puzzle__feedback play";
+    if(pfPlayer)pfPlayer.style.display="flex";
+    if(pfComplete)pfComplete.style.display="none";
+    if(btnN)btnN.style.display="none";
+    if(viewSolBox)viewSolBox.style.display="flex";
+    if(fbT)fbT.textContent=title||"Your turn";
+    var pc=window.playerColor||"white";
+    if(pfIcon)pfIcon.innerHTML='<piece class="king '+pc+'" id="kingPiece"></piece>';
+    if(fbD)fbD.innerHTML='Find the best move for <strong id="pfColor">'+pc+'</strong>.';
+  } else if(type==="good"){
+    // LICHESS: good state — ✓ icon
+    fb.className="puzzle__feedback good";
+    if(pfPlayer)pfPlayer.style.display="flex";
+    if(pfComplete)pfComplete.style.display="none";
+    if(btnN)btnN.style.display="none";
+    if(viewSolBox)viewSolBox.style.display="flex";
+    if(pfIcon)pfIcon.innerHTML='<div class="icon">✓</div>';
+    if(fbT)fbT.textContent=title||"Best move!";
+    if(fbD)fbD.innerHTML=desc||"Keep going...";
+  } else if(type==="fail"||type==="bad"){
+    // LICHESS: fail state — ✗ icon
+    fb.className="puzzle__feedback fail";
+    if(pfPlayer)pfPlayer.style.display="flex";
+    if(pfComplete)pfComplete.style.display="none";
+    if(btnN)btnN.style.display="none";
+    if(viewSolBox)viewSolBox.style.display="flex";
+    if(pfIcon)pfIcon.innerHTML='<div class="icon">✗</div>';
+    if(fbT)fbT.textContent=title||"Not the move";
+    if(fbD)fbD.innerHTML=desc||"Try something else.";
+  } else if(type==="after"){
+    // LICHESS: after state (after.ts) — puzzle complete, show Continue button
+    fb.className="puzzle__feedback after";
+    if(pfPlayer)pfPlayer.style.display="none";
+    if(pfComplete){pfComplete.style.display="block";pfComplete.textContent=title||"Puzzle complete!";}
+    if(viewSolBox)viewSolBox.style.display="none";
+    if(btnHint)btnHint.style.display="none";
+    if(btnSol)btnSol.style.display="none";
+    if(btnN){btnN.style.display="flex";}
+  }
+}
+function toast(msg){var t=document.getElementById("toast");t.textContent=msg;t.classList.add("show");setTimeout(function(){t.classList.remove("show");},2500);}
+function doHint(){
+  if(!puzzle||solved)return;
+  window._hintShown=true;
+  var from=solution[solIdx].slice(0,2);
+  cg.setShapes([{orig:from,brush:"yellow"}]);
+  document.getElementById("btnHint").disabled=true;
+  setTimeout(function(){cg.setShapes([]);},3000);
+
+}
+function viewSolution(){
+  window._hintShown=true;
+  if(document.getElementById("btnHint"))document.getElementById("btnHint").className="button";
+
+  if(!puzzle||solved)return;
+  document.getElementById("btnSol").style.display="none";
+  document.getElementById("btnHint").disabled=true;
+  var idx=solIdx;
+  function playNext(){
+    if(idx>=solution.length){return;}
+    var uci=solution[idx],f=uci.slice(0,2),t=uci.slice(2,4),pr=uci[4];
+    chess.move({from:f,to:t,promotion:pr||"q"});
+    cg.set({fen:chess.fen(),lastMove:[f,t]});
+    buildMoves();idx++;
+    setTimeout(playNext,600);
+  }
+  playNext();
+  // LICHESS after.ts: show "Puzzle complete!" + Continue training button
+  var totalMoves=solution.length-solIdx;
+  setTimeout(function(){setFB("after","","Puzzle complete!","");},totalMoves*600+800);
+
+}
+var navHistory=[],navIdx=-1;
+function navPrev(){
+  if(navIdx<=0)return;
+  navIdx--;
+  var state=navHistory[navIdx];
+  chess.load(state.fen);
+  cg.set({fen:state.fen,lastMove:state.lastMove||undefined,movable:{color:undefined}});
+  buildMoves();
+}
+function navNext(){
+  if(navIdx>=navHistory.length-1)return;
+  navIdx++;
+  var state=navHistory[navIdx];
+  chess.load(state.fen);
+  cg.set({fen:state.fen,lastMove:state.lastMove||undefined});
+  buildMoves();
+}
+function fmt(t){if(!t)return"Mix";return t.replace(/([A-Z])/g," $1").replace(/^./,function(s){return s.toUpperCase();});}
+
+// Populate theme dropdown from API
+fetch('/api/themes').then(r=>r.json()).then(data=>{
+  var themes = data.themes || [];
+  var sel = document.getElementById('themeSelect');
+  sel.innerHTML = '<option value="mix">All themes</option>';
+  window.themeLabels = window.themeLabels || {};
+  var labels = window.themeLabels = {
+    advancedPawn:'Advanced Pawn',advantage:'Advantage',anastasiaMate:'Anastasia Mate',
+    arabianMate:'Arabian Mate',attackingF2F7:'Attacking f2/f7',attraction:'Attraction',
+    backRankMate:'Back Rank Mate',balestraMate:'Balestra Mate',bishopEndgame:'Bishop Endgame',
+    blindSwineMate:'Blind Swine Mate',bodenMate:'Boden Mate',capturingDefender:'Capturing Defender',
+    castling:'Castling',clearance:'Clearance',collinearMove:'Collinear Move',cornerMate:'Corner Mate',
+    crushing:'Crushing',defensiveMove:'Defensive Move',deflection:'Deflection',
+    discoveredAttack:'Discovered Attack',discoveredCheck:'Discovered Check',
+    doubleBishopMate:'Double Bishop Mate',doubleCheck:'Double Check',dovetailMate:'Dovetail Mate',
+    endgame:'Endgame',enPassant:'En Passant',epauletteMate:'Epaulette Mate',equality:'Equality',
+    exposedKing:'Exposed King',fork:'Fork',hangingPiece:'Hanging Piece',hookMate:'Hook Mate',
+    interference:'Interference',intermezzo:'Intermezzo',kingsideAttack:'Kingside Attack',
+    knightEndgame:'Knight Endgame',long:'Long',mate:'Mate',mateIn1:'Mate in 1',mateIn2:'Mate in 2',
+    mateIn3:'Mate in 3',mateIn4:'Mate in 4',mateIn5:'Mate in 5',middlegame:'Middlegame',
+    oneMove:'One Move',opening:'Opening',operaMate:'Opera Mate',pawnEndgame:'Pawn Endgame',
+    pin:'Pin',promotion:'Promotion',queenEndgame:'Queen Endgame',
+    queenRookEndgame:'Queen & Rook Endgame',queensideAttack:'Queenside Attack',
+    quietMove:'Quiet Move',rookEndgame:'Rook Endgame',sacrifice:'Sacrifice',short:'Short',
+    skewer:'Skewer',smotheredMate:'Smothered Mate',superGM:'Super GM',triangleMate:'Triangle Mate',
+    trappedPiece:'Trapped Piece',underPromotion:'Under Promotion',veryLong:'Very Long',
+    xRayAttack:'X-Ray Attack',zugzwang:'Zugzwang'
+  };
+  Object.assign(window.themeLabels, labels);
+  themes.filter(t=>t!=='mix').forEach(t=>{
+    var o=document.createElement('option');
+    o.value=t; o.text=labels[t]||t;
+    sel.appendChild(o);
+  });
+try{var _sv=localStorage.getItem('cg_theme');if(_sv){sel.value=_sv;}}catch(e){}
+}).catch(e=>console.error('Theme load error:',e));
+</script></body></html>
