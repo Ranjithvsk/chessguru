@@ -6,3 +6,9 @@ gen_paths2.js
 lichess_db_puzzle.csv
 .env
 npm-debug.log*
+public/result.txt
+public/exit.txt
+public/*.bak*
+node_modules/
+*.log
+.env
