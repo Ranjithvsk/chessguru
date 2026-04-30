@@ -215,8 +215,11 @@ function oppReply(){
 }
 function submit(win,hint){
   if(!puzzle)return;
+  // Show complete UI immediately on win
+  if(win){ setFB("after","Puzzle complete!",""); solved=true; }
+  else { setFB("fail","Not the best",""); }
   fetch(API+"/puzzles/"+(puzzle.id||puzzle._id)+"/complete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({win:win,hint:!!hint,difficulty:currentDiff,userId:window._userId||null})})
-    .then(function(r){return r.json();}).then(function(d){if(d.ratingDiff){var el=document.getElementById("rDiff");el.textContent=(d.ratingDiff>0?"+":"")+d.ratingDiff;el.className="rd "+(d.ratingDiff>=0?"pos":"neg");}if(d.glicko){myGlicko=d.glicko;myRating=Math.round(d.glicko.r);document.getElementById("myRating").textContent=myRating;}}).catch(function(){});
+  .then(function(r){return r.json();}).then(function(d){if(d.ratingDiff){var el=document.getElementById("rDiff");el.textContent=(d.ratingDiff>0?"+":"")+d.ratingDiff;el.className="rd "+(d.ratingDiff>=0?"pos":"neg");}if(d.glicko){myGlicko=d.glicko;myRating=Math.round(d.glicko.r);document.getElementById("myRating").textContent=myRating;}}).catch(function(){});
 }
 function buildMoves(){
   var ml=document.getElementById("mvList");ml.innerHTML="";if(!chess)return;
@@ -284,7 +287,7 @@ function setFB(type,icon,title,desc){
 }
 function toast(msg){var t=document.getElementById("toast");t.textContent=msg;t.classList.add("show");setTimeout(function(){t.classList.remove("show");},2500);}
 function doHint(){
-  if(!puzzle||solved)return;
+  if(!puzzle)return;
   window._hintShown=true;
   var from=solution[solIdx].slice(0,2);
   cg.setShapes([{orig:from,brush:"yellow"}]);
