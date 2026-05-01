@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>⚔️ Engine Battle — ChessGuru</title>
+<link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+<style>
+:root{--bg:#161512;--panel:#1d1b18;--border:#3a3633;--accent:#629924;--accent2:#f0a500;--text:#d4cfc9;--dim:#7a7067;--red:#c04040;--green:#4a9;}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+nav{background:#0d0c0b;border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:100}
+nav a{color:var(--dim);text-decoration:none;font-size:13px;font-weight:500}
+nav a:hover,nav a.active{color:var(--text)}
+.brand{font-weight:700;font-size:16px;color:var(--text);margin-right:8px}
+.brand span{color:var(--accent)}
+.wrap{display:grid;grid-template-columns:1fr 340px;gap:16px;max-width:1280px;margin:0 auto;padding:16px}
+@media(max-width:900px){.wrap{grid-template-columns:1fr}}
+.sbar{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:8px 14px;display:flex;align-items:center;gap:10px;margin:12px 20px 0;font-size:13px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--red)}
+.dot.ok{background:var(--green)}
+.badge{padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;text-transform:uppercase}
+.idle{background:#2a2520;color:var(--dim)}
+.running{background:#1a3a1a;color:var(--green);animation:pulse 2s infinite}
+.done{background:#1a2a3a;color:var(--accent)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:0}
+.ct{padding:9px 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--dim);border-bottom:1px solid var(--border)}
+.cb{padding:12px}
+.field{margin-bottom:10px}
+.field label{display:block;font-size:11px;color:var(--dim);margin-bottom:4px;font-weight:600;text-transform:uppercase}
+select,input[type=range],input[type=number]{width:100%;background:#12100e;border:1px solid var(--border);color:var(--text);padding:5px 7px;border-radius:4px;font-size:12px;outline:none}
+.elist{max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;padding:3px}
+.eitem{display:flex;align-items:center;gap:7px;padding:3px 5px;border-radius:3px;font-size:12px;cursor:pointer}
+.eitem:hover{background:var(--border)}
+.eitem input{width:auto}
+.elob{margin-left:auto;color:var(--dim);font-size:10px;font-family:monospace}
+.btn{width:100%;padding:8px;border:none;border-radius:5px;font-size:13px;font-weight:700;cursor:pointer;transition:.15s}
+.bstart{background:var(--accent);color:#fff}
+.bstart:hover{background:#7ab52e}
+.bstop{background:#5a1a1a;color:#e88;border:1px solid var(--red);margin-top:6px}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.game-area{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.gh{padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;min-height:46px}
+.pi{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600}
+.pc{width:11px;height:11px;border-radius:2px}
+.pw{background:#f0d9b5;border:1px solid #999}
+.pb{background:#2d1e0f;border:1px solid #555}
+.bw{padding:14px;display:flex;justify-content:center}
+#board{width:480px;max-width:calc(100vw - 70px)}
+.ml{display:flex;flex-wrap:wrap;gap:2px;max-height:64px;overflow-y:auto;font-family:monospace;font-size:11px;padding:6px 14px}
+.mv{padding:2px 3px;border-radius:2px;color:var(--dim)}
+.mv:hover{background:var(--border);color:var(--text)}
+.pbar-w{padding:4px 14px 10px;display:none}
+.pbar{height:3px;background:var(--border);border-radius:2px}
+.pfill{height:100%;background:var(--accent);border-radius:2px;transition:width .4s}
+.plbl{font-size:10px;color:var(--dim);margin-top:2px;text-align:right}
+.cgi{padding:5px 14px;font-size:11px;color:var(--dim);border-top:1px solid var(--border);display:none}
+.cgi strong{color:var(--text)}
+.st{width:100%;border-collapse:collapse;font-size:12px}
+.st th{padding:4px 7px;text-align:left;font-weight:700;color:var(--dim);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--border)}
+.st td{padding:4px 7px;border-bottom:1px solid #1f1d1b}
+.st tr:hover td{background:#1f1d1b}
+.r1 td:first-child::before{content:'🥇 '}
+.r2 td:first-child::before{content:'🥈 '}
+.r3 td:first-child::before{content:'🥉 '}
+.pts{font-weight:700;color:var(--accent2)}
+.glog{max-height:180px;overflow-y:auto;font-size:11px;display:flex;flex-direction:column;gap:3px;padding:4px}
+.le{padding:3px 6px;border-radius:3px;border-left:2px solid transparent}
+.le-s{border-color:var(--accent);background:#1a2a0a}
+.le-e{border-color:var(--accent2);background:#2a2010}
+.le-r{border-color:var(--dim)}
+.le-x{border-color:var(--red);background:#2a1010;color:#e88}
+.lt{color:var(--dim);font-size:10px;margin-right:4px}
+.rb{font-weight:700;padding:1px 5px;border-radius:3px;font-size:10px;margin-left:3px}
+.r10{background:#1a3a1a;color:var(--green)}
+.r01{background:#3a1a1a;color:#e66}
+.rhf{background:#2a2a1a;color:var(--dim)}
+.panel{display:flex;flex-direction:column;gap:12px}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+</style>
+</head>
+<body>
+<nav>
+<div class="brand">♟ Chess<span>Guru</span></div>
+<a href="/">Puzzles</a>
+<a href="/blindfold">Blindfold</a>
+<a href="/opening">Opening</a>
+<a href="/engine-battle" class="active">⚔️ Engine Battle</a>
+</nav>
+<div class="sbar">
+<span class="dot" id="cdot"></span>
+<span id="clbl">Connecting...</span>
+<span style="margin-left:auto;display:flex;gap:8px;align-items:center">
+<span id="sbadge" class="badge idle">Idle</span>
+<span id="ptext" style="font-size:11px;color:var(--dim)"></span>
+</span>
+</div>
+<div class="wrap">
+<div>
+<div class="game-area">
+<div class="gh">
+<div class="pi"><div class="pc pb"></div><span id="bname">Black</span><span style="font-size:11px;color:var(--dim)" id="belo"></span></div>
+<div style="color:var(--dim);font-size:11px">VS</div>
+<div class="pi"><div class="pc pw"></div><span id="wname">White</span><span style="font-size:11px;color:var(--dim)" id="welo"></span></div>
+</div>
+<div class="bw"><div id="board"></div></div>
+<div class="pbar-w" id="pbw"><div class="pbar"><div class="pfill" id="pfill" style="width:0"></div></div><div class="plbl" id="plbl"></div></div>
+<div class="ml" id="ml"></div>
+<div class="cgi" id="cgi">Game <strong id="cr"></strong> of <strong id="tr"></strong> — <span id="cres" style="color:var(--accent2)"></span></div>
+</div>
+</div>
+<div class="panel">
+<div class="card">
+<div class="ct">⚙️ Tournament Setup</div>
+<div class="cb">
+<div class="field"><label>Engines</label><div class="elist" id="elist"><div style="color:var(--dim);padding:8px;font-size:11px">Connecting...</div></div></div>
+<div class="field"><label>Think time: <strong id="tlbl">200ms</strong></label><input type="range" id="tms" min="50" max="5000" step="50" value="200" oninput="document.getElementById('tlbl').textContent=this.value+'ms'"></div>
+<div class="field"><label>Max games (0=all)</label><input type="number" id="mg" value="0" min="0" max="500"></div>
+<button class="btn bstart" id="bstart" onclick="start()">▶ Start Tournament</button>
+<button class="btn bstop" id="bstop" onclick="stop()" style="display:none">⏹ Stop</button>
+</div>
+</div>
+<div class="card">
+<div class="ct">🏆 Standings</div>
+<div style="overflow-x:auto">
+<table class="st"><thead><tr><th>Engine</th><th>Pts</th><th>W</th><th>D</th><th>L</th><th>G</th></tr></thead>
+<tbody id="stb"><tr><td colspan="6" style="color:var(--dim);padding:7px;font-size:11px">No tournament yet</td></tr></tbody>
+</table>
+</div>
+</div>
+<div class="card">
+<div class="ct">📋 Game Log</div>
+<div class="glog" id="glog"><div class="le le-r" style="color:var(--dim)">Waiting...</div></div>
+</div>
+</div>
+</div>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+<script>
+let ws,board,total=0,done=0;
+const WS=location.protocol==='https:'?'wss:':'ws:'+'//'+location.host+'/ws-engine';
+$(()=>{board=Chessboard('board',{position:'start',draggable:false,pieceTheme:'https://lichess1.org/assets/piece/cburnett/{piece}.svg'});connect();});
+function connect(){ws=new WebSocket(WS);ws.onopen=()=>{sc(true);lg('Connected','le-r');};ws.onclose=()=>{sc(false);setTimeout(connect,3000);};ws.onerror=()=>sc(false);ws.onmessage=e=>handle(JSON.parse(e.data));}
+function handle(m){
+if(m.type==='connected'){reng(m.engines||[]);run(m.running);}
+else if(m.type==='tournament_start'){total=m.totalGames;done=0;run(true);badge('Running','running');prog(0,total);lg('🏁 Tournament: '+m.totalGames+' games','le-s');clr();rst();$('#cgi').show();$('#tr').text(m.totalGames);}
+else if(m.type==='round_start'){$('#cr').text(m.round);}
+else if(m.type==='game_start'){const g=m.game;$('#wname').text(g.whiteName);$('#bname').text(g.blackName);$('#welo').text(g.whiteElo?'('+g.whiteElo+')':'');$('#belo').text(g.blackElo?'('+g.blackElo+')':'');$('#cres').text('');clr();rst();lg('⚔️ '+g.whiteName+' vs '+g.blackName,'le-s');}
+else if(m.type==='move'){if(m.fen)board.position(m.fen);addmv(m.move||m.uci,m.ply);}
+else if(m.type==='game_end'){done++;prog(done,total);$('#cres').text(m.result);const rc=m.result==='1-0'?'r10':m.result==='0-1'?'r01':'rhf';const g=m.game;lg('✓ '+g.whiteName+' vs '+g.blackName+'<span class="rb '+rc+'">'+m.result+'</span> '+( m.termination||''),'le-e');}
+else if(m.type==='standings_update'){rst_st(m.standings);}
+else if(m.type==='tournament_end'){run(false);badge('Done','done');rst_st(m.standings);lg('🏆 Tournament complete!','le-s');$('#bstart').show();$('#bstop').hide();}
+else if(m.type==='stopped'){run(false);badge('Idle','idle');lg('⏹ Stopped','le-r');$('#bstart').show();$('#bstop').hide();}
+else if(m.type==='error'){lg('❌ '+m.msg,'le-x');}
+}
+function start(){const ch=[...document.querySelectorAll('.ecb:checked')].map(c=>c.value);if(ch.length<2){alert('Select 2+ engines');return;}const tms=+$('#tms').val(),mg=+$('#mg').val();if(ws&&ws.readyState===1){ws.send(JSON.stringify({type:'start_tournament',engineIds:ch,thinkMs:tms,maxGames:mg}));$('#bstart').hide();$('#bstop').show();}}
+function stop(){if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'stop'}));}
+function reng(e){const el=document.getElementById('elist');if(!e.length){el.innerHTML='<div style="color:var(--dim);padding:8px">No engines</div>';return;}el.innerHTML=e.map(x=>'<label class="eitem"><input type="checkbox" class="ecb" value="'+x.id+'" checked><span>'+x.name+'</span><span class="elob">'+x.elo+'</span></label>').join('');}
+function rst_st(s){if(!s||!s.length)return;document.getElementById('stb').innerHTML=s.map((x,i)=>'<tr class="'+(i===0?'r1':i===1?'r2':i===2?'r3':'')+'"><td>'+(x.name||x.id)+'</td><td class="pts">'+x.points+'</td><td style="color:var(--green)">'+x.wins+'</td><td style="color:var(--dim)">'+x.draws+'</td><td style="color:#e66">'+x.losses+'</td><td style="color:var(--dim)">'+x.games+'</td></tr>').join('');}
+function addmv(s,p){const ml=document.getElementById('ml');if(p%2===0){const n=document.createElement('span');n.style.cssText='color:var(--dim);font-size:10px';n.textContent=(Math.floor(p/2)+1)+'.';ml.appendChild(n);}const mv=document.createElement('span');mv.className='mv';mv.textContent=s;ml.appendChild(mv);ml.scrollTop=ml.scrollHeight;}
+function clr(){document.getElementById('ml').innerHTML='';}
+function rst(){board&&board.position('start');}
+function lg(msg,cls){const el=document.getElementById('glog');const t=new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit',second:'2-digit'});const d=document.createElement('div');d.className='le '+(cls||'');d.innerHTML='<span class="lt">'+t+'</span>'+msg;el.appendChild(d);el.scrollTop=el.scrollHeight;while(el.children.length>80)el.removeChild(el.firstChild);}
+function sc(ok){document.getElementById('cdot').className='dot'+(ok?' ok':'');document.getElementById('clbl').textContent=ok?'Connected':'Reconnecting...';}
+function run(r){if(r){$('#bstart').hide();$('#bstop').show();badge('Running','running');}else{$('#bstart').show();$('#bstop').hide();}}
+function badge(t,c){const b=document.getElementById('sbadge');b.textContent=t;b.className='badge '+c;}
+function prog(d,t){if(!t)return;const p=Math.round(d/t*100);$('#pbw').show();$('#pfill').css('width',p+'%');$('#plbl').text(d+'/'+t+' games ('+p+'%)');$('#ptext').text(d+'/'+t);}
+</script>
+</body>
+</html>

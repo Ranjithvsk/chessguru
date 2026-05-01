@@ -1,0 +1,222 @@
+{
+  "month": "2026-05",
+  "generatedAt": "2026-05-01T05:41:31.026Z",
+  "summary": {
+    "totalEngines": 84,
+    "newlyInstalled": 1,
+    "updated": 9,
+    "failed": 14,
+    "skipped": 60
+  },
+  "newlyInstalled": [
+    {
+      "id": "stockfish16",
+      "name": "Stockfish 16",
+      "elo": 3450,
+      "version": "sf_16"
+    }
+  ],
+  "updated": [
+    {
+      "id": "stockfish17",
+      "name": "Stockfish 17",
+      "version": "sf_18"
+    },
+    {
+      "id": "viridithas",
+      "name": "Viridithas 15",
+      "version": "v19.0.1"
+    },
+    {
+      "id": "renegade",
+      "name": "Renegade 1.1",
+      "version": "v1.2.0"
+    },
+    {
+      "id": "carp",
+      "name": "Carp 3.0",
+      "version": "v3.0.1"
+    },
+    {
+      "id": "willow",
+      "name": "Willow 4.0",
+      "version": "4.0.0.1"
+    },
+    {
+      "id": "blackcore",
+      "name": "BlackCore 6",
+      "version": "6.0"
+    },
+    {
+      "id": "sirius",
+      "name": "Sirius 8",
+      "version": "v9.0"
+    },
+    {
+      "id": "nalwald",
+      "name": "Nalwald 19",
+      "version": "19"
+    },
+    {
+      "id": "frozenight",
+      "name": "Frozenight 6",
+      "version": "v6.0.0"
+    }
+  ],
+  "failed": [
+    {
+      "id": "stockfish14",
+      "name": "Stockfish 14"
+    },
+    {
+      "id": "stockfish11",
+      "name": "Stockfish 11"
+    },
+    {
+      "id": "caissa",
+      "name": "Caissa 1.21"
+    },
+    {
+      "id": "clover",
+      "name": "Clover 8.1"
+    },
+    {
+      "id": "stormphrax",
+      "name": "Stormphrax 6"
+    },
+    {
+      "id": "seer",
+      "name": "Seer 2.8"
+    },
+    {
+      "id": "clarity",
+      "name": "Clarity 7.2"
+    },
+    {
+      "id": "peacekeeper",
+      "name": "Peacekeeper 3"
+    },
+    {
+      "id": "altair",
+      "name": "Altair 7.0"
+    },
+    {
+      "id": "akimbo",
+      "name": "akimbo 1.0"
+    },
+    {
+      "id": "equisetum",
+      "name": "Equisetum 1.0"
+    },
+    {
+      "id": "rice",
+      "name": "Rice 8.0"
+    },
+    {
+      "id": "midnight",
+      "name": "Midnight 9"
+    },
+    {
+      "id": "smallbrain",
+      "name": "Smallbrain 7"
+    }
+  ],
+  "recommendations": [
+    "Elo band 600-1100 has fewest engines (4) — consider adding more"
+  ],
+  "eloDistribution": {
+    "600-1100": 4,
+    "1100-1900": 12,
+    "1900-2500": 9,
+    "2500-3000": 16,
+    "3000+": 43
+  },
+  "newEngineCandidates": [
+    {
+      "id": "starzix",
+      "name": "Starzix",
+      "repo": "zzzzz151/Starzix",
+      "elo": 3571
+    },
+    {
+      "id": "motor",
+      "name": "Motor",
+      "repo": "martinnovaak/motor",
+      "elo": 3564
+    },
+    {
+      "id": "serendipity",
+      "name": "Serendipity",
+      "repo": "xu-shawn/Serendipity",
+      "elo": 3446
+    },
+    {
+      "id": "chesscpp",
+      "name": "chess.cpp",
+      "repo": "GediminasMasaitis/chess-dot-cpp",
+      "elo": 3427
+    },
+    {
+      "id": "pedantic",
+      "name": "Pedantic",
+      "repo": "JoAnnP38/PedanticRF",
+      "elo": 3367
+    },
+    {
+      "id": "avalanche",
+      "name": "Avalanche",
+      "repo": "SnowballSH/Avalanche",
+      "elo": 3345
+    },
+    {
+      "id": "lynx",
+      "name": "Lynx",
+      "repo": "lynx-chess/Lynx",
+      "elo": 3105
+    },
+    {
+      "id": "4ku",
+      "name": "4ku",
+      "repo": "kz04px/4ku",
+      "elo": 3030
+    },
+    {
+      "id": "ice4",
+      "name": "ice4",
+      "repo": "MinusKelvin/ice4",
+      "elo": 3021
+    },
+    {
+      "id": "cheers",
+      "name": "Cheers",
+      "repo": "Algorhythm-sxv/Cheers",
+      "elo": 3020
+    },
+    {
+      "id": "mess",
+      "name": "Mess",
+      "repo": "raklaptudirm/mess",
+      "elo": 2772
+    },
+    {
+      "id": "apotheosis",
+      "name": "Apotheosis",
+      "repo": "spamdrew128/Apotheosis",
+      "elo": 2772
+    },
+    {
+      "id": "oxidation",
+      "name": "Oxidation",
+      "repo": "Mathmagician8191/Liberty-Chess",
+      "elo": 8191
+    },
+    {
+      "id": "oxidation",
+      "name": "Oxidation",
+      "repo": "Mathmagician8191/Liberty-Chess",
+      "elo": 8191
+    }
+  ],
+  "maiaWeightsUpdated": 0,
+  "durationMs": 50159
+}
