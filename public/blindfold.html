@@ -153,7 +153,7 @@ cg-container > svg,cg-container > svg > defs{overflow:hidden;position:absolute;t
 </div>
 <div id="main">
 <div id="leftCol">
-<div id="themeRow"><select id="themeSelect" style="width:100%;background:#1f1e1c;color:#bababa;border:1px solid #3d3a35;border-radius:4px;padding:6px 10px;font-size:13px;cursor:pointer"></select></div><div id="sliderRow"><label>Pieces on board:</label><input type="range" id="pieceSlider" min="1" max="9" value="5" step="1"><span id="sliderVal">8 pieces</span></div>
+<div id="themeRow"><select id="themeSelect" style="width:100%;background:#1f1e1c;color:#bababa;border:1px solid #3d3a35;border-radius:4px;padding:6px 10px;font-size:13px;cursor:pointer"></select></div><div id="sliderRow"><label>Max pieces on board:</label><input type="range" id="pieceSlider" min="1" max="9" value="5" step="1"><span id="sliderVal">8 pieces</span></div>
 <div id="toggleRow" style="display:flex;gap:14px;align-items:center;padding:5px 0;font-size:13px;flex-wrap:wrap"><label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="chkCoords" checked> Coordinates</label><label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="chkBoard" checked> Show Board</label></div>
 <div id="boardWrap"><div id="board"></div><div id="peekOv">Peeking: <span id="peekCnt">3</span>s</div></div>
 <div id="controls">
@@ -274,7 +274,7 @@ function loadNext(){
       $("pLink").textContent=p.id||p._id;
       $("pLink").href="https://lichess.org/training/"+(p.id||p._id);
       ePRV.textContent=p.rating;
-      eSV.textContent=PC_BANDS[parseInt(eSl.value)-1]+" pieces";
+      eSV.textContent="≤"+PC_BANDS[parseInt(eSl.value)-1]+" pieces";
       window._cgFen=p.fen+(p.fen.split(" ").length<6?" - 0 1":"");window._cgPzId=p.id||p._id||"";showPuzzle(p);
       updateQR();
     }).catch(function(){setStatus("No puzzles found for this combination - try different settings","bad");submitLock=false;});
