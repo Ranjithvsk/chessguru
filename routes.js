@@ -156,8 +156,8 @@ if(pieceMin>0||pieceMax<32){
   const pW=await Puzzle.find({...qW,'glicko.r':{$gte:midW-400,$lte:midW+400}}).sort({vote:-1}).limit(500).lean();
   const fW=pW.filter(function(x){return x.pieceCount>=pieceMin&&x.pieceCount<=pieceMax;});
   if(fW.length)return fW[Math.floor(Math.random()*fW.length)];
-  // Last resort: use getPz with correct rating but no piece filter
-  const pz=await getPz(a,d,ur,0,32,ur);
+  // Last resort: use getPz with correct rating AND piece filter
+  const pz=await getPz(a,d,ur,pieceMin,pieceMax,ur);
   if(pz)return pz;
 }
 // ── LICHESS-EXACT: rating flex with 5 compromise levels (PuzzlePathApi.nextFor) ─
@@ -206,29 +206,24 @@ try{
     // LICHESS-EXACT: session path traversal + dedup
     p=await _getNextForUser(uid,theme,diff,rating);
   }
-  // Fast path: PiecePool O(1) lookup when piece filter active
+  // Fast path: bfPools O(1) lookup (theme+rating+pieceCount pre-indexed)
   if(!p && pieceMax<32){
-    const PC_BANDS=[4,5,6,7,8,10,12,16,20,32];
-    const snapBand=PC_BANDS.find(b=>b>=pieceMax)||32;
-    const snapIdx=PC_BANDS.indexOf(snapBand);
-    const tryBands=[snapBand];
-    if(snapIdx>0) tryBands.push(PC_BANDS[snapIdx-1]);
-    if(snapIdx<PC_BANDS.length-1) tryBands.push(PC_BANDS[snapIdx+1]);
-    if(snapIdx<PC_BANDS.length-2) tryBands.push(PC_BANDS[snapIdx+2]);
-    for(const band of tryBands){
-      const pp=await PiecePool.findById(theme+'|'+band).lean();
-      if(pp&&pp.ids&&pp.ids.length){
-        const rid=pp.ids[Math.floor(Math.random()*pp.ids.length)];
-        const pz=await Puzzle.findById(rid).lean();
-        if(pz){p=pz;break;}
+    const PC_BF=[4,5,6,7,8,10,12,16,20,32];
+    const snapPc=PC_BF.find(b=>b>=pieceMax)||32;
+    const snapIdx=PC_BF.indexOf(snapPc);
+    const pcTryBands=PC_BF.slice(snapIdx);
+    const rb=Math.round(Math.max(400,Math.min(2900,rating))/100)*100;
+    const ratingBands=[rb,rb-100,rb+100,rb-200,rb+200,rb-300,rb+300].filter(b=>b>=400&&b<=2900);
+    outerBf: for(const rband of ratingBands){
+      for(const tryPc of pcTryBands){
+        const bfKey=theme+'|'+rband+'|'+tryPc;
+        const bfDoc=await mongoose.connection.db.collection('bfPools').findOne({_id:bfKey});
+        if(bfDoc&&bfDoc.ids&&bfDoc.ids.length>0){
+          const pid=bfDoc.ids[Math.floor(Math.random()*bfDoc.ids.length)];
+          const pz=await Puzzle.findById(pid).lean();
+          if(pz){p=pz;break outerBf;}
+        }
       }
-    }
-    // Only fall to slow getPool if all PiecePool bands missed
-    if(!p){
-      const pool=await getPool(theme,diff,rating,pieceMin,pieceMax);
-      if(pool.length) p=pool[Math.floor(Math.random()*pool.length)];
-      // If still no puzzle, use getPz with explicit rating (avoids widened fallback losing rating)
-      if(!p) p=await getPz(theme,diff,rating,pieceMin,pieceMax,rating);
     }
   }
   // No piece filter: use getPz normally
