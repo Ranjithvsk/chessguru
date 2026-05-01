@@ -465,7 +465,7 @@ function showNextBtn(){
   $("controls").appendChild(btn);
 }
 eSl.addEventListener("input",function(){eSV.textContent=this.value+" pieces";});
-eSl.addEventListener("change",function(){submitLock=false;loadNext();});
+eSl.addEventListener("change",function(){localStorage.setItem("cgbf_slider",eSl.value);submitLock=false;loadNext();});
 $("btnFlip").addEventListener("click",function(){cg.toggleOrientation();});
 $("btnPrev").addEventListener("click",function(){navTo(navIdx-1);});
 $("btnNext").addEventListener("click",function(){navTo(navIdx+1);});
@@ -492,8 +492,14 @@ var THEMES=['mix','advancedPawn','advantage','anastasiaMate','arabianMate','atta
 var tSel=document.getElementById('themeSelect');
 if(tSel){
   THEMES.forEach(function(t){var o=document.createElement('option');o.value=t;o.textContent=t==='mix'?'All Themes':t;tSel.appendChild(o);});
-  tSel.addEventListener('change',function(){currentTheme=this.value;submitLock=false;loadNext();});
+  // Restore saved theme
+  var savedTheme=localStorage.getItem('cgbf_theme');
+  if(savedTheme&&THEMES.indexOf(savedTheme)>=0){tSel.value=savedTheme;currentTheme=savedTheme;}
+  tSel.addEventListener('change',function(){currentTheme=this.value;localStorage.setItem('cgbf_theme',this.value);submitLock=false;loadNext();});
 }
+// Restore saved slider position
+var savedSlider=localStorage.getItem('cgbf_slider');
+if(savedSlider&&eSl){eSl.value=savedSlider;}
 
 function updateQR(){
   var fen = window._cgFen||'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
