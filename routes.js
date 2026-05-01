@@ -173,6 +173,35 @@ if(pieceMin>0||pieceMax<32){
   }
   return null;}
 
+
+// GET /api/puzzles/pc-options?theme=X&rating=Y
+// Returns available maxPc values that have puzzles in bfPools for this theme+rating
+router.get('/puzzles/pc-options', async(req,res)=>{
+  try{
+    const theme=req.query.theme||'mix';
+    const rating=parseInt(req.query.rating)||1500;
+    const PC_BF=[4,5,6,7,8,10,12,16,20,32];
+    // Check nearby rating bands (±300) for each pc value
+    const rb=Math.round(Math.max(400,Math.min(2900,rating))/100)*100;
+    const ratingBands=[rb,rb-100,rb+100,rb-200,rb+200,rb-300,rb+300].filter(b=>b>=400&&b<=2900);
+    const available=[];
+    const db=mongoose.connection.db;
+    for(const pc of PC_BF){
+      if(theme==='mix'){
+        // For mix, all options are always available
+        available.push(pc); continue;
+      }
+      let found=false;
+      for(const band of ratingBands){
+        const doc=await db.collection('bfPools').findOne({_id:theme+'|'+band+'|'+pc},{projection:{_id:1,count:1}});
+        if(doc&&doc.count>0){found=true;break;}
+      }
+      if(found)available.push(pc);
+    }
+    res.json({theme,rating,available});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
 const THEMES=['mix','advancedPawn','advantage','anastasiaMate','arabianMate','attackingF2F7','attraction','backRankMate','balestraMate','bishopEndgame','blindSwineMate','bodenMate','capturingDefender','castling','clearance','collinearMove','cornerMate','crushing','defensiveMove','deflection','discoveredAttack','discoveredCheck','doubleBishopMate','doubleCheck','dovetailMate','endgame','enPassant','epauletteMate','equality','exposedKing','fork','hangingPiece','hookMate','interference','intermezzo','kingsideAttack','knightEndgame','long','mate','mateIn1','mateIn2','mateIn3','mateIn4','mateIn5','middlegame','oneMove','opening','operaMate','pawnEndgame','pin','promotion','queenEndgame','queenRookEndgame','queensideAttack','quietMove','rookEndgame','sacrifice','short','skewer','smotheredMate','superGM','triangleMate','trappedPiece','underPromotion','veryLong','xRayAttack','zugzwang'];
 router.get('/themes',(req,res)=>res.json({themes:THEMES}));
 

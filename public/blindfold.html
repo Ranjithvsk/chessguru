@@ -196,6 +196,26 @@ var eMR=$("myRat"),eMD=$("myDev"),eRD=$("rDiff");
 var ePRV=$("pRatVal"),eMI=$("moveInput");
 var ePO=$("peekOv"),ePC=$("peekCnt");
 var eSl=$("pieceSlider"),eSV=$("sliderVal");
+
+// Refresh piece count dropdown to only show available options for theme+rating
+function refreshPcOptions(theme,rating,savedVal){
+  fetch(API+"/puzzles/pc-options?theme="+encodeURIComponent(theme)+"&rating="+Math.round(rating||800))
+  .then(function(r){return r.json();}).then(function(d){
+    var avail=d.available||[4,5,6,7,8,10,12,16,20,32];
+    var curVal=savedVal||eSl.value||'5';
+    var eSlEl=document.getElementById('pieceSlider');
+    eSlEl.innerHTML='';
+    avail.forEach(function(pc){
+      var idx=[4,5,6,7,8,10,12,16,20,32].indexOf(pc)+1;
+      var o=document.createElement('option');
+      o.value=String(idx);
+      o.textContent='≤'+pc+' pieces';
+      if(String(idx)===String(curVal))o.selected=true;
+      eSlEl.appendChild(o);
+    });
+    if(!eSlEl.value&&eSlEl.options.length>0)eSlEl.selectedIndex=0;
+  }).catch(function(){});
+}
 var PC_BANDS=[4,5,6,7,8,10,12,16,20,32];
 function initBoard(){
   var CG=window.Chessground;
@@ -495,11 +515,11 @@ if(tSel){
   // Restore saved theme
   var savedTheme=localStorage.getItem('cgbf_theme');
   if(savedTheme&&THEMES.indexOf(savedTheme)>=0){tSel.value=savedTheme;currentTheme=savedTheme;}
-  tSel.addEventListener('change',function(){currentTheme=this.value;localStorage.setItem('cgbf_theme',this.value);submitLock=false;loadNext();});
+  tSel.addEventListener('change',function(){currentTheme=this.value;localStorage.setItem('cgbf_theme',this.value);refreshPcOptions(currentTheme,myGlicko.r,null);submitLock=false;loadNext();});
 }
 // Restore saved slider position
 var savedSlider=localStorage.getItem('cgbf_slider');
-if(savedSlider&&eSl){eSl.value=savedSlider;}
+refreshPcOptions(currentTheme,myGlicko?myGlicko.r:800,savedSlider);
 
 function updateQR(){
   var fen = window._cgFen||'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
