@@ -92,6 +92,24 @@ const p=await Puzzle.find({...q,'glicko.r':{$gte:mid-200,$lte:mid+200}}).sort({v
 const filtered=(pieceMin>0||pieceMax<32)?p.filter(function(x){return x.pieceCount>=pieceMin&&x.pieceCount<=pieceMax;}):p;await rSet(k,filtered,60);return filtered;}
 async function getPz(a,d,ur,pieceMin=0,pieceMax=32,userRating=undefined){const bfRating=userRating&&userRating<ur?userRating:ur;const delta=DIFF[d]||0,t=Math.max(400,Math.min(3000,bfRating+delta));
 const p=await sel(a,'top',t);if(p&&(pieceMin<=0||pieceMax>=32||(p.pieceCount>=pieceMin&&p.pieceCount<=pieceMax)))return p;
+// Fast path: use bfPools for blindfold (theme+rating+pieceCount pre-indexed)
+if((pieceMin>0||pieceMax<32)&&ur&&a!=='mix'){
+  // bfPools _id: theme|ratingBand|maxPc
+  const rb=Math.round(Math.max(400,Math.min(2900,ur))/100)*100;
+  const PC_BF=[4,5,6,7,8,10,12,16,20,32];
+  const snapPc=PC_BF.find(b=>b>=pieceMax)||32;
+  // Try rating bands: exact, then widen progressively
+  const bands=[rb,rb-100,rb+100,rb-200,rb+200,rb-300,rb+300].filter(b=>b>=400&&b<=2900);
+  for(const band of bands){
+    const bfKey=a+'|'+band+'|'+snapPc;
+    const bfDoc=await mongoose.connection.db.collection('bfPools').findOne({_id:bfKey});
+    if(bfDoc&&bfDoc.ids&&bfDoc.ids.length>0){
+      const pid=bfDoc.ids[Math.floor(Math.random()*bfDoc.ids.length)];
+      const p=await Puzzle.findById(pid).lean();
+      if(p)return p;
+    }
+  }
+}
 // Fast path: use piecePools collection for piece-filtered requests
 if(pieceMin>0||pieceMax<32){
   // Snap pieceMax to nearest pool band >= pieceMax (strict: only bands that respect the slider)
