@@ -100,15 +100,23 @@ if((pieceMin>0||pieceMax<32)&&ur&&a!=='mix'){
   const snapPc=PC_BF.find(b=>b>=pieceMax)||32;
   // Try rating bands: exact, then widen progressively
   const bands=[rb,rb-100,rb+100,rb-200,rb+200,rb-300,rb+300].filter(b=>b>=400&&b<=2900);
+  // Outer: rating bands (closest rating first), Inner: PC bands (smallest first)
+  // This ensures we get the closest rating AND smallest valid PC
+  const PC_BF_ALL=[4,5,6,7,8,10,12,16,20,32];
+  const snapIdx=PC_BF_ALL.indexOf(snapPc);
+  const pcTryBands=PC_BF_ALL.slice(snapIdx); // snapPc and larger
   for(const band of bands){
-    const bfKey=a+'|'+band+'|'+snapPc;
-    const bfDoc=await mongoose.connection.db.collection('bfPools').findOne({_id:bfKey});
-    if(bfDoc&&bfDoc.ids&&bfDoc.ids.length>0){
-      const pid=bfDoc.ids[Math.floor(Math.random()*bfDoc.ids.length)];
-      const p=await Puzzle.findById(pid).lean();
-      if(p)return p;
+    for(const tryPc of pcTryBands){
+      const bfKey=a+'|'+band+'|'+tryPc;
+      const bfDoc=await mongoose.connection.db.collection('bfPools').findOne({_id:bfKey});
+      if(bfDoc&&bfDoc.ids&&bfDoc.ids.length>0){
+        const pid=bfDoc.ids[Math.floor(Math.random()*bfDoc.ids.length)];
+        const p=await Puzzle.findById(pid).lean();
+        if(p)return p;
+      }
     }
   }
+  return null;
 }
 // Fast path: use piecePools collection for piece-filtered requests
 if(pieceMin>0||pieceMax<32){
