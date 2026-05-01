@@ -279,7 +279,7 @@ function loadNext(){
       updateQR();
     }).catch(function(){setStatus("No puzzles found for this combination - try different settings","bad");submitLock=false;});
   }
-  doLoad(API+"/puzzles/random?theme="+currentTheme+"&maxPc="+pv+"&rating="+Math.round(myGlicko.r));
+  var ct=document.getElementById("themeSelect")?document.getElementById("themeSelect").value:currentTheme;doLoad(API+"/puzzles/random?theme="+ct+"&maxPc="+pv+"&rating="+Math.round(myGlicko.r));
 }
 function showPuzzle(p){window._cgFen=chess.fen();
 updateQR();
