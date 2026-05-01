@@ -153,7 +153,7 @@ cg-container > svg,cg-container > svg > defs{overflow:hidden;position:absolute;t
 </div>
 <div id="main">
 <div id="leftCol">
-<div id="themeRow"><select id="themeSelect" style="width:100%;background:#1f1e1c;color:#bababa;border:1px solid #3d3a35;border-radius:4px;padding:6px 10px;font-size:13px;cursor:pointer"></select></div><div id="sliderRow"><label>Max pieces on board:</label><input type="range" id="pieceSlider" min="1" max="9" value="5" step="1"><span id="sliderVal">8 pieces</span></div>
+<div id="themeRow"><select id="themeSelect" style="width:100%;background:#1f1e1c;color:#bababa;border:1px solid #3d3a35;border-radius:4px;padding:6px 10px;font-size:13px;cursor:pointer"></select></div><div id="sliderRow"><label>Max pieces on board:</label><select id="pieceSlider" style="background:#2a2a2a;color:#fff;border:1px solid #444;border-radius:4px;padding:4px 8px;font-size:13px;cursor:pointer"><option value="1">&le;4 pieces</option><option value="2">&le;5 pieces</option><option value="3">&le;6 pieces</option><option value="4">&le;7 pieces</option><option value="5" selected>&le;8 pieces</option><option value="6">&le;10 pieces</option><option value="7">&le;12 pieces</option><option value="8">&le;16 pieces</option><option value="9">&le;20 pieces</option></select><span id="sliderVal" style="display:none"></span></div>
 <div id="toggleRow" style="display:flex;gap:14px;align-items:center;padding:5px 0;font-size:13px;flex-wrap:wrap"><label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="chkCoords" checked> Coordinates</label><label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="chkBoard" checked> Show Board</label></div>
 <div id="boardWrap"><div id="board"></div><div id="peekOv">Peeking: <span id="peekCnt">3</span>s</div></div>
 <div id="controls">
@@ -464,7 +464,7 @@ function showNextBtn(){
   btn.addEventListener("click",function(){btn.remove();document.body.classList.add("blindfold");loadNext();});
   $("controls").appendChild(btn);
 }
-eSl.addEventListener("input",function(){eSV.textContent=this.value+" pieces";});
+// select handles display via options
 eSl.addEventListener("change",function(){localStorage.setItem("cgbf_slider",eSl.value);submitLock=false;loadNext();});
 $("btnFlip").addEventListener("click",function(){cg.toggleOrientation();});
 $("btnPrev").addEventListener("click",function(){navTo(navIdx-1);});
