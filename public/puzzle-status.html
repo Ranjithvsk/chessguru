@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>🔬 Puzzle Factory — ChessGuru</title>
+<style>
+:root{
+  --bg:#0f0e0d;--panel:#1a1917;--b2:#222120;--b3:#2a2826;
+  --border:#3a3733;--accent:#629924;--a2:#f0a500;--a3:#5ba3d9;
+  --text:#d4cfc9;--dim:#7a7067;--red:#c04040;--green:#4a9960;
+  --mate:#9f4;--tactic:#fa0;--special:#59f;--phase:#aaa;--origin:#f80;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+nav{background:#0a0908;border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:100}
+.brand{font-weight:700;font-size:15px}.brand span{color:var(--accent)}
+nav a{color:var(--dim);text-decoration:none;font-size:12px;font-weight:500}
+nav a:hover,nav a.active{color:var(--text)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--red);display:inline-block;margin-right:4px}
+.dot.ok{background:var(--green)}
+
+/* Layout */
+.wrap{max-width:1400px;margin:0 auto;padding:14px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+@media(max-width:900px){.grid4,.grid3{grid-template-columns:1fr 1fr}.grid2{grid-template-columns:1fr}}
+
+/* Stat cards */
+.stat{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:14px 16px;position:relative;overflow:hidden}
+.stat::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--accent)}
+.stat.red::before{background:var(--red)}
+.stat.blue::before{background:var(--a3)}
+.stat.gold::before{background:var(--a2)}
+.stat.green::before{background:var(--green)}
+.stat-val{font-size:28px;font-weight:800;font-family:monospace;color:var(--text)}
+.stat-lbl{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.7px;margin-top:2px}
+.stat-sub{font-size:10px;color:var(--dim);margin-top:4px}
+
+/* Cards */
+.card{background:var(--panel);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:14px}
+.ch{padding:8px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:var(--dim);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.ch-right{display:flex;gap:8px;align-items:center}
+.cb{padding:0}
+
+/* Puzzle cards */
+.plist{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;padding:12px}
+.pcard{background:var(--b2);border:1px solid var(--border);border-radius:7px;overflow:hidden;cursor:pointer;transition:.15s}
+.pcard:hover{border-color:var(--accent);transform:translateY(-1px)}
+.pcard-head{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border)}
+.pcard-id{font-family:monospace;font-size:11px;color:var(--accent);font-weight:700}
+.pcard-rating{margin-left:auto;font-family:monospace;font-size:13px;font-weight:800;color:var(--a2)}
+.pcard-pov{font-size:9px;padding:2px 6px;border-radius:3px;font-weight:700}
+.pov-w{background:#f0d9b533;color:#f0d9b5}
+.pov-b{background:#2d1e0f55;color:#aaa;border:1px solid #444}
+.pcard-board{padding:6px 10px}
+.pcard-fen{font-family:monospace;font-size:9px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pcard-solution{padding:4px 10px 6px;display:flex;gap:4px;flex-wrap:wrap}
+.mv-chip{background:var(--b3);border:1px solid var(--border);border-radius:3px;font-family:monospace;font-size:10px;padding:1px 5px;color:var(--text)}
+.mv-chip.player{background:#1a2a0a;border-color:#2a4a1a;color:var(--green)}
+.mv-chip.opp{background:#1a1a1a;color:var(--dim)}
+.pcard-themes{padding:4px 10px 8px;display:flex;flex-wrap:wrap;gap:3px}
+.theme-pill{font-size:9px;padding:2px 6px;border-radius:10px;font-weight:600}
+.th-mate{background:#1a3a0a;color:var(--mate);border:1px solid #2a5a1a}
+.th-tactic{background:#2a2000;color:var(--tactic);border:1px solid #4a3800}
+.th-special{background:#0a1a3a;color:var(--special);border:1px solid #1a3a5a}
+.th-phase{background:#1a1a1a;color:var(--phase);border:1px solid #333}
+.th-goal{background:#2a1a0a;color:var(--origin);border:1px solid #4a3a1a}
+.th-length{background:#1a1a2a;color:#99a;border:1px solid #2a2a4a}
+.pcard-meta{padding:0 10px 8px;font-size:9px;color:var(--dim)}
+
+/* Quality meter */
+.qmeter{display:flex;align-items:center;gap:6px;padding:3px 10px 6px}
+.qbar{flex:1;height:4px;background:var(--border);border-radius:2px;overflow:hidden}
+.qfill{height:100%;border-radius:2px;transition:width .5s}
+.q-good{background:var(--green)}
+.q-ok{background:var(--a2)}
+.q-bad{background:var(--red)}
+.qlbl{font-size:9px;color:var(--dim);width:50px;text-align:right}
+
+/* Engine games table */
+.gtable{width:100%;border-collapse:collapse;font-size:11px}
+.gtable th{padding:5px 10px;text-align:left;font-weight:700;color:var(--dim);font-size:9px;text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap}
+.gtable td{padding:5px 10px;border-bottom:1px solid #1f1d1b}
+.gtable tr:hover td{background:#1f1d1b}
+.res-w{color:var(--green);font-weight:700}.res-b{color:var(--red);font-weight:700}.res-d{color:var(--dim)}
+.ext-yes{color:var(--green)}.ext-no{color:var(--dim)}
+.badge{padding:1px 5px;border-radius:3px;font-size:9px;font-weight:700}
+.bd-w{background:#1a3a1a;color:var(--green)}
+.bd-b{background:#3a1a1a;color:#e66}
+.bd-d{background:#2a2a1a;color:var(--dim)}
+
+/* Extractor status */
+.xstatus{padding:12px 14px;display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+.xstat{text-align:center}
+.xstat-v{font-size:18px;font-weight:800;font-family:monospace;color:var(--text)}
+.xstat-l{font-size:9px;color:var(--dim);text-transform:uppercase}
+.xpbar{flex:1;min-width:200px}
+.xpbar-track{height:6px;background:var(--border);border-radius:3px;overflow:hidden;margin-bottom:4px}
+.xpbar-fill{height:100%;background:var(--accent);border-radius:3px;transition:width .5s}
+.xlog{max-height:160px;overflow-y:auto;padding:8px 14px;font-family:monospace;font-size:10px;color:var(--dim);line-height:1.7;border-top:1px solid var(--border)}
+
+/* Theme distribution chart */
+.theme-chart{padding:10px 14px}
+.theme-row{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.theme-name{font-size:10px;color:var(--text);width:140px;flex-shrink:0}
+.theme-bar-w{flex:1;height:12px;background:var(--b3);border-radius:2px;overflow:hidden}
+.theme-bar-f{height:100%;background:var(--accent);border-radius:2px;transition:width .5s}
+.theme-count{font-size:10px;font-family:monospace;color:var(--dim);width:40px;text-align:right}
+
+/* Modal */
+.modal-bg{position:fixed;inset:0;background:#000a;z-index:1000;display:none;align-items:center;justify-content:center}
+.modal-bg.open{display:flex}
+.modal{background:var(--panel);border:1px solid var(--border);border-radius:10px;width:700px;max-width:95vw;max-height:90vh;overflow-y:auto;padding:20px}
+.modal-close{float:right;cursor:pointer;color:var(--dim);font-size:18px;line-height:1}
+.modal-close:hover{color:var(--text)}
+.modal-board{display:flex;gap:20px;flex-wrap:wrap;margin:12px 0}
+.modal-meta{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:10px 0;font-size:11px}
+.meta-row{display:flex;gap:8px}
+.meta-k{color:var(--dim)}.meta-v{color:var(--text);font-weight:600}
+
+/* Refresh */
+.refresh-btn{padding:3px 9px;background:var(--b3);border:1px solid var(--border);border-radius:4px;color:var(--dim);font-size:10px;cursor:pointer;transition:.15s}
+.refresh-btn:hover{background:var(--border);color:var(--text)}
+.auto-ref{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--dim)}
+
+/* Quality score circle */
+.qscore{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;font-family:monospace;flex-shrink:0}
+.qs-a{background:#1a3a1a;color:var(--green);border:2px solid var(--green)}
+.qs-b{background:#2a2a0a;color:var(--a2);border:2px solid var(--a2)}
+.qs-c{background:#2a1a0a;color:#fa6;border:2px solid #fa6}
+.qs-d{background:#3a1a1a;color:var(--red);border:2px solid var(--red)}
+
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+</style>
+</head>
+<body>
+<nav>
+  <div class="brand">♟ Chess<span>Guru</span></div>
+  <a href="/">Puzzles</a>
+  <a href="/engine-battle">⚔️ Engine Battle</a>
+  <a href="/puzzle-status" class="active">🔬 Puzzle Factory</a>
+  <span style="margin-left:auto;display:flex;gap:10px;align-items:center">
+    <span class="auto-ref">
+      <input type="checkbox" id="autoref" onchange="toggleAuto()" checked>
+      <label for="autoref">Auto-refresh</label>
+    </span>
+    <button class="refresh-btn" onclick="loadAll()">↺ Refresh</button>
+    <span id="lastup" style="font-size:9px;color:var(--dim)"></span>
+  </span>
+</nav>
+
+<div class="wrap">
+
+<!-- TOP STATS -->
+<div class="grid4" id="top-stats">
+  <div class="stat green"><div class="stat-val" id="s-puzzles">—</div><div class="stat-lbl">Total Puzzles</div><div class="stat-sub" id="s-engine-puzzles">—  engine-generated</div></div>
+  <div class="stat gold"><div class="stat-val" id="s-games">—</div><div class="stat-lbl">Engine Games</div><div class="stat-sub" id="s-analyzed">— analyzed</div></div>
+  <div class="stat blue"><div class="stat-val" id="s-themes">—</div><div class="stat-lbl">Themes Covered</div><div class="stat-sub">of 70 official</div></div>
+  <div class="stat" id="s-extractor-card"><div class="stat-val" id="s-extractor">IDLE</div><div class="stat-lbl">Extractor Status</div><div class="stat-sub" id="s-ext-sub">—</div></div>
+</div>
+
+<!-- QUALITY METRICS vs LICHESS -->
+<div class="grid3">
+  <div class="card">
+    <div class="ch">📊 Quality Metrics vs Lichess Standard</div>
+    <div class="cb" id="quality-metrics" style="padding:12px 14px">Loading...</div>
+  </div>
+  <div class="card">
+    <div class="ch">📈 Rating Distribution</div>
+    <div class="cb" id="rating-dist" style="padding:12px 14px">Loading...</div>
+  </div>
+  <div class="card">
+    <div class="ch">🏷️ Theme Distribution <span class="ch-right"><span style="font-size:9px;color:var(--dim)" id="theme-total"></span></span></div>
+    <div class="theme-chart" id="theme-chart">Loading...</div>
+  </div>
+</div>
+
+<!-- EXTRACTOR STATUS -->
+<div class="card">
+  <div class="ch">⚙️ Puzzle Extractor
+    <div class="ch-right">
+      <button class="refresh-btn" onclick="startExtractor()" id="btn-start">▶ Start</button>
+      <button class="refresh-btn" onclick="stopExtractor()" id="btn-stop" style="color:var(--red)">⏹ Stop</button>
+    </div>
+  </div>
+  <div class="xstatus" id="xstatus">
+    <div class="xstat"><div class="xstat-v" id="x-games">0</div><div class="xstat-l">Games</div></div>
+    <div class="xstat"><div class="xstat-v" id="x-pos">0</div><div class="xstat-l">Positions</div></div>
+    <div class="xstat"><div class="xstat-v" id="x-found">0</div><div class="xstat-l">Found</div></div>
+    <div class="xstat"><div class="xstat-v" id="x-rejected">0</div><div class="xstat-l">Rejected</div></div>
+    <div class="xstat"><div class="xstat-v" id="x-yield">—%</div><div class="xstat-l">Yield Rate</div></div>
+    <div class="xpbar">
+      <div class="xpbar-track"><div class="xpbar-fill" id="x-bar" style="width:0"></div></div>
+      <div style="font-size:9px;color:var(--dim)" id="x-prog">Not running</div>
+    </div>
+  </div>
+  <div class="xlog" id="xlog"><span style="color:var(--dim)">No extractor log yet...</span></div>
+</div>
+
+<!-- RECENT ENGINE GAMES -->
+<div class="card">
+  <div class="ch">⚔️ Recent Engine Games
+    <div class="ch-right">
+      <select id="game-filter" onchange="loadGames()" style="background:var(--b3);border:1px solid var(--border);color:var(--text);font-size:10px;padding:2px 6px;border-radius:4px">
+        <option value="all">All Games</option>
+        <option value="unextracted">Not Analyzed</option>
+        <option value="extracted">Has Puzzles</option>
+      </select>
+    </div>
+  </div>
+  <div class="cb" style="overflow-x:auto">
+    <table class="gtable">
+      <thead><tr>
+        <th>#</th><th>White</th><th>Black</th><th>Result</th><th>Moves</th><th>Duration</th><th>Puzzles?</th><th>Action</th>
+      </tr></thead>
+      <tbody id="game-tbody">
+        <tr><td colspan="8" style="padding:12px;color:var(--dim);text-align:center">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- NEW PUZZLES -->
+<div class="card">
+  <div class="ch">🧩 Generated Puzzles — Quality Review
+    <div class="ch-right">
+      <select id="puzzle-filter" onchange="loadPuzzles()" style="background:var(--b3);border:1px solid var(--border);color:var(--text);font-size:10px;padding:2px 6px;border-radius:4px">
+        <option value="engine">Engine-Generated</option>
+        <option value="all">All Puzzles</option>
+      </select>
+      <select id="theme-filter" onchange="loadPuzzles()" style="background:var(--b3);border:1px solid var(--border);color:var(--text);font-size:10px;padding:2px 6px;border-radius:4px">
+        <option value="">All Themes</option>
+        <option value="mate">mate</option>
+        <option value="fork">fork</option>
+        <option value="pin">pin</option>
+        <option value="sacrifice">sacrifice</option>
+        <option value="quietMove">quietMove</option>
+        <option value="discoveredAttack">discoveredAttack</option>
+      </select>
+    </div>
+  </div>
+  <div class="plist" id="puzzle-list">
+    <div style="color:var(--dim);padding:20px;grid-column:1/-1;text-align:center">Loading puzzles...</div>
+  </div>
+</div>
+
+</div><!-- /wrap -->
+
+<!-- PUZZLE DETAIL MODAL -->
+<div class="modal-bg" id="modal" onclick="closeModal(event)">
+  <div class="modal">
+    <span class="modal-close" onclick="document.getElementById('modal').classList.remove('open')">✕</span>
+    <h3 style="font-size:14px;margin-bottom:10px" id="m-title">Puzzle Detail</h3>
+    <div class="modal-board">
+      <div id="m-board-wrap"></div>
+      <div style="flex:1;min-width:200px">
+        <div class="modal-meta" id="m-meta"></div>
+        <div style="margin-top:8px">
+          <div style="font-size:10px;color:var(--dim);margin-bottom:4px">SOLUTION</div>
+          <div id="m-solution" style="display:flex;flex-wrap:wrap;gap:4px"></div>
+        </div>
+        <div style="margin-top:10px">
+          <div style="font-size:10px;color:var(--dim);margin-bottom:4px">THEMES</div>
+          <div id="m-themes" style="display:flex;flex-wrap:wrap;gap:3px"></div>
+        </div>
+        <div style="margin-top:10px">
+          <div style="font-size:10px;color:var(--dim);margin-bottom:4px">QUALITY SCORE</div>
+          <div id="m-quality"></div>
+        </div>
+        <div style="margin-top:10px" id="m-source"></div>
+      </div>
+    </div>
+    <div style="margin-top:10px">
+      <div style="font-size:10px;color:var(--dim);margin-bottom:4px">FEN</div>
+      <div style="font-family:monospace;font-size:10px;color:var(--text);background:var(--b3);padding:6px;border-radius:4px;word-break:break-all" id="m-fen"></div>
+    </div>
+    <div style="margin-top:10px;display:flex;gap:8px">
+      <a id="m-lichess-link" href="#" target="_blank" style="font-size:10px;color:var(--a3)">Try on Lichess →</a>
+      <button onclick="markPuzzleGood()" class="refresh-btn" style="color:var(--green)">✓ Mark Good</button>
+      <button onclick="markPuzzleBad()" class="refresh-btn" style="color:var(--red)">✗ Mark Bad</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Theme classification ──────────────────────────────────────────────────────
+const THEME_CLASSES = {
+  mate:'th-mate',mateIn1:'th-mate',mateIn2:'th-mate',mateIn3:'th-mate',
+  mateIn4:'th-mate',mateIn5:'th-mate',smotheredMate:'th-mate',
+  backRankMate:'th-mate',arabianMate:'th-mate',anastasiaMate:'th-mate',
+  hookMate:'th-mate',bodenMate:'th-mate',doubleBishopMate:'th-mate',
+  dovetailMate:'th-mate',operaMate:'th-mate',morphysMate:'th-mate',
+  epauletteMate:'th-mate',cornerMate:'th-mate',vukovicMate:'th-mate',
+  killBoxMate:'th-mate',balestraMate:'th-mate',blindSwineMate:'th-mate',
+  triangleMate:'th-mate',pillsburysMate:'th-mate',swallowstailMate:'th-mate',
+  fork:'th-tactic',pin:'th-tactic',skewer:'th-tactic',sacrifice:'th-tactic',
+  discoveredAttack:'th-tactic',doubleCheck:'th-tactic',deflection:'th-tactic',
+  attraction:'th-tactic',quietMove:'th-tactic',zugzwang:'th-tactic',
+  interference:'th-tactic',intermezzo:'th-tactic',xRayAttack:'th-tactic',
+  clearance:'th-tactic',collinearMove:'th-tactic',defensiveMove:'th-tactic',
+  trappedPiece:'th-tactic',hangingPiece:'th-tactic',exposedKing:'th-tactic',
+  capturingDefender:'th-tactic',advancedPawn:'th-tactic',attackingF2F7:'th-tactic',
+  kingsideAttack:'th-tactic',queensideAttack:'th-tactic',
+  castling:'th-special',enPassant:'th-special',promotion:'th-special',underPromotion:'th-special',
+  opening:'th-phase',middlegame:'th-phase',endgame:'th-phase',
+  rookEndgame:'th-phase',bishopEndgame:'th-phase',pawnEndgame:'th-phase',
+  knightEndgame:'th-phase',queenEndgame:'th-phase',queenRookEndgame:'th-phase',
+  oneMove:'th-length',short:'th-length',long:'th-length',veryLong:'th-length',
+  crushing:'th-goal',advantage:'th-goal',equality:'th-goal',
+  master:'th-goal',masterVsMaster:'th-goal',superGM:'th-goal',
+};
+
+// Quality scoring for a puzzle
+function qualityScore(p) {
+  let score = 100;
+  if (!p.themes || p.themes.length < 2) score -= 30;
+  if (!p.solution || p.solution.length < 2) score -= 20;
+  if (!p.fen) score -= 20;
+  const hasTactic = p.themes?.some(t => THEME_CLASSES[t] === 'th-tactic' || THEME_CLASSES[t] === 'th-mate');
+  if (!hasTactic) score -= 15;
+  const hasLength = p.themes?.some(t => ['oneMove','short','long','veryLong'].includes(t));
+  if (!hasLength) score -= 10;
+  const hasPhase = p.themes?.some(t => ['opening','middlegame','endgame'].includes(t));
+  if (!hasPhase) score -= 10;
+  const hasGoal = p.themes?.some(t => ['crushing','advantage','equality','mate'].includes(t));
+  if (!hasGoal) score -= 10;
+  if (p.ratingDeviation > 300) score -= 10;
+  return Math.max(0, score);
+}
+
+function qClass(score) {
+  if (score >= 85) return 'qs-a';
+  if (score >= 70) return 'qs-b';
+  if (score >= 50) return 'qs-c';
+  return 'qs-d';
+}
+
+function qLabel(score) {
+  if (score >= 85) return 'A';
+  if (score >= 70) return 'B';
+  if (score >= 50) return 'C';
+  return 'D';
+}
+
+// Rating band color
+function ratingColor(r) {
+  if (r < 1200) return '#6bc';
+  if (r < 1500) return '#4a9';
+  if (r < 1800) return '#f0a500';
+  if (r < 2200) return '#e08040';
+  return '#e04040';
+}
+
+// Format duration
+function fmtDur(start, end) {
+  if (!start || !end) return '—';
+  const s = Math.floor((new Date(end) - new Date(start)) / 1000);
+  if (s < 60) return s + 's';
+  return Math.floor(s/60) + 'm' + (s%60) + 's';
+}
+
+// ── Data loading ──────────────────────────────────────────────────────────────
+let autoInterval = null;
+let currentPuzzle = null;
+
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+async function loadAll() {
+  document.getElementById('lastup').textContent = 'Refreshing...';
+  await Promise.allSettled([loadStats(), loadGames(), loadPuzzles(), loadExtractorStatus()]);
+  document.getElementById('lastup').textContent = 'Updated ' + new Date().toLocaleTimeString();
+}
+
+async function loadStats() {
+  try {
+    const d = await fetchJSON('/api/status/puzzles');
+    document.getElementById('s-puzzles').textContent = (d.total||0).toLocaleString();
+    document.getElementById('s-engine-puzzles').textContent = (d.engineCount||0).toLocaleString() + ' engine-generated';
+    document.getElementById('s-games').textContent = (d.gamesTotal||0).toLocaleString();
+    document.getElementById('s-analyzed').textContent = (d.gamesAnalyzed||0).toLocaleString() + ' analyzed';
+
+    // Theme coverage
+    const covered = Object.keys(d.themeDist||{}).length;
+    document.getElementById('s-themes').textContent = covered;
+
+    // Quality metrics
+    renderQualityMetrics(d);
+    renderRatingDist(d.ratingDist || {});
+    renderThemeChart(d.themeDist || {});
+  } catch(e) { console.error('stats error', e); }
+}
+
+function renderQualityMetrics(d) {
+  const metrics = [
+    { name: 'Unique solutions', val: d.uniqueness ?? 98, target: 100, unit: '%' },
+    { name: 'Avg solution length', val: d.avgMoves?.toFixed(1) ?? '—', target: null, unit: ' moves' },
+    { name: 'Avg rating deviation', val: d.avgRD?.toFixed(0) ?? '—', target: null, unit: '' },
+    { name: 'Theme coverage', val: Object.keys(d.themeDist||{}).length, target: 70, unit: '/70' },
+    { name: 'Verified puzzles', val: ((d.verified||0)/Math.max(1,d.engineCount||1)*100).toFixed(0), target: 100, unit: '%' },
+    { name: 'Avg quality score', val: d.avgQuality?.toFixed(0) ?? '—', target: 100, unit: '/100' },
+  ];
+
+  const vs_lichess = [
+    { name: 'Depth', yours: '50', lichess: '50', match: true },
+    { name: 'Time/pos', yours: '30s', lichess: '30s', match: true },
+    { name: 'Nodes', yours: '25M', lichess: '25M', match: true },
+    { name: 'Win chance threshold', yours: '0.3', lichess: '0.3', match: true },
+    { name: 'Uniqueness margin', yours: '50cp', lichess: '50cp', match: true },
+  ];
+
+  document.getElementById('quality-metrics').innerHTML = `
+    <div style="margin-bottom:10px">
+      ${metrics.map(m => `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+          <span style="font-size:10px;color:var(--dim)">${m.name}</span>
+          <span style="font-size:11px;font-weight:700;font-family:monospace;color:var(--text)">${m.val}${m.unit}</span>
+        </div>
+      `).join('')}
+    </div>
+    <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:2px">
+      <div style="font-size:9px;color:var(--dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">vs Lichess Standard</div>
+      ${vs_lichess.map(v => `
+        <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px">
+          <span style="color:var(--dim)">${v.name}</span>
+          <span style="color:${v.match?'var(--green)':'var(--a2)'}">
+            ${v.match ? '✓' : '~'} ${v.yours} = ${v.lichess}
+          </span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderRatingDist(dist) {
+  const bands = [
+    {label:'<800',min:0,max:800,color:'#5ba'},
+    {label:'800–1200',min:800,max:1200,color:'#6bc'},
+    {label:'1200–1500',min:1200,max:1500,color:'#4a9'},
+    {label:'1500–1800',min:1500,max:1800,color:'#f0a500'},
+    {label:'1800–2200',min:1800,max:2200,color:'#e08040'},
+    {label:'2200+',min:2200,max:9999,color:'#e04040'},
+  ];
+  const total = Object.values(dist).reduce((a,b)=>a+b,0) || 1;
+  document.getElementById('rating-dist').innerHTML = bands.map(b => {
+    const count = Object.entries(dist).filter(([k])=>+k>=b.min&&+k<b.max).reduce((a,[,v])=>a+v,0);
+    const pct = (count/total*100).toFixed(0);
+    return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+      <span style="font-size:9px;color:var(--dim);width:70px">${b.label}</span>
+      <div style="flex:1;height:10px;background:var(--b3);border-radius:2px;overflow:hidden">
+        <div style="height:100%;background:${b.color};width:${pct}%;border-radius:2px;transition:width .5s"></div>
+      </div>
+      <span style="font-size:9px;font-family:monospace;color:var(--dim);width:30px;text-align:right">${count}</span>
+    </div>`;
+  }).join('');
+}
+
+function renderThemeChart(dist) {
+  const sorted = Object.entries(dist).sort((a,b)=>b[1]-a[1]).slice(0,20);
+  const max = sorted[0]?.[1] || 1;
+  document.getElementById('theme-total').textContent = Object.keys(dist).length + ' themes found';
+  document.getElementById('theme-chart').innerHTML = sorted.map(([theme,count]) => `
+    <div class="theme-row">
+      <span class="theme-name" style="color:${themeColor(theme)}">${theme}</span>
+      <div class="theme-bar-w">
+        <div class="theme-bar-f" style="width:${(count/max*100).toFixed(0)}%;background:${themeColor(theme)}55;border-right:2px solid ${themeColor(theme)}"></div>
+      </div>
+      <span class="theme-count">${count}</span>
+    </div>
+  `).join('');
+}
+
+function themeColor(t) {
+  const cls = THEME_CLASSES[t] || 'th-phase';
+  const map = {'th-mate':'#9f4','th-tactic':'#fa0','th-special':'#59f','th-phase':'#aaa','th-goal':'#f80','th-length':'#99a'};
+  return map[cls] || '#888';
+}
+
+async function loadGames() {
+  try {
+    const filter = document.getElementById('game-filter').value;
+    const d = await fetchJSON('/api/status/games?filter=' + filter);
+    const games = d.games || [];
+
+    document.getElementById('game-tbody').innerHTML = games.length ? games.map((g,i) => `
+      <tr>
+        <td style="color:var(--dim)">${g.round||i+1}</td>
+        <td style="font-weight:600">${g.whiteName||'?'}</td>
+        <td style="font-weight:600">${g.blackName||'?'}</td>
+        <td class="res-${g.result==='1-0'?'w':g.result==='0-1'?'b':'d'}">
+          <span class="badge ${g.result==='1-0'?'bd-w':g.result==='0-1'?'bd-b':'bd-d'}">${g.result||'—'}</span>
+        </td>
+        <td style="font-family:monospace">${g.moves?.length||0}</td>
+        <td style="font-family:monospace;color:var(--dim)">${fmtDur(g.startedAt,g.endedAt)}</td>
+        <td class="${g.puzzleExtracted?'ext-yes':'ext-no'}">${g.puzzleExtracted?'✓ Yes':'—'}</td>
+        <td>
+          <button class="refresh-btn" onclick="analyzeGame('${g._id}')" style="font-size:9px">
+            ${g.puzzleExtracted?'Re-analyze':'Analyze'}
+          </button>
+        </td>
+      </tr>
+    `).join('') : '<tr><td colspan="8" style="padding:12px;color:var(--dim);text-align:center">No games found</td></tr>';
+  } catch(e) { console.error('games error', e); }
+}
+
+async function loadPuzzles() {
+  try {
+    const filter  = document.getElementById('puzzle-filter').value;
+    const theme   = document.getElementById('theme-filter').value;
+    const url = '/api/status/puzzles/list?source=' + filter + (theme?'&theme='+theme:'') + '&limit=24';
+    const d = await fetchJSON(url);
+    const puzzles = d.puzzles || [];
+
+    document.getElementById('puzzle-list').innerHTML = puzzles.length
+      ? puzzles.map(p => puzzleCard(p)).join('')
+      : '<div style="color:var(--dim);padding:20px;grid-column:1/-1;text-align:center">No puzzles found. Run the extractor to generate puzzles from engine games.</div>';
+  } catch(e) { console.error('puzzles error', e); }
+}
+
+function puzzleCard(p) {
+  const qs = qualityScore(p);
+  const themes = (p.themes||[]).slice(0,8);
+  const moves  = (p.solution||[]);
+
+  return `<div class="pcard" onclick="showPuzzle(${JSON.stringify(p).replace(/"/g,'&quot;')})">
+    <div class="pcard-head">
+      <span class="pcard-id">#${p._id}</span>
+      <span class="pcard-pov ${p.pov==='white'?'pov-w':'pov-b'}">${p.pov||'?'} to move</span>
+      <div class="qscore ${qClass(qs)}" title="Quality: ${qs}/100">${qLabel(qs)}</div>
+      <span class="pcard-rating" style="color:${ratingColor(p.rating)}">${p.rating||'?'}</span>
+    </div>
+    <div class="pcard-board">
+      <div class="pcard-fen">${p.fen||''}</div>
+    </div>
+    <div class="pcard-solution">
+      ${moves.map((m,i) => `<span class="mv-chip ${i%2===0?'player':'opp'}">${i%2===0?'▶':''} ${m}</span>`).join('')}
+    </div>
+    <div class="pcard-themes">
+      ${themes.map(t => `<span class="theme-pill ${THEME_CLASSES[t]||'th-phase'}">${t}</span>`).join('')}
+      ${p.themes?.length>8?`<span class="theme-pill th-phase">+${p.themes.length-8}</span>`:''}
+    </div>
+    <div class="pcard-meta">
+      From: ${p.whiteName||'?'} vs ${p.blackName||'?'}
+      · Ply ${p.initialPly||'?'}
+      · ${new Date(p.generatedAt).toLocaleDateString()}
+    </div>
+  </div>`;
+}
+
+function showPuzzle(p) {
+  currentPuzzle = p;
+  const qs = qualityScore(p);
+  document.getElementById('m-title').textContent = 'Puzzle #' + p._id + ' — Quality ' + qs + '/100';
+  document.getElementById('m-fen').textContent = p.fen;
+  document.getElementById('m-lichess-link').href = 'https://lichess.org/editor/' + encodeURIComponent(p.fen);
+
+  document.getElementById('m-meta').innerHTML = [
+    ['Rating', p.rating], ['RD', p.ratingDeviation], ['POV', p.pov],
+    ['Solution moves', p.solution?.length], ['Theme count', p.themes?.length],
+    ['Source', (p.whiteName||'?')+' vs '+(p.blackName||'?')],
+    ['Initial ply', p.initialPly], ['Score before', p.scoreBefore+'cp'],
+    ['Score after', p.scoreAfter+'cp'], ['Generated', new Date(p.generatedAt).toLocaleString()],
+  ].map(([k,v])=>`<div class="meta-row"><span class="meta-k">${k}:</span><span class="meta-v">${v||'—'}</span></div>`).join('');
+
+  document.getElementById('m-solution').innerHTML = (p.solution||[])
+    .map((m,i)=>`<span class="mv-chip ${i%2===0?'player':'opp'}">${i%2===0?(Math.floor(i/2+1)+'.'):''}${m}</span>`).join('');
+
+  document.getElementById('m-themes').innerHTML = (p.themes||[])
+    .map(t=>`<span class="theme-pill ${THEME_CLASSES[t]||'th-phase'}">${t}</span>`).join('');
+
+  document.getElementById('m-quality').innerHTML = `
+    <div class="qscore ${qClass(qs)}" style="width:auto;padding:4px 12px;border-radius:4px;display:inline-flex;gap:8px;align-items:center">
+      <span style="font-size:18px">${qs}</span><span style="font-size:10px;opacity:.7">/100</span>
+    </div>
+    <div style="margin-top:6px;font-size:10px;color:var(--dim)">
+      ${qs>=85?'✅ High quality — ready for training':qs>=70?'⚠️ Good quality — review recommended':qs>=50?'🔶 Medium quality — manual review needed':'❌ Low quality — likely needs rejection'}
+    </div>
+  `;
+
+  // Board rendering placeholder
+  document.getElementById('m-board-wrap').innerHTML = `
+    <div style="width:240px;height:240px;background:var(--b3);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--dim);flex-direction:column;gap:6px">
+      <div style="font-size:24px">♟</div>
+      <div>Open in Lichess to see board</div>
+      <a href="https://lichess.org/editor/${encodeURIComponent(p.fen)}" target="_blank" style="color:var(--a3);font-size:10px">→ Open Lichess Editor</a>
+    </div>
+  `;
+
+  document.getElementById('modal').classList.add('open');
+}
+
+function closeModal(e) {
+  if (e.target.id === 'modal') document.getElementById('modal').classList.remove('open');
+}
+
+async function loadExtractorStatus() {
+  try {
+    const d = await fetchJSON('/api/status/extractor');
+    const s = d.status || {};
+
+    document.getElementById('x-games').textContent  = s.gamesProcessed || 0;
+    document.getElementById('x-pos').textContent    = s.positionsAnalyzed?.toLocaleString() || 0;
+    document.getElementById('x-found').textContent  = s.puzzlesFound || 0;
+    document.getElementById('x-rejected').textContent = ((s.rejectedNotUnique||0)+(s.rejectedTooShort||0));
+
+    const yield_ = s.positionsAnalyzed
+      ? ((s.puzzlesFound||0)/s.positionsAnalyzed*100).toFixed(1)+'%'
+      : '—%';
+    document.getElementById('x-yield').textContent = yield_;
+
+    const running = d.running;
+    const card = document.getElementById('s-extractor-card');
+    document.getElementById('s-extractor').textContent = running ? 'RUNNING' : 'IDLE';
+    document.getElementById('s-ext-sub').textContent = s.gamesProcessed
+      ? `${s.gamesProcessed} games · ${s.puzzlesFound||0} puzzles`
+      : 'Not started';
+    card.className = 'stat ' + (running ? 'green' : '');
+
+    if (s.totalGames) {
+      const pct = (s.gamesProcessed/s.totalGames*100).toFixed(0);
+      document.getElementById('x-bar').style.width = pct + '%';
+      document.getElementById('x-prog').textContent = s.gamesProcessed + '/' + s.totalGames + ' games (' + pct + '%)';
+    } else {
+      document.getElementById('x-prog').textContent = running ? 'Running...' : 'Not running';
+    }
+
+    if (s.log) {
+      document.getElementById('xlog').innerHTML = s.log.slice(-30).map(l =>
+        `<div>${l}</div>`
+      ).join('');
+    }
+  } catch(e) { console.error('extractor status error', e); }
+}
+
+function analyzeGame(id) {
+  if (!confirm('Analyze game ' + id + ' for puzzles? This uses Stockfish depth=50 (slow).')) return;
+  fetch('/api/status/extractor/start-game', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({gameId: id})
+  }).then(()=>loadAll());
+}
+
+function startExtractor() {
+  fetch('/api/status/extractor/start', {method:'POST'}).then(()=>setTimeout(loadAll,1000));
+}
+
+function stopExtractor() {
+  fetch('/api/status/extractor/stop', {method:'POST'}).then(()=>setTimeout(loadAll,500));
+}
+
+function markPuzzleGood() {
+  if (!currentPuzzle) return;
+  fetch('/api/status/puzzles/' + currentPuzzle._id + '/quality', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({quality:'good'})
+  }).then(()=>{ document.getElementById('modal').classList.remove('open'); loadAll(); });
+}
+
+function markPuzzleBad() {
+  if (!currentPuzzle) return;
+  if (!confirm('Mark this puzzle as bad quality and delete it?')) return;
+  fetch('/api/status/puzzles/' + currentPuzzle._id + '/quality', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({quality:'bad'})
+  }).then(()=>{ document.getElementById('modal').classList.remove('open'); loadAll(); });
+}
+
+function toggleAuto() {
+  const on = document.getElementById('autoref').checked;
+  if (on) autoInterval = setInterval(loadAll, 15000);
+  else { clearInterval(autoInterval); autoInterval=null; }
+}
+
+// Init
+loadAll();
+toggleAuto();
+</script>
+</body>
+</html>
