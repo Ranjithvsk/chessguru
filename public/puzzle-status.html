@@ -223,6 +223,18 @@ nav a:hover,nav a.active{color:var(--text)}
   </div>
 </div>
 
+<!-- POOL STATS -->
+<div class="grid2" id="pool-section">
+  <div class="card">
+    <div class="ch">⚡ Blindfold Pools (bfPools) <span id="bf-badge" style="font-size:9px;color:var(--green);margin-left:6px"></span></div>
+    <div class="cb" id="bf-pool-stats" style="padding:10px 14px;font-size:11px;color:var(--dim)">Loading...</div>
+  </div>
+  <div class="card">
+    <div class="ch">🎯 Piece Pools (piecePools) <span id="pc-badge" style="font-size:9px;color:var(--a3);margin-left:6px"></span></div>
+    <div class="cb" id="pc-pool-stats" style="padding:10px 14px;font-size:11px;color:var(--dim)">Loading...</div>
+  </div>
+</div>
+
 <!-- NEW PUZZLES -->
 <div class="card">
   <div class="ch">🧩 Generated Puzzles — Quality Review
@@ -233,12 +245,47 @@ nav a:hover,nav a.active{color:var(--text)}
       </select>
       <select id="theme-filter" onchange="loadPuzzles()" style="background:var(--b3);border:1px solid var(--border);color:var(--text);font-size:10px;padding:2px 6px;border-radius:4px">
         <option value="">All Themes</option>
-        <option value="mate">mate</option>
-        <option value="fork">fork</option>
-        <option value="pin">pin</option>
-        <option value="sacrifice">sacrifice</option>
-        <option value="quietMove">quietMove</option>
-        <option value="discoveredAttack">discoveredAttack</option>
+        <optgroup label="── Mate">
+          <option value="mate">mate</option>
+          <option value="mateIn1">mateIn1</option>
+          <option value="mateIn2">mateIn2</option>
+          <option value="mateIn3">mateIn3</option>
+          <option value="mateIn4">mateIn4</option>
+          <option value="mateIn5">mateIn5</option>
+          <option value="backRankMate">backRankMate</option>
+          <option value="smotheredMate">smotheredMate</option>
+        </optgroup>
+        <optgroup label="── Tactics">
+          <option value="fork">fork</option>
+          <option value="pin">pin</option>
+          <option value="skewer">skewer</option>
+          <option value="sacrifice">sacrifice</option>
+          <option value="deflection">deflection</option>
+          <option value="discoveredAttack">discoveredAttack</option>
+          <option value="doubleCheck">doubleCheck</option>
+          <option value="attraction">attraction</option>
+          <option value="quietMove">quietMove</option>
+          <option value="zugzwang">zugzwang</option>
+          <option value="clearance">clearance</option>
+          <option value="interference">interference</option>
+          <option value="xRayAttack">xRayAttack</option>
+          <option value="hangingPiece">hangingPiece</option>
+          <option value="trappedPiece">trappedPiece</option>
+        </optgroup>
+        <optgroup label="── Endgame">
+          <option value="endgame">endgame</option>
+          <option value="rookEndgame">rookEndgame</option>
+          <option value="pawnEndgame">pawnEndgame</option>
+          <option value="queenEndgame">queenEndgame</option>
+          <option value="bishopEndgame">bishopEndgame</option>
+          <option value="knightEndgame">knightEndgame</option>
+        </optgroup>
+        <optgroup label="── Special">
+          <option value="promotion">promotion</option>
+          <option value="enPassant">enPassant</option>
+          <option value="castling">castling</option>
+          <option value="underPromotion">underPromotion</option>
+        </optgroup>
       </select>
     </div>
   </div>
@@ -374,7 +421,7 @@ async function fetchJSON(url) {
 
 async function loadAll() {
   document.getElementById('lastup').textContent = 'Refreshing...';
-  await Promise.allSettled([loadStats(), loadGames(), loadPuzzles(), loadExtractorStatus()]);
+  await Promise.allSettled([loadStats(), loadGames(), loadPuzzles(), loadExtractorStatus(), loadPools()]);
   document.getElementById('lastup').textContent = 'Updated ' + new Date().toLocaleTimeString();
 }
 
@@ -486,7 +533,7 @@ async function loadGames() {
   try {
     const filter = document.getElementById('game-filter').value;
     const d = await fetchJSON('/api/status/games?filter=' + filter);
-    const games = d.games || [];
+    const games = d.games || d.recent || [];
 
     document.getElementById('game-tbody').innerHTML = games.length ? games.map((g,i) => `
       <tr>
@@ -597,6 +644,37 @@ function showPuzzle(p) {
 
 function closeModal(e) {
   if (e.target.id === 'modal') document.getElementById('modal').classList.remove('open');
+}
+
+async function loadPools() {
+  try {
+    const d = await fetchJSON('/api/status/pools');
+    const bf = d.bfPools || {}, pc = d.piecePools || {};
+
+    document.getElementById('bf-badge').textContent = (bf.total||0)+' pools · '+(bf.puzzles||0).toLocaleString()+' puzzles';
+    const bfThemes = Object.entries(bf.byTheme||{}).sort((a,b)=>b[1].puzzles-a[1].puzzles);
+    document.getElementById('bf-pool-stats').innerHTML = bfThemes.length
+      ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px">
+          ${bfThemes.slice(0,20).map(([t,s])=>`
+            <div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:3px 0">
+              <span style="color:${themeColor(t)}">${t}</span>
+              <span style="font-family:monospace;color:var(--text)">${s.pools} pools · ${s.puzzles.toLocaleString()}</span>
+            </div>`).join('')}
+         </div>`
+      : '<span style="color:var(--dim)">No bfPools found. Run gen_bf_pools_v2.js to build.</span>';
+
+    document.getElementById('pc-badge').textContent = (pc.total||0)+' pools';
+    const pcThemes = Object.entries(pc.byTheme||{}).sort((a,b)=>b[1].pools-a[1].pools);
+    document.getElementById('pc-pool-stats').innerHTML = pcThemes.length
+      ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px">
+          ${pcThemes.slice(0,20).map(([t,s])=>`
+            <div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:3px 0">
+              <span style="color:${themeColor(t)}">${t}</span>
+              <span style="font-family:monospace;color:var(--text)">${s.pools} pools</span>
+            </div>`).join('')}
+         </div>`
+      : '<span style="color:var(--dim)">No piecePools found.</span>';
+  } catch(e) { console.error('pools error', e); }
 }
 
 async function loadExtractorStatus() {

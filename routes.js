@@ -376,20 +376,105 @@ router.get('/status/puzzles', async (req, res) => {
 router.get('/status/games', async (req, res) => {
   try {
     const db = mongoose.connection.db;
+    const filter = req.query.filter || 'all';
     const [total, analyzed] = await Promise.all([
       db.collection('enginegames').countDocuments(),
       db.collection('enginegames').countDocuments({ puzzleExtracted:true }),
     ]);
-    const recent = await db.collection('enginegames').find({}).sort({startedAt:-1}).limit(50).toArray();
-    res.json({ total, analyzed, pending:total-analyzed, recent });
+    const q = filter==='unextracted'?{puzzleExtracted:{$ne:true}}:filter==='extracted'?{puzzleExtracted:true}:{};
+    const games = await db.collection('enginegames').find(q).sort({startedAt:-1}).limit(50).toArray();
+    res.json({ total, analyzed, pending:total-analyzed, games });
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// List puzzles for quality review — fast: uses themes index + _id sort
+router.get('/status/puzzles/list', async (req, res) => {
+  try {
+    const db = mongoose.connection.db;
+    const source = req.query.source || 'engine';
+    const theme  = req.query.theme  || '';
+    const limit  = Math.min(parseInt(req.query.limit)||24, 50);
+    const q = {};
+    if (source === 'engine') q.sourceGameId = { $exists: true };
+    if (theme) q.themes = theme;
+    const docs = await db.collection('puzzles').find(q).sort({_id:-1}).limit(limit).toArray();
+    const puzzles = docs.map(p => ({
+      _id: p._id,
+      fen: p.fen,
+      solution: p.line ? p.line.trim().split(' ') : (p.solution||[]),
+      themes: p.themes||[],
+      rating: Math.round(p.glicko?.r || p.rating || 1500),
+      ratingDeviation: Math.round(p.glicko?.d || 500),
+      pov: p.pov || (p.fen?.split(' ')[1]==='w' ? 'black' : 'white'),
+      plays: p.plays||0,
+      vote: p.vote,
+      whiteName: p.whiteName||null,
+      blackName: p.blackName||null,
+      initialPly: p.initialPly||null,
+      generatedAt: p.generatedAt||null,
+      scoreBefore: p.scoreBefore||null,
+      scoreAfter: p.scoreAfter||null,
+      verified: p.verified||false,
+    }));
+    res.json({ puzzles, total: puzzles.length });
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// Blindfold pool stats
+router.get('/status/pools', async (req, res) => {
+  try {
+    const db = mongoose.connection.db;
+    const [bfDocs, pcDocs] = await Promise.all([
+      db.collection('bfPools').find({}).toArray(),
+      db.collection('piecePools').find({},{projection:{_id:1,theme:1,maxPc:1,count:1}}).toArray(),
+    ]);
+    const bf = { total: bfDocs.length, puzzles: 0, byTheme: {} };
+    for (const p of bfDocs) {
+      const cnt = p.ids?.length || p.count || 0;
+      bf.puzzles += cnt;
+      const [theme, rating, pc] = (p._id||'').split('|');
+      if (!bf.byTheme[theme]) bf.byTheme[theme] = { pools:0, puzzles:0 };
+      bf.byTheme[theme].pools++;
+      bf.byTheme[theme].puzzles += cnt;
+    }
+    const pc = { total: pcDocs.length, byTheme: {} };
+    for (const p of pcDocs) {
+      if (!pc.byTheme[p.theme]) pc.byTheme[p.theme] = { pools:0 };
+      pc.byTheme[p.theme].pools++;
+    }
+    res.json({ bfPools: bf, piecePools: pc });
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+router.get('/status/extractor', async (req, res) => {
+  try {
+    let status = {}, running = false;
+    try {
+      status = JSON.parse(require('fs').readFileSync(_path.join(process.env.HOME,'chessguru/.extractor_status.json'),'utf8'));
+      running = !!status.running;
+    } catch(e) {}
+    res.json({ status, running });
   } catch(e) { res.status(500).json({error:e.message}); }
 });
 
 router.post('/status/extractor/start', (req, res) => {
-  _exec('nohup node /home/ubuntu/chessguru/engine-battle/puzzle_extractor.js >> /tmp/puzzler.log 2>&1 &', ()=>{});
+  _exec('nohup node '+_path.join(process.env.HOME,'chessguru/engine-battle/puzzle_extractor.js')+' >> /tmp/puzzler.log 2>&1 &', ()=>{});
   res.json({started:true});
 });
 router.post('/status/extractor/stop', (req, res) => {
   _exec('pkill -f puzzle_extractor.js', ()=>{});
   res.json({stopped:true});
+});
+
+router.post('/status/puzzles/:id/quality', async (req, res) => {
+  try {
+    const db = mongoose.connection.db;
+    const { quality } = req.body;
+    if (quality === 'bad') {
+      await db.collection('puzzles').deleteOne({ _id: req.params.id });
+      return res.json({ deleted: true });
+    }
+    await db.collection('puzzles').updateOne({ _id: req.params.id }, { $set: { verified: true } });
+    res.json({ verified: true });
+  } catch(e) { res.status(500).json({error:e.message}); }
 });
