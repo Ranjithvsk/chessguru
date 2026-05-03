@@ -1,4 +1,10 @@
+const {Chess}=require('chess.js');
 function fmtPuzzle(p){if(!p)return null;const {_id,line,glicko,...rest}=p;return {...rest,id:_id,rating:Math.round((glicko&&glicko.r)||1500),ratingDeviation:Math.round((glicko&&glicko.d)||500),solution:line?line.trim().split(" "):[],glicko};}
+function applyLastMove(puzzle){
+  if(!puzzle||!puzzle.solution||puzzle.solution.length<1)return puzzle;
+  try{const chess=new Chess(puzzle.fen);chess.move(puzzle.solution[0]);return{...puzzle,fen:chess.fen(),solution:puzzle.solution.slice(1)};}
+  catch(e){return puzzle;}
+}
 const express=require('express'),router=express.Router(),mongoose=require('mongoose');
 const {User,UserPerfs,Round}=require('./models');
 const {updatePuzzleRating}=require('./glicko2');
@@ -116,7 +122,6 @@ if((pieceMin>0||pieceMax<32)&&ur&&a!=='mix'){
       }
     }
   }
-  return null;
 }
 // Fast path: use piecePools collection for piece-filtered requests
 if(pieceMin>0||pieceMax<32){
@@ -220,7 +225,7 @@ router.get('/puzzles/daily',async(req,res)=>{
 try{if(dayCache.d&&Date.now()-dayCache.ts<86400000)return res.json(dayCache.d);
 const p=await Puzzle.findOne({plays:{$gt:200},themes:{$nin:['superGM']},'glicko.r':{$gte:1200,$lte:1800}}).sort({vote:-1,plays:-1}).lean();
 if(!p)return res.status(404).json({error:'No daily puzzle'});
-dayCache.d=p;dayCache.ts=Date.now();res.json(fmtPuzzle(p));}catch(e){res.status(500).json({error:e.message});}});
+dayCache.d=applyLastMove(fmtPuzzle(p));dayCache.ts=Date.now();res.json(dayCache.d);}catch(e){res.status(500).json({error:e.message});}});
 router.get('/puzzles/random',async(req,res)=>{
 try{
   const theme=req.query.theme||'mix';
@@ -256,12 +261,12 @@ try{
     }
   }
   // No piece filter: use getPz normally
-  if(!p && pieceMax>=32) p=await getPz(theme,diff,rating,pieceMin,pieceMax,parseInt(req.query.rating)||undefined);
+  if(!p) p=await getPz(theme,diff,rating,pieceMin,pieceMax,parseInt(req.query.rating)||undefined);
   if(!p)return res.status(404).json({error:'No puzzles found'});
-  res.json(fmtPuzzle(p));
+  res.json(applyLastMove(fmtPuzzle(p)));
 }catch(e){res.status(500).json({error:e.message});}});
 router.get('/puzzles/:id',async(req,res)=>{
-try{const p=await Puzzle.findById(req.params.id).lean();if(!p)return res.status(404).json({error:'Not found'});res.json(fmtPuzzle(p));}catch(e){res.status(500).json({error:e.message});}});
+try{const p=await Puzzle.findById(req.params.id).lean();if(!p)return res.status(404).json({error:'Not found'});res.json(applyLastMove(fmtPuzzle(p)));}catch(e){res.status(500).json({error:e.message});}});
 router.post('/puzzles/:id/complete',async(req,res)=>{
 const mode=req.body.mode||'puzzle';
 try{const{win,userId,difficulty='normal',hint=false}=req.body;
@@ -282,7 +287,7 @@ const guestGl=!userId&&req.body.rating!=null?(()=>{const gP={gl:{r:parseFloat(re
 router.get('/puzzles/batch',async(req,res)=>{
 try{const{theme='mix',difficulty='normal',rating='1500',nb='10'}=req.query;
 const n=Math.min(50,parseInt(nb));const puzzles=[],seen=new Set();
-for(let i=0;i<n*2&&puzzles.length<n;i++){const p=await getPz(theme,difficulty,parseInt(rating));if(p&&!seen.has(p._id)){seen.add(p._id);puzzles.push(p);}}
+for(let i=0;i<n*2&&puzzles.length<n;i++){const p=await getPz(theme,difficulty,parseInt(rating));if(p&&!seen.has(p._id)){seen.add(p._id);puzzles.push(applyLastMove(fmtPuzzle(p)));}}
 res.json({puzzles});}catch(e){res.status(500).json({error:e.message});}});
 router.get('/streak',async(req,res)=>{
 try{if(sCache.d&&Date.now()-sCache.ts<30000)return res.json(sCache.d);
@@ -292,7 +297,8 @@ const paths=await Path.aggregate([{$match:{min:{$lte:key},max:{$gte:key}}},{$sam
 for(const path of paths){if(!path.ids?.length)continue;
 const sample=path.ids.sort(()=>Math.random()-0.5).slice(0,n*2);
 const pzs=await Puzzle.find({_id:{$in:sample},'glicko.d':{$lte:r>2300?110:85}}).limit(n).lean();
-puzzles.push(...pzs);}}
+puzzles.push(...pzs.map(p=>applyLastMove(fmtPuzzle(p))));}}
+
 sCache.d={puzzles};sCache.ts=Date.now();res.json(sCache.d);}catch(e){res.status(500).json({error:e.message});}});
 router.post('/streak/complete',async(req,res)=>{
 try{const{userId,score=0}=req.body;if(!userId)return res.status(400).json({error:'userId required'});
@@ -393,10 +399,12 @@ router.get('/status/puzzles/list', async (req, res) => {
     const db = mongoose.connection.db;
     const source = req.query.source || 'engine';
     const theme  = req.query.theme  || '';
+    const maxPc  = parseInt(req.query.maxPc) || 0;
     const limit  = Math.min(parseInt(req.query.limit)||24, 50);
     const q = {};
-    if (source === 'engine') q.sourceGameId = { $exists: true };
+    if (source === 'engine' && !theme && !maxPc) q.sourceGameId = { $exists: true };
     if (theme) q.themes = theme;
+    if (maxPc > 0) q.pieceCount = { $lte: maxPc };
     const docs = await db.collection('puzzles').find(q).sort({_id:-1}).limit(limit).toArray();
     const puzzles = docs.map(p => ({
       _id: p._id,
@@ -415,6 +423,7 @@ router.get('/status/puzzles/list', async (req, res) => {
       scoreBefore: p.scoreBefore||null,
       scoreAfter: p.scoreAfter||null,
       verified: p.verified||false,
+      pieceCount: p.pieceCount||null,
     }));
     res.json({ puzzles, total: puzzles.length });
   } catch(e) { res.status(500).json({error:e.message}); }
@@ -426,11 +435,24 @@ router.get('/status/pools', async (req, res) => {
     const db = mongoose.connection.db;
     const [bfDocs, pcDocs] = await Promise.all([
       db.collection('bfPools').find({}).toArray(),
-      db.collection('piecePools').find({},{projection:{_id:1,theme:1,maxPc:1,count:1}}).toArray(),
+      db.collection('piecePools').find({},{projection:{_id:1,theme:1,maxPc:1,count:1,ids:1}}).toArray(),
     ]);
+    // Build set of engine-extracted puzzle IDs for fast intersection
+    const allIds = [
+      ...bfDocs.flatMap(p => p.ids || []),
+      ...pcDocs.flatMap(p => p.ids || []),
+    ];
+    let engineIdSet = new Set();
+    if (allIds.length > 0) {
+      const engineDocs = await db.collection('puzzles').find(
+        { _id: { $in: allIds }, sourceGameId: { $exists: true } },
+        { projection: { _id: 1 } }
+      ).toArray();
+      engineIdSet = new Set(engineDocs.map(d => String(d._id)));
+    }
     const bf = { total: bfDocs.length, puzzles: 0, byTheme: {} };
     for (const p of bfDocs) {
-      const cnt = p.ids?.length || p.count || 0;
+      const cnt = (p.ids || []).filter(id => engineIdSet.has(String(id))).length;
       bf.puzzles += cnt;
       const [theme, rating, pc] = (p._id||'').split('|');
       if (!bf.byTheme[theme]) bf.byTheme[theme] = { pools:0, puzzles:0 };
@@ -439,8 +461,10 @@ router.get('/status/pools', async (req, res) => {
     }
     const pc = { total: pcDocs.length, byTheme: {} };
     for (const p of pcDocs) {
-      if (!pc.byTheme[p.theme]) pc.byTheme[p.theme] = { pools:0 };
+      const cnt = (p.ids || []).filter(id => engineIdSet.has(String(id))).length;
+      if (!pc.byTheme[p.theme]) pc.byTheme[p.theme] = { pools:0, puzzles:0 };
       pc.byTheme[p.theme].pools++;
+      pc.byTheme[p.theme].puzzles += cnt;
     }
     res.json({ bfPools: bf, piecePools: pc });
   } catch(e) { res.status(500).json({error:e.message}); }
