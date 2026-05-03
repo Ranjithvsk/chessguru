@@ -502,3 +502,52 @@ router.post('/status/puzzles/:id/quality', async (req, res) => {
     res.json({ verified: true });
   } catch(e) { res.status(500).json({error:e.message}); }
 });
+
+// ── Generated puzzle review endpoints ────────────────────────────────────────
+router.get('/generated/puzzles', async (req, res) => {
+  try {
+    const db = mongoose.connection.db;
+    const status = req.query.status || 'pending';
+    const limit  = Math.min(parseInt(req.query.limit)||20, 100);
+    const skip   = parseInt(req.query.skip)||0;
+    const q = {source:'generated'};
+    if (status !== 'all') q.status = status;
+    const docs = await db.collection('puzzles').find(q).sort({generatedAt:-1}).skip(skip).limit(limit).toArray();
+    const puzzles = docs.map(p => ({
+      id: p._id, fen: p.fen, lastMove: p.lastMove||null, preFen: p.preFen||null,
+      solution: Array.isArray(p.solution)?p.solution:(p.line?p.line.trim().split(' '):[]),
+      themes: p.themes||[], rating: Math.round((p.glicko&&p.glicko.r)||p.rating||1500),
+      status: p.status||'pending', sourceGameId: p.sourceGameId||null,
+      pov: p.pov||null, generatedAt: p.generatedAt||null,
+    }));
+    res.json({puzzles});
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+router.get('/generated/stats', async (req, res) => {
+  try {
+    const db = mongoose.connection.db;
+    const [pending, approved, rejected] = await Promise.all([
+      db.collection('puzzles').countDocuments({source:'generated', status:'pending'}),
+      db.collection('puzzles').countDocuments({source:'generated', status:'approved'}),
+      db.collection('puzzles').countDocuments({source:'generated', status:'rejected'}),
+    ]);
+    res.json({pending, approved, rejected});
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+router.post('/generated/puzzles/:id/approve', async (req, res) => {
+  try {
+    const db = mongoose.connection.db;
+    await db.collection('puzzles').updateOne({_id:req.params.id},{$set:{status:'approved',verified:true}});
+    res.json({approved:true});
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+router.post('/generated/puzzles/:id/reject', async (req, res) => {
+  try {
+    const db = mongoose.connection.db;
+    await db.collection('puzzles').updateOne({_id:req.params.id},{$set:{status:'rejected'}});
+    res.json({rejected:true});
+  } catch(e) { res.status(500).json({error:e.message}); }
+});

@@ -200,12 +200,9 @@ function winChancesFromResult(res) {
   return 0;
 }
 
-// ── Puzzle ID generator (Lichess style — 5 char alphanumeric) ─────────────────
+// ── Puzzle ID generator ───────────────────────────────────────────────────────
 function makePuzzleId() {
-  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let id = '';
-  for (let i = 0; i < 5; i++) id += chars[Math.floor(Math.random() * chars.length)];
-  return id;
+  return 'cg_' + Date.now().toString(36) + Math.random().toString(36).slice(2,5);
 }
 
 // ── Estimate puzzle rating from tactic type and complexity ────────────────────
@@ -450,6 +447,8 @@ async function validateCandidate(fen, movesToFen, firstAnalysis, secondAnalysis,
     scoreAfter:     best?.cp ?? null,
     generatedAt:    new Date(),
     verified:       true,
+    source:         'generated',
+    status:         'pending',
   };
 }
 
