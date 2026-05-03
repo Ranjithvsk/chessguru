@@ -8,7 +8,7 @@
  * Output: string[] of theme keys
  */
 
-const { Chess } = require('./node_modules/chess.js');
+const { Chess } = require('chess.js');
 
 // ── Piece values (Lichess uses these) ────────────────────────────────────────
 const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 99 };

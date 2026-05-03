@@ -17,8 +17,8 @@ const { spawn }   = require('child_process');
 const mongoose    = require('mongoose');
 const path        = require('path');
 const os          = require('os');
-const { Chess }   = require('./node_modules/chess.js');
-const { cook, materialDiff, winChances } = require('./engine-battle/cook.js');
+const { Chess }   = require('chess.js');
+const { cook, materialDiff, winChances } = require('./cook.js');
 
 const args = process.argv.slice(2);
 const DRY_RUN   = args.includes('--dry-run');
