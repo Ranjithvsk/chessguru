@@ -435,7 +435,7 @@ async function validateCandidate(fen, movesToFen, firstAnalysis, secondAnalysis,
     _id:            puzzleId,
     fen:            fen,
     initialPly:     ply,
-    solution:       verifiedMoves,
+    solution:       [uciMoves[ply], ...verifiedMoves],
     themes:         [...new Set(themes)],
     rating:         rating,
     ratingDeviation: 500,   // high initial uncertainty — will converge via play
