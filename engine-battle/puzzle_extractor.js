@@ -97,16 +97,17 @@ class Stockfish {
       this.proc.stdout.on('data', d => this._recv(d));
       this.proc.on('error', reject);
 
-      this.send('uci');
-      this.send('setoption name Hash value 512');
-      this.send('setoption name Threads value 2');
-      this.send('setoption name MultiPV value 3');  // top 3 for uniqueness check
-
+      // Register listeners BEFORE sending any commands — engine may respond instantly
       this._once('uciok', () => {
+        this.send('setoption name Hash value 512');
+        this.send('setoption name Threads value 2');
+        this.send('setoption name MultiPV value 3');  // top 3 for uniqueness check
         this.send('isready');
         this._once('readyok', () => resolve());
       });
       setTimeout(() => reject(new Error('SF start timeout')), 20000);
+
+      this.send('uci');
     });
   }
 
@@ -150,9 +151,6 @@ class Stockfish {
       const posCmd = movesSoFar.length
         ? `position fen ${fen} moves ${movesSoFar.join(' ')}`
         : `position fen ${fen}`;
-      this.send('setoption name MultiPV value 3');
-      this.send(posCmd);
-      this.send(`go depth ${SCAN_DEPTH} movetime ${SCAN_TIME} nodes ${SCAN_NODES}`);
 
       const multiPV = {};
       const infoRe = /info .* multipv (\d+) .* score (cp|mate) (-?\d+) .* pv ([\w\s]+)/;
@@ -173,6 +171,7 @@ class Stockfish {
         }
       };
 
+      // Register listeners BEFORE sending commands — engine may respond instantly
       this._on(/^info/, infoHandler);
       this._once(/^bestmove/, () => {
         clearTimeout(timeout);
@@ -183,6 +182,10 @@ class Stockfish {
           third:  multiPV['3'] || null,
         });
       });
+
+      this.send('setoption name MultiPV value 3');
+      this.send(posCmd);
+      this.send(`go depth ${SCAN_DEPTH} movetime ${SCAN_TIME} nodes ${SCAN_NODES}`);
     });
   }
 
