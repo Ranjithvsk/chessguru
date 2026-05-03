@@ -19,8 +19,8 @@ nav a.active{color:var(--text);background:rgba(255,255,255,.1)}
 .board-wrap{position:relative;user-select:none}
 #board{display:grid;grid-template-columns:repeat(8,1fr);border:2px solid #555;border-radius:4px;overflow:hidden}
 .sq{width:72px;height:72px;display:flex;align-items:center;justify-content:center;position:relative;cursor:pointer;transition:.1s}
-.sq.light{background:#f0d9b5}
-.sq.dark{background:#b58863}
+.sq.light{background:#ffffff}
+.sq.dark{background:#8c8c8c}
 .sq.selected{background:#7fc97f!important}
 .sq.from{background:#829769!important}
 .sq.to{background:#646f40!important}
@@ -34,8 +34,8 @@ nav a.active{color:var(--text);background:rgba(255,255,255,.1)}
 .piece{width:90%;height:90%;background-size:contain;background-repeat:no-repeat;background-position:center;pointer-events:none;z-index:1}
 .coord-file{position:absolute;bottom:2px;right:3px;font-size:10px;font-weight:700;pointer-events:none}
 .coord-rank{position:absolute;top:2px;left:3px;font-size:10px;font-weight:700;pointer-events:none}
-.sq.light .coord-file,.sq.light .coord-rank{color:#b58863}
-.sq.dark .coord-file,.sq.dark .coord-rank{color:#f0d9b5}
+.sq.light .coord-file,.sq.light .coord-rank{color:#8c8c8c}
+.sq.dark .coord-file,.sq.dark .coord-rank{color:#ffffff}
 .board-coords-below{display:flex;width:100%;padding:2px 2px 0}
 .board-coords-below span{flex:1;text-align:center;font-size:11px;color:var(--dim)}
 /* Right panel */
