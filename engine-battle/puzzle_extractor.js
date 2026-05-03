@@ -118,10 +118,15 @@ class Stockfish {
     for (const line of lines) {
       const t = line.trim();
       if (!t) continue;
+      // Collect matched listeners and update the list BEFORE calling callbacks,
+      // so callbacks that push new listeners (e.g. uciok→isready→readyok) are
+      // not lost when the assignment below overwrites this._listeners.
+      const fired = [];
       this._listeners = this._listeners.filter(l => {
-        if (l.pattern.test(t)) { l.cb(t); return !l.once; }
+        if (l.pattern.test(t)) { fired.push(l); return !l.once; }
         return true;
       });
+      for (const l of fired) l.cb(t);
     }
   }
 
