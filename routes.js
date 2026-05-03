@@ -551,3 +551,14 @@ router.post('/generated/puzzles/:id/reject', async (req, res) => {
     res.json({rejected:true});
   } catch(e) { res.status(500).json({error:e.message}); }
 });
+
+router.get('/extractor/log', (req, res) => {
+  try {
+    const fs = require('fs');
+    const logFile = '/tmp/puzzler.log';
+    if (!fs.existsSync(logFile)) return res.json({lines:[]});
+    const content = fs.readFileSync(logFile, 'utf8');
+    const lines = content.split('\n').filter(l => l.trim()).slice(-100);
+    res.json({lines});
+  } catch(e) { res.json({lines:[]}); }
+});

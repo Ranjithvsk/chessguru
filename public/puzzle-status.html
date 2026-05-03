@@ -170,7 +170,44 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
   .pb{flex-direction:column!important}
   .pb .cg-wrap,.pb #board,.cg-wrap{width:100vw!important;height:100vw!important;max-width:100vw}
   .ps,.pt,.sr{width:100%!important;max-width:100%!important;border-left:none!important;border-top:1px solid var(--border)}
+  .explainer-grid{grid-template-columns:1fr!important}
 }
+
+/* ── Section A: How engines extract ── */
+.explainer-grid{display:grid;grid-template-columns:240px 1fr;gap:24px;align-items:start}
+.steps{display:flex;flex-direction:column;gap:12px}
+.step{display:flex;gap:12px;align-items:flex-start}
+.step-num{width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.step-body h4{font-size:12px;font-weight:700;color:var(--text);margin-bottom:3px}
+.step-body p{font-size:10px;color:var(--dim);line-height:1.55}
+.step-badge{display:inline-block;background:var(--b3);border-radius:3px;padding:2px 7px;font-family:monospace;font-size:9px;color:var(--a3);margin-top:4px;border:1px solid var(--border)}
+.ex-board{display:flex;flex-direction:column;align-items:center;gap:10px}
+.ex-board img{width:200px;height:200px;border-radius:6px;display:block;border:2px solid var(--border)}
+.ex-board-lbl{font-size:9px;color:var(--dim);text-align:center;max-width:200px;line-height:1.4}
+.ex-settings{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px}
+.ex-chip{background:var(--b3);border:1px solid var(--border);border-radius:4px;padding:4px 10px;font-size:10px;font-family:monospace}
+.ex-chip span{color:var(--a2);font-weight:700}
+.formula-box{background:var(--b3);border:1px solid var(--border);border-radius:6px;padding:12px 14px;margin-top:14px}
+.formula-title{font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);margin-bottom:8px}
+.formula-eq{font-family:monospace;font-size:11px;color:var(--a3);margin-bottom:10px;line-height:1.6}
+.fbar-row{display:flex;align-items:center;gap:6px;margin-bottom:3px;font-size:9px}
+.fbar-cp{width:36px;color:var(--dim);font-family:monospace;text-align:right}
+.fbar-track{flex:1;height:6px;background:var(--border);border-radius:2px;overflow:hidden}
+.fbar-fill{height:100%;background:linear-gradient(90deg,var(--red),var(--a2),var(--green));border-radius:2px}
+.fbar-pct{width:32px;font-family:monospace;text-align:right;color:var(--text)}
+
+/* ── Section B: Live log ── */
+.log-term{background:#020202;border:1px solid var(--border);border-radius:6px;padding:10px 12px;height:340px;overflow-y:auto;font-family:'Courier New',monospace;font-size:10px;line-height:1.65}
+.ll{white-space:pre-wrap;word-break:break-all;margin:0}
+.ll.found{color:#4caf50}
+.ll.analyzing{color:var(--a2)}
+.ll.sf{color:var(--a3)}
+.ll.error{color:var(--red)}
+.ll.info{color:#8ab}
+.ll.gray{color:#4a4a4a}
+.log-fen-board{display:inline-block;vertical-align:middle;margin:2px 4px;border-radius:2px;overflow:hidden;border:1px solid #333}
+.log-fen-board img{width:56px;height:56px;display:block}
+.log-hdr-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:9px;color:var(--dim)}
 </style>
 </head>
 <body>
@@ -345,6 +382,102 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
   </div>
   <div class="plist" id="puzzle-list">
     <div style="color:var(--dim);padding:20px;grid-column:1/-1;text-align:center">Loading puzzles...</div>
+  </div>
+</div>
+
+<!-- SECTION A: HOW ENGINE EXTRACTS PUZZLES -->
+<div class="card">
+  <div class="ch">⚙️ How Stockfish Extracts Puzzles</div>
+  <div class="cb" style="padding:16px">
+    <div class="explainer-grid">
+      <div class="ex-board">
+        <img src="https://fen2image.chessvision.ai/r1bqkb1r_pppp1ppp_2n2n2_4p3_2B1P3_5N2_PPPP1PPP_RNBQK2R_w_KQkq_-_4_4" alt="Italian Game" loading="lazy" onerror="this.style.display='none'">
+        <div class="ex-board-lbl">Italian Game — a candidate puzzle position. White has a tactical opportunity.</div>
+        <div class="ex-settings">
+          <div class="ex-chip">depth <span>50</span></div>
+          <div class="ex-chip">time <span>30s</span></div>
+          <div class="ex-chip">nodes <span>25M</span></div>
+          <div class="ex-chip">multiPV <span>3</span></div>
+        </div>
+        <div class="formula-box">
+          <div class="formula-title">Win Chance Formula</div>
+          <div class="formula-eq">win% = 50 + 50 × (2/π) × arctan(cp/290)</div>
+          <div class="fbar-row"><span class="fbar-cp">−500</span><div class="fbar-track"><div class="fbar-fill" style="width:4%"></div></div><span class="fbar-pct">4%</span></div>
+          <div class="fbar-row"><span class="fbar-cp">−200</span><div class="fbar-track"><div class="fbar-fill" style="width:19%"></div></div><span class="fbar-pct">19%</span></div>
+          <div class="fbar-row"><span class="fbar-cp">0</span><div class="fbar-track"><div class="fbar-fill" style="width:50%"></div></div><span class="fbar-pct">50%</span></div>
+          <div class="fbar-row"><span class="fbar-cp">+200</span><div class="fbar-track"><div class="fbar-fill" style="width:81%"></div></div><span class="fbar-pct">81%</span></div>
+          <div class="fbar-row"><span class="fbar-cp">+500</span><div class="fbar-track"><div class="fbar-fill" style="width:96%"></div></div><span class="fbar-pct">96%</span></div>
+          <div style="margin-top:8px;font-size:9px;color:var(--dim)">Blunder = Δwin ≥ 30pp · Unique = best₁ − best₂ &gt; 50cp</div>
+        </div>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <h4>Position received</h4>
+            <p>Every position from completed engine games is fed to Stockfish via UCI: <code style="font-family:monospace;color:var(--a3)">position fen …</code></p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <h4>Stockfish analyses to depth 50</h4>
+            <p>Searches the game tree to depth 50, capped at 30 seconds or 25M nodes — matching Lichess's quality bar exactly.</p>
+            <span class="step-badge">go depth 50 movetime 30000 nodes 25000000</span>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <h4>Win chance swing detected</h4>
+            <p>If win% drops ≥ 30 percentage points versus the previous position, it's flagged as a blunder — a potential puzzle moment.</p>
+            <span class="step-badge">Δwin ≥ 0.30 · win_after ≥ 0.50</span>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <h4>Uniqueness checked (MultiPV=3)</h4>
+            <p>Rejected if the 2nd-best move is within 50cp of the best. Only positions with a single clear answer qualify — no ambiguous moves.</p>
+            <span class="step-badge">best₁ − best₂ &gt; 50cp</span>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">5</div>
+          <div class="step-body">
+            <h4>70 themes tagged by cook.js</h4>
+            <p>The solution is replayed and tactical motifs detected: fork, pin, skewer, back-rank mate, zugzwang, promotion, and 64+ more Lichess themes.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">6</div>
+          <div class="step-body">
+            <h4>Saved as cg_xxx puzzle</h4>
+            <p>Gets a timestamp-based <code style="font-family:monospace;color:var(--a3)">cg_</code> ID, <code style="font-family:monospace;color:var(--a3)">status: "pending"</code>, and enters the review queue below. Approved puzzles enter the training rotation.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION B: LIVE EXTRACTION LOG -->
+<div class="card">
+  <div class="ch">📡 Live Extraction Log
+    <div class="ch-right">
+      <span style="font-size:9px;font-family:monospace;color:var(--dim)" id="log-badge">— lines</span>
+      <button class="refresh-btn" onclick="loadLog(true)">↻ Refresh</button>
+      <span style="font-size:9px;color:var(--dim)" id="log-tick"></span>
+    </div>
+  </div>
+  <div class="cb" style="padding:10px">
+    <div class="log-hdr-row">
+      <span>🟢 green = puzzle found · 🟡 yellow = analyzing · 🔵 cyan = engine output · 🔴 red = error · <span style="color:#4a4a4a">■</span> gray = info</span>
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:9px;color:var(--dim)"><input type="checkbox" id="logAutoScroll" checked style="accent-color:var(--accent)"> Auto-scroll</label>
+    </div>
+    <div class="log-term" id="logTerm">
+      <div class="ll gray">Connecting...</div>
+    </div>
   </div>
 </div>
 
@@ -906,9 +1039,60 @@ async function rejectGenerated(id, btn) {
   } catch(e) { btn.disabled = false; btn.textContent = '✗ Reject'; }
 }
 
+// ── Section B: Live log ──────────────────────────────────────────────────────
+const FEN_RE = /\b([rnbqkpRNBQKP1-8]{1,8}(?:\/[rnbqkpRNBQKP1-8]{1,8}){7})\s+[bw]\s+[KQkq-]+\s+[a-h\-][1-8\-]\s+\d+\s+\d+/;
+
+function logClass(line) {
+  const l = line.toLowerCase();
+  if (l.includes('found puzzle') || l.includes('saved puzzle') || l.includes('puzzle saved') || l.includes('cg_')) return 'found';
+  if (l.includes('analyzing') || l.includes('candidate at ply') || l.includes('blunder') || l.includes('delta=')) return 'analyzing';
+  if (/^\s*(info|bestmove|score|depth|nodes|nps|time|multipv)\b/.test(line) || line.includes(' pv ')) return 'sf';
+  if (l.includes('error') || l.includes('fatal') || l.includes('err:') || l.includes('timeout')) return 'error';
+  if (l.includes('stockfish') || l.includes('mongodb') || l.includes('===') || l.includes('started')) return 'info';
+  return 'gray';
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function renderLogLine(raw) {
+  const cls = logClass(raw);
+  const safe = escHtml(raw);
+  const fenMatch = raw.match(FEN_RE);
+  if (fenMatch) {
+    const fenEnc = fenMatch[1].replace(/\//g,'_') + '_' + raw.slice(raw.indexOf(fenMatch[1]) + fenMatch[1].length).trim().replace(/ /g,'_').split('_').slice(0,5).join('_');
+    const boardUrl = 'https://fen2image.chessvision.ai/' + fenMatch[0].replace(/ /g,'_').replace(/\//g,'_');
+    return `<p class="ll ${cls}">${safe} <span class="log-fen-board"><img src="${boardUrl}" alt="fen" loading="lazy" onerror="this.parentElement.style.display='none'"></span></p>`;
+  }
+  return `<p class="ll ${cls}">${safe}</p>`;
+}
+
+let logLock = false;
+async function loadLog(manual) {
+  if (logLock && !manual) return;
+  logLock = true;
+  try {
+    const d = await fetchJSON('/api/extractor/log');
+    const lines = (d.lines || []).slice(-50);
+    const term = document.getElementById('logTerm');
+    const autoScroll = document.getElementById('logAutoScroll').checked;
+    const atBottom = term.scrollHeight - term.clientHeight <= term.scrollTop + 40;
+    term.innerHTML = lines.length
+      ? lines.map(renderLogLine).join('')
+      : '<p class="ll gray">No log output yet. Start the extractor to see activity.</p>';
+    document.getElementById('log-badge').textContent = lines.length + ' lines';
+    document.getElementById('log-tick').textContent = 'Updated ' + new Date().toLocaleTimeString();
+    if (autoScroll && (atBottom || manual)) term.scrollTop = term.scrollHeight;
+  } catch(e) { document.getElementById('log-tick').textContent = 'Error'; }
+  logLock = false;
+}
+
 // Init
 loadAll();
+loadLog(true);
 toggleAuto();
+setInterval(loadLog, 3000);
 </script>
 </body>
 </html>

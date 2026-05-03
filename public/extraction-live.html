@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Live Extraction — ChessGuru</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --b:#000;--b2:#0f0f0f;--b3:#1a1a1a;--b4:#2a2a2a;--b5:#3a3a3a;
+  --w:#fff;--g1:#888;--g2:#555;
+  --green:#629032;--yellow:#f0a500;--red:#c04040;--blue:#5ba3d9;
+  --r:8px;--r-sm:5px;
+}
+html,body{background:var(--b2);color:var(--w);font-family:"Inter",sans-serif;min-height:100vh}
+
+/* ── Navbar ── */
+#hdr{height:54px;display:flex;align-items:center;padding:0 28px;background:var(--b);border-bottom:1px solid var(--b4);position:sticky;top:0;z-index:100}
+#hdr .logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit;margin-right:4px}
+#hdr .logo-sq{width:30px;height:30px;border-radius:var(--r-sm);background:var(--w);display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--b);line-height:1;flex-shrink:0}
+#hdr .logo-name{font-family:"DM Serif Display",serif;font-size:17px;color:var(--w);letter-spacing:.02em}
+#hdr nav{display:flex;align-items:center;gap:4px;flex:1;margin-left:8px}
+#hdr nav a{color:var(--g1);font-size:12px;font-weight:500;text-decoration:none;padding:4px 10px;border-radius:var(--r-sm);transition:color .15s,background .15s}
+#hdr nav a:hover,#hdr nav a.active{color:var(--w);background:var(--b3)}
+
+/* ── Page Layout ── */
+.wrap{max-width:1280px;margin:0 auto;padding:24px 20px;display:flex;flex-direction:column;gap:24px}
+
+/* ── Section shells ── */
+.section{background:var(--b3);border:1px solid var(--b4);border-radius:var(--r);overflow:hidden}
+.sec-hdr{padding:10px 16px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--g1);border-bottom:1px solid var(--b4);display:flex;align-items:center;gap:8px}
+.sec-body{padding:16px}
+
+/* ── Status dot ── */
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex-shrink:0}
+.dot.running{background:var(--green);box-shadow:0 0 0 0 rgba(98,144,50,.6);animation:pulse-green 1.4s infinite}
+.dot.idle{background:var(--red)}
+@keyframes pulse-green{0%{box-shadow:0 0 0 0 rgba(98,144,50,.6)}70%{box-shadow:0 0 0 8px rgba(98,144,50,0)}100%{box-shadow:0 0 0 0 rgba(98,144,50,0)}}
+
+/* ── Status cards grid ── */
+.status-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+.scard{background:var(--b4);border-radius:var(--r-sm);padding:12px 14px}
+.scard-val{font-size:22px;font-weight:700;font-family:monospace;color:var(--w);margin-bottom:2px}
+.scard-lbl{font-size:10px;color:var(--g1);text-transform:uppercase;letter-spacing:.5px}
+.scard.accent .scard-val{color:var(--green)}
+.scard.yellow .scard-val{color:var(--yellow)}
+.scard.blue .scard-val{color:var(--blue)}
+
+/* Progress bar */
+.pbar-wrap{margin-top:14px}
+.pbar-lbl{display:flex;justify-content:space-between;font-size:11px;color:var(--g1);margin-bottom:5px}
+.pbar-track{height:6px;background:var(--b5);border-radius:3px;overflow:hidden}
+.pbar-fill{height:100%;background:var(--green);border-radius:3px;transition:width .5s}
+
+/* Current game */
+.cur-game{margin-top:14px;background:var(--b4);border-radius:var(--r-sm);padding:10px 14px;display:flex;align-items:center;gap:10px;font-size:13px}
+.cur-game-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--g1);white-space:nowrap}
+.cur-game-val{color:var(--w);font-weight:500}
+
+/* ── Section 2: How Engines Calculate ── */
+.explainer{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start}
+@media(max-width:700px){.explainer{grid-template-columns:1fr}}
+.steps{display:flex;flex-direction:column;gap:10px}
+.step{display:flex;gap:12px;align-items:flex-start}
+.step-num{width:28px;height:28px;border-radius:50%;background:var(--green);color:var(--w);font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.step-body h4{font-size:13px;font-weight:600;color:var(--w);margin-bottom:2px}
+.step-body p{font-size:11px;color:var(--g1);line-height:1.5}
+.step-body .badge{display:inline-block;background:var(--b5);border-radius:3px;padding:1px 6px;font-family:monospace;font-size:10px;color:var(--blue);margin-top:3px}
+
+.board-demo{display:flex;flex-direction:column;align-items:center;gap:12px}
+.board-demo img{width:220px;height:220px;border-radius:6px;display:block;border:2px solid var(--b5)}
+.board-demo-lbl{font-size:10px;color:var(--g1);text-align:center;max-width:220px;line-height:1.4}
+
+/* Win chance formula */
+.formula-box{background:var(--b4);border-radius:var(--r-sm);padding:14px;margin-top:16px}
+.formula-title{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--g1);margin-bottom:8px}
+.formula{font-family:monospace;font-size:12px;color:var(--blue);line-height:1.8}
+.formula span.num{color:var(--yellow)}
+.formula span.op{color:var(--g1)}
+.formula-bars{display:flex;flex-direction:column;gap:4px;margin-top:10px}
+.fb-row{display:flex;align-items:center;gap:8px;font-size:10px}
+.fb-lbl{width:40px;color:var(--g1);text-align:right;font-family:monospace}
+.fb-bar{flex:1;height:8px;background:var(--b5);border-radius:2px;overflow:hidden}
+.fb-fill{height:100%;background:linear-gradient(90deg,var(--red),var(--yellow),var(--green));border-radius:2px}
+.fb-pct{width:36px;font-family:monospace;font-size:10px;color:var(--w);text-align:right}
+
+/* Settings row */
+.settings-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.setting-chip{background:var(--b5);border-radius:var(--r-sm);padding:6px 12px;font-size:11px;font-family:monospace}
+.setting-chip .sk{color:var(--g1)}
+.setting-chip .sv{color:var(--yellow);font-weight:600}
+
+/* ── Section 3: Log stream ── */
+.log-terminal{background:#050505;border-radius:var(--r-sm);padding:12px 14px;height:360px;overflow-y:auto;font-family:monospace;font-size:11px;line-height:1.7}
+.log-line{white-space:pre-wrap;word-break:break-all}
+.log-line.found{color:#4caf50}
+.log-line.analyzing{color:var(--yellow)}
+.log-line.error{color:var(--red)}
+.log-line.info{color:#5ba3d9}
+.log-line.gray{color:#555}
+.log-hdr{display:flex;align-items:center;justify-content:space-between}
+.log-badge{font-size:10px;font-family:monospace;color:var(--g1)}
+
+/* ── Section 4: Puzzle review ── */
+.review-stats{display:flex;gap:10px;padding:12px 16px;border-bottom:1px solid var(--b4)}
+.rstab{flex:1;text-align:center;padding:8px 10px;border-radius:6px;border:1px solid var(--b4);background:var(--b4)}
+.rstab-val{font-size:20px;font-weight:700;font-family:monospace}
+.rstab-lbl{font-size:9px;color:var(--g1);text-transform:uppercase;letter-spacing:.5px;margin-top:1px}
+.rstab.pending .rstab-val{color:var(--yellow)}
+.rstab.approved .rstab-val{color:var(--green)}
+.rstab.rejected .rstab-val{color:var(--red)}
+
+.rlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;padding:14px}
+.rcard{background:var(--b4);border:1px solid var(--b5);border-radius:7px;overflow:hidden;display:flex;flex-direction:column}
+.rcard-head{display:flex;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid var(--b5)}
+.rcard-id{font-family:monospace;font-size:10px;color:var(--blue);font-weight:700;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rcard-rating{font-family:monospace;font-size:11px;font-weight:700}
+.rcard-img{display:flex;justify-content:center;padding:8px 10px;background:#0a0a0a}
+.rcard-img img{width:140px;height:140px;border-radius:3px;display:block}
+.rcard-themes{padding:4px 8px 6px;display:flex;flex-wrap:wrap;gap:3px;min-height:22px}
+.tpill{font-size:9px;padding:1px 5px;border-radius:8px;font-weight:600;background:var(--b5);color:var(--g1)}
+.rcard-actions{display:flex;gap:6px;padding:7px 8px;margin-top:auto;border-top:1px solid var(--b5)}
+.btn-a{flex:1;padding:4px;background:#0d2b0d;border:1px solid var(--green);border-radius:4px;color:var(--green);font-size:10px;font-weight:700;cursor:pointer;transition:.15s}
+.btn-a:hover{background:#1a4a1a}
+.btn-r{flex:1;padding:4px;background:#2b0d0d;border:1px solid var(--red);border-radius:4px;color:var(--red);font-size:10px;font-weight:700;cursor:pointer;transition:.15s}
+.btn-r:hover{background:#4a1a1a}
+
+.empty-state{color:var(--g1);padding:20px;text-align:center;grid-column:1/-1;font-size:12px}
+
+/* refresh indicator */
+.refresh-tick{font-size:9px;color:var(--g2);margin-left:auto}
+</style>
+</head>
+<body>
+<header id="hdr">
+  <a class="logo" href="/"><div class="logo-sq">♟</div><span class="logo-name">ChessGuru</span></a>
+  <nav>
+    <a href="/">Puzzles</a>
+    <a href="/blindfold">Blindfold</a>
+    <a href="/opening">Opening</a>
+    <a href="/engine-battle">Engine Battle</a>
+    <a href="/puzzle-status">Puzzle Factory</a>
+    <a href="/extraction-live" class="active">Live</a>
+  </nav>
+</header>
+
+<div class="wrap">
+
+<!-- ══ SECTION 1: EXTRACTOR STATUS ══════════════════════════════════════ -->
+<div class="section">
+  <div class="sec-hdr">
+    <span class="dot idle" id="statusDot"></span>
+    <span id="statusLabel">Checking...</span>
+    <span class="refresh-tick" id="s1Tick"></span>
+  </div>
+  <div class="sec-body">
+    <div class="status-grid">
+      <div class="scard accent">
+        <div class="scard-val" id="sc-found">—</div>
+        <div class="scard-lbl">Puzzles found today</div>
+      </div>
+      <div class="scard yellow">
+        <div class="scard-val" id="sc-pos">—</div>
+        <div class="scard-lbl">Positions analyzed</div>
+      </div>
+      <div class="scard blue">
+        <div class="scard-val" id="sc-games">—</div>
+        <div class="scard-lbl">Games processed</div>
+      </div>
+      <div class="scard">
+        <div class="scard-val" id="sc-elapsed">—</div>
+        <div class="scard-lbl">Time elapsed</div>
+      </div>
+      <div class="scard">
+        <div class="scard-val" id="sc-yield">—</div>
+        <div class="scard-lbl">Yield rate</div>
+      </div>
+      <div class="scard">
+        <div class="scard-val" id="sc-rejected">—</div>
+        <div class="scard-lbl">Rejected</div>
+      </div>
+    </div>
+    <div class="cur-game">
+      <span class="cur-game-lbl">Now:</span>
+      <span class="cur-game-val" id="sc-curGame">—</span>
+    </div>
+    <div class="pbar-wrap">
+      <div class="pbar-lbl">
+        <span>Progress</span>
+        <span id="pbar-txt">—</span>
+      </div>
+      <div class="pbar-track"><div class="pbar-fill" id="pbar-fill" style="width:0%"></div></div>
+    </div>
+    <div class="settings-row">
+      <div class="setting-chip"><span class="sk">depth </span><span class="sv">50</span></div>
+      <div class="setting-chip"><span class="sk">nodes </span><span class="sv">25M</span></div>
+      <div class="setting-chip"><span class="sk">time </span><span class="sv">30s/pos</span></div>
+      <div class="setting-chip"><span class="sk">multiPV </span><span class="sv">3</span></div>
+      <div class="setting-chip"><span class="sk">Δwin </span><span class="sv">≥0.3</span></div>
+      <div class="setting-chip"><span class="sk">uniqueness </span><span class="sv">50cp</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SECTION 2: HOW ENGINES CALCULATE ════════════════════════════════ -->
+<div class="section">
+  <div class="sec-hdr">⚙️ How Puzzle Extraction Works</div>
+  <div class="sec-body">
+    <div class="explainer">
+      <div>
+        <div class="steps">
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <h4>Engine receives position</h4>
+              <p>Every position in a finished engine game is fed to Stockfish via UCI protocol. The position is set with <code>position fen …</code>.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <h4>Deep search — depth 50</h4>
+              <p>Stockfish searches the game tree to depth 50, spending up to 30s or 25M nodes per position — matching Lichess's own quality threshold.</p>
+              <span class="badge">go depth 50 movetime 30000 nodes 25000000</span>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <h4>Win-chance swing detected</h4>
+              <p>If the position's win% drops by ≥ 30 percentage points vs the previous position, it's flagged as a blunder — a potential puzzle moment.</p>
+              <span class="badge">Δwin ≥ 0.30 &amp; win% ≥ 0.50</span>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">4</div>
+            <div class="step-body">
+              <h4>Uniqueness check</h4>
+              <p>MultiPV=3 is used. The puzzle is rejected if the second-best move is within 50cp of the best — only positions with a single clear best response qualify.</p>
+              <span class="badge">best₁ − best₂ &gt; 50cp</span>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">5</div>
+            <div class="step-body">
+              <h4>Theme tagging (70 themes)</h4>
+              <p>cook.js replays the solution and detects tactical motifs: fork, pin, skewer, mate patterns, endgame types, zugzwang, promotion, and 60+ more.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">6</div>
+            <div class="step-body">
+              <h4>Saved to MongoDB</h4>
+              <p>The puzzle document gets a <code>cg_</code> prefixed ID, status <code>pending</code>, and enters the review queue. Approved puzzles enter training rotation.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="board-demo">
+          <img src="https://fen2image.chessvision.ai/r1bq1rk1_pp2ppbp_2np2p1_8_3NP3_2N1B3_PPP2PPP_R2QKB1R_w_KQ_-_0_9" alt="Sample position" loading="lazy" onerror="this.style.display='none'">
+          <div class="board-demo-lbl">Sample position — engine finds the tactical break</div>
+        </div>
+        <div class="formula-box">
+          <div class="formula-title">Win Chance Formula (Lichess-exact)</div>
+          <div class="formula">
+            win% <span class="op">=</span> <span class="num">50</span> <span class="op">+</span> <span class="num">50</span> <span class="op">×</span> <span class="op">(</span><span class="num">2</span> <span class="op">/</span> <span class="op">(</span><span class="num">1</span> <span class="op">+</span> e<sup><span class="op">−</span><span class="num">0.00368</span><span class="op">×</span>cp</sup><span class="op">)</span> <span class="op">−</span> <span class="num">1</span><span class="op">)</span>
+          </div>
+          <div class="formula-bars">
+            <div class="fb-row"><span class="fb-lbl">−500</span><div class="fb-bar"><div class="fb-fill" style="width:4%"></div></div><span class="fb-pct">4%</span></div>
+            <div class="fb-row"><span class="fb-lbl">−200</span><div class="fb-bar"><div class="fb-fill" style="width:18%"></div></div><span class="fb-pct">18%</span></div>
+            <div class="fb-row"><span class="fb-lbl">0</span><div class="fb-bar"><div class="fb-fill" style="width:50%"></div></div><span class="fb-pct">50%</span></div>
+            <div class="fb-row"><span class="fb-lbl">+200</span><div class="fb-bar"><div class="fb-fill" style="width:82%"></div></div><span class="fb-pct">82%</span></div>
+            <div class="fb-row"><span class="fb-lbl">+500</span><div class="fb-bar"><div class="fb-fill" style="width:96%"></div></div><span class="fb-pct">96%</span></div>
+          </div>
+          <div style="margin-top:10px;font-size:10px;color:var(--g1)">A position scoring +100cp → ~62% win chance. After a blunder to −200cp → 18%. That's a Δwin of 44% — well above the 30% threshold.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SECTION 3: LIVE LOG ══════════════════════════════════════════════ -->
+<div class="section">
+  <div class="sec-hdr">
+    <span>📡 Live Extractor Log</span>
+    <div class="log-hdr" style="flex:1;display:flex;align-items:center;padding-left:12px">
+      <span class="log-badge" id="logBadge">— lines</span>
+      <span class="refresh-tick" id="s3Tick" style="margin-left:auto"></span>
+    </div>
+  </div>
+  <div class="sec-body" style="padding:10px">
+    <div class="log-terminal" id="logTerminal">
+      <div class="log-line gray">Connecting to log stream...</div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SECTION 4: GENERATED PUZZLES REVIEW ══════════════════════════════ -->
+<div class="section">
+  <div class="sec-hdr">
+    🔍 Generated Puzzles — Review Queue
+    <span class="refresh-tick" id="s4Tick" style="margin-left:auto"></span>
+  </div>
+  <div class="review-stats">
+    <div class="rstab pending"><div class="rstab-val" id="rs-pending">—</div><div class="rstab-lbl">Pending</div></div>
+    <div class="rstab approved"><div class="rstab-val" id="rs-approved">—</div><div class="rstab-lbl">Approved</div></div>
+    <div class="rstab rejected"><div class="rstab-val" id="rs-rejected">—</div><div class="rstab-lbl">Rejected</div></div>
+  </div>
+  <div class="rlist" id="reviewList">
+    <div class="empty-state">Loading...</div>
+  </div>
+</div>
+
+</div><!-- /wrap -->
+
+<script>
+// ── Helpers ──────────────────────────────────────────────────────────────────
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+function fmtDur(ms) {
+  if (!ms) return '—';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + 'm ' + (s % 60) + 's';
+  return Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
+}
+
+function ratingColor(r) {
+  if (r >= 2200) return '#e04040';
+  if (r >= 1800) return '#e08040';
+  if (r >= 1500) return '#f0a500';
+  if (r >= 1200) return '#4a9';
+  return '#6bc';
+}
+
+const THEME_COLORS = {
+  mate:'#9f4',fork:'#fa0',pin:'#fa0',skewer:'#fa0',sacrifice:'#fa0',
+  endgame:'#aaa',promotion:'#59f',enPassant:'#59f',mateIn1:'#9f4',mateIn2:'#9f4',
+};
+
+// ── Section 1: Extractor Status ───────────────────────────────────────────
+let startTs = null;
+
+async function loadStatus() {
+  try {
+    const d = await fetchJSON('/api/status/extractor');
+    const s = d.status || {};
+    const running = d.running;
+
+    const dot = document.getElementById('statusDot');
+    const lbl = document.getElementById('statusLabel');
+    dot.className = 'dot ' + (running ? 'running' : 'idle');
+    lbl.textContent = running ? 'Extractor Running' : 'Extractor Idle';
+
+    document.getElementById('sc-found').textContent = (s.puzzlesFound || 0).toLocaleString();
+    document.getElementById('sc-pos').textContent = (s.positionsAnalyzed || 0).toLocaleString();
+    document.getElementById('sc-games').textContent = (s.gamesProcessed || 0).toLocaleString();
+    document.getElementById('sc-rejected').textContent =
+      ((s.rejectedNotUnique || 0) + (s.rejectedTooShort || 0)).toLocaleString();
+
+    const yieldPct = s.positionsAnalyzed
+      ? ((s.puzzlesFound || 0) / s.positionsAnalyzed * 100).toFixed(2) + '%'
+      : '—';
+    document.getElementById('sc-yield').textContent = yieldPct;
+
+    if (running && !startTs) startTs = Date.now();
+    if (!running) startTs = null;
+    document.getElementById('sc-elapsed').textContent = startTs ? fmtDur(Date.now() - startTs) : '—';
+
+    const curLog = (s.log || []).slice(-1)[0] || '';
+    const gameMatch = curLog.match(/Analyzing game [a-f0-9]+: (.+)/);
+    document.getElementById('sc-curGame').textContent = gameMatch ? gameMatch[1] : (s.log ? (s.log.slice(-1)[0] || '—') : '—');
+
+    if (s.totalGames) {
+      const pct = Math.round((s.gamesProcessed || 0) / s.totalGames * 100);
+      document.getElementById('pbar-fill').style.width = pct + '%';
+      document.getElementById('pbar-txt').textContent =
+        (s.gamesProcessed || 0) + ' / ' + s.totalGames + ' games (' + pct + '%)';
+    } else {
+      document.getElementById('pbar-txt').textContent = running ? 'Running...' : 'Not started';
+    }
+
+    document.getElementById('s1Tick').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  } catch(e) { document.getElementById('s1Tick').textContent = 'Error: ' + e.message; }
+}
+
+// ── Section 3: Log Stream ─────────────────────────────────────────────────
+function classifyLine(line) {
+  const l = line.toLowerCase();
+  if (l.includes('found puzzle') || l.includes('saved puzzle') || l.includes('puzzle saved')) return 'found';
+  if (l.includes('analyzing') || l.includes('candidate') || l.includes('ply ')) return 'analyzing';
+  if (l.includes('error') || l.includes('fatal') || l.includes('err:')) return 'error';
+  if (l.includes('stockfish') || l.includes('mongodb') || l.includes('started') || l.includes('===')) return 'info';
+  return 'gray';
+}
+
+async function loadLog() {
+  try {
+    const d = await fetchJSON('/api/extractor/log');
+    const lines = d.lines || [];
+    const terminal = document.getElementById('logTerminal');
+    const wasAtBottom = terminal.scrollHeight - terminal.clientHeight <= terminal.scrollTop + 20;
+
+    terminal.innerHTML = lines.length
+      ? lines.map(l => `<div class="log-line ${classifyLine(l)}">${escHtml(l)}</div>`).join('')
+      : '<div class="log-line gray">No log output yet. Start the extractor to see activity.</div>';
+
+    document.getElementById('logBadge').textContent = lines.length + ' lines';
+    document.getElementById('s3Tick').textContent = 'Updated ' + new Date().toLocaleTimeString();
+
+    if (wasAtBottom) terminal.scrollTop = terminal.scrollHeight;
+  } catch(e) {
+    document.getElementById('s3Tick').textContent = 'Error';
+  }
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Section 4: Review Queue ───────────────────────────────────────────────
+async function loadReview() {
+  try {
+    const [stats, list] = await Promise.all([
+      fetchJSON('/api/generated/stats'),
+      fetchJSON('/api/generated/puzzles?status=pending&limit=20'),
+    ]);
+    document.getElementById('rs-pending').textContent  = (stats.pending  || 0).toLocaleString();
+    document.getElementById('rs-approved').textContent = (stats.approved || 0).toLocaleString();
+    document.getElementById('rs-rejected').textContent = (stats.rejected || 0).toLocaleString();
+
+    const puzzles = list.puzzles || [];
+    const grid = document.getElementById('reviewList');
+    grid.innerHTML = puzzles.length
+      ? puzzles.map(p => reviewCard(p)).join('')
+      : '<div class="empty-state">No pending puzzles. Run the extractor to generate puzzles.</div>';
+
+    document.getElementById('s4Tick').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  } catch(e) { document.getElementById('s4Tick').textContent = 'Error'; }
+}
+
+function reviewCard(p) {
+  const fen = (p.fen || '').replace(/ /g,'_');
+  const themes = (p.themes || []).slice(0,4);
+  const rc = ratingColor(p.rating || 1500);
+  const id = (p.id || '').replace(/'/g,"\\'");
+  return `<div class="rcard">
+    <div class="rcard-head">
+      <span class="rcard-id" title="${p.id}">${p.id}</span>
+      <span class="rcard-rating" style="color:${rc}">${p.rating || '?'}</span>
+    </div>
+    <div class="rcard-img">
+      <img src="https://fen2image.chessvision.ai/${fen}" alt="board" loading="lazy" onerror="this.style.display='none'">
+    </div>
+    <div class="rcard-themes">
+      ${themes.map(t => `<span class="tpill" style="color:${THEME_COLORS[t]||'#888'}">${t}</span>`).join('')}
+      ${p.themes && p.themes.length > 4 ? `<span class="tpill">+${p.themes.length - 4}</span>` : ''}
+    </div>
+    <div class="rcard-actions">
+      <button class="btn-a" onclick="approvePuzzle('${id}',this)">✓ Approve</button>
+      <button class="btn-r" onclick="rejectPuzzle('${id}',this)">✗ Reject</button>
+    </div>
+  </div>`;
+}
+
+async function approvePuzzle(id, btn) {
+  btn.disabled = true; btn.textContent = '...';
+  try {
+    await fetch('/api/generated/puzzles/' + encodeURIComponent(id) + '/approve', {method:'POST'});
+    btn.closest('.rcard').style.opacity = '0.3';
+    loadReview();
+  } catch(e) { btn.disabled = false; btn.textContent = '✓ Approve'; }
+}
+
+async function rejectPuzzle(id, btn) {
+  btn.disabled = true; btn.textContent = '...';
+  try {
+    await fetch('/api/generated/puzzles/' + encodeURIComponent(id) + '/reject', {method:'POST'});
+    btn.closest('.rcard').style.opacity = '0.3';
+    loadReview();
+  } catch(e) { btn.disabled = false; btn.textContent = '✗ Reject'; }
+}
+
+// ── Init & polling ────────────────────────────────────────────────────────
+loadStatus();
+loadLog();
+loadReview();
+// Scroll log to bottom on first load
+document.getElementById('logTerminal').scrollTop = document.getElementById('logTerminal').scrollHeight;
+
+setInterval(loadStatus, 3000);
+setInterval(loadLog, 3000);
+setInterval(loadReview, 10000);
+
+// Elapsed timer ticks every second when running
+setInterval(() => {
+  if (startTs) {
+    document.getElementById('sc-elapsed').textContent = fmtDur(Date.now() - startTs);
+  }
+}, 1000);
+</script>
+</body>
+</html>
