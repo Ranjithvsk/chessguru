@@ -310,7 +310,7 @@ function showPuzzle(p){try{localStorage.setItem("cg_puzzle",p.id||p._id);}catch(
     window._lmTimer=setTimeout(function(){
       var dests=new Map();chess.moves({verbose:true}).forEach(function(m){if(!dests.has(m.from))dests.set(m.from,[]);dests.get(m.from).push(m.to);});
       cg.set({fen:p.fen,orientation:pc,turnColor:chess.turn()==="w"?"white":"black",movable:{color:pc,dests:dests},lastMove:[lmFrom,lmTo],check:chess.in_check()});
-      cg.setShapes([{orig:lmFrom,brush:'red'},{orig:lmTo,brush:'red'}]);
+      cg.setShapes([]);
       dbg("showPuzzle OK pc="+pc);
     },1000);
   }else{
