@@ -68,6 +68,15 @@ body.peeking cg-board piece{opacity:1!important;pointer-events:auto!important}
 #rDiff.pos{color:#759900}
 #rDiff.neg{color:#c23b22}
 @media(max-width:780px){#main{flex-direction:column;align-items:center}#boardWrap{width:min(98vw,480px);height:min(98vw,480px)}#rightCol{flex:unset;width:min(98vw,480px);flex-direction:row;flex-wrap:wrap}.panel{flex:1;min-width:160px}}
+
+@media(max-width:600px){
+  body{overflow-x:hidden}
+  #hdr nav{overflow-x:auto;white-space:nowrap;font-size:11px}
+  #hdr nav a{padding:4px 8px;font-size:11px}
+  .pb{flex-direction:column!important}
+  .pb .cg-wrap,.pb #board,.cg-wrap{width:100vw!important;height:100vw!important;max-width:100vw}
+  .ps,.pt,.sr{width:100%!important;max-width:100%!important;border-left:none!important;border-top:1px solid var(--border)}
+}
 </style>
 <style>
 :root{--w:#fff;--b:#000;--b2:#0f0f0f;--b3:#1a1a1a;--b4:#2a2a2a;--g1:#888;--g2:#555;--r-sm:5px;--cb:hsl(37,10%,8%);--cz:hsl(37,5%,19%);--cz2:hsl(37,5%,15%);--cp:hsl(37,7%,22%);--pri:hsl(209,79%,56%);--pri2:hsl(209,49%,40%);--cf:hsl(0,0%,73%);--cfd:hsl(0,0%,58%);--cfc:hsl(0,0%,87%);--ok:hsl(88,62%,37%);--err:hsl(0,60%,50%);--bdr:rgba(255,255,255,.1)}

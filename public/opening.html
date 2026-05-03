@@ -110,6 +110,15 @@ input:checked~.toggle-thumb{transform:translateX(16px);background:var(--white)}
 @media(max-width:680px){.app{flex-direction:column;height:auto}.right-panel{width:100%;border-left:none;border-top:1px solid var(--border);height:420px}.eval-bar-wrap{display:none}}
 .white-1e1d7{background-color:#ffffff!important}
 .black-3c85d{background-color:#8c8c8c!important}
+
+@media(max-width:600px){
+  body{overflow-x:hidden}
+  #hdr nav{overflow-x:auto;white-space:nowrap;font-size:11px}
+  #hdr nav a{padding:4px 8px;font-size:11px}
+  .pb{flex-direction:column!important}
+  .pb .cg-wrap,.pb #board,.cg-wrap{width:100vw!important;height:100vw!important;max-width:100vw}
+  .ps,.pt,.sr{width:100%!important;max-width:100%!important;border-left:none!important;border-top:1px solid var(--border)}
+}
 </style>
 </head>
 <body>

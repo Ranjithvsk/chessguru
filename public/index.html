@@ -164,6 +164,15 @@ button.continue:hover{background:#70a038}
 /* hint active (showHint=true → removes .button-empty class) */
 .view_solution .button:not(.button-empty){background:#629032;color:#fff;border-color:#5a8228}
 .view_solution .button:not(.button-empty):hover{background:#70a038}
+
+@media(max-width:600px){
+  body{overflow-x:hidden}
+  #hdr nav{overflow-x:auto;white-space:nowrap;font-size:11px}
+  #hdr nav a{padding:4px 8px;font-size:11px}
+  .pb{flex-direction:column!important}
+  .pb .cg-wrap,.pb #board,.cg-wrap{width:100vw!important;height:100vw!important;max-width:100vw}
+  .ps,.pt,.sr{width:100%!important;max-width:100%!important;border-left:none!important;border-top:1px solid var(--border)}
+}
 </style></head><body>
 <header id="hdr">
   <a class="logo" href="/"><div class="logo-sq">♟</div><span class="logo-name">ChessGuru</span></a>
