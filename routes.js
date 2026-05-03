@@ -2,7 +2,7 @@ const {Chess}=require('chess.js');
 function fmtPuzzle(p){if(!p)return null;const {_id,line,glicko,...rest}=p;return {...rest,id:_id,rating:Math.round((glicko&&glicko.r)||1500),ratingDeviation:Math.round((glicko&&glicko.d)||500),solution:line?line.trim().split(" "):[],glicko};}
 function applyLastMove(puzzle){
   if(!puzzle||!puzzle.solution||puzzle.solution.length<1)return puzzle;
-  try{const chess=new Chess(puzzle.fen);chess.move(puzzle.solution[0]);return{...puzzle,fen:chess.fen(),solution:puzzle.solution.slice(1)};}
+  try{const lastMove=puzzle.solution[0];const chess=new Chess(puzzle.fen);chess.move(lastMove);return{...puzzle,preFen:puzzle.fen,lastMove,fen:chess.fen(),solution:puzzle.solution.slice(1)};}
   catch(e){return puzzle;}
 }
 const express=require('express'),router=express.Router(),mongoose=require('mongoose');

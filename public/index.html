@@ -289,15 +289,12 @@ function loadNextClean(){try{localStorage.removeItem("cg_puzzle");}catch(e){}
 
 }
 function showPuzzle(p){try{localStorage.setItem("cg_puzzle",p.id||p._id);}catch(e){}
+  if(window._lmTimer){clearTimeout(window._lmTimer);window._lmTimer=null;}
   solution=Array.isArray(p.solution)?p.solution:(p.line?p.line.trim().split(" "):[]);navHistory=[{fen:p.fen}];navIdx=0;
   chess=new Chess();
   chess.load(p.fen);
-  var m0=solution[0];
-  var r0=chess.move({from:m0.slice(0,2),to:m0.slice(2,4),promotion:m0[4]||"q"});
-  if(!r0){dbg("ERR move0 "+m0+" in "+p.fen);setFB("bad","X","Error","Bad move: "+m0);return;}
-  solution=solution.slice(1);
+  window.puzzleLastMove=p.lastMove;
   var pc=chess.turn()==="w"?"white":"black";window.playerColor=pc;
-  refreshBoard(pc);
   document.getElementById("pId").textContent="#"+p.id;
   document.getElementById("pId").href="https://lichess.org/training/"+p.id;
   document.getElementById("pRating").textContent=Math.round(p.rating||(p.glicko&&p.glicko.r)||1500);
@@ -305,14 +302,27 @@ function showPuzzle(p){try{localStorage.setItem("cg_puzzle",p.id||p._id);}catch(
   document.getElementById("aTitle").textContent=currentTheme==="mix"?fmt((p.themes||[])[0]):((window.themeLabels||{})[currentTheme]||fmt(currentTheme));
   // side set via fbD html below
   setFB("wait","&#9822;","Your turn","Find the best move for "+pc+".");document.getElementById("btnHint").style.display="inline-block";document.getElementById("btnSol").style.display="inline-block";document.getElementById("btnHint").disabled=false;
-  buildMoves();dbg("showPuzzle OK pc="+pc);
+  buildMoves();
+  if(p.lastMove&&p.preFen&&cg){
+    var lmFrom=p.lastMove.slice(0,2),lmTo=p.lastMove.slice(2,4);
+    cg.set({fen:p.preFen,orientation:pc,turnColor:pc==="white"?"black":"white",movable:{color:undefined},lastMove:undefined,check:false});
+    cg.setShapes([{orig:lmFrom,dest:lmTo,brush:'red'}]);
+    window._lmTimer=setTimeout(function(){
+      var dests=new Map();chess.moves({verbose:true}).forEach(function(m){if(!dests.has(m.from))dests.set(m.from,[]);dests.get(m.from).push(m.to);});
+      cg.set({fen:p.fen,orientation:pc,turnColor:chess.turn()==="w"?"white":"black",movable:{color:pc,dests:dests},lastMove:[lmFrom,lmTo],check:chess.in_check()});
+      cg.setShapes([{orig:lmFrom,brush:'red'},{orig:lmTo,brush:'red'}]);
+      dbg("showPuzzle OK pc="+pc);
+    },1000);
+  }else{
+    refreshBoard(pc);dbg("showPuzzle OK pc="+pc);
+  }
 }
 function refreshBoard(pc){
   if(!cg||!chess)return;
   var dests=new Map();
   chess.moves({verbose:true}).forEach(function(m){if(!dests.has(m.from))dests.set(m.from,[]);dests.get(m.from).push(m.to);});
   var hist=chess.history({verbose:true});
-  var lm=hist.length?[hist[hist.length-1].from,hist[hist.length-1].to]:undefined;
+  var _lm=hist.length?[hist[hist.length-1].from,hist[hist.length-1].to]:undefined;var lm=_lm||(window.puzzleLastMove?[window.puzzleLastMove.slice(0,2),window.puzzleLastMove.slice(2,4)]:undefined);
   cg.set({fen:chess.fen(),orientation:pc,turnColor:chess.turn()==="w"?"white":"black",
     movable:{color:solved?undefined:pc,dests:dests},lastMove:lm,check:chess.in_check()});
 }
