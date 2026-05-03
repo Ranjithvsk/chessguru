@@ -243,6 +243,19 @@ nav a:hover,nav a.active{color:var(--text)}
         <option value="engine">Engine-Generated</option>
         <option value="all">All Puzzles</option>
       </select>
+      <select id="pc-filter" onchange="loadPuzzles()" style="background:var(--b3);border:1px solid var(--border);color:var(--text);font-size:10px;padding:2px 6px;border-radius:4px">
+        <option value="">All pieces</option>
+        <option value="4">≤4 pieces</option>
+        <option value="5">≤5 pieces</option>
+        <option value="6">≤6 pieces</option>
+        <option value="7">≤7 pieces</option>
+        <option value="8">≤8 pieces</option>
+        <option value="10">≤10 pieces</option>
+        <option value="12">≤12 pieces</option>
+        <option value="16">≤16 pieces</option>
+        <option value="20">≤20 pieces</option>
+        <option value="32">≤32 pieces</option>
+      </select>
       <select id="theme-filter" onchange="loadPuzzles()" style="background:var(--b3);border:1px solid var(--border);color:var(--text);font-size:10px;padding:2px 6px;border-radius:4px">
         <option value="">All Themes</option>
         <optgroup label="── Mate">
@@ -325,7 +338,7 @@ nav a:hover,nav a.active{color:var(--text)}
       <div style="font-family:monospace;font-size:10px;color:var(--text);background:var(--b3);padding:6px;border-radius:4px;word-break:break-all" id="m-fen"></div>
     </div>
     <div style="margin-top:10px;display:flex;gap:8px">
-      <a id="m-lichess-link" href="#" target="_blank" style="font-size:10px;color:var(--a3)">Try on Lichess →</a>
+      <a id="m-chessguru-link" href="#" target="_blank" style="font-size:10px;color:var(--a3)">Try on ChessGuru →</a>
       <button onclick="markPuzzleGood()" class="refresh-btn" style="color:var(--green)">✓ Mark Good</button>
       <button onclick="markPuzzleBad()" class="refresh-btn" style="color:var(--red)">✗ Mark Bad</button>
     </div>
@@ -558,15 +571,18 @@ async function loadGames() {
 
 async function loadPuzzles() {
   try {
-    const filter  = document.getElementById('puzzle-filter').value;
-    const theme   = document.getElementById('theme-filter').value;
-    const url = '/api/status/puzzles/list?source=' + filter + (theme?'&theme='+theme:'') + '&limit=24';
+    const filter = document.getElementById('puzzle-filter').value;
+    const theme  = document.getElementById('theme-filter').value;
+    const maxPc  = document.getElementById('pc-filter').value;
+    let url = '/api/status/puzzles/list?source=' + filter + '&limit=24';
+    if (theme) url += '&theme=' + theme;
+    if (maxPc) url += '&maxPc=' + maxPc;
     const d = await fetchJSON(url);
     const puzzles = d.puzzles || [];
 
     document.getElementById('puzzle-list').innerHTML = puzzles.length
       ? puzzles.map(p => puzzleCard(p)).join('')
-      : '<div style="color:var(--dim);padding:20px;grid-column:1/-1;text-align:center">No puzzles found. Run the extractor to generate puzzles from engine games.</div>';
+      : `<div style="color:var(--dim);padding:20px;grid-column:1/-1;text-align:center">No puzzles found${theme ? ' for theme <b style="color:var(--text)">' + theme + '</b>' : ''}${maxPc ? ' with ≤' + maxPc + ' pieces' : ''}${filter==='engine'&&!theme&&!maxPc ? '. Run the extractor to generate puzzles from engine games' : ''}.</div>`;
   } catch(e) { console.error('puzzles error', e); }
 }
 
@@ -593,9 +609,7 @@ function puzzleCard(p) {
       ${p.themes?.length>8?`<span class="theme-pill th-phase">+${p.themes.length-8}</span>`:''}
     </div>
     <div class="pcard-meta">
-      From: ${p.whiteName||'?'} vs ${p.blackName||'?'}
-      · Ply ${p.initialPly||'?'}
-      · ${new Date(p.generatedAt).toLocaleDateString()}
+      ${p.whiteName ? `From: ${p.whiteName} vs ${p.blackName||'?'} · Ply ${p.initialPly||'?'} · ${new Date(p.generatedAt).toLocaleDateString()}` : `${p.pieceCount ? p.pieceCount + ' pieces' : ''}`}
     </div>
   </div>`;
 }
@@ -605,14 +619,23 @@ function showPuzzle(p) {
   const qs = qualityScore(p);
   document.getElementById('m-title').textContent = 'Puzzle #' + p._id + ' — Quality ' + qs + '/100';
   document.getElementById('m-fen').textContent = p.fen;
-  document.getElementById('m-lichess-link').href = 'https://lichess.org/editor/' + encodeURIComponent(p.fen);
+  document.getElementById('m-chessguru-link').href = 'https://harinitharanjith.com/?puzzle=' + p._id;
+
+  const srcLabel = (p.whiteName && p.blackName) ? p.whiteName + ' vs ' + p.blackName
+                 : p.whiteName ? p.whiteName
+                 : p.sourceGameId ? 'Engine Game'
+                 : 'Lichess';
+  const genDate = p.generatedAt && new Date(p.generatedAt).getFullYear() > 1970
+    ? new Date(p.generatedAt).toLocaleString() : '—';
+  const scoreBefore = p.scoreBefore != null ? p.scoreBefore + 'cp' : '—';
+  const scoreAfter  = p.scoreAfter  != null ? p.scoreAfter  + 'cp' : '—';
 
   document.getElementById('m-meta').innerHTML = [
     ['Rating', p.rating], ['RD', p.ratingDeviation], ['POV', p.pov],
     ['Solution moves', p.solution?.length], ['Theme count', p.themes?.length],
-    ['Source', (p.whiteName||'?')+' vs '+(p.blackName||'?')],
-    ['Initial ply', p.initialPly], ['Score before', p.scoreBefore+'cp'],
-    ['Score after', p.scoreAfter+'cp'], ['Generated', new Date(p.generatedAt).toLocaleString()],
+    ['Source', srcLabel],
+    ['Initial ply', p.initialPly], ['Score before', scoreBefore],
+    ['Score after', scoreAfter], ['Generated', genDate],
   ].map(([k,v])=>`<div class="meta-row"><span class="meta-k">${k}:</span><span class="meta-v">${v||'—'}</span></div>`).join('');
 
   document.getElementById('m-solution').innerHTML = (p.solution||[])
@@ -634,8 +657,7 @@ function showPuzzle(p) {
   document.getElementById('m-board-wrap').innerHTML = `
     <div style="width:240px;height:240px;background:var(--b3);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--dim);flex-direction:column;gap:6px">
       <div style="font-size:24px">♟</div>
-      <div>Open in Lichess to see board</div>
-      <a href="https://lichess.org/editor/${encodeURIComponent(p.fen)}" target="_blank" style="color:var(--a3);font-size:10px">→ Open Lichess Editor</a>
+      <div>Click "Try on ChessGuru" to play</div>
     </div>
   `;
 
