@@ -1,4 +1,7 @@
 'use strict';
+process.on('unhandledRejection', (reason, promise) => {
+  process.stderr.write(`[unhandledRejection] ${reason?.stack || reason}\n`);
+});
 /**
  * puzzle_extractor.js — ChessGuru Puzzle Factory
  * Full Lichess quality: depth=50, time=30s, nodes=25M
@@ -144,7 +147,10 @@ class Stockfish {
   }
 
   _off(cb) {
-    this._listeners = this._listeners.filter(l => l.cb !== cb);
+    // Filter in-place to avoid overwriting listeners pushed during callbacks
+    const keep = [];
+    for (const l of this._listeners) { if (l.cb !== cb) keep.push(l); }
+    this._listeners = keep;
   }
 
   /**
@@ -153,44 +159,64 @@ class Stockfish {
    */
   analyze(fen, movesSoFar) {
     return new Promise((resolve, reject) => {
+      const {spawn} = require('child_process');
+      const proc = spawn(SF_PATH, [], {stdio:['pipe','pipe','pipe']});
+      let buf = '';
+      const multiPV = {};
+      let ready = false;
+      let searching = false;
       const posCmd = movesSoFar.length
         ? `position fen ${fen} moves ${movesSoFar.join(' ')}`
         : `position fen ${fen}`;
-
-      const multiPV = {};
-      const infoRe = /info .* multipv (\d+) .* score (cp|mate) (-?\d+) .* pv ([\w\s]+)/;
-      const timeout = setTimeout(() => {
-        this._off(infoHandler);
+      const tid = setTimeout(() => {
+        proc.kill();
+        process.stderr.write(`[analyze timeout] moves=${movesSoFar.length} fen=${fen.slice(0,50)}
+`);
         reject(new Error('analyze timeout'));
       }, SCAN_TIME + 15000);
-
-      const infoHandler = (line) => {
-        const m = line.match(infoRe);
-        if (m) {
-          multiPV[m[1]] = {
-            move: m[4].trim().split(' ')[0],
-            cp:   m[2] === 'cp'   ? parseInt(m[3]) : null,
-            mate: m[2] === 'mate' ? parseInt(m[3]) : null,
-            pv:   m[4].trim().split(' '),
-          };
+      proc.stdout.on('data', d => {
+        buf += d.toString();
+        let nl;
+        while ((nl = buf.indexOf('\n')) !== -1) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!line) continue;
+          if (!ready && line === 'uciok') {
+            proc.stdin.write('setoption name Hash value 256\n');
+            proc.stdin.write('setoption name Threads value 2\n');
+            proc.stdin.write('setoption name MultiPV value 3\n');
+            proc.stdin.write('isready\n');
+          }
+          if (!ready && line === 'readyok') {
+            ready = true;
+            proc.stdin.write(posCmd + '\n');
+            proc.stdin.write(`go depth ${SCAN_DEPTH} movetime ${SCAN_TIME} nodes ${SCAN_NODES}\n`);
+            searching = true;
+          }
+          if (searching && line.startsWith('info') && line.includes('multipv')) {
+            const m = line.match(/multipv (\d+) .* score (cp|mate) (-?\d+) .* pv ([\w]+)/);
+            if (m) multiPV[m[1]] = { move: m[4], cp: m[2]==='cp' ? parseInt(m[3]) : null, mate: m[2]==='mate' ? parseInt(m[3]) : null, pv: line.split(' pv ')[1]?.trim().split(' ') || [] };
+          }
+          if (searching && line.startsWith('bestmove')) {
+            clearTimeout(tid);
+            proc.kill();
+            resolve({ best: multiPV['1']||null, second: multiPV['2']||null, third: multiPV['3']||null });
+          }
         }
-      };
-
-      // Register listeners BEFORE sending commands — engine may respond instantly
-      this._on(/^info/, infoHandler);
-      this._once(/^bestmove/, () => {
-        clearTimeout(timeout);
-        this._off(infoHandler);
-        resolve({
-          best:   multiPV['1'] || null,
-          second: multiPV['2'] || null,
-          third:  multiPV['3'] || null,
-        });
       });
+      proc.on('error', e => { clearTimeout(tid); reject(e); });
+      proc.stdin.write('uci\n');
+    });
+  }
 
-      this.send('setoption name MultiPV value 3');
-      this.send(posCmd);
-      this.send(`go depth ${SCAN_DEPTH} movetime ${SCAN_TIME} nodes ${SCAN_NODES}`);
+  // Flush any in-flight search and sync Stockfish state before next analyze.
+  // Sends 'stop' (harmless if idle) then waits for 'readyok'.
+  async sync() {
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('sync timeout')), 8000);
+      this._once('readyok', () => { clearTimeout(t); resolve(); });
+      this.send('stop');
+      this.send('isready');
     });
   }
 
@@ -278,13 +304,16 @@ async function extractPuzzlesFromGame(game, sf, stats) {
     const sideToMove   = chess.turn() === 'w' ? 'white' : 'black';
 
     // ── Analyze current position ──────────────────────────────────────────────
+    log(`  Ply ${ply}/${uciMoves.length}: ${currentFen.slice(0,40)}…`);
     let analysis;
     try {
       analysis = await sf.analyze(START_FEN, currentMoves);
       stats.positionsAnalyzed++;
     } catch(e) {
-      log(`  SF error at ply ${ply}: ${e.message}`);
-      break;
+      const msg = `  SF error at ply ${ply}: ${e.message}`;
+      log(msg);
+      process.stderr.write(msg + '\n' + (e.stack || '') + '\n');
+      continue;  // skip this position, don't abort the whole game
     }
 
     const bestResult = analysis.best;
