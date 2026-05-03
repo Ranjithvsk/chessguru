@@ -168,7 +168,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
   #hdr nav{overflow-x:auto;white-space:nowrap;font-size:11px}
   #hdr nav a{padding:4px 8px;font-size:11px}
   .pb{flex-direction:column!important}
-  .pb .cg-wrap,.pb #board,.cg-wrap{width:100vw!important;height:100vw!important;max-width:100vw}
+  .pb .cg-wrap,.pb #board{width:100vw!important;height:100vw!important;max-width:100vw}
   .ps,.pt,.sr{width:100%!important;max-width:100%!important;border-left:none!important;border-top:1px solid var(--border)}
   .explainer-grid{grid-template-columns:1fr!important}
 }
@@ -209,6 +209,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
 .log-fen-board img{width:56px;height:56px;display:block}
 .log-hdr-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:9px;color:var(--dim)}
 </style>
+<script src="/js/chessground.min.js"></script>
 </head>
 <body>
 <header id="hdr">
@@ -275,7 +276,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
       <div style="font-size:9px;color:var(--dim)" id="x-prog">Not running</div>
     </div>
   </div>
-  <div class="xlog" id="xlog"><span style="color:var(--dim)">No extractor log yet...</span></div>
+  <div class="xlog" id="xlog"></div>
 </div>
 
 <!-- RECENT ENGINE GAMES -->
@@ -470,13 +471,28 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
       <span style="font-size:9px;color:var(--dim)" id="log-tick"></span>
     </div>
   </div>
-  <div class="cb" style="padding:10px">
-    <div class="log-hdr-row">
-      <span>🟢 green = puzzle found · 🟡 yellow = analyzing · 🔵 cyan = engine output · 🔴 red = error · <span style="color:#4a4a4a">■</span> gray = info</span>
+  <div class="cb" style="padding:12px">
+    <!-- Live board row -->
+    <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">
+      <div style="flex-shrink:0">
+        <div style="font-size:9px;color:var(--dim);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">Live Position</div>
+        <div id="liveCgWrap" style="width:180px;height:180px;position:relative;border-radius:4px;overflow:hidden;border:1px solid var(--border)"></div>
+        <div id="livePlyLabel" style="font-size:9px;color:var(--dim);margin-top:4px;text-align:center;font-family:monospace">waiting...</div>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:9px;color:var(--dim);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">Current Game</div>
+        <div id="liveGameLabel" style="font-size:11px;color:var(--text);font-family:monospace;word-break:break-all;line-height:1.4">&mdash;</div>
+        <div id="liveMoveList" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:3px;max-height:60px;overflow:hidden"></div>
+      </div>
+    </div>
+    <!-- Legend + auto-scroll -->
+    <div class="log-hdr-row" style="margin-bottom:6px">
+      <span style="font-size:9px;color:var(--dim)">🟢 found · 🟡 analyzing · 🔵 ply/SF · 🔴 error · ◼ info</span>
       <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:9px;color:var(--dim)"><input type="checkbox" id="logAutoScroll" checked style="accent-color:var(--accent)"> Auto-scroll</label>
     </div>
+    <!-- Terminal — id=logTerm, completely standalone -->
     <div class="log-term" id="logTerm">
-      <div class="ll gray">Connecting...</div>
+      <div class="ll gray">Waiting for extractor log...</div>
     </div>
   </div>
 </div>
@@ -1078,17 +1094,64 @@ async function loadLog(manual) {
     const term = document.getElementById('logTerm');
     const autoScroll = document.getElementById('logAutoScroll').checked;
     const atBottom = term.scrollHeight - term.clientHeight <= term.scrollTop + 40;
+
     term.innerHTML = lines.length
       ? lines.map(renderLogLine).join('')
       : '<p class="ll gray">No log output yet. Start the extractor to see activity.</p>';
+
     document.getElementById('log-badge').textContent = lines.length + ' lines';
-    document.getElementById('log-tick').textContent = 'Updated ' + new Date().toLocaleTimeString();
+
+    // Parse server timestamp from last line [YYYY-MM-DD HH:MM:SS] → local time
+    const lastLine = lines[lines.length - 1] || '';
+    const tsm = lastLine.match(/\[(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})\]/);
+    const tsStr = tsm
+      ? new Date(Date.UTC(+tsm[1],+tsm[2]-1,+tsm[3],+tsm[4],+tsm[5],+tsm[6])).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})
+      : '';
+    document.getElementById('log-tick').textContent = tsStr ? 'LAST ENTRY ' + tsStr : '';
+
     if (autoScroll && (atBottom || manual)) term.scrollTop = term.scrollHeight;
+
+    // Update live board: find last "Ply N/N: <fen>" line
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const m = lines[i].match(/Ply (\d+\/\d+): ([rnbqkpRNBQKP1-8\/]{8,}(?:\s+[bw])?)/);
+      if (m) {
+        const fen = m[2].trim().split(' ')[0];
+        if (window._liveCG) try { window._liveCG.set({ fen }); } catch(e) {}
+        document.getElementById('livePlyLabel').textContent = 'Ply ' + m[1];
+        break;
+      }
+    }
+    // Update game label: find last "Analyzing game ...: NAME" line
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const m = lines[i].match(/Analyzing game [^:]+:\s*(.+)/);
+      if (m) {
+        document.getElementById('liveGameLabel').textContent = m[1].trim();
+        break;
+      }
+    }
   } catch(e) { document.getElementById('log-tick').textContent = 'Error'; }
   logLock = false;
 }
 
-// Init
+// ── Init Chessground live board ───────────────────────────────────────────────
+// window.Chessground is the module object; the constructor is .Chessground()
+(function initLiveCG() {
+  const cgEl = document.getElementById('liveCgWrap');
+  if (!cgEl || !window.Chessground) return;
+  const CG = window.Chessground.Chessground || window.Chessground;
+  if (typeof CG !== 'function') return;
+  // Apply grayscale board: white bg + gray dark squares via inline style
+  cgEl.style.cssText += ';background-color:#ffffff;background-image:url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'2\' height=\'2\'%3E%3Crect width=\'1\' height=\'1\' fill=\'%238c8c8c\'/%3E%3Crect x=\'1\' y=\'1\' width=\'1\' height=\'1\' fill=\'%238c8c8c\'/%3E%3C/svg%3E");background-size:12.5% 12.5%';
+  window._liveCG = CG(cgEl, {
+    fen: 'start',
+    viewOnly: true,
+    coordinates: false,
+    animation: { enabled: true, duration: 400 },
+    highlight: { lastMove: false, check: false },
+    movable: { free: false, color: undefined },
+  });
+})();
+
 loadAll();
 loadLog(true);
 toggleAuto();
