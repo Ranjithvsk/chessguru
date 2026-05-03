@@ -3,18 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
 <title>ChessGuru — Opening Explorer</title>
 <style>
-:root{--bg:#161512;--bg2:#1e1b17;--bg3:#272320;--bg4:#312e28;--border:#3d3830;--text:#bfb89a;--text2:#8a8070;--text3:#5a5248;--accent:#c9a227;--accent2:#a07820;--white:#ede0c8;--green:#4a9c5d;--red:#c04040;--draw:#7a7060;--panel-w:340px}
+:root{--w:#fff;--b:#000;--b2:#0f0f0f;--b3:#1a1a1a;--b4:#2a2a2a;--g1:#888;--g2:#555;--r-sm:5px;--bg:#161512;--bg2:#1e1b17;--bg3:#272320;--bg4:#312e28;--border:#3d3830;--text:#bfb89a;--text2:#8a8070;--text3:#5a5248;--accent:#c9a227;--accent2:#a07820;--white:#ede0c8;--green:#4a9c5d;--red:#c04040;--draw:#7a7060;--panel-w:340px}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;font-size:14px;min-height:100vh;overflow-x:hidden}
-nav{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 20px;height:48px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
-.nav-logo{font-size:18px;font-weight:700;color:var(--accent);letter-spacing:-0.5px}
-.nav-logo span{color:var(--white);font-weight:400}
-.nav-links{display:flex;gap:4px}
-.nav-links a{color:var(--text2);text-decoration:none;padding:6px 12px;border-radius:6px;font-size:13px;transition:background .15s,color .15s}
-.nav-links a:hover{background:var(--bg3);color:var(--text)}
-.nav-links a.active{background:var(--bg4);color:var(--accent)}
+#hdr{height:54px;display:flex;align-items:center;padding:0 28px;background:#000;border-bottom:1px solid #2a2a2a;position:sticky;top:0;z-index:100}
+#hdr .logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit;margin-right:4px}
+#hdr .logo-sq{width:30px;height:30px;border-radius:5px;background:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;color:#000;line-height:1;flex-shrink:0}
+#hdr .logo-name{font-family:"DM Serif Display",serif;font-size:17px;color:#fff;letter-spacing:.02em}
+#hdr nav{display:flex;align-items:center;gap:4px;flex:1;margin-left:8px}
+#hdr nav a{color:#888;font-size:12px;font-weight:500;text-decoration:none;padding:4px 10px;border-radius:5px;transition:color .15s,background .15s}
+#hdr nav a:hover,#hdr nav a.active{color:#fff;background:#1a1a1a}
 .engine-badge{font-size:11px;background:var(--bg4);border:1px solid var(--border);color:var(--text2);padding:3px 8px;border-radius:4px}
 .engine-badge.loaded{color:var(--accent);border-color:var(--accent2)}
 .app{display:flex;height:calc(100vh - 48px);overflow:hidden}
@@ -110,15 +111,18 @@ input:checked~.toggle-thumb{transform:translateX(16px);background:var(--white)}
 </style>
 </head>
 <body>
-<nav>
-  <div class="nav-logo">Chess<span>Guru</span></div>
-  <div class="nav-links">
+<header id="hdr">
+  <a class="logo" href="/"><div class="logo-sq">♟</div><span class="logo-name">ChessGuru</span></a>
+  <nav>
     <a href="/">Puzzles</a>
+    <a href="/theme">Themes</a>
     <a href="/blindfold">Blindfold</a>
-    <a href="/opening" class="active">Opening Explorer</a>
-  </div>
-  <div class="engine-badge" id="engineBadge">Engine loading...</div>
-</nav>
+    <a href="/opening" class="active">Opening</a>
+    <a href="/engine-battle">Engine Battle</a>
+    <a href="/puzzle-status">Puzzle Factory</a>
+  </nav>
+  <div style="margin-left:auto" id="engineBadge" class="engine-badge">Engine loading...</div>
+</header>
 <div class="app">
   <div class="eval-bar-wrap">
     <div class="eval-bar-white" id="evalBarWhite" style="height:50%"></div>

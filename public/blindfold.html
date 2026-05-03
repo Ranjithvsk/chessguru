@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
 <title>ChessGuru - Blindfold</title>
 <link rel="stylesheet" href="/css/chessground.css">
 <link rel="stylesheet" href="/css/theme.css">
@@ -11,12 +12,13 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#161512;color:#bababa;font-family:"Noto Sans",sans-serif;min-height:100vh}
-#topBar{display:flex;align-items:center;justify-content:space-between;background:#1f1e1c;border-bottom:1px solid #3d3a35;padding:8px 16px;flex-wrap:wrap;gap:8px}
-#logo{font-size:18px;font-weight:700;color:#f0d9b5}
-#logo span{color:#759900}
-#streak{font-size:13px;color:#e8a030;font-weight:600}
-#topLeft,#topRight{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-#topBar a{color:#bababa;text-decoration:none;font-size:14px;opacity:.7}
+#hdr{height:54px;display:flex;align-items:center;padding:0 28px;background:#000;border-bottom:1px solid #2a2a2a;position:sticky;top:0;z-index:100}
+#hdr .logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit;margin-right:4px}
+#hdr .logo-sq{width:30px;height:30px;border-radius:5px;background:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;color:#000;line-height:1;flex-shrink:0}
+#hdr .logo-name{font-family:"DM Serif Display",serif;font-size:17px;color:#fff;letter-spacing:.02em}
+#hdr nav{display:flex;align-items:center;gap:4px;flex:1;margin-left:8px}
+#hdr nav a{color:#888;font-size:12px;font-weight:500;text-decoration:none;padding:4px 10px;border-radius:5px;transition:color .15s,background .15s}
+#hdr nav a:hover,#hdr nav a.active{color:#fff;background:#1a1a1a}
 .btn{background:#3d3a35;border:none;color:#bababa;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:13px;white-space:nowrap}
 .btn:hover{background:#4a4744}
 .btn.on{background:#759900;color:#fff}
@@ -68,8 +70,8 @@ body.peeking cg-board piece{opacity:1!important;pointer-events:auto!important}
 @media(max-width:780px){#main{flex-direction:column;align-items:center}#boardWrap{width:min(98vw,480px);height:min(98vw,480px)}#rightCol{flex:unset;width:min(98vw,480px);flex-direction:row;flex-wrap:wrap}.panel{flex:1;min-width:160px}}
 </style>
 <style>
-:root{--cb:hsl(37,10%,8%);--cz:hsl(37,5%,19%);--cz2:hsl(37,5%,15%);--cp:hsl(37,7%,22%);--pri:hsl(209,79%,56%);--pri2:hsl(209,49%,40%);--cf:hsl(0,0%,73%);--cfd:hsl(0,0%,58%);--cfc:hsl(0,0%,87%);--ok:hsl(88,62%,37%);--err:hsl(0,60%,50%);--bdr:rgba(255,255,255,.1)}
-*{box-sizing:border-box;margin:0;padding:0}body{background:var(--cb);color:var(--cf);font-family:"Noto Sans",sans-serif;font-size:13px}
+:root{--w:#fff;--b:#000;--b2:#0f0f0f;--b3:#1a1a1a;--b4:#2a2a2a;--g1:#888;--g2:#555;--r-sm:5px;--cb:hsl(37,10%,8%);--cz:hsl(37,5%,19%);--cz2:hsl(37,5%,15%);--cp:hsl(37,7%,22%);--pri:hsl(209,79%,56%);--pri2:hsl(209,49%,40%);--cf:hsl(0,0%,73%);--cfd:hsl(0,0%,58%);--cfc:hsl(0,0%,87%);--ok:hsl(88,62%,37%);--err:hsl(0,60%,50%);--bdr:rgba(255,255,255,.1)}
+*{box-sizing:border-box;margin:0;padding:0}body{background:var(--cb);color:var(--cf);font-family:"Inter",sans-serif;font-size:13px}
 a{color:var(--pri);text-decoration:none}
 #hdr{display:flex;align-items:center;justify-content:space-between;padding:0 16px;height:40px;background:hsl(37,7%,14%);border-bottom:1px solid var(--bdr);position:sticky;top:0;z-index:100}
 .logo{color:var(--cfc);font-size:16px;font-weight:700}
@@ -147,10 +149,24 @@ cg-container > svg,cg-container > svg > defs{overflow:hidden;position:absolute;t
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body class="blindfold is2d">
-<div id="topBar">
-<div id="topLeft"><span id="logo">Chess<span>Guru</span> <small style="font-size:12px;color:#888">Blindfold</small></span><a href="/">Back to Normal</a></div>
-<div id="topRight"><a id="bfLoginBtn" href="/login" style="display:none;color:var(--cfd);padding:4px 10px;border-radius:3px;text-decoration:none;background:var(--cz);border:1px solid var(--bdr);font-size:13px;white-space:nowrap">Sign in</a><a href="/login" id="bfUserDisplay" style="color:var(--cfc);font-weight:600;text-decoration:none;font-size:13px;margin-right:6px"></a><span id="streak">Streak: 0</span><button class="btn" id="btnVoice">Voice OFF</button><button class="btn" id="btnFlip">Flip</button></div>
-</div>
+<header id="hdr">
+  <a class="logo" href="/"><div class="logo-sq">♟</div><span class="logo-name">ChessGuru</span></a>
+  <nav>
+    <a href="/">Puzzles</a>
+    <a href="/theme">Themes</a>
+    <a href="/blindfold" class="active">Blindfold</a>
+    <a href="/opening">Opening</a>
+    <a href="/engine-battle">Engine Battle</a>
+    <a href="/puzzle-status">Puzzle Factory</a>
+  </nav>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+    <span id="streak" style="font-size:12px;color:#e8a030;font-weight:600">Streak: 0</span>
+    <button class="btn" id="btnVoice">Voice OFF</button>
+    <button class="btn" id="btnFlip">Flip</button>
+    <a id="bfLoginBtn" href="/login" style="display:none;color:#888;padding:4px 10px;border-radius:5px;text-decoration:none;border:1px solid #2a2a2a;font-size:12px;white-space:nowrap">Sign in</a>
+    <a href="/login" id="bfUserDisplay" style="color:#fff;font-weight:600;text-decoration:none;font-size:12px"></a>
+  </div>
+</header>
 <div id="main">
 <div id="leftCol">
 <div id="themeRow"><select id="themeSelect" style="width:100%;background:#1f1e1c;color:#bababa;border:1px solid #3d3a35;border-radius:4px;padding:6px 10px;font-size:13px;cursor:pointer"></select></div><div id="sliderRow"><label>Max pieces on board:</label><select id="pieceSlider" style="background:#2a2a2a;color:#fff;border:1px solid #444;border-radius:4px;padding:4px 8px;font-size:13px;cursor:pointer"><option value="1">&le;4 pieces</option><option value="2">&le;5 pieces</option><option value="3">&le;6 pieces</option><option value="4">&le;7 pieces</option><option value="5" selected>&le;8 pieces</option><option value="6">&le;10 pieces</option><option value="7">&le;12 pieces</option><option value="8">&le;16 pieces</option><option value="9">&le;20 pieces</option></select><span id="sliderVal" style="display:none"></span></div>
