@@ -7,6 +7,7 @@ const MongoStore=require("connect-mongo").default;
 const {register,signin,me,logout}=require("./auth");
 require("dotenv").config();
 const app=express(),PORT=process.env.PORT||3000;
+app.set("trust proxy", 1);
 app.use(helmet({contentSecurityPolicy:false,crossOriginEmbedderPolicy:false}));
 app.use(cors({origin:true,credentials:true}));
 app.use(express.json());
@@ -21,9 +22,12 @@ mongoose.connect("mongodb://localhost:27017/chessguru").then(()=>{
   }));
   const routes=require("./routes");
   
+app.get('/status',(req,res)=>res.sendFile(__dirname+'/public/puzzle-status.html'));
 app.get('/puzzle-status',(req,res)=>res.sendFile(__dirname+'/public/puzzle-status.html'));
+app.get('/board-editor',(req,res)=>res.sendFile(__dirname+'/public/board_editor.html'));
 app.get('/engine-battle',(req,res)=>res.sendFile(__dirname+'/public/engine_battle.html'));
 app.get('/opening',(req,res)=>res.sendFile(__dirname+'/public/opening.html'));
+app.get('/terminal',(req,res)=>res.sendFile(__dirname+'/public/terminal.html'));
 app.use(express.static("public"));
   // Auth endpoints
   app.post('/auth/register', authLimiter, register);

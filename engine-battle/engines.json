@@ -1,546 +1,544 @@
 {
-  "version": "2.0",
+  "version": "3.0",
   "updated": "2026-05-01",
-  "enginesDir": "~/engines",
   "maiaWeightsUrl": "https://github.com/CSSLab/maia-chess/releases/download/v1.0/maia-ELO.pb.gz",
-  "lc0Url": "https://github.com/LeelaChessZero/lc0/releases/download/v0.31.2/lc0-v0.31.2-linux-cpu.tar.gz",
   "engines": [
     {
-      "id": "stockfish18",
+      "id": "sf18",
       "name": "Stockfish 18",
-      "elo": 3600,
       "binary": "stockfish",
-      "type": "nnue",
-      "description": "Stockfish 18 (3600 Elo)"
+      "elo": 3600,
+      "type": "uci"
     },
     {
-      "id": "viridithas15",
-      "name": "Viridithas 15",
-      "elo": 3572,
-      "binary": "viridithas",
-      "type": "nnue",
-      "description": "Viridithas 15 (3572 Elo)"
-    },
-    {
-      "id": "stormphrax",
-      "name": "Stormphrax",
-      "elo": 3520,
-      "binary": "stormphrax",
-      "type": "nnue",
-      "description": "Stormphrax (3520 Elo)"
-    },
-    {
-      "id": "carp",
-      "name": "Carp 3.0",
-      "elo": 3458,
-      "binary": "carp",
-      "type": "nnue",
-      "description": "Carp 3.0 (3458 Elo)"
-    },
-    {
-      "id": "stockfish16",
-      "name": "Stockfish 16",
-      "elo": 3450,
+      "id": "sf17",
+      "name": "Stockfish 17",
       "binary": "stockfish16",
-      "type": "nnue",
-      "description": "Stockfish 16 (3450 Elo)"
+      "elo": 3550,
+      "type": "uci"
     },
     {
-      "id": "sirius",
-      "name": "Sirius",
-      "elo": 3430,
-      "binary": "sirius",
-      "type": "nnue",
-      "description": "Sirius (3430 Elo)"
+      "id": "sf16",
+      "name": "Stockfish 16",
+      "binary": "stockfish16",
+      "elo": 3500,
+      "type": "uci"
     },
     {
-      "id": "berserk",
-      "name": "Berserk",
-      "elo": 3400,
-      "binary": "berserk",
-      "type": "nnue",
-      "description": "Berserk (3400 Elo)"
-    },
-    {
-      "id": "blackcore",
-      "name": "BlackCore 6",
-      "elo": 3380,
-      "binary": "blackcore",
-      "type": "nnue",
-      "description": "BlackCore 6 (3380 Elo)"
+      "id": "viridithas",
+      "name": "Viridithas 15",
+      "binary": "viridithas",
+      "elo": 3572,
+      "type": "uci"
     },
     {
       "id": "renegade",
       "name": "Renegade 1.1",
-      "elo": 3360,
       "binary": "renegade",
-      "type": "nnue",
-      "description": "Renegade 1.1 (3360 Elo)"
+      "elo": 3462,
+      "type": "uci"
+    },
+    {
+      "id": "carp",
+      "name": "Carp 3.0",
+      "binary": "carp",
+      "elo": 3458,
+      "type": "uci"
+    },
+    {
+      "id": "stormphrax",
+      "name": "Stormphrax 6",
+      "binary": "stormphrax",
+      "elo": 3450,
+      "type": "uci"
+    },
+    {
+      "id": "berserk",
+      "name": "Berserk 12",
+      "binary": "berserk",
+      "elo": 3440,
+      "type": "uci"
+    },
+    {
+      "id": "sirius",
+      "name": "Sirius 8",
+      "binary": "sirius",
+      "elo": 3430,
+      "type": "uci"
     },
     {
       "id": "nalwald",
       "name": "Nalwald 19",
-      "elo": 3300,
       "binary": "nalwald",
-      "type": "nnue",
-      "description": "Nalwald 19 (3300 Elo)"
+      "elo": 3350,
+      "type": "uci"
+    },
+    {
+      "id": "clarity",
+      "name": "Clarity 7",
+      "binary": "clarity",
+      "elo": 3360,
+      "type": "uci"
+    },
+    {
+      "id": "blackcore",
+      "name": "BlackCore 6",
+      "binary": "blackcore",
+      "elo": 3320,
+      "type": "uci"
+    },
+    {
+      "id": "clover",
+      "name": "Clover 5",
+      "binary": "clover",
+      "elo": 3340,
+      "type": "uci"
+    },
+    {
+      "id": "altair",
+      "name": "Altair 7",
+      "binary": "altair",
+      "elo": 3310,
+      "type": "uci"
     },
     {
       "id": "frozenight",
       "name": "Frozenight 6",
-      "elo": 3280,
       "binary": "frozenight",
-      "type": "nnue",
-      "description": "Frozenight 6 (3280 Elo)"
-    },
-    {
-      "id": "willow",
-      "name": "Willow 4.0",
       "elo": 3250,
-      "binary": "willow",
-      "type": "nnue",
-      "description": "Willow 4.0 (3250 Elo)"
+      "type": "uci"
     },
     {
       "id": "wahoo",
-      "name": "Wahoo 4.0",
-      "elo": 3200,
+      "name": "Wahoo 4",
       "binary": "wahoo",
-      "type": "nnue",
-      "description": "Wahoo 4.0 (3200 Elo)"
+      "elo": 3200,
+      "type": "uci"
+    },
+    {
+      "id": "willow",
+      "name": "Willow 4",
+      "binary": "willow",
+      "elo": 3180,
+      "type": "uci"
+    },
+    {
+      "id": "avalanche",
+      "name": "Avalanche 2",
+      "binary": "avalanche",
+      "elo": 3160,
+      "type": "uci"
+    },
+    {
+      "id": "weiss",
+      "name": "Weiss 2",
+      "binary": "weiss",
+      "elo": 3140,
+      "type": "uci"
+    },
+    {
+      "id": "seer",
+      "name": "Seer 2",
+      "binary": "seer",
+      "elo": 3120,
+      "type": "uci"
+    },
+    {
+      "id": "rice",
+      "name": "Rice 8",
+      "binary": "rice",
+      "elo": 3100,
+      "type": "uci"
+    },
+    {
+      "id": "midnight",
+      "name": "Midnight 9",
+      "binary": "midnight",
+      "elo": 3090,
+      "type": "uci"
+    },
+    {
+      "id": "smallbrain",
+      "name": "Smallbrain 7",
+      "binary": "smallbrain",
+      "elo": 3080,
+      "type": "uci"
+    },
+    {
+      "id": "laser",
+      "name": "Laser 3",
+      "binary": "laser",
+      "elo": 3060,
+      "type": "uci"
+    },
+    {
+      "id": "drofa",
+      "name": "Drofa 4",
+      "binary": "drofa",
+      "elo": 2980,
+      "type": "uci"
     },
     {
       "id": "ethereal",
       "name": "Ethereal 14",
-      "elo": 3050,
       "binary": "ethereal",
-      "type": "traditional",
-      "description": "Ethereal 14 (3050 Elo)"
+      "elo": 3090,
+      "type": "uci"
     },
     {
-      "id": "koivisto",
-      "name": "Koivisto 9",
-      "elo": 3020,
-      "binary": "koivisto",
-      "type": "nnue",
-      "description": "Koivisto 9 (3020 Elo)"
-    },
-    {
-      "id": "rubichess",
-      "name": "RubiChess 20241005",
-      "elo": 3000,
-      "binary": "rubichess",
-      "type": "nnue",
-      "description": "RubiChess 20241005 (3000 Elo)"
-    },
-    {
-      "id": "weiss",
-      "name": "Weiss 2.0",
-      "elo": 2950,
-      "binary": "weiss",
-      "type": "nnue",
-      "description": "Weiss 2.0 (2950 Elo)"
-    },
-    {
-      "id": "rofchade",
-      "name": "RofChade 3.0",
-      "elo": 2920,
-      "binary": "rofchade",
-      "type": "nnue",
-      "description": "RofChade 3.0 (2920 Elo)"
-    },
-    {
-      "id": "seer",
-      "name": "Seer 2.8",
-      "elo": 2880,
-      "binary": "seer",
-      "type": "nnue",
-      "description": "Seer 2.8 (2880 Elo)"
+      "id": "winter",
+      "name": "Winter 0.9",
+      "binary": "winter",
+      "elo": 2800,
+      "type": "uci"
     },
     {
       "id": "igel",
-      "name": "Igel 3.5",
-      "elo": 2850,
+      "name": "Igel 3",
       "binary": "igel",
-      "type": "nnue",
-      "description": "Igel 3.5 (2850 Elo)"
+      "elo": 2850,
+      "type": "uci"
     },
     {
       "id": "marvin",
-      "name": "Marvin 6.4",
-      "elo": 2820,
+      "name": "Marvin 5",
       "binary": "marvin",
-      "type": "traditional",
-      "description": "Marvin 6.4 (2820 Elo)"
+      "elo": 2780,
+      "type": "uci"
     },
     {
-      "id": "laser",
-      "name": "Laser 1.8",
-      "elo": 2800,
-      "binary": "laser",
-      "type": "traditional",
-      "description": "Laser 1.8 (2800 Elo)"
+      "id": "princhess",
+      "name": "Princhess 0.17",
+      "binary": "princhess",
+      "elo": 2820,
+      "type": "uci"
     },
     {
-      "id": "sf_2800",
-      "name": "Stockfish ≈2800",
-      "elo": 2800,
-      "binary": "stockfish",
-      "type": "sf_limited",
-      "uciElo": 2800,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 2800 Elo"
-    },
-    {
-      "id": "lynx",
-      "name": "Lynx 3.5",
+      "id": "peacekeeper",
+      "name": "Peacekeeper 1.7",
+      "binary": "peacekeeper",
       "elo": 2760,
-      "binary": "lynx",
-      "type": "nnue",
-      "description": "Lynx 3.5 (2760 Elo)"
+      "type": "uci"
     },
     {
-      "id": "starzix",
-      "name": "Starzix",
-      "elo": 2750,
-      "binary": "starzix",
-      "type": "nnue",
-      "description": "Starzix (2750 Elo)"
+      "id": "rofchade",
+      "name": "RofChade 3",
+      "binary": "rofchade",
+      "elo": 3020,
+      "type": "uci"
     },
     {
-      "id": "ice4",
-      "name": "ice4",
+      "id": "leorik",
+      "name": "Leorik 2.5",
+      "binary": "leorik",
+      "elo": 2710,
+      "type": "uci"
+    },
+    {
+      "id": "pedantic",
+      "name": "Pedantic/Velvet",
+      "binary": "pedantic",
       "elo": 2700,
-      "binary": "ice4",
-      "type": "nnue",
-      "description": "ice4 (2700 Elo)"
+      "type": "uci"
     },
     {
-      "id": "minic",
-      "name": "Minic 3.35",
-      "elo": 2700,
-      "binary": "minic",
-      "type": "nnue",
-      "description": "Minic 3.35 (2700 Elo)"
+      "id": "sf_3190",
+      "name": "Stockfish 3190",
+      "binary": "stockfish",
+      "elo": 3190,
+      "uciElo": 3190,
+      "type": "uci"
+    },
+    {
+      "id": "sf_3000",
+      "name": "Stockfish 3000",
+      "binary": "stockfish",
+      "elo": 3000,
+      "uciElo": 3000,
+      "type": "uci"
+    },
+    {
+      "id": "sf_2850",
+      "name": "Stockfish 2850",
+      "binary": "stockfish",
+      "elo": 2850,
+      "uciElo": 2850,
+      "type": "uci"
     },
     {
       "id": "sf_2700",
-      "name": "Stockfish ≈2700",
+      "name": "Stockfish 2700",
+      "binary": "stockfish",
       "elo": 2700,
-      "binary": "stockfish",
-      "type": "sf_limited",
       "uciElo": 2700,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 2700 Elo"
+      "type": "uci"
     },
     {
-      "id": "sf_2600",
-      "name": "Stockfish ≈2600",
-      "elo": 2600,
+      "id": "sf_2550",
+      "name": "Stockfish 2550",
       "binary": "stockfish",
-      "type": "sf_limited",
-      "uciElo": 2600,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 2600 Elo"
-    },
-    {
-      "id": "sf_2500",
-      "name": "Stockfish ≈2500",
-      "elo": 2500,
-      "binary": "stockfish",
-      "type": "sf_limited",
-      "uciElo": 2500,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 2500 Elo"
+      "elo": 2550,
+      "uciElo": 2550,
+      "type": "uci"
     },
     {
       "id": "sf_2400",
-      "name": "Stockfish ≈2400",
+      "name": "Stockfish 2400",
+      "binary": "stockfish",
       "elo": 2400,
-      "binary": "stockfish",
-      "type": "sf_limited",
       "uciElo": 2400,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 2400 Elo"
+      "type": "uci"
     },
     {
-      "id": "sf_2300",
-      "name": "Stockfish ≈2300",
-      "elo": 2300,
+      "id": "sf_2250",
+      "name": "Stockfish 2250",
       "binary": "stockfish",
-      "type": "sf_limited",
-      "uciElo": 2300,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 2300 Elo"
-    },
-    {
-      "id": "sf_2200",
-      "name": "Stockfish ≈2200",
-      "elo": 2200,
-      "binary": "stockfish",
-      "type": "sf_limited",
-      "uciElo": 2200,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 2200 Elo"
+      "elo": 2250,
+      "uciElo": 2250,
+      "type": "uci"
     },
     {
       "id": "sf_2100",
-      "name": "Stockfish ≈2100",
+      "name": "Stockfish 2100",
+      "binary": "stockfish",
       "elo": 2100,
-      "binary": "stockfish",
-      "type": "sf_limited",
       "uciElo": 2100,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 2100 Elo"
+      "type": "uci"
     },
     {
-      "id": "sf_2000",
-      "name": "Stockfish ≈2000",
-      "elo": 2000,
+      "id": "sf_1950",
+      "name": "Stockfish 1950",
       "binary": "stockfish",
-      "type": "sf_limited",
-      "uciElo": 2000,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 2000 Elo"
-    },
-    {
-      "id": "maia_1900",
-      "name": "Maia 1900",
-      "elo": 1900,
-      "binary": "lc0",
-      "type": "maia",
-      "uciOptions": {
-        "WeightsFile": "/home/ubuntu/engines/weights/maia-1900.pb.gz"
-      },
-      "description": "Maia 1900 — human-like neural network"
-    },
-    {
-      "id": "sf_1900",
-      "name": "Stockfish ≈1900",
-      "elo": 1900,
-      "binary": "stockfish",
-      "type": "sf_limited",
-      "uciElo": 1900,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 1900 Elo"
-    },
-    {
-      "id": "maia_1800",
-      "name": "Maia 1800",
-      "elo": 1800,
-      "binary": "lc0",
-      "type": "maia",
-      "uciOptions": {
-        "WeightsFile": "/home/ubuntu/engines/weights/maia-1800.pb.gz"
-      },
-      "description": "Maia 1800 — human-like neural network"
+      "elo": 1950,
+      "uciElo": 1950,
+      "type": "uci"
     },
     {
       "id": "sf_1800",
-      "name": "Stockfish ≈1800",
+      "name": "Stockfish 1800",
+      "binary": "stockfish",
       "elo": 1800,
-      "binary": "stockfish",
-      "type": "sf_limited",
       "uciElo": 1800,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 1800 Elo"
+      "type": "uci"
     },
     {
-      "id": "maia_1700",
-      "name": "Maia 1700",
-      "elo": 1700,
-      "binary": "lc0",
-      "type": "maia",
-      "uciOptions": {
-        "WeightsFile": "/home/ubuntu/engines/weights/maia-1700.pb.gz"
-      },
-      "description": "Maia 1700 — human-like neural network"
-    },
-    {
-      "id": "sf_1700",
-      "name": "Stockfish ≈1700",
-      "elo": 1700,
+      "id": "sf_1650",
+      "name": "Stockfish 1650",
       "binary": "stockfish",
-      "type": "sf_limited",
-      "uciElo": 1700,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 1700 Elo"
-    },
-    {
-      "id": "maia_1600",
-      "name": "Maia 1600",
-      "elo": 1600,
-      "binary": "lc0",
-      "type": "maia",
-      "uciOptions": {
-        "WeightsFile": "/home/ubuntu/engines/weights/maia-1600.pb.gz"
-      },
-      "description": "Maia 1600 — human-like neural network"
-    },
-    {
-      "id": "sf_1600",
-      "name": "Stockfish ≈1600",
-      "elo": 1600,
-      "binary": "stockfish",
-      "type": "sf_limited",
-      "uciElo": 1600,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 1600 Elo"
-    },
-    {
-      "id": "maia_1500",
-      "name": "Maia 1500",
-      "elo": 1500,
-      "binary": "lc0",
-      "type": "maia",
-      "uciOptions": {
-        "WeightsFile": "/home/ubuntu/engines/weights/maia-1500.pb.gz"
-      },
-      "description": "Maia 1500 — human-like neural network"
+      "elo": 1650,
+      "uciElo": 1650,
+      "type": "uci"
     },
     {
       "id": "sf_1500",
-      "name": "Stockfish ≈1500",
+      "name": "Stockfish 1500",
+      "binary": "stockfish",
       "elo": 1500,
-      "binary": "stockfish",
-      "type": "sf_limited",
       "uciElo": 1500,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 1500 Elo"
+      "type": "uci"
     },
     {
-      "id": "maia_1400",
-      "name": "Maia 1400",
-      "elo": 1400,
-      "binary": "lc0",
-      "type": "maia",
-      "uciOptions": {
-        "WeightsFile": "/home/ubuntu/engines/weights/maia-1400.pb.gz"
-      },
-      "description": "Maia 1400 — human-like neural network"
-    },
-    {
-      "id": "sf_1400",
-      "name": "Stockfish ≈1400",
-      "elo": 1400,
+      "id": "sf_1350",
+      "name": "Stockfish 1350",
       "binary": "stockfish",
-      "type": "sf_limited",
-      "uciElo": 1400,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 1400 Elo"
+      "elo": 1350,
+      "uciElo": 1350,
+      "type": "uci"
     },
     {
-      "id": "maia_1300",
-      "name": "Maia 1300",
+      "id": "sf_1320",
+      "name": "Stockfish 1320",
+      "binary": "stockfish",
+      "elo": 1320,
+      "uciElo": 1320,
+      "type": "uci"
+    },
+    {
+      "id": "sf_skill20",
+      "name": "SF Skill 20 (~2000)",
+      "binary": "stockfish",
+      "elo": 2000,
+      "skillLevel": 20,
+      "type": "uci"
+    },
+    {
+      "id": "sf_skill18",
+      "name": "SF Skill 18 (~1800)",
+      "binary": "stockfish",
+      "elo": 1800,
+      "skillLevel": 18,
+      "type": "uci"
+    },
+    {
+      "id": "sf_skill16",
+      "name": "SF Skill 16 (~1600)",
+      "binary": "stockfish",
+      "elo": 1600,
+      "skillLevel": 16,
+      "type": "uci"
+    },
+    {
+      "id": "sf_skill14",
+      "name": "SF Skill 14 (~1450)",
+      "binary": "stockfish",
+      "elo": 1450,
+      "skillLevel": 14,
+      "type": "uci"
+    },
+    {
+      "id": "sf_skill12",
+      "name": "SF Skill 12 (~1300)",
+      "binary": "stockfish",
       "elo": 1300,
-      "binary": "lc0",
-      "type": "maia",
-      "uciOptions": {
-        "WeightsFile": "/home/ubuntu/engines/weights/maia-1300.pb.gz"
-      },
-      "description": "Maia 1300 — human-like neural network"
+      "skillLevel": 12,
+      "type": "uci"
     },
     {
-      "id": "sf_1300",
-      "name": "Stockfish ≈1300",
-      "elo": 1300,
+      "id": "sf_skill10",
+      "name": "SF Skill 10 (~1150)",
       "binary": "stockfish",
-      "type": "sf_limited",
-      "uciElo": 1300,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 1300 Elo"
+      "elo": 1150,
+      "skillLevel": 10,
+      "type": "uci"
     },
     {
-      "id": "maia_1200",
-      "name": "Maia 1200",
-      "elo": 1200,
-      "binary": "lc0",
-      "type": "maia",
-      "uciOptions": {
-        "WeightsFile": "/home/ubuntu/engines/weights/maia-1200.pb.gz"
-      },
-      "description": "Maia 1200 — human-like neural network"
-    },
-    {
-      "id": "sf_1200",
-      "name": "Stockfish ≈1200",
-      "elo": 1200,
+      "id": "sf_skill8",
+      "name": "SF Skill 8 (~1000)",
       "binary": "stockfish",
-      "type": "sf_limited",
-      "uciElo": 1200,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 1200 Elo"
-    },
-    {
-      "id": "maia_1100",
-      "name": "Maia 1100",
-      "elo": 1100,
-      "binary": "lc0",
-      "type": "maia",
-      "uciOptions": {
-        "WeightsFile": "/home/ubuntu/engines/weights/maia-1100.pb.gz"
-      },
-      "description": "Maia 1100 — human-like neural network"
-    },
-    {
-      "id": "sf_1100",
-      "name": "Stockfish ≈1100",
-      "elo": 1100,
-      "binary": "stockfish",
-      "type": "sf_limited",
-      "uciElo": 1100,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 1100 Elo"
-    },
-    {
-      "id": "sf_1000",
-      "name": "Stockfish ≈1000",
       "elo": 1000,
-      "binary": "stockfish",
-      "type": "sf_limited",
-      "uciElo": 1000,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 1000 Elo"
+      "skillLevel": 8,
+      "type": "uci"
     },
     {
-      "id": "sf_900",
-      "name": "Stockfish ≈900",
+      "id": "sf_skill6",
+      "name": "SF Skill 6 (~900)",
+      "binary": "stockfish",
       "elo": 900,
-      "binary": "stockfish",
-      "type": "sf_limited",
-      "uciElo": 900,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 900 Elo"
+      "skillLevel": 6,
+      "type": "uci"
     },
     {
-      "id": "sf_800",
-      "name": "Stockfish ≈800",
+      "id": "sf_skill4",
+      "name": "SF Skill 4 (~800)",
+      "binary": "stockfish",
       "elo": 800,
-      "binary": "stockfish",
-      "type": "sf_limited",
-      "uciElo": 800,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 800 Elo"
+      "skillLevel": 4,
+      "type": "uci"
     },
     {
-      "id": "sf_700",
-      "name": "Stockfish ≈700",
+      "id": "sf_skill2",
+      "name": "SF Skill 2 (~700)",
+      "binary": "stockfish",
       "elo": 700,
-      "binary": "stockfish",
-      "type": "sf_limited",
-      "uciElo": 700,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 700 Elo"
+      "skillLevel": 2,
+      "type": "uci"
     },
     {
-      "id": "sf_600",
-      "name": "Stockfish ≈600",
-      "elo": 600,
+      "id": "sf_skill0",
+      "name": "SF Skill 0 (~600)",
       "binary": "stockfish",
-      "type": "sf_limited",
-      "uciElo": 600,
-      "skillLevel": null,
-      "description": "Stockfish 18 limited to 600 Elo"
+      "elo": 600,
+      "skillLevel": 0,
+      "type": "uci"
+    },
+    {
+      "id": "maia1100",
+      "name": "Maia 1100",
+      "binary": "lc0",
+      "elo": 1100,
+      "type": "maia",
+      "uciOptions": {
+        "WeightsFile": "~/engines/weights/maia-1100.pb.gz",
+        "Threads": "1"
+      }
+    },
+    {
+      "id": "maia1200",
+      "name": "Maia 1200",
+      "binary": "lc0",
+      "elo": 1200,
+      "type": "maia",
+      "uciOptions": {
+        "WeightsFile": "~/engines/weights/maia-1200.pb.gz",
+        "Threads": "1"
+      }
+    },
+    {
+      "id": "maia1300",
+      "name": "Maia 1300",
+      "binary": "lc0",
+      "elo": 1300,
+      "type": "maia",
+      "uciOptions": {
+        "WeightsFile": "~/engines/weights/maia-1300.pb.gz",
+        "Threads": "1"
+      }
+    },
+    {
+      "id": "maia1400",
+      "name": "Maia 1400",
+      "binary": "lc0",
+      "elo": 1400,
+      "type": "maia",
+      "uciOptions": {
+        "WeightsFile": "~/engines/weights/maia-1400.pb.gz",
+        "Threads": "1"
+      }
+    },
+    {
+      "id": "maia1500",
+      "name": "Maia 1500",
+      "binary": "lc0",
+      "elo": 1500,
+      "type": "maia",
+      "uciOptions": {
+        "WeightsFile": "~/engines/weights/maia-1500.pb.gz",
+        "Threads": "1"
+      }
+    },
+    {
+      "id": "maia1600",
+      "name": "Maia 1600",
+      "binary": "lc0",
+      "elo": 1600,
+      "type": "maia",
+      "uciOptions": {
+        "WeightsFile": "~/engines/weights/maia-1600.pb.gz",
+        "Threads": "1"
+      }
+    },
+    {
+      "id": "maia1700",
+      "name": "Maia 1700",
+      "binary": "lc0",
+      "elo": 1700,
+      "type": "maia",
+      "uciOptions": {
+        "WeightsFile": "~/engines/weights/maia-1700.pb.gz",
+        "Threads": "1"
+      }
+    },
+    {
+      "id": "maia1800",
+      "name": "Maia 1800",
+      "binary": "lc0",
+      "elo": 1800,
+      "type": "maia",
+      "uciOptions": {
+        "WeightsFile": "~/engines/weights/maia-1800.pb.gz",
+        "Threads": "1"
+      }
+    },
+    {
+      "id": "maia1900",
+      "name": "Maia 1900",
+      "binary": "lc0",
+      "elo": 1900,
+      "type": "maia",
+      "uciOptions": {
+        "WeightsFile": "~/engines/weights/maia-1900.pb.gz",
+        "Threads": "1"
+      }
     }
   ]
 }

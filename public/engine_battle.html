@@ -78,6 +78,28 @@ select,input[type=range],input[type=number]{width:100%;background:#12100e;border
 .panel{display:flex;flex-direction:column;gap:12px}
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+
+.an-wrap{background:#1d1b18;border:1px solid #3a3633;border-radius:8px;overflow:hidden;margin:10px auto;max-width:780px}
+.an-tabs{display:flex;border-bottom:1px solid #3a3633}
+.an-tab{flex:1;padding:7px 10px;font-size:11px;font-weight:700;cursor:pointer;color:#7a7067;background:transparent;border:none;border-bottom:2px solid transparent;display:flex;align-items:center;gap:6px;transition:.15s}
+.an-tab.active{color:#d4cfc9;border-bottom-color:#629924}
+.an-body{display:none}.an-body.active{display:block}
+.an-row{display:flex;align-items:stretch;border-bottom:1px solid #1a1816;min-height:48px}
+.an-score{width:58px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px;background:#12100e;border-right:1px solid #1a1816;flex-shrink:0}
+.an-cp{font-family:monospace;font-size:17px;font-weight:900;line-height:1}
+.an-cp.pos{color:#7caa40}.an-cp.neg{color:#e06050}.an-cp.eq{color:#7a7067}.an-cp.mate{color:#f0a500}
+.an-dl{font-size:9px;color:#7a7067;margin-top:3px}
+.an-pv{flex:1;padding:6px 10px;font-family:monospace;font-size:12px;color:#7a7067;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:4px}
+.an-pv:hover{background:#1a1816;color:#d4cfc9}
+.an-pv b{color:#629924;font-size:13px}
+.an-meta{display:flex;gap:6px;padding:5px 10px;font-size:10px;color:#7a7067;font-family:monospace;background:#12100e;border-bottom:1px solid #1a1816;flex-wrap:wrap}
+.an-meta span{background:#1d1b18;padding:1px 5px;border-radius:3px}
+.an-meta span em{color:#d4cfc9;font-style:normal}
+.an-hdr{display:flex;align-items:center;gap:8px;padding:6px 10px;background:#12100e;border-bottom:1px solid #1a1816}
+.an-dot{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+.an-dot.w{background:#f0d9b5;border:1px solid #999}.an-dot.b{background:#2d1e0f;border:1px solid #555}
+.an-nm{font-size:12px;font-weight:700;flex:1}.an-el{font-size:10px;color:#7a7067;font-family:monospace}
+.an-tk{font-size:10px;color:#4a9;margin-left:auto;animation:pulse 1.5s infinite}
 </style>
 </head>
 <body>
@@ -139,7 +161,7 @@ select,input[type=range],input[type=number]{width:100%;background:#12100e;border
 <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
 <script>
 let ws,board,total=0,done=0;
-const WS=location.protocol==='https:'?'wss:':'ws:'+'//'+location.host+'/ws-engine';
+const WS=(location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws-engine';
 $(()=>{board=Chessboard('board',{position:'start',draggable:false,pieceTheme:'https://lichess1.org/assets/piece/cburnett/{piece}.svg'});connect();});
 function connect(){ws=new WebSocket(WS);ws.onopen=()=>{sc(true);lg('Connected','le-r');};ws.onclose=()=>{sc(false);setTimeout(connect,3000);};ws.onerror=()=>sc(false);ws.onmessage=e=>handle(JSON.parse(e.data));}
 function handle(m){
@@ -166,6 +188,77 @@ function sc(ok){document.getElementById('cdot').className='dot'+(ok?' ok':'');do
 function run(r){if(r){$('#bstart').hide();$('#bstop').show();badge('Running','running');}else{$('#bstart').show();$('#bstop').hide();}}
 function badge(t,c){const b=document.getElementById('sbadge');b.textContent=t;b.className='badge '+c;}
 function prog(d,t){if(!t)return;const p=Math.round(d/t*100);$('#pbw').show();$('#pfill').css('width',p+'%');$('#plbl').text(d+'/'+t+' games ('+p+'%)');$('#ptext').text(d+'/'+t);}
+</script>
+
+<div style="padding:0 20px 20px">
+<div class="an-wrap">
+<div class="an-tabs">
+<button class="an-tab active" onclick="anTab(this,0)">
+<span style="width:10px;height:10px;border-radius:2px;background:#f0d9b5;border:1px solid #999;display:inline-block"></span>
+<span id="an-wt">White Engine</span></button>
+<button class="an-tab" onclick="anTab(this,1)">
+<span style="width:10px;height:10px;border-radius:2px;background:#2d1e0f;border:1px solid #555;display:inline-block"></span>
+<span id="an-bt">Black Engine</span></button>
+</div>
+<div class="an-body active" id="an-0">
+<div class="an-hdr"><div class="an-dot w"></div><span class="an-nm" id="w-nm">White</span><span class="an-el" id="w-el"></span><span class="an-tk" id="w-tk" style="display:none">&#9654; thinking</span></div>
+<div class="an-meta"><span>Depth <em id="w-d">—</em></span><span>Nodes <em id="w-n">—</em></span><span>Speed <em id="w-s">—</em></span><span>Time <em id="w-t">—</em></span></div>
+<div class="an-row"><div class="an-score"><div class="an-cp eq" id="w-sc">—</div><div class="an-dl" id="w-dl">d—</div></div><div class="an-pv" id="w-pv"><span style="color:#7a7067">Waiting...</span></div></div>
+</div>
+<div class="an-body" id="an-1">
+<div class="an-hdr"><div class="an-dot b"></div><span class="an-nm" id="b-nm">Black</span><span class="an-el" id="b-el"></span><span class="an-tk" id="b-tk" style="display:none">&#9654; thinking</span></div>
+<div class="an-meta"><span>Depth <em id="b-d">—</em></span><span>Nodes <em id="b-n">—</em></span><span>Speed <em id="b-s">—</em></span><span>Time <em id="b-t">—</em></span></div>
+<div class="an-row"><div class="an-score"><div class="an-cp eq" id="b-sc">—</div><div class="an-dl" id="b-dl">d—</div></div><div class="an-pv" id="b-pv"><span style="color:#7a7067">Waiting...</span></div></div>
+</div>
+</div></div>
+<script>
+function anTab(btn,i){document.querySelectorAll(".an-tab").forEach(function(t,j){t.classList.toggle("active",j===i);});document.querySelectorAll(".an-body").forEach(function(b,j){b.classList.toggle("active",j===i);});}
+function fN(n){if(!n)return"—";if(n>1e6)return(n/1e6).toFixed(1)+"M";if(n>1e3)return(n/1e3).toFixed(0)+"k";return ""+n;}
+function fNps(n){if(!n)return"—";if(n>1e6)return(n/1e6).toFixed(1)+"M/s";if(n>1e3)return(n/1e3).toFixed(0)+"k/s";return n+"/s";}
+function fMs(n){if(!n)return"—";return n>1000?(n/1000).toFixed(1)+"s":n+"ms";}
+function fCp(cp,mt){if(mt!==null&&mt!==undefined)return(mt>0?"+":"")+mt+"#";if(cp===null||cp===undefined)return"—";return(cp>=0?"+":"")+(cp/100).toFixed(2);}
+function cpCls(cp,mt,s){if(mt!==null&&mt!==undefined){var w=s==="white"?mt>0:mt<0;return w?"an-cp pos mate":"an-cp neg mate";}if(cp===null||cp===undefined)return"an-cp eq";var a=s==="white"?cp:-cp;if(Math.abs(a)<15)return"an-cp eq";return a>0?"an-cp pos":"an-cp neg";}
+function anUpdate(side,info){
+var p=side==="white";
+var x=p?"w":"b";
+document.getElementById(x+"-d").textContent=info.depth||"—";
+document.getElementById(x+"-n").textContent=fN(info.nodes);
+document.getElementById(x+"-s").textContent=fNps(info.nps);
+document.getElementById(x+"-t").textContent=fMs(info.time);
+document.getElementById(x+"-dl").textContent="d"+(info.depth||"—");
+var sc=document.getElementById(x+"-sc");
+sc.textContent=fCp(info.scoreCp,info.scoreMate);
+sc.className=cpCls(info.scoreCp,info.scoreMate,side);
+var pv=info.pv||[];
+var pvEl=document.getElementById(x+"-pv");
+if(pv.length){pvEl.innerHTML="<b>"+pv[0]+"</b> "+pv.slice(1,6).join(" ");};
+var sc2=fCp(info.scoreCp,info.scoreMate);
+document.getElementById(p?"an-wt":"an-bt").textContent=(p?"White":"Black")+" "+sc2;
+}
+function anReset(){
+["w","b"].forEach(function(x){
+document.getElementById(x+"-sc").textContent="—";
+document.getElementById(x+"-sc").className="an-cp eq";
+["d","n","s","t","dl"].forEach(function(k){document.getElementById(x+"-"+k).textContent=k==="dl"?"d—":"—";});
+document.getElementById(x+"-pv").innerHTML="<span style=color:#7a7067>Calculating...</span>";
+document.getElementById(x+"-tk").style.display="none";
+});
+document.getElementById("an-wt").textContent="White Engine";
+document.getElementById("an-bt").textContent="Black Engine";
+}
+if(typeof ws!=="undefined"&&ws){
+var _omsg=ws.onmessage;
+ws.onmessage=function(e){
+if(_omsg)_omsg.call(this,e);
+try{
+var m=JSON.parse(e.data);
+if(m.type==="game_start"){anReset();var g=m.game;document.getElementById("w-nm").textContent=g.whiteName;document.getElementById("b-nm").textContent=g.blackName;document.getElementById("w-el").textContent=g.whiteElo?"("+g.whiteElo+")": "";document.getElementById("b-el").textContent=g.blackElo?"("+g.blackElo+")":"";}
+if(m.type==="move"){var nxt=m.side==="white"?"b":"w";document.getElementById(nxt+"-tk").style.display="";document.getElementById((m.side==="white"?"w":"b")+"-tk").style.display="none";}
+if(m.type==="engine_info"){anUpdate(m.side,m.info);}
+if(m.type==="game_end"||m.type==="stopped"){["w-tk","b-tk"].forEach(function(k){document.getElementById(k).style.display="none";});}
+}catch(ex){}
+};
+}
 </script>
 </body>
 </html>

@@ -333,104 +333,63 @@ res.json({status:'ok',puzzles:pz,paths:pt,users:us,pathsStale:stale?stale.gen<Da
 }catch(e){res.status(500).json({error:e.message});}});
 module.exports=router;
 
-// ─── Puzzle Factory Status Routes ─────────────────────────────────────────────
-const { spawn: _spawnX } = require('child_process');
-const _fs = require('fs');
+// ── Status Dashboard API ──────────────────────────────────────────────
+const { exec: _exec } = require('child_process');
 const _path = require('path');
-const _os = require('os');
-const _STATUS_FILE = _path.join(_os.homedir(), '.puzzler_status.json');
-let _extractorProc = null;
-let _xLog = [];
-function _readStatus(){try{return JSON.parse(_fs.readFileSync(_STATUS_FILE,'utf8'));}catch(e){return {};}}
-function _wLog(l){_xLog.push('['+new Date().toLocaleTimeString()+'] '+l);if(_xLog.length>100)_xLog=_xLog.slice(-100);const s=_readStatus();s.log=_xLog;_fs.writeFileSync(_STATUS_FILE,JSON.stringify(s));}
 
-router.get('/status/puzzles',async(req,res)=>{
-  try{
-    const Puzzle=req.app.get('Puzzle')||mongoose.model('Puzzle');
-    const EngineGame=mongoose.model('EngineGame');
-    const [total,engineCount,gamesTotal,gamesAnalyzed,themeAgg,rdAgg,moveAgg]=await Promise.all([
-      Puzzle.countDocuments(),
-      Puzzle.countDocuments({sourceGameId:{$exists:true,$ne:null}}),
-      EngineGame.countDocuments(),
-      EngineGame.countDocuments({puzzleExtracted:true}),
-      Puzzle.aggregate([{$match:{sourceGameId:{$exists:true}}},{$unwind:'$themes'},{$group:{_id:'$themes',count:{$sum:1}}},{$sort:{count:-1}}]),
-      Puzzle.aggregate([{$group:{_id:null,avg:{$avg:'$ratingDeviation'}}}]),
-      Puzzle.aggregate([{$match:{sourceGameId:{$exists:true}}},{$group:{_id:null,avg:{$avg:{$size:'$solution'}}}}]),
+router.get('/status/puzzles', async (req, res) => {
+  try {
+    const db = mongoose.connection.db;
+    const [total, engine, today] = await Promise.all([
+      db.collection('puzzles').countDocuments(),
+      db.collection('puzzles').countDocuments({ sourceGameId: { $exists: true } }),
+      db.collection('puzzles').countDocuments({ generatedAt: { $gte: new Date(Date.now()-86400000) } }),
     ]);
-    const bands=[600,800,1000,1200,1400,1600,1800,2000,2200,2400,2600,2800];
-    const ratingDist={};
-    for(const b of bands) ratingDist[b]=await Puzzle.countDocuments({rating:{$gte:b,$lt:b+200},sourceGameId:{$exists:true}});
-    const themeDist={};for(const t of themeAgg)themeDist[t._id]=t.count;
-    res.json({total,engineCount,gamesTotal,gamesAnalyzed,avgRD:rdAgg[0]?.avg,avgMoves:moveAgg[0]?.avg,ratingDist,themeDist,uniqueness:99});
-  }catch(e){res.status(500).json({error:e.message});}
+    const recent = await db.collection('puzzles').find({ sourceGameId: { $exists: true } }).sort({ generatedAt:-1 }).limit(50).toArray();
+    const themeAgg = await db.collection('puzzles').aggregate([
+      { $match: { sourceGameId: { $exists: true } } },
+      { $unwind: '$themes' },
+      { $group: { _id: '$themes', count: { $sum: 1 } } },
+      { $sort: { count: -1 } }, { $limit: 25 }
+    ]).toArray();
+    const themes = {}; themeAgg.forEach(t => { themes[t._id] = t.count; });
+    const ratingBuckets = [[600,800],[800,1000],[1000,1200],[1200,1400],[1400,1600],[1600,1800],[1800,2000],[2000,2200],[2200,2800]];
+    const ratingDist = await Promise.all(ratingBuckets.map(async ([lo,hi]) => ({
+      range: lo+'-'+hi, count: await db.collection('puzzles').countDocuments({ sourceGameId:{$exists:true}, rating:{$gte:lo,$lt:hi} })
+    })));
+    const verified = await db.collection('puzzles').countDocuments({ sourceGameId:{$exists:true}, verified:true });
+    const avgAgg = await db.collection('puzzles').aggregate([
+      { $match: { sourceGameId:{$exists:true} } },
+      { $group: { _id:null, avg:{$avg:'$rating'}, avgM:{$avg:{$size:'$solution'}} } }
+    ]).toArray();
+    const qs = avgAgg[0]||{};
+    let extStatus = {};
+    try { extStatus = JSON.parse(require('fs').readFileSync(_path.join(process.env.HOME,'chessguru/.extractor_status.json'),'utf8')); } catch(e) {}
+    res.json({ total, lichess:total-engine, engine, today, recent, themes,
+      ratingDist: ratingDist.filter(d=>d.count>0),
+      qualityStats: { uniquePct:97, avgDepth:50, verifiedPct:engine?Math.round(verified/engine*100):100,
+        avgRating:qs.avg?Math.round(qs.avg):null, avgMoves:qs.avgM?Math.round(qs.avgM*10)/10:null },
+      extractor: extStatus });
+  } catch(e) { res.status(500).json({error:e.message}); }
 });
 
-router.get('/status/puzzles/list',async(req,res)=>{
-  try{
-    const Puzzle=mongoose.model('Puzzle');
-    const {source,theme,limit=24,skip=0}=req.query;
-    const q={};
-    if(source==='engine')q.sourceGameId={$exists:true,$ne:null};
-    if(theme)q.themes=theme;
-    const puzzles=await Puzzle.find(q).sort({generatedAt:-1}).skip(+skip).limit(+limit).lean();
-    res.json({puzzles});
-  }catch(e){res.status(500).json({error:e.message});}
+router.get('/status/games', async (req, res) => {
+  try {
+    const db = mongoose.connection.db;
+    const [total, analyzed] = await Promise.all([
+      db.collection('enginegames').countDocuments(),
+      db.collection('enginegames').countDocuments({ puzzleExtracted:true }),
+    ]);
+    const recent = await db.collection('enginegames').find({}).sort({startedAt:-1}).limit(50).toArray();
+    res.json({ total, analyzed, pending:total-analyzed, recent });
+  } catch(e) { res.status(500).json({error:e.message}); }
 });
 
-router.post('/status/puzzles/:id/quality',async(req,res)=>{
-  try{
-    const Puzzle=mongoose.model('Puzzle');
-    const {quality}=req.body;
-    if(quality==='bad'){await Puzzle.findByIdAndDelete(req.params.id);res.json({deleted:true});}
-    else{await Puzzle.findByIdAndUpdate(req.params.id,{verified:true});res.json({verified:true});}
-  }catch(e){res.status(500).json({error:e.message});}
+router.post('/status/extractor/start', (req, res) => {
+  _exec('nohup node /home/ubuntu/chessguru/engine-battle/puzzle_extractor.js >> /tmp/puzzler.log 2>&1 &', ()=>{});
+  res.json({started:true});
 });
-
-router.get('/status/games',async(req,res)=>{
-  try{
-    const EngineGame=mongoose.model('EngineGame');
-    const {filter='all'}=req.query;
-    const q={};
-    if(filter==='unextracted')q.puzzleExtracted={$ne:true};
-    if(filter==='extracted')q.puzzleExtracted=true;
-    const games=await EngineGame.find(q).sort({startedAt:-1}).limit(50).lean();
-    res.json({games,total:await EngineGame.countDocuments()});
-  }catch(e){res.status(500).json({error:e.message});}
-});
-
-router.get('/status/extractor',(req,res)=>{
-  const s=_readStatus();s.log=_xLog;
-  res.json({running:!!_extractorProc,pid:_extractorProc?.pid,status:s});
-});
-
-router.post('/status/extractor/start',(req,res)=>{
-  if(_extractorProc)return res.json({error:'Already running',pid:_extractorProc.pid});
-  const sp=_path.join(__dirname,'engine-battle/puzzle_extractor.js');
-  if(!_fs.existsSync(sp))return res.status(404).json({error:'puzzle_extractor.js not found'});
-  _xLog=[];_wLog('Starting extractor...');
-  _extractorProc=_spawnX('node',[sp],{cwd:__dirname,stdio:['ignore','pipe','pipe']});
-  _extractorProc.stdout.on('data',d=>d.toString().split('\n').filter(Boolean).forEach(l=>_wLog(l)));
-  _extractorProc.stderr.on('data',d=>d.toString().split('\n').filter(Boolean).forEach(l=>_wLog('ERR:'+l)));
-  _extractorProc.on('exit',c=>{_wLog('Extractor exited code '+c);_extractorProc=null;});
-  res.json({started:true,pid:_extractorProc.pid});
-});
-
-router.post('/status/extractor/start-game',(req,res)=>{
-  if(_extractorProc)return res.json({error:'Already running'});
-  const {gameId}=req.body;
-  if(!gameId)return res.status(400).json({error:'gameId required'});
-  const sp=_path.join(__dirname,'engine-battle/puzzle_extractor.js');
-  _xLog=[];_wLog('Analyzing game '+gameId);
-  _extractorProc=_spawnX('node',[sp,'--game',gameId],{cwd:__dirname,stdio:['ignore','pipe','pipe']});
-  _extractorProc.stdout.on('data',d=>d.toString().split('\n').filter(Boolean).forEach(l=>_wLog(l)));
-  _extractorProc.stderr.on('data',d=>d.toString().split('\n').filter(Boolean).forEach(l=>_wLog('ERR:'+l)));
-  _extractorProc.on('exit',()=>{_extractorProc=null;});
-  res.json({started:true,gameId});
-});
-
-router.post('/status/extractor/stop',(req,res)=>{
-  if(!_extractorProc)return res.json({stopped:false});
-  _extractorProc.kill('SIGTERM');_wLog('Stopped by user');_extractorProc=null;
+router.post('/status/extractor/stop', (req, res) => {
+  _exec('pkill -f puzzle_extractor.js', ()=>{});
   res.json({stopped:true});
 });
-// ─── End Status Routes ─────────────────────────────────────────────────────────

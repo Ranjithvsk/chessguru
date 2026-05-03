@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Terminal — ChessGuru</title>
+<style>
+:root{--bg:#0f0e0d;--panel:#1a1917;--border:#3a3733;--accent:#5ba3d9;--text:#d4cfc9;--dim:#7a7067;--green:#4a9960;--red:#c04040}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif}
+nav{background:#0a0908;border-bottom:1px solid var(--border);padding:0 20px;height:40px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:100;flex-shrink:0}
+.brand{font-weight:700;font-size:15px;color:var(--text)}.brand span{color:var(--accent)}
+nav a{color:var(--dim);text-decoration:none;font-size:12px;font-weight:500}
+nav a:hover{color:var(--text)}
+.badge{font-size:10px;padding:2px 7px;border-radius:10px;font-weight:600;background:var(--green);color:#fff;margin-left:6px}
+.badge.off{background:var(--red)}
+#shell-wrap{position:fixed;top:40px;left:0;right:0;bottom:0;display:flex;flex-direction:column}
+iframe{flex:1;border:none;width:100%;height:100%}
+#gate{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;z-index:200}
+.gate-icon{font-size:48px}.gate-title{font-size:20px;font-weight:700;color:var(--text)}
+.gate-sub{font-size:13px;color:var(--dim);text-align:center;max-width:340px;line-height:1.5}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:10px 22px;border-radius:5px;font-size:13px;font-weight:600;text-decoration:none;border:none;cursor:pointer;transition:filter .15s}
+.btn:hover{filter:brightness(1.15)}.btn-primary{background:var(--accent);color:#fff}
+.btn-ghost{background:var(--panel);border:1px solid var(--border);color:var(--text)}
+#fallback{display:none;position:fixed;inset:40px 0 0 0;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:var(--bg);z-index:150}
+#fallback.show{display:flex}
+</style>
+</head>
+<body>
+<nav>
+  <a class="brand" href="/">&#9822; Chess<span>Guru</span></a>
+  <a href="/">Puzzles</a><a href="/blindfold">Blindfold</a><a href="/opening">Openings</a>
+  <a href="/puzzle-status">Factory</a><a href="/engine-battle">Engines</a>
+  <a href="/terminal" style="color:var(--text);font-weight:600">Terminal</a>
+  <span id="connBadge" class="badge off" style="margin-left:auto">● connecting</span>
+</nav>
+<div id="gate">
+  <div class="gate-icon">&#128274;</div>
+  <div class="gate-title">Admin Terminal</div>
+  <div class="gate-sub">Checking authentication…</div>
+</div>
+<div id="fallback">
+  <div style="font-size:36px">&#128196;</div>
+  <div style="font-size:17px;font-weight:700">Iframe blocked by browser policy</div>
+  <div style="font-size:13px;color:var(--dim);text-align:center;max-width:320px">Cloudflare Access is preventing embedding.<br>Open the terminal in a new tab instead.</div>
+  <a href="https://term.harinitharanjith.com" target="_blank" class="btn btn-primary">&#9654; Open Terminal</a>
+  <a href="/" class="btn btn-ghost">&#8592; Back to Puzzles</a>
+</div>
+<div id="shell-wrap" style="display:none">
+  <iframe id="term-frame" src="https://term.harinitharanjith.com" title="Server Terminal"
+    allow="clipboard-read; clipboard-write"
+    sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"></iframe>
+</div>
+<script>
+(function(){
+  var gate=document.getElementById('gate'),shellWrap=document.getElementById('shell-wrap');
+  var fallback=document.getElementById('fallback'),badge=document.getElementById('connBadge');
+  var frame=document.getElementById('term-frame');
+  function showGate(icon,title,sub,actions){gate.innerHTML='<div class="gate-icon">'+icon+'</div><div class="gate-title">'+title+'</div><div class="gate-sub">'+sub+'</div>'+(actions||'');gate.style.display='flex';}
+  function setBadge(ok){badge.textContent=ok?'● connected':'● disconnected';badge.className='badge'+(ok?'':' off');}
+  fetch('/auth/me').then(function(r){return r.json();}).then(function(d){
+    if(!d.loggedIn){showGate('&#128274;','Admin Terminal','You must be signed in to access the terminal.','<a href="/login?back=/terminal" class="btn btn-primary">Sign in</a><a href="/" class="btn btn-ghost" style="margin-top:4px">Back to Puzzles</a>');return;}
+    gate.style.display='none';shellWrap.style.display='flex';setBadge(true);
+    var loaded=false;
+    frame.addEventListener('load',function(){loaded=true;setBadge(true);});
+    setTimeout(function(){if(!loaded){shellWrap.style.display='none';fallback.classList.add('show');setBadge(false);}},8000);
+    frame.addEventListener('error',function(){shellWrap.style.display='none';fallback.classList.add('show');setBadge(false);});
+  }).catch(function(){showGate('&#9888;','Connection Error','Could not reach the ChessGuru server.','<button onclick="location.reload()" class="btn btn-ghost">Retry</button>');});
+})();
+</script>
+</body>
+</html>
