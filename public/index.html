@@ -306,11 +306,9 @@ function showPuzzle(p){try{localStorage.setItem("cg_puzzle",p.id||p._id);}catch(
   if(p.lastMove&&p.preFen&&cg){
     var lmFrom=p.lastMove.slice(0,2),lmTo=p.lastMove.slice(2,4);
     cg.set({fen:p.preFen,orientation:pc,turnColor:pc==="white"?"black":"white",movable:{color:undefined},lastMove:undefined,check:false});
-    cg.setShapes([{orig:lmFrom,dest:lmTo,brush:'red'}]);
     window._lmTimer=setTimeout(function(){
       var dests=new Map();chess.moves({verbose:true}).forEach(function(m){if(!dests.has(m.from))dests.set(m.from,[]);dests.get(m.from).push(m.to);});
       cg.set({fen:p.fen,orientation:pc,turnColor:chess.turn()==="w"?"white":"black",movable:{color:pc,dests:dests},lastMove:[lmFrom,lmTo],check:chess.in_check()});
-      cg.setShapes([]);
       dbg("showPuzzle OK pc="+pc);
     },1000);
   }else{
