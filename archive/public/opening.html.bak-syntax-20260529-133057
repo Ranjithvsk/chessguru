@@ -247,7 +247,6 @@ function _doInit(){
     fetchExplorer();
   } catch(e2) { console.error('initBoard failed:', e2); }
   try { initEngine(); } catch(e3) { console.error('initEngine failed:', e3); }
-}
 
 function initBoard(){
   board=Chessboard('board',{
