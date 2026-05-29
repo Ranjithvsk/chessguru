@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "types": ["vite/client"],
+    "paths": {
+      "@chessguru/types": ["../../packages/types/src/index.ts"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "chessguru",
+  "private": true,
+  "version": "2.0.0",
+  "description": "ChessGuru v2 — modern monorepo (React/Vite/TS web + NestJS API + shared types)",
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "dev:web": "pnpm --filter @chessguru/web dev",
+    "dev:api": "pnpm --filter @chessguru/api start:dev"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  },
+  "packageManager": "pnpm@9.12.0",
+  "engines": { "node": ">=20" }
+}

@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "target": "ES2021",
+    "outDir": "dist",
+    "baseUrl": ".",
+    "noEmit": false,
+    "paths": {
+      "@chessguru/types": ["../../packages/types/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}
