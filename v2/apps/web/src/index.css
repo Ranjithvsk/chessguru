@@ -40,3 +40,99 @@ body {
 /* shared board: blindfold mode (Blindfold page) hides pieces; .peek reveals briefly */
 .cg-board-wrap.blindfold cg-board piece { opacity: 0 !important; }
 .cg-board-wrap.blindfold.peek cg-board piece { opacity: 1 !important; }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Lichess-exact puzzle feedback block (components/PuzzleFeedback.tsx)
+   Standalone king sprite is the cburnett SVG, reused outside the board.
+   ────────────────────────────────────────────────────────────────────────── */
+.cg-piece {
+  display: inline-block;
+  width: 3rem;
+  height: 3rem;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+.cg-piece.king.white {
+  background-image: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0NSIgaGVpZ2h0PSI0NSI+PGcgZmlsbD0ibm9uZSIgZmlsbC1ydWxlPSJldmVub2RkIiBzdHJva2U9IiMwMDAiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwYXRoIGQ9Ik0yMi41IDExLjYzVjZNMjAgOGg1IiBzdHJva2UtbGluZWpvaW49Im1pdGVyIi8+PHBhdGggZD0iTTIyLjUgMjVzNC41LTcuNSAzLTEwLjVjMCAwLTEtMi41LTMtMi41cy0zIDIuNS0zIDIuNWMtMS41IDMgMyAxMC41IDMgMTAuNSIgZmlsbD0iI2ZmZiIgc3Ryb2tlLWxpbmVjYXA9ImJ1dHQiIHN0cm9rZS1saW5lam9pbj0ibWl0ZXIiLz48cGF0aCBkPSJNMTEuNSAzN2M1LjUgMy41IDE1LjUgMy41IDIxIDB2LTdzOS00LjUgNi0xMC41Yy00LTYuNS0xMy41LTMuNS0xNiA0VjI3di0zLjVjLTMuNS03LjUtMTMtMTAuNS0xNi00LTMgNiA1IDEwIDUgMTBWMzd6IiBmaWxsPSIjZmZmIi8+PHBhdGggZD0iTTExLjUgMzBjNS41LTMgMTUuNS0zIDIxIDBtLTIxIDMuNWM1LjUtMyAxNS41LTMgMjEgMG0tMjEgMy41YzUuNS0zIDE1LjUtMyAyMSAwIi8+PC9nPjwvc3ZnPg==');
+}
+.cg-piece.king.black {
+  background-image: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0NSIgaGVpZ2h0PSI0NSI+PGcgZmlsbD0ibm9uZSIgZmlsbC1ydWxlPSJldmVub2RkIiBzdHJva2U9IiMwMDAiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwYXRoIGQ9Ik0yMi41IDExLjYzVjYiIHN0cm9rZS1saW5lam9pbj0ibWl0ZXIiLz48cGF0aCBkPSJNMjIuNSAyNXM0LjUtNy41IDMtMTAuNWMwIDAtMS0yLjUtMy0yLjVzLTMgMi41LTMgMi41Yy0xLjUgMyAzIDEwLjUgMyAxMC41IiBmaWxsPSIjMDAwIiBzdHJva2UtbGluZWNhcD0iYnV0dCIgc3Ryb2tlLWxpbmVqb2luPSJtaXRlciIvPjxwYXRoIGQ9Ik0xMS41IDM3YzUuNSAzLjUgMTUuNSAzLjUgMjEgMHYtN3M5LTQuNSA2LTEwLjVjLTQtNi41LTEzLjUtMy41LTE2IDRWMjd2LTMuNWMtMy41LTcuNS0xMy0xMC41LTE2LTQtMyA2IDUgMTAgNSAxMFYzN3oiIGZpbGw9IiMwMDAiLz48cGF0aCBkPSJNMjAgOGg1IiBzdHJva2UtbGluZWpvaW49Im1pdGVyIi8+PHBhdGggZD0iTTMyIDI5LjVzOC41LTQgNi4wMy05LjY1QzM0LjE1IDE0IDI1IDE4IDIyLjUgMjQuNWwuMDEgMi4xLS4wMS0yLjFDMjAgMTggOS45MDYgMTQgNi45OTcgMTkuODVjLTIuNDk3IDUuNjUgNC44NTMgOSA0Ljg1MyA5IiBzdHJva2U9IiNlY2VjZWMiLz48cGF0aCBkPSJNMTEuNSAzMGM1LjUtMyAxNS41LTMgMjEgMG0tMjEgMy41YzUuNS0zIDE1LjUtMyAyMSAwbS0yMSAzLjVjNS41LTMgMTUuNS0zIDIxIDAiIHN0cm9rZT0iI2VjZWNlYyIvPjwvZz48L3N2Zz4=');
+}
+
+.puzzle__feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  border: 1px solid #252b38;          /* ink-700 */
+  border-left-width: 4px;
+  border-left-color: #5b6678;         /* ink-500 (neutral default) */
+  background: #11141b;                /* ink-900 */
+  border-radius: 1rem;
+  padding: 1.25rem;
+}
+.puzzle__feedback.play { border-left-color: #6366f1; }   /* brand-500  */
+.puzzle__feedback.good { border-left-color: #34d399; }   /* accent-400 */
+.puzzle__feedback.fail { border-left-color: #fb7185; }   /* rose-400   */
+.puzzle__feedback.win  { border-left-color: #34d399; }
+
+.puzzle__feedback .player {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.puzzle__feedback .no-square {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 0.5rem;
+  background: #1a1f29;                /* ink-800 */
+}
+.puzzle__feedback .instruction {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+.puzzle__feedback .instruction strong { color: #fff; font-weight: 600; font-size: 1.05rem; }
+.puzzle__feedback .instruction em     { color: #8b95a7; font-style: normal; font-size: 0.875rem; }
+.puzzle__feedback.good .instruction strong { color: #34d399; }
+.puzzle__feedback.fail .instruction strong { color: #fb7185; }
+
+.puzzle__feedback .view_solution { display: flex; gap: 0.5rem; }
+.puzzle__feedback .view_solution button {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.puzzle__feedback .button-empty {
+  background: transparent;
+  border: 1px solid #323a4d;          /* ink-600 */
+  color: #c2c9d6;                     /* ink-300 */
+}
+.puzzle__feedback .button-empty:hover { background: #1a1f29; }
+.puzzle__feedback .puzzle__hint.active {
+  background: #10b981;                /* accent-500 (hint used) */
+  border: 1px solid #10b981;
+  color: #fff;
+}
+
+.puzzle__feedback .complete { display: flex; flex-direction: column; gap: 0.25rem; }
+.puzzle__feedback .complete__title { color: #34d399; font-weight: 700; font-size: 1.25rem; }
+.puzzle__feedback .complete__sub   { color: #8b95a7; font-style: normal; font-size: 0.875rem; }
+.puzzle__feedback .complete__rating { margin-top: 0.25rem; font-size: 0.875rem; }
+.puzzle__feedback .puzzle__next {
+  width: 100%;
+  padding: 0.625rem 0.75rem;
+  border-radius: 0.5rem;
+  background: #4f46e5;                /* brand-600 */
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+.puzzle__feedback .puzzle__next:hover:not(:disabled) { background: #6366f1; }
+.puzzle__feedback .puzzle__next:disabled { opacity: 0.5; cursor: default; }
