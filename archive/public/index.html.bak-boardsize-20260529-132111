@@ -23,8 +23,8 @@ a{color:var(--pri);text-decoration:none}
 #userMenu{display:none;position:absolute;top:calc(100% + 6px);right:0;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;min-width:130px;box-shadow:0 4px 20px rgba(0,0,0,.6);z-index:9999;overflow:hidden}
 #userMenu button{width:100%;background:none;border:none;color:#888;padding:10px 14px;text-align:left;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:8px;transition:background .15s;font-family:"Inter",sans-serif}
 #userMenu button:hover{background:#2a2a2a;color:#fff}
-main{display:grid;grid-template-areas:"board side" "tools side";grid-template-columns:auto 1fr;max-width:1300px;margin:0 auto;align-items:start;padding-top:16px}
-.pb{grid-area:board;position:relative;width:min(62vw,calc(100vh - 96px),880px);aspect-ratio:1;align-self:start;overflow:visible}
+main{display:grid;grid-template-areas:"board side" "tools side";grid-template-columns:auto 1fr;max-width:1100px;margin:0 auto;align-items:start;padding-top:16px}
+.pb{grid-area:board;position:relative;width:clamp(280px,55vw,660px);aspect-ratio:1;align-self:start;overflow:visible}
 .ps{grid-area:side;display:flex;flex-direction:column;background:var(--cz2);border-left:1px solid var(--bdr)}
 .pt{grid-area:tools;background:rgb(38,36,33);display:flex;flex-direction:column;border-top:1px solid var(--bdr)}
 #board{width:100%;height:100%;position:absolute;top:0;left:0}
