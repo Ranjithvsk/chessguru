@@ -2,19 +2,18 @@ import { NavLink } from "react-router-dom";
 
 const links = [
   { to: "/", label: "Puzzles", end: true },
+  { to: "/theme", label: "Themes" },
   { to: "/blindfold", label: "Blindfold" },
-  { to: "/opening", label: "Opening" },
-  { to: "/engine-battle", label: "Engine Battle" },
 ];
 
 export default function Navbar({ rating }: { rating?: number }) {
   return (
     <header className="sticky top-0 z-50 border-b border-ink-700/70 bg-ink-900/80 backdrop-blur">
       <nav className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4">
-        <a href="/" className="mr-2 flex items-center gap-2">
+        <NavLink to="/" className="mr-2 flex items-center gap-2">
           <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand-gradient text-white shadow-glow">♞</span>
           <span className="font-display text-lg text-white">ChessGuru</span>
-        </a>
+        </NavLink>
         {links.map((l) => (
           <NavLink
             key={l.to}

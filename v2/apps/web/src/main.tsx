@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import App from "./App";
 import PuzzlesPage from "./pages/Puzzles";
+import ThemePage from "./pages/Theme";
+import BlindfoldPage from "./pages/Blindfold";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -18,7 +20,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route element={<App />}>
             <Route index element={<PuzzlesPage />} />
             <Route path="puzzles" element={<PuzzlesPage />} />
-            {/* Phase 2+: blindfold, theme, opening, engine-battle, board-editor, admin */}
+            <Route path="theme" element={<ThemePage />} />
+            <Route path="blindfold" element={<BlindfoldPage />} />
+            {/* Next: opening, engine-battle, board-editor, admin */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
