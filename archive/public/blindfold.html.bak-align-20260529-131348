@@ -68,7 +68,7 @@ body.peeking cg-board piece{opacity:1!important;pointer-events:auto!important}
 #rDiff{font-weight:700;font-size:14px}
 #rDiff.pos{color:#759900}
 #rDiff.neg{color:#c23b22}
-@media(max-width:780px){#main{flex-direction:column;align-items:center}#boardWrap{width:min(calc(100vw - 32px),480px);height:min(calc(100vw - 32px),480px)}#rightCol{flex:unset;width:min(calc(100vw - 32px),480px);flex-direction:row;flex-wrap:wrap}.panel{flex:1;min-width:160px}}
+@media(max-width:780px){#main{flex-direction:column;align-items:center}#boardWrap{width:min(98vw,480px);height:min(98vw,480px)}#rightCol{flex:unset;width:min(98vw,480px);flex-direction:row;flex-wrap:wrap}.panel{flex:1;min-width:160px}}
 
 @media(max-width:600px){
   body{overflow-x:hidden}

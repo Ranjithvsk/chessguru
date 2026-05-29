@@ -57,7 +57,7 @@ piece.king.white{background-image:url("/pieces/wK.svg")}piece.queen.white{backgr
 @media(max-width:700px){
   /* === MAIN LAYOUT === */
   main{padding:4px 4px 16px 4px;grid-template-areas:"board" "side" "tools";grid-template-columns:1fr;gap:0;max-width:100%;margin:0;align-items:stretch}
-  .pb{grid-area:board;position:relative;width:calc(100vw - 8px);aspect-ratio:1;align-self:start;overflow:visible}
+  .pb{grid-area:board;position:relative;width:calc(100vw - 32px);max-width:560px;margin:0 auto;aspect-ratio:1;align-self:start;overflow:visible}
   .ps{grid-area:side;border-left:none;border-top:1px solid var(--bdr);padding:10px 12px;min-width:0;width:100%}
 
   /* === NAVBAR === */
