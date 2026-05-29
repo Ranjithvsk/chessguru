@@ -20,7 +20,7 @@ const queryClient = new QueryClient({
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter basename="/v2">
+      <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/+$/, "")}>
         <Routes>
           <Route element={<App />}>
             <Route index element={<PuzzlesPage />} />
