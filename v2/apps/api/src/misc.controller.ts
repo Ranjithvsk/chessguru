@@ -1,16 +1,14 @@
-import { Controller, Get } from "@nestjs/common";
+import { Controller, Get, Req } from "@nestjs/common";
 import { THEMES } from "./themes";
+import { AuthService } from "./auth/auth.service";
 
 @Controller()
 export class MiscController {
-  @Get("themes")
-  themes() {
-    return { themes: THEMES };
-  }
+  constructor(private readonly auth: AuthService) {}
 
-  // v1: guest only (full auth/sessions come in a later milestone)
+  @Get("themes")
+  themes() { return { themes: THEMES }; }
+
   @Get("me/rating")
-  myRating() {
-    return { rating: 1500, loggedIn: false };
-  }
+  myRating(@Req() req: any) { return this.auth.myRating(req.session); }
 }

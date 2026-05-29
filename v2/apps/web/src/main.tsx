@@ -9,6 +9,7 @@ import BlindfoldPage from "./pages/Blindfold";
 import OpeningPage from "./pages/Opening";
 import EngineBattlePage from "./pages/EngineBattle";
 import BoardEditorPage from "./pages/BoardEditor";
+import LoginPage from "./pages/Login";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -28,6 +29,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="opening" element={<OpeningPage />} />
             <Route path="engine-battle" element={<EngineBattlePage />} />
             <Route path="board-editor" element={<BoardEditorPage />} />
+            <Route path="login" element={<LoginPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

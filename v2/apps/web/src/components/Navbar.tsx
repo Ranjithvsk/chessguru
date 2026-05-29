@@ -9,7 +9,9 @@ const links = [
   { to: "/board-editor", label: "Editor" },
 ];
 
-export default function Navbar({ rating }: { rating?: number }) {
+interface Props { rating?: number; username?: string; onLogout?: () => void; }
+
+export default function Navbar({ rating, username, onLogout }: Props) {
   return (
     <header className="sticky top-0 z-50 border-b border-ink-700/70 bg-ink-900/80 backdrop-blur">
       <nav className="mx-auto flex h-14 max-w-6xl items-center gap-1 px-4">
@@ -34,7 +36,14 @@ export default function Navbar({ rating }: { rating?: number }) {
               <span className="text-ink-400">Rating </span><span className="font-semibold text-white">{rating}</span>
             </span>
           )}
-          <a href="/login" className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white">Sign in</a>
+          {username ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-white">{username}</span>
+              <button onClick={onLogout} className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white">Sign out</button>
+            </div>
+          ) : (
+            <NavLink to="/login" className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white">Sign in</NavLink>
+          )}
         </div>
       </nav>
     </header>
