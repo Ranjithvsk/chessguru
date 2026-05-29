@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react";
 // new UI shows real puzzles immediately. Phase 1 repoints these to the NestJS API (:4000).
 export default defineConfig({
   plugins: [react()],
+  base: "/v2/",
   server: {
     port: 5173,
     proxy: {
