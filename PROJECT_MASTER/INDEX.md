@@ -46,6 +46,7 @@ _Created 2026-05-29 · expanded the same day with a full codebase read. Live: ht
 - [research/lichess-source-reads.md](research/lichess-source-reads.md) — which Lichess `lila` / `lichess-puzzler` sources were ported
 
 ## Sessions
+- [2026-05-29-v2-puzzle-replay-dedup.md](sessions/2026-05-29-v2-puzzle-replay-dedup.md) — v2 selector now excludes already-played puzzles per user (rounds $nin) + guest/fallback safe
 - [2026-05-29-homepage-theme-and-mobile-overflow.md](sessions/2026-05-29-homepage-theme-and-mobile-overflow.md) — theme picker surfaced + mobile overflow fixed (home/blindfold/theme)
 - [2026-05-29-full-codebase-documentation.md](sessions/2026-05-29-full-codebase-documentation.md) — full read + docs
 - [2026-04-25-sessions-1-4-auth-rating-login.md](sessions/2026-04-25-sessions-1-4-auth-rating-login.md) — auth/rating/login (from the old monolith)

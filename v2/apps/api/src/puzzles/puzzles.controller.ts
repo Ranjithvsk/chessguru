@@ -11,8 +11,9 @@ export class PuzzlesController {
     @Query("difficulty") difficulty = "normal",
     @Query("rating") rating = "1500",
     @Query("maxPc") maxPc?: string,
+    @Query("userId") userId?: string,
   ) {
-    const p = await this.svc.random(theme, difficulty, Number(rating) || 1500, maxPc ? Number(maxPc) : undefined);
+    const p = await this.svc.random(theme, difficulty, Number(rating) || 1500, maxPc ? Number(maxPc) : undefined, userId || null);
     if (!p) throw new NotFoundException("no puzzle");
     return p;
   }

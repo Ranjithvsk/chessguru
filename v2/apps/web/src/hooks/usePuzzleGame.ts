@@ -24,8 +24,8 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   const [nonce, setNonce] = useState(0);
 
   const { data: puzzle, isFetching } = useQuery({
-    queryKey: ["puzzle", mode, theme, difficulty, maxPc ?? 0, nonce],
-    queryFn: () => api.randomPuzzle({ theme, rating: initialRating, difficulty, maxPc }),
+    queryKey: ["puzzle", mode, theme, difficulty, maxPc ?? 0, userId ?? "guest", nonce],
+    queryFn: () => api.randomPuzzle({ theme, rating: initialRating, difficulty, maxPc, userId }),
   });
 
   const game = useRef(new Chess());

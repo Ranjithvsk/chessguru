@@ -18,7 +18,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export interface RandomPuzzleOpts { theme: string; rating: number; difficulty: Difficulty; maxPc?: number; }
+export interface RandomPuzzleOpts { theme: string; rating: number; difficulty: Difficulty; maxPc?: number; userId?: string | null; }
 export interface CompleteBody { win: boolean; hint: boolean; difficulty: Difficulty; userId: string | null; mode?: "puzzle" | "blindfold"; rating?: number; deviation?: number; }
 export interface AuthResult { ok: boolean; error?: string; }
 
@@ -33,6 +33,7 @@ export const api = {
   randomPuzzle: (opts: RandomPuzzleOpts) => {
     const p = new URLSearchParams({ theme: opts.theme, rating: String(opts.rating), difficulty: opts.difficulty });
     if (opts.maxPc) p.set("maxPc", String(opts.maxPc));
+    if (opts.userId) p.set("userId", opts.userId);
     return get<Puzzle>(`/api/puzzles/random?${p.toString()}`);
   },
   complete: (id: string, body: CompleteBody) => post<CompleteResult>(`/api/puzzles/${encodeURIComponent(id)}/complete`, body),
