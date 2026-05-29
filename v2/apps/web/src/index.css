@@ -36,3 +36,7 @@ body {
   background-clip: text;
   color: transparent;
 }
+
+/* shared board: blindfold mode (Blindfold page) hides pieces; .peek reveals briefly */
+.cg-board-wrap.blindfold cg-board piece { opacity: 0 !important; }
+.cg-board-wrap.blindfold.peek cg-board piece { opacity: 1 !important; }
