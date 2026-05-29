@@ -36,5 +36,20 @@ it only in a chat or in your head:
   (e.g. `curl localhost:3000/api/health`, or a browser check for UI).
 - Back up a file before overwriting it (drop a copy in `archive/`), since the move is reversible.
 
+## 5. What is and isn't saved automatically (important)
+Nothing is captured **automatically**. There is no hook or bot recording the chat — the raw
+conversation is **not** auto-saved anywhere in this repo.
+
+What persists is whatever gets **written down by hand** under `PROJECT_MASTER/` per the rules
+above. So the discipline IS the save mechanism:
+- A change isn't "saved" until its **session note** exists in `sessions/` and is **committed**.
+- An idea/decision isn't "saved" until it's a file in `plans/` or `decisions/`.
+- If a conversation produced a decision, requirement, or idea, **capture it into a file** before
+  moving on — otherwise it's lost when the chat ends.
+
+Treat the chat as scratch; treat `PROJECT_MASTER/` (committed to git) as the durable record. When in
+doubt, over-document: write the note, commit it.
+
 ## TL;DR
 **Change → session note → commit. Every idea → a file in `PROJECT_MASTER/`.**
+**Nothing auto-saves — if it matters, write it down here and commit it.**
