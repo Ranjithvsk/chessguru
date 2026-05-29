@@ -54,12 +54,6 @@ piece.king.white{background-image:url("/pieces/wK.svg")}piece.queen.white{backgr
 #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--cp);color:var(--cfc);padding:10px 20px;border-radius:6px;font-size:13px;opacity:0;transition:.3s;pointer-events:none;z-index:9999;border:1px solid var(--bdr)}
 #toast.show{opacity:1}
 #dbg{position:fixed;bottom:60px;left:10px;background:rgba(0,0,0,.85);color:#0f0;padding:8px;font-size:10px;max-width:400px;word-break:break-all;z-index:9998;border-radius:4px;display:none}
-@media(min-width:701px) and (max-width:1024px){
-  main{grid-template-areas:"board" "side" "tools";grid-template-columns:1fr;max-width:100%;margin:0;padding:10px 16px 28px;align-items:stretch;gap:0}
-  .pb{grid-area:board;width:min(calc(100vw - 32px),calc(100vh - 110px));max-width:900px;margin:0 auto;aspect-ratio:1;overflow:visible}
-  .ps{grid-area:side;border-left:none;border-top:1px solid var(--bdr);padding:18px 0 0;width:100%;max-width:700px;margin:16px auto 0}
-  .pt{grid-area:tools;width:100%;max-width:700px;margin:0 auto}
-}
 @media(max-width:700px){
   /* === MAIN LAYOUT === */
   main{padding:4px 4px 16px 4px;grid-template-areas:"board" "side" "tools";grid-template-columns:1fr;gap:0;max-width:100%;margin:0;align-items:stretch}
