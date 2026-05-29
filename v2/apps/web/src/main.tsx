@@ -6,6 +6,9 @@ import App from "./App";
 import PuzzlesPage from "./pages/Puzzles";
 import ThemePage from "./pages/Theme";
 import BlindfoldPage from "./pages/Blindfold";
+import OpeningPage from "./pages/Opening";
+import EngineBattlePage from "./pages/EngineBattle";
+import BoardEditorPage from "./pages/BoardEditor";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -22,7 +25,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="puzzles" element={<PuzzlesPage />} />
             <Route path="theme" element={<ThemePage />} />
             <Route path="blindfold" element={<BlindfoldPage />} />
-            {/* Next: opening, engine-battle, board-editor, admin */}
+            <Route path="opening" element={<OpeningPage />} />
+            <Route path="engine-battle" element={<EngineBattlePage />} />
+            <Route path="board-editor" element={<BoardEditorPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
