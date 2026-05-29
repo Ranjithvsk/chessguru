@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
+<title>ChessGuru - Blindfold</title>
+<link rel="stylesheet" href="/css/chessground.css">
+<link rel="stylesheet" href="/css/theme.css">
+<link rel="stylesheet" href="/css/site.css">
+<link rel="stylesheet" href="/css/puzzle.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#161512;color:#bababa;font-family:"Noto Sans",sans-serif;min-height:100vh}
+#hdr{height:54px;display:flex;align-items:center;padding:0 28px;background:#000;border-bottom:1px solid #2a2a2a;position:sticky;top:0;z-index:100}
+#hdr .logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit;margin-right:4px}
+#hdr .logo-sq{width:30px;height:30px;border-radius:5px;background:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;color:#000;line-height:1;flex-shrink:0}
+#hdr .logo-name{font-family:"DM Serif Display",serif;font-size:17px;color:#fff;letter-spacing:.02em}
+#hdr nav{display:flex;align-items:center;gap:4px;flex:1;margin-left:8px}
+#hdr nav a{color:#888;font-size:12px;font-weight:500;text-decoration:none;padding:4px 10px;border-radius:5px;transition:color .15s,background .15s}
+#hdr nav a:hover,#hdr nav a.active{color:#fff;background:#1a1a1a}
+.btn{background:#3d3a35;border:none;color:#bababa;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:13px;white-space:nowrap}
+.btn:hover{background:#4a4744}
+.btn.on{background:#759900;color:#fff}
+.btn.danger{background:#c23b22}
+.btn:disabled{opacity:.4;cursor:default}
+#main{display:flex;flex-direction:row;justify-content:center;align-items:flex-start;padding:20px 16px;gap:20px;flex-wrap:wrap;max-width:1100px;margin:0 auto}
+#leftCol{display:flex;flex-direction:column;align-items:center;gap:10px;flex:0 0 auto}
+#sliderRow{display:flex;align-items:center;gap:10px;background:#1f1e1c;border-radius:6px;padding:8px 14px;width:100%;max-width:480px}
+#themeRow{background:#1f1e1c;border-radius:6px;padding:6px 10px;width:100%;max-width:480px;margin-bottom:0}
+#sliderRow label{font-size:12px;color:#888;white-space:nowrap}
+#pieceSlider{flex:1;accent-color:#759900;cursor:pointer}
+#sliderVal{font-size:13px;color:#f0d9b5;font-weight:600;white-space:nowrap;min-width:80px}
+#boardWrap{position:relative;width:480px;height:480px}
+#board{width:100%;height:100%}
+body.blindfold cg-board piece{opacity:0!important;pointer-events:none!important}
+body.peeking cg-board piece{opacity:1!important;pointer-events:auto!important}
+#peekOv{display:none;position:absolute;top:8px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.75);color:#f0d9b5;font-size:13px;font-weight:700;padding:4px 12px;border-radius:20px;pointer-events:none;z-index:10}
+#controls{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:center}
+#inputRow{display:flex;gap:6px;align-items:center;width:100%;max-width:480px}
+#moveInput{flex:1;background:#1f1e1c;border:1px solid #3d3a35;color:#f0d9b5;padding:7px 12px;border-radius:4px;font-size:14px;font-family:monospace}
+#moveInput:focus{outline:none;border-color:#759900}
+#moveInput::placeholder{color:#555}
+#btnGo{background:#759900;color:#fff;border:none;padding:7px 16px;border-radius:4px;cursor:pointer;font-size:14px}
+#status{font-size:14px;font-weight:600;min-height:22px;text-align:center}
+#status.good{color:#759900}
+#status.bad{color:#c23b22}
+#status.info{color:#888}
+#status.opp{color:#4e7fc4}
+#mvWrap{background:#1f1e1c;border-radius:6px;padding:8px 10px;width:100%;max-width:480px;min-height:36px}
+#mvList{display:flex;flex-wrap:wrap;gap:2px 4px;font-size:13px;font-family:monospace}
+#mvList move{padding:2px 5px;border-radius:3px;cursor:pointer;color:#bababa}
+#mvList move.active{background:#759900;color:#fff}
+#meta{font-size:12px;color:#666;text-align:center}
+#meta a{color:#4e7fc4;text-decoration:none}
+#rightCol{display:flex;flex-direction:column;gap:12px;flex:0 0 220px;min-width:200px}
+.panel{background:#1f1e1c;border-radius:8px;padding:14px;border:1px solid #3d3a35}
+.panel h3{font-size:12px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px}
+#turnInd{font-size:13px;font-weight:700;color:#f0d9b5;margin-bottom:10px}
+#notCols{display:flex;gap:16px}
+.nc h4{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px}
+.nc ul{list-style:none;font-size:13px;font-family:monospace;line-height:1.8}
+.nc ul li{color:#c8c8c8}
+.rr{display:flex;justify-content:space-between;margin-bottom:4px}
+.rl{color:#666}
+.rv{color:#f0d9b5;font-weight:600;font-family:monospace}
+#rDiff{font-weight:700;font-size:14px}
+#rDiff.pos{color:#759900}
+#rDiff.neg{color:#c23b22}
+@media(max-width:780px){#main{flex-direction:column;align-items:center}#boardWrap{width:min(98vw,480px);height:min(98vw,480px)}#rightCol{flex:unset;width:min(98vw,480px);flex-direction:row;flex-wrap:wrap}.panel{flex:1;min-width:160px}}
+
+@media(max-width:600px){
+  body{overflow-x:hidden}
+  #hdr nav{overflow-x:auto;white-space:nowrap;font-size:11px}
+  #hdr nav a{padding:4px 8px;font-size:11px}
+  .pb{flex-direction:column!important}
+  .pb .cg-wrap,.pb #board,.cg-wrap{width:100vw!important;height:100vw!important;max-width:100vw}
+  .ps,.pt,.sr{width:100%!important;max-width:100%!important;border-left:none!important;border-top:1px solid var(--border)}
+}
+</style>
+<style>
+:root{--w:#fff;--b:#000;--b2:#0f0f0f;--b3:#1a1a1a;--b4:#2a2a2a;--g1:#888;--g2:#555;--r-sm:5px;--cb:hsl(37,10%,8%);--cz:hsl(37,5%,19%);--cz2:hsl(37,5%,15%);--cp:hsl(37,7%,22%);--pri:hsl(209,79%,56%);--pri2:hsl(209,49%,40%);--cf:hsl(0,0%,73%);--cfd:hsl(0,0%,58%);--cfc:hsl(0,0%,87%);--ok:hsl(88,62%,37%);--err:hsl(0,60%,50%);--bdr:rgba(255,255,255,.1)}
+*{box-sizing:border-box;margin:0;padding:0}body{background:var(--cb);color:var(--cf);font-family:"Inter",sans-serif;font-size:13px}
+a{color:var(--pri);text-decoration:none}
+#hdr{display:flex;align-items:center;justify-content:space-between;padding:0 16px;height:40px;background:hsl(37,7%,14%);border-bottom:1px solid var(--bdr);position:sticky;top:0;z-index:100}
+.logo{color:var(--cfc);font-size:16px;font-weight:700}
+#hdr nav{display:flex;gap:4px;align-items:center}
+#hdr nav a{color:var(--cfd);padding:4px 10px;border-radius:3px}
+#hdr nav a:hover{color:var(--cfc);background:var(--cz)}
+.tsel{background:var(--cz);border:1px solid var(--bdr);color:var(--cf);padding:4px 8px;border-radius:3px;font-size:12px;cursor:pointer}
+main{display:grid;grid-template-areas:"board side" "tools side";grid-template-columns:auto 1fr;max-width:1100px;margin:0 auto;align-items:start;padding-top:16px}
+.pb{grid-area:board;position:relative;width:clamp(280px,55vw,660px);aspect-ratio:1;align-self:start;overflow:visible}
+.ps{grid-area:side;display:flex;flex-direction:column;background:var(--cz2);border-left:1px solid var(--bdr)}
+.pt{grid-area:tools;background:rgb(38,36,33);display:flex;flex-direction:column;border-top:1px solid var(--bdr)}
+#board{width:100%;height:100%;position:absolute;top:0;left:0}
+
+piece.king.white{background-image:url("/pieces/wK.svg")}piece.queen.white{background-image:url("/pieces/wQ.svg")}piece.rook.white{background-image:url("/pieces/wR.svg")}piece.bishop.white{background-image:url("/pieces/wB.svg")}piece.knight.white{background-image:url("/pieces/wN.svg")}piece.pawn.white{background-image:url("/pieces/wP.svg")}piece.king.black{background-image:url("/pieces/bK.svg")}piece.queen.black{background-image:url("/pieces/bQ.svg")}piece.rook.black{background-image:url("/pieces/bR.svg")}piece.bishop.black{background-image:url("/pieces/bB.svg")}piece.knight.black{background-image:url("/pieces/bN.svg")}piece.pawn.black{background-image:url("/pieces/bP.svg")}
+.sm{padding:12px;border-bottom:1px solid var(--bdr)}.sa{display:flex;gap:10px;align-items:center;margin-bottom:8px}
+.si{width:40px;height:40px;background:var(--pri);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px}
+.sn h2{font-size:15px;color:var(--cfc);font-weight:600;margin-bottom:2px}.sn p{font-size:11px;color:var(--cfd)}
+.sr{display:flex;gap:14px;font-size:12px;color:var(--cfd)}.sr strong{color:var(--cf)}
+.rr{padding:8px 12px;border-bottom:1px solid var(--bdr);font-size:12px;color:var(--cfd);display:flex;gap:12px;align-items:center}
+.rr strong{color:var(--cfc);font-size:14px}.rd{font-weight:600}.rd.pos{color:var(--ok)}.rd.neg{color:var(--err)}
+.pf{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center}
+.fi{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:26px}
+.fi.wait{background:var(--cz);border:2px solid var(--bdr)}.fi.good{background:var(--ok)}.fi.bad{background:var(--err)}
+.ft{font-size:17px;color:var(--cfc);font-weight:600}.fd{font-size:12px;color:var(--cfd)}
+.bn{background:var(--pri);color:#fff;border:none;padding:10px 28px;border-radius:4px;font-size:14px;font-weight:600;cursor:pointer;width:100%;max-width:200px;display:none}
+.bn:hover{background:var(--pri2)}
+.sc{padding:8px 12px;border-top:1px solid var(--bdr);display:flex;gap:8px;align-items:center;font-size:12px;color:var(--cfd)}
+.sc select{background:var(--cz);border:1px solid var(--bdr);color:var(--cf);padding:3px 6px;border-radius:3px;font-size:12px;cursor:pointer;flex:1}
+.pm{flex:1;overflow-y:auto;padding:6px}.tv{display:table;width:100%;font-size:13px}
+.mr{display:table-row}.mr index{display:table-cell;color:var(--cfd);padding:2px 6px 2px 2px;width:28px}
+.mr move{display:table-cell;padding:2px 8px;border-radius:3px;cursor:pointer;width:80px}
+.mr move:hover{background:var(--cz)}.mr move.active{background:var(--pri);color:#fff}
+.pc{display:flex;align-items:center;justify-content:center;gap:2px;padding:6px;border-top:1px solid var(--bdr)}
+.pc button{background:none;border:none;color:var(--cfd);cursor:pointer;padding:6px 12px;border-radius:3px;font-size:15px}
+.pc button:hover{color:var(--cfc);background:var(--cz)}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--cp);color:var(--cfc);padding:10px 20px;border-radius:6px;font-size:13px;opacity:0;transition:.3s;pointer-events:none;z-index:9999;border:1px solid var(--bdr)}
+#toast.show{opacity:1}
+#dbg{position:fixed;bottom:60px;left:10px;background:rgba(0,0,0,.85);color:#0f0;padding:8px;font-size:10px;max-width:400px;word-break:break-all;z-index:9998;border-radius:4px;display:none}
+@media(max-width:700px){main{padding:8px;grid-template-areas:"board" "side" "tools";grid-template-columns:1fr}.pb{grid-area:board;position:relative;width:clamp(280px,55vw,660px);aspect-ratio:1;align-self:start;overflow:visible}.ps{border-left:none;border-top:1px solid var(--bdr)}}
+
+cg-board{position:absolute;top:0;left:0;width:100%;height:100%;display:block;background-color:#ffffff;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2' height='2'%3E%3Crect width='1' height='1' fill='%238c8c8c'/%3E%3Crect x='1' y='1' width='1' height='1' fill='%238c8c8c'/%3E%3C/svg%3E");background-size:25% 25%}.cg-wrap{display:block;height:100%;width:100%}
+cg-container{position:absolute;width:100%;height:100%;display:block;top:0}
+
+piece{position:absolute;top:0;left:0;width:12.5%;height:12.5%;background-size:cover;background-repeat:no-repeat;z-index:2;will-change:transform;pointer-events:none}
+square{position:absolute;top:0;left:0;width:12.5%;height:12.5%;pointer-events:none}
+square.last-move{background-color:rgba(20,85,30,.5)}
+square.selected{background-color:rgba(20,85,0,.5)}
+square.move-dest{background:radial-gradient(rgba(20,85,30,.5) 22%,rgba(0,0,0,.3) 0)}
+square.move-dest.oc{background:radial-gradient(transparent 0%,transparent 79%,rgba(20,85,30,.3) 80%)}
+square.check{background:radial-gradient(ellipse at center,rgba(255,0,0,1) 0%,rgba(231,0,0,1) 25%,rgba(169,0,0,0) 89%,rgba(158,0,0,0) 100%)}
+cg-auto-pieces,coords{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
+coords{display:flex}
+coords.ranks{flex-direction:column-reverse}
+coords.files{flex-direction:row;transform:translateY(calc(100% - 16px))}
+coord{flex:1;font-size:max(.8vw,8px);color:rgba(255,255,255,.6)}
+cg-container > svg,cg-container > svg > defs{overflow:hidden;position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:2}
+</style>
+
+<style>
+:root {
+  ---white-king: url("/pieces/wK.svg");
+  ---white-queen: url("/pieces/wQ.svg");
+  ---white-rook: url("/pieces/wR.svg");
+  ---white-bishop: url("/pieces/wB.svg");
+  ---white-knight: url("/pieces/wN.svg");
+  ---white-pawn: url("/pieces/wP.svg");
+  ---black-king: url("/pieces/bK.svg");
+  ---black-queen: url("/pieces/bQ.svg");
+  ---black-rook: url("/pieces/bR.svg");
+  ---black-bishop: url("/pieces/bB.svg");
+  ---black-knight: url("/pieces/bN.svg");
+  ---black-pawn: url("/pieces/bP.svg");
+}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body class="blindfold is2d">
+<header id="hdr">
+  <a class="logo" href="/"><div class="logo-sq">♟</div><span class="logo-name">ChessGuru</span></a>
+  <nav>
+    <a href="/">Puzzles</a>
+    <a href="/blindfold" class="active">Blindfold</a>
+    <a href="/opening">Opening</a>
+    <a href="/engine-battle">Engine Battle</a>
+    <a href="/puzzle-status">Puzzle Factory</a>
+  </nav>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+    <span id="streak" style="font-size:12px;color:#e8a030;font-weight:600">Streak: 0</span>
+    <button class="btn" id="btnVoice">Voice OFF</button>
+    <button class="btn" id="btnFlip">Flip</button>
+    <a id="bfLoginBtn" href="/login" style="display:none;color:#888;padding:4px 10px;border-radius:5px;text-decoration:none;border:1px solid #2a2a2a;font-size:12px;white-space:nowrap">Sign in</a>
+    <a href="/login" id="bfUserDisplay" style="color:#fff;font-weight:600;text-decoration:none;font-size:12px"></a>
+  </div>
+</header>
+<div id="main">
+<div id="leftCol">
+<div id="themeRow"><select id="themeSelect" style="width:100%;background:#1f1e1c;color:#bababa;border:1px solid #3d3a35;border-radius:4px;padding:6px 10px;font-size:13px;cursor:pointer"></select></div><div id="sliderRow"><label>Max pieces on board:</label><select id="pieceSlider" style="background:#2a2a2a;color:#fff;border:1px solid #444;border-radius:4px;padding:4px 8px;font-size:13px;cursor:pointer"><option value="1">&le;4 pieces</option><option value="2">&le;5 pieces</option><option value="3">&le;6 pieces</option><option value="4">&le;7 pieces</option><option value="5" selected>&le;8 pieces</option><option value="6">&le;10 pieces</option><option value="7">&le;12 pieces</option><option value="8">&le;16 pieces</option><option value="9">&le;20 pieces</option></select><span id="sliderVal" style="display:none"></span></div>
+<div id="toggleRow" style="display:flex;gap:14px;align-items:center;padding:5px 0;font-size:13px;flex-wrap:wrap"><label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="chkCoords" checked> Coordinates</label><label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="chkBoard" checked> Show Board</label></div>
+<div id="boardWrap"><div id="board"></div><div id="peekOv">Peeking: <span id="peekCnt">3</span>s</div></div>
+<div id="controls">
+<button class="btn" id="btnPrev" disabled>Prev</button>
+<button class="btn" id="btnNext" disabled>Next</button>
+<button class="btn" id="btnHint">Hint</button>
+<button class="btn" id="btnPeek">Peek 3s</button>
+  
+<button class="btn danger" id="btnSol" style="display:none">View Solution</button>
+</div>
+<div id="inputRow"><input id="moveInput" type="text" placeholder="Type move: Nf3, e4, O-O, e2e4..." autocomplete="off" spellcheck="false"><button id="btnGo">Go</button></div>
+<div id="status" class="info">Loading...</div>
+<div id="mvWrap"><div id="mvList"></div></div>
+<div id="meta"><span id="pRat"></span> | <span id="pPl"></span> | <a id="pLink" href="#" target="_blank"></a></div>
+</div>
+<div id="rightCol">
+<div class="panel" id="notPanel"><h3>Position</h3><div id="turnInd">-</div><div id="notCols"><div class="nc"><h4>White</h4><ul id="wList"></ul></div><div class="nc"><h4>Black</h4><ul id="bList"></ul></div></div></div>
+<div class="panel"><h3>Blindfold Rating</h3><div class="rr"><span class="rl">Rating</span><span class="rv" id="myRat">800</span></div><div class="rr"><span class="rl">Deviation</span><span class="rv" id="myDev">+/-500</span></div><div class="rr"><span class="rl">Last puzzle</span><span class="rv" id="rDiff">-</span></div><div class="rr"><span class="rl">Puzzle rating</span><span class="rv" id="pRatVal">-</span></div></div>
+<div class="panel" id="qrPanel" style="text-align:center;padding:12px 8px 10px">
+  <h3 style="margin-bottom:8px">Board QR</h3>
+  <div id="inlineQR" style="display:inline-block;background:#fff;padding:6px;border-radius:6px"></div>
+  <div style="font-size:10px;color:#6b6560;margin-top:6px">Scan to view on phone</div>
+</div>
+</div>
+</div>
+
+<script src="/js/chess.min.js"></script>
+<script src="/js/chessground.min.js"></script>
+<script>
+(function(){
+"use strict";
+var API="/api",puzzle=null,cg=null,chess=null;
+var solution=[],solIdx=0,solved=false,navIdx=-1,navHistory=[];
+var streakCount=0,peekUsed=false,voiceOn=false,submitLock=false;
+var myGlicko={r:800,d:500,v:0.09};
+function $(i){return document.getElementById(i);}
+var eS=$("status"),eSk=$("streak"),eML=$("mvList");
+var eWL=$("wList"),eBL=$("bList"),eTI=$("turnInd");
+var eMR=$("myRat"),eMD=$("myDev"),eRD=$("rDiff");
+var ePRV=$("pRatVal"),eMI=$("moveInput");
+var ePO=$("peekOv"),ePC=$("peekCnt");
+var eSl=$("pieceSlider"),eSV=$("sliderVal");
+
+// Refresh piece count dropdown to only show available options for theme+rating
+function refreshPcOptions(theme,rating,savedVal){
+  fetch(API+"/puzzles/pc-options?theme="+encodeURIComponent(theme)+"&rating="+Math.round(rating||800))
+  .then(function(r){return r.json();}).then(function(d){
+    var avail=d.available||[4,5,6,7,8,10,12,16,20,32];
+    var curVal=savedVal||eSl.value||'5';
+    var eSlEl=document.getElementById('pieceSlider');
+    eSlEl.innerHTML='';
+    avail.forEach(function(pc){
+      var idx=[4,5,6,7,8,10,12,16,20,32].indexOf(pc)+1;
+      var o=document.createElement('option');
+      o.value=String(idx);
+      o.textContent='≤'+pc+' pieces';
+      if(String(idx)===String(curVal))o.selected=true;
+      eSlEl.appendChild(o);
+    });
+    if(!eSlEl.value&&eSlEl.options.length>0)eSlEl.selectedIndex=0;
+  }).catch(function(){});
+}
+var PC_BANDS=[4,5,6,7,8,10,12,16,20,32];
+function initBoard(){
+  var CG=window.Chessground;
+  var fn=typeof CG==="function"?CG:(CG&&(CG.Chessground||Object.values(CG)[0]));
+  if(!fn){setTimeout(initBoard,100);return;}
+  cg=fn(document.getElementById("board"),{
+    movable:{free:false,color:undefined,events:{after:onMove}},
+    animation:{enabled:true,duration:200},
+    highlight:{lastMove:true,check:true},
+    coordinates:true,draggable:{enabled:true}
+  });
+  loadNext();
+}
+function fenToPieces(fen){
+  var rows=fen.split(" ")[0].split("/"),pieces=new Map(),files="abcdefgh";
+  var tm={p:"pawn",n:"knight",b:"bishop",r:"rook",q:"queen",k:"king"};
+  for(var r=0;r<8;r++){var c=0;
+    for(var i=0;i<rows[r].length;i++){var ch=rows[r][i];
+      if(ch>="1"&&ch<="8")c+=parseInt(ch);
+      else{var sq=files[c]+(8-r);pieces.set(sq,{role:tm[ch.toLowerCase()],color:ch===ch.toUpperCase()?"white":"black"});c++;}
+    }
+  }
+  return pieces;
+}
+function pieceLabel(role,sq){
+  var a={pawn:"",knight:"N",bishop:"B",rook:"R",queen:"Q",king:"K"};
+  return (a[role]||"")+sq.toUpperCase();
+}
+function updateNotation(fen){
+  var pieces=fenToPieces(fen),w=[],b=[];
+  Array.from(pieces.entries()).sort(function(a,bb){return a[0]<bb[0]?-1:1;}).forEach(function(e){
+    var lbl=pieceLabel(e[1].role,e[0]);
+    if(e[1].color==="white")w.push(lbl);else b.push(lbl);
+  });
+  eWL.innerHTML=w.map(function(l){return "<li>"+l+"</li>";}).join("");
+  eBL.innerHTML=b.map(function(l){return "<li>"+l+"</li>";}).join("");
+  eTI.textContent=fen.split(" ")[1]==="w"?"WHITE TO PLAY":"BLACK TO PLAY";
+}
+function getLegal(){
+  var d=new Map();
+  chess.moves({verbose:true}).forEach(function(m){if(!d.has(m.from))d.set(m.from,[]);d.get(m.from).push(m.to);});
+  return d;
+}
+function setStatus(msg,cls){eS.textContent=msg;eS.className=cls||"info";}
+function updateStreak(){eSk.textContent="Streak: "+streakCount;}
+function speak(san){
+  if(!voiceOn||!window.speechSynthesis)return;
+  var t=san.replace(/^N/,"Knight ").replace(/^B/,"Bishop ").replace(/^R/,"Rook ").replace(/^Q/,"Queen ").replace(/^K/,"King ").replace(/^O-O-O/,"Castle queenside").replace(/^O-O/,"Castle kingside").replace(/x/," takes ").replace(/[+]/," check").replace(/#/," checkmate");
+  var u=new SpeechSynthesisUtterance(t);u.rate=1.1;window.speechSynthesis.speak(u);
+}
+function cntPc(fen){var n=0;for(var c of fen.split(" ")[0])if(/[pnbrqkPNBRQK]/.test(c))n++;return n;}
+function loadNext(){
+  setStatus("Loading...","info");
+  solved=false;solIdx=0;solution=[];navIdx=-1;navHistory=[];
+  peekUsed=false;submitLock=false;
+  eML.innerHTML="";
+  $("btnSol").style.display="none";
+  $("btnHint").disabled=false;
+  $("btnPeek").disabled=false;
+  $("btnPrev").disabled=true;
+  $("btnNext").disabled=true;
+  eMI.value="";eMI.disabled=false;
+  document.body.classList.add("blindfold");
+  document.body.classList.remove("peeking");
+  var pv=PC_BANDS[parseInt(eSl.value)-1]||10;
+  var pMin=Math.max(3,pv-2),pMax=Math.min(32,pv+2);
+  function doLoad(u){
+    fetch(u).then(function(r){return r.json();}).then(function(p){
+      puzzle=p;
+      chess=new Chess();
+      var fen=p.fen+(p.fen.split(" ").length<6?" - 0 1":"");
+      chess.load(fen);
+      solution=p.solution||(p.line?p.line.trim().split(" "):[]);
+      $("pRat").textContent="Rating: "+p.rating;
+      $("pPl").textContent=(p.plays||0)+" plays";
+      $("pLink").textContent=p.id||p._id;
+      $("pLink").href="https://lichess.org/training/"+(p.id||p._id);
+      ePRV.textContent=p.rating;
+      eSV.textContent="≤"+PC_BANDS[parseInt(eSl.value)-1]+" pieces";
+      window._cgFen=p.fen+(p.fen.split(" ").length<6?" - 0 1":"");window._cgPzId=p.id||p._id||"";showPuzzle(p);
+      updateQR();
+    }).catch(function(){setStatus("No puzzles found for this combination - try different settings","bad");submitLock=false;});
+  }
+  var ct=document.getElementById("themeSelect")?document.getElementById("themeSelect").value:currentTheme;doLoad(API+"/puzzles/random?theme="+ct+"&maxPc="+pv+"&rating="+Math.round(myGlicko.r));
+}
+function showPuzzle(p){window._cgFen=chess.fen();
+updateQR();
+  var pc=p.fen.split(" ")[1]==="w"?"black":"white";
+  var fm=solution[0],ff=fm.slice(0,2),ft=fm.slice(2,4),fp=fm[4];
+  chess.move({from:ff,to:ft,promotion:fp||"q"});
+  solIdx=1;
+  buildMoves();updateNotation(chess.fen());
+  cg.set({fen:chess.fen(),orientation:pc,turnColor:pc,lastMove:[ff,ft],
+    movable:{free:false,color:pc,dests:getLegal(),events:{after:onMove}},
+    animation:{enabled:true,duration:200},coordinates:true});
+  setTimeout(function(){cg.set({lastMove:undefined});},500);
+  var hist=chess.history({verbose:true});
+  var oppSAN=hist.length?hist[hist.length-1].san:ff+ft;
+  setStatus("Opponent played: "+oppSAN,"opp");
+  speak(oppSAN);
+  navIdx=navHistory.length-1;
+}
+function buildMoves(){
+  var tmpC=new Chess();
+  tmpC.load(puzzle.fen+(puzzle.fen.split(" ").length<6?" - 0 1":""));
+  navHistory=[{fen:tmpC.fen(),lastMove:null,turn:tmpC.turn()==="w"?"white":"black"}];
+  eML.innerHTML="";
+  solution.slice(0,solIdx).forEach(function(uci,i){
+    var f=uci.slice(0,2),t=uci.slice(2,4),pr=uci[4];
+    var mv=tmpC.move({from:f,to:t,promotion:pr||"q"});
+    navHistory.push({fen:tmpC.fen(),lastMove:[f,t],turn:tmpC.turn()==="w"?"white":"black"});
+    var el=document.createElement("move");
+    el.textContent=mv?mv.san:uci;
+    el.onclick=(function(n){return function(){navTo(n);};})(i+1);
+    eML.appendChild(el);
+  });
+  navIdx=navHistory.length-1;
+  syncML();
+}
+function onMove(from,to){
+  if(solved)return;
+  var exp=solution[solIdx],pr=exp&&exp.length===5?exp[4]:"q";
+  var mv=chess.move({from:from,to:to,promotion:pr});
+  if(!mv){setStatus("Illegal move - piece cannot go there","bad");cg.set({fen:chess.fen()});return;}
+  var uci=from+to+(mv.promotion||"");
+  if(uci===exp){
+    solIdx++;buildMoves();updateNotation(chess.fen());
+    if(solIdx>=solution.length){finishSolve(true);return;}
+    setStatus("Best move!","good");
+    $("btnPrev").disabled=false;
+    setTimeout(oppReply,600);
+  } else {
+    chess.undo();cg.set({fen:chess.fen(),movable:{dests:getLegal()}});
+    setStatus("Not the best move - try again","bad");
+    $("btnSol").style.display="inline-block";
+  }
+}
+function oppReply(){
+  if(solIdx>=solution.length)return;
+  var uci=solution[solIdx],f=uci.slice(0,2),t=uci.slice(2,4),pr=uci[4];
+  chess.move({from:f,to:t,promotion:pr||"q"});solIdx++;
+  buildMoves();updateNotation(chess.fen());
+  var pc2=solIdx>=solution.length?undefined:(chess.turn()==="w"?"white":"black");
+  cg.set({fen:chess.fen(),lastMove:[f,t],movable:{color:pc2,dests:getLegal()}});
+  var hist=chess.history({verbose:true});
+  var san=hist.length?hist[hist.length-1].san:f+t;
+  setStatus("Opponent played: "+san,"opp");speak(san);
+  setTimeout(function(){cg.set({lastMove:undefined});},500);
+  if(solIdx>=solution.length)finishSolve(true);
+}
+function finishSolve(win){
+  solved=true;
+  cg.set({movable:{color:undefined}});
+  eMI.disabled=true;
+  $("btnHint").disabled=true;$("btnPeek").disabled=true;
+  if(win){streakCount++;updateStreak();setStatus("Solved! Excellent!","good");}
+  else{setStatus("Puzzle failed - Better luck next time!","bad");}
+  document.body.classList.remove("blindfold");
+  if(cg){cg.state.dom.redraw();}
+  updateNotation(chess.fen());
+  $("btnPrev").disabled=(navHistory.length<=1);
+  $("btnNext").disabled=false;
+  navIdx=0;syncML();
+  submit(win);
+  showNextBtn();
+}
+function handleText(raw){
+  if(!puzzle||solved)return;
+  var inp=raw.trim();if(!inp)return;
+  // Normalize SAN: uppercase piece letter, handle castling
+  inp=inp.replace(/^o-o-o$/i,'O-O-O').replace(/^o-o$/i,'O-O').replace(/^0-0-0$/i,'O-O-O').replace(/^0-0$/i,'O-O');
+  if(inp.length>0&&inp[0]!=='O')inp=inp[0].toUpperCase()+inp.slice(1);
+  var mv=null;
+  try{mv=chess.move(inp);}catch(e){}
+  if(!mv&&/^[a-h][1-8][a-h][1-8][qrbn]?$/i.test(inp)){
+    try{mv=chess.move({from:inp.slice(0,2).toLowerCase(),to:inp.slice(2,4).toLowerCase(),promotion:inp[4]?inp[4].toLowerCase():undefined});}catch(e){}
+  }
+  if(!mv){setStatus("Illegal move - piece cannot go there","bad");eMI.select();return;}
+  chess.undo();eMI.value="";
+  onMove(mv.from,mv.to);
+}
+function giveHint(){
+  if(!puzzle||solved||solIdx>=solution.length)return;
+  streakCount=0;updateStreak();
+  $("btnHint").disabled=true;
+  var from=solution[solIdx].slice(0,2);
+  cg.setShapes([{orig:from,brush:"yellow"}]);
+  setStatus("Hint: piece on "+from.toUpperCase(),"info");
+  submit(false);
+  setTimeout(function(){cg.setShapes([]);},3000);
+}
+function doPeek(){
+  if(peekUsed||solved)return;
+  peekUsed=true;streakCount=0;updateStreak();
+  $("btnPeek").disabled=true;
+  submit(false);
+  document.body.classList.add("peeking");
+  ePO.style.display="block";
+  var s=3;ePC.textContent=s;
+  var iv=setInterval(function(){s--;ePC.textContent=s;if(s<=0){clearInterval(iv);document.body.classList.remove("peeking");ePO.style.display="none";}},1000);
+}
+function revealSol(){
+  streakCount=0;updateStreak();
+  $("btnSol").style.display="none";
+  $("btnHint").disabled=true;$("btnPeek").disabled=true;
+  eMI.disabled=true;
+  submit(false);
+  function playNext(){
+    if(solIdx>=solution.length){finishSolve(false);return;}
+    var uci=solution[solIdx],f=uci.slice(0,2),t=uci.slice(2,4),pr=uci[4];
+    chess.move({from:f,to:t,promotion:pr||"q"});solIdx++;
+    buildMoves();updateNotation(chess.fen());
+    cg.set({fen:chess.fen(),lastMove:[f,t]});
+    setTimeout(function(){cg.set({lastMove:undefined});},400);
+    setTimeout(playNext,800);
+  }
+  playNext();
+}
+function navTo(target){
+  if(!navHistory.length||!cg)return;
+  if(target<0)target=0;
+  if(target>=navHistory.length)target=navHistory.length-1;
+  var moved=(target!==navIdx);
+  navIdx=target;
+  var snap=navHistory[navIdx],isLatest=(navIdx>=navHistory.length-1);
+  if(moved){
+    if(isLatest&&!solved){
+      var pc=chess.turn()==="w"?"white":"black";
+      cg.set({fen:chess.fen(),turnColor:pc,movable:{color:pc,dests:getLegal()}});
+      updateNotation(chess.fen());
+    } else {
+      cg.set({pieces:fenToPieces(snap.fen),lastMove:snap.lastMove||undefined,movable:{color:undefined},turnColor:snap.turn});
+      cg.state.check=undefined;cg.state.selected=undefined;cg.redrawAll();
+      updateNotation(snap.fen);
+    }
+  }
+  $("btnPrev").disabled=(navIdx<=0);
+  $("btnNext").disabled=isLatest;
+  syncML();
+}
+function syncML(){
+  eML.querySelectorAll("move").forEach(function(m,i){m.className=i===navIdx-1?"active":"";});
+}
+function submit(win){
+  if(submitLock)return;submitLock=true;
+  if(!puzzle)return;
+  fetch(API+"/puzzles/"+(puzzle.id||puzzle._id)+"/complete",{
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({win:win,mode:"blindfold",rating:myGlicko.r,deviation:myGlicko.d,userId:window._userId||null})
+  }).then(function(r){return r.json();}).then(function(data){
+    if(data&&data.glicko){
+      var prev=myGlicko.r;myGlicko=data.glicko;
+      var diff=Math.round(myGlicko.r-prev);
+      eMR.textContent=Math.round(myGlicko.r);
+      eMD.textContent="+/-"+Math.round(myGlicko.d);
+      eRD.textContent=(diff>=0?"+":"")+diff;
+      eRD.className=diff>=0?"pos":"neg";
+    }
+  }).catch(function(){});
+}
+function showNextBtn(){
+  if($("btnN2"))return;
+  var btn=document.createElement("button");
+  btn.id="btnN2";btn.className="btn on";btn.textContent="Next puzzle";
+  btn.style.marginTop="4px";
+  btn.addEventListener("click",function(){btn.remove();document.body.classList.add("blindfold");loadNext();});
+  $("controls").appendChild(btn);
+}
+// select handles display via options
+eSl.addEventListener("change",function(){localStorage.setItem("cgbf_slider",eSl.value);submitLock=false;loadNext();});
+$("btnFlip").addEventListener("click",function(){cg.toggleOrientation();});
+$("btnPrev").addEventListener("click",function(){navTo(navIdx-1);});
+$("btnNext").addEventListener("click",function(){navTo(navIdx+1);});
+$("btnHint").addEventListener("click",giveHint);
+$("btnPeek").addEventListener("click",doPeek);
+$("btnSol").addEventListener("click",revealSol);
+$("btnVoice").addEventListener("click",function(){
+  voiceOn=!voiceOn;
+  this.textContent=voiceOn?"Voice ON":"Voice OFF";
+  this.classList.toggle("on",voiceOn);
+  localStorage.setItem("cgbfv",voiceOn?"1":"0");
+});
+if(localStorage.getItem("cgbfv")==="1"){voiceOn=true;$("btnVoice").textContent="Voice ON";$("btnVoice").classList.add("on");}
+eMI.addEventListener("keydown",function(e){if(e.key==="Enter")handleText(this.value);});
+$("btnGo").addEventListener("click",function(){handleText(eMI.value);});
+document.addEventListener("keydown",function(e){
+  if(e.target===eMI)return;
+  if(e.key==="ArrowLeft")navTo(navIdx-1);
+  if(e.key==="ArrowRight")navTo(navIdx+1);
+});
+var THEMES=['mix','advancedPawn','advantage','anastasiaMate','arabianMate','attackingF2F7','attraction','backRankMate','balestraMate','bishopEndgame','blindSwineMate','bodenMate','capturingDefender','castling','clearance','collinearMove','cornerMate','crushing','defensiveMove','deflection','discoveredAttack','discoveredCheck','doubleBishopMate','doubleCheck','dovetailMate','endgame','enPassant','epauletteMate','equality','exposedKing','fork','hangingPiece','hookMate','interference','intermezzo','kingsideAttack','knightEndgame','long','mate','mateIn1','mateIn2','mateIn3','mateIn4','mateIn5','middlegame','oneMove','opening','operaMate','pawnEndgame','pin','promotion','queenEndgame','queenRookEndgame','queensideAttack','quietMove','rookEndgame','sacrifice','short','skewer','smotheredMate','superGM','triangleMate','trappedPiece','underPromotion','veryLong','xRayAttack','zugzwang'];
+var currentTheme='mix';
+var THEMES=['mix','advancedPawn','advantage','anastasiaMate','arabianMate','attackingF2F7','attraction','backRankMate','balestraMate','bishopEndgame','blindSwineMate','bodenMate','capturingDefender','castling','clearance','collinearMove','cornerMate','crushing','defensiveMove','deflection','discoveredAttack','discoveredCheck','doubleBishopMate','doubleCheck','dovetailMate','endgame','enPassant','epauletteMate','equality','exposedKing','fork','hangingPiece','hookMate','interference','intermezzo','kingsideAttack','knightEndgame','long','mate','mateIn1','mateIn2','mateIn3','mateIn4','mateIn5','middlegame','oneMove','opening','operaMate','pawnEndgame','pin','promotion','queenEndgame','queenRookEndgame','queensideAttack','quietMove','rookEndgame','sacrifice','short','skewer','smotheredMate','superGM','triangleMate','trappedPiece','underPromotion','veryLong','xRayAttack','zugzwang'];
+var tSel=document.getElementById('themeSelect');
+if(tSel){
+  THEMES.forEach(function(t){var o=document.createElement('option');o.value=t;o.textContent=t==='mix'?'All Themes':t;tSel.appendChild(o);});
+  // Restore saved theme
+  var savedTheme=localStorage.getItem('cgbf_theme');
+  if(savedTheme&&THEMES.indexOf(savedTheme)>=0){tSel.value=savedTheme;currentTheme=savedTheme;}
+  tSel.addEventListener('change',function(){currentTheme=this.value;localStorage.setItem('cgbf_theme',this.value);refreshPcOptions(currentTheme,myGlicko.r,null);submitLock=false;loadNext();});
+}
+// Restore saved slider position
+var savedSlider=localStorage.getItem('cgbf_slider');
+refreshPcOptions(currentTheme,myGlicko?myGlicko.r:800,savedSlider);
+
+function updateQR(){
+  var fen = window._cgFen||'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+  var pid=window._cgPzId||'';var url=pid?'https://harinitharanjith.com/?puzzle='+encodeURIComponent(pid):'https://harinitharanjith.com/?fen='+encodeURIComponent(fen);
+  var el = document.getElementById('inlineQR');
+  if(!el||typeof QRCode==='undefined') return;
+  el.innerHTML='';
+  new QRCode(el,{text:url,width:96,height:96,colorDark:'#1a1815',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+}
+initBoard();
+})();
+</script>
+
+</body>
+</html>
+<div id="userWidget" style="margin-left:auto;display:flex;align-items:center;gap:8px">
+  <a id="loginBtn" href="/login" style="display:none;color:var(--cfd);padding:4px 10px;border-radius:3px;text-decoration:none;background:var(--cz);border:1px solid var(--bdr);font-size:13px;white-space:nowrap">Sign in</a>
+  <span id="userInfo" style="display:none;align-items:center;gap:8px;font-size:13px">
+    <a href="/login" id="userNameDisplay" style="color:var(--cfc);font-weight:600;text-decoration:none"></a>
+    <button onclick="doLogout()" style="background:none;border:1px solid var(--bdr);color:var(--cfd);padding:2px 8px;border-radius:3px;cursor:pointer;font-size:12px">Sign out</button>
+  </span>
+</div>
+<script>
+(function(){
+  fetch('/auth/me').then(r=>r.json()).then(d=>{
+    if(d.loggedIn){window._userId=d.userId;var ub=document.getElementById("bfLoginBtn");var ud=document.getElementById("bfUserDisplay");if(ud){ud.textContent=d.userId;ud.style.display="inline";}if(ub)ub.style.display="none";}else{var ub2=document.getElementById("bfLoginBtn");if(ub2)ub2.style.display="inline";}
+    fetch('/api/me/rating').then(r=>r.json()).then(rd=>{
+      if(rd.loggedIn){myGlicko={r:rd.rating,d:500,v:0.09};myRating=rd.rating;window._userId=rd.userId;var el=document.getElementById('myRating');if(el)el.textContent=rd.rating;}
+    }).catch(function(){});
+    if(d.loggedIn){
+      document.getElementById('userInfo').style.display='flex';
+      document.getElementById('userNameDisplay').textContent=d.username;
+    } else {
+      document.getElementById('loginBtn').style.display='inline';
+    }
+  }).catch(function(){document.getElementById('loginBtn').style.display='inline';});
+  window.doLogout=function(){fetch('/auth/logout',{method:'POST'}).then(function(){location.reload();});};
+})();
+
+
+function closeQR(){
+  document.getElementById('qrModal').style.display = 'none';
+  document.getElementById('qrCanvas').innerHTML = '';
+}
+document.getElementById("chkCoords").addEventListener("change",function(){document.querySelectorAll("coords").forEach(function(e){e.style.display=this.checked?"flex":"none"},this);});
+document.getElementById("chkBoard").addEventListener("change",function(){document.getElementById("boardWrap").style.visibility=this.checked?"visible":"hidden";});
+</script>
+

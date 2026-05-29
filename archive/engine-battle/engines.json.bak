@@ -1,0 +1,544 @@
+{
+  "version": "3.0",
+  "updated": "2026-05-01",
+  "maiaWeightsUrl": "https://github.com/CSSLab/maia-chess/releases/download/v1.0/maia-ELO.pb.gz",
+  "engines": [
+    {
+      "id": "sf18",
+      "name": "Stockfish 18",
+      "binary": "stockfish",
+      "elo": 3600,
+      "type": "uci"
+    },
+    {
+      "id": "sf17",
+      "name": "Stockfish 17",
+      "binary": "stockfish16",
+      "elo": 3550,
+      "type": "uci"
+    },
+    {
+      "id": "sf16",
+      "name": "Stockfish 16",
+      "binary": "stockfish16",
+      "elo": 3500,
+      "type": "uci"
+    },
+    {
+      "id": "viridithas",
+      "name": "Viridithas 15",
+      "binary": "viridithas",
+      "elo": 3572,
+      "type": "uci"
+    },
+    {
+      "id": "renegade",
+      "name": "Renegade 1.1",
+      "binary": "renegade",
+      "elo": 3462,
+      "type": "uci"
+    },
+    {
+      "id": "carp",
+      "name": "Carp 3.0",
+      "binary": "carp",
+      "elo": 3458,
+      "type": "uci"
+    },
+    {
+      "id": "stormphrax",
+      "name": "Stormphrax 6",
+      "binary": "stormphrax",
+      "elo": 3450,
+      "type": "uci"
+    },
+    {
+      "id": "berserk",
+      "name": "Berserk 12",
+      "binary": "berserk",
+      "elo": 3440,
+      "type": "uci"
+    },
+    {
+      "id": "sirius",
+      "name": "Sirius 8",
+      "binary": "sirius",
+      "elo": 3430,
+      "type": "uci"
+    },
+    {
+      "id": "nalwald",
+      "name": "Nalwald 19",
+      "binary": "nalwald",
+      "elo": 3350,
+      "type": "uci"
+    },
+    {
+      "id": "clarity",
+      "name": "Clarity 7",
+      "binary": "clarity",
+      "elo": 3360,
+      "type": "uci"
+    },
+    {
+      "id": "blackcore",
+      "name": "BlackCore 6",
+      "binary": "blackcore",
+      "elo": 3320,
+      "type": "uci"
+    },
+    {
+      "id": "clover",
+      "name": "Clover 5",
+      "binary": "clover",
+      "elo": 3340,
+      "type": "uci"
+    },
+    {
+      "id": "altair",
+      "name": "Altair 7",
+      "binary": "altair",
+      "elo": 3310,
+      "type": "uci"
+    },
+    {
+      "id": "frozenight",
+      "name": "Frozenight 6",
+      "binary": "frozenight",
+      "elo": 3250,
+      "type": "uci"
+    },
+    {
+      "id": "wahoo",
+      "name": "Wahoo 4",
+      "binary": "wahoo",
+      "elo": 3200,
+      "type": "uci"
+    },
+    {
+      "id": "willow",
+      "name": "Willow 4",
+      "binary": "willow",
+      "elo": 3180,
+      "type": "uci"
+    },
+    {
+      "id": "avalanche",
+      "name": "Avalanche 2",
+      "binary": "avalanche",
+      "elo": 3160,
+      "type": "uci"
+    },
+    {
+      "id": "weiss",
+      "name": "Weiss 2",
+      "binary": "weiss",
+      "elo": 3140,
+      "type": "uci"
+    },
+    {
+      "id": "seer",
+      "name": "Seer 2",
+      "binary": "seer",
+      "elo": 3120,
+      "type": "uci"
+    },
+    {
+      "id": "rice",
+      "name": "Rice 8",
+      "binary": "rice",
+      "elo": 3100,
+      "type": "uci"
+    },
+    {
+      "id": "midnight",
+      "name": "Midnight 9",
+      "binary": "midnight",
+      "elo": 3090,
+      "type": "uci"
+    },
+    {
+      "id": "smallbrain",
+      "name": "Smallbrain 7",
+      "binary": "smallbrain",
+      "elo": 3080,
+      "type": "uci"
+    },
+    {
+      "id": "laser",
+      "name": "Laser 3",
+      "binary": "laser",
+      "elo": 3060,
+      "type": "uci"
+    },
+    {
+      "id": "drofa",
+      "name": "Drofa 4",
+      "binary": "drofa",
+      "elo": 2980,
+      "type": "uci"
+    },
+    {
+      "id": "ethereal",
+      "name": "Ethereal 14",
+      "binary": "ethereal",
+      "elo": 3090,
+      "type": "uci"
+    },
+    {
+      "id": "winter",
+      "name": "Winter 0.9",
+      "binary": "winter",
+      "elo": 2800,
+      "type": "uci"
+    },
+    {
+      "id": "igel",
+      "name": "Igel 3",
+      "binary": "igel",
+      "elo": 2850,
+      "type": "uci"
+    },
+    {
+      "id": "marvin",
+      "name": "Marvin 5",
+      "binary": "marvin",
+      "elo": 2780,
+      "type": "uci"
+    },
+    {
+      "id": "princhess",
+      "name": "Princhess 0.17",
+      "binary": "princhess",
+      "elo": 2820,
+      "type": "uci"
+    },
+    {
+      "id": "peacekeeper",
+      "name": "Peacekeeper 1.7",
+      "binary": "peacekeeper",
+      "elo": 2760,
+      "type": "uci"
+    },
+    {
+      "id": "rofchade",
+      "name": "RofChade 3",
+      "binary": "rofchade",
+      "elo": 3020,
+      "type": "uci"
+    },
+    {
+      "id": "leorik",
+      "name": "Leorik 2.5",
+      "binary": "leorik",
+      "elo": 2710,
+      "type": "uci"
+    },
+    {
+      "id": "pedantic",
+      "name": "Pedantic/Velvet",
+      "binary": "pedantic",
+      "elo": 2700,
+      "type": "uci"
+    },
+    {
+      "id": "sf_3190",
+      "name": "Stockfish 3190",
+      "binary": "stockfish",
+      "elo": 3190,
+      "uciElo": 3190,
+      "type": "uci"
+    },
+    {
+      "id": "sf_3000",
+      "name": "Stockfish 3000",
+      "binary": "stockfish",
+      "elo": 3000,
+      "uciElo": 3000,
+      "type": "uci"
+    },
+    {
+      "id": "sf_2850",
+      "name": "Stockfish 2850",
+      "binary": "stockfish",
+      "elo": 2850,
+      "uciElo": 2850,
+      "type": "uci"
+    },
+    {
+      "id": "sf_2700",
+      "name": "Stockfish 2700",
+      "binary": "stockfish",
+      "elo": 2700,
+      "uciElo": 2700,
+      "type": "uci"
+    },
+    {
+      "id": "sf_2550",
+      "name": "Stockfish 2550",
+      "binary": "stockfish",
+      "elo": 2550,
+      "uciElo": 2550,
+      "type": "uci"
+    },
+    {
+      "id": "sf_2400",
+      "name": "Stockfish 2400",
+      "binary": "stockfish",
+      "elo": 2400,
+      "uciElo": 2400,
+      "type": "uci"
+    },
+    {
+      "id": "sf_2250",
+      "name": "Stockfish 2250",
+      "binary": "stockfish",
+      "elo": 2250,
+      "uciElo": 2250,
+      "type": "uci"
+    },
+    {
+      "id": "sf_2100",
+      "name": "Stockfish 2100",
+      "binary": "stockfish",
+      "elo": 2100,
+      "uciElo": 2100,
+      "type": "uci"
+    },
+    {
+      "id": "sf_1950",
+      "name": "Stockfish 1950",
+      "binary": "stockfish",
+      "elo": 1950,
+      "uciElo": 1950,
+      "type": "uci"
+    },
+    {
+      "id": "sf_1800",
+      "name": "Stockfish 1800",
+      "binary": "stockfish",
+      "elo": 1800,
+      "uciElo": 1800,
+      "type": "uci"
+    },
+    {
+      "id": "sf_1650",
+      "name": "Stockfish 1650",
+      "binary": "stockfish",
+      "elo": 1650,
+      "uciElo": 1650,
+      "type": "uci"
+    },
+    {
+      "id": "sf_1500",
+      "name": "Stockfish 1500",
+      "binary": "stockfish",
+      "elo": 1500,
+      "uciElo": 1500,
+      "type": "uci"
+    },
+    {
+      "id": "sf_1350",
+      "name": "Stockfish 1350",
+      "binary": "stockfish",
+      "elo": 1350,
+      "uciElo": 1350,
+      "type": "uci"
+    },
+    {
+      "id": "sf_1320",
+      "name": "Stockfish 1320",
+      "binary": "stockfish",
+      "elo": 1320,
+      "uciElo": 1320,
+      "type": "uci"
+    },
+    {
+      "id": "sf_skill20",
+      "name": "SF Skill 20 (~2000)",
+      "binary": "stockfish",
+      "elo": 2000,
+      "skillLevel": 20,
+      "type": "uci"
+    },
+    {
+      "id": "sf_skill18",
+      "name": "SF Skill 18 (~1800)",
+      "binary": "stockfish",
+      "elo": 1800,
+      "skillLevel": 18,
+      "type": "uci"
+    },
+    {
+      "id": "sf_skill16",
+      "name": "SF Skill 16 (~1600)",
+      "binary": "stockfish",
+      "elo": 1600,
+      "skillLevel": 16,
+      "type": "uci"
+    },
+    {
+      "id": "sf_skill14",
+      "name": "SF Skill 14 (~1450)",
+      "binary": "stockfish",
+      "elo": 1450,
+      "skillLevel": 14,
+      "type": "uci"
+    },
+    {
+      "id": "sf_skill12",
+      "name": "SF Skill 12 (~1300)",
+      "binary": "stockfish",
+      "elo": 1300,
+      "skillLevel": 12,
+      "type": "uci"
+    },
+    {
+      "id": "sf_skill10",
+      "name": "SF Skill 10 (~1150)",
+      "binary": "stockfish",
+      "elo": 1150,
+      "skillLevel": 10,
+      "type": "uci"
+    },
+    {
+      "id": "sf_skill8",
+      "name": "SF Skill 8 (~1000)",
+      "binary": "stockfish",
+      "elo": 1000,
+      "skillLevel": 8,
+      "type": "uci"
+    },
+    {
+      "id": "sf_skill6",
+      "name": "SF Skill 6 (~900)",
+      "binary": "stockfish",
+      "elo": 900,
+      "skillLevel": 6,
+      "type": "uci"
+    },
+    {
+      "id": "sf_skill4",
+      "name": "SF Skill 4 (~800)",
+      "binary": "stockfish",
+      "elo": 800,
+      "skillLevel": 4,
+      "type": "uci"
+    },
+    {
+      "id": "sf_skill2",
+      "name": "SF Skill 2 (~700)",
+      "binary": "stockfish",
+      "elo": 700,
+      "skillLevel": 2,
+      "type": "uci"
+    },
+    {
+      "id": "sf_skill0",
+      "name": "SF Skill 0 (~600)",
+      "binary": "stockfish",
+      "elo": 600,
+      "skillLevel": 0,
+      "type": "uci"
+    },
+    {
+      "id": "maia1100",
+      "name": "Maia 1100",
+      "binary": "lc0",
+      "elo": 1100,
+      "type": "maia",
+      "uciOptions": {
+        "WeightsFile": "~/engines/weights/maia-1100.pb.gz",
+        "Threads": "1"
+      }
+    },
+    {
+      "id": "maia1200",
+      "name": "Maia 1200",
+      "binary": "lc0",
+      "elo": 1200,
+      "type": "maia",
+      "uciOptions": {
+        "WeightsFile": "~/engines/weights/maia-1200.pb.gz",
+        "Threads": "1"
+      }
+    },
+    {
+      "id": "maia1300",
+      "name": "Maia 1300",
+      "binary": "lc0",
+      "elo": 1300,
+      "type": "maia",
+      "uciOptions": {
+        "WeightsFile": "~/engines/weights/maia-1300.pb.gz",
+        "Threads": "1"
+      }
+    },
+    {
+      "id": "maia1400",
+      "name": "Maia 1400",
+      "binary": "lc0",
+      "elo": 1400,
+      "type": "maia",
+      "uciOptions": {
+        "WeightsFile": "~/engines/weights/maia-1400.pb.gz",
+        "Threads": "1"
+      }
+    },
+    {
+      "id": "maia1500",
+      "name": "Maia 1500",
+      "binary": "lc0",
+      "elo": 1500,
+      "type": "maia",
+      "uciOptions": {
+        "WeightsFile": "~/engines/weights/maia-1500.pb.gz",
+        "Threads": "1"
+      }
+    },
+    {
+      "id": "maia1600",
+      "name": "Maia 1600",
+      "binary": "lc0",
+      "elo": 1600,
+      "type": "maia",
+      "uciOptions": {
+        "WeightsFile": "~/engines/weights/maia-1600.pb.gz",
+        "Threads": "1"
+      }
+    },
+    {
+      "id": "maia1700",
+      "name": "Maia 1700",
+      "binary": "lc0",
+      "elo": 1700,
+      "type": "maia",
+      "uciOptions": {
+        "WeightsFile": "~/engines/weights/maia-1700.pb.gz",
+        "Threads": "1"
+      }
+    },
+    {
+      "id": "maia1800",
+      "name": "Maia 1800",
+      "binary": "lc0",
+      "elo": 1800,
+      "type": "maia",
+      "uciOptions": {
+        "WeightsFile": "~/engines/weights/maia-1800.pb.gz",
+        "Threads": "1"
+      }
+    },
+    {
+      "id": "maia1900",
+      "name": "Maia 1900",
+      "binary": "lc0",
+      "elo": 1900,
+      "type": "maia",
+      "uciOptions": {
+        "WeightsFile": "~/engines/weights/maia-1900.pb.gz",
+        "Threads": "1"
+      }
+    }
+  ]
+}

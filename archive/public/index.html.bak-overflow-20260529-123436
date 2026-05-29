@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
+<title>ChessGuru &bull; Puzzle Trainer</title>
+<style>
+:root{--w:#fff;--b:#000;--b2:#0f0f0f;--b3:#1a1a1a;--b4:#2a2a2a;--g1:#888;--g2:#555;--r:8px;--r-sm:5px;--pri:#629032;--cb:var(--b2);--cz:var(--b4);--cz2:var(--b2);--cp:var(--b3);--pri2:#4a7022;--cf:var(--g1);--cfd:var(--g2);--cfc:var(--w);--ok:var(--pri);--err:#c0392b;--bdr:var(--b4)}
+*{box-sizing:border-box;margin:0;padding:0}body{background:var(--cb);color:var(--cf);font-family:"Inter",sans-serif;font-size:13px}
+a{color:var(--pri);text-decoration:none}
+#hdr{height:54px;display:flex;align-items:center;padding:0 28px;background:#000;border-bottom:1px solid #2a2a2a;position:sticky;top:0;z-index:100}
+#hdr .logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit;margin-right:4px}
+#hdr .logo-sq{width:30px;height:30px;border-radius:5px;background:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;color:#000;line-height:1;flex-shrink:0}
+#hdr .logo-name{font-family:"DM Serif Display",serif;font-size:17px;color:#fff;letter-spacing:.02em}
+#hdr nav{display:flex;align-items:center;gap:4px;flex:1;margin-left:8px}
+#hdr nav a{color:#888;font-size:12px;font-weight:500;text-decoration:none;padding:4px 10px;border-radius:5px;transition:color .15s,background .15s}
+#hdr nav a:hover,#hdr nav a.active{color:#fff;background:#1a1a1a}
+.tsel{background:none;border:1px solid #2a2a2a;color:#888;border-radius:5px;font-size:11px;padding:5px 8px;cursor:pointer;max-width:150px}
+#userWidget{margin-left:auto;display:flex;align-items:center;gap:8px;position:relative}
+#loginBtn{color:#888;padding:4px 10px;border-radius:5px;text-decoration:none;background:none;border:1px solid #2a2a2a;font-size:12px;white-space:nowrap;display:none}
+#userInfo{display:none;align-items:center;font-size:12px}
+#userMenuBtn{background:rgba(255,255,255,.05);border:1px solid #2a2a2a;color:#555;font-size:12px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:5px;white-space:nowrap;transition:all .15s;font-family:"Inter",sans-serif}
+#userMenuBtn:hover{background:rgba(255,255,255,.09);color:#fff}
+#userNameDisplay{max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#userMenu{display:none;position:absolute;top:calc(100% + 6px);right:0;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;min-width:130px;box-shadow:0 4px 20px rgba(0,0,0,.6);z-index:9999;overflow:hidden}
+#userMenu button{width:100%;background:none;border:none;color:#888;padding:10px 14px;text-align:left;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:8px;transition:background .15s;font-family:"Inter",sans-serif}
+#userMenu button:hover{background:#2a2a2a;color:#fff}
+main{display:grid;grid-template-areas:"board side" "tools side";grid-template-columns:auto 1fr;max-width:1100px;margin:0 auto;align-items:start;padding-top:16px}
+.pb{grid-area:board;position:relative;width:clamp(280px,55vw,660px);aspect-ratio:1;align-self:start;overflow:visible}
+.ps{grid-area:side;display:flex;flex-direction:column;background:var(--cz2);border-left:1px solid var(--bdr)}
+.pt{grid-area:tools;background:rgb(38,36,33);display:flex;flex-direction:column;border-top:1px solid var(--bdr)}
+#board{width:100%;height:100%;position:absolute;top:0;left:0}
+
+piece.king.white{background-image:url("/pieces/wK.svg")}piece.queen.white{background-image:url("/pieces/wQ.svg")}piece.rook.white{background-image:url("/pieces/wR.svg")}piece.bishop.white{background-image:url("/pieces/wB.svg")}piece.knight.white{background-image:url("/pieces/wN.svg")}piece.pawn.white{background-image:url("/pieces/wP.svg")}piece.king.black{background-image:url("/pieces/bK.svg")}piece.queen.black{background-image:url("/pieces/bQ.svg")}piece.rook.black{background-image:url("/pieces/bR.svg")}piece.bishop.black{background-image:url("/pieces/bB.svg")}piece.knight.black{background-image:url("/pieces/bN.svg")}piece.pawn.black{background-image:url("/pieces/bP.svg")}
+.sm{padding:12px;border-bottom:1px solid var(--bdr)}.sa{display:flex;gap:10px;align-items:center;margin-bottom:8px}
+.si{width:40px;height:40px;background:var(--pri);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px}
+.sn h2{font-size:15px;color:var(--cfc);font-weight:600;margin-bottom:2px}.sn p{font-size:11px;color:var(--cfd)}
+.sr{display:flex;gap:14px;font-size:12px;color:var(--cfd)}.sr strong{color:var(--cf)}
+.rr{padding:8px 12px;border-bottom:1px solid var(--bdr);font-size:12px;color:var(--cfd);display:flex;gap:12px;align-items:center}
+.rr strong{color:var(--cfc);font-size:14px}.rd{font-weight:600}.rd.pos{color:var(--ok)}.rd.neg{color:var(--err)}
+.pf{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center}
+.fi{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:26px}
+.fi.wait{background:var(--cz);border:2px solid var(--bdr)}.fi.good{background:var(--ok)}.fi.bad{background:var(--err)}
+.ft{font-size:17px;color:var(--cfc);font-weight:600}.fd{font-size:12px;color:var(--cfd)}
+.bn{background:var(--pri);color:#fff;border:none;padding:10px 28px;border-radius:4px;font-size:14px;font-weight:600;cursor:pointer;width:100%;max-width:200px;display:none}
+.bn:hover{background:var(--pri2)}
+.sc{padding:8px 12px;border-top:1px solid var(--bdr);display:flex;gap:8px;align-items:center;font-size:12px;color:var(--cfd)}
+.sc select{background:var(--cz);border:1px solid var(--bdr);color:var(--cf);padding:3px 6px;border-radius:3px;font-size:12px;cursor:pointer;flex:1}
+.pm{flex:1;overflow-y:auto;padding:6px}.tv{display:table;width:100%;font-size:13px}
+.mr{display:table-row}.mr index{display:table-cell;color:var(--cfd);padding:2px 6px 2px 2px;width:28px}
+.mr move{display:table-cell;padding:2px 8px;border-radius:3px;cursor:pointer;width:80px}
+.mr move:hover{background:var(--cz)}.mr move.active{background:var(--pri);color:#fff}
+.pc{display:flex;align-items:center;justify-content:center;gap:2px;padding:6px;border-top:1px solid var(--bdr)}
+.pc button{background:none;border:none;color:var(--cfd);cursor:pointer;padding:6px 12px;border-radius:3px;font-size:15px}
+.pc button:hover{color:var(--cfc);background:var(--cz)}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--cp);color:var(--cfc);padding:10px 20px;border-radius:6px;font-size:13px;opacity:0;transition:.3s;pointer-events:none;z-index:9999;border:1px solid var(--bdr)}
+#toast.show{opacity:1}
+#dbg{position:fixed;bottom:60px;left:10px;background:rgba(0,0,0,.85);color:#0f0;padding:8px;font-size:10px;max-width:400px;word-break:break-all;z-index:9998;border-radius:4px;display:none}
+@media(max-width:700px){
+  /* === MAIN LAYOUT === */
+  main{padding:4px 4px 16px 4px;grid-template-areas:"board" "side" "tools";grid-template-columns:1fr;gap:0;max-width:100%;margin:0;align-items:stretch}
+  .pb{grid-area:board;position:relative;width:calc(100vw - 8px);aspect-ratio:1;align-self:start;overflow:visible}
+  .ps{grid-area:side;border-left:none;border-top:1px solid var(--bdr);padding:10px 12px;min-width:0;width:100%}
+
+  /* === NAVBAR === */
+  #hdr{padding:0 10px;height:46px;gap:8px}
+  #hdr nav{gap:6px;align-items:center;flex-wrap:nowrap}
+  .tsel{font-size:12px;padding:4px 6px;max-width:130px;min-width:0;flex-shrink:1}
+  #userWidget{gap:6px;flex-shrink:0}
+  #userWidget a,#userNameDisplay{font-size:12px;max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #userWidget button,#loginBtn{font-size:11px;padding:3px 8px;white-space:nowrap}
+
+  /* === PUZZLE FEEDBACK PANEL === */
+  .puzzle__feedback{padding:10px 0;gap:10px}
+  .puzzle__feedback .no-square{width:46px;height:46px;flex-shrink:0}
+  .puzzle__feedback .icon{width:46px;height:46px;font-size:28px;flex-shrink:0}
+  .puzzle__feedback .instruction strong{font-size:15px}
+  .puzzle__feedback .instruction em{font-size:12px}
+
+  /* === BUTTONS - Hint/View Solution === */
+  .view_solution{flex-direction:row;gap:8px}
+  .view_solution .button{flex:1;font-size:13px;padding:8px 10px;text-align:center}
+
+  /* === NEXT PUZZLE BUTTON === */
+  .bn{max-width:100%;width:100%;font-size:15px;padding:12px;display:flex;margin-top:4px}
+
+  /* === DIFFICULTY + STATS ROW === */
+  .sc{padding:8px 12px;gap:8px;flex-wrap:wrap;font-size:12px}
+  .sc label{font-size:12px}
+  #diffSel{font-size:12px;padding:4px 8px;flex:1}
+
+  /* === MOVE LIST === */
+  #mvList{max-height:56px;font-size:11px;overflow-y:auto}
+  .mr{font-size:11px}
+
+  /* === PUZZLE INFO ROW === */
+  .pz-meta,#puzzleMeta{font-size:11px;flex-wrap:wrap;gap:4px}
+  #myRating,#rDiff{font-size:14px}
+
+  /* === BOARD CONTROLS (  ) === */
+  .pc{padding:4px 6px;gap:2px}
+  .pc button{padding:4px 10px;font-size:14px}
+}
+
+cg-board{position:absolute;top:0;left:0;width:100%;height:100%;display:block;background-color:#ffffff;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2' height='2'%3E%3Crect width='1' height='1' fill='%238c8c8c'/%3E%3Crect x='1' y='1' width='1' height='1' fill='%238c8c8c'/%3E%3C/svg%3E");background-size:25% 25%}.cg-wrap{display:block;height:100%;width:100%}
+cg-container{position:absolute;width:100%;height:100%;display:block;top:0}
+
+piece{position:absolute;top:0;left:0;width:12.5%;height:12.5%;background-size:cover;background-repeat:no-repeat;z-index:2;will-change:transform;pointer-events:none}
+square{position:absolute;top:0;left:0;width:12.5%;height:12.5%;pointer-events:none}
+square.last-move{background-color:rgba(20,85,30,.5)}
+square.selected{background-color:rgba(20,85,0,.5)}
+square.move-dest{background:radial-gradient(rgba(20,85,30,.5) 22%,rgba(0,0,0,.3) 0)}
+square.move-dest.oc{background:radial-gradient(transparent 0%,transparent 79%,rgba(20,85,30,.3) 80%)}
+square.check{background:radial-gradient(ellipse at center,rgba(255,0,0,1) 0%,rgba(231,0,0,1) 25%,rgba(169,0,0,0) 89%,rgba(158,0,0,0) 100%)}
+cg-auto-pieces,coords{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
+coords{display:flex;pointer-events:none}
+/* === RANKS: right side OUTSIDE the board === */
+coords.ranks{position:absolute;right:-15px;top:0;width:15px;height:100%;flex-direction:column-reverse;left:auto;bottom:auto}
+/* black: rank 1 at top visually */
+coords.ranks.black{flex-direction:column}
+/* === FILES: bottom side OUTSIDE the board === */
+coords.files{position:absolute;bottom:-15px;left:0;width:100%;height:15px;flex-direction:row;top:auto;right:auto}
+/* black: h at left */
+coords.files.black{flex-direction:row-reverse}
+/* === each coord cell === */
+coord{flex:1;display:flex;font-size:max(.7vw,9px);font-weight:700;opacity:1;line-height:1;color:var(--cfd)}
+/* rank: right-align, vertically centered */
+coords.ranks coord{align-items:center;justify-content:flex-start;padding-left:2px}
+/* file: centered horizontally, top-aligned */
+coords.files coord{align-items:flex-start;justify-content:center;padding-top:1px}
+/* alternating colors matching square color under the label */
+coord.coord-light{color:#8c8c8c}
+coord.coord-dark{color:#ffffff}
+cg-container > svg,cg-container > svg > defs{overflow:hidden;position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:2}
+
+/* === LICHESS EXACT feedback (from lichess-org/lila GitHub API) === */
+/* feedback.ts: div.puzzle__feedback states */
+.puzzle__feedback{display:flex;flex-direction:column;gap:12px;padding:12px 0}
+/* initial/good/fail: div.player */
+.puzzle__feedback .player{display:flex;align-items:center;gap:12px}
+/* div.no-square: king piece container */
+.puzzle__feedback .no-square{width:60px;height:60px;flex-shrink:0;position:relative}
+.puzzle__feedback piece.king{display:block;width:60px;height:60px;background-size:contain;background-repeat:no-repeat;background-position:center}
+.puzzle__feedback piece.king.white{background-image:url(https://lichess1.org/assets/piece/cburnett/wK.svg)}
+.puzzle__feedback piece.king.black{background-image:url(https://lichess1.org/assets/piece/cburnett/bK.svg)}
+/* div.icon: good(✓) and fail(✗) */
+.puzzle__feedback .icon{width:60px;height:60px;display:flex;align-items:center;justify-content:center;font-size:40px;border-radius:50%}
+.puzzle__feedback.good .icon{color:#739552}
+.puzzle__feedback.fail .icon{color:#c33}
+/* div.instruction */
+.puzzle__feedback .instruction{display:flex;flex-direction:column;gap:3px}
+.puzzle__feedback .instruction strong{font-size:16px;font-weight:700;color:#e8e6e3}
+.puzzle__feedback .instruction em{font-size:13px;color:#9e9b97;font-style:normal}
+.puzzle__feedback .instruction em strong{color:#c0bdb9;font-size:13px}
+/* after.ts: div.complete */
+.puzzle__feedback .complete{font-size:18px;font-weight:700;color:#e8e6e3;text-align:center;padding:8px 0}
+/* after.ts: button.continue — LICHESS EXACT green button */
+button.continue{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:10px;background:#629032;color:#fff;border:none;border-radius:4px;font-size:15px;font-weight:600;cursor:pointer;transition:background .15s}
+button.continue:hover{background:#70a038}
+/* feedback.ts: div.view_solution */
+.view_solution{display:flex;flex-direction:column;gap:6px}
+.view_solution .button{padding:8px;border-radius:4px;font-size:13px;cursor:pointer;text-align:center;transition:background .15s;border:1px solid rgba(255,255,255,.15);color:#bdbbb8;background:rgba(255,255,255,.08)}
+.view_solution .button:hover{background:rgba(255,255,255,.18)}
+.view_solution .button.button-empty{background:transparent;border-color:transparent}
+.view_solution .button.button-empty:hover{background:rgba(255,255,255,.08)}
+/* hint active (showHint=true → removes .button-empty class) */
+.view_solution .button:not(.button-empty){background:#629032;color:#fff;border-color:#5a8228}
+.view_solution .button:not(.button-empty):hover{background:#70a038}
+
+@media(max-width:600px){
+  body{overflow-x:hidden}
+  #hdr nav{overflow-x:auto;white-space:nowrap;font-size:11px}
+  #hdr nav a{padding:4px 8px;font-size:11px}
+  .pb{flex-direction:column!important}
+  .pb .cg-wrap,.pb #board,.cg-wrap{width:100vw!important;height:100vw!important;max-width:100vw}
+  .ps,.pt,.sr{width:100%!important;max-width:100%!important;border-left:none!important;border-top:1px solid var(--border)}
+}
+</style></head><body>
+<header id="hdr">
+  <a class="logo" href="/"><div class="logo-sq">♟</div><span class="logo-name">ChessGuru</span></a>
+  <nav>
+    <a href="/" class="active">Puzzles</a>
+    <a href="/blindfold">Blindfold</a>
+    <a href="/opening">Opening</a>
+    <a href="/engine-battle">Engine Battle</a>
+    <a href="/puzzle-status">Puzzle Factory</a>
+    <div id="userWidget">
+      <a id="loginBtn" href="/login">Sign in</a>
+      <span id="userInfo">
+        <button id="userMenuBtn" onclick="toggleUserMenu()"><span id="userNameDisplay"></span><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="opacity:.6;flex-shrink:0"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg></button>
+        <div id="userMenu"><button onclick="doLogout()">⏻ Sign out</button></div>
+      </span>
+    </div>
+  </nav>
+</header>
+<script>
+(function(){
+  fetch('/auth/me').then(r=>r.json()).then(d=>{
+    if(d.loggedIn){window._userId=d.userId;}
+    fetch('/api/me/rating').then(r=>r.json()).then(rd=>{
+      if(rd.loggedIn){myRating=rd.rating;myGlicko={r:myRating,d:200,v:0.09};document.getElementById('myRating').textContent=myRating;window._userId=rd.userId;}
+    }).catch(function(){});
+    if(d.loggedIn){
+      document.getElementById('userInfo').style.display='flex';
+      document.getElementById('userNameDisplay').textContent=d.username;
+    } else {
+      document.getElementById('loginBtn').style.display='inline';
+    }
+  }).catch(function(){document.getElementById('loginBtn').style.display='inline';});
+  window.doLogout=function(){fetch('/auth/logout',{method:'POST'}).then(function(){location.reload();});};
+  window.toggleUserMenu=function(){var m=document.getElementById('userMenu');if(m)m.style.display=m.style.display==='block'?'none':'block';};
+  document.addEventListener('click',function(e){var btn=document.getElementById('userMenuBtn');var menu=document.getElementById('userMenu');if(menu&&btn&&!btn.contains(e.target)&&!menu.contains(e.target))menu.style.display='none';});
+})();
+</script>
+<main>
+  <div class="pb"><div id="board"></div></div>
+  <aside class="ps">
+    <div class="sm">
+      <div class="sa"><div class="si" id="aIcon">&#9822;</div>
+        <div class="sn"><h2 id="aTitle">Loading...</h2><p>Find the best move</p></div>
+      </div>
+      <div class="sr">
+        <span>Puzzle <strong><a id="pId" href="#" target="_blank">#----</a></strong></span>
+        <span>Rating <strong id="pRating">----</strong></span>
+        <span>Played <strong id="pPlays">----</strong></span>
+      </div>
+    </div>
+    <div class="rr"><span>Your rating</span><strong id="myRating">1500</strong><span class="rd" id="rDiff"></span></div>
+    <div class="puzzle__feedback play" id="pzFeedback">
+		<div class="player" id="pfPlayer">
+		  <div class="no-square" id="pfIcon"><piece class="king white" id="kingPiece"></piece></div>
+		  <div class="instruction">
+		    <strong id="fbT">Your turn</strong>
+		    <em id="fbD">Find the best move for <strong id="pfColor">white</strong>.</em>
+		  </div>
+		</div>
+		<div class="complete" id="pfComplete" style="display:none">Puzzle complete!</div>
+    </div>
+    <div class="sc" style="gap:8px;flex-wrap:wrap;padding:8px 12px;border-top:1px solid var(--bdr)">
+      <button id="btnHint" onclick="doHint()" style="display:none;padding:6px 14px;background:#2f2f2f;border:1px solid #4a4a4a;color:#c0b060;border-radius:4px;cursor:pointer;font-size:13px">&#128161; Hint</button>
+      <button id="btnSol" onclick="viewSolution()" style="display:none;padding:6px 14px;background:#2f2f2f;border:1px solid #4a4a4a;color:#b06060;border-radius:4px;cursor:pointer;font-size:13px">View Solution</button>
+      <button class="bn" id="btnN" onclick="loadNextClean()" style="display:none">Next puzzle &#8594;</button>
+    </div>
+    <div class="sc">
+      <span>Theme</span>
+      <select id="themeSelect" onchange="changeTheme(this.value)"><option value="mix">All themes</option></select>
+    </div>
+    <div class="sc">
+      <span>Difficulty</span>
+      <select id="diffSel" onchange="currentDiff=this.value;loadNext()">
+        <option value="easiest">Easiest</option><option value="easier">Easier</option><option value="normal" selected>Normal</option><option value="harder">Harder</option><option value="hardest">Hardest</option>
+      </select>
+    </div>
+  </aside>
+  <div class="pt">
+    <div class="pm"><div class="tv" id="mvList"></div></div>
+    <div class="pc"><button onclick="navPrev()" id="btnPrev" title="Previous" style="padding:4px 10px;background:none;border:1px solid #444;color:#9e9b97;border-radius:3px;cursor:pointer;font-size:14px">←</button>
+  <button onclick="navNext()" id="btnNext" title="Next" style="padding:4px 10px;background:none;border:1px solid #444;color:#9e9b97;border-radius:3px;cursor:pointer;font-size:14px">→</button>
+  <button onclick="flip()" title="Flip board">&#8645;</button></div>
+  </div>
+</main>
+<div id="toast"></div>
+<div id="dbg"></div>
+<script src="/js/chess.min.js"></script>
+<script src="/js/chessground.min.js"></script>
+<script>
+var API=location.origin+"/api",myRating=800,myGlicko={r:800,d:500,v:0.09},currentTheme="mix",currentDiff="normal";
+var puzzle=null,cg=null,chess=null,solution=[],solIdx=0,solved=false;
+function dbg(msg){var d=document.getElementById("dbg");if(false){d.style.display="block";d.innerHTML+=msg+"<br>";}}
+window.onerror=function(m,s,l,c,e){dbg("ONERROR: "+m+" "+s+":"+l);};
+window.addEventListener("load",function(){
+  dbg("load: CG="+typeof window.Chessground+" Chess="+typeof window.Chess);
+  if(!window.Chessground){dbg("ERR: no CG");return;}
+  if(!window.Chess){dbg("ERR: no Chess");return;}
+  var CG=window.Chessground;
+  var fn=typeof CG==="function"?CG:(CG.Chessground||null);
+  if(!fn){dbg("ERR: CG.Chessground not found, keys="+Object.keys(CG));return;}
+  try{
+    cg=fn(document.getElementById("board"),{
+      movable:{free:false,color:undefined,showDests:true,events:{after:onMove}},
+      animation:{enabled:true,duration:200},highlight:{lastMove:true,check:true},coordinates:true
+    });
+    dbg("CG OK");var _st=null;try{_st=localStorage.getItem("cg_theme");}catch(e){}if(_st){currentTheme=_st;var _sd=document.getElementById("themeSelect");if(_sd)_sd.value=_st;}loadNext();
+  }catch(e){dbg("CG ERR: "+e.message);}
+});
+function loadNext(){
+  var _pzParam=(new URLSearchParams(window.location.search)).get('puzzle');if(!_pzParam){try{_pzParam=localStorage.getItem("cg_puzzle");}catch(e){}}
+  if(_pzParam){
+    fetch(API+'/puzzles/'+encodeURIComponent(_pzParam))
+      .then(function(r){return r.json();})
+      .then(function(p){
+        if(!p.id&&!p._id){loadNextClean();return;}
+        puzzle=p;showPuzzle(p);
+        // clear param so next/prev work normally
+        history.replaceState(null,'',window.location.pathname);
+      }).catch(function(){loadNextClean();});
+    return;
+  }
+  loadNextClean();
+}
+function loadNextClean(){try{localStorage.removeItem("cg_puzzle");}catch(e){}
+  setFB("wait","&#9822;","Loading...","");
+  document.getElementById("btnN").style.display="none";
+  document.getElementById("btnHint").style.display="none";
+  document.getElementById("btnSol").style.display="none";
+  solved=false;solIdx=0;
+  fetch(API+"/puzzles/random?theme="+currentTheme+"&rating="+myRating+"&difficulty="+currentDiff)
+    .then(function(r){return r.json();})
+    .then(function(p){
+      if(!p.id)throw new Error("no id");
+      dbg("P:"+p.id);
+      puzzle=p;showPuzzle(p);
+    }).catch(function(e){dbg("loadNext ERR:"+e.message);setFB("bad","X","Error",e.message);});
+
+}
+function showPuzzle(p){try{localStorage.setItem("cg_puzzle",p.id||p._id);}catch(e){}
+  if(window._lmTimer){clearTimeout(window._lmTimer);window._lmTimer=null;}
+  solution=Array.isArray(p.solution)?p.solution:(p.line?p.line.trim().split(" "):[]);navHistory=[{fen:p.fen}];navIdx=0;
+  chess=new Chess();
+  chess.load(p.fen);
+  window.puzzleLastMove=p.lastMove;
+  var pc=chess.turn()==="w"?"white":"black";window.playerColor=pc;
+  document.getElementById("pId").textContent="#"+p.id;
+  document.getElementById("pId").href="https://lichess.org/training/"+p.id;
+  document.getElementById("pRating").textContent=Math.round(p.rating||(p.glicko&&p.glicko.r)||1500);
+  document.getElementById("pPlays").textContent=(p.plays||0).toLocaleString();
+  document.getElementById("aTitle").textContent=currentTheme==="mix"?fmt((p.themes||[])[0]):((window.themeLabels||{})[currentTheme]||fmt(currentTheme));
+  // side set via fbD html below
+  setFB("wait","&#9822;","Your turn","Find the best move for "+pc+".");document.getElementById("btnHint").style.display="inline-block";document.getElementById("btnSol").style.display="inline-block";document.getElementById("btnHint").disabled=false;
+  buildMoves();
+  if(p.lastMove&&p.preFen&&cg){
+    var lmFrom=p.lastMove.slice(0,2),lmTo=p.lastMove.slice(2,4);
+    cg.set({fen:p.preFen,orientation:pc,turnColor:pc==="white"?"black":"white",movable:{color:undefined},lastMove:undefined,check:false});
+    window._lmTimer=setTimeout(function(){
+      var dests=new Map();chess.moves({verbose:true}).forEach(function(m){if(!dests.has(m.from))dests.set(m.from,[]);dests.get(m.from).push(m.to);});
+      cg.set({fen:p.fen,orientation:pc,turnColor:chess.turn()==="w"?"white":"black",movable:{color:pc,dests:dests},lastMove:[lmFrom,lmTo],check:chess.in_check()});
+      dbg("showPuzzle OK pc="+pc);
+    },1000);
+  }else{
+    refreshBoard(pc);dbg("showPuzzle OK pc="+pc);
+  }
+}
+function refreshBoard(pc){
+  if(!cg||!chess)return;
+  var dests=new Map();
+  chess.moves({verbose:true}).forEach(function(m){if(!dests.has(m.from))dests.set(m.from,[]);dests.get(m.from).push(m.to);});
+  var hist=chess.history({verbose:true});
+  var _lm=hist.length?[hist[hist.length-1].from,hist[hist.length-1].to]:undefined;var lm=_lm||(window.puzzleLastMove?[window.puzzleLastMove.slice(0,2),window.puzzleLastMove.slice(2,4)]:undefined);
+  cg.set({fen:chess.fen(),orientation:pc,turnColor:chess.turn()==="w"?"white":"black",
+    movable:{color:solved?undefined:pc,dests:dests},lastMove:lm,check:chess.in_check()});
+}
+function onMove(from,to){
+  if(solved)return;
+  var uci=from+to,exp=solution[solIdx],pc=chess.turn()==="w"?"white":"black";
+  if(uci===exp||uci+"q"===exp){
+    chess.move({from:from,to:to,promotion:exp[4]||"q"});solIdx++;buildMoves();
+    if(solIdx>=solution.length){solved=true;setFB("good","&#10003;","Solved!","Excellent!");document.getElementById("btnN").style.display="block";
+    document.getElementById("btnHint").style.display="inline-block";
+    document.getElementById("btnSol").style.display="inline-block";cg.set({movable:{color:undefined}});submit(true,window._hintShown);return;}
+    setFB("good","&#10003;","Best move!","Keep going...");setTimeout(function(){oppReply();},600);
+  }else{
+    cg.set({fen:chess.fen()});refreshBoard(pc);
+    setFB("bad","&#10007;","Not the best","Try again.");toast("Not the best!");
+    setTimeout(function(){setFB("wait","&#9822;","Your turn","Try again.");refreshBoard(pc);document.getElementById("btnHint").style.display="inline-block";document.getElementById("btnSol").style.display="inline-block";},1500);
+    if(!window._hintShown)submit(false);
+  }
+}
+function oppReply(){
+  if(solIdx>=solution.length)return;
+  var m=solution[solIdx];chess.move({from:m.slice(0,2),to:m.slice(2,4),promotion:m[4]||"q"});solIdx++;
+  cg.move(m.slice(0,2),m.slice(2,4));cg.set({fen:chess.fen(),lastMove:[m.slice(0,2),m.slice(2,4)]});buildMoves();navHistory.push({fen:chess.fen(),lastMove:[m.slice(0,2),m.slice(2,4)]});navIdx=navHistory.length-1;
+  if(solIdx>=solution.length){solved=true;setFB("good","&#10003;","Solved!","Excellent!");document.getElementById("btnN").style.display="block";cg.set({movable:{color:undefined}});return;}
+  var pc=chess.turn()==="w"?"white":"black";setFB("wait","&#9822;","Your turn","Continue.");refreshBoard(pc);document.getElementById("btnHint").style.display="inline-block";document.getElementById("btnSol").style.display="inline-block";document.getElementById("btnHint").disabled=false;
+}
+function submit(win,hint){
+  if(!puzzle)return;
+  fetch(API+"/puzzles/"+(puzzle.id||puzzle._id)+"/complete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({win:win,hint:!!hint,difficulty:currentDiff,userId:window._userId||null})})
+    .then(function(r){return r.json();}).then(function(d){if(d.ratingDiff){var el=document.getElementById("rDiff");el.textContent=(d.ratingDiff>0?"+":"")+d.ratingDiff;el.className="rd "+(d.ratingDiff>=0?"pos":"neg");}if(d.glicko){myGlicko=d.glicko;myRating=Math.round(d.glicko.r);document.getElementById("myRating").textContent=myRating;}}).catch(function(){});
+}
+function buildMoves(){
+  var ml=document.getElementById("mvList");ml.innerHTML="";if(!chess)return;
+  var hist=chess.history(),row,n=1;
+  hist.forEach(function(san,i){
+    if(i%2===0){row=document.createElement("div");row.className="mr";var idx=document.createElement("index");idx.textContent=n+++".";row.appendChild(idx);ml.appendChild(row);}
+    var mv=document.createElement("move");mv.className=i===hist.length-1?"active":"";mv.textContent=san;row.appendChild(mv);
+  });ml.scrollTop=ml.scrollHeight;
+}
+function flip(){if(cg)cg.toggleOrientation();}
+function changeTheme(t){currentTheme=t;try{localStorage.setItem("cg_theme",t);localStorage.removeItem("cg_puzzle");}catch(e){}loadNext();}
+function setFB(type,icon,title,desc){
+  var fb=document.getElementById("pzFeedback");
+  if(!fb)return;
+  var pfPlayer=document.getElementById("pfPlayer");
+  var pfIcon=document.getElementById("pfIcon");
+  var fbT=document.getElementById("fbT");
+  var fbD=document.getElementById("fbD");
+  var pfComplete=document.getElementById("pfComplete");
+  var viewSolBox=document.getElementById("viewSolBox");
+  var btnN=document.getElementById("btnN");
+  var btnHint=document.getElementById("btnHint");
+  var btnSol=document.getElementById("btnSol");
+  if(type==="wait"){
+    // LICHESS: initial state — show king piece
+    fb.className="puzzle__feedback play";
+    if(pfPlayer)pfPlayer.style.display="flex";
+    if(pfComplete)pfComplete.style.display="none";
+    if(btnN)btnN.style.display="none";
+    if(viewSolBox)viewSolBox.style.display="flex";
+    if(fbT)fbT.textContent=title||"Your turn";
+    var pc=window.playerColor||"white";
+    if(pfIcon)pfIcon.innerHTML='<piece class="king '+pc+'" id="kingPiece"></piece>';
+    if(fbD)fbD.innerHTML='Find the best move for <strong id="pfColor">'+pc+'</strong>.';
+  } else if(type==="good"){
+    // LICHESS: good state — ✓ icon
+    fb.className="puzzle__feedback good";
+    if(pfPlayer)pfPlayer.style.display="flex";
+    if(pfComplete)pfComplete.style.display="none";
+    if(btnN)btnN.style.display="none";
+    if(viewSolBox)viewSolBox.style.display="flex";
+    if(pfIcon)pfIcon.innerHTML='<div class="icon">✓</div>';
+    if(fbT)fbT.textContent=title||"Best move!";
+    if(fbD)fbD.innerHTML=desc||"Keep going...";
+  } else if(type==="fail"||type==="bad"){
+    // LICHESS: fail state — ✗ icon
+    fb.className="puzzle__feedback fail";
+    if(pfPlayer)pfPlayer.style.display="flex";
+    if(pfComplete)pfComplete.style.display="none";
+    if(btnN)btnN.style.display="none";
+    if(viewSolBox)viewSolBox.style.display="flex";
+    if(pfIcon)pfIcon.innerHTML='<div class="icon">✗</div>';
+    if(fbT)fbT.textContent=title||"Not the move";
+    if(fbD)fbD.innerHTML=desc||"Try something else.";
+  } else if(type==="after"){
+    // LICHESS: after state (after.ts) — puzzle complete, show Continue button
+    fb.className="puzzle__feedback after";
+    if(pfPlayer)pfPlayer.style.display="none";
+    if(pfComplete){pfComplete.style.display="block";pfComplete.textContent=title||"Puzzle complete!";}
+    if(viewSolBox)viewSolBox.style.display="none";
+    if(btnHint)btnHint.style.display="none";
+    if(btnSol)btnSol.style.display="none";
+    if(btnN){btnN.style.display="flex";}
+  }
+}
+function toast(msg){var t=document.getElementById("toast");t.textContent=msg;t.classList.add("show");setTimeout(function(){t.classList.remove("show");},2500);}
+function doHint(){
+  if(!puzzle||solved)return;
+  window._hintShown=true;
+  var from=solution[solIdx].slice(0,2);
+  cg.setShapes([{orig:from,brush:"yellow"}]);
+  document.getElementById("btnHint").disabled=true;
+  setTimeout(function(){cg.setShapes([]);},3000);
+
+}
+function viewSolution(){
+  window._hintShown=true;
+  if(document.getElementById("btnHint"))document.getElementById("btnHint").className="button";
+
+  if(!puzzle||solved)return;
+  document.getElementById("btnSol").style.display="none";
+  document.getElementById("btnHint").disabled=true;
+  var idx=solIdx;
+  function playNext(){
+    if(idx>=solution.length){return;}
+    var uci=solution[idx],f=uci.slice(0,2),t=uci.slice(2,4),pr=uci[4];
+    chess.move({from:f,to:t,promotion:pr||"q"});
+    cg.set({fen:chess.fen(),lastMove:[f,t]});
+    buildMoves();idx++;
+    setTimeout(playNext,600);
+  }
+  playNext();
+  // LICHESS after.ts: show "Puzzle complete!" + Continue training button
+  var totalMoves=solution.length-solIdx;
+  setTimeout(function(){setFB("after","","Puzzle complete!","");},totalMoves*600+800);
+
+}
+var navHistory=[],navIdx=-1;
+function navPrev(){
+  if(navIdx<=0)return;
+  navIdx--;
+  var state=navHistory[navIdx];
+  chess.load(state.fen);
+  cg.set({fen:state.fen,lastMove:state.lastMove||undefined,movable:{color:undefined}});
+  buildMoves();
+}
+function navNext(){
+  if(navIdx>=navHistory.length-1)return;
+  navIdx++;
+  var state=navHistory[navIdx];
+  chess.load(state.fen);
+  cg.set({fen:state.fen,lastMove:state.lastMove||undefined});
+  buildMoves();
+}
+function fmt(t){if(!t)return"Mix";return t.replace(/([A-Z])/g," $1").replace(/^./,function(s){return s.toUpperCase();});}
+
+// Populate theme dropdown from API
+fetch('/api/themes').then(r=>r.json()).then(data=>{
+  var themes = data.themes || [];
+  var sel = document.getElementById('themeSelect');
+  sel.innerHTML = '<option value="mix">All themes</option>';
+  window.themeLabels = window.themeLabels || {};
+  var labels = window.themeLabels = {
+    advancedPawn:'Advanced Pawn',advantage:'Advantage',anastasiaMate:'Anastasia Mate',
+    arabianMate:'Arabian Mate',attackingF2F7:'Attacking f2/f7',attraction:'Attraction',
+    backRankMate:'Back Rank Mate',balestraMate:'Balestra Mate',bishopEndgame:'Bishop Endgame',
+    blindSwineMate:'Blind Swine Mate',bodenMate:'Boden Mate',capturingDefender:'Capturing Defender',
+    castling:'Castling',clearance:'Clearance',collinearMove:'Collinear Move',cornerMate:'Corner Mate',
+    crushing:'Crushing',defensiveMove:'Defensive Move',deflection:'Deflection',
+    discoveredAttack:'Discovered Attack',discoveredCheck:'Discovered Check',
+    doubleBishopMate:'Double Bishop Mate',doubleCheck:'Double Check',dovetailMate:'Dovetail Mate',
+    endgame:'Endgame',enPassant:'En Passant',epauletteMate:'Epaulette Mate',equality:'Equality',
+    exposedKing:'Exposed King',fork:'Fork',hangingPiece:'Hanging Piece',hookMate:'Hook Mate',
+    interference:'Interference',intermezzo:'Intermezzo',kingsideAttack:'Kingside Attack',
+    knightEndgame:'Knight Endgame',long:'Long',mate:'Mate',mateIn1:'Mate in 1',mateIn2:'Mate in 2',
+    mateIn3:'Mate in 3',mateIn4:'Mate in 4',mateIn5:'Mate in 5',middlegame:'Middlegame',
+    oneMove:'One Move',opening:'Opening',operaMate:'Opera Mate',pawnEndgame:'Pawn Endgame',
+    pin:'Pin',promotion:'Promotion',queenEndgame:'Queen Endgame',
+    queenRookEndgame:'Queen & Rook Endgame',queensideAttack:'Queenside Attack',
+    quietMove:'Quiet Move',rookEndgame:'Rook Endgame',sacrifice:'Sacrifice',short:'Short',
+    skewer:'Skewer',smotheredMate:'Smothered Mate',superGM:'Super GM',triangleMate:'Triangle Mate',
+    trappedPiece:'Trapped Piece',underPromotion:'Under Promotion',veryLong:'Very Long',
+    xRayAttack:'X-Ray Attack',zugzwang:'Zugzwang'
+  };
+  Object.assign(window.themeLabels, labels);
+  themes.filter(t=>t!=='mix').forEach(t=>{
+    var o=document.createElement('option');
+    o.value=t; o.text=labels[t]||t;
+    sel.appendChild(o);
+  });
+try{var _sv=localStorage.getItem('cg_theme');if(_sv){sel.value=_sv;}}catch(e){}
+}).catch(e=>console.error('Theme load error:',e));
+</script></body></html>
