@@ -3,7 +3,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
 <title>ChessGuru &bull; Puzzle Trainer</title>
 <style>
-:root{--w:#fff;--b:#000;--b2:#0f0f0f;--b3:#1a1a1a;--b4:#2a2a2a;--g1:#b0b0b0;--g2:#8c8c8c;--r:8px;--r-sm:5px;--pri:#629032;--cb:var(--b2);--cz:var(--b4);--cz2:var(--b2);--cp:var(--b3);--pri2:#4a7022;--cf:var(--g1);--cfd:var(--g2);--cfc:var(--w);--ok:var(--pri);--err:#c0392b;--bdr:var(--b4)}
+:root{--w:#fff;--b:#000;--b2:#0f0f0f;--b3:#1a1a1a;--b4:#2a2a2a;--g1:#888;--g2:#555;--r:8px;--r-sm:5px;--pri:#629032;--cb:var(--b2);--cz:var(--b4);--cz2:var(--b2);--cp:var(--b3);--pri2:#4a7022;--cf:var(--g1);--cfd:var(--g2);--cfc:var(--w);--ok:var(--pri);--err:#c0392b;--bdr:var(--b4)}
 *{box-sizing:border-box;margin:0;padding:0}html,body{max-width:100%;overflow-x:hidden}body{background:var(--cb);color:var(--cf);font-family:"Inter",sans-serif;font-size:13px}
 a{color:var(--pri);text-decoration:none}
 #hdr{height:54px;display:flex;align-items:center;padding:0 28px;background:#000;border-bottom:1px solid #2a2a2a;position:sticky;top:0;z-index:100}
