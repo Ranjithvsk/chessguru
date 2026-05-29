@@ -6,12 +6,14 @@ import { PuzzlesController } from "./puzzles/puzzles.controller";
 import { PuzzlesService } from "./puzzles/puzzles.service";
 import { AuthController } from "./auth/auth.controller";
 import { AuthService } from "./auth/auth.service";
+import { AdminController } from "./admin/admin.controller";
+import { AdminService } from "./admin/admin.service";
 
 const MONGO_URI = process.env.MONGO_URI ?? "mongodb://localhost:27017/chessguru";
 
 @Module({
   imports: [MongooseModule.forRoot(MONGO_URI)],
-  controllers: [HealthController, MiscController, PuzzlesController, AuthController],
-  providers: [PuzzlesService, AuthService],
+  controllers: [HealthController, MiscController, PuzzlesController, AuthController, AdminController],
+  providers: [PuzzlesService, AuthService, AdminService],
 })
 export class AppModule {}

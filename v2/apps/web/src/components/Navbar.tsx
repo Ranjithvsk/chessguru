@@ -7,6 +7,7 @@ const links = [
   { to: "/opening", label: "Opening" },
   { to: "/engine-battle", label: "Engine" },
   { to: "/board-editor", label: "Editor" },
+  { to: "/admin", label: "Factory" },
 ];
 
 interface Props { rating?: number; username?: string; onLogout?: () => void; }
