@@ -4,7 +4,7 @@
 <title>ChessGuru &bull; Puzzle Trainer</title>
 <style>
 :root{--w:#fff;--b:#000;--b2:#0f0f0f;--b3:#1a1a1a;--b4:#2a2a2a;--g1:#888;--g2:#555;--r:8px;--r-sm:5px;--pri:#629032;--cb:var(--b2);--cz:var(--b4);--cz2:var(--b2);--cp:var(--b3);--pri2:#4a7022;--cf:var(--g1);--cfd:var(--g2);--cfc:var(--w);--ok:var(--pri);--err:#c0392b;--bdr:var(--b4)}
-*{box-sizing:border-box;margin:0;padding:0}body{background:var(--cb);color:var(--cf);font-family:"Inter",sans-serif;font-size:13px}
+*{box-sizing:border-box;margin:0;padding:0}html,body{max-width:100%;overflow-x:hidden}body{background:var(--cb);color:var(--cf);font-family:"Inter",sans-serif;font-size:13px}
 a{color:var(--pri);text-decoration:none}
 #hdr{height:54px;display:flex;align-items:center;padding:0 28px;background:#000;border-bottom:1px solid #2a2a2a;position:sticky;top:0;z-index:100}
 #hdr .logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit;margin-right:4px}
@@ -170,7 +170,7 @@ button.continue:hover{background:#70a038}
   #hdr nav{overflow-x:auto;white-space:nowrap;font-size:11px}
   #hdr nav a{padding:4px 8px;font-size:11px}
   .pb{flex-direction:column!important}
-  .pb .cg-wrap,.pb #board,.cg-wrap{width:100vw!important;height:100vw!important;max-width:100vw}
+  .pb .cg-wrap,.pb #board,.cg-wrap{width:100%!important;height:100%!important;max-width:100%}
   .ps,.pt,.sr{width:100%!important;max-width:100%!important;border-left:none!important;border-top:1px solid var(--border)}
 }
 </style></head><body>
@@ -182,7 +182,6 @@ button.continue:hover{background:#70a038}
     <a href="/opening">Opening</a>
     <a href="/engine-battle">Engine Battle</a>
     <a href="/puzzle-status">Puzzle Factory</a>
-    <select class="tsel" id="themeSelect" onchange="changeTheme(this.value)"><option value="mix">All themes</option></select>
     <div id="userWidget">
       <a id="loginBtn" href="/login">Sign in</a>
       <span id="userInfo">
@@ -239,6 +238,10 @@ button.continue:hover{background:#70a038}
       <button id="btnHint" onclick="doHint()" style="display:none;padding:6px 14px;background:#2f2f2f;border:1px solid #4a4a4a;color:#c0b060;border-radius:4px;cursor:pointer;font-size:13px">&#128161; Hint</button>
       <button id="btnSol" onclick="viewSolution()" style="display:none;padding:6px 14px;background:#2f2f2f;border:1px solid #4a4a4a;color:#b06060;border-radius:4px;cursor:pointer;font-size:13px">View Solution</button>
       <button class="bn" id="btnN" onclick="loadNextClean()" style="display:none">Next puzzle &#8594;</button>
+    </div>
+    <div class="sc">
+      <span>Theme</span>
+      <select id="themeSelect" onchange="changeTheme(this.value)"><option value="mix">All themes</option></select>
     </div>
     <div class="sc">
       <span>Difficulty</span>
