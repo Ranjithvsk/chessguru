@@ -115,7 +115,7 @@ export class Router {
 
       case "sub":
         await this.track(msg.g, s.id);
-        await this.route({ ...base, by: conn.userId, kind: "sub", g: msg.g });
+        await this.route({ ...base, kind: "sub", g: msg.g });
         return;
 
       case "unsub":
@@ -123,22 +123,27 @@ export class Router {
         conn.subs.delete(msg.g);
         return;
 
+      case "create":
+        await this.track(msg.g, s.id);
+        await this.route({ ...base, kind: "create", g: msg.g, clock: msg.d.clock, initialFen: msg.d.initialFen });
+        return;
+
       case "join":
         await this.track(msg.g, s.id);
-        await this.route({ ...base, by: conn.userId, kind: "join", g: msg.g });
+        await this.route({ ...base, kind: "join", g: msg.g });
         return;
 
       case "resync":
         await this.track(msg.g, s.id);
-        await this.route({ ...base, by: conn.userId, kind: "resync", g: msg.g, havePly: msg.d.havePly });
+        await this.route({ ...base, kind: "resync", g: msg.g, havePly: msg.d.havePly });
         return;
 
       case "move":
-        await this.route({ ...base, by: conn.userId, kind: "move", g: msg.g, uci: msg.d.uci, ply: msg.d.ply });
+        await this.route({ ...base, kind: "move", g: msg.g, uci: msg.d.uci, ply: msg.d.ply, lag: Math.max(0, msg.d.lag ?? 0) });
         return;
 
       case "resign":
-        await this.route({ ...base, by: conn.userId, kind: "resign", g: msg.g });
+        await this.route({ ...base, kind: "resign", g: msg.g });
         return;
     }
   }

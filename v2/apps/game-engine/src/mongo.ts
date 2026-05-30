@@ -1,4 +1,5 @@
 import { MongoClient, type Db } from "mongodb";
+import type { TimeControl } from "@chessguru/protocol";
 
 const URI = process.env.MONGO_URI ?? "mongodb://127.0.0.1:27017/chessguru";
 
@@ -20,6 +21,7 @@ export interface PersistedGame {
   moves: string[];
   result: string | null;
   status: string;
+  timeControl: TimeControl;
   startedAt: Date;
   finishedAt: Date;
 }

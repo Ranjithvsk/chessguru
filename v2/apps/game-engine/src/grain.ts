@@ -1,5 +1,5 @@
 import { Chess } from "chess.js";
-import type { Color, GameStatus, Players, Seat } from "@chessguru/protocol";
+import type { Clock, Color, GameStatus, Players, Seat, TimeControl } from "@chessguru/protocol";
 import type { GameState } from "./snapshot";
 
 export interface MoveResult {
@@ -9,6 +9,8 @@ export interface MoveResult {
   fen?: string;
   turn?: Color;
   ply?: number; // index of the move just played
+  clock?: Clock;
+  flagged?: boolean; // true when the "move" was rejected because the mover's clock expired
   end?: { result: string; reason: GameStatus };
 }
 
@@ -17,13 +19,18 @@ export interface JoinResult {
 }
 
 const START_FEN = new Chess().fen();
+const DEFAULT_TC: TimeControl = { initial: 180_000, increment: 2_000 };
+/** Max network lag (ms) the server will refund per move (lila-style cap). */
+const LAG_CAP_MS = 1_000;
 
 /**
- * The authoritative state of one live game (M1: standard chess, no clocks).
- * Replaces M0's EchoGrain; the directory / mailbox / lease / snapshot machinery
- * around it is unchanged. Rules + draw detection come from chess.js (threefold,
- * insufficient material and 50-move are tracked for free). chessops/variants are
- * the post-M5 path; rules stay encapsulated here so that swap is local.
+ * Authoritative state of one live game: standard chess (chess.js) + server-truth
+ * clocks. Time is kept in integer ms; the running side's remaining time is
+ * `clockRemaining[turn] - (now - turnStartedAt)`. `turnStartedAt` is an epoch-ms
+ * timestamp so the clock survives rehydration onto another node (the documented
+ * trade-off: time spent during a node-outage counts against the mover until
+ * pause-on-unavailable lands in a later milestone). Rules are encapsulated here
+ * so a chessops/variant swap stays local.
  */
 export class RoundGrain {
   private chess = new Chess();
@@ -35,6 +42,11 @@ export class RoundGrain {
   startedAt = Date.now();
   finishedAt?: number;
 
+  timeControl: TimeControl = { ...DEFAULT_TC };
+  clockRemaining: Clock = { white: DEFAULT_TC.initial, black: DEFAULT_TC.initial };
+  clockStarted = false;
+  turnStartedAt: number | null = null;
+
   get ply(): number {
     return this.moves.length;
   }
@@ -43,6 +55,9 @@ export class RoundGrain {
   }
   fen(): string {
     return this.chess.fen();
+  }
+  bothSeated(): boolean {
+    return this.players.white !== null && this.players.black !== null;
   }
 
   hydrate(st: GameState | null): void {
@@ -53,8 +68,12 @@ export class RoundGrain {
     this.result = st.result;
     this.startedAt = st.startedAt;
     this.finishedAt = st.finishedAt;
+    this.timeControl = { ...st.timeControl };
+    this.clockRemaining = { ...st.clockRemaining };
+    this.clockStarted = st.clockStarted;
+    this.turnStartedAt = st.turnStartedAt;
     this.chess = new Chess(st.initialFen);
-    for (const uci of st.moves) this.applyUci(uci); // replay to restore full history (for repetition)
+    for (const uci of st.moves) this.applyUci(uci); // replay to restore history (repetition)
     this.moves = st.moves.slice();
   }
 
@@ -67,7 +86,27 @@ export class RoundGrain {
       result: this.result,
       startedAt: this.startedAt,
       finishedAt: this.finishedAt,
+      timeControl: { ...this.timeControl },
+      clockRemaining: { ...this.clockRemaining },
+      clockStarted: this.clockStarted,
+      turnStartedAt: this.turnStartedAt,
     };
+  }
+
+  /** Configure before the game starts (before any move + before both seated). */
+  configure(tc: TimeControl, initialFen?: string): boolean {
+    if (this.clockStarted || this.moves.length > 0) return false;
+    if (initialFen) {
+      try {
+        this.chess = new Chess(initialFen); // throws on an invalid FEN
+        this.initialFen = initialFen;
+      } catch {
+        return false;
+      }
+    }
+    this.timeControl = { initial: tc.initial, increment: tc.increment };
+    this.clockRemaining = { white: tc.initial, black: tc.initial };
+    return true;
   }
 
   /** First two distinct users take white then black; everyone else spectates. */
@@ -85,13 +124,49 @@ export class RoundGrain {
     return { seat: "spectator" };
   }
 
-  move(uci: string, expectedPly: number, by: string): MoveResult {
+  /** Start the clock once both seats are filled (the side to move begins ticking). */
+  startClock(now: number): boolean {
+    if (this.clockStarted || !this.bothSeated() || this.status !== "playing") return false;
+    this.clockStarted = true;
+    this.turnStartedAt = now;
+    return true;
+  }
+
+  /** Live remaining time, decrementing the running side. */
+  liveClock(now: number): Clock {
+    const c = { ...this.clockRemaining };
+    if (this.clockStarted && this.turnStartedAt !== null && this.status === "playing") {
+      const side = this.turn;
+      c[side] = Math.max(0, c[side] - (now - this.turnStartedAt));
+    }
+    return c;
+  }
+
+  /** Epoch-ms instant the running side would flag, or null if no clock is running. */
+  dueAt(): number | null {
+    if (!this.clockStarted || this.turnStartedAt === null || this.status !== "playing") return null;
+    return this.turnStartedAt + this.clockRemaining[this.turn];
+  }
+
+  move(uci: string, expectedPly: number, by: string, now: number, lagMs: number): MoveResult {
     if (this.status !== "playing") return { ok: false, code: "game-over" };
     const moverColor = this.turn;
     const seat = this.players[moverColor];
     if (seat === null) return { ok: false, code: "no-player" };
     if (seat !== by) return { ok: false, code: "not-your-turn" };
     if (expectedPly !== this.moves.length) return { ok: false, code: "stale-ply" };
+
+    // ── clock first: debit, lag-comp, flag check before accepting the move ──
+    if (this.clockStarted && this.turnStartedAt !== null) {
+      const elapsed = now - this.turnStartedAt;
+      const refund = Math.min(Math.max(0, lagMs), LAG_CAP_MS, elapsed);
+      this.clockRemaining[moverColor] -= elapsed - refund;
+      if (this.clockRemaining[moverColor] <= 0) {
+        this.clockRemaining[moverColor] = 0;
+        const end = this.flagInternal(moverColor, now); // too late — flag, move not applied
+        return { ok: true, flagged: true, clock: { ...this.clockRemaining }, end };
+      }
+    }
 
     let san: string;
     try {
@@ -102,11 +177,30 @@ export class RoundGrain {
       });
       san = m.san;
     } catch {
+      // restore: an illegal attempt shouldn't keep the debit (we re-add elapsed)
+      if (this.clockStarted && this.turnStartedAt !== null) {
+        this.clockRemaining[moverColor] += now - this.turnStartedAt; // best-effort restore
+      }
       return { ok: false, code: "illegal-move" };
     }
+
     this.moves.push(uci);
+    this.clockRemaining[moverColor] += this.timeControl.increment;
+    this.turnStartedAt = now; // the other side's clock starts now
     const end = this.checkEnd(moverColor);
-    return { ok: true, san, fen: this.chess.fen(), turn: this.turn, ply: this.moves.length - 1, end };
+    if (end) this.turnStartedAt = null; // game over — clocks stop
+    return { ok: true, san, fen: this.chess.fen(), turn: this.turn, ply: this.moves.length - 1, clock: { ...this.clockRemaining }, end };
+  }
+
+  /** Flag the given side (called by the engine's proactive timer). */
+  flag(side: Color, now: number): MoveResult {
+    if (this.status !== "playing") return { ok: false, code: "game-over" };
+    // confirm the side really is out of time
+    const live = this.liveClock(now);
+    if (live[side] > 0) return { ok: false, code: "not-flagged" };
+    this.clockRemaining[side] = 0;
+    const end = this.flagInternal(side, now);
+    return { ok: true, clock: { ...this.clockRemaining }, end };
   }
 
   resign(by: string): MoveResult {
@@ -116,7 +210,32 @@ export class RoundGrain {
     this.status = "resign";
     this.result = color === "white" ? "0-1" : "1-0";
     this.finishedAt = Date.now();
-    return { ok: true, end: { result: this.result, reason: "resign" } };
+    this.turnStartedAt = null;
+    return { ok: true, clock: { ...this.clockRemaining }, end: { result: this.result, reason: "resign" } };
+  }
+
+  private flagInternal(side: Color, now: number): { result: string; reason: GameStatus } {
+    const opp: Color = side === "white" ? "black" : "white";
+    this.status = "flag";
+    // flag is a draw if the opponent cannot possibly mate (insufficient material)
+    this.result = this.hasMatingMaterial(opp) ? (opp === "white" ? "1-0" : "0-1") : "1/2-1/2";
+    this.finishedAt = now;
+    this.turnStartedAt = null;
+    return { result: this.result, reason: "flag" };
+  }
+
+  /** Could `color` ever deliver mate? false for lone king / K+single-minor. */
+  private hasMatingMaterial(color: Color): boolean {
+    const c = color === "white" ? "w" : "b";
+    const minors: string[] = [];
+    for (const row of this.chess.board()) {
+      for (const sq of row) {
+        if (sq && sq.color === c && sq.type !== "k") minors.push(sq.type);
+      }
+    }
+    if (minors.length === 0) return false; // lone king
+    if (minors.length === 1 && (minors[0] === "n" || minors[0] === "b")) return false; // K+N or K+B
+    return true;
   }
 
   private applyUci(uci: string): void {
@@ -143,7 +262,7 @@ export class RoundGrain {
       this.status = "threefold";
       this.result = "1/2-1/2";
     } else {
-      this.status = "draw"; // 50-move and any other chess.js draw
+      this.status = "draw";
       this.result = "1/2-1/2";
     }
     return { result: this.result, reason: this.status };
