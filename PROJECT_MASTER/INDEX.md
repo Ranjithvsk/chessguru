@@ -38,6 +38,7 @@ _Created 2026-05-29 · expanded the same day with a full codebase read. Live: ht
 - [database/schema.md](database/schema.md) — schemas, all collections + counts, the puzzle field-vocabulary divergence
 
 ## Plans
+- ⭐ [plans/online-play-international.md](plans/online-play-international.md) — PROPOSED: Lichess-level platform at international scale (separate WS + game-engine tiers, Redis bus, fishnet, anti-cheat, tournaments); infra decision flagged
 - [plans/own-opening-explorer.md](plans/own-opening-explorer.md) — IN PROGRESS: own NestJS+Mongo opening book (position-keyed), Lichess-compatible /api/explorer
 - [plans/ovh-migration.md](plans/ovh-migration.md) — DONE (co-located on the DreamWorld OVH VPS)
 - [plans/code-cleanup.md](plans/code-cleanup.md) — archived dead files + remaining follow-ups
