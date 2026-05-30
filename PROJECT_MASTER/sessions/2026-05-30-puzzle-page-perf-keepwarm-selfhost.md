@@ -23,8 +23,10 @@ are fast. Same root cause as the earlier "website slow" report.
 **Also freed RAM this session:** closed 5 idle web terminals (~1.4GB) + killed orphaned terminal-less
 claude processes — available RAM 1.8 → ~2.7GB, swap 6.0 → 3.9GB.
 
-**Still external (NOT changed):** Google Fonts (`fonts.googleapis.com` Inter + DM Serif). Render-blocking
-but already `display=swap`. Could self-host woff2 later if the owner wants.
+**Google Fonts — now self-hosted too** (owner asked): fetched the css2 stylesheet + 11 woff2 (Inter
+300/400/500/600 + DM Serif Display normal/italic) into `public/fonts/` + `public/css/fonts.css`; all 8
+html pages repointed to `/css/fonts.css` and the googleapis/gstatic preconnects removed. **Zero external
+requests remain** — the page is fully same-origin now.
 
 **Durable note:** the box is genuinely under-provisioned for everything running. Keep-warm masks the
 cold-start; the real fixes are fewer concurrent heavy processes (Claude/terminal sessions), capping
