@@ -8,8 +8,15 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@chessguru/protocol": ["../../packages/protocol/src/index.ts"]
+      "@chessguru/protocol": [
+        "../../packages/protocol/src/index.ts"
+      ],
+      "@chessguru/glicko": [
+        "../../packages/glicko/src/index.ts"
+      ]
     }
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }

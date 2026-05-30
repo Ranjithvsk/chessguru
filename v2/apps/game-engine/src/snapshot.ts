@@ -1,9 +1,8 @@
 import type Redis from "ioredis";
 import { keys, LEASE_MS } from "@chessguru/protocol";
-import type { Clock, GameStatus, Players, TimeControl } from "@chessguru/protocol";
+import type { Clock, Color, GameStatus, Players, TimeControl } from "@chessguru/protocol";
 
-/** Hot recovery state: enough to rebuild the position by replay AND restore the
- *  clock across a re-placement (turnStartedAt is epoch-ms, so it's portable). */
+/** Hot recovery state: rebuild the position by replay + restore clock + flow. */
 export interface GameState {
   initialFen: string;
   moves: string[];
@@ -12,10 +11,13 @@ export interface GameState {
   result: string | null;
   startedAt: number;
   finishedAt?: number;
+  rated: boolean;
   timeControl: TimeControl;
   clockRemaining: Clock;
   clockStarted: boolean;
   turnStartedAt: number | null;
+  pendingDraw: Color | null;
+  rematchReq: { white: boolean; black: boolean };
 }
 
 export async function readState(cmd: Redis, g: string): Promise<GameState | null> {
@@ -29,6 +31,5 @@ export async function readState(cmd: Redis, g: string): Promise<GameState | null
 }
 
 export async function writeState(cmd: Redis, g: string, st: GameState): Promise<void> {
-  // Keep hot state alive well past one lease so a re-placed grain can rehydrate.
   await cmd.set(keys.state(g), JSON.stringify(st), "PX", LEASE_MS * 4);
 }

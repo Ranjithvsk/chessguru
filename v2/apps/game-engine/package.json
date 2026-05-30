@@ -12,7 +12,8 @@
     "@chessguru/protocol": "workspace:*",
     "ioredis": "^5.10.1",
     "chess.js": "^1.4.0",
-    "mongodb": "^6.20.0"
+    "mongodb": "^6.20.0",
+    "@chessguru/glicko": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.7.4",

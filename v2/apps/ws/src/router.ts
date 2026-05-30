@@ -26,7 +26,7 @@ interface Conn {
 export class Router {
   readonly gwId = process.env.GW_ID ?? `gw:${randomUUID().slice(0, 8)}`;
   private conns = new Map<string, Conn>();
-  private gameSubs = new Map<string, Set<string>>(); // g -> connIds
+  private gameSubs = new Map<string, Set<string>>();
   private ownerCache = new Map<string, { node: string; exp: number }>();
 
   constructor(
@@ -87,7 +87,6 @@ export class Router {
     void this.cmd.publish(ch.engineIn(owner), encode(evt));
   }
 
-  /** Subscribe this gateway to a game's fan-out and add the socket to its set. */
   private async track(g: string, connId: string): Promise<void> {
     if (!this.gameSubs.has(g)) {
       this.gameSubs.set(g, new Set());
@@ -125,7 +124,7 @@ export class Router {
 
       case "create":
         await this.track(msg.g, s.id);
-        await this.route({ ...base, kind: "create", g: msg.g, clock: msg.d.clock, initialFen: msg.d.initialFen });
+        await this.route({ ...base, kind: "create", g: msg.g, clock: msg.d.clock, initialFen: msg.d.initialFen, rated: msg.d.rated ?? true });
         return;
 
       case "join":
@@ -144,6 +143,23 @@ export class Router {
 
       case "resign":
         await this.route({ ...base, kind: "resign", g: msg.g });
+        return;
+
+      case "draw-offer":
+        await this.route({ ...base, kind: "draw-offer", g: msg.g });
+        return;
+
+      case "draw-accept":
+        await this.route({ ...base, kind: "draw-accept", g: msg.g });
+        return;
+
+      case "draw-decline":
+        await this.route({ ...base, kind: "draw-decline", g: msg.g });
+        return;
+
+      case "rematch":
+        await this.track(msg.g, s.id);
+        await this.route({ ...base, kind: "rematch", g: msg.g });
         return;
     }
   }

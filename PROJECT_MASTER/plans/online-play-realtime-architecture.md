@@ -324,9 +324,12 @@ authority fair across regions; add regional authority only if cross-region RTT m
   game to checkmate; it shows in game history.*
 - **M2 — Clocks.** Server-truth clocks, increment, flag (+insufficient-material), lag comp, periodic
   `clock` ticks, proactive flag timer. *Exit: a 1+0 bullet game flags correctly; lag doesn't steal time.*
-- **M3 — Game flow + rating + reconnect.** resign/abort/draw-offer/rematch/takeback(casual); Glicko-2 on
-  end; full disconnect→`resync` recovery + opponent-gone grace. *Exit: rated games adjust ratings; pull
-  the network mid-game and the game survives.*
+- **M3 — Game flow + rating + reconnect.** ✅ BUILT 2026-05-30 (11/11) — resign + draw-offer/accept/
+  decline + rematch (spawns a colour-swapped game); **Glicko-2 rating on rated game end** (shared
+  `packages/glicko`, persisted to `live_perfs` by speed bucket); client disconnect→reconnect resumes
+  the seat via `resync`. *Deferred: casual takeback, abort, pause-on-unavailable (clock keeps running
+  during a node-outage for now). Verified: rated mate moves both ratings; draw-accept ends 1/2;
+  reconnect resumes mid-game; rematch swaps colours.*
 - **M4 — Lobby.** `apps/lobby` seek pools + atomic pairing + challenge-a-friend. *Exit: anonymous-free
   "Quick pairing" 5+3 matches two strangers.*
 - **M5 — Hardening.** Premove polish, abuse/rate limits, anti-cheat capture, metrics dashboards, bot-fleet

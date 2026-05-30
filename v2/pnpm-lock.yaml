@@ -78,6 +78,9 @@ importers:
 
   apps/game-engine:
     dependencies:
+      '@chessguru/glicko':
+        specifier: workspace:*
+        version: link:../../packages/glicko
       '@chessguru/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -174,6 +177,8 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+
+  packages/glicko: {}
 
   packages/protocol: {}
 

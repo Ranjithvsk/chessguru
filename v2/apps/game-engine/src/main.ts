@@ -5,10 +5,13 @@ import {
   encode,
   HEARTBEAT_MS,
   type EngineInbound,
+  type GameStatus,
   type OutBroadcast,
+  type RatingDiff,
   type ReplyOut,
   type ServerMsg,
 } from "@chessguru/protocol";
+import { rateGame } from "@chessguru/glicko";
 import { newRedis } from "./redis";
 import { NODE_ID } from "./node-id";
 import { Cluster } from "./cluster";
@@ -17,7 +20,8 @@ import { Registry } from "./registry";
 import { Mailbox } from "./mailbox";
 import { RoundGrain } from "./grain";
 import { readState, writeState } from "./snapshot";
-import { persistGame } from "./mongo";
+import { persistGame, type RatingChange } from "./mongo";
+import { getPerf, setPerf, speedOf } from "./perfs";
 
 const cmd = newRedis();
 const sub = newRedis();
@@ -55,11 +59,9 @@ function gameStateMsg(g: string, grain: RoundGrain, now: number): ServerMsg {
       players: st.players,
       clock: grain.liveClock(now),
       timeControl: st.timeControl,
+      rated: st.rated,
     },
   };
-}
-function endMsg(g: string, grain: RoundGrain, end: { result: string; reason: string }, now: number): ServerMsg {
-  return { v: 1, t: "game-end", g, d: { result: end.result, reason: end.reason as never, fen: grain.fen(), clock: grain.liveClock(now) } };
 }
 
 function clearFlagTimer(g: string): void {
@@ -73,11 +75,45 @@ function armFlagTimer(g: string, grain: RoundGrain): void {
   clearFlagTimer(g);
   const due = grain.dueAt();
   if (due === null) return;
-  const ms = Math.max(0, due - Date.now());
   flagTimers.set(
     g,
-    setTimeout(() => void mb.run(g, () => onFlagDue(g)), ms),
+    setTimeout(() => void mb.run(g, () => onFlagDue(g)), Math.max(0, due - Date.now())),
   );
+}
+
+/** Rate (if rated), broadcast game-end, persist the finished game. */
+async function endGame(g: string, grain: RoundGrain, end: { result: string; reason: GameStatus }, now: number): Promise<void> {
+  let ratingDiff: RatingDiff | undefined;
+  let rating: RatingChange | null = null;
+  const { white, black } = grain.players;
+  if (grain.rated && white && black && white.startsWith("u:") && black.startsWith("u:")) {
+    const speed = speedOf(grain.timeControl);
+    const wPerf = await getPerf(white, speed);
+    const bPerf = await getPerf(black, speed);
+    const whiteScore = end.result === "1-0" ? 1 : end.result === "0-1" ? 0 : 0.5;
+    const r = rateGame(wPerf, bPerf, whiteScore);
+    await setPerf(white, speed, r.white, wPerf);
+    await setPerf(black, speed, r.black, bPerf);
+    ratingDiff = { white: r.whiteDiff, black: r.blackDiff };
+    rating = { white: { before: wPerf.gl.r, after: r.white.r }, black: { before: bPerf.gl.r, after: r.black.r } };
+  }
+  broadcast(g, { v: 1, t: "game-end", g, d: { result: end.result, reason: end.reason, fen: grain.fen(), clock: grain.liveClock(now), ...(ratingDiff ? { ratingDiff } : {}) } });
+  const st = grain.state();
+  await persistGame(g, {
+    variant: "standard",
+    rated: grain.rated,
+    speed: speedOf(grain.timeControl),
+    players: st.players,
+    initialFen: st.initialFen,
+    moves: st.moves,
+    result: st.result,
+    status: st.status,
+    timeControl: st.timeControl,
+    rating,
+    startedAt: new Date(st.startedAt),
+    finishedAt: new Date(st.finishedAt ?? now),
+  }).catch((e) => console.error("[engine] persist failed", e));
+  clearFlagTimer(g);
 }
 
 async function onFlagDue(g: string): Promise<void> {
@@ -86,14 +122,12 @@ async function onFlagDue(g: string): Promise<void> {
   if (grain.status !== "playing") return clearFlagTimer(g);
   const now = Date.now();
   const side = grain.turn;
-  if (grain.liveClock(now)[side] > 0) return armFlagTimer(g, grain); // a move reset the clock
+  if (grain.liveClock(now)[side] > 0) return armFlagTimer(g, grain);
   const r = grain.flag(side, now);
   if (!r.ok) return armFlagTimer(g, grain);
   if (!(await dir.owns(g))) return void reg.evict(g);
   await writeState(cmd, g, grain.state());
-  broadcast(g, endMsg(g, grain, r.end!, now));
-  await persistIfEnded(g, grain);
-  clearFlagTimer(g);
+  await endGame(g, grain, r.end!, now);
 }
 
 async function activate(g: string): Promise<RoundGrain> {
@@ -102,30 +136,27 @@ async function activate(g: string): Promise<RoundGrain> {
   const grain = new RoundGrain();
   grain.hydrate(await readState(cmd, g));
   reg.set(g, grain);
-  if (grain.clockStarted && grain.status === "playing") armFlagTimer(g, grain); // resume after rehydrate
+  if (grain.clockStarted && grain.status === "playing") armFlagTimer(g, grain);
   return grain;
 }
 
-async function persistIfEnded(g: string, grain: RoundGrain): Promise<void> {
-  if (grain.status === "playing") return;
-  const st = grain.state();
-  await persistGame(g, {
-    variant: "standard",
-    players: st.players,
-    initialFen: st.initialFen,
-    moves: st.moves,
-    result: st.result,
-    status: st.status,
-    timeControl: st.timeControl,
-    startedAt: new Date(st.startedAt),
-    finishedAt: new Date(st.finishedAt ?? Date.now()),
-  }).catch((e) => console.error("[engine] persist failed", e));
+async function spawnRematch(oldG: string, grain: RoundGrain): Promise<void> {
+  const newId = `${oldG}~r${Date.now().toString(36)}`;
+  const ng = new RoundGrain();
+  ng.configure(grain.timeControl, undefined, grain.rated);
+  ng.seat(grain.players.black!, grain.players.white!); // swap colours
+  ng.startClock(Date.now());
+  await writeState(cmd, newId, ng.state()); // persist first so any owner can hydrate
+  if (await dir.claim(newId)) {
+    reg.set(newId, ng);
+    armFlagTimer(newId, ng);
+  }
+  broadcast(oldG, { v: 1, t: "rematch-ready", g: oldG, d: { game: newId, white: ng.players.white, black: ng.players.black } });
 }
 
 async function handle(evt: EngineInbound): Promise<void> {
   const g = evt.g;
 
-  // ── ownership resolution (unchanged from M0) ──────────────────────────────
   let owner = await dir.current(g);
   if (owner === null) {
     owner = (await dir.claim(g)) ? NODE_ID : await dir.current(g);
@@ -150,7 +181,7 @@ async function handle(evt: EngineInbound): Promise<void> {
       return;
 
     case "create": {
-      if (!grain.configure(evt.clock, evt.initialFen)) {
+      if (!grain.configure(evt.clock, evt.initialFen, evt.rated)) {
         reply(evt.gw, evt.conn, { v: 1, t: "error", g, d: { code: "already-started", msg: "cannot configure a started game" } });
         return;
       }
@@ -185,34 +216,58 @@ async function handle(evt: EngineInbound): Promise<void> {
       if (!(await dir.owns(g))) return void reg.evict(g);
       await writeState(cmd, g, grain.state());
       if (r.flagged) {
-        broadcast(g, endMsg(g, grain, r.end!, now)); // mover's clock expired — no move applied
-        await persistIfEnded(g, grain);
-        clearFlagTimer(g);
+        await endGame(g, grain, r.end!, now);
         return;
       }
       broadcast(g, { v: 1, t: "moved", g, d: { uci: evt.uci, san: r.san!, ply: r.ply!, fen: r.fen!, turn: r.turn!, by: evt.by, clock: r.clock! } });
-      if (r.end) {
-        broadcast(g, endMsg(g, grain, r.end, now));
-        await persistIfEnded(g, grain);
-        clearFlagTimer(g);
-      } else {
-        armFlagTimer(g, grain); // the other side's clock is now running
-      }
+      if (r.end) await endGame(g, grain, r.end, now);
+      else armFlagTimer(g, grain);
       return;
     }
 
     case "resign": {
       const r = grain.resign(evt.by);
-      if (!r.ok) {
-        reply(evt.gw, evt.conn, { v: 1, t: "error", g, d: { code: r.code ?? "rejected", msg: "resign rejected" } });
-        return;
-      }
+      if (!r.ok) return reply(evt.gw, evt.conn, { v: 1, t: "error", g, d: { code: r.code ?? "rejected", msg: "resign rejected" } });
       if (!(await dir.owns(g))) return void reg.evict(g);
       await writeState(cmd, g, grain.state());
       broadcast(g, gameStateMsg(g, grain, now));
-      broadcast(g, endMsg(g, grain, r.end!, now));
-      await persistIfEnded(g, grain);
-      clearFlagTimer(g);
+      await endGame(g, grain, r.end!, now);
+      return;
+    }
+
+    case "draw-offer": {
+      const r = grain.drawOffer(evt.by);
+      if (!r.ok) return reply(evt.gw, evt.conn, { v: 1, t: "error", g, d: { code: r.code ?? "rejected", msg: "draw offer rejected" } });
+      if (!(await dir.owns(g))) return void reg.evict(g);
+      await writeState(cmd, g, grain.state());
+      broadcast(g, { v: 1, t: "offer", g, d: { kind: "draw", by: r.color! } });
+      return;
+    }
+
+    case "draw-accept": {
+      const r = grain.drawAccept(evt.by);
+      if (!r.ok) return reply(evt.gw, evt.conn, { v: 1, t: "error", g, d: { code: r.code ?? "rejected", msg: "no draw to accept" } });
+      if (!(await dir.owns(g))) return void reg.evict(g);
+      await writeState(cmd, g, grain.state());
+      broadcast(g, gameStateMsg(g, grain, now));
+      await endGame(g, grain, r.end!, now);
+      return;
+    }
+
+    case "draw-decline": {
+      grain.drawDecline(evt.by);
+      if (!(await dir.owns(g))) return void reg.evict(g);
+      await writeState(cmd, g, grain.state());
+      broadcast(g, gameStateMsg(g, grain, now));
+      return;
+    }
+
+    case "rematch": {
+      const r = grain.rematch(evt.by);
+      if (!r.ok) return reply(evt.gw, evt.conn, { v: 1, t: "error", g, d: { code: r.code ?? "rejected", msg: "rematch rejected" } });
+      if (!(await dir.owns(g))) return void reg.evict(g);
+      await writeState(cmd, g, grain.state());
+      if (r.both) await spawnRematch(g, grain);
       return;
     }
   }
