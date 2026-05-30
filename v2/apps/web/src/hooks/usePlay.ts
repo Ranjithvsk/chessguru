@@ -21,11 +21,16 @@ export interface PlayState {
   opponent: string | null;
   result: string | null;
   reason: string | null;
+  incomingDraw: boolean;
   dests: ReturnType<typeof destsFromChess>;
   myTurn: boolean;
   seek: (clock: TimeControl, rated?: boolean) => void;
   sendMove: (from: Key, to: Key) => void;
   resign: () => void;
+  offerDraw: () => void;
+  acceptDraw: () => void;
+  declineDraw: () => void;
+  rematch: () => void;
   newGame: () => void;
 }
 
@@ -36,6 +41,8 @@ export function usePlay(token: string): PlayState {
   const gameIdRef = useRef<string | null>(null);
   const plyRef = useRef(0);
   const colorRef = useRef<Color>("white");
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
 
   const [status, setStatus] = useState<PlayStatus>("connecting");
   const [color, setColor] = useState<Color>("white");
@@ -48,6 +55,7 @@ export function usePlay(token: string): PlayState {
   const [opponent, setOpponent] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const [reason, setReason] = useState<string | null>(null);
+  const [incomingDraw, setIncomingDraw] = useState(false);
 
   const loadFen = (f: string) => {
     try {
@@ -58,20 +66,36 @@ export function usePlay(token: string): PlayState {
     setFen(f);
   };
 
+  const startGame = (g: string, myColor: Color, opp: string | null) => {
+    gameIdRef.current = g;
+    colorRef.current = myColor;
+    plyRef.current = 0;
+    game.current.reset();
+    setColor(myColor);
+    setOpponent(opp);
+    setFen(game.current.fen());
+    setTurn("white");
+    setPly(0);
+    setMoves([]);
+    setLastMove(undefined);
+    setResult(null);
+    setReason(null);
+    setIncomingDraw(false);
+    client.current?.sub(g);
+    setStatus("playing");
+  };
+
   const onMsg = (m: ServerMsg) => {
     switch (m.t) {
       case "matched":
-        gameIdRef.current = m.d.game;
-        colorRef.current = m.d.color;
-        setColor(m.d.color);
-        setOpponent(m.d.opponent);
-        setResult(null);
-        setReason(null);
-        setMoves([]);
-        setLastMove(undefined);
-        client.current?.sub(m.d.game);
-        setStatus("playing");
+        startGame(m.d.game, m.d.color, m.d.opponent);
         break;
+      case "rematch-ready": {
+        const me = `u:${tokenRef.current}`;
+        const myColor: Color = m.d.white === me ? "white" : "black";
+        startGame(m.d.game, myColor, myColor === "white" ? m.d.black : m.d.white);
+        break;
+      }
       case "game-state":
         loadFen(m.d.fen);
         setTurn(m.d.turn);
@@ -79,6 +103,7 @@ export function usePlay(token: string): PlayState {
         setPly(m.d.ply);
         setClock(m.d.clock);
         setMoves(m.d.moves);
+        setIncomingDraw(false);
         if (m.d.status !== "playing") {
           setStatus("ended");
           setResult(m.d.result);
@@ -92,15 +117,20 @@ export function usePlay(token: string): PlayState {
         setClock(m.d.clock);
         setLastMove([m.d.uci.slice(0, 2) as Key, m.d.uci.slice(2, 4) as Key]);
         setMoves((mv) => [...mv, m.d.san]);
+        setIncomingDraw(false);
         break;
       case "clock":
         setClock(m.d.clock);
         setTurn(m.d.turn);
         break;
+      case "offer":
+        if (m.d.kind === "draw" && m.d.by !== colorRef.current) setIncomingDraw(true);
+        break;
       case "game-end":
         setResult(m.d.result);
         setReason(m.d.reason);
         setClock(m.d.clock);
+        setIncomingDraw(false);
         setStatus("ended");
         break;
     }
@@ -110,17 +140,21 @@ export function usePlay(token: string): PlayState {
     const c = new LiveClient();
     client.current = c;
     let off = () => {};
+    const g = () => gameIdRef.current;
     c.connect(WS_URL)
       .then(() => {
-        c.hello(token);
+        c.hello(tokenRef.current);
         setStatus("idle");
         off = c.on(onMsg);
         if (import.meta.env.DEV) {
           (window as unknown as { __play?: unknown }).__play = {
             seek: (initial = 300000, increment = 3000, rated = false) => c.seek({ initial, increment }, rated),
-            move: (uci: string) => gameIdRef.current && c.move(gameIdRef.current, uci, plyRef.current),
-            resign: () => gameIdRef.current && c.resign(gameIdRef.current),
-            state: () => ({ game: gameIdRef.current, ply: plyRef.current, color: colorRef.current }),
+            move: (uci: string) => g() && c.move(g()!, uci, plyRef.current),
+            resign: () => g() && c.resign(g()!),
+            offerDraw: () => g() && c.drawOffer(g()!),
+            acceptDraw: () => g() && c.drawAccept(g()!),
+            rematch: () => g() && c.rematch(g()!),
+            state: () => ({ game: g(), ply: plyRef.current, color: colorRef.current }),
           };
         }
       })
@@ -148,17 +182,34 @@ export function usePlay(token: string): PlayState {
   const resign = useCallback(() => {
     if (gameIdRef.current) client.current?.resign(gameIdRef.current);
   }, []);
-
+  const offerDraw = useCallback(() => {
+    if (gameIdRef.current) client.current?.drawOffer(gameIdRef.current);
+  }, []);
+  const acceptDraw = useCallback(() => {
+    if (gameIdRef.current) client.current?.drawAccept(gameIdRef.current);
+    setIncomingDraw(false);
+  }, []);
+  const declineDraw = useCallback(() => {
+    if (gameIdRef.current) client.current?.drawDecline(gameIdRef.current);
+    setIncomingDraw(false);
+  }, []);
+  const rematch = useCallback(() => {
+    if (gameIdRef.current) client.current?.rematch(gameIdRef.current);
+  }, []);
   const newGame = useCallback(() => {
     gameIdRef.current = null;
     setStatus("idle");
     setResult(null);
     setReason(null);
     setMoves([]);
+    setIncomingDraw(false);
   }, []);
 
   const myTurn = status === "playing" && turn === color;
   const dests = useMemo(() => destsFromChess(game.current as never), [fen]);
 
-  return { status, color, fen, turn, ply, moves, lastMove, clock, opponent, result, reason, dests, myTurn, seek, sendMove, resign, newGame };
+  return {
+    status, color, fen, turn, ply, moves, lastMove, clock, opponent, result, reason, incomingDraw, dests, myTurn,
+    seek, sendMove, resign, offerDraw, acceptDraw, declineDraw, rematch, newGame,
+  };
 }

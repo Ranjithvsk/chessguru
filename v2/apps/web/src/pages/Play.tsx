@@ -32,8 +32,8 @@ export default function PlayPage() {
 
   const resultText = (() => {
     if (!p.result) return "";
-    const won = (p.result === "1-0" && p.color === "white") || (p.result === "0-1" && p.color === "black");
     if (p.result === "1/2-1/2") return `Draw (${p.reason ?? "draw"})`;
+    const won = (p.result === "1-0" && p.color === "white") || (p.result === "0-1" && p.color === "black");
     return `${won ? "You won" : "You lost"} — ${p.result} (${p.reason ?? ""})`;
   })();
 
@@ -78,8 +78,32 @@ export default function PlayPage() {
           </div>
         </div>
 
+        {p.incomingDraw && p.status === "playing" && (
+          <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-4" data-testid="draw-offer-banner">
+            <div className="mb-2 text-sm text-amber-200">Your opponent offers a draw.</div>
+            <div className="flex gap-2">
+              <button data-testid="draw-accept" onClick={p.acceptDraw} className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-500">
+                Accept
+              </button>
+              <button data-testid="draw-decline" onClick={p.declineDraw} className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white">
+                Decline
+              </button>
+            </div>
+          </div>
+        )}
+
         {(p.status === "idle" || p.status === "ended") && (
           <div className="rounded-xl border border-ink-700 bg-ink-900/60 p-4">
+            {p.status === "ended" && (
+              <div className="mb-3 flex gap-2">
+                <button data-testid="rematch" onClick={p.rematch} className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-500">
+                  Rematch
+                </button>
+                <button data-testid="new-game" onClick={p.newGame} className="rounded-lg border border-ink-700 px-3 py-2 text-sm text-ink-300 hover:text-white">
+                  New game
+                </button>
+              </div>
+            )}
             <div className="mb-2 text-xs uppercase tracking-wide text-ink-400">Quick pairing</div>
             <div className="grid grid-cols-2 gap-2">
               {TIME_CONTROLS.map((tc) => (
@@ -87,7 +111,7 @@ export default function PlayPage() {
                   key={tc.label}
                   data-testid={`seek-${tc.initial}`}
                   onClick={() => p.seek({ initial: tc.initial, increment: tc.increment }, false)}
-                  className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-500"
+                  className="rounded-lg bg-ink-800 px-3 py-2 text-sm font-medium text-white hover:bg-ink-700"
                 >
                   {tc.label}
                 </button>
@@ -99,9 +123,14 @@ export default function PlayPage() {
         {p.status === "seeking" && <div className="animate-pulse text-sm text-ink-400">Waiting for a match…</div>}
 
         {p.status === "playing" && (
-          <button onClick={p.resign} className="rounded-lg border border-ink-700 px-3 py-2 text-sm text-ink-300 hover:text-white">
-            Resign
-          </button>
+          <div className="flex gap-2">
+            <button data-testid="offer-draw" onClick={p.offerDraw} className="rounded-lg border border-ink-700 px-3 py-2 text-sm text-ink-300 hover:text-white">
+              Offer draw
+            </button>
+            <button data-testid="resign" onClick={p.resign} className="rounded-lg border border-ink-700 px-3 py-2 text-sm text-ink-300 hover:text-white">
+              Resign
+            </button>
+          </div>
         )}
 
         <div className="rounded-xl border border-ink-700 bg-ink-900/60 p-4">

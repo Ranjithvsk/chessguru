@@ -59,6 +59,15 @@ export class LiveClient {
   resign(g: string): void {
     this.send({ v: 1, t: "resign", g });
   }
+  drawOffer(g: string): void {
+    this.send({ v: 1, t: "draw-offer", g });
+  }
+  drawAccept(g: string): void {
+    this.send({ v: 1, t: "draw-accept", g });
+  }
+  drawDecline(g: string): void {
+    this.send({ v: 1, t: "draw-decline", g });
+  }
   rematch(g: string): void {
     this.send({ v: 1, t: "rematch", g });
   }
