@@ -92,17 +92,18 @@ Consolidated from a full code read on 2026-05-29. Ordered by severity. None of t
 26. **`module.exports = router` precedes ~220 lines of route registrations** in routes.js — works
     only because the export is a shared reference; fragile.
 
-27. **Puzzle page loses state on refresh (regresses after frontend rebuilds)** — on `index.html`,
-    **refreshing changes the theme and loads a new, unsolved puzzle** instead of resuming the current
-    one. The *save* side works (`localStorage` keys `cg_theme` + `cg_puzzle` are written:
-    `setItem("cg_puzzle", p.id||p._id)`, `setItem("cg_theme", t)`), but the *restore-on-load* path is
-    broken — the page calls `/api/puzzles/random?theme=...` fresh on every load and resets the theme to
-    default. **Expected:** on load, read `cg_theme` to restore the selected theme, and if `cg_puzzle`
-    holds an *unsolved* id, re-load THAT puzzle (by id) instead of a random one; only clear `cg_puzzle`
-    and advance after the puzzle is solved (or an explicit Next/skip). **This recurs after big builds** —
-    production `index.html` is re-merged from a test page and the restore logic gets dropped (see the
-    test-page rule in [03-rules-and-gotchas](03-rules-and-gotchas.md)). **Re-verify refresh behaviour
-    (theme persists + unsolved puzzle resumes) after every frontend merge.** Reported by owner 2026-05-30.
+27. **✅ FIXED 2026-05-30 — Puzzle page lost theme + puzzle on refresh.** The LIVE site
+    (`harinitharanjith.com` apex) is **not** the v1 express puzzle page (`:3000`, which *does* persist
+    via `cg_theme`/`cg_puzzle`); after the v2 "flip", nginx serves a **static v2 React build from
+    `/var/www/chessguru`** (root, base `/`, deployed by `v2/scripts/deploy.sh`). That React Puzzles page
+    (`apps/web/src/pages/Puzzles.tsx` + `hooks/usePuzzleGame.ts`) had **no persistence** — `theme`
+    defaulted to "mix" and it fetched a random puzzle on every mount → refresh changed theme + loaded a
+    new puzzle. **Fix:** added `api.puzzleById`; `usePuzzleGame` now saves the current id to
+    `localStorage` (`cg_puzzle`, per-mode), resumes it by id on first load, and clears it on solve/next;
+    `Puzzles.tsx` initialises `theme` from `cg_theme` and persists it (clearing `cg_puzzle` on theme
+    change). Rebuilt + redeployed via `deploy.sh`; verified live (refresh resumes same puzzle + theme).
+    **The deploy is a static build — re-run `v2/scripts/deploy.sh` after any web change, and re-verify
+    refresh.** (The `:3000` v1 app is dead weight for the public site now.)
 
 ---
 

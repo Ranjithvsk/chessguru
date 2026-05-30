@@ -36,6 +36,7 @@ export const api = {
     if (opts.userId) p.set("userId", opts.userId);
     return get<Puzzle>(`/api/puzzles/random?${p.toString()}`);
   },
+  puzzleById: (id: string) => get<Puzzle>(`/api/puzzles/${encodeURIComponent(id)}`),
   complete: (id: string, body: CompleteBody) => post<CompleteResult>(`/api/puzzles/${encodeURIComponent(id)}/complete`, body),
 
   signin: (username: string, password: string, keep: boolean) => post<AuthResult>("/auth/signin", { username, password, keep }),

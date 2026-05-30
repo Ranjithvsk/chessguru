@@ -22,10 +22,17 @@ export interface UsePuzzleGameOpts {
 export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   const { theme, difficulty, userId, initialRating, mode = "puzzle", maxPc } = opts;
   const [nonce, setNonce] = useState(0);
+  const STORE_KEY = mode === "blindfold" ? "cg_puzzle_bf" : "cg_puzzle";
+  const resumeId = useRef<string | null>((() => { try { return localStorage.getItem(STORE_KEY); } catch { return null; } })());
 
   const { data: puzzle, isFetching } = useQuery({
     queryKey: ["puzzle", mode, theme, difficulty, maxPc ?? 0, userId ?? "guest", nonce],
-    queryFn: () => api.randomPuzzle({ theme, rating: initialRating, difficulty, maxPc, userId }),
+    queryFn: () => {
+      const rid = resumeId.current;
+      resumeId.current = null; // resume the saved puzzle at most once (first load)
+      const rand = () => api.randomPuzzle({ theme, rating: initialRating, difficulty, maxPc, userId });
+      return rid ? api.puzzleById(rid).catch(rand) : rand();
+    },
   });
 
   const game = useRef(new Chess());
@@ -66,6 +73,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
     setFen(puzzle.fen);
     setRatingDiff(null);
     setFb({ kind: "wait", title: "Your turn", sub: `Find the best move for ${pc}` });
+    try { if (puzzle.id) localStorage.setItem(STORE_KEY, puzzle.id); } catch { /* */ }
   }, [puzzle]);
 
   const submit = useCallback((win: boolean) => {
@@ -81,6 +89,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
 
   const finish = useCallback(() => {
     solved.current = true;
+    try { localStorage.removeItem(STORE_KEY); } catch { /* */ }
     setFb({ kind: "solved", title: "Solved!", sub: "Well played." });
     if (!failed.current && !hinted.current) submit(true); // award only on a clean solve
     force((n) => n + 1);
@@ -161,7 +170,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
     step();
   }, []);
 
-  const next = useCallback(() => setNonce((n) => n + 1), []);
+  const next = useCallback(() => { try { localStorage.removeItem(STORE_KEY); } catch { /* */ } setNonce((n) => n + 1); }, []);
 
   return {
     puzzle, isFetching,

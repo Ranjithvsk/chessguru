@@ -12,7 +12,7 @@ const DIFFS: Difficulty[] = ["easiest", "easier", "normal", "harder", "hardest"]
 
 export default function PuzzlesPage() {
   const { userId, rating } = useOutletContext<Ctx>();
-  const [theme, setTheme] = useState("mix");
+  const [theme, setTheme] = useState<string>(() => { try { return localStorage.getItem("cg_theme") || "mix"; } catch { return "mix"; } });
   const [difficulty, setDifficulty] = useState<Difficulty>("normal");
   const { data: themes } = useQuery({ queryKey: ["themes"], queryFn: api.themes });
 
@@ -71,7 +71,7 @@ export default function PuzzlesPage() {
 
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
           <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-400">Theme</label>
-          <select value={theme} onChange={(e) => setTheme(e.target.value)}
+          <select value={theme} onChange={(e) => { const t = e.target.value; try { localStorage.setItem("cg_theme", t); localStorage.removeItem("cg_puzzle"); } catch { /* */ } setTheme(t); }}
             className="mb-3 w-full rounded-lg border border-ink-600 bg-ink-800 px-3 py-2 text-sm text-white">
             <option value="mix">All themes</option>
             {(themes?.themes ?? []).filter((t) => t !== "mix").map((t) => <option key={t} value={t}>{prettify(t)}</option>)}
