@@ -335,9 +335,12 @@ authority fair across regions; add regional authority only if cross-region RTT m
   challenge-by-link (create→accept). On a match the lobby pre-seats the game via a new engine `setup`
   event then notifies both players (`matched`); clients just `sub`+play (no seating race). *(Verified:
   two strangers seek 5+3 → matched opposite colours → play; challenge create→accept → casual game.)*
-- **M5 — Hardening.** Premove polish, abuse/rate limits, anti-cheat capture, metrics dashboards, bot-fleet
-  load + chaos tests, single→multi gateway. *Exit: a load test of N concurrent games with a node-kill
-  passes with zero lost games.*
+- **M5 — Hardening.** ✅ BUILT 2026-05-30 (7/7) — premove (queue + auto-apply on your turn),
+  per-connection token-bucket rate limiting, anti-cheat per-move think-time capture (persisted),
+  Prometheus `/metrics` on engine + gateway, and a bot-fleet load+chaos test: **8 games across two
+  gateways, SIGKILL an engine mid-flight → all 8 re-place + rehydrate + finish correctly (zero lost)**.
+  *(Exit met: N concurrent games survive a node-kill. Grafana dashboards + multi-instance lobby are
+  deploy-time wiring.)*
 - **Then** → parent-plan Phase 4 (analysis/fishnet → Arena/Swiss → variants → studies/broadcasts →
   anti-cheat ML → social → mobile).
 

@@ -30,6 +30,9 @@ const dir = new Directory(cmd, NODE_ID);
 const reg = new Registry();
 const mb = new Mailbox();
 const flagTimers = new Map<string, ReturnType<typeof setTimeout>>();
+let movesTotal = 0;
+let gamesFinishedTotal = 0;
+let flagsTotal = 0;
 
 const MAX_HOP = 4;
 const CLOCK_TICK_MS = 2_000;
@@ -83,6 +86,8 @@ function armFlagTimer(g: string, grain: RoundGrain): void {
 
 /** Rate (if rated), broadcast game-end, persist the finished game. */
 async function endGame(g: string, grain: RoundGrain, end: { result: string; reason: GameStatus }, now: number): Promise<void> {
+  gamesFinishedTotal++;
+  if (end.reason === "flag") flagsTotal++;
   let ratingDiff: RatingDiff | undefined;
   let rating: RatingChange | null = null;
   const { white, black } = grain.players;
@@ -106,6 +111,7 @@ async function endGame(g: string, grain: RoundGrain, end: { result: string; reas
     players: st.players,
     initialFen: st.initialFen,
     moves: st.moves,
+    moveTimes: st.moveTimes,
     result: st.result,
     status: st.status,
     timeControl: st.timeControl,
@@ -114,6 +120,33 @@ async function endGame(g: string, grain: RoundGrain, end: { result: string; reas
     finishedAt: new Date(st.finishedAt ?? now),
   }).catch((e) => console.error("[engine] persist failed", e));
   clearFlagTimer(g);
+}
+
+async function consumePremoves(g: string, grain: RoundGrain): Promise<void> {
+  let guard = 0;
+  while (grain.status === "playing" && grain.premoves[grain.turn] && guard++ < 6) {
+    const side = grain.turn;
+    const uci = grain.premoves[side]!;
+    grain.clearPremove(side);
+    const seat = grain.players[side];
+    if (!seat) break;
+    const now = Date.now();
+    const r = grain.move(uci, grain.ply, seat, now, 0);
+    if (!r.ok || r.flagged) {
+      if (r.flagged) {
+        if (!(await dir.owns(g))) return void reg.evict(g);
+        await writeState(cmd, g, grain.state());
+        await endGame(g, grain, r.end!, now);
+      }
+      break; // illegal premove is silently discarded
+    }
+    movesTotal++;
+    if (!(await dir.owns(g))) return void reg.evict(g);
+    await writeState(cmd, g, grain.state());
+    broadcast(g, { v: 1, t: "moved", g, d: { uci, san: r.san!, ply: r.ply!, fen: r.fen!, turn: r.turn!, by: seat, clock: r.clock! } });
+    if (r.end) return void (await endGame(g, grain, r.end, now));
+    armFlagTimer(g, grain);
+  }
 }
 
 async function onFlagDue(g: string): Promise<void> {
@@ -233,9 +266,21 @@ async function handle(evt: EngineInbound): Promise<void> {
         await endGame(g, grain, r.end!, now);
         return;
       }
+      movesTotal++;
       broadcast(g, { v: 1, t: "moved", g, d: { uci: evt.uci, san: r.san!, ply: r.ply!, fen: r.fen!, turn: r.turn!, by: evt.by, clock: r.clock! } });
-      if (r.end) await endGame(g, grain, r.end, now);
-      else armFlagTimer(g, grain);
+      if (r.end) {
+        await endGame(g, grain, r.end, now);
+        return;
+      }
+      armFlagTimer(g, grain);
+      await consumePremoves(g, grain);
+      return;
+    }
+
+    case "premove": {
+      grain.setPremove(evt.by, evt.uci);
+      if (!(await dir.owns(g))) return void reg.evict(g);
+      await writeState(cmd, g, grain.state());
       return;
     }
 
@@ -327,6 +372,16 @@ async function main(): Promise<void> {
         if (req.url === "/healthz") {
           res.writeHead(200, { "content-type": "application/json" });
           res.end(JSON.stringify({ ok: true, node: NODE_ID, grains: reg.active().length }));
+          return;
+        }
+        if (req.url === "/metrics") {
+          res.writeHead(200, { "content-type": "text/plain" });
+          res.end(
+            `# TYPE cg_games_active gauge\ncg_games_active ${reg.active().length}\n` +
+            `# TYPE cg_moves_total counter\ncg_moves_total ${movesTotal}\n` +
+            `# TYPE cg_games_finished_total counter\ncg_games_finished_total ${gamesFinishedTotal}\n` +
+            `# TYPE cg_flags_total counter\ncg_flags_total ${flagsTotal}\n`,
+          );
           return;
         }
         res.writeHead(404);

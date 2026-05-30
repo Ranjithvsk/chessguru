@@ -14,6 +14,7 @@ export interface SocketServer {
   onConnection(cb: (s: Socket) => void): void;
   onMessage(cb: (s: Socket, data: string) => void): void;
   onClose(cb: (s: Socket) => void): void;
+  onMetrics(cb: () => string): void;
   listen(port: number): Promise<void>;
 }
 
@@ -24,6 +25,7 @@ export class UwsSocketServer implements SocketServer {
   private onConn?: (s: Socket) => void;
   private onMsg?: (s: Socket, data: string) => void;
   private onCls?: (s: Socket) => void;
+  private metricsCb?: () => string;
 
   constructor() {
     const self = this;
@@ -48,6 +50,9 @@ export class UwsSocketServer implements SocketServer {
     });
     this.app.get("/healthz", (res) => {
       res.writeStatus("200 OK").end("ok");
+    });
+    this.app.get("/metrics", (res) => {
+      res.writeStatus("200 OK").writeHeader("content-type", "text/plain").end(this.metricsCb ? this.metricsCb() : "");
     });
     this.app.any("/*", (res) => {
       res.writeStatus("404 Not Found").end();
@@ -89,6 +94,9 @@ export class UwsSocketServer implements SocketServer {
   }
   onClose(cb: (s: Socket) => void): void {
     this.onCls = cb;
+  }
+  onMetrics(cb: () => string): void {
+    this.metricsCb = cb;
   }
 
   listen(port: number): Promise<void> {

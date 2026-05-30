@@ -41,6 +41,7 @@ export interface CreateMsg      { v: 1; t: "create"; g: string; d: { clock: Time
 export interface JoinMsg        { v: 1; t: "join";   g: string }
 export interface MoveMsg        { v: 1; t: "move";   g: string; d: { uci: string; ply: number; lag?: number } }
 export interface ResignMsg      { v: 1; t: "resign"; g: string }
+export interface PremoveMsg     { v: 1; t: "premove"; g: string; d: { uci: string } }
 export interface DrawOfferMsg   { v: 1; t: "draw-offer";   g: string }
 export interface DrawAcceptMsg  { v: 1; t: "draw-accept";  g: string }
 export interface DrawDeclineMsg { v: 1; t: "draw-decline"; g: string }
@@ -53,7 +54,7 @@ export interface UnseekMsg          { v: 1; t: "unseek" }
 export interface ChallengeMsg       { v: 1; t: "challenge"; d: { clock: TimeControl; rated?: boolean } }
 export interface ChallengeAcceptMsg { v: 1; t: "challenge-accept"; d: { id: string } }
 export type ClientMsg =
-  | HelloMsg | SubMsg | UnsubMsg | CreateMsg | JoinMsg | MoveMsg | ResignMsg
+  | HelloMsg | SubMsg | UnsubMsg | CreateMsg | JoinMsg | MoveMsg | ResignMsg | PremoveMsg
   | DrawOfferMsg | DrawAcceptMsg | DrawDeclineMsg | RematchMsg | ResyncMsg | PingMsg
   | SeekMsg | UnseekMsg | ChallengeMsg | ChallengeAcceptMsg;
 
@@ -102,12 +103,13 @@ export interface InSetup       extends RoutedAddr { kind: "setup"; white: string
 export interface InJoin        extends RoutedAddr { kind: "join" }
 export interface InMove        extends RoutedAddr { kind: "move"; uci: string; ply: number; lag: number }
 export interface InResign      extends RoutedAddr { kind: "resign" }
+export interface InPremove     extends RoutedAddr { kind: "premove"; uci: string }
 export interface InDrawOffer   extends RoutedAddr { kind: "draw-offer" }
 export interface InDrawAccept  extends RoutedAddr { kind: "draw-accept" }
 export interface InDrawDecline extends RoutedAddr { kind: "draw-decline" }
 export interface InRematch     extends RoutedAddr { kind: "rematch" }
 export type EngineInbound =
-  | InSub | InResync | InCreate | InSetup | InJoin | InMove | InResign
+  | InSub | InResync | InCreate | InSetup | InJoin | InMove | InResign | InPremove
   | InDrawOffer | InDrawAccept | InDrawDecline | InRematch;
 
 // ── internal: gateway → lobby (over lobby:in) ────────────────────────────────

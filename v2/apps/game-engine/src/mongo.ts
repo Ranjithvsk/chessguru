@@ -30,6 +30,7 @@ export interface PersistedGame {
   players: { white: string | null; black: string | null };
   initialFen: string;
   moves: string[];
+  moveTimes: number[];
   result: string | null;
   status: string;
   timeControl: TimeControl;

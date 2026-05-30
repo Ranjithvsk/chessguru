@@ -18,6 +18,8 @@ export interface GameState {
   turnStartedAt: number | null;
   pendingDraw: Color | null;
   rematchReq: { white: boolean; black: boolean };
+  premoves: { white: string | null; black: string | null };
+  moveTimes: number[];
 }
 
 export async function readState(cmd: Redis, g: string): Promise<GameState | null> {

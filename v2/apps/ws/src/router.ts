@@ -19,7 +19,12 @@ interface Conn {
   socket: Socket;
   userId: string;
   subs: Set<string>;
+  tokens: number;
+  last: number;
 }
+
+const RL_CAPACITY = 40; // burst
+const RL_REFILL_PER_MS = 40 / 1000; // 40 msgs/sec sustained
 
 /** Stateless relay: holds sockets, routes client events to the owning engine
  *  node, fans engine output back out. No game state lives here. */
@@ -28,6 +33,8 @@ export class Router {
   private conns = new Map<string, Conn>();
   private gameSubs = new Map<string, Set<string>>();
   private ownerCache = new Map<string, { node: string; exp: number }>();
+  private messagesTotal = 0;
+  private rateLimitedTotal = 0;
 
   constructor(
     private server: SocketServer,
@@ -36,13 +43,14 @@ export class Router {
   ) {}
 
   async start(port: number): Promise<void> {
-    this.server.onConnection((s) => this.conns.set(s.id, { socket: s, userId: "anon", subs: new Set() }));
+    this.server.onConnection((s) => this.conns.set(s.id, { socket: s, userId: "anon", subs: new Set(), tokens: RL_CAPACITY, last: Date.now() }));
     this.server.onMessage((s, data) => void this.onMessage(s, data));
     this.server.onClose((s) => this.onClose(s));
 
     await this.sub.subscribe(ch.wsReply(this.gwId));
     this.sub.on("message", (chan, raw) => this.onBus(chan, raw));
 
+    this.server.onMetrics(() => this.renderMetrics());
     await this.server.listen(port);
     console.log(`[ws ${this.gwId}] listening on :${port}`);
   }
@@ -97,9 +105,20 @@ export class Router {
   }
 
   private async onMessage(s: Socket, data: string): Promise<void> {
-    const msg = decode<ClientMsg>(data);
     const conn = this.conns.get(s.id);
-    if (!msg || !conn) return;
+    if (!conn) return;
+    this.messagesTotal++;
+    const now = Date.now();
+    conn.tokens = Math.min(RL_CAPACITY, conn.tokens + (now - conn.last) * RL_REFILL_PER_MS);
+    conn.last = now;
+    if (conn.tokens < 1) {
+      this.rateLimitedTotal++;
+      this.send(s.id, { v: 1, t: "error", d: { code: "rate-limited", msg: "slow down" } });
+      return;
+    }
+    conn.tokens -= 1;
+    const msg = decode<ClientMsg>(data);
+    if (!msg) return;
     const base = { gw: this.gwId, conn: s.id, by: conn.userId, hop: 0 };
 
     switch (msg.t) {
@@ -145,6 +164,10 @@ export class Router {
         await this.route({ ...base, kind: "resign", g: msg.g });
         return;
 
+      case "premove":
+        await this.route({ ...base, kind: "premove", g: msg.g, uci: msg.d.uci });
+        return;
+
       case "draw-offer":
         await this.route({ ...base, kind: "draw-offer", g: msg.g });
         return;
@@ -178,6 +201,14 @@ export class Router {
         await this.route({ ...base, kind: "rematch", g: msg.g });
         return;
     }
+  }
+
+  private renderMetrics(): string {
+    return (
+      `# TYPE cg_ws_connections gauge\ncg_ws_connections ${this.conns.size}\n` +
+      `# TYPE cg_ws_messages_total counter\ncg_ws_messages_total ${this.messagesTotal}\n` +
+      `# TYPE cg_ws_rate_limited_total counter\ncg_ws_rate_limited_total ${this.rateLimitedTotal}\n`
+    );
   }
 
   private onClose(s: Socket): void {

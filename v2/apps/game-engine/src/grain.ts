@@ -47,6 +47,8 @@ export class RoundGrain {
 
   pendingDraw: Color | null = null;
   rematchReq: { white: boolean; black: boolean } = { white: false, black: false };
+  premoves: { white: string | null; black: string | null } = { white: null, black: null };
+  moveTimes: number[] = [];
 
   get ply(): number {
     return this.moves.length;
@@ -79,6 +81,8 @@ export class RoundGrain {
     this.turnStartedAt = st.turnStartedAt;
     this.pendingDraw = st.pendingDraw;
     this.rematchReq = { ...st.rematchReq };
+    this.premoves = { ...st.premoves };
+    this.moveTimes = st.moveTimes.slice();
     this.chess = new Chess(st.initialFen);
     for (const uci of st.moves) this.applyUci(uci);
     this.moves = st.moves.slice();
@@ -100,6 +104,8 @@ export class RoundGrain {
       turnStartedAt: this.turnStartedAt,
       pendingDraw: this.pendingDraw,
       rematchReq: { ...this.rematchReq },
+      premoves: { ...this.premoves },
+      moveTimes: this.moveTimes.slice(),
     };
   }
 
@@ -167,8 +173,10 @@ export class RoundGrain {
     if (seat !== by) return { ok: false, code: "not-your-turn" };
     if (expectedPly !== this.moves.length) return { ok: false, code: "stale-ply" };
 
+    let thinkMs = 0;
     if (this.clockStarted && this.turnStartedAt !== null) {
       const elapsed = now - this.turnStartedAt;
+      thinkMs = elapsed;
       const refund = Math.min(Math.max(0, lagMs), LAG_CAP_MS, elapsed);
       this.clockRemaining[moverColor] -= elapsed - refund;
       if (this.clockRemaining[moverColor] <= 0) {
@@ -188,6 +196,7 @@ export class RoundGrain {
     }
 
     this.moves.push(uci);
+    this.moveTimes.push(thinkMs); // anti-cheat: per-move think time
     this.pendingDraw = null; // a move supersedes any standing draw offer
     this.clockRemaining[moverColor] += this.timeControl.increment;
     this.turnStartedAt = now;
@@ -248,6 +257,17 @@ export class RoundGrain {
     if (!color) return { ok: false, code: "not-a-player" };
     this.rematchReq[color] = true;
     return { ok: true, both: this.rematchReq.white && this.rematchReq.black };
+  }
+
+  /** Queue a premove for a player; auto-applied by the engine on their turn. */
+  setPremove(by: string, uci: string): boolean {
+    const color = this.colorOf(by);
+    if (!color) return false;
+    this.premoves[color] = uci;
+    return true;
+  }
+  clearPremove(color: Color): void {
+    this.premoves[color] = null;
   }
 
   private flagInternal(side: Color, now: number): { result: string; reason: GameStatus } {
