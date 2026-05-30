@@ -1,0 +1,20 @@
+{
+  "name": "@chessguru/game-engine",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo \"(game-engine) no lint yet\""
+  },
+  "dependencies": {
+    "@chessguru/protocol": "workspace:*",
+    "ioredis": "^5.10.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "tsx": "^4.21.0",
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,6 +1,7 @@
 # M0 — Realtime walking skeleton (build spec)
 
-**Status:** PROPOSED (2026-05-30) · implements milestone **M0** of
+**Status:** ✅ **BUILT & VERIFIED** (2026-05-30) — 13/13 acceptance checks pass against a live
+2-engine + 1-gateway cluster on local Redis (`bash v2/scripts/run-m0.sh`). Implements milestone **M0** of
 [online-play-realtime-architecture.md](online-play-realtime-architecture.md) §11, under the choices in
 [ADR-0008](../decisions/ADR-0008-realtime-stack.md). **Gated on parent §10 infra/budget** — this is the
 build-ready spec; don't run it on the shared OVH box.
@@ -133,3 +134,33 @@ whole point of doing M0 first.
 Clocks (M2), rules/legality (M1), ratings/Mongo persistence (M1/M3), lobby/matchmaking (M4), premove/
 offers/resign (M3), auth beyond a `hello` stub (M3 wires real session/OAuth), rate limiting & anti-cheat
 capture (M5), regional gateways (post-M5).
+
+
+---
+
+## 7. Implementation (BUILT 2026-05-30)
+
+Built in the v2 pnpm monorepo exactly as specced. Runs under global `tsx` (no build step);
+deps installed via `corepack pnpm install`.
+
+**Packages:** `packages/protocol` (envelope + codec + channels + consistent-hash ring),
+`apps/game-engine` (redis, node-id, cluster/heartbeat, directory lease, mailbox, EchoGrain,
+registry, snapshot, main), `apps/ws` (uWebSockets.js `SocketServer` adapter behind the D1 seam,
+redis, router, main). All three `typecheck` clean.
+
+**Run:** `cd v2 && bash scripts/run-m0.sh` — boots `e1`+`e2`+`gw1`, runs `scripts/m0-verify.mjs`,
+tears down. Gateway on `:18080` (dev; `:8080` is taken on this box). Needs only local Redis.
+
+**Verified (13 assertions over the 6 exit criteria):**
+1. ordered echo through the authority to both clients, monotonic seq ✓
+2. single-writer placement — owned by exactly one of e1/e2; concurrent `SET NX` loses ✓
+3. stale/out-of-order append → `error:stale-seq` + recovery `state`; not broadcast ✓
+4. **crash-rehydration** — SIGKILL the owner; after lease+node expiry the game re-places on the
+   survivor, rehydrates the full log from `game:state`, seq continues uninterrupted ✓
+5. reconnect to a fresh socket + `resync{haveSeq}` returns the exact missed tail ✓
+6. gateway `/healthz` ✓
+
+**Known M0-dev caveats (not bugs):** crash recovery waits the full ≤15s lease+heartbeat expiry by
+design; `tsx` spawns a child node process that outlives a parent kill, so the harness also clears by
+port on cleanup. **Next: M1** swaps `EchoGrain` → a chess `RoundGrain` (chessops) leaving the
+directory/mailbox/lease/snapshot machinery untouched.
