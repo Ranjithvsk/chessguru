@@ -92,6 +92,18 @@ Consolidated from a full code read on 2026-05-29. Ordered by severity. None of t
 26. **`module.exports = router` precedes ~220 lines of route registrations** in routes.js — works
     only because the export is a shared reference; fragile.
 
+27. **Puzzle page loses state on refresh (regresses after frontend rebuilds)** — on `index.html`,
+    **refreshing changes the theme and loads a new, unsolved puzzle** instead of resuming the current
+    one. The *save* side works (`localStorage` keys `cg_theme` + `cg_puzzle` are written:
+    `setItem("cg_puzzle", p.id||p._id)`, `setItem("cg_theme", t)`), but the *restore-on-load* path is
+    broken — the page calls `/api/puzzles/random?theme=...` fresh on every load and resets the theme to
+    default. **Expected:** on load, read `cg_theme` to restore the selected theme, and if `cg_puzzle`
+    holds an *unsolved* id, re-load THAT puzzle (by id) instead of a random one; only clear `cg_puzzle`
+    and advance after the puzzle is solved (or an explicit Next/skip). **This recurs after big builds** —
+    production `index.html` is re-merged from a test page and the restore logic gets dropped (see the
+    test-page rule in [03-rules-and-gotchas](03-rules-and-gotchas.md)). **Re-verify refresh behaviour
+    (theme persists + unsolved puzzle resumes) after every frontend merge.** Reported by owner 2026-05-30.
+
 ---
 
 _This register is descriptive, not a work order. Pick fixes via the test-page / safe-change rules in
