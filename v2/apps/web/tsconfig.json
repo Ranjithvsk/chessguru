@@ -3,10 +3,20 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "noEmit": true,
-    "types": ["vite/client"],
+    "types": [
+      "vite/client"
+    ],
     "paths": {
-      "@chessguru/types": ["../../packages/types/src/index.ts"]
+      "@chessguru/types": [
+        "../../packages/types/src/index.ts"
+      ],
+      "@chessguru/protocol": [
+        "../../packages/protocol/src/index.ts"
+      ]
     }
   },
-  "include": ["src", "vite.config.ts"]
+  "include": [
+    "src",
+    "vite.config.ts"
+  ]
 }

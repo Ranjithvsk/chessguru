@@ -10,6 +10,7 @@ import EngineBattlePage from "./pages/EngineBattle";
 import BoardEditorPage from "./pages/BoardEditor";
 import LoginPage from "./pages/Login";
 import AdminPage from "./pages/Admin";
+import PlayPage from "./pages/Play";
 import FeedbackUITestPage from "./pages/FeedbackUITest";
 import "./index.css";
 
@@ -24,6 +25,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <Routes>
           <Route element={<App />}>
             <Route index element={<PuzzlesPage />} />
+            <Route path="play" element={<PlayPage />} />
             <Route path="puzzles" element={<PuzzlesPage />} />
             <Route path="blindfold" element={<BlindfoldPage />} />
             <Route path="opening" element={<OpeningPage />} />

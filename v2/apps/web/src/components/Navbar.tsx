@@ -2,6 +2,7 @@ import { NavLink } from "react-router-dom";
 
 const links = [
   { to: "/", label: "Puzzles", end: true },
+  { to: "/play", label: "Play" },
   { to: "/blindfold", label: "Blindfold" },
   { to: "/opening", label: "Opening" },
   { to: "/engine-battle", label: "Engine" },
