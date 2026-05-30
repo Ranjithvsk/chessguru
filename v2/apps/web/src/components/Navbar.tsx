@@ -1,4 +1,5 @@
 import { NavLink } from "react-router-dom";
+import InstallButton from "./InstallButton";
 
 const links = [
   { to: "/", label: "Puzzles", end: true },
@@ -32,6 +33,7 @@ export default function Navbar({ rating, username, onLogout }: Props) {
           ))}
         </div>
         <div className="ml-auto flex items-center gap-3 pl-2">
+          <InstallButton />
           {rating != null && (
             <span className="hidden rounded-lg bg-ink-800 px-3 py-1.5 text-sm sm:inline">
               <span className="text-ink-400">Rating </span><span className="font-semibold text-white">{rating}</span>
