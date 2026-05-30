@@ -57,7 +57,6 @@ export class Router {
       if (r) this.send(r.conn, r.msg);
       return;
     }
-    // game:out:{g} broadcast
     const g = chan.slice("game:out:".length);
     const b = decode<OutBroadcast>(raw);
     const subs = this.gameSubs.get(g);
@@ -69,7 +68,6 @@ export class Router {
     return this.cmd.zrangebyscore(keys.engineNodes, Date.now() - NODE_TTL_MS, "+inf");
   }
 
-  /** Owner of g: cached → lease → cold-placement target via the ring. */
   private async resolveOwner(g: string): Promise<string | null> {
     const now = Date.now();
     const cached = this.ownerCache.get(g);
@@ -89,17 +87,21 @@ export class Router {
     void this.cmd.publish(ch.engineIn(owner), encode(evt));
   }
 
-  private async ensureGameSub(g: string): Promise<void> {
+  /** Subscribe this gateway to a game's fan-out and add the socket to its set. */
+  private async track(g: string, connId: string): Promise<void> {
     if (!this.gameSubs.has(g)) {
       this.gameSubs.set(g, new Set());
       await this.sub.subscribe(ch.gameOut(g));
     }
+    this.gameSubs.get(g)!.add(connId);
+    this.conns.get(connId)?.subs.add(g);
   }
 
   private async onMessage(s: Socket, data: string): Promise<void> {
     const msg = decode<ClientMsg>(data);
     const conn = this.conns.get(s.id);
     if (!msg || !conn) return;
+    const base = { gw: this.gwId, conn: s.id, by: conn.userId, hop: 0 };
 
     switch (msg.t) {
       case "hello":
@@ -112,10 +114,8 @@ export class Router {
         return;
 
       case "sub":
-        await this.ensureGameSub(msg.g);
-        this.gameSubs.get(msg.g)!.add(s.id);
-        conn.subs.add(msg.g);
-        await this.route({ kind: "sub", g: msg.g, gw: this.gwId, conn: s.id, by: conn.userId, haveSeq: 0, hop: 0 });
+        await this.track(msg.g, s.id);
+        await this.route({ ...base, by: conn.userId, kind: "sub", g: msg.g });
         return;
 
       case "unsub":
@@ -123,15 +123,22 @@ export class Router {
         conn.subs.delete(msg.g);
         return;
 
-      case "resync":
-        await this.ensureGameSub(msg.g);
-        this.gameSubs.get(msg.g)!.add(s.id);
-        conn.subs.add(msg.g);
-        await this.route({ kind: "resync", g: msg.g, gw: this.gwId, conn: s.id, by: conn.userId, haveSeq: msg.d.haveSeq, hop: 0 });
+      case "join":
+        await this.track(msg.g, s.id);
+        await this.route({ ...base, by: conn.userId, kind: "join", g: msg.g });
         return;
 
-      case "append":
-        await this.route({ kind: "append", g: msg.g, gw: this.gwId, conn: s.id, by: conn.userId, text: msg.d.text, seq: msg.d.seq, hop: 0 });
+      case "resync":
+        await this.track(msg.g, s.id);
+        await this.route({ ...base, by: conn.userId, kind: "resync", g: msg.g, havePly: msg.d.havePly });
+        return;
+
+      case "move":
+        await this.route({ ...base, by: conn.userId, kind: "move", g: msg.g, uci: msg.d.uci, ply: msg.d.ply });
+        return;
+
+      case "resign":
+        await this.route({ ...base, by: conn.userId, kind: "resign", g: msg.g });
         return;
     }
   }

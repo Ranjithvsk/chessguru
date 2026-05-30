@@ -315,11 +315,11 @@ authority fair across regions; add regional authority only if cross-region RTT m
 > Each milestone is independently demoable. **M0–M3 = roadmap Phase 1 ("two humans play one rated
 > live game").** Don't build tournaments/variants/analysis until M3 is rock-solid.
 
-- **M0 — Walking skeleton (no chess).** `apps/ws` (uWS) + `apps/game-engine` + Redis bus. A "game" is an
+- **M0 — Walking skeleton (no chess).** ✅ BUILT 2026-05-30 (13/13). `apps/ws` (uWS) + `apps/game-engine` + Redis bus. A "game" is an
   echo: client sends `move`, authority echoes with a server seq to both sockets. Proves transport,
   directory placement, `sub`/`out` routing, `resync`. *Exit: two browsers exchange ordered messages
   through the authority; killing the engine node rehydrates the "game".*
-- **M1 — A legal game, no clocks.** Grain holds a chess position (chessops); validates legality/turn/ply;
+- **M1 — A legal game, no clocks.** ✅ BUILT 2026-05-30 (14/14) — used chess.js (already in-repo; gives threefold/insufficient/50-move free), rules encapsulated so chessops/variants stay a local swap. Grain holds a chess position; validates legality/turn/ply;
   detects mate/stalemate/draws; persists a finished game to Mongo. *Exit: two humans play a full untimed
   game to checkmate; it shows in game history.*
 - **M2 — Clocks.** Server-truth clocks, increment, flag (+insufficient-material), lag comp, periodic

@@ -10,7 +10,9 @@
   },
   "dependencies": {
     "@chessguru/protocol": "workspace:*",
-    "ioredis": "^5.10.1"
+    "ioredis": "^5.10.1",
+    "chess.js": "^1.4.0",
+    "mongodb": "^6.20.0"
   },
   "devDependencies": {
     "@types/node": "^22.7.4",

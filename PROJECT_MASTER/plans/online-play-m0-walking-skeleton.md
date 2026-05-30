@@ -162,5 +162,7 @@ tears down. Gateway on `:18080` (dev; `:8080` is taken on this box). Needs only 
 
 **Known M0-dev caveats (not bugs):** crash recovery waits the full ≤15s lease+heartbeat expiry by
 design; `tsx` spawns a child node process that outlives a parent kill, so the harness also clears by
-port on cleanup. **Next: M1** swaps `EchoGrain` → a chess `RoundGrain` (chessops) leaving the
-directory/mailbox/lease/snapshot machinery untouched.
+port on cleanup. **M1 is now BUILT** (2026-05-30): `EchoGrain` → chess `RoundGrain` (chess.js), Mongo
+persistence of finished games, 14/14 acceptance incl. a full game to checkmate through a mid-game
+owner crash — directory/mailbox/lease/snapshot machinery untouched, as designed. Run `bash
+v2/scripts/run-m1.sh`.
