@@ -23,7 +23,22 @@ the live `/opening` page was erroring in console), so we can't proxy or cache it
 - `ExplorerModule` (controller+service, raw Mongo Connection like PuzzlesService). `GET /api/explorer?fen&db=masters&moves&topGames` → Lichess-shaped `{white,draws,black,moves[],topGames:[],opening}`. Verified live via `https://harinitharanjith.com/v2api/api/explorer` (no 401): startpos 5069/5288/3465 top e4/d4; `1.e4 c5` → B20 Sicilian, top reply Nf3.
 ## Phase 5 — frontend repoint + UI (DONE)
 - `lib/explorer.ts` now calls our `/api/explorer` (no more explorer.lichess.ovh). `Opening.tsx` rebuilt: aggregate W/D/B bar + game count, per-move rows (SAN, game count + %, per-move WDL bar), opening ECO/name breadcrumb (carries the most specific name down the line). Deployed + verified live at /opening: startpos 13,822 games, e4 50% / d4 32% / Nf3 8% / c4 6%, no console 401.
-## Phase 6 — scale corpus (next)
+## Phase 6 — scale corpus (DONE)
+- Ingested **44 pgnmentor elite players across all eras** (Capablanca, Alekhine, Botvinnik, Tal,
+  Petrosian, Spassky, Fischer, Karpov, Kasparov, Kramnik, Anand, Carlsen, Caruana, Ding, Firouzja,
+  Gukesh, Praggnanandhaa, …). Dropped the 3-player sample first to avoid double-counting.
+- **158,885 games used / 158,906 seen → 896,005 positions** (maxply 24). Memory peaked fine
+  (~1.9Gi available). Mongo `openingpositions` ≈ 896k docs.
+- Verified live at `/v2api/api/explorer`: startpos 158,885 games (e4/d4/Nf3); **B90 Najdorf** 6,639
+  games, top Be3(1962)/Be2/Bg5/h3 — matches real master theory.
+- Corpus PGNs were staged in `/tmp/openings-data` (reproducible: re-download pgnmentor player zips,
+  `python3 -m zipfile -e`, then `node scripts/ingest-pgn.js --db masters --maxply 24 <files>` after
+  dropping the collection). Removed afterwards to reclaim space; data lives in Mongo.
+
+## Status: FEATURE COMPLETE
+Own opening explorer shipped end-to-end (ingestion → /api/explorer → /opening UI), backed by ~159k
+master games, independent of Lichess. Deferred extras (topGames, per-move avg rating, ratings/speeds
+filters, lichess/player DBs) listed in plans/own-opening-explorer.md.
 
 ## Notes / data state
 - Data lives in Mongo, not git. Current corpus = 3 pgnmentor player files (sample). `openingnames`
