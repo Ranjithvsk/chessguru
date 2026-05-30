@@ -10,12 +10,14 @@ import { AdminController } from "./admin/admin.controller";
 import { AdminService } from "./admin/admin.service";
 import { EngineController } from "./engine/engine.controller";
 import { EngineService } from "./engine/engine.service";
+import { ExplorerController } from "./explorer/explorer.controller";
+import { ExplorerService } from "./explorer/explorer.service";
 
 const MONGO_URI = process.env.MONGO_URI ?? "mongodb://localhost:27017/chessguru";
 
 @Module({
   imports: [MongooseModule.forRoot(MONGO_URI)],
-  controllers: [HealthController, MiscController, PuzzlesController, AuthController, AdminController, EngineController],
-  providers: [PuzzlesService, AuthService, AdminService, EngineService],
+  controllers: [HealthController, MiscController, PuzzlesController, AuthController, AdminController, EngineController, ExplorerController],
+  providers: [PuzzlesService, AuthService, AdminService, EngineService, ExplorerService],
 })
 export class AppModule {}

@@ -19,7 +19,8 @@ the live `/opening` page was erroring in console), so we can't proxy or cache it
   positions**, memory stable (~1.7Gi free). Spot-check: start pos W/D/B 5069/5288/3465; top first
   moves e4(6935)>d4(4384)>Nf3>c4; `1.e4 c5` resolves to **B20 Sicilian Defense**. Correct.
 
-## Phase 4 — /api/explorer endpoint (next)
+## Phase 4 — /api/explorer endpoint (DONE)
+- `ExplorerModule` (controller+service, raw Mongo Connection like PuzzlesService). `GET /api/explorer?fen&db=masters&moves&topGames` → Lichess-shaped `{white,draws,black,moves[],topGames:[],opening}`. Verified live via `https://harinitharanjith.com/v2api/api/explorer` (no 401): startpos 5069/5288/3465 top e4/d4; `1.e4 c5` → B20 Sicilian, top reply Nf3.
 ## Phase 5 — frontend repoint + UI (next)
 ## Phase 6 — scale corpus (next)
 
