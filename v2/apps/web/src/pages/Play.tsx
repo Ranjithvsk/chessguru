@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useOutletContext } from "react-router-dom";
 import Board from "../components/Board";
-import { usePlay } from "../hooks/usePlay";
+import { usePlay, type Promo } from "../hooks/usePlay";
 
 function guestToken(): string {
   const k = "cg_play_token";
@@ -25,6 +25,13 @@ const TIME_CONTROLS = [
   { label: "Rapid 10+0", initial: 600000, increment: 0 },
 ];
 
+const PROMO_PIECES: { p: Promo; glyph: string }[] = [
+  { p: "q", glyph: "♛" },
+  { p: "r", glyph: "♜" },
+  { p: "b", glyph: "♝" },
+  { p: "n", glyph: "♞" },
+];
+
 export default function PlayPage() {
   const ctx = useOutletContext<{ userId: string | null }>();
   const token = useMemo(() => ctx?.userId?.replace(/^u:/, "") ?? guestToken(), [ctx?.userId]);
@@ -39,6 +46,7 @@ export default function PlayPage() {
 
   const topClock = p.color === "white" ? p.clock.black : p.clock.white;
   const botClock = p.color === "white" ? p.clock.white : p.clock.black;
+  const playing = p.status === "playing";
 
   return (
     <div className="grid gap-6 md:grid-cols-[minmax(0,520px)_1fr]">
@@ -47,16 +55,46 @@ export default function PlayPage() {
           <span>{p.opponent ? p.opponent.replace(/^u:/, "") : "Opponent"}</span>
           <span className="rounded bg-ink-800 px-2 py-0.5 font-mono text-white">{fmtClock(topClock)}</span>
         </div>
-        <Board
-          fen={p.fen}
-          orientation={p.color}
-          turnColor={p.turn}
-          movableColor={p.myTurn ? p.color : undefined}
-          dests={p.myTurn ? p.dests : undefined}
-          lastMove={p.lastMove}
-          viewOnly={p.status !== "playing"}
-          onMove={p.sendMove}
-        />
+
+        <div className="relative">
+          <Board
+            key={p.boardEpoch}
+            fen={p.fen}
+            orientation={p.color}
+            turnColor={p.turn}
+            movableColor={playing ? p.color : undefined}
+            dests={p.myTurn ? p.dests : undefined}
+            premovable={playing}
+            onPremove={p.premove}
+            lastMove={p.lastMove}
+            viewOnly={!playing}
+            onMove={p.sendMove}
+          />
+
+          {p.pendingPromotion && (
+            <div className="absolute inset-0 z-10 grid place-items-center bg-ink-900/70" data-testid="promo-overlay">
+              <div className="rounded-xl border border-ink-700 bg-ink-900 p-4 text-center">
+                <div className="mb-2 text-sm text-ink-300">Promote to</div>
+                <div className="flex gap-2">
+                  {PROMO_PIECES.map(({ p: pc, glyph }) => (
+                    <button
+                      key={pc}
+                      data-testid={`promote-${pc}`}
+                      onClick={() => p.choosePromotion(pc)}
+                      className="grid h-12 w-12 place-items-center rounded-lg bg-ink-800 text-2xl text-white hover:bg-brand-600"
+                    >
+                      {glyph}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={p.cancelPromotion} className="mt-3 text-xs text-ink-400 hover:text-white">
+                  cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
         <div className="mt-2 flex items-center justify-between text-sm text-ink-300" data-testid="my-clock">
           <span>You ({p.color})</span>
           <span className="rounded bg-ink-800 px-2 py-0.5 font-mono text-white">{fmtClock(botClock)}</span>
@@ -70,7 +108,7 @@ export default function PlayPage() {
             {p.status === "connecting" && "Connecting…"}
             {p.status === "idle" && "Ready to play"}
             {p.status === "seeking" && "Searching for an opponent…"}
-            {p.status === "playing" && (p.myTurn ? "Your move" : "Opponent's move")}
+            {playing && (p.myTurn ? "Your move" : "Opponent's move")}
             {p.status === "ended" && (resultText || "Game over")}
           </div>
           <div className="mt-1 text-sm text-ink-400" data-testid="movecount">
@@ -78,7 +116,7 @@ export default function PlayPage() {
           </div>
         </div>
 
-        {p.incomingDraw && p.status === "playing" && (
+        {p.incomingDraw && playing && (
           <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-4" data-testid="draw-offer-banner">
             <div className="mb-2 text-sm text-amber-200">Your opponent offers a draw.</div>
             <div className="flex gap-2">
@@ -122,7 +160,7 @@ export default function PlayPage() {
 
         {p.status === "seeking" && <div className="animate-pulse text-sm text-ink-400">Waiting for a match…</div>}
 
-        {p.status === "playing" && (
+        {playing && (
           <div className="flex gap-2">
             <button data-testid="offer-draw" onClick={p.offerDraw} className="rounded-lg border border-ink-700 px-3 py-2 text-sm text-ink-300 hover:text-white">
               Offer draw

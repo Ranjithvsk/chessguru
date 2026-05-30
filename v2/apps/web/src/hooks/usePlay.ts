@@ -8,6 +8,7 @@ import { destsFromChess } from "../components/Board";
 const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined) ?? "ws://localhost:18080/ws";
 
 export type PlayStatus = "connecting" | "idle" | "seeking" | "playing" | "ended";
+export type Promo = "q" | "r" | "b" | "n";
 
 export interface PlayState {
   status: PlayStatus;
@@ -22,10 +23,15 @@ export interface PlayState {
   result: string | null;
   reason: string | null;
   incomingDraw: boolean;
+  pendingPromotion: { from: Key; to: Key } | null;
+  boardEpoch: number;
   dests: ReturnType<typeof destsFromChess>;
   myTurn: boolean;
   seek: (clock: TimeControl, rated?: boolean) => void;
   sendMove: (from: Key, to: Key) => void;
+  premove: (from: Key, to: Key) => void;
+  choosePromotion: (p: Promo) => void;
+  cancelPromotion: () => void;
   resign: () => void;
   offerDraw: () => void;
   acceptDraw: () => void;
@@ -33,6 +39,11 @@ export interface PlayState {
   rematch: () => void;
   newGame: () => void;
 }
+
+const isPromotion = (game: Chess, from: Key, to: Key): boolean => {
+  const piece = game.get(from as Square);
+  return piece?.type === "p" && (to[1] === "8" || to[1] === "1");
+};
 
 /** All realtime game state for the Play page, driven by one LiveClient. */
 export function usePlay(token: string): PlayState {
@@ -42,6 +53,7 @@ export function usePlay(token: string): PlayState {
   const plyRef = useRef(0);
   const colorRef = useRef<Color>("white");
   const tokenRef = useRef(token);
+  const pendingRef = useRef<{ from: Key; to: Key } | null>(null);
   tokenRef.current = token;
 
   const [status, setStatus] = useState<PlayStatus>("connecting");
@@ -56,7 +68,13 @@ export function usePlay(token: string): PlayState {
   const [result, setResult] = useState<string | null>(null);
   const [reason, setReason] = useState<string | null>(null);
   const [incomingDraw, setIncomingDraw] = useState(false);
+  const [pendingPromotion, setPendingPromotion] = useState<{ from: Key; to: Key } | null>(null);
+  const [boardEpoch, setBoardEpoch] = useState(0);
 
+  const clearPending = () => {
+    pendingRef.current = null;
+    setPendingPromotion(null);
+  };
   const loadFen = (f: string) => {
     try {
       game.current.load(f);
@@ -71,6 +89,7 @@ export function usePlay(token: string): PlayState {
     colorRef.current = myColor;
     plyRef.current = 0;
     game.current.reset();
+    clearPending();
     setColor(myColor);
     setOpponent(opp);
     setFen(game.current.fen());
@@ -104,6 +123,7 @@ export function usePlay(token: string): PlayState {
         setClock(m.d.clock);
         setMoves(m.d.moves);
         setIncomingDraw(false);
+        clearPending();
         if (m.d.status !== "playing") {
           setStatus("ended");
           setResult(m.d.result);
@@ -118,6 +138,7 @@ export function usePlay(token: string): PlayState {
         setLastMove([m.d.uci.slice(0, 2) as Key, m.d.uci.slice(2, 4) as Key]);
         setMoves((mv) => [...mv, m.d.san]);
         setIncomingDraw(false);
+        clearPending();
         break;
       case "clock":
         setClock(m.d.clock);
@@ -131,6 +152,7 @@ export function usePlay(token: string): PlayState {
         setReason(m.d.reason);
         setClock(m.d.clock);
         setIncomingDraw(false);
+        clearPending();
         setStatus("ended");
         break;
     }
@@ -150,6 +172,7 @@ export function usePlay(token: string): PlayState {
           (window as unknown as { __play?: unknown }).__play = {
             seek: (initial = 300000, increment = 3000, rated = false) => c.seek({ initial, increment }, rated),
             move: (uci: string) => g() && c.move(g()!, uci, plyRef.current),
+            premove: (uci: string) => g() && c.premove(g()!, uci),
             resign: () => g() && c.resign(g()!),
             offerDraw: () => g() && c.drawOffer(g()!),
             acceptDraw: () => g() && c.drawAccept(g()!),
@@ -172,11 +195,33 @@ export function usePlay(token: string): PlayState {
   }, []);
 
   const sendMove = useCallback((from: Key, to: Key) => {
-    const g = gameIdRef.current;
-    if (!g) return;
-    const piece = game.current.get(from as Square);
-    const promo = piece?.type === "p" && (to[1] === "8" || to[1] === "1") ? "q" : "";
-    client.current?.move(g, `${from}${to}${promo}`, plyRef.current);
+    const gid = gameIdRef.current;
+    if (!gid) return;
+    if (isPromotion(game.current, from, to)) {
+      pendingRef.current = { from, to };
+      setPendingPromotion({ from, to });
+      return; // wait for the user to pick a piece
+    }
+    client.current?.move(gid, `${from}${to}`, plyRef.current);
+  }, []);
+
+  const premove = useCallback((from: Key, to: Key) => {
+    const gid = gameIdRef.current;
+    if (!gid) return;
+    const promo = isPromotion(game.current, from, to) ? "q" : ""; // premoves auto-queen
+    client.current?.premove(gid, `${from}${to}${promo}`);
+  }, []);
+
+  const choosePromotion = useCallback((p: Promo) => {
+    const gid = gameIdRef.current;
+    const pend = pendingRef.current;
+    if (gid && pend) client.current?.move(gid, `${pend.from}${pend.to}${p}`, plyRef.current);
+    clearPending();
+  }, []);
+
+  const cancelPromotion = useCallback(() => {
+    clearPending();
+    setBoardEpoch((e) => e + 1); // remount the board to snap the pawn back
   }, []);
 
   const resign = useCallback(() => {
@@ -203,13 +248,15 @@ export function usePlay(token: string): PlayState {
     setReason(null);
     setMoves([]);
     setIncomingDraw(false);
+    clearPending();
   }, []);
 
   const myTurn = status === "playing" && turn === color;
   const dests = useMemo(() => destsFromChess(game.current as never), [fen]);
 
   return {
-    status, color, fen, turn, ply, moves, lastMove, clock, opponent, result, reason, incomingDraw, dests, myTurn,
-    seek, sendMove, resign, offerDraw, acceptDraw, declineDraw, rematch, newGame,
+    status, color, fen, turn, ply, moves, lastMove, clock, opponent, result, reason, incomingDraw,
+    pendingPromotion, boardEpoch, dests, myTurn,
+    seek, sendMove, premove, choosePromotion, cancelPromotion, resign, offerDraw, acceptDraw, declineDraw, rematch, newGame,
   };
 }

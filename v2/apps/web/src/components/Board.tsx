@@ -23,6 +23,8 @@ export interface BoardProps {
   blindfold?: boolean;                 // hide pieces (Blindfold mode)
   shapes?: DrawShape[];                // arrows/circles (hints, engine PV)
   onMove?: (from: Key, to: Key) => void;
+  onPremove?: (from: Key, to: Key) => void;
+  premovable?: boolean;
   onSelect?: (key: Key) => void;
   className?: string;
 }
@@ -40,6 +42,8 @@ export default function Board({
   blindfold = false,
   shapes,
   onMove,
+  onPremove,
+  premovable = false,
   onSelect,
   className = "",
 }: BoardProps) {
@@ -66,6 +70,11 @@ export default function Board({
         showDests: true,
         events: { after: (from, to) => onMove?.(from, to) },
       },
+      premovable: {
+        enabled: premovable,
+        showDests: true,
+        events: { set: (orig, dest) => onPremove?.(orig, dest) },
+      },
       selectable: { enabled: true },
       events: { select: (key) => onSelect?.(key) },
       drawable: { enabled: true, visible: true },
@@ -88,6 +97,7 @@ export default function Board({
       check: check ? turnColor : undefined,
       movable: { color: movableColor, dests },
     });
+    api.current?.cancelPremove();
   }, [fen, orientation, turnColor, coordinates, viewOnly, lastMove, check, movableColor, dests]);
 
   // shapes (hints / engine arrows)
