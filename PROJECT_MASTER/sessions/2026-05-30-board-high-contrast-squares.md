@@ -22,3 +22,6 @@ pieces still legible (cburnett outlines). Rebuilt + redeployed via `deploy.sh`.
 dark; bump to taste (or a dark green) if more piece contrast wanted.
 
 **File:** `v2/apps/web/src/index.css`.
+
+## Update — Lichess colours (owner)
+Owner then asked for Lichess square colours; switched the override to the exact Lichess brown: light **#f0d9b5**, dark **#b58863** (verified live via computed style + screenshot). Same conic geometry, only colours changed.
