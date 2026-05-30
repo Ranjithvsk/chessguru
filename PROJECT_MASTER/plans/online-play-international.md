@@ -50,6 +50,11 @@ sockets; `fishnet`/`lila-fishnet` own analysis; `lila-openingexplorer`, `lila-ta
 ```
 
 ## 5. The realtime game engine (the hard part — Node, no Akka)
+
+> **Deep design:** the full architecture for this section lives in
+> [online-play-realtime-architecture.md](online-play-realtime-architecture.md) — grain directory,
+> wire protocol, clock math, failure/recovery, capacity, and an M0–M5 walking-skeleton build plan.
+> The bullets below are the summary.
 - **WS tier = dumb pipes.** Hold connections only; relay JSON ↔ Redis channels. Stateless → add
   nodes behind an L4 LB. Use **uWebSockets.js** (or `ws`) for throughput.
 - **Game-engine tier = single-writer authority.** Each active game is an in-memory round actor
