@@ -179,7 +179,7 @@ select,input[type=range],input[type=number]{width:100%;background:#12100e;border
 <script>
 let ws,board,total=0,done=0;
 const WS=(location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws-engine';
-$(()=>{board=Chessboard('board',{position:'start',draggable:false,pieceTheme:'https://lichess1.org/assets/piece/cburnett/{piece}.svg'});connect();});
+$(()=>{board=Chessboard('board',{position:'start',draggable:false,pieceTheme:'/pieces/{piece}.svg'});connect();});
 function connect(){ws=new WebSocket(WS);ws.onopen=()=>{sc(true);lg('Connected','le-r');};ws.onclose=()=>{sc(false);setTimeout(connect,3000);};ws.onerror=()=>sc(false);ws.onmessage=e=>handle(JSON.parse(e.data));}
 function handle(m){
 if(m.type==='connected'){reng(m.engines||[]);run(m.running);}
