@@ -1,5 +1,5 @@
-// Wire protocol — M3 (chess + clocks + game flow + rating). Versioned JSON
-// envelope (ADR-0008 D3); the `v` field + codec seam keep evolution non-breaking.
+// Wire protocol — M4 (chess + clocks + flow + rating + lobby). Versioned JSON
+// envelope (ADR-0008 D3); `v` + codec seam keep evolution non-breaking.
 export const PROTOCOL_VERSION = 1 as const;
 
 export type Color = "white" | "black";
@@ -47,9 +47,15 @@ export interface DrawDeclineMsg { v: 1; t: "draw-decline"; g: string }
 export interface RematchMsg     { v: 1; t: "rematch"; g: string }
 export interface ResyncMsg      { v: 1; t: "resync"; g: string; d: { havePly: number } }
 export interface PingMsg        { v: 1; t: "ping";   d: { ts: number } }
+// lobby
+export interface SeekMsg            { v: 1; t: "seek";   d: { clock: TimeControl; rated?: boolean; ratingRange?: number } }
+export interface UnseekMsg          { v: 1; t: "unseek" }
+export interface ChallengeMsg       { v: 1; t: "challenge"; d: { clock: TimeControl; rated?: boolean } }
+export interface ChallengeAcceptMsg { v: 1; t: "challenge-accept"; d: { id: string } }
 export type ClientMsg =
   | HelloMsg | SubMsg | UnsubMsg | CreateMsg | JoinMsg | MoveMsg | ResignMsg
-  | DrawOfferMsg | DrawAcceptMsg | DrawDeclineMsg | RematchMsg | ResyncMsg | PingMsg;
+  | DrawOfferMsg | DrawAcceptMsg | DrawDeclineMsg | RematchMsg | ResyncMsg | PingMsg
+  | SeekMsg | UnseekMsg | ChallengeMsg | ChallengeAcceptMsg;
 
 // ── server → client ─────────────────────────────────────────────────────────
 export interface HelloOkMsg  { v: 1; t: "hello-ok"; d: { node: string; conn: string } }
@@ -78,15 +84,21 @@ export interface GameEndMsg      { v: 1; t: "game-end"; g: string; d: { result: 
 export interface RematchReadyMsg { v: 1; t: "rematch-ready"; g: string; d: { game: string; white: string | null; black: string | null } }
 export interface ErrorMsg        { v: 1; t: "error";    g?: string; d: { code: string; msg: string } }
 export interface PongMsg         { v: 1; t: "pong";     d: { ts: number } }
+// lobby
+export interface SeekAckMsg          { v: 1; t: "seek-ack";          d: { seekId: string } }
+export interface MatchedMsg          { v: 1; t: "matched";           d: { game: string; color: Color; opponent: string; clock: TimeControl; rated: boolean } }
+export interface ChallengeCreatedMsg { v: 1; t: "challenge-created"; d: { id: string } }
 export type ServerMsg =
   | HelloOkMsg | JoinedMsg | GameStateMsg | MovedMsg | ClockMsg | OfferMsg
-  | GameEndMsg | RematchReadyMsg | ErrorMsg | PongMsg;
+  | GameEndMsg | RematchReadyMsg | ErrorMsg | PongMsg
+  | SeekAckMsg | MatchedMsg | ChallengeCreatedMsg;
 
-// ── internal: gateway → owning engine node (over game:in:{node}) ─────────────
+// ── internal: gateway/lobby → owning engine node (over game:in:{node}) ───────
 export interface RoutedAddr { gw: string; conn: string; by: string; hop: number; g: string }
 export interface InSub         extends RoutedAddr { kind: "sub" }
 export interface InResync      extends RoutedAddr { kind: "resync"; havePly: number }
 export interface InCreate      extends RoutedAddr { kind: "create"; clock: TimeControl; initialFen?: string; rated: boolean }
+export interface InSetup       extends RoutedAddr { kind: "setup"; white: string; black: string; clock: TimeControl; rated: boolean }
 export interface InJoin        extends RoutedAddr { kind: "join" }
 export interface InMove        extends RoutedAddr { kind: "move"; uci: string; ply: number; lag: number }
 export interface InResign      extends RoutedAddr { kind: "resign" }
@@ -95,8 +107,16 @@ export interface InDrawAccept  extends RoutedAddr { kind: "draw-accept" }
 export interface InDrawDecline extends RoutedAddr { kind: "draw-decline" }
 export interface InRematch     extends RoutedAddr { kind: "rematch" }
 export type EngineInbound =
-  | InSub | InResync | InCreate | InJoin | InMove | InResign
+  | InSub | InResync | InCreate | InSetup | InJoin | InMove | InResign
   | InDrawOffer | InDrawAccept | InDrawDecline | InRematch;
+
+// ── internal: gateway → lobby (over lobby:in) ────────────────────────────────
+export interface LobbyAddr { gw: string; conn: string; by: string }
+export interface LobbySeek      extends LobbyAddr { kind: "seek"; clock: TimeControl; rated: boolean; ratingRange?: number }
+export interface LobbyUnseek    extends LobbyAddr { kind: "unseek" }
+export interface LobbyChallenge extends LobbyAddr { kind: "challenge"; clock: TimeControl; rated: boolean }
+export interface LobbyAccept    extends LobbyAddr { kind: "challenge-accept"; id: string }
+export type LobbyInbound = LobbySeek | LobbyUnseek | LobbyChallenge | LobbyAccept;
 
 // ── internal: engine → gateway ───────────────────────────────────────────────
 export interface ReplyOut     { conn: string; msg: ServerMsg } // ws:reply:{gw}  — targeted to one socket

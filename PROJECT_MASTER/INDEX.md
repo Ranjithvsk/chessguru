@@ -40,7 +40,7 @@ _Created 2026-05-29 · expanded the same day with a full codebase read. Live: ht
 
 ## Plans
 - ⭐ [plans/online-play-international.md](plans/online-play-international.md) — PROPOSED: Lichess-level platform at international scale (separate WS + game-engine tiers, Redis bus, fishnet, anti-cheat, tournaments); infra decision flagged
-  - ↳ ⭐ [plans/online-play-realtime-architecture.md](plans/online-play-realtime-architecture.md) — PROPOSED (deep): realtime play architecture — grain directory (Orleans-style single-writer), uWS gateway tier, wire protocol, server-truth clocks, failure/recovery, M0–M5 build phases — **M0–M3 BUILT & verified**
+  - ↳ ⭐ [plans/online-play-realtime-architecture.md](plans/online-play-realtime-architecture.md) — PROPOSED (deep): realtime play architecture — grain directory (Orleans-style single-writer), uWS gateway tier, wire protocol, server-truth clocks, failure/recovery, M0–M5 build phases — **M0–M4 BUILT & verified**
     - ↳ [plans/online-play-m0-walking-skeleton.md](plans/online-play-m0-walking-skeleton.md) — ✅ BUILT & VERIFIED (13/13): M0 walking skeleton — concrete monorepo packages (apps/ws, apps/game-engine, packages/protocol) + 6 exit criteria proving directory/single-writer/rehydration
 - [plans/own-opening-explorer.md](plans/own-opening-explorer.md) — IN PROGRESS: own NestJS+Mongo opening book (position-keyed), Lichess-compatible /api/explorer
 - [plans/ovh-migration.md](plans/ovh-migration.md) — DONE (co-located on the DreamWorld OVH VPS)

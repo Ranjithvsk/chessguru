@@ -1,15 +1,8 @@
 import { DEFAULT_DEVIATION, DEFAULT_RATING, DEFAULT_VOLATILITY, type Glicko, type Perf } from "@chessguru/glicko";
 import { collection } from "./mongo";
-import type { TimeControl } from "@chessguru/protocol";
+import { speedOf } from "@chessguru/protocol";
+export { speedOf };
 
-/** Lichess-style speed bucket from estimated game duration (initial + 40·inc). */
-export function speedOf(tc: TimeControl): string {
-  const est = tc.initial + 40 * tc.increment;
-  if (est < 180_000) return "bullet";
-  if (est < 480_000) return "blitz";
-  if (est < 1_500_000) return "rapid";
-  return "classical";
-}
 
 const defaultPerf = (): Perf => ({ gl: { r: DEFAULT_RATING, d: DEFAULT_DEVIATION, v: DEFAULT_VOLATILITY }, nb: 0, la: null });
 

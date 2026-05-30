@@ -330,8 +330,11 @@ authority fair across regions; add regional authority only if cross-region RTT m
   the seat via `resync`. *Deferred: casual takeback, abort, pause-on-unavailable (clock keeps running
   during a node-outage for now). Verified: rated mate moves both ratings; draw-accept ends 1/2;
   reconnect resumes mid-game; rematch swaps colours.*
-- **M4 — Lobby.** `apps/lobby` seek pools + atomic pairing + challenge-a-friend. *Exit: anonymous-free
-  "Quick pairing" 5+3 matches two strangers.*
+- **M4 — Lobby.** ✅ BUILT 2026-05-30 (9/9) — `apps/lobby` process: Redis sorted-set seek pools per
+  exact time-control+rated, **Lua-atomic match pop**, widening sweep (window grows with wait), and
+  challenge-by-link (create→accept). On a match the lobby pre-seats the game via a new engine `setup`
+  event then notifies both players (`matched`); clients just `sub`+play (no seating race). *(Verified:
+  two strangers seek 5+3 → matched opposite colours → play; challenge create→accept → casual game.)*
 - **M5 — Hardening.** Premove polish, abuse/rate limits, anti-cheat capture, metrics dashboards, bot-fleet
   load + chaos tests, single→multi gateway. *Exit: a load test of N concurrent games with a node-kill
   passes with zero lost games.*

@@ -192,6 +192,20 @@ async function handle(evt: EngineInbound): Promise<void> {
       return;
     }
 
+    case "setup": {
+      // lobby-created game: configure + seat both + start the clock once
+      if (grain.moves.length === 0 && !grain.clockStarted) {
+        grain.configure(evt.clock, undefined, evt.rated);
+        grain.seat(evt.white, evt.black);
+        grain.startClock(now);
+        if (!(await dir.owns(g))) return void reg.evict(g);
+        await writeState(cmd, g, grain.state());
+        armFlagTimer(g, grain);
+        broadcast(g, gameStateMsg(g, grain, now));
+      }
+      return;
+    }
+
     case "join": {
       const j = grain.join(evt.by);
       const started = grain.startClock(now);

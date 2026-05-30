@@ -157,6 +157,22 @@ export class Router {
         await this.route({ ...base, kind: "draw-decline", g: msg.g });
         return;
 
+      case "seek":
+        void this.cmd.publish(ch.lobbyIn, encode({ kind: "seek", gw: this.gwId, conn: s.id, by: conn.userId, clock: msg.d.clock, rated: msg.d.rated ?? true, ratingRange: msg.d.ratingRange }));
+        return;
+
+      case "unseek":
+        void this.cmd.publish(ch.lobbyIn, encode({ kind: "unseek", gw: this.gwId, conn: s.id, by: conn.userId }));
+        return;
+
+      case "challenge":
+        void this.cmd.publish(ch.lobbyIn, encode({ kind: "challenge", gw: this.gwId, conn: s.id, by: conn.userId, clock: msg.d.clock, rated: msg.d.rated ?? true }));
+        return;
+
+      case "challenge-accept":
+        void this.cmd.publish(ch.lobbyIn, encode({ kind: "challenge-accept", gw: this.gwId, conn: s.id, by: conn.userId, id: msg.d.id }));
+        return;
+
       case "rematch":
         await this.track(msg.g, s.id);
         await this.route({ ...base, kind: "rematch", g: msg.g });
