@@ -46,6 +46,7 @@ _Created 2026-05-29 · expanded the same day with a full codebase read. Live: ht
 - [research/lichess-source-reads.md](research/lichess-source-reads.md) — which Lichess `lila` / `lichess-puzzler` sources were ported
 
 ## Sessions
+- [2026-05-30-v2-remove-themes-section.md](sessions/2026-05-30-v2-remove-themes-section.md) — dropped the redundant Themes page (same solver as Puzzles, which already has a theme dropdown); /theme now redirects to /
 - [2026-05-29-v2-feedback-ui-test-harness.md](sessions/2026-05-29-v2-feedback-ui-test-harness.md) — Lichess-exact feedback block built as a shared component + isolated test page (`/test/feedback-ui`); typechecks; production merge gated on review (ADR-0005)
 - [2026-05-29-v2-puzzle-replay-dedup.md](sessions/2026-05-29-v2-puzzle-replay-dedup.md) — v2 selector now excludes already-played puzzles per user (rounds $nin) + guest/fallback safe
 - [2026-05-29-homepage-theme-and-mobile-overflow.md](sessions/2026-05-29-homepage-theme-and-mobile-overflow.md) — theme picker surfaced + mobile overflow fixed (home/blindfold/theme)

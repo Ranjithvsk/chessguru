@@ -4,7 +4,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import App from "./App";
 import PuzzlesPage from "./pages/Puzzles";
-import ThemePage from "./pages/Theme";
 import BlindfoldPage from "./pages/Blindfold";
 import OpeningPage from "./pages/Opening";
 import EngineBattlePage from "./pages/EngineBattle";
@@ -26,7 +25,6 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route element={<App />}>
             <Route index element={<PuzzlesPage />} />
             <Route path="puzzles" element={<PuzzlesPage />} />
-            <Route path="theme" element={<ThemePage />} />
             <Route path="blindfold" element={<BlindfoldPage />} />
             <Route path="opening" element={<OpeningPage />} />
             <Route path="engine-battle" element={<EngineBattlePage />} />
