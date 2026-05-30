@@ -34,37 +34,59 @@ export class PuzzlesService {
 
   async random(theme: string, difficulty: string, rating: number, maxPc?: number, userId?: string | null) {
     const target = clamp(rating + (DIFF[difficulty] ?? 0), 400, 3000);
+    const played = userId ? await this.playedIds(userId) : [];
+    const playedSet = new Set(played);
+
+    // ── FAST PATH: precomputed pools (`paths`) — sample an id, fetch by indexed _id. ──
+    // paths: { _id:"theme|tier|RRRR", min, max, ids:[puzzleId] }; exactly one band path per rating.
+    // Avoids the $sample-over-5.9M-docs scan (4–6s). pieceCount-filtered requests fall through.
+    if (!maxPc || maxPc >= 32) {
+      const band = String(Math.max(0, Math.round(target))).padStart(4, "0");
+      const esc = theme.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const paths = this.conn.db!.collection("paths");
+      for (const tier of ["top", "good", "all"]) {
+        const key = `${theme}|${tier}|${band}`;
+        const path = await paths.findOne({
+          _id: { $regex: `^${esc}\\|${tier}\\|` } as any,
+          min: { $lte: key },
+          max: { $gte: key },
+        });
+        const ids: string[] = (path?.ids as string[]) || [];
+        if (!ids.length) continue;
+        const avail = ids.filter((id) => !playedSet.has(id));
+        const poolIds = avail.length ? avail : ids;
+        const pick = poolIds[Math.floor(Math.random() * poolIds.length)]!;
+        const d = await this.col().findOne({ _id: pick as any });
+        if (d) return applyLastMove(fmtPuzzle(d));
+      }
+    }
+
+    // ── FALLBACK: $match + $sample (rare: piece-count filter, exotic theme, or missing pool). ──
     const flex = Math.round(100 + Math.abs(1500 - target) / 4);
     const themeQ = theme && theme !== "mix" ? { themes: theme } : {};
     const pcQ = maxPc && maxPc < 32 ? { pieceCount: { $lte: maxPc } } : {};
-    // Exclude puzzles this user has already attempted (logged-in only; guests don't persist rounds).
-    const played = userId ? await this.playedIds(userId) : [];
     const dedupQ = played.length ? { _id: { $nin: played } } : {};
-
     const sample = async (m: any) => {
       const d = await this.col().aggregate([{ $match: m }, { $sample: { size: 1 } }]).toArray();
       return d.length ? applyLastMove(fmtPuzzle(d[0])) : null;
     };
-
     const tiers: any[] = [
       { vote: { $gte: 0.75 }, plays: { $gte: 100 } },
       { vote: { $gte: 0.5 }, plays: { $gte: 20 } },
       {},
     ];
     for (const tier of tiers) {
-      const p = await sample({ "glicko.r": { $gte: target - flex, $lte: target + flex }, ...tier, ...themeQ, ...pcQ, ...dedupQ });
-      if (p) return p;
+      const pz = await sample({ "glicko.r": { $gte: target - flex, $lte: target + flex }, ...tier, ...themeQ, ...pcQ, ...dedupQ });
+      if (pz) return pz;
     }
     const wide = await sample({ "glicko.r": { $gte: target - 400, $lte: target + 400 }, ...themeQ, ...pcQ, ...dedupQ });
     if (wide) return wide;
-    // Final fallback: the user has solved everything in-band — drop dedup so we still serve a puzzle.
     if (played.length) {
       const any = await sample({ "glicko.r": { $gte: target - 400, $lte: target + 400 }, ...themeQ, ...pcQ });
       if (any) return any;
     }
     return null;
   }
-
   async byId(id: string) {
     const d = await this.col().findOne({ _id: id as any });
     return d ? applyLastMove(fmtPuzzle(d)) : null;
