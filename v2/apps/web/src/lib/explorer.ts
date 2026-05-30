@@ -1,11 +1,15 @@
-// Lichess opening explorer (public API, called client-side from the visitor's browser).
+// Our own opening explorer — served by the v2 NestJS API (/api/explorer).
+// (We do NOT call explorer.lichess.ovh: it 401s our datacenter IP. See
+//  PROJECT_MASTER/plans/own-opening-explorer.md.)
+const BASE = import.meta.env.VITE_API_BASE ?? "";
+
 export interface ExplorerMove {
   uci: string;
   san: string;
   white: number;
   draws: number;
   black: number;
-  averageRating?: number;
+  averageRating?: number | null;
 }
 export interface ExplorerData {
   white: number;
@@ -13,15 +17,14 @@ export interface ExplorerData {
   black: number;
   moves: ExplorerMove[];
   opening?: { eco: string; name: string } | null;
+  topGames?: unknown[];
 }
 
-export async function fetchExplorer(fen: string, source: "lichess" | "masters" = "lichess"): Promise<ExplorerData> {
-  const p = new URLSearchParams({ variant: "standard", fen, moves: "12", topGames: "0", recentGames: "0" });
-  if (source === "lichess") {
-    p.set("speeds", "blitz,rapid,classical");
-    p.set("ratings", "1600,1800,2000,2200,2500");
-  }
-  const res = await fetch(`https://explorer.lichess.ovh/${source}?${p.toString()}`);
+export type ExplorerDb = "masters";
+
+export async function fetchExplorer(fen: string, db: ExplorerDb = "masters", moves = 14): Promise<ExplorerData> {
+  const p = new URLSearchParams({ fen, db, moves: String(moves) });
+  const res = await fetch(`${BASE}/api/explorer?${p.toString()}`, { credentials: "include" });
   if (!res.ok) throw new Error(`explorer ${res.status}`);
   return res.json() as Promise<ExplorerData>;
 }

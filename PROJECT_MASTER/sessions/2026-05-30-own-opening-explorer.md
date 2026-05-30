@@ -21,7 +21,8 @@ the live `/opening` page was erroring in console), so we can't proxy or cache it
 
 ## Phase 4 — /api/explorer endpoint (DONE)
 - `ExplorerModule` (controller+service, raw Mongo Connection like PuzzlesService). `GET /api/explorer?fen&db=masters&moves&topGames` → Lichess-shaped `{white,draws,black,moves[],topGames:[],opening}`. Verified live via `https://harinitharanjith.com/v2api/api/explorer` (no 401): startpos 5069/5288/3465 top e4/d4; `1.e4 c5` → B20 Sicilian, top reply Nf3.
-## Phase 5 — frontend repoint + UI (next)
+## Phase 5 — frontend repoint + UI (DONE)
+- `lib/explorer.ts` now calls our `/api/explorer` (no more explorer.lichess.ovh). `Opening.tsx` rebuilt: aggregate W/D/B bar + game count, per-move rows (SAN, game count + %, per-move WDL bar), opening ECO/name breadcrumb (carries the most specific name down the line). Deployed + verified live at /opening: startpos 13,822 games, e4 50% / d4 32% / Nf3 8% / c4 6%, no console 401.
 ## Phase 6 — scale corpus (next)
 
 ## Notes / data state

@@ -5,23 +5,36 @@ import Board from "../components/Board";
 import { useFreePlay } from "../hooks/useFreePlay";
 import { fetchExplorer } from "../lib/explorer";
 
+/** White / Draw / Black result bar (segments scaled to the three counts). */
+function WdlBar({ w, d, b, className = "" }: { w: number; d: number; b: number; className?: string }) {
+  const t = w + d + b || 1;
+  const pct = (n: number) => `${(n / t) * 100}%`;
+  return (
+    <div className={`flex h-full w-full overflow-hidden rounded-[3px] ${className}`} title={`+${w} =${d} -${b}`}>
+      <div style={{ width: pct(w) }} className="bg-[#e8e8e8]" />
+      <div style={{ width: pct(d) }} className="bg-[#6b7280]" />
+      <div style={{ width: pct(b) }} className="bg-[#15181f]" />
+    </div>
+  );
+}
+
 export default function OpeningPage() {
   const fp = useFreePlay();
-  const [source, setSource] = useState<"lichess" | "masters">("lichess");
   const { data, isFetching, isError } = useQuery({
-    queryKey: ["explorer", fp.fen, source],
-    queryFn: () => fetchExplorer(fp.fen, source),
+    queryKey: ["explorer", fp.fen],
+    queryFn: () => fetchExplorer(fp.fen, "masters"),
   });
 
-  const total = data ? data.white + data.draws + data.black : 0;
-  const pct = (n: number) => (total ? Math.round((n / total) * 100) : 0);
+  // Carry the most specific opening name seen down the line (deep positions often have no ECO row).
+  const [opening, setOpening] = useState<{ eco: string; name: string } | null>(null);
+  useEffect(() => { if (data?.opening) setOpening(data.opening); }, [data?.opening]);
+  useEffect(() => { if (fp.fen.startsWith("rnbqkbnr/pppppppp")) setOpening(null); }, [fp.fen]);
 
-  // play a move from the explorer table
+  const total = data ? data.white + data.draws + data.black : 0;
   const playUci = (uci: string) => fp.onMove(uci.slice(0, 2) as Key, uci.slice(2, 4) as Key);
-  useEffect(() => { /* refetch handled by query key */ }, [fp.fen]);
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
       <section>
         <Board fen={fp.fen} orientation={fp.orientation} turnColor={fp.turnColor}
           movableColor="both" dests={fp.dests} onMove={fp.onMove} />
@@ -36,36 +49,51 @@ export default function OpeningPage() {
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
           <div className="mb-3 flex items-center justify-between">
             <h1 className="font-display text-xl text-white">Opening explorer</h1>
-            <div className="flex rounded-lg border border-ink-700 p-0.5 text-xs">
-              {(["lichess", "masters"] as const).map((s) => (
-                <button key={s} onClick={() => setSource(s)}
-                  className={`rounded-md px-2.5 py-1 capitalize ${source === s ? "bg-brand-600 text-white" : "text-ink-400"}`}>{s}</button>
-              ))}
-            </div>
+            <span className="rounded-md border border-ink-700 px-2 py-0.5 text-xs text-ink-400">Masters</span>
           </div>
-          {data?.opening && <p className="mb-2 text-sm text-brand-300">{data.opening.eco} · {data.opening.name}</p>}
-          {/* win-rate bar */}
+
+          {opening && (
+            <p className="mb-3 text-sm">
+              <span className="font-mono text-ink-400">{opening.eco}</span>{" "}
+              <span className="text-brand-300">{opening.name}</span>
+            </p>
+          )}
+
+          {/* aggregate result bar for this position */}
           {total > 0 && (
-            <div className="mb-3 flex h-2.5 overflow-hidden rounded-full">
-              <div style={{ width: `${pct(data!.white)}%` }} className="bg-ink-300" />
-              <div style={{ width: `${pct(data!.draws)}%` }} className="bg-ink-500" />
-              <div style={{ width: `${pct(data!.black)}%` }} className="bg-ink-800" />
+            <div className="mb-1 flex items-center gap-2">
+              <div className="h-3 flex-1"><WdlBar w={data!.white} d={data!.draws} b={data!.black} /></div>
+              <span className="w-20 text-right text-xs text-ink-400">{total.toLocaleString()} games</span>
             </div>
           )}
+          <div className="mb-3 flex justify-between text-[11px] text-ink-500">
+            <span>White {total ? Math.round((data!.white / total) * 100) : 0}%</span>
+            <span>Draw {total ? Math.round((data!.draws / total) * 100) : 0}%</span>
+            <span>Black {total ? Math.round((data!.black / total) * 100) : 0}%</span>
+          </div>
+
           {isFetching && <p className="text-sm text-ink-400">Loading…</p>}
           {isError && <p className="text-sm text-rose-400">Explorer unavailable.</p>}
-          <div className="max-h-[420px] overflow-y-auto">
+
+          {/* moves table */}
+          <div className="max-h-[440px] divide-y divide-ink-800/70 overflow-y-auto">
             {(data?.moves ?? []).map((m) => {
               const t = m.white + m.draws + m.black;
               return (
                 <button key={m.uci} onClick={() => playUci(m.uci)}
-                  className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm hover:bg-ink-800">
-                  <span className="font-medium text-white">{m.san}</span>
-                  <span className="text-ink-400">{t.toLocaleString()} games · {t ? Math.round((m.white / t) * 100) : 0}% W</span>
+                  className="grid w-full grid-cols-[3rem_4.5rem_1fr] items-center gap-3 px-1 py-2 text-left hover:bg-ink-800">
+                  <span className="font-semibold text-white">{m.san}</span>
+                  <span className="text-xs text-ink-400">
+                    {t.toLocaleString()}
+                    <span className="ml-1 text-ink-500">{total ? Math.round((t / total) * 100) : 0}%</span>
+                  </span>
+                  <span className="h-3.5"><WdlBar w={m.white} d={m.draws} b={m.black} /></span>
                 </button>
               );
             })}
-            {data && data.moves.length === 0 && <p className="text-sm text-ink-400">No more book moves.</p>}
+            {data && data.moves.length === 0 && (
+              <p className="py-3 text-sm text-ink-400">No master games from this position yet.</p>
+            )}
           </div>
         </div>
       </aside>
