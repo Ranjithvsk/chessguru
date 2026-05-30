@@ -23,11 +23,13 @@ export interface PlayState {
   result: string | null;
   reason: string | null;
   incomingDraw: boolean;
+  challengeId: string | null;
   pendingPromotion: { from: Key; to: Key } | null;
   boardEpoch: number;
   dests: ReturnType<typeof destsFromChess>;
   myTurn: boolean;
   seek: (clock: TimeControl, rated?: boolean) => void;
+  createChallenge: (clock: TimeControl, rated?: boolean) => void;
   sendMove: (from: Key, to: Key) => void;
   premove: (from: Key, to: Key) => void;
   choosePromotion: (p: Promo) => void;
@@ -68,6 +70,7 @@ export function usePlay(token: string): PlayState {
   const [result, setResult] = useState<string | null>(null);
   const [reason, setReason] = useState<string | null>(null);
   const [incomingDraw, setIncomingDraw] = useState(false);
+  const [challengeId, setChallengeId] = useState<string | null>(null);
   const [pendingPromotion, setPendingPromotion] = useState<{ from: Key; to: Key } | null>(null);
   const [boardEpoch, setBoardEpoch] = useState(0);
 
@@ -100,6 +103,7 @@ export function usePlay(token: string): PlayState {
     setResult(null);
     setReason(null);
     setIncomingDraw(false);
+    setChallengeId(null);
     client.current?.sub(g);
     setStatus("playing");
   };
@@ -144,6 +148,10 @@ export function usePlay(token: string): PlayState {
         setClock(m.d.clock);
         setTurn(m.d.turn);
         break;
+      case "challenge-created":
+        setChallengeId(m.d.id);
+        setStatus("seeking");
+        break;
       case "offer":
         if (m.d.kind === "draw" && m.d.by !== colorRef.current) setIncomingDraw(true);
         break;
@@ -168,6 +176,11 @@ export function usePlay(token: string): PlayState {
         c.hello(tokenRef.current);
         setStatus("idle");
         off = c.on(onMsg);
+        const cid = new URLSearchParams(window.location.search).get("challenge");
+        if (cid) {
+          c.challengeAccept(cid);
+          window.history.replaceState({}, "", window.location.pathname);
+        }
         if (import.meta.env.DEV) {
           (window as unknown as { __play?: unknown }).__play = {
             seek: (initial = 300000, increment = 3000, rated = false) => c.seek({ initial, increment }, rated),
@@ -191,6 +204,11 @@ export function usePlay(token: string): PlayState {
 
   const seek = useCallback((clock: TimeControl, rated = false) => {
     client.current?.seek(clock, rated);
+    setStatus("seeking");
+  }, []);
+
+  const createChallenge = useCallback((clock: TimeControl, rated = false) => {
+    client.current?.challenge(clock, rated);
     setStatus("seeking");
   }, []);
 
@@ -248,6 +266,7 @@ export function usePlay(token: string): PlayState {
     setReason(null);
     setMoves([]);
     setIncomingDraw(false);
+    setChallengeId(null);
     clearPending();
   }, []);
 
@@ -255,8 +274,8 @@ export function usePlay(token: string): PlayState {
   const dests = useMemo(() => destsFromChess(game.current as never), [fen]);
 
   return {
-    status, color, fen, turn, ply, moves, lastMove, clock, opponent, result, reason, incomingDraw,
+    status, color, fen, turn, ply, moves, lastMove, clock, opponent, result, reason, incomingDraw, challengeId,
     pendingPromotion, boardEpoch, dests, myTurn,
-    seek, sendMove, premove, choosePromotion, cancelPromotion, resign, offerDraw, acceptDraw, declineDraw, rematch, newGame,
+    seek, createChallenge, sendMove, premove, choosePromotion, cancelPromotion, resign, offerDraw, acceptDraw, declineDraw, rematch, newGame,
   };
 }

@@ -155,10 +155,37 @@ export default function PlayPage() {
                 </button>
               ))}
             </div>
+            <button
+              data-testid="challenge-friend"
+              onClick={() => p.createChallenge({ initial: 300000, increment: 3000 }, false)}
+              className="mt-2 w-full rounded-lg border border-ink-700 px-3 py-2 text-sm text-ink-200 hover:bg-ink-800"
+            >
+              Challenge a friend (5+3)
+            </button>
           </div>
         )}
 
-        {p.status === "seeking" && <div className="animate-pulse text-sm text-ink-400">Waiting for a match…</div>}
+        {p.status === "seeking" && p.challengeId && (
+          <div className="rounded-xl border border-brand-500/50 bg-brand-600/10 p-4" data-testid="challenge-link">
+            <div className="mb-2 text-sm text-ink-200">Send this link to a friend — the game starts when they open it:</div>
+            <input
+              readOnly
+              data-testid="challenge-url"
+              value={`${location.origin}${import.meta.env.BASE_URL}play?challenge=${p.challengeId}`}
+              onFocus={(e) => e.currentTarget.select()}
+              className="w-full rounded-lg bg-ink-900 px-3 py-2 font-mono text-xs text-ink-200"
+            />
+            <button
+              onClick={() => navigator.clipboard?.writeText(`${location.origin}${import.meta.env.BASE_URL}play?challenge=${p.challengeId}`)}
+              className="mt-2 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-500"
+            >
+              Copy link
+            </button>
+            <div className="mt-2 animate-pulse text-xs text-ink-400">Waiting for your friend to join…</div>
+          </div>
+        )}
+
+        {p.status === "seeking" && !p.challengeId && <div className="animate-pulse text-sm text-ink-400">Waiting for a match…</div>}
 
         {playing && (
           <div className="flex gap-2">

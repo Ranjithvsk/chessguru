@@ -12,7 +12,11 @@ const send = (o) => ws.send(JSON.stringify(o));
 function maybeMove(turn, ply) {
   if (g && color && turn === color && ply < LINE.length) setTimeout(() => send({ v: 1, t: "move", g, d: { uci: LINE[ply], ply } }), DELAY);
 }
-ws.on("open", () => { send({ v: 1, t: "hello", d: { token: "sparring" } }); send({ v: 1, t: "seek", d: { clock: TC, rated: false } }); console.log("[spar] seeking"); });
+ws.on("open", () => {
+  send({ v: 1, t: "hello", d: { token: "sparring" } });
+  if (process.env.CHALLENGE) { send({ v: 1, t: "challenge-accept", d: { id: process.env.CHALLENGE } }); console.log("[spar] accepting challenge", process.env.CHALLENGE); }
+  else { send({ v: 1, t: "seek", d: { clock: TC, rated: false } }); console.log("[spar] seeking"); }
+});
 ws.on("message", (raw) => {
   const m = JSON.parse(raw.toString());
   if (m.t === "matched") { g = m.d.game; color = m.d.color; send({ v: 1, t: "sub", g }); console.log("[spar] matched", g, color); }

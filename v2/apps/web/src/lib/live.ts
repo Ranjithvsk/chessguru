@@ -44,6 +44,12 @@ export class LiveClient {
   unseek(): void {
     this.send({ v: 1, t: "unseek" });
   }
+  challenge(clock: TimeControl, rated = false): void {
+    this.send({ v: 1, t: "challenge", d: { clock, rated } });
+  }
+  challengeAccept(id: string): void {
+    this.send({ v: 1, t: "challenge-accept", d: { id } });
+  }
   sub(g: string): void {
     this.send({ v: 1, t: "sub", g });
   }
