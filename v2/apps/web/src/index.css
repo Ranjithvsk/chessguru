@@ -2,6 +2,14 @@
 @import "chessground/assets/chessground.brown.css";
 @import "chessground/assets/chessground.cburnett.css";
 
+/* High-contrast board: light squares = white, dark squares = darker (owner pref) */
+.cg-board-wrap cg-board {
+  background-color: #ffffff !important;            /* light squares */
+  background-image: repeating-conic-gradient(#454545 0deg 90deg, #ffffff 90deg 180deg) !important; /* dark squares */
+  background-size: 25% 25% !important;
+}
+
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
