@@ -41,10 +41,12 @@ export default function PuzzlesPage() {
                 </p>
               </div>
             </div>
-            <button onClick={g.next} disabled={g.isFetching}
-              className="shrink-0 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
-              {g.isFetching ? "…" : "Next →"}
-            </button>
+            {g.solved && (
+              <button onClick={g.next} disabled={g.isFetching}
+                className="shrink-0 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
+                {g.isFetching ? "…" : "Next →"}
+              </button>
+            )}
           </div>
         </div>
 
@@ -68,11 +70,6 @@ export default function PuzzlesPage() {
             <button onClick={g.showHint} className="flex-1 rounded-lg border border-gold-500/60 px-3 py-2 text-sm text-gold-400 hover:bg-gold-500/10">💡 Hint</button>
             <button onClick={g.viewSolution} className="flex-1 rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">View Solution</button>
           </div>
-          {g.solved && (
-            <button onClick={g.next} className="mt-3 w-full rounded-lg bg-brand-600 px-3 py-2.5 font-semibold text-white hover:bg-brand-500">
-              Next puzzle →
-            </button>
-          )}
         </div>
 
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
