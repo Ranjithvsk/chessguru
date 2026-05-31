@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Chess } from "chess.js";
 import type { Key } from "chessground/types";
 import type { DrawShape } from "chessground/draw";
@@ -22,6 +22,7 @@ export interface UsePuzzleGameOpts {
 export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   const { theme, difficulty, userId, initialRating, mode = "puzzle", maxPc } = opts;
   const [nonce, setNonce] = useState(0);
+  const qc = useQueryClient();
   const STORE_KEY = mode === "blindfold" ? "cg_puzzle_bf" : "cg_puzzle";
   const resumeId = useRef<string | null>((() => { try { return localStorage.getItem(STORE_KEY); } catch { return null; } })());
 
@@ -84,8 +85,9 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
     }).then((r) => {
       if (typeof r.ratingDiff === "number") setRatingDiff(r.ratingDiff);
       if (r.glicko) setDisplayRating(Math.round(r.glicko.r));
+      qc.invalidateQueries({ queryKey: ["me-rating"] }); // refresh the navbar rating
     }).catch(() => {});
-  }, [puzzle, difficulty, userId, mode, displayRating]);
+  }, [puzzle, difficulty, userId, mode, displayRating, qc]);
 
   const finish = useCallback(() => {
     solved.current = true;
