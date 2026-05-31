@@ -20,7 +20,7 @@ export default function PuzzlesPage() {
   const fbColor = { wait: "text-ink-300", good: "text-accent-400", bad: "text-rose-400", solved: "text-accent-400" }[g.fb.kind];
 
   return (
-    <div className="grid gap-6 md:grid-cols-[minmax(0,1fr)_340px]">
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
       <section>
         <Board
           fen={g.fen} orientation={g.orientation} turnColor={g.turnColor}
@@ -31,14 +31,20 @@ export default function PuzzlesPage() {
 
       <aside className="flex flex-col gap-4">
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
-          <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center rounded-lg bg-brand-gradient text-white">♞</span>
-            <div>
-              <h1 className="font-display text-xl text-white">{theme === "mix" ? "Mixed puzzles" : prettify(theme)}</h1>
-              <p className="text-sm text-ink-400">
-                {g.puzzle ? <>#{g.puzzle.id} · Rating {g.puzzle.rating} · Played {g.puzzle.plays ?? 0}</> : "Loading…"}
-              </p>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-brand-gradient text-white">♞</span>
+              <div className="min-w-0">
+                <h1 className="font-display text-xl text-white">{theme === "mix" ? "Mixed puzzles" : prettify(theme)}</h1>
+                <p className="truncate text-sm text-ink-400">
+                  {g.puzzle ? <>#{g.puzzle.id} · Rating {g.puzzle.rating} · Played {g.puzzle.plays ?? 0}</> : "Loading…"}
+                </p>
+              </div>
             </div>
+            <button onClick={g.next} disabled={g.isFetching}
+              className="shrink-0 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
+              {g.isFetching ? "…" : "Next →"}
+            </button>
           </div>
         </div>
 
