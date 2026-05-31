@@ -24,13 +24,15 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   const [nonce, setNonce] = useState(0);
   const qc = useQueryClient();
   const STORE_KEY = mode === "blindfold" ? "cg_puzzle_bf" : "cg_puzzle";
-  const resumeId = useRef<string | null>((() => { try { return localStorage.getItem(STORE_KEY); } catch { return null; } })());
 
   const { data: puzzle, isFetching } = useQuery({
     queryKey: ["puzzle", mode, theme, difficulty, maxPc ?? 0, userId ?? "guest", nonce],
     queryFn: () => {
-      const rid = resumeId.current;
-      resumeId.current = null; // resume the saved puzzle at most once (first load)
+      // Resume the saved (unsolved) puzzle whenever one is stored. Read it live
+      // each fetch so it survives the queryKey changing when auth (userId) resolves
+      // after the first render — otherwise refresh would load a new random puzzle.
+      let rid: string | null = null;
+      try { rid = localStorage.getItem(STORE_KEY); } catch { /* */ }
       const rand = () => api.randomPuzzle({ theme, rating: initialRating, difficulty, maxPc, userId });
       return rid ? api.puzzleById(rid).catch(rand) : rand();
     },
