@@ -27,6 +27,8 @@ body {
 .cg-board-wrap {
   position: relative;
   width: 100%;
+  max-width: min(100%, 82vh); /* never taller than the viewport -> controls stay visible */
+  margin-inline: auto;
   aspect-ratio: 1 / 1;
   border-radius: 0.75rem;
   overflow: hidden;

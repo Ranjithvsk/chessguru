@@ -20,7 +20,7 @@ export default function PuzzlesPage() {
   const fbColor = { wait: "text-ink-300", good: "text-accent-400", bad: "text-rose-400", solved: "text-accent-400" }[g.fb.kind];
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+    <div className="grid gap-6 md:grid-cols-[minmax(0,1fr)_340px]">
       <section>
         <Board
           fen={g.fen} orientation={g.orientation} turnColor={g.turnColor}
