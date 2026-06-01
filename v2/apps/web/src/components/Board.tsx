@@ -50,6 +50,15 @@ export default function Board({
   const el = useRef<HTMLDivElement>(null);
   const api = useRef<Api | null>(null);
 
+  // chessground is created once, so its event handlers would capture the
+  // first-render callbacks — when the puzzle is still loading, submit() closes
+  // over an undefined puzzle and bails. Route events through refs kept current
+  // each render so the live onMove/submit always runs.
+  const onMoveRef = useRef(onMove);
+  const onPremoveRef = useRef(onPremove);
+  const onSelectRef = useRef(onSelect);
+  useEffect(() => { onMoveRef.current = onMove; onPremoveRef.current = onPremove; onSelectRef.current = onSelect; });
+
   // create once
   useEffect(() => {
     if (!el.current) return;
@@ -68,15 +77,15 @@ export default function Board({
         color: movableColor,
         dests,
         showDests: true,
-        events: { after: (from, to) => onMove?.(from, to) },
+        events: { after: (from, to) => onMoveRef.current?.(from, to) },
       },
       premovable: {
         enabled: premovable,
         showDests: true,
-        events: { set: (orig, dest) => onPremove?.(orig, dest) },
+        events: { set: (orig, dest) => onPremoveRef.current?.(orig, dest) },
       },
       selectable: { enabled: true },
-      events: { select: (key) => onSelect?.(key) },
+      events: { select: (key) => onSelectRef.current?.(key) },
       drawable: { enabled: true, visible: true },
     };
     api.current = Chessground(el.current, config);
