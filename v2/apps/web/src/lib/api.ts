@@ -26,9 +26,23 @@ export interface Overview { total: number; engineGenerated: number; verified: nu
 export interface Distribution { sampled: number; themeDist: { theme: string; count: number }[]; ratingDist: { band: number | string; count: number }[]; }
 export interface GenPuzzle { id: string; fen: string; rating: number; themes: string[]; verified: boolean; }
 
+export interface HistoryItem {
+  id: string; date: string; win: boolean;
+  ratingDiff: number | null; ratingAfter: number | null;
+  puzzleRating: number | null; themes: string[]; mode: string;
+}
+export interface HistoryReport {
+  loggedIn: boolean;
+  totals?: { attempted: number; solved: number; failed: number; winRate: number };
+  byTheme?: { theme: string; total: number; wins: number }[];
+  byBand?: { band: string; lo: number; total: number; wins: number }[];
+  items?: HistoryItem[];
+}
+
 export const api = {
   me: () => get<AuthMe>("/auth/me"),
   myRating: () => get<MeRating>("/api/me/rating"),
+  history: () => get<HistoryReport>("/api/me/history"),
   themes: () => get<{ themes: string[] }>("/api/themes"),
   randomPuzzle: (opts: RandomPuzzleOpts) => {
     const p = new URLSearchParams({ theme: opts.theme, rating: String(opts.rating), difficulty: opts.difficulty });

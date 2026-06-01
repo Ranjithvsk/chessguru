@@ -5,6 +5,7 @@ const links = [
   { to: "/", label: "Puzzles", end: true },
   { to: "/play", label: "Play" },
   { to: "/blindfold", label: "Blindfold" },
+  { to: "/history", label: "History" },
   { to: "/opening", label: "Opening" },
   { to: "/engine-battle", label: "Engine" },
   { to: "/board-editor", label: "Editor" },

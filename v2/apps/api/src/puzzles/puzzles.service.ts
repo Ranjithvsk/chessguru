@@ -107,7 +107,19 @@ export class PuzzlesService {
       if (hint) return { win, ratingDiff: 0, rating: Math.round(perf.gl.r), glicko: perf.gl };
       const upd = updatePuzzleRating(perf, puzzleGlicko, win);
       await perfsCol.updateOne({ _id: userId as any }, { $set: { [key]: upd.userPerf } }, { upsert: true });
-      await this.conn.db!.collection("rounds").updateOne({ _id: `${userId}:${id}` as any }, { $set: { w: win, d: new Date() } }, { upsert: true });
+      await this.conn.db!.collection("rounds").updateOne(
+        { _id: `${userId}:${id}` as any },
+        { $set: {
+          w: win,
+          d: new Date(),
+          rd: upd.ratingDiff,                                 // rating change this solve
+          r: Math.round(upd.userPerf.gl.r),                   // user rating after
+          pr: Math.round(puzzleGlicko.r ?? 1500),             // puzzle rating
+          th: Array.isArray(pz.themes) ? pz.themes : [],      // puzzle themes (for categorising)
+          k: key,                                             // "puzzle" | "blindfold"
+        } },
+        { upsert: true },
+      );
       return { win, ratingDiff: upd.ratingDiff, rating: upd.userPerf.gl.r, glicko: upd.userPerf.gl };
     }
 
