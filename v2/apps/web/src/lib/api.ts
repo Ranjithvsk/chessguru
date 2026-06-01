@@ -30,6 +30,7 @@ export interface HistoryItem {
   id: string; date: string; win: boolean;
   ratingDiff: number | null; ratingAfter: number | null;
   puzzleRating: number | null; themes: string[]; mode: string;
+  fen: string | null; lastMove: string | null; orientation: "white" | "black";
 }
 export interface HistoryReport {
   loggedIn: boolean;
