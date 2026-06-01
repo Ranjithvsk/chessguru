@@ -25,7 +25,7 @@ export class PuzzlesService {
     // ";" (0x3B) sorts immediately after ":" (0x3A), so [userId:, userId;) brackets exactly this user's rounds.
     const lo = `${userId}:`;
     const hi = `${userId};`;
-    const REPEAT_FAILED_DAYS = 14;
+    const REPEAT_FAILED_DAYS = 7;
     const cutoff = new Date(Date.now() - REPEAT_FAILED_DAYS * 86400000);
     const rows = await this.conn.db!
       .collection("rounds")
