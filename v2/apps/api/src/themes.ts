@@ -7,6 +7,6 @@ export const THEMES = [
   "fork", "hangingPiece", "hookMate", "interference", "intermezzo", "kingsideAttack", "knightEndgame",
   "long", "mate", "mateIn1", "mateIn2", "mateIn3", "mateIn4", "mateIn5", "middlegame", "oneMove",
   "opening", "operaMate", "pawnEndgame", "pin", "promotion", "queenEndgame", "queenRookEndgame",
-  "queensideAttack", "quietMove", "rookEndgame", "sacrifice", "short", "skewer", "smotheredMate",
-  "superGM", "triangleMate", "trappedPiece", "underPromotion", "veryLong", "xRayAttack", "zugzwang",
+  "queensideAttack", "quietMove", "rookEndgame", "sacrifice", "short", "skewer", "smotheredMate", "killBoxMate", "vukovicMate", "pillsburysMate", "morphysMate", "swallowstailMate",
+  "superGM", "master", "masterVsMaster", "triangleMate", "trappedPiece", "underPromotion", "veryLong", "xRayAttack", "zugzwang",
 ];
