@@ -1,4 +1,4 @@
-import { Body, Controller, Get, NotFoundException, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, NotFoundException, Param, Post, Query, Req } from "@nestjs/common";
 import { PuzzlesService } from "./puzzles.service";
 
 @Controller("puzzles")
@@ -19,8 +19,11 @@ export class PuzzlesController {
   }
 
   @Post(":id/complete")
-  async complete(@Param("id") id: string, @Body() body: any) {
-    const r = await this.svc.complete(id, body ?? {});
+  async complete(@Param("id") id: string, @Body() body: any, @Req() req: any) {
+    // Trust the session for identity, not the request body (secure + survives a
+    // stale cached /auth/me on the client). Guests have no session userId.
+    const userId = req?.session?.userId ?? null;
+    const r = await this.svc.complete(id, { ...(body ?? {}), userId });
     if (!r) throw new NotFoundException("puzzle not found");
     return r;
   }
