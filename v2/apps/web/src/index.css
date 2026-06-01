@@ -2,10 +2,10 @@
 @import "chessground/assets/chessground.brown.css";
 @import "chessground/assets/chessground.cburnett.css";
 
-/* Board square colours: light = original cream, dark = blue (same shade as the old brown) */
+/* Board square colours: light = white, dark = blue */
 .cg-board-wrap cg-board {
-  background-color: #f0d9b5 !important;             /* light squares (unchanged) */
-  background-image: repeating-conic-gradient(#668cb2 0deg 90deg, #f0d9b5 90deg 180deg) !important; /* dark squares (blue) */
+  background-color: #ffffff !important;             /* light squares (white) */
+  background-image: repeating-conic-gradient(#668cb2 0deg 90deg, #ffffff 90deg 180deg) !important; /* dark squares (blue) */
   background-size: 25% 25% !important;
 }
 
