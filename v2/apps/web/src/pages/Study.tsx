@@ -14,7 +14,7 @@ export default function StudyPage() {
           <Link key={s.id} to={`/study/${s.id}`}
             className="group flex flex-col rounded-xl2 border border-ink-700 bg-ink-900 p-5 transition hover:border-brand-500 hover:bg-ink-800">
             <div className="flex items-center gap-3">
-              <span className="grid h-12 w-12 place-items-center rounded-lg bg-brand-gradient text-3xl text-white">{s.icon}</span>
+              <span className="grid h-12 w-12 place-items-center rounded-lg bg-brand-gradient text-2xl leading-none text-white">{s.icon}</span>
               <div>
                 <h2 className="font-display text-lg text-white">{s.title}</h2>
                 <p className="text-xs text-ink-400">{s.blurb}</p>

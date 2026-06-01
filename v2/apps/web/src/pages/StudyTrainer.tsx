@@ -4,7 +4,7 @@ import { Chess } from "chess.js";
 import type { Key } from "chessground/types";
 import Board, { destsFromChess } from "../components/Board";
 import { createEngine, type Engine } from "../lib/engine";
-import { studyById, type StudyPiece } from "../lib/studies";
+import { studyById } from "../lib/studies";
 
 const FILES = "abcdefgh";
 const rsq = () => FILES[Math.floor(Math.random() * 8)]! + (Math.floor(Math.random() * 8) + 1);
@@ -25,12 +25,28 @@ function toFen(place: Record<string, string>, turn: "w" | "b") {
   return `${rows.join("/")} ${turn} - - 0 1`;
 }
 
-function randomMate(piece: StudyPiece): string {
-  for (let i = 0; i < 1000; i++) {
-    const wk = rsq(), bk = rsq(), wp = rsq();
-    if (new Set([wk, bk, wp]).size !== 3) continue;
-    if (adjacent(wk, bk)) continue;
-    const place = { [wk]: "K", [wp]: piece, [bk]: "k" } as Record<string, string>;
+const sqColor = (sqr: string) => ((sqr.charCodeAt(0) - 97) + Number(sqr.slice(1))) % 2;
+
+function randomMate(pieces: string[]): string {
+  for (let i = 0; i < 6000; i++) {
+    const used = new Set<string>();
+    const wk = rsq(); used.add(wk);
+    const bk = rsq();
+    if (used.has(bk) || adjacent(wk, bk)) continue;
+    used.add(bk);
+    const place: Record<string, string> = { [wk]: "K", [bk]: "k" };
+    const twoBishops = pieces.filter((p) => p === "B").length >= 2;
+    const bishopColors = new Set<number>();
+    let ok = true;
+    for (const p of pieces) {
+      let sqr = "", tries = 0;
+      do { sqr = rsq(); tries++; }
+      while ((used.has(sqr) || (p === "B" && twoBishops && bishopColors.has(sqColor(sqr)))) && tries < 80);
+      if (used.has(sqr)) { ok = false; break; }
+      used.add(sqr); place[sqr] = p;
+      if (p === "B") bishopColors.add(sqColor(sqr));
+    }
+    if (!ok) continue;
     try {
       const c = new Chess(toFen(place, "w"));
       if (c.isGameOver() || c.isCheck()) continue;
@@ -38,17 +54,19 @@ function randomMate(piece: StudyPiece): string {
       return toFen(place, "w");
     } catch { continue; }
   }
-  return piece === "Q" ? "4k3/8/8/8/8/8/3Q4/4K3 w - - 0 1" : "4k3/8/8/8/8/8/3R4/4K3 w - - 0 1";
+  const fb: Record<string, string> = { e1: "K", e5: "k" };
+  ["a1", "h1", "a2", "h2", "c1"].forEach((sp, i) => { if (pieces[i]) fb[sp] = pieces[i]!; });
+  return toFen(fb, "w");
 }
 
-// K+Q (white) vs K+P (black) — black pawn advanced (rank 2-4) and racing to promote.
-function randomQvsKP(): string {
-  for (let i = 0; i < 2000; i++) {
-    const wk = rsq(), wq = rsq(), bk = rsq();
+// White K + one piece vs black K + a passed pawn (rank 2-4, racing to promote).
+function randomVsKP(piece: string): string {
+  for (let i = 0; i < 3000; i++) {
+    const wk = rsq(), wp = rsq(), bk = rsq();
     const bp = FILES[Math.floor(Math.random() * 8)]! + (2 + Math.floor(Math.random() * 3));
-    if (new Set([wk, wq, bk, bp]).size !== 4) continue;
+    if (new Set([wk, wp, bk, bp]).size !== 4) continue;
     if (adjacent(wk, bk)) continue;
-    const place = { [wk]: "K", [wq]: "Q", [bk]: "k", [bp]: "p" } as Record<string, string>;
+    const place = { [wk]: "K", [wp]: piece, [bk]: "k", [bp]: "p" } as Record<string, string>;
     try {
       const c = new Chess(toFen(place, "w"));
       if (c.isGameOver() || c.isCheck()) continue;
@@ -56,7 +74,7 @@ function randomQvsKP(): string {
       return toFen(place, "w");
     } catch { continue; }
   }
-  return "8/8/8/8/4k3/8/3p4/3QK3 w - - 0 1";
+  return piece === "R" ? "8/8/8/8/4k3/8/3p4/3RK3 w - - 0 1" : "8/8/8/8/4k3/8/3p4/3QK3 w - - 0 1";
 }
 
 type Status = { kind: "play" | "think" | "win" | "draw"; msg: string };
@@ -73,14 +91,14 @@ export default function StudyTrainer() {
   const [thinking, setThinking] = useState(false);
   const [, force] = useState(0);
 
-  const piece = def?.piece ?? "Q";
+  const pieces = def?.pieces ?? ["Q"];
   const kind = def?.kind ?? "mate";
   const newPosition = useCallback(() => {
-    const f = kind === "stopPawn" ? randomQvsKP() : randomMate(piece);
+    const f = kind === "stopPawn" ? randomVsKP(pieces[0] ?? "Q") : randomMate(pieces);
     game.current = new Chess(f);
     setFen(f); setLastMove(undefined); setThinking(false);
     setStatus({ kind: "play", msg: "Your move — drive the king to the edge and checkmate." });
-  }, [piece, kind]);
+  }, [kind, pieces]);
 
   useEffect(() => {
     if (!def) return;
@@ -92,7 +110,7 @@ export default function StudyTrainer() {
 
   const moveNo = () => Math.ceil(game.current.history().length / 2);
   const finished = (): boolean => {
-    if (kind === "stopPawn" && (game.current.fen().split(" ")[0] || "").includes("q")) {
+    if (kind === "stopPawn" && /[qrbn]/.test(game.current.fen().split(" ")[0] || "")) {
       setStatus({ kind: "draw", msg: "The pawn promoted! \u{1F62C} Tap New position ↻" }); return true;
     }
     if (game.current.isCheckmate()) { setStatus({ kind: "win", msg: `Checkmate! \u{1F389} Mated in ${moveNo()} moves.` }); return true; }
