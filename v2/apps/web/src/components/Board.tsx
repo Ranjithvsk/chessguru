@@ -76,7 +76,7 @@ export default function Board({
         free: false,
         color: movableColor,
         dests,
-        showDests: true,
+        showDests: false, // no legal-move dots when a piece is selected
         events: { after: (from, to) => onMoveRef.current?.(from, to) },
       },
       premovable: {
