@@ -9,7 +9,7 @@ different slicing axis:
 
 | Collection | Key | Axis | Built by | Live count |
 |---|---|---|---|---|
-| `paths` | `theme\|tier\|RRRR` (range `min`/`max`) | theme × vote-tier × rating band | `gen_paths2.js` | 4,299 |
+| `paths` | `theme\|tier\|RRRR` (range `min`/`max`) | theme × vote-tier × rating band | `gen_paths3.js` | 4,299 |
 | `piecePools` | `theme\|maxPc` | theme × piece-count band | `gen_piece_pools.js` / `build_pools*.js` | 590 |
 | `bfPools` | `theme\|ratingBand\|pc` | theme × rating × piece-count (blindfold) | `gen_bf_pools_v2.js` | 13,443 |
 | `themePools` | theme (+`__all__`) | engine-generated puzzles only | `build_theme_pools.js` | 3 |
@@ -92,3 +92,15 @@ Elos, e.g. `Oxidation` at 8191).
   (lowercase, empty) Mongo collection.
 - Delete `write_editor.py`; dedup `diag2.js`/`theme_check.js` and `test_logic.js`/`diag_wc.js`.
 - These are the one-off scripts intentionally left in the root for now (not archived).
+
+
+## 2026-06-01 — floor-bias fix (gen_paths2 → gen_paths3)
+`gen_paths2.js` built each band pool with `Puzzle.find(filter).limit(500)` — **no sort/sample**, so
+MongoDB returned puzzles in `glicko.r` index order (ascending) and the kept 50 were always the band's
+**lowest-rated** puzzles. Because 50+ puzzles sit at each band's floor value, every pool was 100%
+floor-rated → users always saw puzzles at exactly their band floor (e.g. rating 1002 → always 1000),
+with no variety and slow rating progress. **`gen_paths3.js`** fixes it: it samples ~6 puzzles at each
+of 10 rating sub-points across the band via small indexed `limit()` queries (cheap, low-memory — avoids
+`$sample`, which scans the whole no-theme `mix` band and took ~35s each). Builds into `paths_new` then
+atomically renames over `paths` (sub-second swap; reader falls back to `$sample` during it). Verified:
+pools now span the band (~9 distinct ratings/50). Re-run `gen_paths3.js` (NOT gen_paths2) on puzzle reimports.
