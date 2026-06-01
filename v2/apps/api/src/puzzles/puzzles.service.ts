@@ -15,21 +15,32 @@ export class PuzzlesService {
   private col() { return this.conn.db!.collection("puzzles"); }
 
   /**
-   * Puzzle IDs this user has already attempted, for replay dedup.
-   * rounds._id is "userId:puzzleId" (puzzle _id is a string), so a range scan on the
-   * indexed _id is index-friendly. Most-recent-first, capped at MAX_PLAYED.
+   * Puzzle IDs to KEEP OUT of this user's draw (spaced repetition):
+   *   - SOLVED puzzles (w:true) are excluded forever — never repeat a solved one.
+   *   - FAILED puzzles (w:false) are excluded only for REPEAT_FAILED_DAYS, then become
+   *     eligible again so the user gets another crack at the ones they missed.
+   * rounds._id is "userId:puzzleId"; range scan on the indexed _id, most-recent-first.
    */
   private async playedIds(userId: string): Promise<string[]> {
     // ";" (0x3B) sorts immediately after ":" (0x3A), so [userId:, userId;) brackets exactly this user's rounds.
     const lo = `${userId}:`;
     const hi = `${userId};`;
+    const REPEAT_FAILED_DAYS = 14;
+    const cutoff = new Date(Date.now() - REPEAT_FAILED_DAYS * 86400000);
     const rows = await this.conn.db!
       .collection("rounds")
-      .find({ _id: { $gte: lo, $lt: hi } as any }, { projection: { _id: 1 } })
+      .find({ _id: { $gte: lo, $lt: hi } as any }, { projection: { _id: 1, w: 1, d: 1 } })
       .sort({ d: -1 })
       .limit(MAX_PLAYED)
       .toArray();
-    return rows.map((r) => String(r._id).slice(lo.length));
+    const out: string[] = [];
+    for (const r of rows as any[]) {
+      const id = String(r._id).slice(lo.length);
+      if (r.w) out.push(id);                                          // solved -> never repeat
+      else if (r.d && new Date(r.d) >= cutoff) out.push(id);          // failed recently -> hold off
+      // failed long ago -> eligible to retry
+    }
+    return out;
   }
 
   async random(theme: string, difficulty: string, rating: number, maxPc?: number, userId?: string | null) {
@@ -54,8 +65,8 @@ export class PuzzlesService {
         const ids: string[] = (path?.ids as string[]) || [];
         if (!ids.length) continue;
         const avail = ids.filter((id) => !playedSet.has(id));
-        const poolIds = avail.length ? avail : ids;
-        const pick = poolIds[Math.floor(Math.random() * poolIds.length)]!;
+        if (!avail.length) continue; // user cleared this pool -> next tier, then fresh $sample fallback
+        const pick = avail[Math.floor(Math.random() * avail.length)]!;
         const d = await this.col().findOne({ _id: pick as any });
         if (d) return applyLastMove(fmtPuzzle(d));
       }
