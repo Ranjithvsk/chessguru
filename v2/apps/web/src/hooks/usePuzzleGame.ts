@@ -126,7 +126,13 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
       if (!failed.current && !hinted.current) submit(false); // deduct once
       failed.current = true;
       setFb({ kind: "bad", title: "Not the best", sub: "Try again." });
-      setFen(game.current.fen()); // snap back
+      // Snap the wrong move back. It was never applied to game.current, so
+      // setFen() passes the same string and React skips the re-render -> the
+      // Board sync effect never fires and chessground keeps the moved piece.
+      // Re-assert lastMove with a fresh array ref so the effect runs and
+      // api.set({ fen }) restores the true position.
+      setFen(game.current.fen());
+      setLastMove((lm) => (lm ? [lm[0], lm[1]] : lm));
       force((n) => n + 1);
     }
   }, [finish, oppReply, submit]);
