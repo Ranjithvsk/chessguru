@@ -6,6 +6,7 @@ const links = [
   { to: "/play", label: "Play" },
   { to: "/blindfold", label: "Blindfold" },
   { to: "/history", label: "History" },
+  { to: "/study", label: "Study" },
   { to: "/opening", label: "Opening" },
   { to: "/engine-battle", label: "Engine" },
   { to: "/board-editor", label: "Editor" },

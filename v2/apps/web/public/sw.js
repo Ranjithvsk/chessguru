@@ -1,9 +1,9 @@
 // ChessGuru PWA service worker. Bump VERSION to invalidate caches on deploy.
-const VERSION = "cg-v10";
+const VERSION = "cg-v11";
 // Derive base from this SW's own URL so it's correct for both "/" and "/v2/" deploys.
 const BASE = self.location.pathname.replace(/sw\.js$/, "");
 const SHELL = [BASE, BASE + "manifest.webmanifest", BASE + "icons/icon-192.png", BASE + "icons/icon-512.png"];
-const STATIC_RE = /\.(?:js|css|mjs|svg|png|jpg|jpeg|webp|gif|woff2?|ttf|otf|ico)$/;
+const STATIC_RE = /\.(?:js|css|mjs|wasm|svg|png|jpg|jpeg|webp|gif|woff2?|ttf|otf|ico)$/;
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL).catch(() => {})).then(() => self.skipWaiting()));
