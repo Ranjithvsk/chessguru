@@ -80,7 +80,7 @@ export default function PuzzlesPage() {
             {(themes?.themes ?? []).filter((t) => t !== "mix").map((t) => <option key={t} value={t}>{prettify(t)}</option>)}
           </select>
           <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-400">Difficulty</label>
-          <select value={difficulty} onChange={(e) => setDifficulty(e.target.value as Difficulty)}
+          <select value={difficulty} onChange={(e) => { try { localStorage.removeItem("cg_puzzle"); } catch { /* */ } setDifficulty(e.target.value as Difficulty); }}
             className="w-full rounded-lg border border-ink-600 bg-ink-800 px-3 py-2 text-sm text-white">
             {DIFFS.map((d) => <option key={d} value={d}>{prettify(d)}</option>)}
           </select>
