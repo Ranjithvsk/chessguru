@@ -32,7 +32,7 @@ export class MiscController {
       .limit(2000)
       .toArray();
 
-    const DISPLAY = 40;                       // recent items get a mini board
+    const DISPLAY = 200;                      // recent items get a (lazily-rendered) mini board
     const pidOf = (r: any) => String(r._id).slice(lo.length);
     const recent = rounds.slice(0, DISPLAY);
     const recentIds = recent.map(pidOf);

@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { useOutletContext, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { Key } from "chessground/types";
@@ -29,15 +30,32 @@ function Bar({ wins, total }: { wins: number; total: number }) {
   );
 }
 
-function PuzzleCard({ it }: { it: HistoryItem }) {
+/** Mount the chessground mini board only once it scrolls into view (keeps 200 boards cheap). */
+function LazyMini({ it }: { it: HistoryItem }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    if (show || !ref.current) return;
+    const io = new IntersectionObserver((es) => {
+      if (es.some((e) => e.isIntersecting)) { setShow(true); io.disconnect(); }
+    }, { rootMargin: "300px" });
+    io.observe(ref.current);
+    return () => io.disconnect();
+  }, [show]);
   const lm = it.lastMove ? ([it.lastMove.slice(0, 2), it.lastMove.slice(2, 4)] as [Key, Key]) : undefined;
   return (
+    <div ref={ref} className="w-16 shrink-0 sm:w-20">
+      {show && it.fen
+        ? <Board fen={it.fen} orientation={it.orientation} lastMove={lm} viewOnly coordinates={false} className="mini" />
+        : <div className="aspect-square w-full rounded-md bg-ink-800" />}
+    </div>
+  );
+}
+
+function PuzzleCard({ it }: { it: HistoryItem }) {
+  return (
     <div className="flex gap-3 rounded-xl border border-ink-700 bg-ink-900 p-3">
-      <div className="w-16 shrink-0 sm:w-20">
-        {it.fen
-          ? <Board fen={it.fen} orientation={it.orientation} lastMove={lm} viewOnly coordinates={false} className="mini" />
-          : <div className="aspect-square w-full rounded-md bg-ink-800" />}
-      </div>
+      <LazyMini it={it} />
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-center justify-between gap-2">
           {it.win
