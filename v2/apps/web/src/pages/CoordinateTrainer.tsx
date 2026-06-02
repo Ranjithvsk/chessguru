@@ -45,6 +45,7 @@ function pickTarget(placed: Record<string, string>): Target | null {
 
 export default function CoordinateTrainer() {
   const [orientation, setOrientation] = useState<"white" | "black">("white");
+  const [showCoords, setShowCoords] = useState(false);
   const [phase, setPhase] = useState<"idle" | "run" | "done">("idle");
   const [placed, setPlaced] = useState<Record<string, string>>({});
   const [target, setTarget] = useState<Target | null>(null);
@@ -93,7 +94,7 @@ export default function CoordinateTrainer() {
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
       <section>
-        <Board fen={fenFromPlaced(placed)} orientation={orientation} coordinates={false}
+        <Board key={showCoords ? "coords-on" : "coords-off"} fen={fenFromPlaced(placed)} orientation={orientation} coordinates={showCoords}
           movableColor={undefined} dests={new Map()} shapes={shapes} onSelect={onSelect} />
       </section>
       <aside className="flex flex-col gap-4">
@@ -154,7 +155,11 @@ export default function CoordinateTrainer() {
               </button>
             ))}
           </div>
-          <p className="mt-3 text-xs text-ink-500">Coordinates are hidden — that&apos;s the test. Pieces stay where you put them.</p>
+          <button onClick={() => setShowCoords((v) => !v)}
+            className="mt-3 w-full rounded-lg border border-ink-600 px-3 py-2 text-sm font-medium text-ink-300 hover:bg-ink-800">
+            {showCoords ? "Hide coordinates" : "Show coordinates"}
+          </button>
+          <p className="mt-3 text-xs text-ink-500">{showCoords ? "Coordinates shown — training wheels on." : "Coordinates hidden — that’s the real test."} Pieces stay where you put them.</p>
         </div>
       </aside>
     </div>
