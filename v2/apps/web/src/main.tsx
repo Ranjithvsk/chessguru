@@ -7,6 +7,7 @@ import PuzzlesPage from "./pages/Puzzles";
 import HistoryPage from "./pages/History";
 import StudyPage from "./pages/Study";
 import StudyTrainer from "./pages/StudyTrainer";
+import CoordinateTrainer from "./pages/CoordinateTrainer";
 import BlindfoldPage from "./pages/Blindfold";
 import OpeningPage from "./pages/Opening";
 import EngineBattlePage from "./pages/EngineBattle";
@@ -33,6 +34,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="blindfold" element={<BlindfoldPage />} />
             <Route path="history" element={<HistoryPage />} />
             <Route path="study" element={<StudyPage />} />
+            <Route path="study/coordinates" element={<CoordinateTrainer />} />
             <Route path="study/:id" element={<StudyTrainer />} />
             <Route path="opening" element={<OpeningPage />} />
             <Route path="engine-battle" element={<EngineBattlePage />} />

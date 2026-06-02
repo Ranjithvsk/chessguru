@@ -1,8 +1,8 @@
-export type StudyKind = "mate" | "stopPawn";
+export type StudyKind = "mate" | "stopPawn" | "coordinate";
 export interface StudyDef {
   id: string;
   kind: StudyKind;
-  pieces: string[];   // white attacking pieces (besides the king). stopPawn uses pieces[0].
+  pieces?: string[];  // white attacking pieces (besides the king). stopPawn uses pieces[0]. (none for coordinate)
   icon: string;
   title: string;
   blurb: string;
@@ -11,6 +11,8 @@ export interface StudyDef {
 }
 
 export const STUDIES: StudyDef[] = [
+  { id: "coordinates", kind: "coordinate", icon: "a1", title: "Coordinate Training", blurb: "Place pieces by coordinate",
+    detail: "A square + piece appears (e.g. \u201cBlack Rook \u2192 e7\u201d) and you tap that square to place it. Coordinates are hidden — the classic way to learn the board. 45-second sprint.", mateIn: "45s sprint" },
   { id: "queen-mate", kind: "mate", pieces: ["Q"], icon: "♛", title: "Queen Mate", blurb: "King + Queen vs King",
     detail: "The first checkmate to master. Box the lone king to an edge with the queen, bring your king up, and mate — without stalemating.", mateIn: "Mate in ≤ 10" },
   { id: "rook-mate", kind: "mate", pieces: ["R"], icon: "♜", title: "Rook Mate", blurb: "King + Rook vs King",
