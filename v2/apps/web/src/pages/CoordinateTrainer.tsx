@@ -122,7 +122,7 @@ export default function CoordinateTrainer() {
   );
 
   return (
-    <div className="mx-auto max-w-md space-y-3 pb-24">
+    <div className="mx-auto max-w-2xl space-y-3 pb-24">
       <div className="flex items-center justify-between">
         <Link to="/study" className="text-sm text-ink-400 hover:text-white">&larr; All studies</Link>
         <span className="text-xs font-medium text-ink-500">Coordinate Training</span>
