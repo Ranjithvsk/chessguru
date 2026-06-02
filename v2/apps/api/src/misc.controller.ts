@@ -65,7 +65,7 @@ export class MiscController {
         id, date: r.d, win: !!r.w,
         ratingDiff: typeof r.rd === "number" ? r.rd : null,
         ratingAfter: typeof r.r === "number" ? r.r : null,
-        puzzleRating, themes, mode: r.k ?? "puzzle",
+        puzzleRating, themes, mode: r.k ?? "puzzle", sel: r.sel ?? null,
         ...miniOf(p),
       };
     });

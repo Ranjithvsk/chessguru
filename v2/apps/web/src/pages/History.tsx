@@ -84,11 +84,12 @@ export default function HistoryPage() {
   const themeGroupsOf = (items: HistoryItem[]) => {
     const map = new Map<string, HistoryItem[]>();
     for (const it of items) {
-      const th = primaryTheme(it.themes);
-      if (!map.has(th)) map.set(th, []);
-      map.get(th)!.push(it);
+      // group by the filter that was played: "All themes" when mix; else the picked theme; fall back to the puzzle's main theme (older solves)
+      const label = it.sel === "mix" ? "All themes" : it.sel ? prettify(it.sel) : prettify(primaryTheme(it.themes));
+      if (!map.has(label)) map.set(label, []);
+      map.get(label)!.push(it);
     }
-    return [...map.entries()].map(([theme, items]) => ({ theme, items })).sort((a, b) => b.items.length - a.items.length);
+    return [...map.entries()].map(([label, items]) => ({ label, items })).sort((a, b) => b.items.length - a.items.length);
   };
 
   return (
@@ -122,9 +123,9 @@ export default function HistoryPage() {
               </div>
               <div className="space-y-4">
                 {themeGroupsOf(g.items).map((tg) => (
-                  <div key={tg.theme}>
+                  <div key={tg.label}>
                     <h3 className="mb-2 text-sm font-semibold text-ink-300">
-                      {prettify(tg.theme)} <span className="font-normal text-ink-500">· {tg.items.length}</span>
+                      {tg.label} <span className="font-normal text-ink-500">· {tg.items.length}</span>
                     </h3>
                     <div className="grid grid-cols-3 gap-2 sm:gap-3">
                       {tg.items.map((it) => <LazyMini key={it.id + it.date} it={it} />)}

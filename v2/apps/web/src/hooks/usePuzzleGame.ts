@@ -82,14 +82,14 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   const submit = useCallback((win: boolean) => {
     if (!puzzle) return;
     api.complete(puzzle.id, {
-      win, hint: hinted.current, difficulty, userId,
+      win, hint: hinted.current, difficulty, userId, theme,
       mode, rating: displayRating, deviation: 200,
     }).then((r) => {
       if (typeof r.ratingDiff === "number") setRatingDiff(r.ratingDiff);
       if (r.glicko) setDisplayRating(Math.round(r.glicko.r));
       qc.invalidateQueries({ queryKey: ["me-rating"] }); // refresh the navbar rating
     }).catch(() => {});
-  }, [puzzle, difficulty, userId, mode, displayRating, qc]);
+  }, [puzzle, difficulty, userId, mode, displayRating, qc, theme]);
 
   const finish = useCallback(() => {
     solved.current = true;

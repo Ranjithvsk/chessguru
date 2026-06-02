@@ -103,7 +103,7 @@ export class PuzzlesService {
     return d ? applyLastMove(fmtPuzzle(d)) : null;
   }
 
-  async complete(id: string, body: { win: boolean; userId?: string | null; hint?: boolean; mode?: string; rating?: number; deviation?: number }) {
+  async complete(id: string, body: { win: boolean; userId?: string | null; hint?: boolean; mode?: string; rating?: number; deviation?: number; theme?: string }) {
     const pz = await this.col().findOne({ _id: id as any });
     if (!pz) return null;
     await this.col().updateOne({ _id: id as any }, { $inc: { plays: 1 } });
@@ -128,6 +128,7 @@ export class PuzzlesService {
           pr: Math.round(puzzleGlicko.r ?? 1500),             // puzzle rating
           th: Array.isArray(pz.themes) ? pz.themes : [],      // puzzle themes (for categorising)
           k: key,                                             // "puzzle" | "blindfold"
+          sel: body.theme ?? null,                            // selected filter ("mix" = All themes)
         } },
         { upsert: true },
       );
