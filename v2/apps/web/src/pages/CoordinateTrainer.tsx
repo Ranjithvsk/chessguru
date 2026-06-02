@@ -53,6 +53,7 @@ const glyphStyle = (white: boolean): React.CSSProperties =>
 export default function CoordinateTrainer() {
   const [orientation, setOrientation] = useState<"white" | "black">("white");
   const [showCoords, setShowCoords] = useState(false);
+  const [timed, setTimed] = useState(true);
   const [phase, setPhase] = useState<"idle" | "run" | "done">("idle");
   const [placed, setPlaced] = useState<Record<string, string>>({});
   const [target, setTarget] = useState<Target | null>(null);
@@ -70,16 +71,16 @@ export default function CoordinateTrainer() {
   }, []);
 
   useEffect(() => {
-    if (phase !== "run") return;
+    if (phase !== "run" || !timed) return;
     timer.current = window.setInterval(() => {
       setTimeLeft((t) => { if (t <= 1) { if (timer.current) window.clearInterval(timer.current); setPhase("done"); return 0; } return t - 1; });
     }, 1000);
     return () => { if (timer.current) window.clearInterval(timer.current); };
-  }, [phase]);
+  }, [phase, timed]);
 
   useEffect(() => {
-    if (phase === "done") setBest((b) => { const nb = Math.max(b, score); try { localStorage.setItem("cg_coord_best", String(nb)); } catch { /* */ } return nb; });
-  }, [phase, score]);
+    if (phase === "done" && timed) setBest((b) => { const nb = Math.max(b, score); try { localStorage.setItem("cg_coord_best", String(nb)); } catch { /* */ } return nb; });
+  }, [phase, score, timed]);
 
   // shared placement check (used by both drag-drop and click-to-place)
   const tryPlace = useCallback((piece: Sel, sq: string) => {
@@ -140,11 +141,13 @@ export default function CoordinateTrainer() {
             </div>
             <div className="text-right text-sm leading-tight">
               <div className="font-semibold text-accent-400">&#10003; {score}</div>
-              <div className="text-ink-400">{timeLeft}s</div>
+              <div className="text-ink-400">{timed ? `${timeLeft}s` : "\u221E"}</div>
               <div className="font-semibold text-rose-400">&#10007; {wrong}</div>
             </div>
           </div>
-          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-ink-800"><div className="h-full bg-accent-500" style={{ width: `${(timeLeft / SECONDS) * 100}%` }} /></div>
+          {timed
+            ? <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-ink-800"><div className="h-full bg-accent-500" style={{ width: `${(timeLeft / SECONDS) * 100}%` }} /></div>
+            : <button onClick={() => { if (timer.current) window.clearInterval(timer.current); setPhase("done"); }} className="mt-2 w-full rounded-lg border border-ink-600 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">Finish &amp; see score</button>}
         </div>
       )}
 
@@ -175,13 +178,16 @@ export default function CoordinateTrainer() {
         {(["white", "black"] as const).map((o) => (
           <button key={o} onClick={() => setOrientation(o)} className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold capitalize ${orientation === o ? "bg-brand-600 text-white" : "border border-ink-700 text-ink-300 hover:bg-ink-800"}`}>{o}</button>
         ))}
+      </div>
+      <div className="flex items-center gap-2">
         <button onClick={() => setShowCoords((v) => !v)} className="flex-1 rounded-lg border border-ink-600 px-3 py-2 text-sm font-medium text-ink-300 hover:bg-ink-800">{showCoords ? "Hide coords" : "Show coords"}</button>
+        <button onClick={() => setTimed((v) => !v)} className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium ${timed ? "border border-ink-600 text-ink-300 hover:bg-ink-800" : "bg-brand-600 text-white"}`}>{timed ? "Timer: On" : "Timer: Off (practice)"}</button>
       </div>
 
       {phase !== "run" && (
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-4 text-center">
           {phase === "done" ? (
-            <div className="mb-2"><span className="text-sm text-ink-400">Time! You placed </span><span className="font-display text-2xl font-bold text-accent-400">{score}</span><span className="text-sm text-ink-400"> · best {best}</span></div>
+            <div className="mb-2"><span className="text-sm text-ink-400">{timed ? "Time! You placed " : "You placed "}</span><span className="font-display text-2xl font-bold text-accent-400">{score}</span><span className="text-sm text-ink-400">{timed ? ` · best ${best}` : ""}</span></div>
           ) : (
             <p className="mb-2 text-sm text-ink-400">A piece + square appears. <b className="text-white">Drag</b> the matching piece onto the square — or <b className="text-white">tap the piece then the square</b>. Best: {best}</p>
           )}
