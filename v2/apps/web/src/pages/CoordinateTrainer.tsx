@@ -4,7 +4,6 @@ import Board from "../components/Board";
 
 const FILES = "abcdefgh";
 const SECONDS = 45;
-// roles in order: pawn, knight, bishop, rook, queen, king
 const ROLES = [
   { wc: "P", bc: "p", glyph: "♟", label: "Pawn" },
   { wc: "N", bc: "n", glyph: "♞", label: "Knight" },
@@ -80,7 +79,6 @@ export default function CoordinateTrainer() {
     if (phase === "done") setBest((b) => { const nb = Math.max(b, score); try { localStorage.setItem("cg_coord_best", String(nb)); } catch { /* */ } return nb; });
   }, [phase, score]);
 
-  // pointer drag (mouse + touch): bind move/up only while a drag is active
   useEffect(() => {
     if (!drag) return;
     const ori = orientation; const t = target;
@@ -89,13 +87,11 @@ export default function CoordinateTrainer() {
       setDrag(null);
       const sq = squareFromPoint(e.clientX, e.clientY, ori);
       if (!sq || !t) return;
-      const ok = ((drag.white) === t.white) && drag.roleIdx === t.roleIdx && sq === t.sq;
+      const ok = (drag.white === t.white) && drag.roleIdx === t.roleIdx && sq === t.sq;
       if (ok) {
         setPlaced((p) => { const np = { ...p, [sq]: tChar(t) }; const nt = pickTarget(np); setTarget(nt); if (!nt) { if (timer.current) window.clearInterval(timer.current); setPhase("done"); } return np; });
         setScore((s) => s + 1);
-      } else {
-        setWrong((w) => w + 1); setWrongFlash(true); window.setTimeout(() => setWrongFlash(false), 450);
-      }
+      } else { setWrong((w) => w + 1); setWrongFlash(true); window.setTimeout(() => setWrongFlash(false), 450); }
     };
     window.addEventListener("pointermove", mv, { passive: false });
     window.addEventListener("pointerup", up);
@@ -109,69 +105,77 @@ export default function CoordinateTrainer() {
     setDrag({ white, roleIdx, x: e.clientX, y: e.clientY });
   };
 
-  return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-      <section>
-        <Board key={showCoords ? "coords-on" : "coords-off"} fen={fenFromPlaced(placed)} orientation={orientation}
-          coordinates={showCoords} viewOnly movableColor={undefined} dests={new Map()} />
-      </section>
-      <aside className="flex flex-col gap-4">
-        <Link to="/study" className="text-sm text-ink-400 hover:text-white">&larr; All studies</Link>
-        <div className={`rounded-xl2 border bg-ink-900 p-5 transition-colors ${wrongFlash ? "border-rose-500" : "border-ink-700"}`}>
-          {phase === "run" && target ? (
-            <>
-              <div className="text-xs uppercase tracking-wide text-ink-500">Drag this piece to…</div>
-              <div className="my-2 flex items-center justify-center gap-3">
-                <span className="text-5xl leading-none" style={glyphStyle(target.white)}>{ROLES[target.roleIdx]!.glyph}</span>
-                <div className="text-left">
-                  <div className="font-display text-3xl font-bold text-white">{target.sq}</div>
-                  <div className="text-xs text-ink-400">{tLabel(target)}</div>
-                </div>
-              </div>
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-ink-800"><div className="h-full bg-accent-500" style={{ width: `${(timeLeft / SECONDS) * 100}%` }} /></div>
-              <div className="mt-2 flex justify-between text-sm">
-                <span className="font-semibold text-accent-400">&#10003; {score}</span>
-                <span className="text-ink-400">{timeLeft}s</span>
-                <span className="font-semibold text-rose-400">&#10007; {wrong}</span>
-              </div>
-            </>
-          ) : (
-            <div className="text-center">
-              {phase === "done" ? (
-                <><div className="text-sm text-ink-400">Time! You placed</div><div className="my-1 font-display text-6xl font-bold text-accent-400">{score}</div><div className="text-xs text-ink-500">pieces correctly &middot; best {best}</div></>
-              ) : (
-                <p className="mb-2 text-sm text-ink-400">A piece + square appears. <b className="text-white">Drag the matching piece</b> from the tray onto that square. Best: {best}</p>
-              )}
-              <button onClick={start} className="mt-4 w-full rounded-lg bg-brand-600 px-3 py-2.5 font-semibold text-white hover:bg-brand-500">{phase === "done" ? "Play again" : "Start"}</button>
-            </div>
-          )}
-        </div>
-
-        {/* piece tray */}
-        <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-4">
-          <div className="mb-2 text-xs uppercase tracking-wide text-ink-500">Pieces — drag onto the board</div>
-          {([true, false] as const).map((white) => (
-            <div key={String(white)} className="flex justify-between gap-1">
-              {ROLES.map((role, ri) => (
-                <div key={ri} onPointerDown={startDrag(white, ri)}
-                  style={{ touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: phase === "run" ? "grab" : "default" }}
-                  className="grid h-10 w-10 place-items-center rounded-lg text-3xl leading-none hover:bg-ink-800">
-                  <span style={glyphStyle(white)}>{role.glyph}</span>
-                </div>
-              ))}
+  const Tray = (
+    <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-2">
+      {([true, false] as const).map((white) => (
+        <div key={String(white)} className="flex justify-around gap-1">
+          {ROLES.map((role, ri) => (
+            <div key={ri} onPointerDown={startDrag(white, ri)}
+              style={{ touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: phase === "run" ? "grab" : "default", opacity: phase === "run" ? 1 : 0.5 }}
+              className="grid h-10 w-10 place-items-center rounded-lg text-3xl leading-none hover:bg-ink-800">
+              <span style={glyphStyle(white)}>{role.glyph}</span>
             </div>
           ))}
         </div>
+      ))}
+    </div>
+  );
 
-        <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
-          <div className="mb-2 flex gap-2">
-            {(["white", "black"] as const).map((o) => (
-              <button key={o} onClick={() => setOrientation(o)} className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold capitalize ${orientation === o ? "bg-brand-600 text-white" : "border border-ink-700 text-ink-300 hover:bg-ink-800"}`}>{o}</button>
-            ))}
+  return (
+    <div className="mx-auto max-w-md space-y-3 pb-24">
+      <div className="flex items-center justify-between">
+        <Link to="/study" className="text-sm text-ink-400 hover:text-white">&larr; All studies</Link>
+        <span className="text-xs font-medium text-ink-500">Coordinate Training</span>
+      </div>
+
+      {/* prompt + score (only while running) */}
+      {phase === "run" && target && (
+        <div className={`rounded-xl2 border bg-ink-900 p-3 transition-colors ${wrongFlash ? "border-rose-500" : "border-ink-700"}`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-4xl leading-none" style={glyphStyle(target.white)}>{ROLES[target.roleIdx]!.glyph}</span>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-ink-500">Drag to</div>
+                <div className="font-display text-2xl font-bold leading-tight text-white">{target.sq}</div>
+                <div className="text-[11px] text-ink-400">{tLabel(target)}</div>
+              </div>
+            </div>
+            <div className="text-right text-sm leading-tight">
+              <div className="font-semibold text-accent-400">&#10003; {score}</div>
+              <div className="text-ink-400">{timeLeft}s</div>
+              <div className="font-semibold text-rose-400">&#10007; {wrong}</div>
+            </div>
           </div>
-          <button onClick={() => setShowCoords((v) => !v)} className="w-full rounded-lg border border-ink-600 px-3 py-2 text-sm font-medium text-ink-300 hover:bg-ink-800">{showCoords ? "Hide coordinates" : "Show coordinates"}</button>
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-ink-800"><div className="h-full bg-accent-500" style={{ width: `${(timeLeft / SECONDS) * 100}%` }} /></div>
         </div>
-      </aside>
+      )}
+
+      {/* PIECE TRAY — on top */}
+      {Tray}
+
+      {/* BOARD — below the tray */}
+      <Board key={showCoords ? "coords-on" : "coords-off"} fen={fenFromPlaced(placed)} orientation={orientation}
+        coordinates={showCoords} viewOnly movableColor={undefined} dests={new Map()} />
+
+      {/* controls */}
+      <div className="flex items-center gap-2">
+        {(["white", "black"] as const).map((o) => (
+          <button key={o} onClick={() => setOrientation(o)} className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold capitalize ${orientation === o ? "bg-brand-600 text-white" : "border border-ink-700 text-ink-300 hover:bg-ink-800"}`}>{o}</button>
+        ))}
+        <button onClick={() => setShowCoords((v) => !v)} className="flex-1 rounded-lg border border-ink-600 px-3 py-2 text-sm font-medium text-ink-300 hover:bg-ink-800">{showCoords ? "Hide coords" : "Show coords"}</button>
+      </div>
+
+      {/* START / result — at the bottom */}
+      {phase !== "run" && (
+        <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-4 text-center">
+          {phase === "done" ? (
+            <div className="mb-2"><span className="text-sm text-ink-400">Time! You placed </span><span className="font-display text-2xl font-bold text-accent-400">{score}</span><span className="text-sm text-ink-400"> · best {best}</span></div>
+          ) : (
+            <p className="mb-2 text-sm text-ink-400">A piece + square appears — drag the matching piece from the tray onto that square. Best: {best}</p>
+          )}
+          <button onClick={start} className="w-full rounded-lg bg-brand-600 px-3 py-2.5 font-semibold text-white hover:bg-brand-500">{phase === "done" ? "Play again" : "Start"}</button>
+        </div>
+      )}
 
       {drag && (
         <div style={{ position: "fixed", left: drag.x, top: drag.y, transform: "translate(-50%,-55%)", pointerEvents: "none", zIndex: 60, fontSize: 46, lineHeight: 1 }}>
