@@ -53,6 +53,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   const [ratingDiff, setRatingDiff] = useState<number | null>(null);
   const [displayRating, setDisplayRating] = useState(initialRating);
   const [, force] = useState(0);
+  const [replayPly, setReplayPly] = useState<number | null>(null); // post-solve move replay (null = live)
 
   useEffect(() => setDisplayRating(initialRating), [initialRating]);
 
@@ -77,6 +78,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
     setRatingDiff(null);
     setFb({ kind: "wait", title: "Your turn", sub: `Find the best move for ${pc}` });
     try { if (puzzle.id) localStorage.setItem(STORE_KEY, puzzle.id); } catch { /* */ }
+    setReplayPly(null);
   }, [puzzle]);
 
   const submit = useCallback((win: boolean) => {
@@ -180,15 +182,38 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
     step();
   }, []);
 
+  // Post-solve replay: step through the puzzle's positions with back/forward arrows.
+  const replayView = useMemo(() => {
+    if (replayPly == null || !puzzle) return null;
+    const c = new Chess();
+    try { c.load(puzzle.fen); } catch { return null; }
+    let last: [Key, Key] | undefined = puzzle.lastMove
+      ? [puzzle.lastMove.slice(0, 2) as Key, puzzle.lastMove.slice(2, 4) as Key]
+      : undefined;
+    for (let i = 0; i < replayPly && i < solution.current.length; i++) {
+      const mv = solution.current[i];
+      if (!mv) break;
+      try {
+        c.move({ from: mv.slice(0, 2), to: mv.slice(2, 4), promotion: (mv[4] as any) || "q" });
+        last = [mv.slice(0, 2) as Key, mv.slice(2, 4) as Key];
+      } catch { break; }
+    }
+    return { fen: c.fen(), lastMove: last };
+  }, [replayPly, puzzle]);
+  const replayPrev = useCallback(() => setReplayPly((p) => Math.max(0, (p ?? solution.current.length) - 1)), []);
+  const replayNext = useCallback(() => setReplayPly((p) => Math.min(solution.current.length, (p ?? solution.current.length) + 1)), []);
+
   const next = useCallback(() => { try { localStorage.removeItem(STORE_KEY); } catch { /* */ } setNonce((n) => n + 1); }, []);
 
   return {
     puzzle, isFetching,
-    fen, orientation, turnColor: playerColor(),
+    fen: replayView ? replayView.fen : fen,
+    orientation, turnColor: playerColor(),
     movableColor: solved.current ? undefined : playerColor(),
-    dests, lastMove, hintShapes,
+    dests, lastMove: replayView ? replayView.lastMove : lastMove, hintShapes,
     fb, ratingDiff, displayRating,
     solved: solved.current, hinted: hinted.current, failed: failed.current,
     onMove, tryInput, showHint, viewSolution, next,
+    replayPly, replayTotal: solution.current.length, replayPrev, replayNext,
   };
 }

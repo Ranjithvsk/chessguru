@@ -42,10 +42,21 @@ export default function PuzzlesPage() {
               </div>
             </div>
             {g.solved && (
-              <button onClick={g.next} disabled={g.isFetching}
-                className="shrink-0 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
-                {g.isFetching ? "…" : "Next →"}
-              </button>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {g.replayTotal > 0 && (
+                  <div className="flex items-center gap-1 rounded-lg border border-ink-600 bg-ink-800 px-1 py-1" title="Replay the moves">
+                    <button onClick={g.replayPrev} aria-label="Previous move"
+                      className="grid h-7 w-7 place-items-center rounded text-ink-200 hover:bg-ink-700">◀</button>
+                    <span className="min-w-[2.5rem] text-center text-xs tabular-nums text-ink-400">{(g.replayPly ?? g.replayTotal)}/{g.replayTotal}</span>
+                    <button onClick={g.replayNext} aria-label="Next move"
+                      className="grid h-7 w-7 place-items-center rounded text-ink-200 hover:bg-ink-700">▶</button>
+                  </div>
+                )}
+                <button onClick={g.next} disabled={g.isFetching}
+                  className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
+                  {g.isFetching ? "…" : "Next →"}
+                </button>
+              </div>
             )}
           </div>
         </div>
