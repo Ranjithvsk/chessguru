@@ -4,7 +4,9 @@ import { Connection } from "mongoose";
 import { updatePuzzleRating, DEFAULT_VOLATILITY } from "../glicko/glicko";
 import { fmtPuzzle, applyLastMove } from "../lib/puzzle-format";
 
-const DIFF: Record<string, number> = { easiest: -600, easier: -300, normal: 0, harder: 300, hardest: 600 };
+// CL-9156c: "normal" = ~125 below the user's live rating (comfortable level the user
+// solves most of); ladder steps from there. Offsets apply to the LIVE rating (CL-9156b).
+const DIFF: Record<string, number> = { easiest: -600, easier: -300, normal: -125, harder: 300, hardest: 600 };
 const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
 // Cap the exclusion set so $nin stays cheap even for very active accounts.
 const MAX_PLAYED = 5000;
@@ -44,7 +46,16 @@ export class PuzzlesService {
   }
 
   async random(theme: string, difficulty: string, rating: number, maxPc?: number, userId?: string | null) {
-    const target = clamp(rating + (DIFF[difficulty] ?? 0), 400, 3000);
+    // CL-9156b: use the user's CURRENT puzzle rating from userperfs as the base,
+    // not the client-passed `rating` (which lags — frozen near page load — so as
+    // the user climbs during a session, puzzles were served ~100-150 below).
+    let baseRating = rating;
+    if (userId) {
+      const up = await this.conn.db!.collection("userperfs").findOne({ _id: userId as any }, { projection: { "puzzle.gl.r": 1 } });
+      const liveR = (up as any)?.puzzle?.gl?.r;
+      if (typeof liveR === "number" && liveR > 0) baseRating = liveR;
+    }
+    const target = clamp(baseRating + (DIFF[difficulty] ?? 0), 400, 3000);
     const played = userId ? await this.playedIds(userId) : [];
     const playedSet = new Set(played);
 
