@@ -3,6 +3,7 @@ import { useOutletContext } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { Difficulty } from "@chessguru/types";
 import Board from "../components/Board";
+import SolvedStrip from "../components/SolvedStrip";
 import { api } from "../lib/api";
 import { usePuzzleGame } from "../hooks/usePuzzleGame";
 import { prettify } from "../lib/format";
@@ -27,6 +28,18 @@ export default function PuzzlesPage() {
           movableColor={g.movableColor} dests={g.dests} lastMove={g.lastMove}
           shapes={g.hintShapes} onMove={g.onMove}
         />
+        {g.solved && g.replayTotal > 0 && (
+          <div className="mt-3 flex items-center justify-center gap-3">
+            <button onClick={g.replayPrev} aria-label="Previous move"
+              className="grid h-9 w-9 place-items-center rounded-lg border border-ink-600 bg-ink-800 text-lg text-ink-200 hover:bg-ink-700">◀</button>
+            <span className="min-w-[3rem] text-center text-sm tabular-nums text-ink-300">{(g.replayPly ?? g.replayTotal)} / {g.replayTotal}</span>
+            <button onClick={g.replayNext} aria-label="Next move"
+              className="grid h-9 w-9 place-items-center rounded-lg border border-ink-600 bg-ink-800 text-lg text-ink-200 hover:bg-ink-700">▶</button>
+          </div>
+        )}
+        <div className="mt-3">
+          <SolvedStrip onSelect={g.review} />
+        </div>
       </section>
 
       <aside className="flex flex-col gap-4">
@@ -42,21 +55,10 @@ export default function PuzzlesPage() {
               </div>
             </div>
             {g.solved && (
-              <div className="flex shrink-0 items-center gap-1.5">
-                {g.replayTotal > 0 && (
-                  <div className="flex items-center gap-1 rounded-lg border border-ink-600 bg-ink-800 px-1 py-1" title="Replay the moves">
-                    <button onClick={g.replayPrev} aria-label="Previous move"
-                      className="grid h-7 w-7 place-items-center rounded text-ink-200 hover:bg-ink-700">◀</button>
-                    <span className="min-w-[2.5rem] text-center text-xs tabular-nums text-ink-400">{(g.replayPly ?? g.replayTotal)}/{g.replayTotal}</span>
-                    <button onClick={g.replayNext} aria-label="Next move"
-                      className="grid h-7 w-7 place-items-center rounded text-ink-200 hover:bg-ink-700">▶</button>
-                  </div>
-                )}
-                <button onClick={g.next} disabled={g.isFetching}
-                  className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
-                  {g.isFetching ? "…" : "Next →"}
-                </button>
-              </div>
+              <button onClick={g.next} disabled={g.isFetching}
+                className="shrink-0 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
+                {g.isFetching ? "…" : (g.reviewing ? "Back to training →" : "Next →")}
+              </button>
             )}
           </div>
         </div>

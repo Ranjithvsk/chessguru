@@ -22,12 +22,16 @@ export interface UsePuzzleGameOpts {
 export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   const { theme, difficulty, userId, initialRating, mode = "puzzle", maxPc } = opts;
   const [nonce, setNonce] = useState(0);
+  const [reviewId, setReviewId] = useState<string | null>(null); // reviewing a past solve (from the solved strip)
+  const reviewIdRef = useRef<string | null>(null);
+  reviewIdRef.current = reviewId;
   const qc = useQueryClient();
   const STORE_KEY = mode === "blindfold" ? "cg_puzzle_bf" : "cg_puzzle";
 
   const { data: puzzle, isFetching } = useQuery({
-    queryKey: ["puzzle", mode, theme, difficulty, maxPc ?? 0, userId ?? "guest", nonce],
+    queryKey: ["puzzle", mode, theme, difficulty, maxPc ?? 0, userId ?? "guest", reviewId ?? "", nonce],
     queryFn: () => {
+      if (reviewId) return api.puzzleById(reviewId); // reviewing a past solve from the strip
       // Resume the saved (unsolved) puzzle whenever one is stored. Read it live
       // each fetch so it survives the queryKey changing when auth (userId) resolves
       // after the first render — otherwise refresh would load a new random puzzle.
@@ -66,19 +70,36 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
     game.current = new Chess();
     try { game.current.load(puzzle.fen); } catch { /* ignore bad fen */ }
     solution.current = puzzle.solution ?? [];
-    idx.current = 0;
-    solved.current = false;
     failed.current = false;
     hinted.current = false;
     const pc = playerColor();
     setOrientation(pc);
-    setLastMove(puzzle.lastMove ? [puzzle.lastMove.slice(0, 2) as Key, puzzle.lastMove.slice(2, 4) as Key] : undefined);
     setHintShapes([]);
-    setFen(puzzle.fen);
     setRatingDiff(null);
-    setFb({ kind: "wait", title: "Your turn", sub: `Find the best move for ${pc}` });
-    try { if (puzzle.id) localStorage.setItem(STORE_KEY, puzzle.id); } catch { /* */ }
-    setReplayPly(null);
+    if (reviewIdRef.current && puzzle.id === reviewIdRef.current) {
+      // Review a past solve: play out the whole line, show the final position,
+      // enable replay (back/forward), and never submit (rating untouched).
+      for (let i = 0; i < solution.current.length; i++) {
+        const mv = solution.current[i];
+        if (!mv) break;
+        try { game.current.move({ from: mv.slice(0, 2), to: mv.slice(2, 4), promotion: (mv[4] as any) || "q" }); } catch { break; }
+      }
+      idx.current = solution.current.length;
+      solved.current = true;
+      const lastMv = solution.current[solution.current.length - 1];
+      setLastMove(lastMv ? [lastMv.slice(0, 2) as Key, lastMv.slice(2, 4) as Key] : undefined);
+      setFen(game.current.fen());
+      setReplayPly(solution.current.length);
+      setFb({ kind: "solved", title: "Reviewing", sub: "Step through with the arrows" });
+    } else {
+      idx.current = 0;
+      solved.current = false;
+      setLastMove(puzzle.lastMove ? [puzzle.lastMove.slice(0, 2) as Key, puzzle.lastMove.slice(2, 4) as Key] : undefined);
+      setFen(puzzle.fen);
+      setReplayPly(null);
+      setFb({ kind: "wait", title: "Your turn", sub: `Find the best move for ${pc}` });
+      try { if (puzzle.id) localStorage.setItem(STORE_KEY, puzzle.id); } catch { /* */ }
+    }
   }, [puzzle]);
 
   const submit = useCallback((win: boolean) => {
@@ -90,6 +111,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
       if (typeof r.ratingDiff === "number") setRatingDiff(r.ratingDiff);
       if (r.glicko) setDisplayRating(Math.round(r.glicko.r));
       qc.invalidateQueries({ queryKey: ["me-rating"] }); // refresh the navbar rating
+      qc.invalidateQueries({ queryKey: ["me-history"] }); // refresh the solved strip
     }).catch(() => {});
   }, [puzzle, difficulty, userId, mode, displayRating, qc, theme]);
 
@@ -203,7 +225,8 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   const replayPrev = useCallback(() => setReplayPly((p) => Math.max(0, (p ?? solution.current.length) - 1)), []);
   const replayNext = useCallback(() => setReplayPly((p) => Math.min(solution.current.length, (p ?? solution.current.length) + 1)), []);
 
-  const next = useCallback(() => { try { localStorage.removeItem(STORE_KEY); } catch { /* */ } setNonce((n) => n + 1); }, []);
+  const next = useCallback(() => { try { localStorage.removeItem(STORE_KEY); } catch { /* */ } setReviewId(null); setNonce((n) => n + 1); }, []);
+  const review = useCallback((id: string) => { setReplayPly(null); setReviewId(id); }, []);
 
   return {
     puzzle, isFetching,
@@ -213,7 +236,8 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
     dests, lastMove: replayView ? replayView.lastMove : lastMove, hintShapes,
     fb, ratingDiff, displayRating,
     solved: solved.current, hinted: hinted.current, failed: failed.current,
-    onMove, tryInput, showHint, viewSolution, next,
+    onMove, tryInput, showHint, viewSolution, next, review,
     replayPly, replayTotal: solution.current.length, replayPrev, replayNext,
+    reviewing: reviewId != null,
   };
 }
