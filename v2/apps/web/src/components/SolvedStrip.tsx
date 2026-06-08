@@ -47,7 +47,7 @@ export default function SolvedStrip({ onSelect }: { onSelect: (id: string) => vo
   if (!data?.loggedIn || todays.length === 0) return null;
 
   return (
-    <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-3">
+    <div className="min-w-0 rounded-xl2 border border-ink-700 bg-ink-900 p-3">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-xs font-semibold uppercase tracking-wide text-ink-400">Today · {todays.length} solved</span>
         <span className="text-[11px] text-ink-500">tap to review</span>

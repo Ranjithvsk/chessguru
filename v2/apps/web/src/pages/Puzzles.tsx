@@ -22,7 +22,7 @@ export default function PuzzlesPage() {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-      <section>
+      <section className="min-w-0">
         <Board
           fen={g.fen} orientation={g.orientation} turnColor={g.turnColor}
           movableColor={g.movableColor} dests={g.dests} lastMove={g.lastMove}
