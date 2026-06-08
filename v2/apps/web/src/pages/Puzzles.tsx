@@ -37,12 +37,9 @@ export default function PuzzlesPage() {
               className="grid h-9 w-9 place-items-center rounded-lg border border-ink-600 bg-ink-800 text-lg text-ink-200 hover:bg-ink-700">▶</button>
           </div>
         )}
-        <div className="mt-3">
-          <SolvedStrip onSelect={g.review} />
-        </div>
       </section>
 
-      <aside className="flex flex-col gap-4">
+      <aside className="flex min-w-0 flex-col gap-4">
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
@@ -62,6 +59,8 @@ export default function PuzzlesPage() {
             )}
           </div>
         </div>
+
+        <SolvedStrip onSelect={g.review} />
 
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
           <div className="flex items-center justify-between">
