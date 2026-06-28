@@ -8,6 +8,7 @@ import chess
 from pymongo import MongoClient, ASCENDING
 
 LC0  = "/home/ubuntu/engines/lc0"
+SF   = "/home/ubuntu/engines/stockfish18"
 MAIA = sorted(glob.glob("/home/ubuntu/engines/maia/maia-*.pb.gz"))   # 1100,1300,1500,1700,1900
 TB_API = "https://tablebase.lichess.ovh/standard?fen="
 FILES = "abcdefgh"
@@ -86,6 +87,10 @@ class Eng:
         s.cmd("position fen "+fen); s.cmd("go nodes 1")
         l=s.until(lambda x:x.startswith("bestmove"))
         return l.split()[1] if l else None
+    def bestmove_mt(s,fen,ms=60):
+        s.cmd("position fen "+fen); s.cmd("go movetime "+str(ms))
+        l=s.until(lambda x:x.startswith("bestmove"))
+        return l.split()[1] if l else None
     def close(s):
         try: s.cmd("quit"); s.p.wait(timeout=3)
         except Exception:
@@ -94,23 +99,35 @@ class Eng:
 
 def band_of(net): return int(re.search(r"maia-(\d+)", net).group(1))
 
+def _converts(maia, sf, fen, cap=110):
+    b=chess.Board(fen)                       # white to move = the player (a maia band); black = Stockfish
+    for _ in range(cap):
+        if b.is_checkmate(): return b.turn==chess.BLACK          # black mated -> the player converted
+        if b.is_stalemate() or b.is_insufficient_material() or b.is_fifty_moves(): return False
+        mv = maia.bestmove(b.fen()) if b.turn==chess.WHITE else sf.bestmove_mt(b.fen())
+        if not mv: return False
+        try: b.push_uci(mv)
+        except Exception: return False
+    return False
+
 def maia_probe(positions):
-    # positions: list of (idx, fen, winmoves set). Returns idx -> lowest band that keeps the win, or None.
-    # "skip" sentinel if probe could not run at all (no maia signal -> seed uses curated+dtm only).
+    # Multi-ply playout: player = maia(band), defender = Stockfish. The LOWEST band that converts the
+    # whole mate within the 50-move rule = the human level that can actually solve it. "skip" if engines fail.
     if not MAIA: return {i:"skip" for i,_,_ in positions}
-    result={i:None for i,_,_ in positions}; ran=False
-    for net in MAIA:
-        band=band_of(net)
-        try:
-            e=Eng(LC0,[f"--weights={net}","--backend=blas"]); e.ready(); ran=True
-            for i,fen,winmoves in positions:
-                if result[i] is not None: continue
-                mv=e.bestmove(fen)
-                if mv and mv in winmoves: result[i]=band
-            e.close()
-        except Exception as ex:
-            print(f"[maia {band}] failed: {ex}", file=sys.stderr)
-    if not ran: return {i:"skip" for i,_,_ in positions}
+    result={i:None for i,_,_ in positions}
+    try:
+        sf=Eng(SF); sf.ready()
+        engs={}
+        for net in MAIA:
+            band=band_of(net); e=Eng(LC0,[f"--weights={net}","--backend=blas"]); e.ready(); engs[band]=e
+        for i,fen,_ in positions:
+            for band in sorted(engs):
+                if _converts(engs[band], sf, fen): result[i]=band; break
+        for e in engs.values(): e.close()
+        sf.close()
+    except Exception as ex:
+        print(f"[playout] failed: {ex}", file=sys.stderr)
+        return {i:"skip" for i,_,_ in positions}
     return result
 
 def seed_rating(t, dtm, maia_band):
