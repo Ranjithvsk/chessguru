@@ -18,7 +18,8 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export interface RandomPuzzleOpts { theme: string; rating: number; difficulty: Difficulty; maxPc?: number; userId?: string | null; }
+export interface RandomPuzzleOpts { theme: string; rating: number; difficulty: Difficulty; maxPc?: number; userId?: string | null; section?: string; player?: string; }
+export interface MasterPlayer { name: string; count: number; }
 export interface CompleteBody { win: boolean; hint: boolean; difficulty: Difficulty; userId: string | null; mode?: "puzzle" | "blindfold"; rating?: number; deviation?: number; theme?: string; }
 export interface AuthResult { ok: boolean; error?: string; }
 
@@ -38,20 +39,25 @@ export interface HistoryReport {
   byTheme?: { theme: string; total: number; wins: number }[];
   byBand?: { band: string; lo: number; total: number; wins: number }[];
   items?: HistoryItem[];
+  hasMore?: boolean;
+  nextOffset?: number;
 }
 
 export const api = {
   me: () => get<AuthMe>("/auth/me"),
   myRating: () => get<MeRating>("/api/me/rating"),
-  history: () => get<HistoryReport>("/api/me/history"),
+  history: (offset = 0) => get<HistoryReport>(`/api/me/history?offset=${offset}`),
   themes: () => get<{ themes: string[] }>("/api/themes"),
   randomPuzzle: (opts: RandomPuzzleOpts) => {
     const p = new URLSearchParams({ theme: opts.theme, rating: String(opts.rating), difficulty: opts.difficulty });
     if (opts.maxPc) p.set("maxPc", String(opts.maxPc));
     if (opts.userId) p.set("userId", opts.userId);
+    if (opts.section) p.set("section", opts.section);
+    if (opts.player) p.set("player", opts.player);
     return get<Puzzle>(`/api/puzzles/random?${p.toString()}`);
   },
   puzzleById: (id: string) => get<Puzzle>(`/api/puzzles/${encodeURIComponent(id)}`),
+  masterPlayers: () => get<MasterPlayer[]>("/api/puzzles/master-players"),
   complete: (id: string, body: CompleteBody) => post<CompleteResult>(`/api/puzzles/${encodeURIComponent(id)}/complete`, body),
 
   signin: (username: string, password: string, keep: boolean) => post<AuthResult>("/auth/signin", { username, password, keep }),
@@ -68,3 +74,7 @@ export const api = {
   queueStats: () => get<{ counts: Record<string, number>; recent: { id: string; gameId: string; state: string; ts: number }[] }>("/api/admin/queue"),
   enqueueExtraction: (limit: number) => post<{ enqueued: number; availableGames: number }>("/api/admin/extract", { limit }),
 };
+
+// Study-puzzle rating summary per study type (study-factory). Used by the Study list to show level.
+export interface StudyLevel { n: number; min: number; avg: number; max: number; }
+export const studyLevels = () => get<Record<string, StudyLevel>>("/study/levels");
