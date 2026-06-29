@@ -146,17 +146,21 @@ export default function StudyTrainer() {
   const resumeOrNew = useCallback(() => {
     let saved: string | null = null;
     try { saved = localStorage.getItem(STORE_KEY); } catch { /* */ }
+    let meta: { id?: string; rating?: number; result?: string } | null = null;
+    try { meta = JSON.parse(localStorage.getItem(`${STORE_KEY}_meta`) || "null"); } catch { /* */ }
+    // A pre-rating saved position (no meta) on a DB-backed drill -> fetch a fresh RATED puzzle instead.
+    if (saved && !meta && def && (def.kind === "mate" || def.kind === "stopPawn")) { void newPosition(); return; }
     if (saved) {
       try {
         game.current = new Chess(saved);
         setFen(saved); setLastMove(undefined); setThinking(false);
-        try { const m = JSON.parse(localStorage.getItem(`${STORE_KEY}_meta`) || "null"); if (m) { setRating(m.rating ?? null); setVerdict(m.result ?? null); verdictRef.current = m.result ?? null; puzzleIdRef.current = m.id ?? null; reportedRef.current = false; } } catch { /* */ }
+        if (meta) { setRating(meta.rating ?? null); setVerdict(meta.result ?? null); verdictRef.current = meta.result ?? null; puzzleIdRef.current = meta.id ?? null; reportedRef.current = false; }
         setStatus({ kind: "play", msg: "Your move \u2014 pick up where you left off." });
         return;
       } catch { /* fall through */ }
     }
-    newPosition();
-  }, [newPosition, STORE_KEY]);
+    void newPosition();
+  }, [newPosition, STORE_KEY, def]);
 
   useEffect(() => {
     if (!def) return;
