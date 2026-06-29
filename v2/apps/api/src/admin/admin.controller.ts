@@ -1,4 +1,5 @@
-import { Controller, Get, Param, Post, Query, Req, UnauthorizedException } from "@nestjs/common";
+import { Controller, Get, Param, Post, Query, Req, UnauthorizedException, ForbiddenException } from "@nestjs/common";
+import { isAdmin } from "./admins";
 import { AdminService } from "./admin.service";
 
 @Controller()
@@ -8,6 +9,16 @@ export class AdminController {
   private requireAuth(req: any) {
     if (!req.session?.userId) throw new UnauthorizedException("login required");
   }
+
+  private requireAdmin(req: any) {
+    if (!isAdmin(req.session?.userId)) throw new ForbiddenException("admin only");
+  }
+
+  @Get("admin/users")
+  users(@Req() req: any) { this.requireAdmin(req); return this.admin.listUsers(); }
+
+  @Get("admin/users/:username")
+  userDetail(@Param("username") username: string, @Req() req: any) { this.requireAdmin(req); return this.admin.userDetail(username); }
 
   @Get("status/overview")
   overview() { return this.admin.overview(); }

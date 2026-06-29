@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { isAdmin } from "../admin/admins";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import bcrypt from "bcryptjs";
@@ -54,7 +55,7 @@ export class AuthService {
 
   me(session: any) {
     if (!session?.userId) return { loggedIn: false };
-    return { loggedIn: true, username: session.username, userId: session.userId };
+    return { loggedIn: true, username: session.username, userId: session.userId, admin: isAdmin(session.userId) };
   }
 
   logout(session: any): Promise<{ ok: boolean }> {

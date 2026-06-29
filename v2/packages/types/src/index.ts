@@ -19,6 +19,17 @@ export interface Puzzle {
   glicko?: Glicko;
   lastMove?: string; // opponent setup move (UCI), already reflected in `fen`
   preFen?: string;   // position before `lastMove`
+  // GM "Master Games" puzzles (source:"broadcast") only:
+  source?: string;
+  whiteName?: string;
+  blackName?: string;
+  whiteElo?: number;
+  blackElo?: number;
+  winnerName?: string;
+  loserName?: string;
+  winnerElo?: number;
+  loserElo?: number;
+  pov?: "white" | "black";
 }
 
 export type Difficulty = "easiest" | "easier" | "normal" | "harder" | "hardest";
@@ -40,4 +51,5 @@ export interface AuthMe {
   loggedIn: boolean;
   userId?: string;
   username?: string;
+  admin?: boolean;
 }

@@ -8,14 +8,18 @@ import HistoryPage from "./pages/History";
 import StudyPage from "./pages/Study";
 import StudyTrainer from "./pages/StudyTrainer";
 import CoordinateTrainer from "./pages/CoordinateTrainer";
+import MemoryPalace from "./pages/MemoryPalace";
+import OpeningMemory from "./pages/OpeningMemory";
 import BlindfoldPage from "./pages/Blindfold";
 import OpeningPage from "./pages/Opening";
 import EngineBattlePage from "./pages/EngineBattle";
 import BoardEditorPage from "./pages/BoardEditor";
 import LoginPage from "./pages/Login";
 import AdminPage from "./pages/Admin";
+import AdminUsersPage from "./pages/AdminUsers";
 import PlayPage from "./pages/Play";
 import FeedbackUITestPage from "./pages/FeedbackUITest";
+import BookPage from "./pages/Book";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -35,13 +39,17 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="history" element={<HistoryPage />} />
             <Route path="study" element={<StudyPage />} />
             <Route path="study/coordinates" element={<CoordinateTrainer />} />
+            <Route path="study/memory-palace" element={<MemoryPalace />} />
+            <Route path="study/opening-memory" element={<OpeningMemory />} />
             <Route path="study/:id" element={<StudyTrainer />} />
             <Route path="opening" element={<OpeningPage />} />
             <Route path="engine-battle" element={<EngineBattlePage />} />
             <Route path="board-editor" element={<BoardEditorPage />} />
             <Route path="admin" element={<AdminPage />} />
+            <Route path="admin/users" element={<AdminUsersPage />} />
             <Route path="login" element={<LoginPage />} />
             <Route path="test/feedback-ui" element={<FeedbackUITestPage />} />
+            <Route path="book" element={<BookPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

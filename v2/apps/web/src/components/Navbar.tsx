@@ -4,6 +4,7 @@ import InstallButton from "./InstallButton";
 const links = [
   { to: "/", label: "Puzzles", end: true },
   { to: "/play", label: "Play" },
+  { to: "/book", label: "Book" },
   { to: "/blindfold", label: "Blindfold" },
   { to: "/history", label: "History" },
   { to: "/study", label: "Study" },
@@ -13,9 +14,9 @@ const links = [
   { to: "/admin", label: "Factory" },
 ];
 
-interface Props { rating?: number; username?: string; onLogout?: () => void; }
+interface Props { rating?: number; username?: string; admin?: boolean; onLogout?: () => void; }
 
-export default function Navbar({ rating, username, onLogout }: Props) {
+export default function Navbar({ rating, username, admin, onLogout }: Props) {
   return (
     <header className="sticky top-0 z-50 border-b border-ink-700/70 bg-ink-900/80 backdrop-blur">
       <nav className="mx-auto flex h-14 max-w-6xl items-center gap-1 px-4">
@@ -33,6 +34,15 @@ export default function Navbar({ rating, username, onLogout }: Props) {
               {l.label}
             </NavLink>
           ))}
+          {admin && (
+            <NavLink to="/admin/users"
+              className={({ isActive }) =>
+                `whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                  isActive ? "bg-brand-600 text-white" : "text-amber-300 hover:bg-ink-800 hover:text-white"
+                }`}>
+              Admin
+            </NavLink>
+          )}
         </div>
         <div className="ml-auto flex items-center gap-3 pl-2">
           <InstallButton />

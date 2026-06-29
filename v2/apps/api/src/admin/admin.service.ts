@@ -55,4 +55,46 @@ export class AdminService {
   }
   async approve(id: string) { await this.p().updateOne({ _id: id as any }, { $set: { verified: true, rejected: false } }); this.statsCache = null; return { ok: true }; }
   async reject(id: string) { await this.p().updateOne({ _id: id as any }, { $set: { verified: false, rejected: true } }); this.statsCache = null; return { ok: true }; }
+
+  async listUsers() {
+    const db = this.db();
+    const users = await db.collection("users").find({}, { projection: { bpass: 0 } }).toArray();
+    const perfs = await db.collection("userperfs").find({}).toArray();
+    const pm: Record<string, any> = {}; for (const p of perfs) pm[String(p._id)] = p;
+    const agg = await db.collection("rounds").aggregate([
+      { $project: { uid: { $arrayElemAt: [{ $split: ["$_id", ":"] }, 0] }, d: 1, w: 1 } },
+      { $group: { _id: "$uid", solves: { $sum: 1 }, wins: { $sum: { $cond: ["$w", 1, 0] } }, last: { $max: "$d" } } },
+    ]).toArray();
+    const rm: Record<string, any> = {}; for (const r of agg) rm[String(r._id)] = r;
+    return users.map((u: any) => {
+      const pf = pm[u.username] || {}; const rd = rm[u.username] || {};
+      const study = pf.study ? Object.fromEntries(Object.entries(pf.study).map(([k, v]: any) => [k, Math.round(v?.gl?.r ?? 0)])) : {};
+      return {
+        username: u.username, email: u.email || null, createdAt: u.createdAt || null,
+        puzzleRating: pf.puzzle?.gl?.r ? Math.round(pf.puzzle.gl.r) : null,
+        solves: rd.solves ?? u.count ?? 0, wins: rd.wins ?? 0,
+        lastActive: rd.last || pf.puzzle?.la || null, study,
+      };
+    }).sort((a: any, b: any) => b.solves - a.solves);
+  }
+
+  async userDetail(username: string) {
+    const db = this.db();
+    const u: any = await db.collection("users").findOne({ username }, { projection: { bpass: 0 } });
+    if (!u) return null;
+    const pf: any = await db.collection("userperfs").findOne({ _id: username as any });
+    const lo = username + ":", hi = username + ";";
+    const rounds = await db.collection("rounds").find({ _id: { $gte: lo, $lt: hi } as any }).sort({ d: -1 }).limit(50).toArray();
+    const ratings: Record<string, { r: number; nb: number }> = {};
+    if (pf) for (const [k, v] of Object.entries(pf)) {
+      if (k === "_id") continue;
+      const val: any = v;
+      if (val?.gl?.r) ratings[k] = { r: Math.round(val.gl.r), nb: val.nb || 0 };
+      else if (k === "study" && val) for (const [t, sv] of Object.entries(val)) { const s2: any = sv; if (s2?.gl?.r) ratings["study:" + t] = { r: Math.round(s2.gl.r), nb: s2.nb || 0 }; }
+    }
+    return {
+      username: u.username, email: u.email || null, createdAt: u.createdAt || null, ratings,
+      recent: rounds.map((r: any) => ({ puzzleId: String(r._id).split(":")[1], win: !!r.w, at: r.d, rating: r.r ?? null, ratingDiff: r.rd ?? null, themes: r.th || [] })),
+    };
+  }
 }
