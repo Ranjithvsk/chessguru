@@ -152,18 +152,86 @@ def gen_candidate(t):
     return {"type":t,"fen":fen,"result":"win","dtm":abs(d.get("dtm") or 0),
             "solution":([sol] if sol else []), "_winmoves":winmoves}
 
+# ---- Pawn drills (Queen/Rook vs Pawns) — result can be WIN or DRAW (cursed-win/blessed-loss => practical draw).
+PAWN_TYPES = {
+  "stop-the-pawn":  {"piece": "Q", "base": 1000},   # study id (King+Queen vs King+Pawns)
+  "rook-stop-pawn": {"piece": "R", "base": 1300},   # study id (King+Rook  vs King+Pawns)
+}
+
+def random_vskp_fen(piece, pawns):
+    # Port of StudyTrainer randomVsKP: white K + piece vs black K + N pawns on ranks 2-4 (racing to promote).
+    for _ in range(5000):
+        wk=rsq(); wp=rsq(); bk=rsq(); used={wk,wp,bk}
+        if len(used)!=3 or adjacent(wk,bk): continue
+        place={wk:"K", wp:piece, bk:"k"}
+        files=list(FILES); random.shuffle(files); placed=0
+        for f in files:
+            if placed>=pawns: break
+            sq=f+str(2+random.randint(0,2))
+            if sq in used: continue
+            used.add(sq); place[sq]="p"; placed+=1
+        if placed<pawns: continue
+        fen=to_fen(place,"w")
+        try: b=chess.Board(fen)
+        except Exception: continue
+        if (not b.is_valid()) or b.is_check() or b.is_game_over(): continue
+        return fen
+    return None
+
+def pawn_seed_rating(t, pawns, result, dtm):
+    r = PAWN_TYPES[t]["base"] + (pawns-1)*150
+    if result=="draw": r += 80                                   # recognising/securing a draw is its own skill
+    else: r += max(-100, min(150, int((abs(dtm)-20)*4)))
+    return max(500, min(2600, r))
+
+def gen_pawn_candidate(t, pawns):
+    fen=random_vskp_fen(PAWN_TYPES[t]["piece"], pawns)
+    if not fen: return None
+    d=tb_lookup(fen); time.sleep(0.7)
+    if not d: return None
+    cat=d.get("category")
+    if cat not in ("win","draw","cursed-win","blessed-loss"): return None   # skip losses (player can't do anything)
+    result = "win" if cat=="win" else "draw"                                # cursed-win/blessed-loss => practical draw (50-move)
+    moves=d.get("moves",[]); sol=moves[0]["uci"] if moves else None
+    dtm=abs(d.get("dtm") or 0)
+    return {"type":t,"fen":fen,"result":result,"dtm":dtm,"solution":([sol] if sol else []),
+            "pawns":pawns,"rating":pawn_seed_rating(t,pawns,result,dtm),"seedMethod":"curated-pawns","maiaBand":None}
+
+def run_pawns(col, types, per, now):
+    from pymongo import ASCENDING as ASC
+    col.create_index([("type",ASC),("pawns",ASC),("rating",ASC)])
+    ins=0
+    for t in types:
+        for pawns in (1,2,3,4):
+            n=0
+            for _ in range(per*5):
+                if n>=per: break
+                c=gen_pawn_candidate(t, pawns)
+                if not c: continue
+                doc={**c, "rd":350, "vol":0.06, "nb":0, "createdAt":now}
+                try: col.update_one({"fen":c["fen"]}, {"$setOnInsert":doc}, upsert=True); ins+=1; n+=1
+                except Exception as e: print(f"[mongo] {e}", file=sys.stderr)
+            print(f"[pawns] {t} {pawns}-pawn: {n}", file=sys.stderr)
+    print(f"[done] upserted {ins} pawn puzzles into chessguru.study_puzzles")
+
 def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("--count", type=int, default=10, help="puzzles per type")
     ap.add_argument("--types", default=",".join(TYPES), help="comma list of study types")
     ap.add_argument("--no-maia", action="store_true", help="skip the maia probe (faster; curated+dtm seed)")
+    ap.add_argument("--mode", default="mate", choices=["mate","pawns"])
     ap.add_argument("--mongo", default="mongodb://127.0.0.1:27017")
     a=ap.parse_args()
-    types=[t.strip() for t in a.types.split(",") if t.strip() in TYPES]
+    allkeys = set(TYPES) | set(PAWN_TYPES)
+    types=[t.strip() for t in a.types.split(",") if t.strip() in allkeys]
 
     cli=MongoClient(a.mongo); col=cli["chessguru"]["study_puzzles"]
     col.create_index([("type",ASCENDING),("rating",ASCENDING)])
     col.create_index([("fen",ASCENDING)], unique=True)
+    now=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    if a.mode=="pawns":
+        pt=[t for t in types if t in PAWN_TYPES] or list(PAWN_TYPES)
+        run_pawns(col, pt, a.count, now); return
 
     cands=[]
     for t in types:

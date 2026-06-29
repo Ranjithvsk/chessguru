@@ -32,14 +32,16 @@ export class StudyService {
   }
 
   // One puzzle of `type` near `level` (matchmaking) — a beginner never gets a GM puzzle.
-  async puzzle(type: string, level: number) {
+  async puzzle(type: string, level: number, pawns?: number) {
+    const base: any = { type };
+    if (pawns) base.pawns = pawns;
     const band = 175;
-    let docs = await this.col().find({ type, rating: { $gte: level - band, $lte: level + band } }).limit(50).toArray();
-    if (!docs.length) docs = await this.col().find({ type }).limit(50).toArray();
+    let docs = await this.col().find({ ...base, rating: { $gte: level - band, $lte: level + band } }).limit(50).toArray();
+    if (!docs.length) docs = await this.col().find(base).limit(50).toArray();
     if (!docs.length) return null;
     const d = docs[Math.floor(Math.random() * docs.length)];
     if (!d) return null;
-    return { id: String(d._id), fen: d.fen, rating: d.rating, result: d.result, dtm: d.dtm, solution: d.solution };
+    return { id: String(d._id), fen: d.fen, rating: d.rating, result: d.result, dtm: d.dtm, solution: d.solution, pawns: d.pawns ?? null };
   }
 
   // Record a solve/fail: Glicko-update the users per-study rating AND self-calibrate the puzzles rating.

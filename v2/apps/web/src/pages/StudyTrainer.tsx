@@ -112,6 +112,7 @@ export default function StudyTrainer() {
   const userRatingRef = useRef(1200);
   const puzzleIdRef = useRef<string | null>(null);
   const reportedRef = useRef(false);
+  const verdictRef = useRef<string | null>(null);
 
   const pieces = def?.pieces ?? ["Q"];
   const kind = def?.kind ?? "mate";
@@ -120,11 +121,11 @@ export default function StudyTrainer() {
     // Prefer a RATED puzzle from the study DB at the player's level (matchmaking); else local generation.
     if (def && (kind === "mate" || kind === "stopPawn")) {
       try {
-        const p = await studyPuzzle(def.id, userRatingRef.current);
+        const p = await studyPuzzle(def.id, userRatingRef.current, kind === "stopPawn" ? pawnCount : undefined);
         if (p && p.fen) {
           game.current = new Chess(p.fen);
           setFen(p.fen); setLastMove(undefined);
-          setRating(p.rating); setVerdict(p.result);
+          setRating(p.rating); setVerdict(p.result); verdictRef.current = p.result;
           puzzleIdRef.current = p.id; reportedRef.current = false;
           setStatus({ kind: "play", msg: p.result === "draw" ? "Theoretical DRAW — can you hold it?" : "Your move — drive the king to the edge and checkmate." });
           try { localStorage.setItem(STORE_KEY, p.fen); localStorage.setItem(`${STORE_KEY}_meta`, JSON.stringify({ id: p.id, rating: p.rating, result: p.result })); } catch { /* */ }
@@ -135,7 +136,7 @@ export default function StudyTrainer() {
     const f = kind === "stopPawn" ? randomVsKP(pieces[0] ?? "Q", pawnCount) : randomMate(pieces);
     game.current = new Chess(f);
     setFen(f); setLastMove(undefined);
-    setRating(null); setVerdict(null);
+    setRating(null); setVerdict(null); verdictRef.current = null;
     puzzleIdRef.current = null; reportedRef.current = false;
     setStatus({ kind: "play", msg: "Your move — drive the king to the edge and checkmate." });
     try { localStorage.setItem(STORE_KEY, f); localStorage.removeItem(`${STORE_KEY}_meta`); } catch { /* */ }
@@ -149,7 +150,7 @@ export default function StudyTrainer() {
       try {
         game.current = new Chess(saved);
         setFen(saved); setLastMove(undefined); setThinking(false);
-        try { const m = JSON.parse(localStorage.getItem(`${STORE_KEY}_meta`) || "null"); if (m) { setRating(m.rating ?? null); setVerdict(m.result ?? null); puzzleIdRef.current = m.id ?? null; reportedRef.current = false; } } catch { /* */ }
+        try { const m = JSON.parse(localStorage.getItem(`${STORE_KEY}_meta`) || "null"); if (m) { setRating(m.rating ?? null); setVerdict(m.result ?? null); verdictRef.current = m.result ?? null; puzzleIdRef.current = m.id ?? null; reportedRef.current = false; } } catch { /* */ }
         setStatus({ kind: "play", msg: "Your move \u2014 pick up where you left off." });
         return;
       } catch { /* fall through */ }
@@ -203,8 +204,14 @@ export default function StudyTrainer() {
       else { setStatus({ kind: "win", msg: `Checkmate! \u{1F389} Mated in ${moveNo()} moves.` }); reportResult(true); }
       return true;
     }
-    if (game.current.isStalemate()) { setStatus({ kind: "draw", msg: "Stalemate — a draw. Tap New position ↻" }); reportResult(false); return true; }
-    if (game.current.isDraw()) { setStatus({ kind: "draw", msg: "Draw (repetition / 50-move / no mating material). Tap New position ↻" }); reportResult(false); return true; }
+    if (game.current.isStalemate() || game.current.isDraw()) {
+      const held = verdictRef.current === "draw";          // a theoretical-draw position: surviving to a draw = success
+      setStatus(held
+        ? { kind: "win", msg: "Draw secured! \u{1F389} You held the theoretical draw \u2014 that is the win here." }
+        : { kind: "draw", msg: "Draw \u2014 but this one was winnable. Tap New position ↻" });
+      reportResult(held);
+      return true;
+    }
     return false;
   };
 

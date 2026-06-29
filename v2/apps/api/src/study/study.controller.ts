@@ -12,8 +12,8 @@ export class StudyController {
   me(@Query("type") type: string, @Req() req: any) { return this.study.me(req?.session?.userId ?? null, type); }
 
   @Get("puzzle")
-  puzzle(@Query("type") type: string, @Query("level") level?: string) {
-    return this.study.puzzle(type, Number(level) || 1200);
+  puzzle(@Query("type") type: string, @Query("level") level?: string, @Query("pawns") pawns?: string) {
+    return this.study.puzzle(type, Number(level) || 1200, pawns ? Number(pawns) : undefined);
   }
 
   @Post(":id/complete")
