@@ -20,7 +20,7 @@ export class AuthService {
     const existing = await col.findOne({ username: { $regex: new RegExp("^" + esc(username) + "$", "i") } });
     if (existing) return { ok: false, error: "Username already taken." };
     const hash = await bcrypt.hash(password, 10);
-    const doc = { _id: username.toLowerCase(), username, bpass: hash, email: email || null, createdAt: new Date() };
+    const doc = { _id: username.toLowerCase(), username, bpass: hash, email: email || null, createdAt: new Date(), lastLogin: new Date() };
     await col.insertOne(doc as any);
     session.userId = doc._id;
     session.username = username;
@@ -50,6 +50,7 @@ export class AuthService {
     session.userId = user._id;
     session.username = user.username;
     if (keep && session.cookie) session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
+    await col.updateOne({ _id: user._id }, { $set: { lastLogin: new Date() } });
     return { ok: true };
   }
 

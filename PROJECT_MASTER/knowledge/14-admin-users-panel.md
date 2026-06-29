@@ -45,3 +45,8 @@ Dedicated subdomain for the ChessGuru admin (was sharing an nginx block with the
   -> ranjith_vsk), and (b) admin.service listUsers/userDetail key perf+round lookups by _id, not the
   display-case username (was returning blank ratings/solves). Verified _id-keyed lookup yields real stats
   for all users; api-only fix (no web rebuild). Refresh the page; no re-login needed.
+
+## 2026-06-29 — last-login tracking
+auth.service stamps `users.lastLogin = new Date()` on every signin AND register. Admin listUsers/userDetail
+return `lastLogin`; AdminUsers.tsx shows a "Last login" column + in the detail header. Verified the stamp
+updates on signin. NOTE: existing users show "—" until their NEXT login (no backfill of past logins possible).

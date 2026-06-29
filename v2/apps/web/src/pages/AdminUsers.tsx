@@ -40,6 +40,7 @@ export default function AdminUsersPage() {
               <th className="px-3 py-2">User</th>
               <th className="px-3 py-2">Email</th>
               <th className="px-3 py-2">Joined</th>
+              <th className="px-3 py-2">Last login</th>
               <th className="px-3 py-2">Puzzle</th>
               <th className="px-3 py-2">Solves</th>
               <th className="px-3 py-2">Win%</th>
@@ -53,14 +54,15 @@ export default function AdminUsersPage() {
                 <td className="px-3 py-2 font-medium text-white">{u.username}</td>
                 <td className="px-3 py-2 text-ink-300">{u.email || "—"}</td>
                 <td className="px-3 py-2 text-ink-400">{fmtDate(u.createdAt)}</td>
+                <td className="px-3 py-2 text-ink-400">{fmtAgo(u.lastLogin)}</td>
                 <td className="px-3 py-2">{u.puzzleRating ?? "—"}</td>
                 <td className="px-3 py-2">{u.solves}</td>
                 <td className="px-3 py-2">{u.solves ? Math.round((u.wins / u.solves) * 100) + "%" : "—"}</td>
                 <td className="px-3 py-2 text-ink-400">{fmtAgo(u.lastActive)}</td>
               </tr>
             ))}
-            {isLoading && <tr><td colSpan={7} className="px-3 py-6 text-center text-ink-400">Loading…</td></tr>}
-            {!isLoading && (users ?? []).length === 0 && <tr><td colSpan={7} className="px-3 py-6 text-center text-ink-400">No users.</td></tr>}
+            {isLoading && <tr><td colSpan={8} className="px-3 py-6 text-center text-ink-400">Loading…</td></tr>}
+            {!isLoading && (users ?? []).length === 0 && <tr><td colSpan={8} className="px-3 py-6 text-center text-ink-400">No users.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -70,7 +72,7 @@ export default function AdminUsersPage() {
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-display text-lg text-white">
               {detail.username}{" "}
-              <span className="text-sm text-ink-400">· joined {fmtDate(detail.createdAt)}{detail.email ? " · " + detail.email : ""}</span>
+              <span className="text-sm text-ink-400">· joined {fmtDate(detail.createdAt)} · last login {fmtAgo(detail.lastLogin)}{detail.email ? " · " + detail.email : ""}</span>
             </h2>
             <button onClick={() => setSel(null)} className="text-sm text-ink-400 hover:text-white">close</button>
           </div>

@@ -73,7 +73,7 @@ export class AdminService {
         username: u.username, email: u.email || null, createdAt: u.createdAt || null,
         puzzleRating: pf.puzzle?.gl?.r ? Math.round(pf.puzzle.gl.r) : null,
         solves: rd.solves ?? u.count ?? 0, wins: rd.wins ?? 0,
-        lastActive: rd.last || pf.puzzle?.la || null, study,
+        lastActive: rd.last || pf.puzzle?.la || null, lastLogin: u.lastLogin || null, study,
       };
     }).sort((a: any, b: any) => b.solves - a.solves);
   }
@@ -94,7 +94,7 @@ export class AdminService {
       else if (k === "study" && val) for (const [t, sv] of Object.entries(val)) { const s2: any = sv; if (s2?.gl?.r) ratings["study:" + t] = { r: Math.round(s2.gl.r), nb: s2.nb || 0 }; }
     }
     return {
-      username: u.username, email: u.email || null, createdAt: u.createdAt || null, ratings,
+      username: u.username, email: u.email || null, createdAt: u.createdAt || null, lastLogin: u.lastLogin || null, ratings,
       recent: rounds.map((r: any) => ({ puzzleId: String(r._id).split(":")[1], win: !!r.w, at: r.d, rating: r.r ?? null, ratingDiff: r.rd ?? null, themes: r.th || [] })),
     };
   }

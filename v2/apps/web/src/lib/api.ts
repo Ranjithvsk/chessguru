@@ -89,7 +89,7 @@ export const studyComplete = (id: string, win: boolean, rating: number) =>
   post<{ win: boolean; rating: number; ratingDiff: number; puzzleRating: number }>(`/api/study/${id}/complete`, { win, rating, deviation: 500 });
 
 // --- Admin: registered users + their activity (gated to admins server-side) ---
-export interface AdminUserRow { username: string; email: string | null; createdAt: string | null; puzzleRating: number | null; solves: number; wins: number; lastActive: string | null; study: Record<string, number>; }
+export interface AdminUserRow { username: string; email: string | null; createdAt: string | null; lastLogin: string | null; puzzleRating: number | null; solves: number; wins: number; lastActive: string | null; study: Record<string, number>; }
 export const adminUsers = () => get<AdminUserRow[]>("/api/admin/users");
-export interface AdminUserDetail { username: string; email: string | null; createdAt: string | null; ratings: Record<string, { r: number; nb: number }>; recent: { puzzleId: string; win: boolean; at: string; rating: number | null; ratingDiff: number | null; themes: string[] }[]; }
+export interface AdminUserDetail { username: string; email: string | null; createdAt: string | null; lastLogin: string | null; ratings: Record<string, { r: number; nb: number }>; recent: { puzzleId: string; win: boolean; at: string; rating: number | null; ratingDiff: number | null; themes: string[] }[]; }
 export const adminUserDetail = (u: string) => get<AdminUserDetail>(`/api/admin/users/${encodeURIComponent(u)}`);
