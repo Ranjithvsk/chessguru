@@ -5,7 +5,7 @@ import type { Key } from "chessground/types";
 import Board, { destsFromChess } from "../components/Board";
 import { createEngine, type Engine } from "../lib/engine";
 import { studyById } from "../lib/studies";
-import { studyPuzzle } from "../lib/api";
+import { studyPuzzle, studyMe, studyComplete } from "../lib/api";
 
 const FILES = "abcdefgh";
 const rsq = () => FILES[Math.floor(Math.random() * 8)]! + (Math.floor(Math.random() * 8) + 1);
@@ -107,21 +107,27 @@ export default function StudyTrainer() {
   const [, force] = useState(0);
   const [rating, setRating] = useState<number | null>(null);
   const [verdict, setVerdict] = useState<string | null>(null);
+  const [userRating, setUserRating] = useState<number>(1200);
+  const [ratingDiff, setRatingDiff] = useState<number | null>(null);
+  const userRatingRef = useRef(1200);
+  const puzzleIdRef = useRef<string | null>(null);
+  const reportedRef = useRef(false);
 
   const pieces = def?.pieces ?? ["Q"];
   const kind = def?.kind ?? "mate";
   const newPosition = useCallback(async () => {
-    setThinking(false);
-    // Prefer a RATED puzzle from the study DB (mate/stopPawn drills are seeded there); else local generation.
+    setThinking(false); setRatingDiff(null);
+    // Prefer a RATED puzzle from the study DB at the player's level (matchmaking); else local generation.
     if (def && (kind === "mate" || kind === "stopPawn")) {
       try {
-        const p = await studyPuzzle(def.id, 1200);
+        const p = await studyPuzzle(def.id, userRatingRef.current);
         if (p && p.fen) {
           game.current = new Chess(p.fen);
           setFen(p.fen); setLastMove(undefined);
           setRating(p.rating); setVerdict(p.result);
+          puzzleIdRef.current = p.id; reportedRef.current = false;
           setStatus({ kind: "play", msg: p.result === "draw" ? "Theoretical DRAW — can you hold it?" : "Your move — drive the king to the edge and checkmate." });
-          try { localStorage.setItem(STORE_KEY, p.fen); localStorage.setItem(`${STORE_KEY}_meta`, JSON.stringify({ rating: p.rating, result: p.result })); } catch { /* */ }
+          try { localStorage.setItem(STORE_KEY, p.fen); localStorage.setItem(`${STORE_KEY}_meta`, JSON.stringify({ id: p.id, rating: p.rating, result: p.result })); } catch { /* */ }
           return;
         }
       } catch { /* fall through to local generation */ }
@@ -130,6 +136,7 @@ export default function StudyTrainer() {
     game.current = new Chess(f);
     setFen(f); setLastMove(undefined);
     setRating(null); setVerdict(null);
+    puzzleIdRef.current = null; reportedRef.current = false;
     setStatus({ kind: "play", msg: "Your move — drive the king to the edge and checkmate." });
     try { localStorage.setItem(STORE_KEY, f); localStorage.removeItem(`${STORE_KEY}_meta`); } catch { /* */ }
   }, [kind, pieces, pawnCount, STORE_KEY, def]);
@@ -142,7 +149,7 @@ export default function StudyTrainer() {
       try {
         game.current = new Chess(saved);
         setFen(saved); setLastMove(undefined); setThinking(false);
-        try { const m = JSON.parse(localStorage.getItem(`${STORE_KEY}_meta`) || "null"); if (m) { setRating(m.rating ?? null); setVerdict(m.result ?? null); } } catch { /* */ }
+        try { const m = JSON.parse(localStorage.getItem(`${STORE_KEY}_meta`) || "null"); if (m) { setRating(m.rating ?? null); setVerdict(m.result ?? null); puzzleIdRef.current = m.id ?? null; reportedRef.current = false; } } catch { /* */ }
         setStatus({ kind: "play", msg: "Your move \u2014 pick up where you left off." });
         return;
       } catch { /* fall through */ }
@@ -154,6 +161,12 @@ export default function StudyTrainer() {
     if (!def) return;
     const e = createEngine(); engine.current = e;
     e.ready.then(() => setReady(true)).catch(() => setReady(true));
+    if (def.kind === "mate" || def.kind === "stopPawn") {
+      const RKEY = `cg_study_rating_${def.id}`;
+      let lr = 1200; try { lr = Number(localStorage.getItem(RKEY)) || 1200; } catch { /* */ }
+      setUserRating(lr); userRatingRef.current = lr;
+      studyMe(def.id).then((m) => { if (m && typeof m.rating === "number") { setUserRating(m.rating); userRatingRef.current = m.rating; try { localStorage.setItem(RKEY, String(m.rating)); } catch { /* */ } } }).catch(() => { /* */ });
+    }
     resumeOrNew();
     return () => e.quit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -169,16 +182,29 @@ export default function StudyTrainer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pawnCount]);
 
+  const reportResult = useCallback((win: boolean) => {
+    if (reportedRef.current || !puzzleIdRef.current) return;
+    reportedRef.current = true;
+    studyComplete(puzzleIdRef.current, win, userRatingRef.current)
+      .then((res) => {
+        if (res && typeof res.rating === "number") {
+          setUserRating(res.rating); userRatingRef.current = res.rating;
+          setRatingDiff(typeof res.ratingDiff === "number" ? res.ratingDiff : null);
+          try { localStorage.setItem(`cg_study_rating_${def?.id ?? "x"}`, String(res.rating)); } catch { /* */ }
+        }
+      })
+      .catch(() => { /* offline / non-critical */ });
+  }, [def]);
+
   const moveNo = () => Math.ceil(game.current.history().length / 2);
   const finished = (): boolean => {
     if (game.current.isCheckmate()) {
-      // The side to move is the one that just got mated (player is White).
-      if (game.current.turn() === "w") setStatus({ kind: "draw", msg: "You got checkmated \u{1F62C} Tap New position ↻" });
-      else setStatus({ kind: "win", msg: `Checkmate! \u{1F389} Mated in ${moveNo()} moves.` });
+      if (game.current.turn() === "w") { setStatus({ kind: "draw", msg: "You got checkmated \u{1F62C} Tap New position ↻" }); reportResult(false); }
+      else { setStatus({ kind: "win", msg: `Checkmate! \u{1F389} Mated in ${moveNo()} moves.` }); reportResult(true); }
       return true;
     }
-    if (game.current.isStalemate()) { setStatus({ kind: "draw", msg: "Stalemate — a draw. Tap New position ↻" }); return true; }
-    if (game.current.isDraw()) { setStatus({ kind: "draw", msg: "Draw (repetition / 50-move / no mating material). Tap New position ↻" }); return true; }
+    if (game.current.isStalemate()) { setStatus({ kind: "draw", msg: "Stalemate — a draw. Tap New position ↻" }); reportResult(false); return true; }
+    if (game.current.isDraw()) { setStatus({ kind: "draw", msg: "Draw (repetition / 50-move / no mating material). Tap New position ↻" }); reportResult(false); return true; }
     return false;
   };
 
@@ -257,6 +283,9 @@ export default function StudyTrainer() {
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
           <div className={`text-base font-semibold ${tone}`}>{status.msg}</div>
           <div className="mt-1 text-xs text-ink-500">Move {moveNo()} · {ready ? "engine ready" : "loading engine…"}</div>
+          {(kind === "mate" || kind === "stopPawn") && (
+            <div className="mt-2 text-sm text-ink-300">Your rating: <span className="font-semibold text-white">{userRating}</span>{ratingDiff != null && <span className={ratingDiff >= 0 ? "text-emerald-400" : "text-rose-400"}> {ratingDiff >= 0 ? "+" : ""}{ratingDiff}</span>}</div>
+          )}
           {(status.kind === "win" || status.kind === "draw") && (
             <button onClick={newPosition} className="mt-4 w-full rounded-lg bg-brand-600 px-3 py-2.5 font-semibold text-white hover:bg-brand-500">New position →</button>
           )}

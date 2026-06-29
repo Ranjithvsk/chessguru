@@ -82,3 +82,8 @@ export const studyLevels = () => get<Record<string, StudyLevel>>("/api/study/lev
 export interface StudyPuzzle { id: string; fen: string; rating: number; result: "win" | "draw" | "loss"; dtm: number; solution: string[]; }
 export const studyPuzzle = (type: string, level: number) =>
   get<StudyPuzzle | null>(`/api/study/puzzle?type=${encodeURIComponent(type)}&level=${level}`);
+
+export const studyMe = (type: string) =>
+  get<{ rating: number; nb: number; guest: boolean }>(`/api/study/me?type=${encodeURIComponent(type)}`);
+export const studyComplete = (id: string, win: boolean, rating: number) =>
+  post<{ win: boolean; rating: number; ratingDiff: number; puzzleRating: number }>(`/api/study/${id}/complete`, { win, rating, deviation: 500 });
