@@ -23,11 +23,12 @@ const ratingLabel = (b: number | string) => {
 export default function AdminPage() {
   const { userId } = useOutletContext<Ctx>();
   const qc = useQueryClient();
+  const { data: auth } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
   const [msg, setMsg] = useState("");
-  const { data: ov } = useQuery({ queryKey: ["adm-overview"], queryFn: api.adminOverview });
-  const { data: dist } = useQuery({ queryKey: ["adm-dist"], queryFn: api.adminDistribution });
-  const { data: gen } = useQuery({ queryKey: ["adm-gen"], queryFn: () => api.generatedPuzzles(24) });
-  const { data: queue } = useQuery({ queryKey: ["adm-queue"], queryFn: api.queueStats, refetchInterval: 5000 });
+  const { data: ov } = useQuery({ queryKey: ["adm-overview"], queryFn: api.adminOverview, enabled: !!auth?.admin });
+  const { data: dist } = useQuery({ queryKey: ["adm-dist"], queryFn: api.adminDistribution, enabled: !!auth?.admin });
+  const { data: gen } = useQuery({ queryKey: ["adm-gen"], queryFn: () => api.generatedPuzzles(24), enabled: !!auth?.admin });
+  const { data: queue } = useQuery({ queryKey: ["adm-queue"], queryFn: api.queueStats, refetchInterval: 5000, enabled: !!auth?.admin });
 
   const enqueue = async () => {
     setMsg("Enqueuing…");
@@ -39,6 +40,8 @@ export default function AdminPage() {
   const fmt = (n?: number) => (n ?? 0).toLocaleString();
   const maxTheme = Math.max(1, ...(dist?.themeDist ?? []).map((t) => t.count));
   const maxRating = Math.max(1, ...(dist?.ratingDist ?? []).map((r) => r.count));
+
+  if (auth && !auth.admin) return <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-6 text-rose-200">Not authorized — admin only.</div>;
 
   return (
     <div className="flex flex-col gap-6">

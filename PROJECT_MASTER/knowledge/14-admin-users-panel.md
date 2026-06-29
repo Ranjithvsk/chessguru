@@ -12,3 +12,11 @@ Owner ask 2026-06-29: an admin panel to see registered users + their activity.
 - Web: `pages/AdminUsers.tsx` (table + click-through detail), self-gated (Not-authorized for non-admins).
 - NOTE: the existing factory-admin endpoints (`/api/status/*`, `/api/generated/*`) are still ungated —
   separate pre-existing security item; the NEW user endpoints ARE gated.
+
+## 2026-06-29 — factory-admin endpoints secured
+Closed the pre-existing gap: gated ALL factory/extractor routes to admin-only (was ungated / any-login):
+`/api/status/overview|distribution`, `/api/generated/puzzles|stats`, `/api/admin/queue`, `/api/admin/extract`
+(spawns a node extractor — was any-login), and approve/reject (was any-login). All now 403 unless the
+session user is in ADMIN_USERS (engine.controller + admin.controller use isAdmin). Public endpoints
+(/api/themes etc.) unchanged. Factory page (Admin.tsx) + its navbar link are now admin-only. Verified all
+six endpoints return 403 unauthenticated; /api/themes still 200.

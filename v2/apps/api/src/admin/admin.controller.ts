@@ -21,20 +21,20 @@ export class AdminController {
   userDetail(@Param("username") username: string, @Req() req: any) { this.requireAdmin(req); return this.admin.userDetail(username); }
 
   @Get("status/overview")
-  overview() { return this.admin.overview(); }
+  overview(@Req() req: any) { this.requireAdmin(req); return this.admin.overview(); }
 
   @Get("status/distribution")
-  distribution() { return this.admin.distribution(); }
+  distribution(@Req() req: any) { this.requireAdmin(req); return this.admin.distribution(); }
 
   @Get("generated/puzzles")
-  generated(@Query("limit") limit = "24") { return this.admin.generated(Math.min(Number(limit) || 24, 100)); }
+  generated(@Query("limit") limit = "24", @Req() req: any) { this.requireAdmin(req); return this.admin.generated(Math.min(Number(limit) || 24, 100)); }
 
   @Get("generated/stats")
-  generatedStats() { return this.admin.generatedStats(); }
+  generatedStats(@Req() req: any) { this.requireAdmin(req); return this.admin.generatedStats(); }
 
   @Post("generated/puzzles/:id/approve")
-  approve(@Param("id") id: string, @Req() req: any) { this.requireAuth(req); return this.admin.approve(id); }
+  approve(@Param("id") id: string, @Req() req: any) { this.requireAdmin(req); return this.admin.approve(id); }
 
   @Post("generated/puzzles/:id/reject")
-  reject(@Param("id") id: string, @Req() req: any) { this.requireAuth(req); return this.admin.reject(id); }
+  reject(@Param("id") id: string, @Req() req: any) { this.requireAdmin(req); return this.admin.reject(id); }
 }

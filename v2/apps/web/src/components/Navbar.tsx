@@ -11,7 +11,6 @@ const links = [
   { to: "/opening", label: "Opening" },
   { to: "/engine-battle", label: "Engine" },
   { to: "/board-editor", label: "Editor" },
-  { to: "/admin", label: "Factory" },
 ];
 
 interface Props { rating?: number; username?: string; admin?: boolean; onLogout?: () => void; }
@@ -35,13 +34,22 @@ export default function Navbar({ rating, username, admin, onLogout }: Props) {
             </NavLink>
           ))}
           {admin && (
-            <NavLink to="/admin/users"
-              className={({ isActive }) =>
-                `whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-                  isActive ? "bg-brand-600 text-white" : "text-amber-300 hover:bg-ink-800 hover:text-white"
-                }`}>
-              Admin
-            </NavLink>
+            <>
+              <NavLink to="/admin/users"
+                className={({ isActive }) =>
+                  `whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                    isActive ? "bg-brand-600 text-white" : "text-amber-300 hover:bg-ink-800 hover:text-white"
+                  }`}>
+                Admin
+              </NavLink>
+              <NavLink to="/admin"
+                className={({ isActive }) =>
+                  `whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                    isActive ? "bg-brand-600 text-white" : "text-amber-300 hover:bg-ink-800 hover:text-white"
+                  }`}>
+                Factory
+              </NavLink>
+            </>
           )}
         </div>
         <div className="ml-auto flex items-center gap-3 pl-2">
