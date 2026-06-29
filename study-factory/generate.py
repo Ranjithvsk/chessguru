@@ -214,6 +214,28 @@ def run_pawns(col, types, per, now):
             print(f"[pawns] {t} {pawns}-pawn: {n}", file=sys.stderr)
     print(f"[done] upserted {ins} pawn puzzles into chessguru.study_puzzles")
 
+def _achieves(maia, sf, fen, result, cap=90):
+    # Draw-aware playout: player(white)=maia(band) vs Stockfish(black). WIN position => success iff maia
+    # checkmates; DRAW position => success iff the game reaches a draw (maia does not get mated/lose). The
+    # lowest band that succeeds = the human level that can solve THIS position (not just its pawn count).
+    b=chess.Board(fen)
+    for _ in range(cap):
+        if b.is_checkmate(): return b.turn==chess.BLACK                 # black mated => player won
+        if b.is_stalemate() or b.is_insufficient_material() or b.is_fifty_moves() or b.is_repetition(3):
+            return result=="draw"                                       # a draw outcome: success iff a theoretical draw
+        mv = maia.bestmove(b.fen()) if b.turn==chess.WHITE else sf.bestmove_mt(b.fen())
+        if not mv: return False
+        try: b.push_uci(mv)
+        except Exception: return False
+    return result=="draw"                                              # ran out: held (draw) / didn't convert (win=fail)
+
+def pawn_maia_rating(t, pawns, result, band):
+    base = PAWN_TYPES[t]["base"] + (pawns-1)*120
+    if band is None: return min(2600, base + (320 if result=="win" else 200))   # no band succeeds => very hard
+    r = int(round(0.45*base + 0.55*band))                              # blend the type/pawn floor with the human level
+    if result=="draw": r += 40
+    return max(500, min(2600, r))
+
 def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("--count", type=int, default=10, help="puzzles per type")
