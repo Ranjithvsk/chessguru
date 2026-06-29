@@ -57,3 +57,12 @@ The panel only counted the puzzle `rounds` collection; study solves live in `stu
 adds studySolves/studyWins, a "Study" column, and folds study activity into "Last active" (max of puzzle/
 study/perf dates). userDetail adds a "Recent studies" section (type + win + rating). NOTE: no study activity
 existed before 2026-06-29 (feature went live that day) — yesterday(06-28) shows 0 study solves correctly.
+
+## 2026-06-29 — admin analytics dashboard (overview + richer per-user)
+New GET /api/admin/overview (gated): users {total,newToday,newWeek,active7d,active30d}, solves
+{puzzleTotal,studyTotal,today,week}, signups14 + activity14 (14-day trends, puzzle+study), content
+{puzzlePool, studyTotal, studyByType, studyPending}, inactive[] (14+ days). admin.service.overviewDash().
+userDetail enriched: solvesToday/Week, studySolves/Wins, topThemes, ratingHistory. AdminUsers.tsx renders
+a dashboard (summary cards + 14-day activity bars + content/generation + inactive list) above the table,
+and the detail shows today/week/study% + top themes + a rating-trend sparkline. Verified via gated call
+(users=6, puzzlePool 6.01M, study 532, pending 0). UTC day boundaries.

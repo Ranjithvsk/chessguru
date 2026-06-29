@@ -14,6 +14,9 @@ export class AdminController {
     if (!isAdmin(req.session?.userId)) throw new ForbiddenException("admin only");
   }
 
+  @Get("admin/overview")
+  overviewDash(@Req() req: any) { this.requireAdmin(req); return this.admin.overviewDash(); }
+
   @Get("admin/users")
   users(@Req() req: any) { this.requireAdmin(req); return this.admin.listUsers(); }
 

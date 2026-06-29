@@ -91,5 +91,14 @@ export const studyComplete = (id: string, win: boolean, rating: number) =>
 // --- Admin: registered users + their activity (gated to admins server-side) ---
 export interface AdminUserRow { username: string; email: string | null; createdAt: string | null; lastLogin: string | null; puzzleRating: number | null; solves: number; wins: number; lastActive: string | null; studySolves: number; studyWins: number; study: Record<string, number>; }
 export const adminUsers = () => get<AdminUserRow[]>("/api/admin/users");
-export interface AdminUserDetail { username: string; email: string | null; createdAt: string | null; lastLogin: string | null; ratings: Record<string, { r: number; nb: number }>; recent: { puzzleId: string; win: boolean; at: string; rating: number | null; ratingDiff: number | null; themes: string[] }[]; recentStudy: { type: string; win: boolean; at: string; rating: number | null; ratingDiff: number | null }[]; }
+export interface AdminOverview {
+  users: { total: number; newToday: number; newWeek: number; active7d: number; active30d: number };
+  solves: { puzzleTotal: number; studyTotal: number; today: number; week: number };
+  signups14: { date: string; n: number }[];
+  activity14: { date: string; puzzle: number; study: number }[];
+  content: { puzzlePool: number; studyTotal: number; studyByType: { type: string; n: number }[]; studyPending: number };
+  inactive: { username: string; lastActive: string; days: number }[];
+}
+export const adminOverview = () => get<AdminOverview>("/api/admin/overview");
+export interface AdminUserDetail { username: string; email: string | null; createdAt: string | null; lastLogin: string | null; ratings: Record<string, { r: number; nb: number }>; recent: { puzzleId: string; win: boolean; at: string; rating: number | null; ratingDiff: number | null; themes: string[] }[]; recentStudy: { type: string; win: boolean; at: string; rating: number | null; ratingDiff: number | null }[]; solvesToday: number; solvesWeek: number; studySolves: number; studyWins: number; topThemes: { theme: string; n: number }[]; ratingHistory: number[]; }
 export const adminUserDetail = (u: string) => get<AdminUserDetail>(`/api/admin/users/${encodeURIComponent(u)}`);
