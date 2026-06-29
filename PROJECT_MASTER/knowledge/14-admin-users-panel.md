@@ -34,3 +34,14 @@ Dedicated subdomain for the ChessGuru admin (was sharing an nginx block with the
   by design for a dedicated admin subdomain. Verified: / ->302 /admin/users, /admin/users 200 SPA, /login 200,
   /v2api/api/admin/users 403 unauth. Minor inert leftover: a dead `if ($host = admin.harinitharanjith.com)`
   certbot redirect remains in the DW block (harmless; server_name no longer matches it).
+
+## 2026-06-29 — SSO cookie domain + admin-identity case fix
+- SSO: session cookie now `domain=.harinitharanjith.com` (main.ts reads env COOKIE_DOMAIN; set in pm2 for
+  chessguru-v2-api + pm2 save). One login shared across harinitharanjith.com + admin.harinitharanjith.com.
+  Verified Set-Cookie carries Domain=.harinitharanjith.com. NOTE: cookie also reaches other *.harinitharanjith.com
+  (shop/code/shell) — same owner, ignored there. Existing host-only sessions: re-login once if odd.
+- BUG FIX (Not authorized / blank stats): session.userId is the user _id = username.toLowerCase()
+  (register: _id: username.toLowerCase()). So (a) admins.ts now matches case-insensitively (Ranjith_vsk
+  -> ranjith_vsk), and (b) admin.service listUsers/userDetail key perf+round lookups by _id, not the
+  display-case username (was returning blank ratings/solves). Verified _id-keyed lookup yields real stats
+  for all users; api-only fix (no web rebuild). Refresh the page; no re-login needed.

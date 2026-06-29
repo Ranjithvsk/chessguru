@@ -67,7 +67,7 @@ export class AdminService {
     ]).toArray();
     const rm: Record<string, any> = {}; for (const r of agg) rm[String(r._id)] = r;
     return users.map((u: any) => {
-      const pf = pm[u.username] || {}; const rd = rm[u.username] || {};
+      const pf = pm[String(u._id)] || {}; const rd = rm[String(u._id)] || {};
       const study = pf.study ? Object.fromEntries(Object.entries(pf.study).map(([k, v]: any) => [k, Math.round(v?.gl?.r ?? 0)])) : {};
       return {
         username: u.username, email: u.email || null, createdAt: u.createdAt || null,
@@ -82,8 +82,9 @@ export class AdminService {
     const db = this.db();
     const u: any = await db.collection("users").findOne({ username }, { projection: { bpass: 0 } });
     if (!u) return null;
-    const pf: any = await db.collection("userperfs").findOne({ _id: username as any });
-    const lo = username + ":", hi = username + ";";
+    const id = String(u._id);
+    const pf: any = await db.collection("userperfs").findOne({ _id: id as any });
+    const lo = id + ":", hi = id + ";";
     const rounds = await db.collection("rounds").find({ _id: { $gte: lo, $lt: hi } as any }).sort({ d: -1 }).limit(50).toArray();
     const ratings: Record<string, { r: number; nb: number }> = {};
     if (pf) for (const [k, v] of Object.entries(pf)) {

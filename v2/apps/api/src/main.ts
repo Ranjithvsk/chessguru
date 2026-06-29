@@ -25,8 +25,11 @@ async function bootstrap() {
       secret: process.env.SESSION_SECRET || "cg_v2_dev_secret_change_me",
       resave: false,
       saveUninitialized: false,
+      rolling: true,   // slide the cookie's lifetime forward on every response so an active user never gets logged out mid-use
       store: MongoStore.create({ mongoUrl: MONGO_URI, ttl: 30 * 24 * 60 * 60 }),
-      cookie: { path: "/", httpOnly: true, sameSite: "lax", secure: false, maxAge: 7 * 24 * 60 * 60 * 1000 },
+      // domain=.harinitharanjith.com => one login shared across harinitharanjith.com + admin.harinitharanjith.com (SSO).
+      // Unset (host-only) when COOKIE_DOMAIN is absent, so localhost/dev still works.
+      cookie: { path: "/", httpOnly: true, sameSite: "lax", secure: false, maxAge: 30 * 24 * 60 * 60 * 1000, domain: process.env.COOKIE_DOMAIN || undefined },
     }),
   );
   // /api/* everywhere except the /auth/* routes (kept at root to match the client)
