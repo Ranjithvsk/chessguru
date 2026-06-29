@@ -133,11 +133,11 @@ def maia_probe(positions):
 def seed_rating(t, dtm, maia_band):
     cfg=TYPES[t]; r=cfg["base"]
     r += max(-200, min(200, int((abs(dtm)-cfg["dtm0"])*6)))   # within-type dtm nudge
-    if maia_band == "skip" or maia_band is None and not MAIA:
+    if maia_band == "skip":
         pass
-    elif maia_band is None:           # even maia-1900 throws the win here -> genuinely hard
-        r=max(r,1950)
-    elif maia_band > r+150:           # position meaningfully harder than the type baseline -> raise
+    elif maia_band is None:           # ran but no band converts -> hard, but proportional to the type
+        r += 250
+    elif maia_band > r+150:           # position meaningfully harder than the type baseline -> raise toward it
         r=int(round((r+maia_band)/2))
     return max(400, min(2600, r))
 
