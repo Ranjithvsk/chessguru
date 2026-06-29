@@ -20,3 +20,17 @@ Closed the pre-existing gap: gated ALL factory/extractor routes to admin-only (w
 session user is in ADMIN_USERS (engine.controller + admin.controller use isAdmin). Public endpoints
 (/api/themes etc.) unchanged. Factory page (Admin.tsx) + its navbar link are now admin-only. Verified all
 six endpoints return 403 unauthenticated; /api/themes still 200.
+
+## 2026-06-29 — admin.harinitharanjith.com carved out (LIVE)
+Dedicated subdomain for the ChessGuru admin (was sharing an nginx block with the DreamWorld admin).
+- DNS: Cloudflare A `admin.harinitharanjith.com -> 213.32.21.226` (France, DNS-only/grey, matches apex).
+- nginx (France `/etc/nginx/sites-enabled/{chessguru,dreamworldplants}`): removed admin.harinitharanjith.com
+  from the DW shared block (kept admin.dreamworldplants.com/.in -> :3010 untouched); added a dedicated block
+  in `chessguru` serving the same SPA (/var/www/chessguru) + /v2api -> :4000, with `location = / -> 302 /admin/users`.
+  Reuses existing LE cert `admin.harinitharanjith.com` (valid to Aug 4 2026). Backups: *.bak-carve-* in sites-available.
+- GOTCHA found: sites-enabled/dreamworldplants is a REAL FILE (not a symlink) -> edit the ENABLED copy, not
+  sites-available, or nginx keeps the old server_name (caused a conflicting-server-name warning until fixed).
+- It is a separate origin from harinitharanjith.com, so the admin logs in THERE (session cookie is per-host) -
+  by design for a dedicated admin subdomain. Verified: / ->302 /admin/users, /admin/users 200 SPA, /login 200,
+  /v2api/api/admin/users 403 unauth. Minor inert leftover: a dead `if ($host = admin.harinitharanjith.com)`
+  certbot redirect remains in the DW block (harmless; server_name no longer matches it).
