@@ -66,14 +66,21 @@ export class AdminService {
       { $group: { _id: "$uid", solves: { $sum: 1 }, wins: { $sum: { $cond: ["$w", 1, 0] } }, last: { $max: "$d" } } },
     ]).toArray();
     const rm: Record<string, any> = {}; for (const r of agg) rm[String(r._id)] = r;
+    const sagg = await db.collection("study_rounds").aggregate([
+      { $project: { uid: { $arrayElemAt: [{ $split: ["$_id", ":"] }, 0] }, d: 1, w: 1 } },
+      { $group: { _id: "$uid", solves: { $sum: 1 }, wins: { $sum: { $cond: ["$w", 1, 0] } }, last: { $max: "$d" } } },
+    ]).toArray();
+    const sm: Record<string, any> = {}; for (const r of sagg) sm[String(r._id)] = r;
     return users.map((u: any) => {
-      const pf = pm[String(u._id)] || {}; const rd = rm[String(u._id)] || {};
+      const pf = pm[String(u._id)] || {}; const rd = rm[String(u._id)] || {}; const sd = sm[String(u._id)] || {};
       const study = pf.study ? Object.fromEntries(Object.entries(pf.study).map(([k, v]: any) => [k, Math.round(v?.gl?.r ?? 0)])) : {};
       return {
         username: u.username, email: u.email || null, createdAt: u.createdAt || null,
         puzzleRating: pf.puzzle?.gl?.r ? Math.round(pf.puzzle.gl.r) : null,
         solves: rd.solves ?? u.count ?? 0, wins: rd.wins ?? 0,
-        lastActive: rd.last || pf.puzzle?.la || null, lastLogin: u.lastLogin || null, study,
+        studySolves: sd.solves ?? 0, studyWins: sd.wins ?? 0,
+        lastActive: [rd.last, sd.last, pf.puzzle?.la].filter(Boolean).sort((a: any, b: any) => new Date(b).getTime() - new Date(a).getTime())[0] || null,
+        lastLogin: u.lastLogin || null, study,
       };
     }).sort((a: any, b: any) => b.solves - a.solves);
   }
@@ -86,6 +93,7 @@ export class AdminService {
     const pf: any = await db.collection("userperfs").findOne({ _id: id as any });
     const lo = id + ":", hi = id + ";";
     const rounds = await db.collection("rounds").find({ _id: { $gte: lo, $lt: hi } as any }).sort({ d: -1 }).limit(50).toArray();
+    const srounds = await db.collection("study_rounds").find({ _id: { $gte: lo, $lt: hi } as any }).sort({ d: -1 }).limit(50).toArray();
     const ratings: Record<string, { r: number; nb: number }> = {};
     if (pf) for (const [k, v] of Object.entries(pf)) {
       if (k === "_id") continue;
@@ -96,6 +104,7 @@ export class AdminService {
     return {
       username: u.username, email: u.email || null, createdAt: u.createdAt || null, lastLogin: u.lastLogin || null, ratings,
       recent: rounds.map((r: any) => ({ puzzleId: String(r._id).split(":")[1], win: !!r.w, at: r.d, rating: r.r ?? null, ratingDiff: r.rd ?? null, themes: r.th || [] })),
+      recentStudy: srounds.map((r: any) => ({ type: r.t || "?", win: !!r.w, at: r.d, rating: r.r ?? null, ratingDiff: r.rd ?? null })),
     };
   }
 }

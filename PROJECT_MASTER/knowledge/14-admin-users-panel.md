@@ -50,3 +50,10 @@ Dedicated subdomain for the ChessGuru admin (was sharing an nginx block with the
 auth.service stamps `users.lastLogin = new Date()` on every signin AND register. Admin listUsers/userDetail
 return `lastLogin`; AdminUsers.tsx shows a "Last login" column + in the detail header. Verified the stamp
 updates on signin. NOTE: existing users show "—" until their NEXT login (no backfill of past logins possible).
+
+## 2026-06-29 — study activity tracked in admin (like puzzles)
+The panel only counted the puzzle `rounds` collection; study solves live in `study_rounds` (written by
+/api/study/:id/complete for logged-in users, started 2026-06-29). Now listUsers aggregates study_rounds too:
+adds studySolves/studyWins, a "Study" column, and folds study activity into "Last active" (max of puzzle/
+study/perf dates). userDetail adds a "Recent studies" section (type + win + rating). NOTE: no study activity
+existed before 2026-06-29 (feature went live that day) — yesterday(06-28) shows 0 study solves correctly.

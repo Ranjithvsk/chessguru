@@ -44,6 +44,7 @@ export default function AdminUsersPage() {
               <th className="px-3 py-2">Puzzle</th>
               <th className="px-3 py-2">Solves</th>
               <th className="px-3 py-2">Win%</th>
+              <th className="px-3 py-2">Study</th>
               <th className="px-3 py-2">Last active</th>
             </tr>
           </thead>
@@ -58,11 +59,12 @@ export default function AdminUsersPage() {
                 <td className="px-3 py-2">{u.puzzleRating ?? "—"}</td>
                 <td className="px-3 py-2">{u.solves}</td>
                 <td className="px-3 py-2">{u.solves ? Math.round((u.wins / u.solves) * 100) + "%" : "—"}</td>
+                <td className="px-3 py-2" title={u.studySolves ? Math.round((u.studyWins / u.studySolves) * 100) + "% solved" : ""}>{u.studySolves || "—"}</td>
                 <td className="px-3 py-2 text-ink-400">{fmtAgo(u.lastActive)}</td>
               </tr>
             ))}
-            {isLoading && <tr><td colSpan={8} className="px-3 py-6 text-center text-ink-400">Loading…</td></tr>}
-            {!isLoading && (users ?? []).length === 0 && <tr><td colSpan={8} className="px-3 py-6 text-center text-ink-400">No users.</td></tr>}
+            {isLoading && <tr><td colSpan={9} className="px-3 py-6 text-center text-ink-400">Loading…</td></tr>}
+            {!isLoading && (users ?? []).length === 0 && <tr><td colSpan={9} className="px-3 py-6 text-center text-ink-400">No users.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -88,6 +90,17 @@ export default function AdminUsersPage() {
             {detail.recent.map((r, i) => (
               <div key={i} className="flex items-center justify-between border-t border-ink-800 py-1.5 text-sm">
                 <span className={r.win ? "text-emerald-400" : "text-rose-400"}>{r.win ? "✓ win" : "✗ miss"}</span>
+                <span className="text-ink-400">{r.rating ?? "—"}{r.ratingDiff != null ? ` (${r.ratingDiff >= 0 ? "+" : ""}${r.ratingDiff})` : ""}</span>
+                <span className="text-ink-500">{fmtAgo(r.at)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 text-xs font-semibold uppercase tracking-wide text-ink-400">Recent studies ({detail.recentStudy.length})</div>
+          <div className="mt-2 max-h-64 overflow-y-auto">
+            {detail.recentStudy.length === 0 && <p className="text-sm text-ink-400">No study solves yet.</p>}
+            {detail.recentStudy.map((r, i) => (
+              <div key={i} className="flex items-center justify-between border-t border-ink-800 py-1.5 text-sm">
+                <span className={r.win ? "text-emerald-400" : "text-rose-400"}>{r.win ? "✓" : "✗"} {r.type}</span>
                 <span className="text-ink-400">{r.rating ?? "—"}{r.ratingDiff != null ? ` (${r.ratingDiff >= 0 ? "+" : ""}${r.ratingDiff})` : ""}</span>
                 <span className="text-ink-500">{fmtAgo(r.at)}</span>
               </div>
