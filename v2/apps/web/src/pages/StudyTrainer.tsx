@@ -5,6 +5,7 @@ import type { Key } from "chessground/types";
 import Board, { destsFromChess } from "../components/Board";
 import { createEngine, type Engine } from "../lib/engine";
 import { studyById } from "../lib/studies";
+import { studyPuzzle } from "../lib/api";
 
 const FILES = "abcdefgh";
 const rsq = () => FILES[Math.floor(Math.random() * 8)]! + (Math.floor(Math.random() * 8) + 1);
@@ -59,14 +60,25 @@ function randomMate(pieces: string[]): string {
   return toFen(fb, "w");
 }
 
-// White K + one piece vs black K + a passed pawn (rank 2-4, racing to promote).
-function randomVsKP(piece: string): string {
-  for (let i = 0; i < 3000; i++) {
+// White K + one piece vs black K + N passed pawns (ranks 2-4, racing to promote).
+function randomVsKP(piece: string, pawns = 1): string {
+  const N = Math.max(1, Math.min(6, pawns));
+  for (let i = 0; i < 5000; i++) {
     const wk = rsq(), wp = rsq(), bk = rsq();
-    const bp = FILES[Math.floor(Math.random() * 8)]! + (2 + Math.floor(Math.random() * 3));
-    if (new Set([wk, wp, bk, bp]).size !== 4) continue;
+    const used = new Set([wk, wp, bk]);
+    if (used.size !== 3) continue;
     if (adjacent(wk, bk)) continue;
-    const place = { [wk]: "K", [wp]: piece, [bk]: "k", [bp]: "p" } as Record<string, string>;
+    const place = { [wk]: "K", [wp]: piece, [bk]: "k" } as Record<string, string>;
+    // N black pawns, each on a distinct file (no doubled pawns), ranks 2-4.
+    const files = [...FILES].sort(() => Math.random() - 0.5);
+    let placed = 0;
+    for (const f of files) {
+      if (placed >= N) break;
+      const sq = f + (2 + Math.floor(Math.random() * 3));
+      if (used.has(sq)) continue;
+      used.add(sq); place[sq] = "p"; placed++;
+    }
+    if (placed < N) continue;
     try {
       const c = new Chess(toFen(place, "w"));
       if (c.isGameOver() || c.isCheck()) continue;
@@ -82,6 +94,8 @@ type Status = { kind: "play" | "think" | "win" | "draw"; msg: string };
 export default function StudyTrainer() {
   const { id } = useParams();
   const def = studyById(id);
+  const STORE_KEY = `cg_study_${id ?? "x"}`;
+  const PAWNS_KEY = `cg_study_${id ?? "x"}_pawns`;
   const game = useRef(new Chess());
   const engine = useRef<Engine | null>(null);
   const [ready, setReady] = useState(false);
@@ -89,33 +103,82 @@ export default function StudyTrainer() {
   const [lastMove, setLastMove] = useState<[Key, Key] | undefined>();
   const [status, setStatus] = useState<Status>({ kind: "play", msg: "Loading engine…" });
   const [thinking, setThinking] = useState(false);
+  const [pawnCount, setPawnCount] = useState<number>(() => { try { return Number(localStorage.getItem(PAWNS_KEY)) || 1; } catch { return 1; } });
   const [, force] = useState(0);
+  const [rating, setRating] = useState<number | null>(null);
+  const [verdict, setVerdict] = useState<string | null>(null);
 
   const pieces = def?.pieces ?? ["Q"];
   const kind = def?.kind ?? "mate";
-  const newPosition = useCallback(() => {
-    const f = kind === "stopPawn" ? randomVsKP(pieces[0] ?? "Q") : randomMate(pieces);
+  const newPosition = useCallback(async () => {
+    setThinking(false);
+    // Prefer a RATED puzzle from the study DB (mate/stopPawn drills are seeded there); else local generation.
+    if (def && (kind === "mate" || kind === "stopPawn")) {
+      try {
+        const p = await studyPuzzle(def.id, 1200);
+        if (p && p.fen) {
+          game.current = new Chess(p.fen);
+          setFen(p.fen); setLastMove(undefined);
+          setRating(p.rating); setVerdict(p.result);
+          setStatus({ kind: "play", msg: p.result === "draw" ? "Theoretical DRAW — can you hold it?" : "Your move — drive the king to the edge and checkmate." });
+          try { localStorage.setItem(STORE_KEY, p.fen); localStorage.setItem(`${STORE_KEY}_meta`, JSON.stringify({ rating: p.rating, result: p.result })); } catch { /* */ }
+          return;
+        }
+      } catch { /* fall through to local generation */ }
+    }
+    const f = kind === "stopPawn" ? randomVsKP(pieces[0] ?? "Q", pawnCount) : randomMate(pieces);
     game.current = new Chess(f);
-    setFen(f); setLastMove(undefined); setThinking(false);
+    setFen(f); setLastMove(undefined);
+    setRating(null); setVerdict(null);
     setStatus({ kind: "play", msg: "Your move — drive the king to the edge and checkmate." });
-  }, [kind, pieces]);
+    try { localStorage.setItem(STORE_KEY, f); localStorage.removeItem(`${STORE_KEY}_meta`); } catch { /* */ }
+  }, [kind, pieces, pawnCount, STORE_KEY, def]);
+
+  // Resume the saved position on refresh (so it does NOT change), else make a new one.
+  const resumeOrNew = useCallback(() => {
+    let saved: string | null = null;
+    try { saved = localStorage.getItem(STORE_KEY); } catch { /* */ }
+    if (saved) {
+      try {
+        game.current = new Chess(saved);
+        setFen(saved); setLastMove(undefined); setThinking(false);
+        try { const m = JSON.parse(localStorage.getItem(`${STORE_KEY}_meta`) || "null"); if (m) { setRating(m.rating ?? null); setVerdict(m.result ?? null); } } catch { /* */ }
+        setStatus({ kind: "play", msg: "Your move \u2014 pick up where you left off." });
+        return;
+      } catch { /* fall through */ }
+    }
+    newPosition();
+  }, [newPosition, STORE_KEY]);
 
   useEffect(() => {
     if (!def) return;
     const e = createEngine(); engine.current = e;
     e.ready.then(() => setReady(true)).catch(() => setReady(true));
-    newPosition();
+    resumeOrNew();
     return () => e.quit();
-  }, [def, newPosition]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [def]);
+
+  useEffect(() => { try { localStorage.setItem(PAWNS_KEY, String(pawnCount)); } catch { /* */ } }, [pawnCount, PAWNS_KEY]);
+
+  // Regenerate the position when the pawn count changes (engine stays up).
+  const firstRun = useRef(true);
+  useEffect(() => {
+    if (firstRun.current) { firstRun.current = false; return; }
+    newPosition();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pawnCount]);
 
   const moveNo = () => Math.ceil(game.current.history().length / 2);
   const finished = (): boolean => {
-    if (kind === "stopPawn" && /[qrbn]/.test(game.current.fen().split(" ")[0] || "")) {
-      setStatus({ kind: "draw", msg: "The pawn promoted! \u{1F62C} Tap New position ↻" }); return true;
+    if (game.current.isCheckmate()) {
+      // The side to move is the one that just got mated (player is White).
+      if (game.current.turn() === "w") setStatus({ kind: "draw", msg: "You got checkmated \u{1F62C} Tap New position ↻" });
+      else setStatus({ kind: "win", msg: `Checkmate! \u{1F389} Mated in ${moveNo()} moves.` });
+      return true;
     }
-    if (game.current.isCheckmate()) { setStatus({ kind: "win", msg: `Checkmate! \u{1F389} Mated in ${moveNo()} moves.` }); return true; }
     if (game.current.isStalemate()) { setStatus({ kind: "draw", msg: "Stalemate — a draw. Tap New position ↻" }); return true; }
-    if (game.current.isDraw()) { setStatus({ kind: "draw", msg: "Draw. Tap New position ↻" }); return true; }
+    if (game.current.isDraw()) { setStatus({ kind: "draw", msg: "Draw (repetition / 50-move / no mating material). Tap New position ↻" }); return true; }
     return false;
   };
 
@@ -130,7 +193,7 @@ export default function StudyTrainer() {
     try { best = await engine.current!.bestMove(game.current.fen(), 400); } catch { /* */ }
     if (best && best !== "(none)" && best.length >= 4) {
       try {
-        game.current.move({ from: best.slice(0, 2), to: best.slice(2, 4) });
+        game.current.move({ from: best.slice(0, 2), to: best.slice(2, 4), promotion: (best[4] as "q" | "r" | "b" | "n") || "q" });
         setLastMove([best.slice(0, 2) as Key, best.slice(2, 4) as Key]);
         setFen(game.current.fen());
       } catch { /* */ }
@@ -166,7 +229,31 @@ export default function StudyTrainer() {
             </div>
           </div>
           <p className="mt-3 text-sm text-ink-400">{def.detail}</p>
+          {rating != null && (
+            <div className="mt-3 flex items-center gap-2">
+              <span className="rounded-full bg-brand-500/15 px-2.5 py-1 text-xs font-semibold text-brand-300">★ Rating {rating}</span>
+              {verdict && (
+                <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${verdict === "draw" ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300"}`}>
+                  {verdict === "draw" ? "DRAW — hold it" : "WIN — find the mate"}
+                </span>
+              )}
+            </div>
+          )}
         </div>
+        {kind === "stopPawn" && (
+          <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-400">Number of pawns</div>
+            <div className="flex gap-2">
+              {[1, 2, 3, 4].map((n) => (
+                <button key={n} onClick={() => setPawnCount(n)} disabled={!ready}
+                  className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold ${pawnCount === n ? "bg-brand-600 text-white" : "border border-ink-700 text-ink-300 hover:bg-ink-800"} disabled:opacity-50`}>
+                  {n}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-ink-500">Capture or blockade every pawn, then checkmate. If a pawn promotes you can still try to win the new queen — only a real draw or getting mated ends it.</p>
+          </div>
+        )}
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
           <div className={`text-base font-semibold ${tone}`}>{status.msg}</div>
           <div className="mt-1 text-xs text-ink-500">Move {moveNo()} · {ready ? "engine ready" : "loading engine…"}</div>

@@ -78,3 +78,7 @@ export const api = {
 // Study-puzzle rating summary per study type (study-factory). Used by the Study list to show level.
 export interface StudyLevel { n: number; min: number; avg: number; max: number; }
 export const studyLevels = () => get<Record<string, StudyLevel>>("/api/study/levels");
+
+export interface StudyPuzzle { id: string; fen: string; rating: number; result: "win" | "draw" | "loss"; dtm: number; solution: string[]; }
+export const studyPuzzle = (type: string, level: number) =>
+  get<StudyPuzzle | null>(`/api/study/puzzle?type=${encodeURIComponent(type)}&level=${level}`);
