@@ -3,6 +3,11 @@
 # (nginx: / -> /var/www/chessguru ; /v2/ -> /var/www/chessguru-v2 ; /v2api -> NestJS :4000)
 set -euo pipefail
 cd "$(dirname "$0")/.."                 # -> v2/
+# Stamp the service-worker cache version per deploy — a fixed VERSION left returning
+# devices on stale precached assets across deploys (sign-in looked dead, 2026-07-08).
+STAMP="cg-$(date +%Y%m%d%H%M%S)"
+sed -i "s/^const VERSION = \".*\";/const VERSION = \"${STAMP}\";/" apps/web/public/sw.js
+echo "sw.js VERSION -> ${STAMP}"
 # /v2 build (base /v2/ from vite.config)
 corepack pnpm --filter @chessguru/web exec vite build
 sudo rm -rf /var/www/chessguru-v2/* && sudo cp -r apps/web/dist/. /var/www/chessguru-v2/

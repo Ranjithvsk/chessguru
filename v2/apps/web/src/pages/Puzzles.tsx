@@ -51,8 +51,8 @@ export default function PuzzlesPage() {
   const fbColor = { wait: "text-ink-300", good: "text-accent-400", bad: "text-rose-400", solved: "text-accent-400" }[g.fb.kind];
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-      <section className="min-w-0">
+    <div className="grid gap-6 lg:h-[calc(100dvh-6.5rem)] lg:grid-cols-[minmax(0,1fr)_360px] lg:overflow-hidden">
+      <section className="min-w-0 lg:flex lg:min-h-0 lg:flex-col lg:justify-center">
         <Board
           fen={g.fen} orientation={g.orientation} turnColor={g.turnColor}
           movableColor={g.movableColor} dests={g.dests} lastMove={g.lastMove}
@@ -80,7 +80,7 @@ export default function PuzzlesPage() {
         )}
       </section>
 
-      <aside className="flex min-w-0 flex-col gap-4">
+      <aside className="flex min-w-0 flex-col gap-4 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
         <div className="flex gap-2">
           {([["normal", "Normal"], ["masters", "\u{1F451} Master Games"]] as const).map(([sec, label]) => (
             <button key={sec} onClick={() => { setSection(sec); try { localStorage.setItem("cg_section", sec); } catch { /* */ } }}
