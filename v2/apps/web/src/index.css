@@ -39,6 +39,19 @@ body {
   box-shadow: 0 10px 40px -12px rgba(0, 0, 0, 0.6);
 }
 .cg-board-wrap.mini { max-width: 100%; margin-inline: 0; } /* thumbnails: container-sized */
+
+/* Board coordinates (owner 2026-07-08): chessground's defaults (9px, 80% opacity,
+   inherited colour) vanish against our blue/white squares. Deep navy + a white halo
+   reads clearly on BOTH square colours, at a size that matches a 500px+ board. */
+.cg-board-wrap coords {
+  opacity: 1 !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  font-family: ui-sans-serif, system-ui, sans-serif !important;
+  color: #16305c !important;
+  text-shadow: 0 0 2px rgba(255, 255, 255, 0.95), 0 0 5px rgba(255, 255, 255, 0.75);
+}
+.cg-board-wrap.mini coords { display: none; } /* thumbnails stay clean */
 .cg-board-wrap cg-board { border-radius: 0.75rem; }
 .cg-board-wrap.mini { box-shadow: none; border-radius: 0.375rem; }
 .cg-board-wrap.mini cg-board { border-radius: 0.375rem; }
