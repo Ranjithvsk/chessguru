@@ -31,7 +31,7 @@ body {
      (~770px in the max-w-6xl shell) is TALLER than a laptop viewport. Cap the square
      board so it always fits on screen with the navbar + a control row visible, and
      center it in its column. Phones are unaffected (100% wins the min()). */
-  max-width: min(100%, calc(100dvh - 13rem));
+  max-width: min(100%, calc(100dvh - 10.5rem)); /* fill the screen generously — navbar + one control row of headroom */
   margin-inline: auto;
   aspect-ratio: 1 / 1;
   border-radius: 0.75rem;
