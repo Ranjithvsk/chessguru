@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { Difficulty } from "@chessguru/types";
 import Board from "../components/Board";
 import SolvedStrip from "../components/SolvedStrip";
-import { api } from "../lib/api";
+import { api, get } from "../lib/api";
 import { usePuzzleGame } from "../hooks/usePuzzleGame";
 import { prettify } from "../lib/format";
 
@@ -36,6 +36,10 @@ export default function PuzzlesPage() {
   const [player, setPlayer] = useState<string>("");
   const { data: masterPlayers } = useQuery({ queryKey: ["master-players"], queryFn: api.masterPlayers, enabled: section === "masters" });
   const { data: themes } = useQuery({ queryKey: ["themes"], queryFn: api.themes });
+  // Selected-theme rating shown right on the training screen (owner 2026-07-08).
+  type DashLite = { loggedIn: boolean; themes?: { theme: string; rating: number; games: number }[] };
+  const { data: dashLite } = useQuery({ queryKey: ["dashboard"], queryFn: () => get<DashLite>("/api/puzzles/dashboard"), staleTime: 15_000 });
+  const themePerf = theme !== "mix" && dashLite?.loggedIn ? dashLite.themes?.find((t) => t.theme === theme) : undefined;
 
   const g = usePuzzleGame({ theme, difficulty, userId, initialRating: rating, section, player });
   // Mixed ("All themes") puzzles hide their theme so it is not a spoiler;
@@ -191,6 +195,14 @@ export default function PuzzlesPage() {
             <option value="mix">All themes</option>
             {(themes?.themes ?? []).filter((t) => t !== "mix").map((t) => <option key={t} value={t}>{prettify(t)}</option>)}
           </select>
+          {theme !== "mix" && dashLite?.loggedIn && (
+            <p className="mb-3 flex items-baseline justify-between rounded-lg bg-ink-800 px-3 py-2 text-sm">
+              <span className="text-ink-400">Your {prettify(theme)} rating</span>
+              {themePerf
+                ? <span className="font-semibold tabular-nums text-white">{themePerf.rating}{themePerf.games < 5 && <span className="text-gold-400">?</span>} <span className="text-xs text-ink-500">({themePerf.games})</span></span>
+                : <span className="text-xs text-ink-500">unrated — this solve starts it!</span>}
+            </p>
+          )}
           <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-400">Difficulty</label>
           <select value={difficulty} onChange={(e) => { try { localStorage.removeItem("cg_puzzle"); } catch { /* */ } setDifficulty(e.target.value as Difficulty); }}
             className="w-full rounded-lg border border-ink-600 bg-ink-800 px-3 py-2 text-sm text-white">

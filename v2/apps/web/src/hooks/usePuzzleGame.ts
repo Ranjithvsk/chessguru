@@ -130,6 +130,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
       if (r.glicko) setDisplayRating(Math.round(r.glicko.r));
       qc.invalidateQueries({ queryKey: ["me-rating"] }); // refresh the navbar rating
       qc.invalidateQueries({ queryKey: ["me-history"] }); // refresh the solved strip
+      qc.invalidateQueries({ queryKey: ["dashboard"] }); // refresh theme ratings (sidebar + /dashboard)
     }).catch(() => {});
   }, [puzzle, difficulty, userId, mode, displayRating, qc, theme]);
 
