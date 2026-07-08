@@ -16,28 +16,42 @@ export interface UsePuzzleGameOpts {
   initialRating: number;
   mode?: "puzzle" | "blindfold";
   maxPc?: number;
+  section?: string;
+  player?: string;
 }
 
 /** Shared puzzle-solving engine used by Puzzles, Theme and Blindfold pages. */
 export function usePuzzleGame(opts: UsePuzzleGameOpts) {
-  const { theme, difficulty, userId, initialRating, mode = "puzzle", maxPc } = opts;
+  const { theme, difficulty, userId, initialRating, mode = "puzzle", maxPc, section, player } = opts;
   const [nonce, setNonce] = useState(0);
   const [reviewId, setReviewId] = useState<string | null>(null); // reviewing a past solve (from the solved strip)
   const reviewIdRef = useRef<string | null>(null);
   reviewIdRef.current = reviewId;
   const qc = useQueryClient();
-  const STORE_KEY = mode === "blindfold" ? "cg_puzzle_bf" : "cg_puzzle";
+  const STORE_KEY = mode === "blindfold" ? "cg_puzzle_bf" : section === "masters" ? "cg_puzzle_masters" : "cg_puzzle";
 
   const { data: puzzle, isFetching } = useQuery({
-    queryKey: ["puzzle", mode, theme, difficulty, maxPc ?? 0, userId ?? "guest", reviewId ?? "", nonce],
+    queryKey: ["puzzle", mode, section ?? "normal", player ?? "", theme, difficulty, maxPc ?? 0, userId ?? "guest", reviewId ?? "", nonce],
     queryFn: () => {
       if (reviewId) return api.puzzleById(reviewId); // reviewing a past solve from the strip
       // Resume the saved (unsolved) puzzle whenever one is stored. Read it live
       // each fetch so it survives the queryKey changing when auth (userId) resolves
       // after the first render — otherwise refresh would load a new random puzzle.
+      // Saved entries carry the filters they were fetched under; resume ONLY when
+      // they match the current theme/maxPc — otherwise a theme or piece-count change
+      // kept re-loading the same stored puzzle and the selectors looked dead
+      // (owner-reported on Blindfold, 2026-07-08). Legacy plain-id entries resume once.
       let rid: string | null = null;
-      try { rid = localStorage.getItem(STORE_KEY); } catch { /* */ }
-      const rand = () => api.randomPuzzle({ theme, rating: initialRating, difficulty, maxPc, userId });
+      try {
+        const raw = localStorage.getItem(STORE_KEY);
+        if (raw) {
+          if (raw.startsWith("{")) {
+            const saved = JSON.parse(raw) as { id: string; theme?: string; maxPc?: number };
+            if (saved.theme === theme && (saved.maxPc ?? 0) === (maxPc ?? 0)) rid = saved.id;
+          } else rid = raw; // legacy format
+        }
+      } catch { /* */ }
+      const rand = () => api.randomPuzzle({ theme, rating: initialRating, difficulty, maxPc, userId, section, player });
       return rid ? api.puzzleById(rid).catch(rand) : rand();
     },
   });
@@ -58,6 +72,9 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   const [displayRating, setDisplayRating] = useState(initialRating);
   const [, force] = useState(0);
   const [replayPly, setReplayPly] = useState<number | null>(null); // post-solve move replay (null = live)
+  const exploreGame = useRef(new Chess());
+  const [exploreFen, setExploreFen] = useState<string | null>(null); // post-solve free-play sandbox (null = off)
+  const [exploreLast, setExploreLast] = useState<[Key, Key] | undefined>(undefined);
 
   useEffect(() => setDisplayRating(initialRating), [initialRating]);
 
@@ -67,6 +84,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
 
   useEffect(() => {
     if (!puzzle) return;
+    setExploreFen(null); setExploreLast(undefined);
     game.current = new Chess();
     try { game.current.load(puzzle.fen); } catch { /* ignore bad fen */ }
     solution.current = puzzle.solution ?? [];
@@ -98,7 +116,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
       setFen(puzzle.fen);
       setReplayPly(null);
       setFb({ kind: "wait", title: "Your turn", sub: `Find the best move for ${pc}` });
-      try { if (puzzle.id) localStorage.setItem(STORE_KEY, puzzle.id); } catch { /* */ }
+      try { if (puzzle.id) localStorage.setItem(STORE_KEY, JSON.stringify({ id: puzzle.id, theme, maxPc: maxPc ?? 0 })); } catch { /* */ }
     }
   }, [puzzle]);
 
@@ -225,19 +243,47 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   const replayPrev = useCallback(() => setReplayPly((p) => Math.max(0, (p ?? solution.current.length) - 1)), []);
   const replayNext = useCallback(() => setReplayPly((p) => Math.min(solution.current.length, (p ?? solution.current.length) + 1)), []);
 
+  // Post-solve "explore" sandbox: branch from the position currently shown and let
+  // the player move BOTH sides to try their own lines (never touches the puzzle/rating).
+  const startExplore = useCallback(() => {
+    const base = replayPly != null && replayView ? replayView.fen : game.current.fen();
+    try { exploreGame.current = new Chess(base); } catch { exploreGame.current = new Chess(); }
+    setExploreLast(undefined);
+    setExploreFen(exploreGame.current.fen());
+  }, [replayPly, replayView]);
+  const stopExplore = useCallback(() => { setExploreFen(null); setExploreLast(undefined); }, []);
+  const exploreMove = useCallback((from: Key, to: Key) => {
+    try { exploreGame.current.move({ from, to, promotion: "q" }); } catch { return; }
+    setExploreLast([from, to]);
+    setExploreFen(exploreGame.current.fen());
+  }, []);
+  const exploreUndo = useCallback(() => {
+    exploreGame.current.undo();
+    const h = exploreGame.current.history({ verbose: true });
+    const l = h[h.length - 1] as any;
+    setExploreLast(l ? [l.from as Key, l.to as Key] : undefined);
+    setExploreFen(exploreGame.current.fen());
+  }, []);
+  const exploreDests = useMemo(() => (exploreFen ? destsFromChess(exploreGame.current as any) : new Map()), [exploreFen]);
+
   const next = useCallback(() => { try { localStorage.removeItem(STORE_KEY); } catch { /* */ } setReviewId(null); setNonce((n) => n + 1); }, []);
   const review = useCallback((id: string) => { setReplayPly(null); setReviewId(id); }, []);
 
+  const exploring = exploreFen != null;
   return {
     puzzle, isFetching,
-    fen: replayView ? replayView.fen : fen,
-    orientation, turnColor: playerColor(),
-    movableColor: solved.current ? undefined : playerColor(),
-    dests, lastMove: replayView ? replayView.lastMove : lastMove, hintShapes,
+    fen: exploring ? exploreFen! : replayView ? replayView.fen : fen,
+    orientation,
+    turnColor: exploring ? (exploreGame.current.turn() === "w" ? "white" : "black") : playerColor(),
+    movableColor: exploring ? ("both" as const) : solved.current ? undefined : playerColor(),
+    dests: exploring ? exploreDests : dests,
+    lastMove: exploring ? exploreLast : replayView ? replayView.lastMove : lastMove,
+    hintShapes: exploring ? [] : hintShapes,
     fb, ratingDiff, displayRating,
     solved: solved.current, hinted: hinted.current, failed: failed.current,
-    onMove, tryInput, showHint, viewSolution, next, review,
+    onMove: exploring ? exploreMove : onMove, tryInput, showHint, viewSolution, next, review,
     replayPly, replayTotal: solution.current.length, replayPrev, replayNext,
     reviewing: reviewId != null,
+    exploring, startExplore, stopExplore, exploreUndo,
   };
 }

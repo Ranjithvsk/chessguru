@@ -128,6 +128,11 @@ function cook(fen, moves, pov) {
     if (cornerMate(matePos, oppColor))     tags.add('cornerMate');
     if (vukovicMate(matePos, oppColor))    tags.add('vukovicMate');
     if (killBoxMate(matePos, oppColor))    tags.add('killBoxMate');
+    if (balestraMate(matePos, oppColor))   tags.add('balestraMate');
+    if (blindSwineMate(matePos, oppColor)) tags.add('blindSwineMate');
+    if (pillsburysMate(matePos, oppColor)) tags.add('pillsburysMate');
+    if (swallowstailMate(matePos, oppColor)) tags.add('swallowstailMate');
+    if (triangleMate(matePos, oppColor))   tags.add('triangleMate');
   }
 
   // ── Tactical themes (check player's moves at index 1,3,5,...) ──────────────
@@ -209,7 +214,7 @@ function fork(line, moves, povColor) {
     const attacked = [];
     const opponentPieces = allPieces(after).filter(p => p.color !== povColor);
     for (const op of opponentPieces) {
-      if (after.isAttackedBy(povColor, op.square)) {
+      if (after.isAttacked(op.square, povColor)) {
         attacked.push(op);
       }
     }
@@ -274,7 +279,7 @@ function skewer(line, moves, povColor) {
     for (const slider of ourSliders) {
       const oppHighVal = allPieces(after).filter(p =>
         p.color !== povColor && ['k', 'q', 'r'].includes(p.type) &&
-        after.isAttackedBy(povColor, p.square)
+        after.isAttacked(p.square, povColor)
       );
       for (const hv of oppHighVal) {
         if (!isOnLine(slider.square, hv.square)) continue;
@@ -317,7 +322,7 @@ function discoveredAttack(line, moves, povColor) {
         // Does slider now attack opponent pieces?
         const oppPieces = allPieces(after).filter(p => p.color !== povColor);
         for (const op of oppPieces) {
-          if (after.isAttackedBy(povColor, op.square) && isOnLine(slider.square, op.square)) {
+          if (after.isAttacked(op.square, povColor) && isOnLine(slider.square, op.square)) {
             return true;
           }
         }
@@ -346,7 +351,7 @@ function getCheckers(chess) {
   const opp  = turn === 'w' ? 'b' : 'w';
   const kingPos = allPieces(chess).find(p => p.color === turn && p.type === 'k')?.square;
   if (!kingPos) return [];
-  return allPieces(chess).filter(p => p.color === opp && chess.isAttackedBy(opp, kingPos));
+  return allPieces(chess).filter(p => p.color === opp && chess.isAttacked(kingPos, opp));
 }
 
 function sacrifice(line, moves, pov) {
@@ -408,7 +413,7 @@ function deflection(line, moves, povColor) {
     if (captured.color === oppColor) {
       // Was it defending the king or a high-value piece?
       const oppKing = allPieces(before).find(p => p.color === oppColor && p.type === 'k');
-      if (oppKing && before.isAttackedBy(oppColor, oppKing.square)) return false; // already in check
+      if (oppKing && before.isAttacked(oppKing.square, oppColor)) return false; // already in check
       // After capture, is opponent's king now more exposed?
       return true; // Simplified
     }
@@ -554,7 +559,7 @@ function hangingPiece(line, moves, oppColor) {
   const povColor = oppColor === 'w' ? 'b' : 'w';
   const oppPieces = allPieces(start).filter(p => p.color === oppColor && p.type !== 'k');
   for (const op of oppPieces) {
-    if (start.isAttackedBy(povColor, op.square) && !start.isAttackedBy(oppColor, op.square)) {
+    if (start.isAttacked(op.square, povColor) && !start.isAttacked(op.square, oppColor)) {
       return true; // undefended piece we can take
     }
   }
@@ -589,11 +594,11 @@ function capturingDefender(line, moves, povColor) {
     const oppColor = captured.color;
     // Was the captured piece defending other opponent pieces?
     const defended = allPieces(before).filter(p =>
-      p.color === oppColor && before.isAttackedBy(oppColor, p.square)
+      p.color === oppColor && before.isAttacked(p.square, oppColor)
     );
     // After capture, are those pieces now undefended and attacked?
     for (const d of defended) {
-      if (after.isAttackedBy(povColor, d.square) && !after.isAttackedBy(oppColor, d.square)) {
+      if (after.isAttacked(d.square, povColor) && !after.isAttacked(d.square, oppColor)) {
         return true;
       }
     }
@@ -625,8 +630,8 @@ function attackingF2F7(line, moves, povColor) {
     if (to === 'f2' || to === 'f7') return true;
     // Also check if we set up attack on f2/f7
     const after = line[i + 1];
-    if (after && after.isAttackedBy(povColor, 'f2')) return true;
-    if (after && after.isAttackedBy(povColor, 'f7')) return true;
+    if (after && after.isAttacked('f2', povColor)) return true;
+    if (after && after.isAttacked('f7', povColor)) return true;
   }
   return false;
 }
@@ -700,7 +705,7 @@ function discoveredCheck(line, moves) {
     const oppColor = after.turn();
     const king     = allPieces(after).find(p => p.color === oppColor && p.type === 'k');
     if (!king) continue;
-    if (!after.isAttackedBy(after.turn() === 'w' ? 'b' : 'w', king.square)) continue;
+    if (!after.isAttacked(king.square, after.turn() === 'w' ? 'b' : 'w')) continue;
     // If moved piece is NOT on a line to king, it's discovered check
     const movedPiece = after.get(to);
     if (movedPiece && !isOnLine(to, king.square)) return true;
@@ -738,7 +743,7 @@ function smotheredMate(chess, oppColor) {
   if (!king) return false;
   // Find the checking piece
   const checkers = allPieces(chess).filter(p =>
-    p.color === povColor && chess.isAttackedBy(povColor, king.square) && p.type === 'n'
+    p.color === povColor && chess.isAttacked(king.square, povColor) && p.type === 'n'
   );
   if (checkers.length === 0) return false;
   // King surrounded by own pieces or edge
@@ -886,6 +891,112 @@ function killBoxMate(chess, oppColor) {
   if (!chess.isCheckmate()) return false;
   // King confined to a corner box — very similar to cornerMate
   return cornerMate(chess, oppColor);
+}
+
+// ── 2026-07-08: the five newest Lichess mate themes ─────────────────────────
+// (balestra / blind swine / pillsbury / swallow's tail / triangle). Heuristic
+// detectors in the same spirit as the ones above; checker found via attackers().
+
+function matedKing(chess) {
+  return allPieces(chess).find(p => p.color === chess.turn() && p.type === 'k') || null;
+}
+function checkersOf(chess) {
+  const king = matedKing(chess);
+  if (!king) return [];
+  const pov = chess.turn() === 'w' ? 'b' : 'w';
+  return chess.attackers(king.square, pov).map(sq => ({ square: sq, ...chess.get(sq) }));
+}
+
+function balestraMate(chess, oppColor) {
+  // Queen delivers mate while a NON-adjacent bishop covers the king's diagonal
+  // escape square(s) — queen + bishop teamwork.
+  if (!chess.isCheckmate()) return false;
+  const king = matedKing(chess); if (!king) return false;
+  const pov = chess.turn() === 'w' ? 'b' : 'w';
+  const checks = checkersOf(chess);
+  if (!checks.some(c => c.type === 'q')) return false;
+  const kC = squareToCoord(king.square);
+  const bishops = allPieces(chess).filter(p => p.color === pov && p.type === 'b');
+  return bishops.some(b => {
+    const bC = squareToCoord(b.square);
+    if (Math.abs(bC.f - kC.f) <= 1 && Math.abs(bC.r - kC.r) <= 1) return false; // not adjacent
+    // bishop guards at least one empty king-adjacent diagonal square
+    return getAdjacentSquares(kC).some(sq => {
+      if (chess.get(sq)) return false;
+      return chess.attackers(sq, pov).includes(b.square);
+    });
+  });
+}
+
+function blindSwineMate(chess, oppColor) {
+  // Two connected rooks (or rook+queen acting as swine) on the 7th rank mating
+  // the king on its back rank.
+  if (!chess.isCheckmate()) return false;
+  const king = matedKing(chess); if (!king) return false;
+  const pov = chess.turn() === 'w' ? 'b' : 'w';
+  const kC = squareToCoord(king.square);
+  const backRank = chess.turn() === 'w' ? 0 : 7;       // mated side's back rank (r index)
+  const seventh  = chess.turn() === 'w' ? 1 : 6;       // attacker's "7th"
+  if (kC.r !== backRank) return false;
+  const heavies = allPieces(chess).filter(p => p.color === pov && (p.type === 'r' || p.type === 'q'))
+    .filter(p => squareToCoord(p.square).r === seventh);
+  if (heavies.length < 2 || !heavies.some(p => p.type === 'r')) return false;
+  return checkersOf(chess).some(c => squareToCoord(c.square).r === seventh && (c.type === 'r' || c.type === 'q'));
+}
+
+function pillsburysMate(chess, oppColor) {
+  // Rook delivers mate while a bishop slices the diagonal, covering the king's
+  // escape (classically Rg1+ ... with Bxf6). King at/near the edge.
+  if (!chess.isCheckmate()) return false;
+  const king = matedKing(chess); if (!king) return false;
+  const pov = chess.turn() === 'w' ? 'b' : 'w';
+  if (!checkersOf(chess).some(c => c.type === 'r')) return false;
+  const kC = squareToCoord(king.square);
+  if (kC.f !== 0 && kC.f !== 7 && kC.r !== 0 && kC.r !== 7) return false; // edge/corner king
+  const bishops = allPieces(chess).filter(p => p.color === pov && p.type === 'b');
+  return bishops.some(b => getAdjacentSquares(kC).some(sq => {
+    const occ = chess.get(sq);
+    if (occ && occ.color === pov) return false;
+    return chess.attackers(sq, pov).includes(b.square);
+  }));
+}
+
+function swallowstailMate(chess, oppColor) {
+  // Mirror of the dovetail: queen mates from an ORTHOGONALLY adjacent square and
+  // the two diagonal squares BEHIND the king (away from the queen) are blocked
+  // by the king's own pieces — the swallow's tail.
+  if (!chess.isCheckmate()) return false;
+  const king = matedKing(chess); if (!king) return false;
+  const turn = chess.turn();
+  const checks = checkersOf(chess);
+  const q = checks.find(c => c.type === 'q');
+  if (!q) return false;
+  const kC = squareToCoord(king.square), qC = squareToCoord(q.square);
+  const df = kC.f - qC.f, dr = kC.r - qC.r;
+  if (Math.abs(df) + Math.abs(dr) !== 1) return false; // orthogonally adjacent
+  const rear = [
+    coordToSquare(kC.f + df - dr, kC.r + dr - df),
+    coordToSquare(kC.f + df + dr, kC.r + dr + df),
+  ].filter(Boolean);
+  if (rear.length < 2) return false;
+  return rear.every(sq => { const p = chess.get(sq); return p && p.color === turn; });
+}
+
+function triangleMate(chess, oppColor) {
+  // Queen mates adjacent to the king with a rook two squares from the king on
+  // the same line, protecting the queen — Q/R/K form the triangle.
+  if (!chess.isCheckmate()) return false;
+  const king = matedKing(chess); if (!king) return false;
+  const pov = chess.turn() === 'w' ? 'b' : 'w';
+  const q = checkersOf(chess).find(c => c.type === 'q');
+  if (!q) return false;
+  const kC = squareToCoord(king.square), qC = squareToCoord(q.square);
+  if (Math.max(Math.abs(kC.f - qC.f), Math.abs(kC.r - qC.r)) !== 1) return false; // adjacent
+  return allPieces(chess).filter(p => p.color === pov && p.type === 'r').some(r => {
+    const rC = squareToCoord(r.square);
+    const twoAway = (rC.f === kC.f && Math.abs(rC.r - kC.r) === 2) || (rC.r === kC.r && Math.abs(rC.f - kC.f) === 2);
+    return twoAway && chess.attackers(q.square, pov).includes(r.square);
+  });
 }
 
 // ── Phase detection ────────────────────────────────────────────────────────────
