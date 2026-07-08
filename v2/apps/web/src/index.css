@@ -27,11 +27,18 @@ body {
 .cg-board-wrap {
   position: relative;
   width: 100%;
+  /* PC fix (2026-07-08): the board fills its grid column, and on desktop that column
+     (~770px in the max-w-6xl shell) is TALLER than a laptop viewport. Cap the square
+     board so it always fits on screen with the navbar + a control row visible, and
+     center it in its column. Phones are unaffected (100% wins the min()). */
+  max-width: min(100%, calc(100dvh - 13rem));
+  margin-inline: auto;
   aspect-ratio: 1 / 1;
   border-radius: 0.75rem;
   overflow: hidden;
   box-shadow: 0 10px 40px -12px rgba(0, 0, 0, 0.6);
 }
+.cg-board-wrap.mini { max-width: 100%; margin-inline: 0; } /* thumbnails: container-sized */
 .cg-board-wrap cg-board { border-radius: 0.75rem; }
 .cg-board-wrap.mini { box-shadow: none; border-radius: 0.375rem; }
 .cg-board-wrap.mini cg-board { border-radius: 0.375rem; }

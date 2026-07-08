@@ -32,7 +32,7 @@ function Mini({ it, onClick }: { it: HistoryItem; onClick: () => void }) {
 }
 
 export default function SolvedStrip({ onSelect }: { onSelect: (id: string) => void }) {
-  const { data } = useQuery({ queryKey: ["me-history"], queryFn: api.history });
+  const { data } = useQuery({ queryKey: ["me-history"], queryFn: () => api.history() });
   const scroller = useRef<HTMLDivElement>(null);
 
   // Oldest → newest so new solves append on the right (timeline feel).
