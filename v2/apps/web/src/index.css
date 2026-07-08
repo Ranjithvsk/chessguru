@@ -40,16 +40,40 @@ body {
 }
 .cg-board-wrap.mini { max-width: 100%; margin-inline: 0; } /* thumbnails: container-sized */
 
-/* Board coordinates (owner 2026-07-08): chessground's defaults (9px, 80% opacity,
-   inherited colour) vanish against our blue/white squares. Deep navy + a white halo
-   reads clearly on BOTH square colours, at a size that matches a 500px+ board. */
+/* Board coordinates (owner 2026-07-08, round 2 — checked visually): chessground
+   (a) offsets ranks -20px above the board (rank 8 clipped by overflow:hidden) and
+   files +24px right (H clipped), and (b) colours coord CELLS with alternating
+   rules that beat a container override — evens (8/6/4/2) were white-on-white.
+   Realign both strips INSIDE the board (lichess style: rank top-left of its
+   square, file bottom-right) and force one readable colour per CELL. */
 .cg-board-wrap coords {
   opacity: 1 !important;
   font-size: 11px !important;
   font-weight: 700 !important;
   font-family: ui-sans-serif, system-ui, sans-serif !important;
+}
+.cg-board-wrap coords.ranks {
+  top: 0 !important;
+  bottom: auto !important;
+  left: 4px !important;
+  height: 100% !important;
+}
+.cg-board-wrap coords.ranks coord { display: flex; align-items: flex-start; padding-top: 2px; }
+.cg-board-wrap coords.files {
+  left: 0 !important;
+  right: auto !important;
+  bottom: 1px !important;
+  top: auto !important;
+  width: 100% !important;
+}
+.cg-board-wrap coords.files coord { text-align: right; padding-right: 5px; }
+.cg-board-wrap coords coord,
+.cg-board-wrap coords coord:nth-child(odd),
+.cg-board-wrap coords coord:nth-child(even),
+.cg-board-wrap coords.black coord:nth-child(odd),
+.cg-board-wrap coords.black coord:nth-child(even) {
   color: #16305c !important;
-  text-shadow: 0 0 2px rgba(255, 255, 255, 0.95), 0 0 5px rgba(255, 255, 255, 0.75);
+  text-shadow: 0 0 2px rgba(255, 255, 255, 0.95), 0 0 5px rgba(255, 255, 255, 0.8) !important;
 }
 .cg-board-wrap.mini coords { display: none; } /* thumbnails stay clean */
 .cg-board-wrap cg-board { border-radius: 0.75rem; }
