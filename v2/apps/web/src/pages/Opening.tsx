@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { Key } from "chessground/types";
 import Board from "../components/Board";
 import { useFreePlay } from "../hooks/useFreePlay";
 import { fetchExplorer } from "../lib/explorer";
+import { OPENING_HANDOFF_KEY } from "../lib/openingMemory";
 
 /** White / Draw / Black result bar (segments scaled to the three counts). */
 function WdlBar({ w, d, b, className = "" }: { w: number; d: number; b: number; className?: string }) {
@@ -20,6 +22,13 @@ function WdlBar({ w, d, b, className = "" }: { w: number; d: number; b: number; 
 
 export default function OpeningPage() {
   const fp = useFreePlay();
+  const navigate = useNavigate();
+  const memorize = () => {
+    if (!fp.history.length) return;
+    const name = opening ? `${opening.eco} ${opening.name}` : "Explored line";
+    try { sessionStorage.setItem(OPENING_HANDOFF_KEY, JSON.stringify({ name, sans: fp.history })); } catch { /* */ }
+    navigate("/study/opening-memory");
+  };
   const { data, isFetching, isError } = useQuery({
     queryKey: ["explorer", fp.fen],
     queryFn: () => fetchExplorer(fp.fen, "masters"),
@@ -42,6 +51,7 @@ export default function OpeningPage() {
           <button onClick={fp.undo} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">◀ Undo</button>
           <button onClick={fp.reset} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">Reset</button>
           <button onClick={fp.flip} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">⇅ Flip</button>
+          <button onClick={memorize} disabled={!fp.history.length} className="ml-auto rounded-lg bg-accent-600 px-3 py-2 text-sm font-semibold text-white hover:bg-accent-500 disabled:opacity-40" title="Send this line to the Memory Training opening trainer">🧠 Memorize</button>
         </div>
       </section>
 

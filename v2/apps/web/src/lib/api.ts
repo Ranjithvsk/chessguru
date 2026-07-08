@@ -4,7 +4,7 @@ import type {
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
 
-async function get<T>(path: string): Promise<T> {
+export async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { credentials: "include" });
   if (!res.ok) throw new Error(`GET ${path} → ${res.status}`);
   return res.json() as Promise<T>;
@@ -18,7 +18,8 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export interface RandomPuzzleOpts { theme: string; rating: number; difficulty: Difficulty; maxPc?: number; userId?: string | null; section?: string; player?: string; }
+export interface RandomPuzzleOpts { theme: string; rating: number; difficulty: Difficulty; maxPc?: number; userId?: string | null; section?: string; player?: string;   mode?: string;
+}
 export interface MasterPlayer { name: string; count: number; }
 export interface CompleteBody { win: boolean; hint: boolean; difficulty: Difficulty; userId: string | null; mode?: "puzzle" | "blindfold"; rating?: number; deviation?: number; theme?: string; }
 export interface AuthResult { ok: boolean; error?: string; }
@@ -54,6 +55,7 @@ export const api = {
     if (opts.userId) p.set("userId", opts.userId);
     if (opts.section) p.set("section", opts.section);
     if (opts.player) p.set("player", opts.player);
+    if (opts.mode) p.set("mode", opts.mode); // blindfold serves from its own rating
     return get<Puzzle>(`/api/puzzles/random?${p.toString()}`);
   },
   puzzleById: (id: string) => get<Puzzle>(`/api/puzzles/${encodeURIComponent(id)}`),

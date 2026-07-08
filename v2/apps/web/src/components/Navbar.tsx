@@ -13,6 +13,7 @@ const GROUPS: Group[] = [
     items: [
       { to: "/", label: "🧩 Puzzle trainer", end: true, desc: "Rated tactics, all themes" },
       { to: "/blindfold", label: "🕶️ Blindfold", desc: "Solve without seeing the pieces" },
+      { to: "/dashboard", label: "📊 My performance", desc: "Ratings, strengths & progress" },
       { to: "/history", label: "📜 My history", desc: "Every puzzle you've solved" },
     ],
   },

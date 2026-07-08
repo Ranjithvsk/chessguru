@@ -1,4 +1,4 @@
-export type StudyKind = "mate" | "stopPawn" | "coordinate";
+export type StudyKind = "mate" | "stopPawn" | "coordinate" | "memory";
 export interface StudyDef {
   id: string;
   kind: StudyKind;
@@ -13,6 +13,10 @@ export interface StudyDef {
 export const STUDIES: StudyDef[] = [
   { id: "coordinates", kind: "coordinate", icon: "a1", title: "Coordinate Training", blurb: "Place pieces by coordinate",
     detail: "A square + piece appears (e.g. \u201cBlack Rook \u2192 e7\u201d) and you tap that square to place it. Coordinates are hidden — the classic way to learn the board. 45-second sprint.", mateIn: "45s sprint" },
+  { id: "memory-palace", kind: "memory", icon: "\ud83c\udff0", title: "Memory Palace", blurb: "A funny picture on every square",
+    detail: "The memory-champion trick: each of the 64 squares gets a silly, unforgettable scene (a1 = Ant on the Sun, h8 = Hedgehog that Ate too much). Pick from 11 picture sets \u2014 Easy, Animals, Mythology, Space, Ocean, Jungle, Fairy Tales, Superheroes, Cartoons, Vehicles, Food. Explore the board, then quiz yourself both ways.", mateIn: "11 sets \u00b7 no timer" },
+  { id: "opening-memory", kind: "memory", icon: "\u265f\ufe0f", title: "Opening Memory", blurb: "Memorize an opening as a story",
+    detail: "Learn an opening the memory-champion way: every move becomes a hero visiting a square\u2019s funny picture (its anchor). Step through the Italian, Ruy Lopez, Scotch or Queen\u2019s Gambit \u2014 or send a line over from the Opening explorer \u2014 in any of the 11 picture sets.", mateIn: "anchors \u00b7 step-through" },
   { id: "queen-mate", kind: "mate", pieces: ["Q"], icon: "♛", title: "Queen Mate", blurb: "King + Queen vs King",
     detail: "The first checkmate to master. Box the lone king to an edge with the queen, bring your king up, and mate — without stalemating.", mateIn: "Mate in ≤ 10" },
   { id: "rook-mate", kind: "mate", pieces: ["R"], icon: "♜", title: "Rook Mate", blurb: "King + Rook vs King",
@@ -23,10 +27,10 @@ export const STUDIES: StudyDef[] = [
     detail: "Two bishops on opposite colours mate the lone king in a corner. Coordinate the bishops to build a wall and use your king to herd it.", mateIn: "Mate in ≤ 19" },
   { id: "bishop-knight-mate", kind: "mate", pieces: ["B", "N"], icon: "♝♞", title: "Bishop + Knight Mate", blurb: "King + Bishop + Knight vs King",
     detail: "The hardest basic mate. You must drive the king to a corner of the BISHOP's colour. Needs precise king+piece coordination (the 'W' manoeuvre).", mateIn: "Mate in ≤ 33 · hardest" },
-  { id: "stop-the-pawn", kind: "stopPawn", pieces: ["Q"], icon: "♛♟", title: "Queen vs Pawn", blurb: "King + Queen vs King + Pawn",
-    detail: "Your opponent has a passed pawn racing to promote. Capture or blockade it with the queen, then checkmate. Let it promote and you start over.", mateIn: "Stop & mate" },
-  { id: "rook-stop-pawn", kind: "stopPawn", pieces: ["R"], icon: "♜♟", title: "Rook vs Pawn", blurb: "King + Rook vs King + Pawn",
-    detail: "Trickier than with a queen — your rook must catch the runner. Get behind or in front of the pawn, win it, then mate. Promotion = restart.", mateIn: "Stop & mate" },
+  { id: "stop-the-pawn", kind: "stopPawn", pieces: ["Q"], icon: "♛♟", title: "Queen vs Pawns", blurb: "King + Queen vs King + Pawns (pick 1–4)",
+    detail: "Your opponent has passed pawns racing to promote. Pick how many pawns (1, 2, 3 or 4), capture or blockade them with the queen, then checkmate. If a pawn promotes you can still try to win the new queen — only a real draw or getting mated ends it.", mateIn: "1–4 pawns" },
+  { id: "rook-stop-pawn", kind: "stopPawn", pieces: ["R"], icon: "♜♟", title: "Rook vs Pawns", blurb: "King + Rook vs King + Pawns (pick 1–4)",
+    detail: "Trickier than with a queen — your rook must catch the runners. Pick 1–4 pawns, get behind or in front of each, win them, then mate. If a pawn promotes you can still try to win it.", mateIn: "1–4 pawns" },
 ];
 
 export const studyById = (id: string | undefined) => STUDIES.find((s) => s.id === id);

@@ -49,7 +49,23 @@ function LazyMini({ it }: { it: HistoryItem }) {
 
 export default function HistoryPage() {
   const { rating } = useOutletContext<Ctx>();
-  const { data, isLoading } = useQuery({ queryKey: ["me-history"], queryFn: api.history });
+  const { data, isLoading } = useQuery({ queryKey: ["me-history"], queryFn: () => api.history(0) });
+  const [pages, setPages] = useState<HistoryItem[]>([]);   // appended pages beyond the first
+  const [off, setOff] = useState<number | null>(null);      // next offset to fetch (null = none)
+  const [more, setMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  useEffect(() => {
+    if (data?.loggedIn) { setPages([]); setMore(!!data.hasMore); setOff(data.nextOffset ?? null); }
+  }, [data]);
+  async function loadMore() {
+    if (off == null || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const r = await api.history(off);
+      setPages((p) => [...p, ...(r.items ?? [])]);
+      setMore(!!r.hasMore); setOff(r.nextOffset ?? null);
+    } finally { setLoadingMore(false); }
+  }
 
   if (isLoading) return <div className="py-16 text-center text-ink-400">Loading your report…</div>;
 
@@ -73,9 +89,10 @@ export default function HistoryPage() {
     { label: "Rating", value: rating ?? "—" },
   ];
 
+  const allItems = [...(data.items ?? []), ...pages];
   // date groups (items are newest-first, so same-day items are contiguous)
   const dateGroups: { label: string; items: HistoryItem[] }[] = [];
-  for (const it of data.items ?? []) {
+  for (const it of allItems) {
     const label = dateLabel(it.date);
     const last = dateGroups[dateGroups.length - 1];
     if (last && last.label === label) last.items.push(it);
@@ -135,7 +152,16 @@ export default function HistoryPage() {
               </div>
             </div>
           ))}
-          <p className="text-xs text-ink-500">Showing your {(data.items ?? []).length} most recent puzzles.</p>
+          {more ? (
+            <div className="pt-2 text-center">
+              <button onClick={loadMore} disabled={loadingMore}
+                className="rounded-lg border border-ink-700 bg-ink-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-ink-800 disabled:opacity-50">
+                {loadingMore ? "Loading…" : "Load more"}
+              </button>
+            </div>
+          ) : (
+            <p className="text-xs text-ink-500">That’s all {allItems.length} puzzles.</p>
+          )}
         </div>
       )}
     </div>

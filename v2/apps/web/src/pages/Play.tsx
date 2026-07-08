@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import Board from "../components/Board";
 import { usePlay, type Promo } from "../hooks/usePlay";
+import PassPlay from "../components/PassPlay";
 
 function guestToken(): string {
   const k = "cg_play_token";
@@ -36,6 +37,7 @@ export default function PlayPage() {
   const ctx = useOutletContext<{ userId: string | null }>();
   const token = useMemo(() => ctx?.userId?.replace(/^u:/, "") ?? guestToken(), [ctx?.userId]);
   const p = usePlay(token);
+  const [mode, setMode] = useState<"online" | "local">("online");
 
   const resultText = (() => {
     if (!p.result) return "";
@@ -49,7 +51,16 @@ export default function PlayPage() {
   const playing = p.status === "playing";
 
   return (
-    <div className="grid gap-6 md:grid-cols-[minmax(0,520px)_1fr]">
+    <div className="space-y-4">
+      <div className="inline-flex rounded-xl border border-ink-700 bg-ink-900/60 p-1" data-testid="play-mode">
+        <button onClick={() => setMode("online")} className={`rounded-lg px-4 py-1.5 text-sm font-medium ${mode === "online" ? "bg-brand-600 text-white" : "text-ink-300 hover:text-white"}`}>Online</button>
+        <button onClick={() => setMode("local")} className={`rounded-lg px-4 py-1.5 text-sm font-medium ${mode === "local" ? "bg-brand-600 text-white" : "text-ink-300 hover:text-white"}`}>Pass &amp; Play</button>
+      </div>
+
+      {mode === "local" ? (
+        <PassPlay />
+      ) : (
+      <div className="grid gap-6 md:grid-cols-[minmax(0,520px)_1fr]">
       <div>
         <div className="mb-2 flex items-center justify-between text-sm text-ink-300" data-testid="opp-clock">
           <span>{p.opponent ? p.opponent.replace(/^u:/, "") : "Opponent"}</span>
@@ -210,6 +221,8 @@ export default function PlayPage() {
           </ol>
         </div>
       </aside>
+      </div>
+      )}
     </div>
   );
 }

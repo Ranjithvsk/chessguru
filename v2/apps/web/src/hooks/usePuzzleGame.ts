@@ -51,7 +51,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
           } else rid = raw; // legacy format
         }
       } catch { /* */ }
-      const rand = () => api.randomPuzzle({ theme, rating: initialRating, difficulty, maxPc, userId, section, player });
+      const rand = () => api.randomPuzzle({ theme, rating: initialRating, difficulty, maxPc, userId, section, player, mode });
       return rid ? api.puzzleById(rid).catch(rand) : rand();
     },
   });

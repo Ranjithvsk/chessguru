@@ -5,6 +5,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import App from "./App";
 import PuzzlesPage from "./pages/Puzzles";
 import HistoryPage from "./pages/History";
+import DashboardPage from "./pages/Dashboard";
 import StudyPage from "./pages/Study";
 import StudyTrainer from "./pages/StudyTrainer";
 import CoordinateTrainer from "./pages/CoordinateTrainer";
@@ -37,6 +38,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="puzzles" element={<PuzzlesPage />} />
             <Route path="blindfold" element={<BlindfoldPage />} />
             <Route path="history" element={<HistoryPage />} />
+            <Route path="dashboard" element={<DashboardPage />} />
             <Route path="study" element={<StudyPage />} />
             <Route path="study/coordinates" element={<CoordinateTrainer />} />
             <Route path="study/memory-palace" element={<MemoryPalace />} />

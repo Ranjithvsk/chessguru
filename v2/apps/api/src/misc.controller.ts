@@ -1,4 +1,4 @@
-import { Controller, Get, Req } from "@nestjs/common";
+import { Controller, Get, Req, Query } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { THEMES } from "./themes";
@@ -20,9 +20,10 @@ export class MiscController {
 
   /** Solved-puzzle history + categorised summary for the signed-in user. */
   @Get("me/history")
-  async myHistory(@Req() req: any) {
+  async myHistory(@Req() req: any, @Query("offset") offsetRaw?: string) {
     const userId: string | null = req?.session?.userId ?? null;
     if (!userId) return { loggedIn: false };
+    const offset = Math.max(0, parseInt(String(offsetRaw ?? "0"), 10) || 0);
 
     const lo = `${userId}:`, hi = `${userId};`;
     const rounds = await this.conn
@@ -34,9 +35,9 @@ export class MiscController {
 
     const DISPLAY = 200;                      // recent items get a (lazily-rendered) mini board
     const pidOf = (r: any) => String(r._id).slice(lo.length);
-    const recent = rounds.slice(0, DISPLAY);
+    const recent = rounds.slice(offset, offset + DISPLAY);   // the requested page
     const recentIds = recent.map(pidOf);
-    const needThemes = rounds.slice(DISPLAY).filter((r: any) => !Array.isArray(r.th)).map(pidOf);
+    const needThemes = rounds.filter((r: any) => !Array.isArray(r.th)).map(pidOf);
     const allNeed = Array.from(new Set([...recentIds, ...needThemes]));
 
     const pmap: Record<string, any> = {};
@@ -96,6 +97,8 @@ export class MiscController {
       byTheme: Object.values(byTheme).sort((a, b) => b.total - a.total),
       byBand: Object.values(byBand).sort((a, b) => a.lo - b.lo),
       items,
+      hasMore: offset + DISPLAY < rounds.length,   // more pages available?
+      nextOffset: offset + DISPLAY,
     };
   }
 }
