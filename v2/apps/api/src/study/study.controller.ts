@@ -12,9 +12,12 @@ export class StudyController {
   me(@Query("type") type: string, @Req() req: any) { return this.study.me(req?.session?.userId ?? null, type); }
 
   @Get("puzzle")
-  puzzle(@Query("type") type: string, @Query("level") level?: string, @Query("pawns") pawns?: string) {
-    return this.study.puzzle(type, Number(level) || 1200, pawns ? Number(pawns) : undefined);
+  puzzle(@Query("type") type: string, @Query("level") level?: string, @Query("pawns") pawns?: string, @Query("book") book?: string) {
+    return this.study.puzzle(type, Number(level) || 1200, pawns ? Number(pawns) : undefined, book || undefined);
   }
+
+  @Get("books")
+  books(@Query("type") type: string) { return this.study.books(type); }
 
   @Post(":id/complete")
   complete(@Param("id") id: string, @Body() body: any, @Req() req: any) {

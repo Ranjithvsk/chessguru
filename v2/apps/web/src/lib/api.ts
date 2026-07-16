@@ -81,9 +81,14 @@ export const api = {
 export interface StudyLevel { n: number; min: number; avg: number; max: number; }
 export const studyLevels = () => get<Record<string, StudyLevel>>("/api/study/levels");
 
-export interface StudyPuzzle { id: string; fen: string; rating: number; result: "win" | "draw" | "loss"; dtm: number; solution: string[]; }
-export const studyPuzzle = (type: string, level: number, pawns?: number) =>
-  get<StudyPuzzle | null>(`/api/study/puzzle?type=${encodeURIComponent(type)}&level=${level}${pawns ? `&pawns=${pawns}` : ""}`);
+export interface StudyPuzzle { id: string; fen: string; rating: number; result: "win" | "draw" | "loss"; dtm: number; solution: string[]; book?: string | null; author?: string | null; quote?: string | null; topic?: string | null; }
+export const studyPuzzle = (type: string, level: number, pawns?: number, book?: string) =>
+  get<StudyPuzzle | null>(`/api/study/puzzle?type=${encodeURIComponent(type)}&level=${level}${pawns ? `&pawns=${pawns}` : ""}${book ? `&book=${encodeURIComponent(book)}` : ""}`);
+
+// Books that have famous seeded positions for a study type (the book selector).
+export interface StudyBook { book: string; author: string; n: number; }
+export const studyBooks = (type: string) =>
+  get<StudyBook[]>(`/api/study/books?type=${encodeURIComponent(type)}`);
 
 export const studyMe = (type: string) =>
   get<{ rating: number; nb: number; guest: boolean }>(`/api/study/me?type=${encodeURIComponent(type)}`);

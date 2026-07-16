@@ -32,6 +32,7 @@ const GROUPS: Group[] = [
       { to: "/book", label: "📕 Book", desc: "Puzzles from the book games" },
       { to: "/study/coordinates", label: "🎯 Coordinates", desc: "Name squares at speed" },
       { to: "/study/memory-palace", label: "🏛️ Memory palace", desc: "Board memory training" },
+      { to: "/study/endgame", label: "🏁 Endgame trainer", desc: "Rule of the square, K+P vs K" },
     ],
   },
   {

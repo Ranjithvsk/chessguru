@@ -32,16 +32,34 @@ export class StudyService {
   }
 
   // One puzzle of `type` near `level` (matchmaking) — a beginner never gets a GM puzzle.
-  async puzzle(type: string, level: number, pawns?: number) {
+  // `book` (optional): restrict to a specific book's famous positions (rating-agnostic).
+  async puzzle(type: string, level: number, pawns?: number, book?: string) {
     const base: any = { type };
     if (pawns) base.pawns = pawns;
-    const band = 175;
-    let docs = await this.col().find({ ...base, rating: { $gte: level - band, $lte: level + band } }).limit(50).toArray();
-    if (!docs.length) docs = await this.col().find(base).limit(50).toArray();
+    let docs: any[];
+    if (book) {
+      base.book = book;
+      docs = await this.col().find(base).limit(200).toArray();   // whole book set (small)
+    } else {
+      const band = 175;
+      docs = await this.col().find({ ...base, rating: { $gte: level - band, $lte: level + band } }).limit(50).toArray();
+      if (!docs.length) docs = await this.col().find(base).limit(50).toArray();
+    }
     if (!docs.length) return null;
     const d = docs[Math.floor(Math.random() * docs.length)];
     if (!d) return null;
-    return { id: String(d._id), fen: d.fen, rating: d.rating, result: d.result, dtm: d.dtm, solution: d.solution, pawns: d.pawns ?? null };
+    return { id: String(d._id), fen: d.fen, rating: d.rating, result: d.result, dtm: d.dtm, solution: d.solution, pawns: d.pawns ?? null,
+      book: d.book ?? null, author: d.author ?? null, quote: d.quote ?? null, topic: d.topic ?? null };
+  }
+
+  // Distinct books that have famous positions for a type (for the book selector).
+  async books(type: string) {
+    const rows = await this.col().aggregate([
+      { $match: { type, famous: true } },
+      { $group: { _id: "$book", author: { $first: "$author" }, n: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]).toArray();
+    return rows.filter((r) => r._id).map((r) => ({ book: r._id as string, author: r.author as string, n: r.n as number }));
   }
 
   // Record a solve/fail: Glicko-update the users per-study rating AND self-calibrate the puzzles rating.

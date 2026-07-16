@@ -54,9 +54,24 @@ export default function StudyPage() {
           <p className="text-sm text-ink-400">Endgame technique trainers — you play the winning side, Stockfish defends at full strength. The ★ rating is each drills difficulty (calibrated from play).</p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
+          <Link to="/study/endgame"
+            className="group flex flex-col rounded-xl2 border border-ink-700 bg-ink-900 p-5 transition hover:border-brand-500 hover:bg-ink-800">
+            <div className="flex items-center gap-3">
+              <span className="grid h-12 w-12 place-items-center rounded-lg bg-brand-gradient text-2xl leading-none text-white">🏁</span>
+              <div>
+                <h2 className="font-display text-lg text-white">Rule of the Square</h2>
+                <p className="text-xs text-ink-400">King + Pawn vs King</p>
+              </div>
+            </div>
+            <p className="mt-3 flex-1 text-sm text-ink-400">Can the king catch the pawn? Answer yes/no, see the square drawn as proof, then play it out against a perfect tablebase — the square, the double-step, opposition &amp; key squares.</p>
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <span className="rounded-full bg-ink-800 px-2.5 py-1 text-[11px] font-medium text-ink-300">Q&amp;A + play-it-out</span>
+              <span className="shrink-0 text-sm font-semibold text-brand-400 group-hover:text-brand-300">Start →</span>
+            </div>
+          </Link>
           {rest.map((s) => <StudyCard key={s.id} s={s} level={levels[s.id]} />)}
         </div>
-        <p className="text-xs text-ink-500">More studies coming — king &amp; pawn, opposition…</p>
+        <p className="text-xs text-ink-500">More studies coming — opposition, triangulation…</p>
       </section>
 
       {memory.length > 0 && (

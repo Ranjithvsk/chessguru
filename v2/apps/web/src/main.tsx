@@ -9,6 +9,7 @@ import DashboardPage from "./pages/Dashboard";
 import StudyPage from "./pages/Study";
 import StudyTrainer from "./pages/StudyTrainer";
 import CoordinateTrainer from "./pages/CoordinateTrainer";
+import EndgameTrainer from "./pages/EndgameTrainer";
 import MemoryPalace from "./pages/MemoryPalace";
 import OpeningMemory from "./pages/OpeningMemory";
 import BlindfoldPage from "./pages/Blindfold";
@@ -41,6 +42,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="study" element={<StudyPage />} />
             <Route path="study/coordinates" element={<CoordinateTrainer />} />
+            <Route path="study/endgame" element={<EndgameTrainer />} />
             <Route path="study/memory-palace" element={<MemoryPalace />} />
             <Route path="study/opening-memory" element={<OpeningMemory />} />
             <Route path="study/:id" element={<StudyTrainer />} />
