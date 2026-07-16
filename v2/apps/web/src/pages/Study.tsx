@@ -69,6 +69,21 @@ export default function StudyPage() {
               <span className="shrink-0 text-sm font-semibold text-brand-400 group-hover:text-brand-300">Start →</span>
             </div>
           </Link>
+          <Link to="/study/key-squares"
+            className="group flex flex-col rounded-xl2 border border-ink-700 bg-ink-900 p-5 transition hover:border-brand-500 hover:bg-ink-800">
+            <div className="flex items-center gap-3">
+              <span className="grid h-12 w-12 place-items-center rounded-lg bg-brand-gradient text-2xl leading-none text-white">🔑</span>
+              <div>
+                <h2 className="font-display text-lg text-white">Key Squares</h2>
+                <p className="text-xs text-ink-400">The king's winning squares</p>
+              </div>
+            </div>
+            <p className="mt-3 flex-1 text-sm text-ink-400">Tap every key square of the pawn — the squares where the king promotes it no matter whose move it is. Rook pawns are the trick: they have none. Separate rating, matched to your level.</p>
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <span className="rounded-full bg-ink-800 px-2.5 py-1 text-[11px] font-medium text-ink-300">Tap-the-squares</span>
+              <span className="shrink-0 text-sm font-semibold text-brand-400 group-hover:text-brand-300">Start →</span>
+            </div>
+          </Link>
           {rest.map((s) => <StudyCard key={s.id} s={s} level={levels[s.id]} />)}
         </div>
         <p className="text-xs text-ink-500">More studies coming — opposition, triangulation…</p>
