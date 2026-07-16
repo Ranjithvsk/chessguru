@@ -6,6 +6,7 @@ import { setTable, tableReady, buildDTM } from "./kpk";
 
 export { evaluateKPK } from "./kpk";
 export { squareRule } from "./square";
+export { keySquares, type KeySquares } from "./keySquares";
 export { classify, generatePuzzle, TIER_NAMES, type Tier, type Classified } from "./generator";
 export { buildPuzzle, type EndgamePuzzle } from "./puzzle";
 export { applyMove, gradeMove, principalVariation, resultAfter, type CoordMove, type PVStep } from "./play";

@@ -9,7 +9,7 @@ import type { Key } from "chessground/types";
 import type { DrawShape } from "chessground/draw";
 import Board, { destsFromChess } from "../components/Board";
 import {
-  ensureOracle, generatePuzzle, buildPuzzle, evaluateKPK, resultAfter,
+  ensureOracle, generatePuzzle, buildPuzzle, evaluateKPK, resultAfter, keySquares,
   type EndgamePuzzle,
 } from "../lib/endgame/oracle";
 import { studyPuzzle, studyMe, studyBooks, studyComplete, type StudyBook } from "../lib/api";
@@ -58,6 +58,10 @@ export default function EndgameTrainer() {
   const [lastMove, setLastMove] = useState<[Key, Key] | undefined>();
   const [playing, setPlaying] = useState(false);
   const [boardKey, setBoardKey] = useState(0);   // fresh chessground per puzzle (no stale interactivity state)
+  const [showKeys, setShowKeys] = useState(false);   // overlay the pawn's key squares (concept)
+
+  // Key squares for the current pawn (derived from the oracle geometry).
+  const keys = useMemo(() => (puzzle ? keySquares(puzzle.fen) : null), [puzzle]);
 
   const nextPuzzle = useCallback(async (bk = book) => {
     setDelta(null);
@@ -78,6 +82,7 @@ export default function EndgameTrainer() {
     setPuzzle(p);
     game.current = new Chess(p.fen);
     setFen(p.fen); setLastMove(undefined); setCorrect(null); setMsg(""); setPlaying(false);
+    setShowKeys(false);
     setBoardKey((k) => k + 1);
     setPhase("question");
   }, [book]);
@@ -134,8 +139,9 @@ export default function EndgameTrainer() {
     s.push({ orig: puzzle.overlay.pawn as Key, dest: puzzle.overlay.promotionSquare as Key, brush: "green" });
     const defKing = puzzle.defender === "white" ? ks.K : ks.k;
     if (defKing) s.push({ orig: defKing as Key, dest: puzzle.overlay.promotionSquare as Key, brush: "red" });
+    if (showKeys && keys) for (const c of keys.squares) s.push({ orig: c as Key, brush: "purple" });
     return s;
-  }, [puzzle, phase]);
+  }, [puzzle, phase, showKeys, keys]);
 
   // ── play it out against the oracle ──
   const startPlay = useCallback(() => {
@@ -287,6 +293,26 @@ export default function EndgameTrainer() {
               )}
               <p className="mt-2 text-sm text-ink-300">{puzzle.explanation}</p>
               <div className="mt-2 text-xs text-ink-500">The shaded squares are the pawn's <b>square</b>. Green = the pawn's run, red = the king's chase.</div>
+
+              {/* Key-square concept — toggle the critical squares the attacking king aims for */}
+              {keys && (keys.squares.length > 0 || keys.rookPawn) && (
+                <div className="mt-3 rounded-lg border border-ink-800 bg-ink-950/40 p-3">
+                  <button
+                    onClick={() => setShowKeys((v) => !v)}
+                    className="flex w-full items-center justify-between gap-2 text-sm font-semibold text-violet-300 hover:text-violet-200"
+                  >
+                    <span>🔑 Key squares {keys.rookPawn ? "(rook pawn)" : `(${keys.squares.length})`}</span>
+                    <span className="text-xs text-ink-500">{showKeys ? "hide ▲" : "show ▼"}</span>
+                  </button>
+                  {showKeys && (
+                    <p className="mt-2 text-xs leading-relaxed text-ink-300">
+                      {keys.text}
+                      {!keys.rookPawn && <span className="mt-1 block text-ink-500">The rule of the square asks whether the <i>defending</i> king catches the pawn; key squares are the flip side — the <i>attacking</i> king's targets. Reach one and the pawn queens even without the move.</span>}
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="mt-4 flex flex-col gap-2">
                 <button onClick={startPlay} className="rounded-lg bg-brand-600 px-4 py-2.5 font-bold text-white hover:bg-brand-500">▶ Play it out ({puzzle.playItOut.userPlays})</button>
                 <button onClick={() => nextPuzzle()} className="rounded-lg border border-ink-700 px-4 py-2.5 font-semibold text-ink-200 hover:bg-ink-800">Next position ↻</button>
