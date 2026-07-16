@@ -16,15 +16,15 @@ type EmRate = { anchor: number | null; themes: string[]; confidence: string;
   signals: { onlyMoves: number; trap: boolean; sfSubtle: boolean; dtm: number; reciprocalZugzwang: boolean } };
 type Puz = {
   n: number; num?: string; fen: string; side: "w" | "b"; diff: string;
-  bb?: [number, number, number, number]; sol: string[];
+  page?: number; bb?: [number, number, number, number]; sol: string[];
   sf: string; maia: string; idea: string; note: string;
   goal?: "win" | "draw"; rating?: number; band?: string; emRate?: EmRate;
 };
 
-type Book = { slug: string; title: string; subtitle: string; mode: "pages" | "list"; pages?: number };
+type Book = { slug: string; title: string; subtitle: string; mode: "pages"; pages: number; imgBase: string; initialPage: number };
 const BOOKS: Book[] = [
-  { slug: "2000-tactical", title: "2000 Tactical Chess", subtitle: "Part 4: Chess Endings — preview (pp.1–10)", mode: "pages", pages: 10 },
-  { slug: "endgame-manual", title: "Dvoretsky's Endgame Manual", subtitle: "Chapter 1 · Pawn Endgames — read from the diagrams, engine-verified & Maia-rated", mode: "list" },
+  { slug: "2000-tactical", title: "2000 Tactical Chess", subtitle: "Part 4: Chess Endings — preview (pp.1–10)", mode: "pages", pages: 10, imgBase: "bookimg/", initialPage: 9 },
+  { slug: "endgame-manual", title: "Dvoretsky's Endgame Manual", subtitle: "Chapter 1 · Pawn Endgames — flip through the book; click any diagram with a ▶ to play it (engine-verified, Maia-rated)", mode: "pages", pages: 120, imgBase: "bookimg/endgame-manual/", initialPage: 18 },
 ];
 
 const PUZZLES: Record<number, Puz[]> = {
@@ -68,54 +68,59 @@ const BANDS = [1100, 1300, 1500, 1700, 1900];
 // Dvoretsky's Endgame Manual — Chapter 1 (Pawn Endgames). FENs read from the diagrams,
 // verified by Stockfish 18 + the KPK oracle; ratings from the Maia play-it-out rater.
 const EM_PUZZLES: Puz[] = [
-  { n: 1, num: "1-1", fen: "8/3k4/8/3K4/3P4/8/8/8 w - - 0 1", side: "w", diff: "Key squares · draw", goal: "draw",
+  { n: 1, num: "1-1", fen: "8/3k4/8/3K4/3P4/8/8/8 w - - 0 1", page: 19, bb: [35.6, 49, 36, 25.4], side: "w", diff: "Key squares · draw", goal: "draw",
     sol: ["d5e5", "d7e7", "e5d5", "e7d7"], sf: "Draw (½–½)", maia: "—",
     idea: "The king on d5 does NOT stand on a key square, so with White to move it is only a draw: 1.Kc5 Kc7 or 1.Ke5 Ke7. The key squares for the d4-pawn are c6, d6 and e6 — only Black-to-move would have to cede one.",
     note: "Chapter 1 — Key Squares. (Ties into the Key-Squares trainer.)",
     rating: 950, band: "Beginner", emRate: { anchor: 1100, themes: ["K+P vs K", "opposition"], confidence: "high", signals: { onlyMoves: 0, trap: false, sfSubtle: false, dtm: 4, reciprocalZugzwang: false } } },
-  { n: 2, num: "1-2", fen: "1k6/8/1K6/1P6/8/8/8/8 w - - 0 1", side: "w", diff: "Win", goal: "win",
+  { n: 2, num: "1-2", fen: "1k6/8/1K6/1P6/8/8/8/8 w - - 0 1", page: 20, bb: [35.6, 3, 36, 25.4], side: "w", diff: "Win", goal: "win",
     sol: ["b6a6", "b8a8", "b5b6", "a8b8", "b6b7"], sf: "White wins", maia: "—",
     idea: "1.Ka6! seizes the key square (the opposition). After 1…Ka8 2.b6 Kb8 3.b7 the pawn queens next move. The tempting 1.Kc6? runs into 1…Ka7! and White has to start over.",
     note: "Chapter 1 — a knight-pawn's key squares. Maia: only the 1900 level converts it against perfect defense.",
     rating: 1879, band: "Advanced", emRate: { anchor: 1900, themes: ["K+P vs K", "opposition"], confidence: "high", signals: { onlyMoves: 2, trap: false, sfSubtle: false, dtm: 15, reciprocalZugzwang: false } } },
-  { n: 3, num: "1-3", fen: "5k2/8/8/8/1P6/8/8/2K5 w - - 0 1", side: "w", diff: "Win · study", goal: "win",
+  { n: 3, num: "1-3", fen: "5k2/8/8/8/1P6/8/8/2K5 w - - 0 1", page: 20, bb: [35.2, 38.1, 36, 25.4], side: "w", diff: "Win · study", goal: "win",
     sol: ["c1c2", "f8e7", "c2b3", "e7d6", "b3a4", "d6c6", "a4a5", "c6b7", "a5b5"], sf: "White wins", maia: "—",
     idea: "J. Moravec, 1952. Head for the key square FARTHEST from the enemy king: 1.Kc2! (not 1.Kb2? or 1.Kd2?). Then 1…Ke7 2.Kb3 Kd6 3.Ka4 Kc6 4.Ka5 Kb7 5.Kb5 and White wins the race for b5.",
     note: "Chapter 1 — outflanking. Even Maia-1900 fails to win this against best defense.",
     rating: 2373, band: "Expert", emRate: { anchor: null, themes: ["king march / outflanking"], confidence: "high", signals: { onlyMoves: 2, trap: true, sfSubtle: true, dtm: 24, reciprocalZugzwang: false } } },
-  { n: 4, num: "1-4", fen: "2k5/8/8/7p/8/8/6P1/5K2 w - - 0 1", side: "w", diff: "Win · study", goal: "win",
+  { n: 4, num: "1-4", fen: "2k5/8/8/7p/8/8/6P1/5K2 w - - 0 1", page: 21, bb: [35.6, 2.7, 36, 25.4], side: "w", diff: "Win · study", goal: "win",
     sol: ["f1f2", "h5h4", "f2g1", "h4h3", "g2g3", "c8d7", "g1h2", "d7e6", "h2h3", "e6f5", "h3h4", "f5g6", "h4g4"], sf: "White wins", maia: "—",
     idea: "White wins by tempo and key squares. 1.Kf2! (not 1.Kg1? Kd7 and Black holds the pawn). If 1…h4 2.Kg1!! (the natural 2.Kf3? h3! draws) 2…h3 3.g3! — now the g3-pawn's key squares (f5/g5/h5) are near White's king. 3…Kd7 4.Kh2 Ke6 5.Kxh3 Kf5 6.Kh4 Kg6 7.Kg4 and White wins.",
     note: "Chapter 1 — the waiting move & key squares. Tablebase: 1.Kf2 is the UNIQUE win (every other move only draws).",
     rating: 2075, band: "Expert", emRate: { anchor: null, themes: ["K+P vs K", "key squares", "reciprocal zugzwang"], confidence: "medium", signals: { onlyMoves: 2, trap: true, sfSubtle: true, dtm: 13, reciprocalZugzwang: true } } },
-  { n: 7, num: "1-7", fen: "2k5/8/2p5/2K5/1P1P4/8/8/8 b - - 0 1", side: "b", diff: "Hold the draw", goal: "draw",
+  { n: 7, num: "1-7", fen: "2k5/8/2p5/2K5/1P1P4/8/8/8 b - - 0 1", page: 23, bb: [35.2, 2.7, 36, 25.4], side: "b", diff: "Hold the draw", goal: "draw",
     sol: ["c8c7", "b4b5", "c6b5", "c5b5", "c7d6"], sf: "Draw (½–½)", maia: "—",
     idea: "White has the opposition, but two pawns on the same file can't break a well-defended king. 1…Kc7! keeps the opposition. If 2.b5 cxb5 3.Kxb5 Kd6 the king reaches the square in front of the d-pawn — draw. (1…Ka7? loses.)",
     note: "Chapter 1 — opposition & the defender's resources.",
     rating: 1175, band: "Beginner", emRate: { anchor: 1300, themes: ["opposition", "defensive hold"], confidence: "high", signals: { onlyMoves: 2, trap: false, sfSubtle: false, dtm: 5, reciprocalZugzwang: false } } },
-  { n: 9, num: "1-9", fen: "8/5p2/8/5PPk/8/8/8/7K w - - 0 1", side: "w", diff: "Hold the draw · study", goal: "draw",
+  { n: 9, num: "1-9", fen: "8/5p2/8/5PPk/8/8/8/7K w - - 0 1", page: 24, bb: [35.6, 13.7, 36, 25.4], side: "w", diff: "Hold the draw · study", goal: "draw",
     sol: ["g5g6", "f7g6", "f5g6", "h5g6", "h1g2"], sf: "Draw (½–½)", maia: "—",
     idea: "H. Mattison, 1918. The pawns are lost, but White saves himself with the distant opposition: 1.g6! fxg6 2.f5! gxf5 3.Kg1! and Black — though he holds the distant opposition — cannot convert it into the close opposition. Draw.",
     note: "Chapter 1 — distant opposition as a drawing resource.",
     rating: 950, band: "Beginner", emRate: { anchor: 1100, themes: ["distant opposition", "defensive hold"], confidence: "high", signals: { onlyMoves: 1, trap: false, sfSubtle: false, dtm: 5, reciprocalZugzwang: false } } },
-  { n: 10, num: "1-10", fen: "5k2/8/4p3/4P3/3P4/8/8/4K3 w - - 0 1", side: "w", diff: "Win · study", goal: "win",
+  { n: 10, num: "1-10", fen: "5k2/8/4p3/4P3/3P4/8/8/4K3 w - - 0 1", page: 24, bb: [36, 67.6, 36, 25.4], side: "w", diff: "Win · study", goal: "win",
     sol: ["e1d2", "f8e7", "d2c3", "e7d7", "c3b4", "d7c6", "b4c4", "c6b6", "d4d5"], sf: "White wins", maia: "—",
     idea: "J. Drtina, 1907. Taking the distant opposition with 1.Ke1? only draws. White wins by OUTFLANKING: 1.Kd2! marches the king around (Kc3-Kb4-Kc4) to force through d4-d5 — the enemy king can't cover both breakthroughs.",
     note: "Chapter 1 — outflanking beats mere opposition. Even Maia-1900 misplays it.",
     rating: 2203, band: "Expert", emRate: { anchor: null, themes: ["king march / outflanking"], confidence: "high", signals: { onlyMoves: 2, trap: true, sfSubtle: false, dtm: 9, reciprocalZugzwang: false } } },
-  { n: 11, num: "1-11", fen: "8/8/2p5/k1p3K1/p1P5/P7/8/8 w - - 0 1", side: "w", diff: "Win · study", goal: "win",
+  { n: 11, num: "1-11", fen: "8/8/2p5/k1p3K1/p1P5/P7/8/8 w - - 0 1", page: 25, bb: [36, 40.5, 36, 25.4], side: "w", diff: "Win · study", goal: "win",
     sol: ["g5f5", "a5b6", "f5f6", "b6b7", "f6f7", "b7b6", "f7e8", "b6a7", "e8e7", "a7a8", "e7d6", "a8b7", "d6d7", "b7b6", "d7c8"], sf: "White wins", maia: "—",
     idea: "F. Sackmann, 1913. Black is a pawn up, but his pawns are fixed and weak. White wins by OUTFLANKING with the king: 1.Kf5! (the only move — every other king move draws) …Kb6 2.Kf6 Kb7 3.Kf7 Kb6 4.Ke8! Ka7 5.Ke7 Ka8 6.Kd6 Kb7 7.Kd7 Kb6 8.Kc8 and the king breaks through to the weak queenside pawns.",
     note: "Chapter 1 — outflanking a pawn-up defender. Tablebase: 1.Kf5 is the UNIQUE win.",
     rating: 2220, band: "Expert", emRate: { anchor: null, themes: ["king march / outflanking", "distant opposition"], confidence: "high", signals: { onlyMoves: 3, trap: false, sfSubtle: false, dtm: 32, reciprocalZugzwang: false } } },
 ];
 
+// Group Endgame Manual puzzles by their PDF page → clickable hotspots on the page view.
+const EM_BY_PAGE: Record<number, Puz[]> = {};
+for (const p of EM_PUZZLES) { if (p.page != null) (EM_BY_PAGE[p.page] ??= []).push(p); }
+
 const uci = (m: string) => ({ from: m.slice(0, 2) as Key, to: m.slice(2, 4) as Key, promotion: m.length > 4 ? m[4] : undefined });
 
 export default function BookPage() {
   const [bookSlug, setBookSlug] = useState(BOOKS[0]!.slug);
   const book = BOOKS.find((b) => b.slug === bookSlug)!;
-  const [page, setPage] = useState(9);
+  const bookPuzzles = bookSlug === "endgame-manual" ? EM_BY_PAGE : PUZZLES;
+  const [page, setPage] = useState(BOOKS[0]!.initialPage);
   const [cur, setCur] = useState<Puz | null>(null);
   const game = useRef(new Chess());
   const [ply, setPly] = useState(0);
@@ -192,7 +197,7 @@ export default function BookPage() {
   const turnColor: Color = game.current.turn() === "w" ? "white" : "black";
   const myTurn = !!cur && !solving.current && turnColor === solverColor && ply < (cur?.sol.length || 0);
 
-  const selectBook = (slug: string) => { setBookSlug(slug); setCur(null); setPage(9); };
+  const selectBook = (slug: string) => { const b = BOOKS.find((x) => x.slug === slug)!; setBookSlug(slug); setCur(null); setPage(b.initialPage); };
 
   return (
     <div>
@@ -208,46 +213,25 @@ export default function BookPage() {
       </div>
       <p className="mb-4 text-sm text-ink-400">{book.subtitle}</p>
 
-      {/* ── PAGES mode (pilot tactics book) ── */}
-      {book.mode === "pages" && !cur && (
+      {/* ── PAGES mode: flip through the book, click a ▶ diagram to play ── */}
+      {!cur && (
         <div>
           <div className="mb-3 flex items-center gap-2">
             <button disabled={page <= 1} onClick={() => setPage(page - 1)} className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white disabled:opacity-40">‹ Prev</button>
-            <span className="text-sm text-ink-400">Page {page} / {book.pages} (book p.{page - 1})</span>
-            <button disabled={page >= (book.pages || 10)} onClick={() => setPage(page + 1)} className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white disabled:opacity-40">Next ›</button>
+            <span className="text-sm text-ink-400">Page {page} / {book.pages}</span>
+            <button disabled={page >= book.pages} onClick={() => setPage(page + 1)} className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white disabled:opacity-40">Next ›</button>
+            {(bookPuzzles[page]?.length ?? 0) > 0 && <span className="text-xs text-brand-400">▶ {bookPuzzles[page]!.length} playable diagram{bookPuzzles[page]!.length > 1 ? "s" : ""} on this page</span>}
           </div>
           <div className="relative inline-block w-full max-w-xl">
-            <img src={`${BASE}bookimg/p${page}.png`} alt={`book page ${page}`} className="w-full rounded-lg bg-white" />
-            {(PUZZLES[page] || []).map((pz) => (
-              <button key={pz.n} onClick={() => start(pz)} title={`Play puzzle #${pz.n}`}
+            <img src={`${BASE}${book.imgBase}p${page}.png`} alt={`page ${page}`} className="w-full rounded-lg bg-white" />
+            {(bookPuzzles[page] || []).map((pz) => (
+              <button key={pz.n} onClick={() => start(pz)} title={`Play ${pz.num ?? "#" + pz.n}`}
                 style={{ left: `${pz.bb![0]}%`, top: `${pz.bb![1]}%`, width: `${pz.bb![2]}%`, height: `${pz.bb![3]}%` }}
-                className="group absolute rounded-md border-2 border-transparent transition hover:border-brand-500 hover:bg-brand-500/20">
-                <span className="absolute left-1 top-1 rounded bg-brand-600 px-1.5 text-[11px] font-bold text-white opacity-90">▶ #{pz.n}</span>
+                className="group absolute rounded-md border-2 border-brand-500/40 bg-brand-500/5 transition hover:border-brand-500 hover:bg-brand-500/20">
+                <span className="absolute left-1 top-1 rounded bg-brand-600 px-1.5 text-[11px] font-bold text-white opacity-90">▶ {pz.num ?? "#" + pz.n}</span>
               </button>
             ))}
           </div>
-        </div>
-      )}
-
-      {/* ── LIST mode (Endgame Manual) ── */}
-      {book.mode === "list" && !cur && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {EM_PUZZLES.map((pz) => (
-            <button key={pz.n} onClick={() => start(pz)}
-              className="group flex flex-col rounded-xl border border-ink-700 bg-ink-900 p-3 text-left transition hover:border-brand-500 hover:bg-ink-800">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="rounded-full bg-ink-700 px-2 py-0.5 text-xs text-ink-200">{pz.num} · {pz.side === "w" ? "White" : "Black"} to move</span>
-                <span className="rounded-full bg-brand-900/60 px-2 py-0.5 text-xs font-semibold text-brand-200">{pz.rating}</span>
-              </div>
-              <div className="pointer-events-none mx-auto w-full max-w-[220px]">
-                <Board fen={pz.fen} orientation={pz.side === "w" ? "white" : "black"} viewOnly className="mini" coordinates={false} />
-              </div>
-              <div className="mt-2 flex items-center justify-between text-xs">
-                <span className="text-ink-400">{pz.diff}</span>
-                <span className="text-brand-400 group-hover:text-brand-300">Play →</span>
-              </div>
-            </button>
-          ))}
         </div>
       )}
 
@@ -345,21 +329,21 @@ export default function BookPage() {
             )}
           </div>
 
-          {book.mode === "pages" && (
+          {(() => { const pp = cur.page ?? page; return (
             <>
-              <p className="mb-2 mt-4 text-xs text-ink-500">Book page — scroll to read; click any other diagram to switch:</p>
+              <p className="mb-2 mt-4 text-xs text-ink-500">Book page {pp} — scroll to read; click any other diagram to switch:</p>
               <div className="relative mx-auto w-full max-w-xl">
-                <img src={`${BASE}bookimg/p${page}.png`} alt="book page" className="w-full rounded-lg bg-white" />
-                {(PUZZLES[page] || []).map((pz) => (
-                  <button key={pz.n} onClick={() => start(pz)} title={`Play puzzle #${pz.n}`}
+                <img src={`${BASE}${book.imgBase}p${pp}.png`} alt={`book page ${pp}`} className="w-full rounded-lg bg-white" />
+                {(bookPuzzles[pp] || []).map((pz) => (
+                  <button key={pz.n} onClick={() => start(pz)} title={`Play ${pz.num ?? "#" + pz.n}`}
                     style={{ left: `${pz.bb![0]}%`, top: `${pz.bb![1]}%`, width: `${pz.bb![2]}%`, height: `${pz.bb![3]}%` }}
-                    className={`group absolute rounded-md border-2 transition ${cur.n === pz.n ? "border-brand-500 bg-brand-500/10" : "border-transparent hover:border-brand-500 hover:bg-brand-500/20"}`}>
-                    <span className="absolute left-1 top-1 rounded bg-brand-600 px-1.5 text-[11px] font-bold text-white opacity-90">▶ #{pz.n}</span>
+                    className={`group absolute rounded-md border-2 transition ${cur.n === pz.n ? "border-brand-500 bg-brand-500/10" : "border-brand-500/40 bg-brand-500/5 hover:border-brand-500 hover:bg-brand-500/20"}`}>
+                    <span className="absolute left-1 top-1 rounded bg-brand-600 px-1.5 text-[11px] font-bold text-white opacity-90">▶ {pz.num ?? "#" + pz.n}</span>
                   </button>
                 ))}
               </div>
             </>
-          )}
+          ); })()}
         </div>
       )}
     </div>
