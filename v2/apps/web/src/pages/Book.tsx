@@ -3,20 +3,29 @@ import { Chess } from "chess.js";
 import type { Key, Color } from "chessground/types";
 import Board, { destsFromChess } from "../components/Board";
 
-// CL-9155: "Book" tab — a scanned tactics book rendered like a book, with each
-// puzzle clickable into a playable board (the shared ChessGuru chessground board).
-// Pilot data = 2000 Tactical Chess Part 4 (Endings), book p.8 (6 pawn-ending
-// puzzles), hand-extracted + Stockfish 18 validated. Page images in public/bookimg/.
-// Engine lines / Maia notes are baked (the live tab will call the engine API).
+// "Book" tab — chess books rendered playable. Two books now:
+//  • 2000 Tactical Chess (pilot) — scanned pages with clickable diagram hotspots.
+//  • Dvoretsky's Endgame Manual — positions read straight off the diagrams (vision),
+//    Stockfish-18 + KPK-oracle verified, and rated by the Maia play-it-out endgame
+//    rater (book-engine/endgame_rater.py). Presented as a position list.
 // See PROJECT_MASTER/knowledge/11-book-tab-and-engines.md.
 
 const BASE = import.meta.env.BASE_URL; // "/" or "/v2/"
 
+type EmRate = { anchor: number | null; onlyMoves: number; trap: boolean };
 type Puz = {
-  n: number; fen: string; side: "w" | "b"; diff: string;
-  bb: [number, number, number, number]; sol: string[];
+  n: number; num?: string; fen: string; side: "w" | "b"; diff: string;
+  bb?: [number, number, number, number]; sol: string[];
   sf: string; maia: string; idea: string; note: string;
+  goal?: "win" | "draw"; rating?: number; band?: string; emRate?: EmRate;
 };
+
+type Book = { slug: string; title: string; subtitle: string; mode: "pages" | "list"; pages?: number };
+const BOOKS: Book[] = [
+  { slug: "2000-tactical", title: "2000 Tactical Chess", subtitle: "Part 4: Chess Endings — preview (pp.1–10)", mode: "pages", pages: 10 },
+  { slug: "endgame-manual", title: "Dvoretsky's Endgame Manual", subtitle: "Chapter 1 · Pawn Endgames — read from the diagrams, engine-verified & Maia-rated", mode: "list" },
+];
+
 const PUZZLES: Record<number, Puz[]> = {
   9: [
     { n: 1, fen: "7k/5P2/8/5K2/8/8/8/8 w - - 0 1", side: "w", diff: "Cadet · #3", bb: [15.6, 12.6, 31.4, 21.8],
@@ -45,11 +54,6 @@ const PUZZLES: Record<number, Puz[]> = {
       note: "Maia finds 1.a4 — correct. ✓" },
   ],
 };
-// CL-9156 v3: PRECOMPUTED calibrated difficulty rating. A gradient-boosted model trained
-// on ChessGuru's 5.88M real-rated puzzles (features = Stockfish eval/only-move + Maia
-// 1100/1300/1500/1700/1900 policy probability + strong Leela policy) — held-out MAE 256 Elo
-// / R² 0.75, vs the old heuristic's 419. `profile` = Maia policy % for the key move per band
-// ("how likely each rating level plays it"). Scored offline by book-engine/score_book.py.
 const RATINGS: Record<number, { rating: number; band: string; profile: Record<number, number>; maiaSolved: number[] }> = {
   1: { rating: 2095, band: "Expert", profile: { 1100: 23.0, 1300: 12.3, 1500: 15.5, 1700: 18.0, 1900: 15.1 }, maiaSolved: [] },
   2: { rating: 2564, band: "Expert", profile: { 1100: 22.7, 1300: 33.2, 1500: 32.7, 1700: 43.5, 1900: 37.0 }, maiaSolved: [] },
@@ -59,9 +63,32 @@ const RATINGS: Record<number, { rating: number; band: string; profile: Record<nu
   6: { rating: 1314, band: "Club", profile: { 1100: 51.0, 1300: 62.5, 1500: 57.1, 1700: 72.9, 1900: 65.5 }, maiaSolved: [1100, 1300, 1500, 1700, 1900] },
 };
 const BANDS = [1100, 1300, 1500, 1700, 1900];
+
+// Dvoretsky's Endgame Manual — Chapter 1 (Pawn Endgames). FENs read from the diagrams,
+// verified by Stockfish 18 + the KPK oracle; ratings from the Maia play-it-out rater.
+const EM_PUZZLES: Puz[] = [
+  { n: 1, num: "1-1", fen: "8/3k4/8/3K4/3P4/8/8/8 w - - 0 1", side: "w", diff: "Key squares · draw", goal: "draw",
+    sol: ["d5e5", "d7e7", "e5d5", "e7d7"], sf: "Draw (½–½)", maia: "—",
+    idea: "The king on d5 does NOT stand on a key square, so with White to move it is only a draw: 1.Kc5 Kc7 or 1.Ke5 Ke7. The key squares for the d4-pawn are c6, d6 and e6 — only Black-to-move would have to cede one.",
+    note: "Chapter 1 — Key Squares. (Ties into the Key-Squares trainer.)",
+    rating: 950, band: "Beginner", emRate: { anchor: 1100, onlyMoves: 0, trap: false } },
+  { n: 2, num: "1-2", fen: "1k6/8/1K6/1P6/8/8/8/8 w - - 0 1", side: "w", diff: "Win", goal: "win",
+    sol: ["b6a6", "b8a8", "b5b6", "a8b8", "b6b7"], sf: "White wins", maia: "—",
+    idea: "1.Ka6! seizes the key square (the opposition). After 1…Ka8 2.b6 Kb8 3.b7 the pawn queens next move. The tempting 1.Kc6? runs into 1…Ka7! and White has to start over.",
+    note: "Chapter 1 — a knight-pawn's key squares. Maia: only the 1900 level converts it against perfect defense.",
+    rating: 1825, band: "Advanced", emRate: { anchor: 1900, onlyMoves: 2, trap: false } },
+  { n: 3, num: "1-3", fen: "5k2/8/8/8/1P6/8/8/2K5 w - - 0 1", side: "w", diff: "Win · study", goal: "win",
+    sol: ["c1c2", "f8e7", "c2b3", "e7d6", "b3a4", "d6c6", "a4a5", "c6b7", "a5b5"], sf: "White wins", maia: "—",
+    idea: "J. Moravec, 1952. Head for the key square FARTHEST from the enemy king: 1.Kc2! (not 1.Kb2? or 1.Kd2?). Then 1…Ke7 2.Kb3 Kd6 3.Ka4 Kc6 4.Ka5 Kb7 5.Kb5 and White wins the race for b5.",
+    note: "Chapter 1 — outflanking. Even Maia-1900 fails to win this against best defense.",
+    rating: 2075, band: "Expert", emRate: { anchor: null, onlyMoves: 2, trap: false } },
+];
+
 const uci = (m: string) => ({ from: m.slice(0, 2) as Key, to: m.slice(2, 4) as Key, promotion: m.length > 4 ? m[4] : undefined });
 
 export default function BookPage() {
+  const [bookSlug, setBookSlug] = useState(BOOKS[0]!.slug);
+  const book = BOOKS.find((b) => b.slug === bookSlug)!;
   const [page, setPage] = useState(9);
   const [cur, setCur] = useState<Puz | null>(null);
   const game = useRef(new Chess());
@@ -72,8 +99,6 @@ export default function BookPage() {
   const rerender = () => force((x) => x + 1);
   const solving = useRef(false);
 
-  // CL-9155: live engine analysis (Stockfish 18 + Lc0/Maia) via the isolated
-  // /book-engine microservice. Off by default so it doesn't spoil the puzzle.
   const [showAn, setShowAn] = useState(false);
   const [an, setAn] = useState<{ sf: { move: string | null; score: { type: string; val: number } | null }; maia: { move: string | null; level: number } } | null>(null);
   useEffect(() => {
@@ -91,10 +116,10 @@ export default function BookPage() {
   }, [showAn, an]);
   const evalStr = an?.sf?.score ? (an.sf.score.type === "mate" ? `M${an.sf.score.val}` : (an.sf.score.val / 100).toFixed(2)) : "";
 
-  // CL-9156 v3: calibrated difficulty rating, precomputed by the trained model (see RATINGS).
-  const rateData = cur ? RATINGS[cur.n] : undefined;
-  const finalRating = rateData ? rateData.rating : null;
-  const finalBand = rateData ? rateData.band : "";
+  // rating: endgame puzzles carry their own (Maia rater); tactics use the RATINGS map.
+  const tacticData = cur && cur.rating == null ? RATINGS[cur.n] : undefined;
+  const finalRating = cur?.rating ?? tacticData?.rating ?? null;
+  const finalBand = cur?.band ?? tacticData?.band ?? "";
 
   function start(p: Puz) {
     setCur(p); game.current = new Chess(p.fen); setPly(0); setLastMove(undefined); solving.current = false;
@@ -115,15 +140,15 @@ export default function BookPage() {
       setLastMove([from, to]); const np = ply + 1; setPly(np);
       setFb(promo && promo !== "q" ? { t: "Underpromotion! (avoids stalemate)", k: "good" } : { t: "✓ Correct!", k: "good" });
       rerender();
-      if (np >= cur.sol.length) { setFb({ t: "✓ Solved! 🎉", k: "good" }); return; }
+      if (np >= cur.sol.length) { setFb({ t: cur.goal === "draw" ? "✓ Draw held! 🛡️" : "✓ Solved! 🎉", k: "good" }); return; }
       solving.current = true;
       setTimeout(() => {
         const m = uci(cur.sol[np]!); try { game.current.move(m); } catch { /* */ }
         setLastMove([m.from, m.to]); const n2 = np + 1; setPly(n2); solving.current = false; rerender();
-        if (n2 >= cur.sol.length) setFb({ t: "✓ Solved! 🎉", k: "good" });
+        if (n2 >= cur.sol.length) setFb({ t: cur.goal === "draw" ? "✓ Draw held! 🛡️" : "✓ Solved! 🎉", k: "good" });
       }, 480);
     } else {
-      setFb({ t: "✗ Not the puzzle move — try again.", k: "bad" }); rerender(); // fen unchanged → board snaps back
+      setFb({ t: "✗ Not the book move — try again.", k: "bad" }); rerender();
     }
   }
   function showSolution() {
@@ -141,36 +166,72 @@ export default function BookPage() {
   const turnColor: Color = game.current.turn() === "w" ? "white" : "black";
   const myTurn = !!cur && !solving.current && turnColor === solverColor && ply < (cur?.sol.length || 0);
 
+  const selectBook = (slug: string) => { setBookSlug(slug); setCur(null); setPage(9); };
+
   return (
     <div>
       <h1 className="mb-1 font-display text-xl text-white">Book</h1>
-      <p className="mb-4 text-sm text-ink-400">2000 Tactical Chess · Part 4: Chess Endings — preview (pp.1–10). Click a diagram on a puzzle page to play it.</p>
+      {/* Book selector */}
+      <div className="mb-3 flex flex-wrap gap-2">
+        {BOOKS.map((b) => (
+          <button key={b.slug} onClick={() => selectBook(b.slug)}
+            className={`rounded-lg border px-3 py-1.5 text-sm transition ${b.slug === bookSlug ? "border-brand-500 bg-brand-600/20 text-white" : "border-ink-700 text-ink-300 hover:text-white"}`}>
+            {b.title}
+          </button>
+        ))}
+      </div>
+      <p className="mb-4 text-sm text-ink-400">{book.subtitle}</p>
 
-      {!cur ? (
+      {/* ── PAGES mode (pilot tactics book) ── */}
+      {book.mode === "pages" && !cur && (
         <div>
           <div className="mb-3 flex items-center gap-2">
             <button disabled={page <= 1} onClick={() => setPage(page - 1)} className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white disabled:opacity-40">‹ Prev</button>
-            <span className="text-sm text-ink-400">Page {page} / 10 (book p.{page - 1})</span>
-            <button disabled={page >= 10} onClick={() => setPage(page + 1)} className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white disabled:opacity-40">Next ›</button>
+            <span className="text-sm text-ink-400">Page {page} / {book.pages} (book p.{page - 1})</span>
+            <button disabled={page >= (book.pages || 10)} onClick={() => setPage(page + 1)} className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white disabled:opacity-40">Next ›</button>
           </div>
           <div className="relative inline-block w-full max-w-xl">
             <img src={`${BASE}bookimg/p${page}.png`} alt={`book page ${page}`} className="w-full rounded-lg bg-white" />
             {(PUZZLES[page] || []).map((pz) => (
               <button key={pz.n} onClick={() => start(pz)} title={`Play puzzle #${pz.n}`}
-                style={{ left: `${pz.bb[0]}%`, top: `${pz.bb[1]}%`, width: `${pz.bb[2]}%`, height: `${pz.bb[3]}%` }}
+                style={{ left: `${pz.bb![0]}%`, top: `${pz.bb![1]}%`, width: `${pz.bb![2]}%`, height: `${pz.bb![3]}%` }}
                 className="group absolute rounded-md border-2 border-transparent transition hover:border-brand-500 hover:bg-brand-500/20">
                 <span className="absolute left-1 top-1 rounded bg-brand-600 px-1.5 text-[11px] font-bold text-white opacity-90">▶ #{pz.n}</span>
               </button>
             ))}
           </div>
         </div>
-      ) : (
+      )}
+
+      {/* ── LIST mode (Endgame Manual) ── */}
+      {book.mode === "list" && !cur && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {EM_PUZZLES.map((pz) => (
+            <button key={pz.n} onClick={() => start(pz)}
+              className="group flex flex-col rounded-xl border border-ink-700 bg-ink-900 p-3 text-left transition hover:border-brand-500 hover:bg-ink-800">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="rounded-full bg-ink-700 px-2 py-0.5 text-xs text-ink-200">{pz.num} · {pz.side === "w" ? "White" : "Black"} to move</span>
+                <span className="rounded-full bg-brand-900/60 px-2 py-0.5 text-xs font-semibold text-brand-200">{pz.rating}</span>
+              </div>
+              <div className="pointer-events-none mx-auto w-full max-w-[220px]">
+                <Board fen={pz.fen} orientation={pz.side === "w" ? "white" : "black"} viewOnly className="mini" coordinates={false} />
+              </div>
+              <div className="mt-2 flex items-center justify-between text-xs">
+                <span className="text-ink-400">{pz.diff}</span>
+                <span className="text-brand-400 group-hover:text-brand-300">Play →</span>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ── shared play panel ── */}
+      {cur && (
         <div>
-          {/* PINNED puzzle — stays on top while the book page scrolls under it */}
           <div className="sticky top-14 z-20 -mx-4 border-b border-ink-700 bg-ink-900/95 px-4 py-2 backdrop-blur">
             <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
               <button onClick={() => setCur(null)} className="text-brand-400 hover:text-brand-300">‹ Back to book</button>
-              <span className="rounded-full bg-ink-700 px-2 py-0.5 text-xs text-ink-300">#{cur.n} · {cur.side === "w" ? "White" : "Black"} to move</span>
+              <span className="rounded-full bg-ink-700 px-2 py-0.5 text-xs text-ink-300">{cur.num ? `${cur.num} · ` : `#${cur.n} · `}{cur.side === "w" ? "White" : "Black"} to move</span>
               <span className="rounded-full bg-brand-900/60 px-2 py-0.5 text-xs text-brand-200">{cur.diff}</span>
               <button onClick={() => start(cur)} className="rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-ink-300 hover:text-white">↺ Reset</button>
               <button onClick={showSolution} className="rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-ink-300 hover:text-white">Show solution</button>
@@ -190,23 +251,31 @@ export default function BookPage() {
                 className="mini"
               />
             </div>
-            <p className="mt-1 text-center font-mono text-xs text-ink-300">{ply > 0 ? lineSAN(ply) : "— your move, or Show solution"}</p>
+            <p className="mt-1 text-center font-mono text-xs text-ink-300">{ply > 0 ? lineSAN(ply) : (cur.goal === "draw" ? "— hold the draw, or Show solution" : "— your move, or Show solution")}</p>
           </div>
 
-          {/* SCROLLABLE below: the idea + the book page */}
-          {/* Puzzle difficulty rating — calibrated model (Stockfish + Maia + Leela), precomputed */}
+          {/* Difficulty rating */}
           <div className="mt-4 rounded-xl border border-brand-700/60 bg-brand-900/20 p-4 text-sm">
             <div className="flex items-baseline gap-3">
               <span className="text-ink-400">Difficulty rating</span>
               <span className="text-2xl font-bold text-white">{finalRating ?? "…"}</span>
               {finalRating != null && <span className="rounded-full bg-brand-700/60 px-2 py-0.5 text-xs text-brand-100">{finalBand}</span>}
             </div>
-            {rateData && (
+            {cur.emRate ? (
+              <p className="mt-3 text-xs text-ink-400">
+                {cur.emRate.anchor
+                  ? <>Human anchor: the lowest Maia level that converts this against perfect defense is <b className="text-ink-200">{cur.emRate.anchor}</b>.</>
+                  : <>Even <b className="text-ink-200">Maia-1900</b> can't hold the result against best defense — counter-intuitive for humans.</>}
+                {cur.emRate.trap && <span className="text-amber-300"> Trap: the natural human move throws it.</span>}
+                {cur.emRate.onlyMoves > 1 && <> {cur.emRate.onlyMoves} only-moves in the line.</>}
+                <span className="text-ink-500"> Rater: Maia play-it-out + only-move + trap (Stockfish-verified).</span>
+              </p>
+            ) : tacticData ? (
               <>
                 <p className="mb-1 mt-3 text-xs text-ink-400">Chance a player at each level plays the key move:</p>
                 <div className="flex items-end gap-2">
                   {BANDS.map((b) => {
-                    const pct = rateData.profile[b] ?? 0;
+                    const pct = tacticData.profile[b] ?? 0;
                     return (
                       <div key={b} className="flex flex-1 flex-col items-center">
                         <span className="mb-0.5 text-[10px] text-ink-400">{Math.round(pct)}%</span>
@@ -219,35 +288,42 @@ export default function BookPage() {
                   })}
                 </div>
                 <p className="mt-2 text-xs text-ink-400">
-                  {rateData.maiaSolved.length
-                    ? <>Human levels that find the whole line: <b className="text-ink-200">{rateData.maiaSolved.join(", ")}</b>.</>
+                  {tacticData.maiaSolved.length
+                    ? <>Human levels that find the whole line: <b className="text-ink-200">{tacticData.maiaSolved.join(", ")}</b>.</>
                     : <>No human level (1100–1900) reliably finds the full line — counter‑intuitive.</>}
                   <span className="text-ink-500"> Model: GBM trained on 5.88M rated puzzles (±256 Elo).</span>
                 </p>
               </>
-            )}
+            ) : null}
           </div>
+
           <div className="mt-4 rounded-xl border border-ink-700 bg-ink-800/60 p-4 text-sm">
             <p className="mb-2 text-ink-200"><span className="text-ink-400">Idea — </span>{cur.idea}</p>
             <p className="mb-1 text-sky-300"><span className="text-ink-400">Best (Stockfish 18) — </span>{cur.sf}</p>
-            <p className="text-amber-300"><span className="text-ink-400">Human (Maia) — </span>plays {cur.maia}. <span className="text-ink-400">{cur.note}</span></p>
+            {cur.maia !== "—" && <p className="text-amber-300"><span className="text-ink-400">Human (Maia) — </span>plays {cur.maia}. <span className="text-ink-400">{cur.note}</span></p>}
+            {cur.maia === "—" && <p className="text-ink-400 text-xs">{cur.note}</p>}
             {showAn && (
               <p className="mt-2 border-t border-ink-700 pt-2 text-emerald-300"><span className="text-ink-400">Live engine — </span>
                 Stockfish: <b>{an?.sf?.move ?? "…"}</b>{evalStr && ` (${evalStr})`} · Leela/Maia‑1500: <b>{an?.maia?.move ?? "…"}</b>
                 <span className="text-ink-500"> — green arrow = best, yellow = likely human</span></p>
             )}
           </div>
-          <p className="mb-2 mt-4 text-xs text-ink-500">Book page — scroll to read; click any other diagram to switch (the pinned board above updates instantly):</p>
-          <div className="relative mx-auto w-full max-w-xl">
-            <img src={`${BASE}bookimg/p${page}.png`} alt="book page" className="w-full rounded-lg bg-white" />
-            {(PUZZLES[page] || []).map((pz) => (
-              <button key={pz.n} onClick={() => start(pz)} title={`Play puzzle #${pz.n}`}
-                style={{ left: `${pz.bb[0]}%`, top: `${pz.bb[1]}%`, width: `${pz.bb[2]}%`, height: `${pz.bb[3]}%` }}
-                className={`group absolute rounded-md border-2 transition ${cur.n === pz.n ? "border-brand-500 bg-brand-500/10" : "border-transparent hover:border-brand-500 hover:bg-brand-500/20"}`}>
-                <span className="absolute left-1 top-1 rounded bg-brand-600 px-1.5 text-[11px] font-bold text-white opacity-90">▶ #{pz.n}</span>
-              </button>
-            ))}
-          </div>
+
+          {book.mode === "pages" && (
+            <>
+              <p className="mb-2 mt-4 text-xs text-ink-500">Book page — scroll to read; click any other diagram to switch:</p>
+              <div className="relative mx-auto w-full max-w-xl">
+                <img src={`${BASE}bookimg/p${page}.png`} alt="book page" className="w-full rounded-lg bg-white" />
+                {(PUZZLES[page] || []).map((pz) => (
+                  <button key={pz.n} onClick={() => start(pz)} title={`Play puzzle #${pz.n}`}
+                    style={{ left: `${pz.bb![0]}%`, top: `${pz.bb![1]}%`, width: `${pz.bb![2]}%`, height: `${pz.bb![3]}%` }}
+                    className={`group absolute rounded-md border-2 transition ${cur.n === pz.n ? "border-brand-500 bg-brand-500/10" : "border-transparent hover:border-brand-500 hover:bg-brand-500/20"}`}>
+                    <span className="absolute left-1 top-1 rounded bg-brand-600 px-1.5 text-[11px] font-bold text-white opacity-90">▶ #{pz.n}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
