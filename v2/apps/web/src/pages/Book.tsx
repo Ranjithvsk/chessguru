@@ -83,6 +83,11 @@ const EM_PUZZLES: Puz[] = [
     idea: "J. Moravec, 1952. Head for the key square FARTHEST from the enemy king: 1.Kc2! (not 1.Kb2? or 1.Kd2?). Then 1…Ke7 2.Kb3 Kd6 3.Ka4 Kc6 4.Ka5 Kb7 5.Kb5 and White wins the race for b5.",
     note: "Chapter 1 — outflanking. Even Maia-1900 fails to win this against best defense.",
     rating: 2373, band: "Expert", emRate: { anchor: null, themes: ["king march / outflanking"], confidence: "high", signals: { onlyMoves: 2, trap: true, sfSubtle: true, dtm: 24, reciprocalZugzwang: false } } },
+  { n: 4, num: "1-4", fen: "2k5/8/8/7p/8/8/6P1/5K2 w - - 0 1", side: "w", diff: "Win · study", goal: "win",
+    sol: ["f1f2", "h5h4", "f2g1", "h4h3", "g2g3", "c8d7", "g1h2", "d7e6", "h2h3", "e6f5", "h3h4", "f5g6", "h4g4"], sf: "White wins", maia: "—",
+    idea: "White wins by tempo and key squares. 1.Kf2! (not 1.Kg1? Kd7 and Black holds the pawn). If 1…h4 2.Kg1!! (the natural 2.Kf3? h3! draws) 2…h3 3.g3! — now the g3-pawn's key squares (f5/g5/h5) are near White's king. 3…Kd7 4.Kh2 Ke6 5.Kxh3 Kf5 6.Kh4 Kg6 7.Kg4 and White wins.",
+    note: "Chapter 1 — the waiting move & key squares. Tablebase: 1.Kf2 is the UNIQUE win (every other move only draws).",
+    rating: 2075, band: "Expert", emRate: { anchor: null, themes: ["K+P vs K", "key squares", "reciprocal zugzwang"], confidence: "medium", signals: { onlyMoves: 2, trap: true, sfSubtle: true, dtm: 13, reciprocalZugzwang: true } } },
   { n: 7, num: "1-7", fen: "2k5/8/2p5/2K5/1P1P4/8/8/8 b - - 0 1", side: "b", diff: "Hold the draw", goal: "draw",
     sol: ["c8c7", "b4b5", "c6b5", "c5b5", "c7d6"], sf: "Draw (½–½)", maia: "—",
     idea: "White has the opposition, but two pawns on the same file can't break a well-defended king. 1…Kc7! keeps the opposition. If 2.b5 cxb5 3.Kxb5 Kd6 the king reaches the square in front of the d-pawn — draw. (1…Ka7? loses.)",
@@ -98,6 +103,11 @@ const EM_PUZZLES: Puz[] = [
     idea: "J. Drtina, 1907. Taking the distant opposition with 1.Ke1? only draws. White wins by OUTFLANKING: 1.Kd2! marches the king around (Kc3-Kb4-Kc4) to force through d4-d5 — the enemy king can't cover both breakthroughs.",
     note: "Chapter 1 — outflanking beats mere opposition. Even Maia-1900 misplays it.",
     rating: 2203, band: "Expert", emRate: { anchor: null, themes: ["king march / outflanking"], confidence: "high", signals: { onlyMoves: 2, trap: true, sfSubtle: false, dtm: 9, reciprocalZugzwang: false } } },
+  { n: 11, num: "1-11", fen: "8/8/2p5/k1p3K1/p1P5/P7/8/8 w - - 0 1", side: "w", diff: "Win · study", goal: "win",
+    sol: ["g5f5", "a5b6", "f5f6", "b6b7", "f6f7", "b7b6", "f7e8", "b6a7", "e8e7", "a7a8", "e7d6", "a8b7", "d6d7", "b7b6", "d7c8"], sf: "White wins", maia: "—",
+    idea: "F. Sackmann, 1913. Black is a pawn up, but his pawns are fixed and weak. White wins by OUTFLANKING with the king: 1.Kf5! (the only move — every other king move draws) …Kb6 2.Kf6 Kb7 3.Kf7 Kb6 4.Ke8! Ka7 5.Ke7 Ka8 6.Kd6 Kb7 7.Kd7 Kb6 8.Kc8 and the king breaks through to the weak queenside pawns.",
+    note: "Chapter 1 — outflanking a pawn-up defender. Tablebase: 1.Kf5 is the UNIQUE win.",
+    rating: 2220, band: "Expert", emRate: { anchor: null, themes: ["king march / outflanking", "distant opposition"], confidence: "high", signals: { onlyMoves: 3, trap: false, sfSubtle: false, dtm: 32, reciprocalZugzwang: false } } },
 ];
 
 const uci = (m: string) => ({ from: m.slice(0, 2) as Key, to: m.slice(2, 4) as Key, promotion: m.length > 4 ? m[4] : undefined });
