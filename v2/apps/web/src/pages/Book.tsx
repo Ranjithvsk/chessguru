@@ -12,7 +12,8 @@ import Board, { destsFromChess } from "../components/Board";
 
 const BASE = import.meta.env.BASE_URL; // "/" or "/v2/"
 
-type EmRate = { anchor: number | null; onlyMoves: number; trap: boolean };
+type EmRate = { anchor: number | null; themes: string[]; confidence: string;
+  signals: { onlyMoves: number; trap: boolean; sfSubtle: boolean; dtm: number; reciprocalZugzwang: boolean } };
 type Puz = {
   n: number; num?: string; fen: string; side: "w" | "b"; diff: string;
   bb?: [number, number, number, number]; sol: string[];
@@ -71,17 +72,32 @@ const EM_PUZZLES: Puz[] = [
     sol: ["d5e5", "d7e7", "e5d5", "e7d7"], sf: "Draw (½–½)", maia: "—",
     idea: "The king on d5 does NOT stand on a key square, so with White to move it is only a draw: 1.Kc5 Kc7 or 1.Ke5 Ke7. The key squares for the d4-pawn are c6, d6 and e6 — only Black-to-move would have to cede one.",
     note: "Chapter 1 — Key Squares. (Ties into the Key-Squares trainer.)",
-    rating: 950, band: "Beginner", emRate: { anchor: 1100, onlyMoves: 0, trap: false } },
+    rating: 950, band: "Beginner", emRate: { anchor: 1100, themes: ["K+P vs K", "opposition"], confidence: "high", signals: { onlyMoves: 0, trap: false, sfSubtle: false, dtm: 4, reciprocalZugzwang: false } } },
   { n: 2, num: "1-2", fen: "1k6/8/1K6/1P6/8/8/8/8 w - - 0 1", side: "w", diff: "Win", goal: "win",
     sol: ["b6a6", "b8a8", "b5b6", "a8b8", "b6b7"], sf: "White wins", maia: "—",
     idea: "1.Ka6! seizes the key square (the opposition). After 1…Ka8 2.b6 Kb8 3.b7 the pawn queens next move. The tempting 1.Kc6? runs into 1…Ka7! and White has to start over.",
     note: "Chapter 1 — a knight-pawn's key squares. Maia: only the 1900 level converts it against perfect defense.",
-    rating: 1825, band: "Advanced", emRate: { anchor: 1900, onlyMoves: 2, trap: false } },
+    rating: 1879, band: "Advanced", emRate: { anchor: 1900, themes: ["K+P vs K", "opposition"], confidence: "high", signals: { onlyMoves: 2, trap: false, sfSubtle: false, dtm: 15, reciprocalZugzwang: false } } },
   { n: 3, num: "1-3", fen: "5k2/8/8/8/1P6/8/8/2K5 w - - 0 1", side: "w", diff: "Win · study", goal: "win",
     sol: ["c1c2", "f8e7", "c2b3", "e7d6", "b3a4", "d6c6", "a4a5", "c6b7", "a5b5"], sf: "White wins", maia: "—",
     idea: "J. Moravec, 1952. Head for the key square FARTHEST from the enemy king: 1.Kc2! (not 1.Kb2? or 1.Kd2?). Then 1…Ke7 2.Kb3 Kd6 3.Ka4 Kc6 4.Ka5 Kb7 5.Kb5 and White wins the race for b5.",
     note: "Chapter 1 — outflanking. Even Maia-1900 fails to win this against best defense.",
-    rating: 2075, band: "Expert", emRate: { anchor: null, onlyMoves: 2, trap: false } },
+    rating: 2373, band: "Expert", emRate: { anchor: null, themes: ["king march / outflanking"], confidence: "high", signals: { onlyMoves: 2, trap: true, sfSubtle: true, dtm: 24, reciprocalZugzwang: false } } },
+  { n: 7, num: "1-7", fen: "2k5/8/2p5/2K5/1P1P4/8/8/8 b - - 0 1", side: "b", diff: "Hold the draw", goal: "draw",
+    sol: ["c8c7", "b4b5", "c6b5", "c5b5", "c7d6"], sf: "Draw (½–½)", maia: "—",
+    idea: "White has the opposition, but two pawns on the same file can't break a well-defended king. 1…Kc7! keeps the opposition. If 2.b5 cxb5 3.Kxb5 Kd6 the king reaches the square in front of the d-pawn — draw. (1…Ka7? loses.)",
+    note: "Chapter 1 — opposition & the defender's resources.",
+    rating: 1175, band: "Beginner", emRate: { anchor: 1300, themes: ["opposition", "defensive hold"], confidence: "high", signals: { onlyMoves: 2, trap: false, sfSubtle: false, dtm: 5, reciprocalZugzwang: false } } },
+  { n: 9, num: "1-9", fen: "8/5p2/8/5PPk/8/8/8/7K w - - 0 1", side: "w", diff: "Hold the draw · study", goal: "draw",
+    sol: ["g5g6", "f7g6", "f5g6", "h5g6", "h1g2"], sf: "Draw (½–½)", maia: "—",
+    idea: "H. Mattison, 1918. The pawns are lost, but White saves himself with the distant opposition: 1.g6! fxg6 2.f5! gxf5 3.Kg1! and Black — though he holds the distant opposition — cannot convert it into the close opposition. Draw.",
+    note: "Chapter 1 — distant opposition as a drawing resource.",
+    rating: 950, band: "Beginner", emRate: { anchor: 1100, themes: ["distant opposition", "defensive hold"], confidence: "high", signals: { onlyMoves: 1, trap: false, sfSubtle: false, dtm: 5, reciprocalZugzwang: false } } },
+  { n: 10, num: "1-10", fen: "5k2/8/4p3/4P3/3P4/8/8/4K3 w - - 0 1", side: "w", diff: "Win · study", goal: "win",
+    sol: ["e1d2", "f8e7", "d2c3", "e7d7", "c3b4", "d7c6", "b4c4", "c6b6", "d4d5"], sf: "White wins", maia: "—",
+    idea: "J. Drtina, 1907. Taking the distant opposition with 1.Ke1? only draws. White wins by OUTFLANKING: 1.Kd2! marches the king around (Kc3-Kb4-Kc4) to force through d4-d5 — the enemy king can't cover both breakthroughs.",
+    note: "Chapter 1 — outflanking beats mere opposition. Even Maia-1900 misplays it.",
+    rating: 2203, band: "Expert", emRate: { anchor: null, themes: ["king march / outflanking"], confidence: "high", signals: { onlyMoves: 2, trap: true, sfSubtle: false, dtm: 9, reciprocalZugzwang: false } } },
 ];
 
 const uci = (m: string) => ({ from: m.slice(0, 2) as Key, to: m.slice(2, 4) as Key, promotion: m.length > 4 ? m[4] : undefined });
@@ -262,14 +278,24 @@ export default function BookPage() {
               {finalRating != null && <span className="rounded-full bg-brand-700/60 px-2 py-0.5 text-xs text-brand-100">{finalBand}</span>}
             </div>
             {cur.emRate ? (
-              <p className="mt-3 text-xs text-ink-400">
-                {cur.emRate.anchor
-                  ? <>Human anchor: the lowest Maia level that converts this against perfect defense is <b className="text-ink-200">{cur.emRate.anchor}</b>.</>
-                  : <>Even <b className="text-ink-200">Maia-1900</b> can't hold the result against best defense — counter-intuitive for humans.</>}
-                {cur.emRate.trap && <span className="text-amber-300"> Trap: the natural human move throws it.</span>}
-                {cur.emRate.onlyMoves > 1 && <> {cur.emRate.onlyMoves} only-moves in the line.</>}
-                <span className="text-ink-500"> Rater: Maia play-it-out + only-move + trap (Stockfish-verified).</span>
-              </p>
+              <>
+                {cur.emRate.themes.length > 0 && (
+                  <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs text-ink-400">Key ideas:</span>
+                    {cur.emRate.themes.map((t) => <span key={t} className="rounded-full bg-brand-700/50 px-2 py-0.5 text-[11px] text-brand-100">{t}</span>)}
+                  </div>
+                )}
+                <p className="mt-2 text-xs text-ink-400">
+                  {cur.emRate.anchor
+                    ? <>Human anchor: the lowest Maia level that converts this vs perfect defense is <b className="text-ink-200">{cur.emRate.anchor}</b>.</>
+                    : <>Even <b className="text-ink-200">Maia-1900</b> can't hold the result against best defense — counter-intuitive for humans.</>}
+                  {cur.emRate.signals.trap && <span className="text-amber-300"> Trap: the natural move throws it.</span>}
+                  {cur.emRate.signals.sfSubtle && <> Shallow search misses the idea.</>}
+                  {cur.emRate.signals.reciprocalZugzwang && <> Reciprocal zugzwang.</>}
+                  {cur.emRate.signals.onlyMoves > 1 && <> {cur.emRate.signals.onlyMoves} only-moves.</>}
+                </p>
+                <p className="mt-1 text-[11px] text-ink-500">Ensemble rater: Maia play-it-out (human) + Stockfish subtlety + DTM depth + zugzwang/trap/only-move + theme detection · confidence {cur.emRate.confidence}.</p>
+              </>
             ) : tacticData ? (
               <>
                 <p className="mb-1 mt-3 text-xs text-ink-400">Chance a player at each level plays the key move:</p>
