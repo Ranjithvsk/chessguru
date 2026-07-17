@@ -142,20 +142,77 @@ for (const p of EM_PUZZLES) { if (p.page != null) (EM_BY_PAGE[p.page] ??= []).pu
 const uci = (m: string) => ({ from: m.slice(0, 2) as Key, to: m.slice(2, 4) as Key, promotion: m.length > 4 ? m[4] : undefined });
 const pieceCount = (fen: string) => ((fen.split(" ")[0] || "").match(/[a-zA-Z]/g) || []).length;
 const tbUrl = (fen: string) => `https://tablebase.lichess.ovh/standard?fen=${encodeURIComponent(fen)}`;
-// Best reply for the side to move (the DEFENDER): perfect from the tablebase for <=7 pieces,
-// else Stockfish via the book-engine. Returns the uci move + whether the solver is on track.
-async function engineReply(fen: string, goal: "win" | "draw"): Promise<{ move: string | null; onTrack: boolean }> {
-  try {
-    if (pieceCount(fen) <= 7) {
-      const d = await fetch(tbUrl(fen)).then((r) => r.json());
-      const move = d.moves?.[0]?.uci ?? null;            // opponent's best (max resistance)
-      const cat = d.category as string;                   // from the opponent's perspective
-      const onTrack = goal === "win" ? cat === "loss" : cat !== "win";
-      return { move, onTrack };
+const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+const PIECE: Record<string, string> = { p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king" };
+function kingSq(fen: string, color: "w" | "b"): { f: number; r: number } | null {
+  const rows = (fen.split(" ")[0] || "").split("/"); const t = color === "w" ? "K" : "k";
+  for (let r = 0; r < 8; r++) { let f = 0; for (const ch of rows[7 - r] || "") { if (/\d/.test(ch)) { f += +ch; continue; } if (ch === t) return { f, r }; f++; } }
+  return null;
+}
+// Plain-language description of a move (with the concept it embodies).
+function describeMove(fenBefore: string, muci: string): string {
+  let g = new Chess(fenBefore), mv: any;
+  try { mv = g.move(uci(muci)); } catch { return muci; }
+  const to = mv.to;
+  if (mv.promotion) return `${to}=${mv.promotion.toUpperCase()} — promotes`;
+  if (mv.captured) return `${cap(PIECE[mv.piece] || "piece")} takes on ${to}, winning a ${PIECE[mv.captured] || "pawn"}`;
+  if (mv.piece === "p") return `pawn to ${to} — advances the passed pawn`;
+  if (mv.piece === "k") {
+    const a = kingSq(g.fen(), "w"), b = kingSq(g.fen(), "b");
+    if (a && b) {
+      const fg = Math.abs(a.f - b.f), rg = Math.abs(a.r - b.r);
+      if ((fg === 0 && rg === 2) || (rg === 0 && fg === 2)) return `K${to} — takes the opposition`;
     }
-    const d = await fetch(`/book-engine/analyze?fen=${encodeURIComponent(fen)}`).then((r) => r.json());
-    return { move: d.sf?.move ?? null, onTrack: true };
-  } catch { return { move: null, onTrack: true }; }
+    return `K${to} — the king marches in`;
+  }
+  return `${cap(PIECE[mv.piece] || "")}${to}`;
+}
+type Tier = "win" | "draw" | "loss";
+const tier = (cat: string, solverToMove: boolean): Tier => {
+  const w = cat === "win" || cat === "cursed-win", l = cat === "loss" || cat === "blessed-loss";
+  return solverToMove ? (w ? "win" : l ? "loss" : "draw") : (w ? "loss" : l ? "win" : "draw");
+};
+const RANK: Record<Tier, number> = { loss: 0, draw: 1, win: 2 };
+const dist = (d: any) => d?.dtm ? ` (mate in ${Math.abs(d.dtm)})` : d?.dtz != null ? ` (dtz ${Math.abs(d.dtz)})` : "";
+// Assess the solver's move + pick the engine's best reply, with human commentary for both.
+async function assessMove(fenBefore: string, muci: string, fenAfter: string, goal: "win" | "draw"):
+  Promise<{ you: string; eng: string; engineMove: string | null; fb: { t: string; k: string }; onTrack: boolean }> {
+  const desc = describeMove(fenBefore, muci);
+  try {
+    if (pieceCount(fenAfter) <= 7) {
+      const [tb0, tb1] = await Promise.all([fetch(tbUrl(fenBefore)).then((r) => r.json()), fetch(tbUrl(fenAfter)).then((r) => r.json())]);
+      const bestUci = tb0.moves?.[0]?.uci;
+      const before = tier(tb0.category, true), after = tier(tb1.category, false);
+      const isBest = muci === bestUci;
+      const status = after === "win" ? `you're winning${dist(tb1)}` : after === "draw" ? "it's a draw" : "you're now losing";
+      let you: string, k: string, onTrack: boolean;
+      if (RANK[after] < RANK[before]) {                       // threw it
+        onTrack = false; k = "bad";
+        const bestDesc = bestUci ? describeMove(fenBefore, bestUci) : "the only move";
+        you = `✗ ${desc}. This ${before === "win" ? "throws the win" : "loses the draw"} — ${status}. Needed: ${bestDesc}.`;
+      } else if (isBest) {
+        onTrack = after !== "loss"; k = onTrack ? "good" : "bad";
+        you = `✓ Best. ${desc} — ${status}.`;
+      } else {
+        onTrack = after !== "loss"; k = onTrack ? "good" : "bad";
+        const bestDesc = bestUci ? describeMove(fenBefore, bestUci) : "";
+        you = `✓ ${desc} — still ${after === "win" ? "winning" : after === "draw" ? "holding" : "lost"}${after === before ? `, though ${bestDesc || "the top move"} was cleaner` : ""}. ${status}.`;
+      }
+      const engineMove = tb1.moves?.[0]?.uci ?? null;
+      const eng = engineMove ? `Engine (best defence): ${describeMove(fenAfter, engineMove)}.` : "";
+      const fb = { t: onTrack ? (goal === "draw" ? "✓ Holding — your move." : "✓ On track — your move.") : "✗ Off track — play on, or Restart.", k };
+      return { you, eng, engineMove, fb, onTrack };
+    }
+    // >7 pieces: Stockfish via book-engine, eval-based commentary
+    const [a0, a1] = await Promise.all([
+      fetch(`/book-engine/analyze?fen=${encodeURIComponent(fenBefore)}`).then((r) => r.json()),
+      fetch(`/book-engine/analyze?fen=${encodeURIComponent(fenAfter)}`).then((r) => r.json()),
+    ]);
+    const ev = (s: any) => s?.score ? (s.score.type === "mate" ? (s.score.val > 0 ? 99 : -99) : s.score.val / 100) : 0;
+    const before = ev(a0.sf), after = -ev(a1.sf); // a1 is opponent-to-move → negate for solver
+    const you = `${after < before - 0.8 ? "✗" : "✓"} ${desc}. Stockfish: ${after >= 3 ? "you're winning" : after <= -3 ? "you're losing" : "roughly level"} (${after.toFixed(1)}).`;
+    return { you, eng: a1.sf?.move ? `Engine defends: ${a1.sf.move}.` : "", engineMove: a1.sf?.move ?? null, fb: { t: after >= before - 0.8 ? "✓ Your move." : "✗ Play on, or Restart.", k: after >= before - 0.8 ? "good" : "bad" }, onTrack: after >= before - 0.8 };
+  } catch { return { you: desc, eng: "", engineMove: null, fb: { t: "Your move.", k: "" }, onTrack: true }; }
 }
 
 export default function BookPage() {
@@ -172,6 +229,8 @@ export default function BookPage() {
   const rerender = () => force((x) => x + 1);
   const solving = useRef(false);   // engine is thinking / demo is running
   const done = useRef(false);      // puzzle reached a terminal (win/draw/loss)
+  const [comment, setComment] = useState<{ you: string; eng: string }>({ you: "", eng: "" }); // per-move reasoning
+  const [viewPly, setViewPly] = useState(0);   // which ply of the played line is on the board (browse ◀ ▶)
 
   // Preload neighbouring pages so Prev/Next feels instant.
   useEffect(() => {
@@ -236,18 +295,36 @@ export default function BookPage() {
   const finalRating = cur?.rating ?? tacticData?.rating ?? null;
   const finalBand = cur?.band ?? tacticData?.band ?? "";
 
+  const solverSide = (cur?.side === "b" ? "b" : "w") as "w" | "b";
+  // The board the user SEES = the played line up to `viewPly` (browse with ◀ ▶).
+  const fullLen = cur ? game.current.history().length : 0;
+  const view = (() => {
+    if (!cur) return new Chess();
+    const g = new Chess(cur.fen);
+    const ms = game.current.history();
+    for (let i = 0; i < Math.min(viewPly, ms.length); i++) { try { g.move(ms[i]!); } catch { /* */ } }
+    return g;
+  })();
+  const atLive = viewPly >= fullLen;
+  const viewLastMove: [Key, Key] | undefined = (() => {
+    if (!cur || viewPly === 0) return undefined;
+    const m = (game.current.history({ verbose: true })[viewPly - 1]) as any;
+    return m ? [m.from as Key, m.to as Key] : undefined;
+  })();
+
   function start(p: Puz) {
-    setCur(p); game.current = new Chess(p.fen); setPly(0); setLastMove(undefined); solving.current = false; done.current = false;
+    setCur(p); game.current = new Chess(p.fen); setViewPly(0); setPly(0); setLastMove(undefined); solving.current = false; done.current = false;
+    setComment({ you: "", eng: "" });
     setFb({ t: `You play ${p.side === "w" ? "White" : "Black"}. ${p.goal === "draw" ? "Hold the draw." : "Win it."}`, k: "" }); rerender();
   }
-  // Moves played so far, as a SAN string (from the live game).
-  function playedSAN(): string {
-    if (!cur) return "";
-    const hist = game.current.history();
-    let s = ""; for (let i = 0; i < hist.length; i++) { if (i % 2 === 0) s += `${Math.floor(i / 2) + 1}. `; s += (hist[i] ?? "") + " "; }
-    return s.trim();
+  function undo() {
+    if (!cur || solving.current || game.current.history().length === 0) return;
+    game.current.undo();
+    if (game.current.turn() !== solverSide && game.current.history().length > 0) game.current.undo();
+    done.current = false; setViewPly(game.current.history().length);
+    setComment({ you: "", eng: "" }); setFb({ t: "↶ Take-back — your move.", k: "" }); rerender();
   }
-  // Adjudicate from the SOLVER's perspective, or null if still going.
+  const moveSAN = () => game.current.history();  // SAN array of the whole line
   function adjudicate(): "win" | "draw" | "loss" | null {
     const g = game.current, solW = cur?.side === "w";
     if (g.isCheckmate()) return (g.turn() === "w") === solW ? "loss" : "win";
@@ -261,46 +338,47 @@ export default function BookPage() {
   function finish(res: "win" | "draw" | "loss") {
     done.current = true;
     const goal = cur?.goal ?? "win";
-    const ok = res === goal;
     const msg = goal === "win"
-      ? (res === "win" ? "✓ Solved — you won it! 🎉" : res === "draw" ? "½ Only a draw — the defence held. Restart to try again." : "✗ You lost it. Restart to try again.")
-      : (res === "draw" ? "✓ Draw held! 🛡️" : "✗ You lost the draw. Restart to try again.");
-    setFb({ t: msg, k: ok ? "good" : "bad" }); rerender();
+      ? (res === "win" ? "✓ Solved — you won it! 🎉" : res === "draw" ? "½ Only a draw — the defence held. ↶ Take back or ↺ Restart." : "✗ You lost it. ↶ Take back or ↺ Restart.")
+      : (res === "draw" ? "✓ Draw held! 🛡️" : "✗ You lost the draw. ↶ Take back or ↺ Restart.");
+    setFb({ t: msg, k: res === goal ? "good" : "bad" }); rerender();
   }
-  // Free play: your move stands, then the engine defends BEST and tries to beat you.
+  // Free play with move-browsing: playing from a browsed position BRANCHES from there.
   async function handleMove(from: Key, to: Key) {
-    if (!cur || solving.current || done.current) return;
-    let mv: unknown = null;
-    try { mv = game.current.move({ from, to, promotion: "q" }); } catch { mv = null; }
-    if (!mv) { rerender(); return; }                          // illegal → snaps back
-    setLastMove([from, to]); rerender();
-    let r = adjudicate();
-    if (r) { finish(r); return; }
-    solving.current = true; setFb({ t: "…", k: "" }); rerender();
-    const { move, onTrack } = await engineReply(game.current.fen(), cur.goal ?? "win");
-    if (move) { const m = uci(move); try { game.current.move(m); setLastMove([m.from, m.to]); } catch { /* */ } }
-    solving.current = false; rerender();
-    r = adjudicate();
-    if (r) { finish(r); return; }
-    setFb(onTrack
-      ? { t: cur.goal === "draw" ? "✓ Holding — your move." : "✓ On track — keep converting.", k: "good" }
-      : { t: cur.goal === "draw" ? "✗ That slips — the engine is winning. Play on, or Restart." : "✗ That throws the win. Play on, or Restart.", k: "bad" });
-    rerender();
+    if (!cur || solving.current) return;
+    const g = new Chess(cur.fen); const ms = game.current.history();
+    for (let i = 0; i < Math.min(viewPly, ms.length); i++) { try { g.move(ms[i]!); } catch { /* */ } }
+    if (g.turn() !== solverSide) return;                      // only on your turn
+    const fenBefore = g.fen();
+    let mv: any = null;
+    try { mv = g.move({ from, to, promotion: "q" }); } catch { mv = null; }
+    if (!mv) { rerender(); return; }
+    game.current = g; done.current = false;                   // branch: this line replaces the future
+    const muci = mv.from + mv.to + (mv.promotion || "");
+    setViewPly(g.history().length); solving.current = true; setFb({ t: "…", k: "" }); setComment({ you: "", eng: "" }); rerender();
+    const term0 = adjudicate();
+    const a = await assessMove(fenBefore, muci, game.current.fen(), cur.goal ?? "win");
+    if (!term0 && a.engineMove) { const m = uci(a.engineMove); try { game.current.move(m); } catch { /* */ } }
+    solving.current = false; setViewPly(game.current.history().length);
+    setComment({ you: a.you, eng: term0 ? "" : a.eng });
+    const term = adjudicate();
+    if (term) { finish(term); return; }
+    setFb(a.fb); rerender();
   }
   function showSolution() {
-    if (!cur) return; game.current = new Chess(cur.fen); setPly(0); setLastMove(undefined); solving.current = true; done.current = true; rerender();
+    if (!cur) return; game.current = new Chess(cur.fen); setViewPly(0); solving.current = true; done.current = true; rerender();
     let i = 0;
     const step = () => {
-      if (!cur || i >= cur.sol.length) { solving.current = false; setFb({ t: "Solution shown — Restart to play it yourself.", k: "good" }); rerender(); return; }
-      const m = uci(cur.sol[i]!); try { game.current.move(m); } catch { /* */ }
-      setLastMove([m.from, m.to]); setPly(i + 1); i++; rerender(); setTimeout(step, 620);
+      if (!cur || i >= cur.sol.length) { solving.current = false; setFb({ t: "Solution shown — ↶ take back or ↺ Restart to play it.", k: "good" }); rerender(); return; }
+      try { game.current.move(uci(cur.sol[i]!)); } catch { /* */ }
+      setViewPly(i + 1); i++; rerender(); setTimeout(step, 620);
     };
     setTimeout(step, 300);
   }
 
-  const solverColor: Color = cur?.side === "b" ? "black" : "white";
-  const turnColor: Color = game.current.turn() === "w" ? "white" : "black";
-  const myTurn = !!cur && !solving.current && !done.current && turnColor === solverColor && !game.current.isGameOver();
+  const solverColor: Color = solverSide === "b" ? "black" : "white";
+  const turnColor: Color = view.turn() === "w" ? "white" : "black";
+  const myTurn = !!cur && !solving.current && view.turn() === solverSide && !view.isGameOver() && !(done.current && atLive);
 
   const selectBook = (slug: string) => { const b = BOOKS.find((x) => x.slug === slug)!; setBookSlug(slug); setCur(null); setPage(b.initialPage); };
 
@@ -385,18 +463,33 @@ export default function BookPage() {
             </div>
             <div className="mx-auto w-full max-w-[300px]">
               <Board
-                fen={game.current.fen()}
+                fen={view.fen()}
                 orientation={solverColor}
                 turnColor={turnColor}
                 movableColor={myTurn ? solverColor : undefined}
-                dests={myTurn ? destsFromChess(game.current) : new Map()}
-                lastMove={lastMove}
+                dests={myTurn ? destsFromChess(view) : new Map()}
+                lastMove={viewLastMove}
                 onMove={handleMove}
                 shapes={shapes}
                 className="mini"
               />
             </div>
-            <p className="mt-1 text-center font-mono text-xs text-ink-300">{game.current.history().length > 0 ? playedSAN() : (cur.goal === "draw" ? "— hold the draw; the engine defends best" : "— your move; the engine defends best")}</p>
+            {/* move browser: ⏮ ◀ ▶ ⏭ + Undo. Playing from a browsed position continues from there. */}
+            <div className="mt-1.5 flex items-center justify-center gap-1 text-xs">
+              <button onClick={() => setViewPly(0)} disabled={viewPly <= 0} title="Start" className="rounded border border-ink-700 px-1.5 py-0.5 text-ink-300 hover:text-white disabled:opacity-30">⏮</button>
+              <button onClick={() => setViewPly((p) => Math.max(0, p - 1))} disabled={viewPly <= 0} title="Back" className="rounded border border-ink-700 px-2 py-0.5 text-ink-300 hover:text-white disabled:opacity-30">◀</button>
+              <span className="min-w-[68px] text-center font-mono text-ink-400">{fullLen ? `move ${viewPly}/${fullLen}` : "start"}</span>
+              <button onClick={() => setViewPly((p) => Math.min(fullLen, p + 1))} disabled={viewPly >= fullLen} title="Forward" className="rounded border border-ink-700 px-2 py-0.5 text-ink-300 hover:text-white disabled:opacity-30">▶</button>
+              <button onClick={() => setViewPly(fullLen)} disabled={viewPly >= fullLen} title="Latest" className="rounded border border-ink-700 px-1.5 py-0.5 text-ink-300 hover:text-white disabled:opacity-30">⏭</button>
+              <button onClick={undo} disabled={fullLen === 0 || solving.current} title="Take back your move" className="ml-1 rounded border border-amber-700/60 bg-amber-900/20 px-2 py-0.5 text-amber-200 hover:bg-amber-700/30 disabled:opacity-30">↶ Undo</button>
+            </div>
+            {!atLive && fullLen > 0 && <p className="mt-0.5 text-center text-[11px] text-amber-400">browsing — play a move here to continue from this point</p>}
+            {(comment.you || comment.eng) && (
+              <div className="mt-1.5 rounded-lg border border-ink-700 bg-ink-950/60 p-2 text-[11px] leading-relaxed">
+                {comment.you && <p className={comment.you.startsWith("✗") ? "text-rose-300" : "text-emerald-300"}>{comment.you}</p>}
+                {comment.eng && <p className="mt-0.5 text-sky-300">{comment.eng}</p>}
+              </div>
+            )}
           </div>
 
           {/* Difficulty rating */}
