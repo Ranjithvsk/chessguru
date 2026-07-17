@@ -480,6 +480,18 @@ async function assessMove(fenBefore: string, muci: string, fenAfter: string, goa
   } catch { return { you: desc, eng: "", engineMove: null, fb: { t: "Your move.", k: "" }, onTrack: true }; }
 }
 
+// Best engine move for the side to move (tablebase ≤7 pieces, else Stockfish via book-engine).
+async function engineBest(fen: string): Promise<string | null> {
+  try {
+    if (pieceCount(fen) <= 7) {
+      const d = await fetch(tbUrl(fen)).then((r) => r.json());
+      return d.moves?.[0]?.uci ?? null;
+    }
+    const d = await fetch(`/book-engine/analyze?fen=${encodeURIComponent(fen)}`).then((r) => r.json());
+    return d.sf?.move ?? null;
+  } catch { return null; }
+}
+
 export default function BookPage() {
   const [bookSlug, setBookSlug] = useState(BOOKS[0]!.slug);
   const book = BOOKS.find((b) => b.slug === bookSlug)!;
@@ -637,6 +649,22 @@ export default function BookPage() {
     if (game.current.isGameOver() || term === goal) { finish(term ?? "draw"); return; }
     setFb(a.fb); rerender();
   }
+  // Play the engine's move on demand — from the current (possibly browsed-back) position, when
+  // it's the engine's turn. Lets you step: engine move → your move → engine move → …
+  async function engineMove() {
+    if (!cur || solving.current) return;
+    const g = new Chess(cur.fen); const ms = game.current.history();
+    for (let i = 0; i < Math.min(viewPly, ms.length); i++) { try { g.move(ms[i]!); } catch { /* */ } }
+    if (g.turn() === solverSide || g.isGameOver()) return;   // only when it's the engine's turn
+    game.current = g; done.current = false; solving.current = true;
+    setViewPly(g.history().length); setFb({ t: "Stockfish is thinking…", k: "" }); setComment({ you: "", eng: "" }); rerender();
+    const mv = await engineBest(g.fen());
+    if (mv) { const desc = describeMove(g.fen(), mv); try { game.current.move(uci(mv)); } catch { /* */ } setComment({ you: "", eng: `Engine plays ${desc}.` }); }
+    solving.current = false; setViewPly(game.current.history().length);
+    const term = adjudicate(); const goal = cur.goal ?? "win";
+    if (game.current.isGameOver() || term === goal) { finish(term ?? "draw"); return; }
+    setFb({ t: "Your move.", k: "" }); rerender();
+  }
   function showSolution() {
     if (!cur) return; game.current = new Chess(cur.fen); setViewPly(0); solving.current = true; done.current = true; rerender();
     let i = 0;
@@ -651,6 +679,7 @@ export default function BookPage() {
   const solverColor: Color = solverSide === "b" ? "black" : "white";
   const turnColor: Color = view.turn() === "w" ? "white" : "black";
   const myTurn = !!cur && !solving.current && view.turn() === solverSide && !view.isGameOver() && !(done.current && atLive);
+  const engineTurn = !!cur && !solving.current && view.turn() !== solverSide && !view.isGameOver() && !(done.current && atLive);
 
   const selectBook = (slug: string) => { const b = BOOKS.find((x) => x.slug === slug)!; setBookSlug(slug); setCur(null); setPage(b.initialPage); };
 
@@ -753,9 +782,10 @@ export default function BookPage() {
               <span className="min-w-[68px] text-center font-mono text-ink-400">{fullLen ? `move ${viewPly}/${fullLen}` : "start"}</span>
               <button onClick={() => setViewPly((p) => Math.min(fullLen, p + 1))} disabled={viewPly >= fullLen} title="Forward" className="rounded border border-ink-700 px-2 py-0.5 text-ink-300 hover:text-white disabled:opacity-30">▶</button>
               <button onClick={() => setViewPly(fullLen)} disabled={viewPly >= fullLen} title="Latest" className="rounded border border-ink-700 px-1.5 py-0.5 text-ink-300 hover:text-white disabled:opacity-30">⏭</button>
+              <button onClick={engineMove} disabled={!engineTurn} title="Let Stockfish play its move from here" className="ml-1 rounded border border-sky-700/60 bg-sky-900/20 px-2 py-0.5 text-sky-200 hover:bg-sky-700/30 disabled:opacity-30">▷ Engine move</button>
               <button onClick={undo} disabled={fullLen === 0 || solving.current} title="Take back your move" className="ml-1 rounded border border-amber-700/60 bg-amber-900/20 px-2 py-0.5 text-amber-200 hover:bg-amber-700/30 disabled:opacity-30">↶ Undo</button>
             </div>
-            {!atLive && fullLen > 0 && <p className="mt-0.5 text-center text-[11px] text-amber-400">browsing — play a move here to continue from this point</p>}
+            {!atLive && fullLen > 0 && <p className="mt-0.5 text-center text-[11px] text-amber-400">browsing — {engineTurn ? "click ▷ Engine move to let Stockfish play, then it's your move" : "play a move here to continue from this point"}</p>}
             {(comment.you || comment.eng) && (
               <div className="mt-1.5 rounded-lg border border-ink-700 bg-ink-950/60 p-2 text-[11px] leading-relaxed">
                 {comment.you && <p className={comment.you.startsWith("✗") ? "text-rose-300" : "text-emerald-300"}>{comment.you}</p>}
