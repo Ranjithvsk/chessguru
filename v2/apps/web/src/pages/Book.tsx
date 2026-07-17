@@ -133,6 +133,11 @@ const EM_PUZZLES: Puz[] = [
     idea: "Reciprocal zugzwang: with the kings on e6 and c5, whoever is to move loses. White forces Black onto the mined square first: 1.Kf6! Kb5 2.Ke7! Kc5 3.Ke6! and Black must give way — the king penetrates to win the d6-pawn.",
     note: "Chapter 1 — Mined Squares. Tablebase: White wins with 1.Kf6.",
     rating: 1700, band: "Advanced", emRate: { anchor: null, themes: ["mined squares", "reciprocal zugzwang", "outflanking"], confidence: "medium", signals: { onlyMoves: 1, trap: true, sfSubtle: false, dtm: 7, reciprocalZugzwang: true } } },
+  { n: 21, num: "1-21", fen: "8/8/k1p5/2P5/K7/P7/8/8 w - - 0 1", page: 30, bb: [36, 2.7, 36, 25.4], side: "w", diff: "Corresponding squares · win", goal: "win",
+    sol: ["a4b4", "a6a7", "b4c3", "a7a6", "c3d3", "a6b7", "d3d4", "b7c7", "a3a4", "c7d7", "a4a5", "d7c7", "a5a6"], sf: "White wins", maia: "—",
+    idea: "Corresponding squares. The only winning try is to get the king to d6 — but the d4-square is mined (reciprocal zugzwang vs Black's b5). The first pair of corresponding squares is a6↔b4. White manoeuvres to hand Black the zugzwang, marches the king to d6 to win the c6-pawn, and queens the c-pawn. (In the book it's Black to move — Black is already in zugzwang.)",
+    note: "Chapter 1 — Corresponding squares. Tablebase-verified win.",
+    rating: 2100, band: "Expert", emRate: { anchor: null, themes: ["corresponding squares", "reciprocal zugzwang", "outflanking"], confidence: "medium", signals: { onlyMoves: 2, trap: true, sfSubtle: true, dtm: 15, reciprocalZugzwang: true } } },
 ];
 
 // Group Endgame Manual puzzles by their PDF page → clickable hotspots on the page view.
