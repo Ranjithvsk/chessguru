@@ -546,13 +546,20 @@ export default function BookPage() {
     game.current = g; done.current = false;                   // branch: this line replaces the future
     const muci = mv.from + mv.to + (mv.promotion || "");
     setViewPly(g.history().length); solving.current = true; setFb({ t: "…", k: "" }); setComment({ you: "", eng: "" }); rerender();
-    const term0 = adjudicate();
+    const overAfterYou = game.current.isGameOver();
     const a = await assessMove(fenBefore, muci, game.current.fen(), cur.goal ?? "win");
-    if (!term0 && a.engineMove) { const m = uci(a.engineMove); try { game.current.move(m); } catch { /* */ } }
+    // The engine ALWAYS replies (best defence/conversion) unless the game is truly over —
+    // so a dubious move (e.g. a promotion that walks into ...Bf5+) gets refuted over the board
+    // instead of ending the puzzle early.
+    if (!overAfterYou && a.engineMove) { const m = uci(a.engineMove); try { game.current.move(m); } catch { /* */ } }
     solving.current = false; setViewPly(game.current.history().length);
-    setComment({ you: a.you, eng: term0 ? "" : a.eng });
+    setComment({ you: a.you, eng: overAfterYou ? "" : a.eng });
+    // Finish ONLY on a real game-over, or when the solver actually REACHES the goal (a genuine
+    // win in a win-puzzle / a held draw). A non-goal verdict — e.g. a soon-to-be-lost promoted
+    // queen in a draw study — does NOT end play; the engine keeps fighting until real mate.
     const term = adjudicate();
-    if (term) { finish(term); return; }
+    const goal = cur.goal ?? "win";
+    if (game.current.isGameOver() || term === goal) { finish(term ?? "draw"); return; }
     setFb(a.fb); rerender();
   }
   function showSolution() {
