@@ -21,10 +21,10 @@ type Puz = {
   goal?: "win" | "draw"; rating?: number; band?: string; emRate?: EmRate;
 };
 
-type Book = { slug: string; title: string; subtitle: string; mode: "pages"; pages: number; imgBase: string; initialPage: number };
+type Book = { slug: string; title: string; subtitle: string; mode: "pages"; pages: number; imgBase: string; initialPage: number; defaultAspect: string };
 const BOOKS: Book[] = [
-  { slug: "2000-tactical", title: "2000 Tactical Chess", subtitle: "Part 4: Chess Endings — preview (pp.1–10)", mode: "pages", pages: 10, imgBase: "bookimg/", initialPage: 9 },
-  { slug: "endgame-manual", title: "Dvoretsky's Endgame Manual", subtitle: "Chapter 1 · Pawn Endgames — flip through the book; click any diagram with a ▶ to play it (engine-verified, Maia-rated)", mode: "pages", pages: 120, imgBase: "bookimg/endgame-manual/", initialPage: 18 },
+  { slug: "2000-tactical", title: "2000 Tactical Chess", subtitle: "Part 4: Chess Endings — preview (pp.1–10)", mode: "pages", pages: 10, imgBase: "bookimg/", initialPage: 9, defaultAspect: "750 / 1125" },
+  { slug: "endgame-manual", title: "Dvoretsky's Endgame Manual", subtitle: "Chapter 1 · Pawn Endgames — flip through the book; click any diagram with a ▶ to play it (engine-verified, Maia-rated)", mode: "pages", pages: 120, imgBase: "bookimg/endgame-manual/", initialPage: 18, defaultAspect: "1240 / 1755" },
 ];
 
 const PUZZLES: Record<number, Puz[]> = {
@@ -135,12 +135,46 @@ export default function BookPage() {
   const rerender = () => force((x) => x + 1);
   const solving = useRef(false);
 
-  // Preload neighbouring pages so Prev/Next feels instant (the page PNGs are ~110KB each).
+  // Preload neighbouring pages so Prev/Next feels instant.
   useEffect(() => {
-    for (const p of [page + 1, page + 2, page - 1]) {
+    for (const p of [page + 1, page + 2, page + 3, page - 1]) {
       if (p >= 1 && p <= book.pages) { const im = new Image(); im.src = `${BASE}${book.imgBase}p${p}.png`; }
     }
   }, [page, book.imgBase, book.pages]);
+
+  // Page-image loading + aspect (read from the actual image so the browser is common to
+  // any book, whatever the page dimensions; keeps the box stable → no layout shift).
+  const [imgLoaded, setImgLoaded] = useState(false);
+  const [aspect, setAspect] = useState(book.defaultAspect);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const onImg = () => {
+    setImgLoaded(true);
+    const im = imgRef.current;
+    if (im?.naturalWidth && im.naturalHeight) setAspect(`${im.naturalWidth} / ${im.naturalHeight}`);
+  };
+  useEffect(() => { setAspect(book.defaultAspect); }, [bookSlug, book.defaultAspect]);
+  useEffect(() => {
+    setImgLoaded(false);
+    const t = setTimeout(() => { if (imgRef.current?.complete) onImg(); }, 40);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, bookSlug]);
+
+  // Keyboard ← → to flip pages while browsing.
+  useEffect(() => {
+    if (cur) return;
+    const h = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (e.key === "ArrowLeft") setPage((p) => Math.max(1, p - 1));
+      else if (e.key === "ArrowRight") setPage((p) => Math.min(book.pages, p + 1));
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [cur, book.pages]);
+
+  // Flat list of playable diagrams (for the quick-jump strip).
+  const playable = Object.entries(bookPuzzles).flatMap(([pg, arr]) => arr.map((pz) => ({ pz, pg: +pg }))).sort((a, b) => a.pz.n - b.pz.n);
 
   const [showAn, setShowAn] = useState(false);
   const [an, setAn] = useState<{ sf: { move: string | null; score: { type: string; val: number } | null }; maia: { move: string | null; level: number } } | null>(null);
@@ -227,23 +261,53 @@ export default function BookPage() {
 
       {/* ── PAGES mode: flip through the book, click a ▶ diagram to play ── */}
       {!cur && (
-        <div>
-          <div className="mb-3 flex items-center gap-2">
-            <button disabled={page <= 1} onClick={() => setPage(page - 1)} className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white disabled:opacity-40">‹ Prev</button>
-            <span className="text-sm text-ink-400">Page {page} / {book.pages}</span>
-            <button disabled={page >= book.pages} onClick={() => setPage(page + 1)} className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white disabled:opacity-40">Next ›</button>
-            {(bookPuzzles[page]?.length ?? 0) > 0 && <span className="text-xs text-brand-400">▶ {bookPuzzles[page]!.length} playable diagram{bookPuzzles[page]!.length > 1 ? "s" : ""} on this page</span>}
+        <div className="mx-auto w-full max-w-xl">
+          {/* nav bar: First / Prev / jump / Next / Last */}
+          <div className="mb-2 flex items-center gap-1.5">
+            <button disabled={page <= 1} onClick={() => setPage(1)} title="First page" className="rounded-lg border border-ink-700 px-2 py-1.5 text-sm text-ink-300 hover:text-white disabled:opacity-30">«</button>
+            <button disabled={page <= 1} onClick={() => setPage(page - 1)} className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white disabled:opacity-30">‹ Prev</button>
+            <div className="flex items-center gap-1 text-sm text-ink-400">
+              <input type="number" min={1} max={book.pages} value={page}
+                onChange={(e) => { const v = Math.max(1, Math.min(book.pages, Number(e.target.value) || 1)); setPage(v); }}
+                className="w-14 rounded-lg border border-ink-700 bg-ink-900 px-2 py-1 text-center text-ink-100 focus:border-brand-500 focus:outline-none" />
+              <span>/ {book.pages}</span>
+            </div>
+            <button disabled={page >= book.pages} onClick={() => setPage(page + 1)} className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white disabled:opacity-30">Next ›</button>
+            <button disabled={page >= book.pages} onClick={() => setPage(book.pages)} title="Last page" className="rounded-lg border border-ink-700 px-2 py-1.5 text-sm text-ink-300 hover:text-white disabled:opacity-30">»</button>
+            <span className="ml-auto hidden text-[11px] text-ink-600 sm:inline">← → to flip</span>
           </div>
-          <div className="relative inline-block w-full max-w-xl">
-            <img src={`${BASE}${book.imgBase}p${page}.png`} alt={`page ${page}`} className="w-full rounded-lg bg-white" />
+
+          {/* quick-jump to the playable diagrams */}
+          {playable.length > 0 && (
+            <div className="mb-3 flex flex-wrap items-center gap-1.5">
+              <span className="text-xs text-ink-500">Jump to diagram:</span>
+              {playable.map(({ pz, pg }) => (
+                <button key={pz.n} onClick={() => setPage(pg)} title={`Go to ${pz.num ?? "#" + pz.n} (page ${pg})`}
+                  className={`rounded-full border px-2 py-0.5 text-[11px] transition ${page === pg ? "border-brand-500 bg-brand-600/30 text-white" : "border-brand-700/50 bg-brand-900/25 text-brand-200 hover:bg-brand-600/25"}`}>
+                  ▶ {pz.num ?? "#" + pz.n}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* the page — full quality, fixed aspect so no layout shift, spinner while loading */}
+          <div className="relative w-full overflow-hidden rounded-lg bg-white shadow-lg shadow-black/30" style={{ aspectRatio: aspect }}>
+            {!imgLoaded && <div className="absolute inset-0 z-10 flex items-center justify-center bg-ink-900/10"><div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" /></div>}
+            <img ref={imgRef} key={page} src={`${BASE}${book.imgBase}p${page}.png`} alt={`page ${page}`}
+              onLoad={onImg} className="absolute inset-0 h-full w-full object-contain" />
             {(bookPuzzles[page] || []).map((pz) => (
               <button key={pz.n} onClick={() => start(pz)} title={`Play ${pz.num ?? "#" + pz.n}`}
                 style={{ left: `${pz.bb![0]}%`, top: `${pz.bb![1]}%`, width: `${pz.bb![2]}%`, height: `${pz.bb![3]}%` }}
-                className="group absolute rounded-md border-2 border-brand-500/40 bg-brand-500/5 transition hover:border-brand-500 hover:bg-brand-500/20">
-                <span className="absolute left-1 top-1 rounded bg-brand-600 px-1.5 text-[11px] font-bold text-white opacity-90">▶ {pz.num ?? "#" + pz.n}</span>
+                className="group absolute z-20 rounded-md border-2 border-brand-500/50 bg-brand-500/5 transition hover:border-brand-500 hover:bg-brand-500/25">
+                <span className="absolute left-1 top-1 rounded bg-brand-600 px-1.5 text-[11px] font-bold text-white shadow">▶ {pz.num ?? "#" + pz.n}</span>
               </button>
             ))}
           </div>
+          <p className="mt-2 text-center text-xs text-ink-500">
+            {(bookPuzzles[page]?.length ?? 0) > 0
+              ? <span className="text-brand-400">▶ {bookPuzzles[page]!.length} playable diagram{bookPuzzles[page]!.length > 1 ? "s" : ""} on this page — click to solve</span>
+              : "Flip with ‹ Prev / Next › or the arrow keys · use the chips above to jump to a playable diagram"}
+          </p>
         </div>
       )}
 
