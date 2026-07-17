@@ -123,6 +123,16 @@ const EM_PUZZLES: Puz[] = [
     idea: "F. Sackmann, 1913. Black is a pawn up, but his pawns are fixed and weak. White wins by OUTFLANKING with the king: 1.Kf5! (the only move — every other king move draws) …Kb6 2.Kf6 Kb7 3.Kf7 Kb6 4.Ke8! Ka7 5.Ke7 Ka8 6.Kd6 Kb7 7.Kd7 Kb6 8.Kc8 and the king breaks through to the weak queenside pawns.",
     note: "Chapter 1 — outflanking a pawn-up defender. Tablebase: 1.Kf5 is the UNIQUE win.",
     rating: 2220, band: "Expert", emRate: { anchor: null, themes: ["king march / outflanking", "distant opposition"], confidence: "high", signals: { onlyMoves: 3, trap: false, sfSubtle: false, dtm: 32, reciprocalZugzwang: false } } },
+  { n: 19, num: "1-19", fen: "8/3k4/8/2Pp3p/7P/3K4/8/8 w - - 0 1", page: 29, bb: [36, 2.7, 36, 25.4], side: "w", diff: "Mined squares · hold the draw", goal: "draw",
+    sol: ["d3c3", "d7c7", "c3d3", "c7d7"], sf: "Draw (½–½)", maia: "—",
+    idea: "\"Untouchable pawns.\" The squares c4 and b6 are MINED — step on one first and you fall into zugzwang. White's king just shuttles b3-c3-d3 while Black's shuttles c7-b7-a7; neither can ever attack the pawn. Draw.",
+    note: "Chapter 1 — Mined Squares. Tablebase-confirmed draw.",
+    rating: 1300, band: "Club", emRate: { anchor: null, themes: ["mined squares", "reciprocal zugzwang", "defensive hold"], confidence: "medium", signals: { onlyMoves: 0, trap: true, sfSubtle: false, dtm: 0, reciprocalZugzwang: true } } },
+  { n: 20, num: "1-20", fen: "8/8/1k1p4/3P1K2/8/8/8/8 w - - 0 1", page: 29, bb: [36, 36.3, 36, 25.4], side: "w", diff: "Mined squares · win", goal: "win",
+    sol: ["f5f6", "b6b5", "f6e7", "b5c5", "e7e6", "c5b4", "e6d6", "b4c4", "d6c6"], sf: "White wins", maia: "—",
+    idea: "Reciprocal zugzwang: with the kings on e6 and c5, whoever is to move loses. White forces Black onto the mined square first: 1.Kf6! Kb5 2.Ke7! Kc5 3.Ke6! and Black must give way — the king penetrates to win the d6-pawn.",
+    note: "Chapter 1 — Mined Squares. Tablebase: White wins with 1.Kf6.",
+    rating: 1700, band: "Advanced", emRate: { anchor: null, themes: ["mined squares", "reciprocal zugzwang", "outflanking"], confidence: "medium", signals: { onlyMoves: 1, trap: true, sfSubtle: false, dtm: 7, reciprocalZugzwang: true } } },
 ];
 
 // Group Endgame Manual puzzles by their PDF page → clickable hotspots on the page view.
@@ -130,6 +140,23 @@ const EM_BY_PAGE: Record<number, Puz[]> = {};
 for (const p of EM_PUZZLES) { if (p.page != null) (EM_BY_PAGE[p.page] ??= []).push(p); }
 
 const uci = (m: string) => ({ from: m.slice(0, 2) as Key, to: m.slice(2, 4) as Key, promotion: m.length > 4 ? m[4] : undefined });
+const pieceCount = (fen: string) => ((fen.split(" ")[0] || "").match(/[a-zA-Z]/g) || []).length;
+const tbUrl = (fen: string) => `https://tablebase.lichess.ovh/standard?fen=${encodeURIComponent(fen)}`;
+// Best reply for the side to move (the DEFENDER): perfect from the tablebase for <=7 pieces,
+// else Stockfish via the book-engine. Returns the uci move + whether the solver is on track.
+async function engineReply(fen: string, goal: "win" | "draw"): Promise<{ move: string | null; onTrack: boolean }> {
+  try {
+    if (pieceCount(fen) <= 7) {
+      const d = await fetch(tbUrl(fen)).then((r) => r.json());
+      const move = d.moves?.[0]?.uci ?? null;            // opponent's best (max resistance)
+      const cat = d.category as string;                   // from the opponent's perspective
+      const onTrack = goal === "win" ? cat === "loss" : cat !== "win";
+      return { move, onTrack };
+    }
+    const d = await fetch(`/book-engine/analyze?fen=${encodeURIComponent(fen)}`).then((r) => r.json());
+    return { move: d.sf?.move ?? null, onTrack: true };
+  } catch { return { move: null, onTrack: true }; }
+}
 
 export default function BookPage() {
   const [bookSlug, setBookSlug] = useState(BOOKS[0]!.slug);
@@ -143,7 +170,8 @@ export default function BookPage() {
   const [fb, setFb] = useState<{ t: string; k: string }>({ t: "Your move.", k: "" });
   const [, force] = useState(0);
   const rerender = () => force((x) => x + 1);
-  const solving = useRef(false);
+  const solving = useRef(false);   // engine is thinking / demo is running
+  const done = useRef(false);      // puzzle reached a terminal (win/draw/loss)
 
   // Preload neighbouring pages so Prev/Next feels instant.
   useEffect(() => {
@@ -209,49 +237,70 @@ export default function BookPage() {
   const finalBand = cur?.band ?? tacticData?.band ?? "";
 
   function start(p: Puz) {
-    setCur(p); game.current = new Chess(p.fen); setPly(0); setLastMove(undefined); solving.current = false;
-    setFb({ t: `Your move (${p.side === "w" ? "White" : "Black"}).`, k: "" }); rerender();
+    setCur(p); game.current = new Chess(p.fen); setPly(0); setLastMove(undefined); solving.current = false; done.current = false;
+    setFb({ t: `You play ${p.side === "w" ? "White" : "Black"}. ${p.goal === "draw" ? "Hold the draw." : "Win it."}`, k: "" }); rerender();
   }
-  function lineSAN(toPly: number): string {
+  // Moves played so far, as a SAN string (from the live game).
+  function playedSAN(): string {
     if (!cur) return "";
-    const g = new Chess(cur.fen); const out: string[] = [];
-    for (let i = 0; i < toPly; i++) { const mv = cur.sol[i]!; try { out.push(g.move(uci(mv)).san); } catch { out.push(mv); } }
-    let s = ""; for (let i = 0; i < out.length; i++) { if (i % 2 === 0) s += `${Math.floor(i / 2) + 1}. `; s += out[i] + " "; } return s.trim();
+    const hist = game.current.history();
+    let s = ""; for (let i = 0; i < hist.length; i++) { if (i % 2 === 0) s += `${Math.floor(i / 2) + 1}. `; s += (hist[i] ?? "") + " "; }
+    return s.trim();
   }
-  function handleMove(from: Key, to: Key) {
-    if (!cur || solving.current) return;
-    const exp = cur.sol[ply] || ""; const want = exp.slice(0, 4);
-    if (from + to === want) {
-      const promo = exp.length > 4 ? exp[4] : undefined;
-      try { game.current.move({ from, to, promotion: promo as any }); } catch { rerender(); return; }
-      setLastMove([from, to]); const np = ply + 1; setPly(np);
-      setFb(promo && promo !== "q" ? { t: "Underpromotion! (avoids stalemate)", k: "good" } : { t: "✓ Correct!", k: "good" });
-      rerender();
-      if (np >= cur.sol.length) { setFb({ t: cur.goal === "draw" ? "✓ Draw held! 🛡️" : "✓ Solved! 🎉", k: "good" }); return; }
-      solving.current = true;
-      setTimeout(() => {
-        const m = uci(cur.sol[np]!); try { game.current.move(m); } catch { /* */ }
-        setLastMove([m.from, m.to]); const n2 = np + 1; setPly(n2); solving.current = false; rerender();
-        if (n2 >= cur.sol.length) setFb({ t: cur.goal === "draw" ? "✓ Draw held! 🛡️" : "✓ Solved! 🎉", k: "good" });
-      }, 480);
-    } else {
-      setFb({ t: "✗ Not the book move — try again.", k: "bad" }); rerender();
-    }
+  // Adjudicate from the SOLVER's perspective, or null if still going.
+  function adjudicate(): "win" | "draw" | "loss" | null {
+    const g = game.current, solW = cur?.side === "w";
+    if (g.isCheckmate()) return (g.turn() === "w") === solW ? "loss" : "win";
+    if (g.isStalemate() || g.isInsufficientMaterial() || g.isThreefoldRepetition() || g.isDraw()) return "draw";
+    const board = g.fen().split(" ")[0] ?? "";
+    const wq = (board.match(/Q/g) || []).length, bq = (board.match(/q/g) || []).length;
+    if (wq || bq) return (solW ? wq > 0 : bq > 0) ? "win" : "loss";
+    if (!/[PpRrBbNnQq]/.test(board)) return "draw";
+    return null;
+  }
+  function finish(res: "win" | "draw" | "loss") {
+    done.current = true;
+    const goal = cur?.goal ?? "win";
+    const ok = res === goal;
+    const msg = goal === "win"
+      ? (res === "win" ? "✓ Solved — you won it! 🎉" : res === "draw" ? "½ Only a draw — the defence held. Restart to try again." : "✗ You lost it. Restart to try again.")
+      : (res === "draw" ? "✓ Draw held! 🛡️" : "✗ You lost the draw. Restart to try again.");
+    setFb({ t: msg, k: ok ? "good" : "bad" }); rerender();
+  }
+  // Free play: your move stands, then the engine defends BEST and tries to beat you.
+  async function handleMove(from: Key, to: Key) {
+    if (!cur || solving.current || done.current) return;
+    let mv: unknown = null;
+    try { mv = game.current.move({ from, to, promotion: "q" }); } catch { mv = null; }
+    if (!mv) { rerender(); return; }                          // illegal → snaps back
+    setLastMove([from, to]); rerender();
+    let r = adjudicate();
+    if (r) { finish(r); return; }
+    solving.current = true; setFb({ t: "…", k: "" }); rerender();
+    const { move, onTrack } = await engineReply(game.current.fen(), cur.goal ?? "win");
+    if (move) { const m = uci(move); try { game.current.move(m); setLastMove([m.from, m.to]); } catch { /* */ } }
+    solving.current = false; rerender();
+    r = adjudicate();
+    if (r) { finish(r); return; }
+    setFb(onTrack
+      ? { t: cur.goal === "draw" ? "✓ Holding — your move." : "✓ On track — keep converting.", k: "good" }
+      : { t: cur.goal === "draw" ? "✗ That slips — the engine is winning. Play on, or Restart." : "✗ That throws the win. Play on, or Restart.", k: "bad" });
+    rerender();
   }
   function showSolution() {
-    if (!cur) return; game.current = new Chess(cur.fen); setPly(0); setLastMove(undefined); solving.current = true; rerender();
+    if (!cur) return; game.current = new Chess(cur.fen); setPly(0); setLastMove(undefined); solving.current = true; done.current = true; rerender();
     let i = 0;
     const step = () => {
-      if (!cur || i >= cur.sol.length) { solving.current = false; setFb({ t: "Solution shown.", k: "good" }); return; }
+      if (!cur || i >= cur.sol.length) { solving.current = false; setFb({ t: "Solution shown — Restart to play it yourself.", k: "good" }); rerender(); return; }
       const m = uci(cur.sol[i]!); try { game.current.move(m); } catch { /* */ }
-      setLastMove([m.from, m.to]); setPly(i + 1); i++; rerender(); setTimeout(step, 560);
+      setLastMove([m.from, m.to]); setPly(i + 1); i++; rerender(); setTimeout(step, 620);
     };
     setTimeout(step, 300);
   }
 
   const solverColor: Color = cur?.side === "b" ? "black" : "white";
   const turnColor: Color = game.current.turn() === "w" ? "white" : "black";
-  const myTurn = !!cur && !solving.current && turnColor === solverColor && ply < (cur?.sol.length || 0);
+  const myTurn = !!cur && !solving.current && !done.current && turnColor === solverColor && !game.current.isGameOver();
 
   const selectBook = (slug: string) => { const b = BOOKS.find((x) => x.slug === slug)!; setBookSlug(slug); setCur(null); setPage(b.initialPage); };
 
@@ -329,7 +378,7 @@ export default function BookPage() {
               <button onClick={() => setCur(null)} className="text-brand-400 hover:text-brand-300">‹ Back to book</button>
               <span className="rounded-full bg-ink-700 px-2 py-0.5 text-xs text-ink-300">{cur.num ? `${cur.num} · ` : `#${cur.n} · `}{cur.side === "w" ? "White" : "Black"} to move</span>
               <span className="rounded-full bg-brand-900/60 px-2 py-0.5 text-xs text-brand-200">{cur.diff}</span>
-              <button onClick={() => start(cur)} className="rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-ink-300 hover:text-white">↺ Reset</button>
+              <button onClick={() => start(cur)} className="rounded-lg border border-brand-600/60 bg-brand-900/30 px-2.5 py-1 text-xs font-semibold text-brand-200 hover:bg-brand-600/30">↺ Restart</button>
               <button onClick={showSolution} className="rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-ink-300 hover:text-white">Show solution</button>
               <button onClick={() => setShowAn((v) => !v)} className={`rounded-lg border px-2.5 py-1 text-xs ${showAn ? "border-emerald-500 text-emerald-300" : "border-ink-700 text-ink-300 hover:text-white"}`}>{showAn ? "Engine ✓" : "Engine ▷"}</button>
               <span className={`ml-auto font-semibold ${fb.k === "good" ? "text-emerald-400" : fb.k === "bad" ? "text-rose-400" : "text-ink-300"}`}>{fb.t}</span>
@@ -347,7 +396,7 @@ export default function BookPage() {
                 className="mini"
               />
             </div>
-            <p className="mt-1 text-center font-mono text-xs text-ink-300">{ply > 0 ? lineSAN(ply) : (cur.goal === "draw" ? "— hold the draw, or Show solution" : "— your move, or Show solution")}</p>
+            <p className="mt-1 text-center font-mono text-xs text-ink-300">{game.current.history().length > 0 ? playedSAN() : (cur.goal === "draw" ? "— hold the draw; the engine defends best" : "— your move; the engine defends best")}</p>
           </div>
 
           {/* Difficulty rating */}
