@@ -135,6 +135,13 @@ export default function BookPage() {
   const rerender = () => force((x) => x + 1);
   const solving = useRef(false);
 
+  // Preload neighbouring pages so Prev/Next feels instant (the page PNGs are ~110KB each).
+  useEffect(() => {
+    for (const p of [page + 1, page + 2, page - 1]) {
+      if (p >= 1 && p <= book.pages) { const im = new Image(); im.src = `${BASE}${book.imgBase}p${p}.png`; }
+    }
+  }, [page, book.imgBase, book.pages]);
+
   const [showAn, setShowAn] = useState(false);
   const [an, setAn] = useState<{ sf: { move: string | null; score: { type: string; val: number } | null }; maia: { move: string | null; level: number } } | null>(null);
   useEffect(() => {
