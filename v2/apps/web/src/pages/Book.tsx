@@ -492,6 +492,22 @@ async function engineBest(fen: string): Promise<string | null> {
   } catch { return null; }
 }
 
+// ── position editor helpers ──
+const EDIT_PIECES = ["K", "Q", "R", "B", "N", "P", "k", "q", "r", "b", "n", "p"] as const;
+const PIECE_GLYPH: Record<string, string> = { K: "♔", Q: "♕", R: "♖", B: "♗", N: "♘", P: "♙", k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
+function boardToGrid(board: string): string {   // board-part FEN → 64-char row-major (rank8/fileA), "." = empty
+  return board.split("/").map((row) => { let s = ""; for (const ch of row) s += /\d/.test(ch) ? ".".repeat(+ch) : ch; return s.padEnd(8, ".").slice(0, 8); }).join("");
+}
+function gridToBoard(grid: string): string {
+  const rows: string[] = [];
+  for (let r = 0; r < 8; r++) { let s = "", e = 0; for (let c = 0; c < 8; c++) { const ch = grid[r * 8 + c] ?? "."; if (ch === ".") e++; else { if (e) { s += e; e = 0; } s += ch; } } if (e) s += e; rows.push(s || "8"); }
+  return rows.join("/");
+}
+function setSquare(board: string, sq: string, piece: string): string {
+  const g = boardToGrid(board).split(""); const f = sq.charCodeAt(0) - 97, r = 8 - parseInt(sq[1]!);
+  if (f < 0 || f > 7 || r < 0 || r > 7) return board; g[r * 8 + f] = piece || "."; return gridToBoard(g.join(""));
+}
+
 export default function BookPage() {
   const [bookSlug, setBookSlug] = useState(BOOKS[0]!.slug);
   const book = BOOKS.find((b) => b.slug === bookSlug)!;
@@ -508,6 +524,10 @@ export default function BookPage() {
   const done = useRef(false);      // puzzle reached a terminal (win/draw/loss)
   const [comment, setComment] = useState<{ you: string; eng: string }>({ you: "", eng: "" }); // per-move reasoning
   const [viewPly, setViewPly] = useState(0);   // which ply of the played line is on the board (browse ◀ ▶)
+  const [editing, setEditing] = useState(false);
+  const [editBoard, setEditBoard] = useState("");         // board-part FEN being edited
+  const [editSide, setEditSide] = useState<"w" | "b">("w");
+  const [editPiece, setEditPiece] = useState<string>("K"); // selected palette piece; "" = erase
 
   // Preload neighbouring pages so Prev/Next feels instant.
   useEffect(() => {
@@ -665,6 +685,23 @@ export default function BookPage() {
     if (game.current.isGameOver() || term === goal) { finish(term ?? "draw"); return; }
     setFb({ t: "Your move.", k: "" }); rerender();
   }
+  // ── position editor: fix a mistaken puzzle position, choose side, and play ──
+  function startEdit() {
+    if (!cur) return;
+    setEditBoard((atLive ? game.current.fen() : view.fen()).split(" ")[0] ?? "");
+    setEditSide(view.turn() as "w" | "b"); setEditPiece("K"); setEditing(true);
+  }
+  const editSelect = (sq: Key) => setEditBoard((b) => setSquare(b, sq, editPiece));
+  function playEdited() {
+    if (!cur) return;
+    const fen = `${editBoard} ${editSide} - - 0 1`;
+    let g: Chess;
+    try { g = new Chess(fen); } catch { setFb({ t: "✗ Illegal position — need one king each, no pawns on the back ranks.", k: "bad" }); return; }
+    const edited: Puz = { ...cur, fen, side: editSide, sol: [], num: `${cur.num ?? "#" + cur.n} ✎`, diff: "Edited position" };
+    game.current = new Chess(fen); setCur(edited); setViewPly(0); setPly(0); setLastMove(undefined);
+    solving.current = false; done.current = false; setEditing(false);
+    setComment({ you: "", eng: "" }); setFb({ t: `${editSide === "w" ? "White" : "Black"} to move — play on.`, k: "" });
+  }
   function showSolution() {
     if (!cur) return; game.current = new Chess(cur.fen); setViewPly(0); solving.current = true; done.current = true; rerender();
     let i = 0;
@@ -759,33 +796,54 @@ export default function BookPage() {
               <span className="rounded-full bg-brand-900/60 px-2 py-0.5 text-xs text-brand-200">{cur.diff}</span>
               <button onClick={() => start(cur)} className="rounded-lg border border-brand-600/60 bg-brand-900/30 px-2.5 py-1 text-xs font-semibold text-brand-200 hover:bg-brand-600/30">↺ Restart</button>
               <button onClick={showSolution} className="rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-ink-300 hover:text-white">Show solution</button>
+              <button onClick={() => (editing ? setEditing(false) : startEdit())} className={`rounded-lg border px-2.5 py-1 text-xs ${editing ? "border-emerald-500 text-emerald-300" : "border-ink-700 text-ink-300 hover:text-white"}`}>✎ Edit position</button>
               <button onClick={() => setShowAn((v) => !v)} className={`rounded-lg border px-2.5 py-1 text-xs ${showAn ? "border-emerald-500 text-emerald-300" : "border-ink-700 text-ink-300 hover:text-white"}`}>{showAn ? "Engine ✓" : "Engine ▷"}</button>
               <span className={`ml-auto font-semibold ${fb.k === "good" ? "text-emerald-400" : fb.k === "bad" ? "text-rose-400" : "text-ink-300"}`}>{fb.t}</span>
             </div>
             <div className="mx-auto w-full max-w-[300px]">
               <Board
-                fen={view.fen()}
+                fen={editing ? `${editBoard} ${editSide} - - 0 1` : view.fen()}
                 orientation={solverColor}
-                turnColor={turnColor}
-                movableColor={myTurn ? solverColor : undefined}
-                dests={myTurn ? destsFromChess(view) : new Map()}
-                lastMove={viewLastMove}
-                onMove={handleMove}
-                shapes={shapes}
+                turnColor={editing ? (editSide === "w" ? "white" : "black") : turnColor}
+                movableColor={editing ? undefined : (myTurn ? solverColor : undefined)}
+                dests={editing ? new Map() : (myTurn ? destsFromChess(view) : new Map())}
+                lastMove={editing ? undefined : viewLastMove}
+                onMove={editing ? undefined : handleMove}
+                onSelect={editing ? editSelect : undefined}
+                shapes={editing ? [] : shapes}
                 className="mini"
               />
             </div>
-            {/* move browser: ⏮ ◀ ▶ ⏭ + Undo. Playing from a browsed position continues from there. */}
-            <div className="mt-1.5 flex items-center justify-center gap-1 text-xs">
-              <button onClick={() => setViewPly(0)} disabled={viewPly <= 0} title="Start" className="rounded border border-ink-700 px-1.5 py-0.5 text-ink-300 hover:text-white disabled:opacity-30">⏮</button>
-              <button onClick={() => setViewPly((p) => Math.max(0, p - 1))} disabled={viewPly <= 0} title="Back" className="rounded border border-ink-700 px-2 py-0.5 text-ink-300 hover:text-white disabled:opacity-30">◀</button>
-              <span className="min-w-[68px] text-center font-mono text-ink-400">{fullLen ? `move ${viewPly}/${fullLen}` : "start"}</span>
-              <button onClick={() => setViewPly((p) => Math.min(fullLen, p + 1))} disabled={viewPly >= fullLen} title="Forward" className="rounded border border-ink-700 px-2 py-0.5 text-ink-300 hover:text-white disabled:opacity-30">▶</button>
-              <button onClick={() => setViewPly(fullLen)} disabled={viewPly >= fullLen} title="Latest" className="rounded border border-ink-700 px-1.5 py-0.5 text-ink-300 hover:text-white disabled:opacity-30">⏭</button>
-              <button onClick={engineMove} disabled={!engineTurn} title="Let Stockfish play its move from here" className="ml-1 rounded border border-sky-700/60 bg-sky-900/20 px-2 py-0.5 text-sky-200 hover:bg-sky-700/30 disabled:opacity-30">▷ Engine move</button>
-              <button onClick={undo} disabled={fullLen === 0 || solving.current} title="Take back your move" className="ml-1 rounded border border-amber-700/60 bg-amber-900/20 px-2 py-0.5 text-amber-200 hover:bg-amber-700/30 disabled:opacity-30">↶ Undo</button>
-            </div>
-            {!atLive && fullLen > 0 && <p className="mt-0.5 text-center text-[11px] text-amber-400">browsing — {engineTurn ? "click ▷ Engine move to let Stockfish play, then it's your move" : "play a move here to continue from this point"}</p>}
+            {editing ? (
+              <div className="mt-1.5">
+                <div className="flex flex-wrap items-center justify-center gap-1">
+                  {EDIT_PIECES.map((p) => (
+                    <button key={p} onClick={() => setEditPiece(p)} title={p} className={`h-7 w-7 rounded border text-lg leading-none ${editPiece === p ? "border-brand-400 bg-brand-900/40" : "border-ink-700 hover:border-ink-500"}`}>{PIECE_GLYPH[p]}</button>
+                  ))}
+                  <button onClick={() => setEditPiece("")} title="Erase" className={`h-7 rounded border px-2 text-xs ${editPiece === "" ? "border-brand-400 bg-brand-900/40 text-white" : "border-ink-700 text-ink-300 hover:border-ink-500"}`}>⌫ erase</button>
+                </div>
+                <p className="mt-1 text-center text-[11px] text-ink-400">tap a piece, then tap squares to place · ⌫ then tap to clear</p>
+                <div className="mt-1.5 flex flex-wrap items-center justify-center gap-2 text-xs">
+                  <span className="text-ink-400">To move:</span>
+                  <button onClick={() => setEditSide("w")} className={`rounded border px-2 py-0.5 ${editSide === "w" ? "border-brand-400 bg-brand-900/40 text-white" : "border-ink-700 text-ink-300"}`}>White</button>
+                  <button onClick={() => setEditSide("b")} className={`rounded border px-2 py-0.5 ${editSide === "b" ? "border-brand-400 bg-brand-900/40 text-white" : "border-ink-700 text-ink-300"}`}>Black</button>
+                  <button onClick={playEdited} className="ml-1 rounded border border-emerald-600/60 bg-emerald-900/30 px-2.5 py-0.5 font-semibold text-emerald-200 hover:bg-emerald-700/30">▶ Play</button>
+                  <button onClick={() => setEditing(false)} className="rounded border border-ink-700 px-2 py-0.5 text-ink-300 hover:text-white">✕ Cancel</button>
+                </div>
+              </div>
+            ) : (<>
+              {/* move browser: ⏮ ◀ ▶ ⏭ + Engine move + Undo. Playing from a browsed position continues from there. */}
+              <div className="mt-1.5 flex items-center justify-center gap-1 text-xs">
+                <button onClick={() => setViewPly(0)} disabled={viewPly <= 0} title="Start" className="rounded border border-ink-700 px-1.5 py-0.5 text-ink-300 hover:text-white disabled:opacity-30">⏮</button>
+                <button onClick={() => setViewPly((p) => Math.max(0, p - 1))} disabled={viewPly <= 0} title="Back" className="rounded border border-ink-700 px-2 py-0.5 text-ink-300 hover:text-white disabled:opacity-30">◀</button>
+                <span className="min-w-[68px] text-center font-mono text-ink-400">{fullLen ? `move ${viewPly}/${fullLen}` : "start"}</span>
+                <button onClick={() => setViewPly((p) => Math.min(fullLen, p + 1))} disabled={viewPly >= fullLen} title="Forward" className="rounded border border-ink-700 px-2 py-0.5 text-ink-300 hover:text-white disabled:opacity-30">▶</button>
+                <button onClick={() => setViewPly(fullLen)} disabled={viewPly >= fullLen} title="Latest" className="rounded border border-ink-700 px-1.5 py-0.5 text-ink-300 hover:text-white disabled:opacity-30">⏭</button>
+                <button onClick={engineMove} disabled={!engineTurn} title="Let Stockfish play its move from here" className="ml-1 rounded border border-sky-700/60 bg-sky-900/20 px-2 py-0.5 text-sky-200 hover:bg-sky-700/30 disabled:opacity-30">▷ Engine move</button>
+                <button onClick={undo} disabled={fullLen === 0 || solving.current} title="Take back your move" className="ml-1 rounded border border-amber-700/60 bg-amber-900/20 px-2 py-0.5 text-amber-200 hover:bg-amber-700/30 disabled:opacity-30">↶ Undo</button>
+              </div>
+              {!atLive && fullLen > 0 && <p className="mt-0.5 text-center text-[11px] text-amber-400">browsing — {engineTurn ? "click ▷ Engine move to let Stockfish play, then it's your move" : "play a move here to continue from this point"}</p>}
+            </>)}
             {(comment.you || comment.eng) && (
               <div className="mt-1.5 rounded-lg border border-ink-700 bg-ink-950/60 p-2 text-[11px] leading-relaxed">
                 {comment.you && <p className={comment.you.startsWith("✗") ? "text-rose-300" : "text-emerald-300"}>{comment.you}</p>}
