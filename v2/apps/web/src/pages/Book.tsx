@@ -78,9 +78,9 @@ const EM_PUZZLES: Puz[] = [
     idea: "1.Ka6! seizes the key square (the opposition). After 1…Ka8 2.b6 Kb8 3.b7 the pawn queens next move. The tempting 1.Kc6? runs into 1…Ka7! and White has to start over.",
     note: "Chapter 1 — a knight-pawn's key squares. Maia: only the 1900 level converts it against perfect defense.",
     rating: 1879, band: "Advanced", emRate: { anchor: 1900, themes: ["K+P vs K", "opposition"], confidence: "high", signals: { onlyMoves: 2, trap: false, sfSubtle: false, dtm: 15, reciprocalZugzwang: false } } },
-  { n: 3, num: "1-3", fen: "5k2/8/8/8/1P6/8/8/2K5 w - - 0 1", page: 20, bb: [35.2, 38.1, 36, 25.4], side: "w", diff: "Win · study", goal: "win",
-    sol: ["c1c2", "f8e7", "c2b3", "e7d6", "b3a4", "d6c6", "a4a5", "c6b7", "a5b5"], sf: "White wins", maia: "—",
-    idea: "J. Moravec, 1952. Head for the key square FARTHEST from the enemy king: 1.Kc2! (not 1.Kb2? or 1.Kd2?). Then 1…Ke7 2.Kb3 Kd6 3.Ka4 Kc6 4.Ka5 Kb7 5.Kb5 and White wins the race for b5.",
+  { n: 3, num: "1-3", fen: "5k2/8/8/8/1P6/8/8/3K4 w - - 0 1", page: 20, bb: [35.2, 38.1, 36, 25.4], side: "w", diff: "Win · study", goal: "win",
+    sol: ["d1c2", "f8e7", "c2b3", "e7d6", "b3a4", "d6c6", "a4a5", "c6b7", "a5b5"], sf: "White wins", maia: "—",
+    idea: "J. Moravec, 1952. Head for the key square FARTHEST from the enemy king: 1.Kc2! (not 1.Kd2? or 1.Ke2?). Then 1…Ke7 2.Kb3 Kd6 3.Ka4 Kc6 4.Ka5 Kb7 5.Kb5 and White wins the race for the b5 key square.",
     note: "Chapter 1 — outflanking. Even Maia-1900 fails to win this against best defense.",
     rating: 2373, band: "Expert", emRate: { anchor: null, themes: ["king march / outflanking"], confidence: "high", signals: { onlyMoves: 2, trap: true, sfSubtle: true, dtm: 24, reciprocalZugzwang: false } } },
   { n: 4, num: "1-4", fen: "2k5/8/8/7p/8/8/6P1/5K2 w - - 0 1", page: 21, bb: [35.6, 2.7, 36, 25.4], side: "w", diff: "Win · study", goal: "win",
@@ -98,34 +98,34 @@ const EM_PUZZLES: Puz[] = [
     idea: "A rook-ending tragicomedy. The game went 1.Rf4?? Kg5 and White resigned — the rook is lost (attacked by the king AND the rook, defended only by Kf3). But it's a DRAW: keep the king active and the rook behind the pawn — 1.Ke2! Rb5 2.Ra1 f5 3.Rc1 f4 4.Ra1 and Black can't break through.",
     note: "Chapter 1 — Tragicomedy: 1.Rf4?? threw a draw. Tablebase: draw (and Rf4 loses).",
     rating: 1400, band: "Club", emRate: { anchor: null, themes: ["rook ending", "defensive hold"], confidence: "medium", signals: { onlyMoves: 0, trap: true, sfSubtle: false, dtm: 0, reciprocalZugzwang: false } } },
-  { n: 7, num: "1-7", fen: "2k5/8/2p5/2K5/1P1P4/8/8/8 b - - 0 1", page: 23, bb: [35.2, 2.7, 36, 25.4], side: "b", diff: "Hold the draw", goal: "draw",
-    sol: ["c8c7", "b4b5", "c6b5", "c5b5", "c7d6"], sf: "Draw (½–½)", maia: "—",
-    idea: "White has the opposition, but two pawns on the same file can't break a well-defended king. 1…Kc7! keeps the opposition. If 2.b5 cxb5 3.Kxb5 Kd6 the king reaches the square in front of the d-pawn — draw. (1…Ka7? loses.)",
+  { n: 7, num: "1-7", fen: "8/1k6/1p6/1K6/P1P5/8/8/8 b - - 0 1", page: 23, bb: [35.2, 2.7, 36, 25.4], side: "b", diff: "Hold the draw", goal: "draw",
+    sol: ["b7c7", "a4a5", "b6a5", "b5a5", "c7c6", "c4c5", "c6c5"], sf: "Draw (½–½)", maia: "—",
+    idea: "White has the opposition, but it is not enough to win. 1…Kc7! (1…Ka7? loses to 2.a5! b×a5 3.K×a5, getting the opposition) 2.Ka6 (2.c5 is useless) 2…Kc6 3.Ka7 Kc7! 4.Ka8 Kc8!= — Black keeps the horizontal opposition. Draw.",
     note: "Chapter 1 — opposition & the defender's resources.",
     rating: 1175, band: "Beginner", emRate: { anchor: 1300, themes: ["opposition", "defensive hold"], confidence: "high", signals: { onlyMoves: 2, trap: false, sfSubtle: false, dtm: 5, reciprocalZugzwang: false } } },
-  { n: 8, num: "1-8", fen: "8/8/8/4p1p1/8/5P2/7K/3k4 w - - 0 1", page: 23, bb: [35.6, 65.1, 36, 25.4], side: "w", diff: "Hold the draw · study", goal: "draw",
-    sol: ["h2h1", "d1d2", "h1h2", "d2d3", "h2h3"], sf: "Draw (½–½)", maia: "—",
-    idea: "H. Neustadtl, 1890. White is lost unless he grabs the DISTANT opposition: 1.Kh1!! is the ONLY move (every other loses!). 1…Kd2 2.Kh2 Kd3 3.Kh3 — White mirrors the black king along the rank, keeping the distant opposition. Draw. (1…g4 2.Kg2! Kd2 3.fxg4=.)",
+  { n: 8, num: "1-8", fen: "8/8/8/4p1p1/8/5P2/6K1/3k4 w - - 0 1", page: 23, bb: [35.6, 65.1, 36, 25.4], side: "w", diff: "Hold the draw · study", goal: "draw",
+    sol: ["g2h1", "g5g4", "h1g2", "g4f3", "g2f3", "e5e4", "f3e4"], sf: "Draw (½–½)", maia: "—",
+    idea: "H. Neustadtl, 1890. White is lost unless he grabs the DISTANT opposition: 1.Kh1!! is the ONLY move (every other loses!). 1…Kd2 2.Kh2 Kd3 3.Kh3 — White mirrors the black king along the rank (d-file king ↔ h-file king). Draw. (1…g4 2.Kg2! and 3.f×g4=.)",
     note: "Chapter 1 — distant opposition as the only defence. Tablebase: 1.Kh1 is the UNIQUE saving move; everything else loses.",
     rating: 1600, band: "Advanced", emRate: { anchor: null, themes: ["distant opposition", "defensive hold"], confidence: "medium", signals: { onlyMoves: 1, trap: true, sfSubtle: true, dtm: 0, reciprocalZugzwang: true } } },
-  { n: 9, num: "1-9", fen: "8/5p2/8/5PPk/8/8/8/7K w - - 0 1", page: 24, bb: [35.6, 13.7, 36, 25.4], side: "w", diff: "Hold the draw · study", goal: "draw",
-    sol: ["g5g6", "f7g6", "f5g6", "h5g6", "h1g2"], sf: "Draw (½–½)", maia: "—",
-    idea: "H. Mattison, 1918. The pawns are lost, but White saves himself with the distant opposition: 1.g6! fxg6 2.f5! gxf5 3.Kg1! and Black — though he holds the distant opposition — cannot convert it into the close opposition. Draw.",
+  { n: 9, num: "1-9", fen: "8/5p2/8/6Pk/5P2/8/8/7K w - - 0 1", page: 24, bb: [35.6, 13.7, 36, 25.4], side: "w", diff: "Hold the draw · study", goal: "draw",
+    sol: ["g5g6", "f7g6", "f4f5", "g6f5", "h1g1", "f5f4", "g1f1", "f4f3", "f1e1", "f3f2", "e1f2"], sf: "Draw (½–½)", maia: "—",
+    idea: "H. Mattison, 1918. The pawns are lost, but White saves himself with the distant opposition: 1.g6! f×g6 2.f5! g×f5 3.Kg1! and Black — though he holds the distant opposition — cannot convert it into the close opposition. Draw.",
     note: "Chapter 1 — distant opposition as a drawing resource.",
     rating: 950, band: "Beginner", emRate: { anchor: 1100, themes: ["distant opposition", "defensive hold"], confidence: "high", signals: { onlyMoves: 1, trap: false, sfSubtle: false, dtm: 5, reciprocalZugzwang: false } } },
-  { n: 10, num: "1-10", fen: "5k2/8/4p3/4P3/3P4/8/8/4K3 w - - 0 1", page: 24, bb: [36, 67.6, 36, 25.4], side: "w", diff: "Win · study", goal: "win",
-    sol: ["e1d2", "f8e7", "d2c3", "e7d7", "c3b4", "d7c6", "b4c4", "c6b6", "d4d5"], sf: "White wins", maia: "—",
-    idea: "J. Drtina, 1907. Taking the distant opposition with 1.Ke1? only draws. White wins by OUTFLANKING: 1.Kd2! marches the king around (Kc3-Kb4-Kc4) to force through d4-d5 — the enemy king can't cover both breakthroughs.",
+  { n: 10, num: "1-10", fen: "8/4k3/3p4/3P4/2P5/8/8/5K2 w - - 0 1", page: 24, bb: [36, 67.6, 36, 25.4], side: "w", diff: "Win · study", goal: "win",
+    sol: ["f1g2", "e7f6", "g2f2", "f6e7", "f2g3", "e7f7", "g3f3", "f7e7", "f3g4"], sf: "White wins", maia: "—",
+    idea: "J. Drtina, 1907. Merely taking the opposition only draws; White wins by OUTFLANKING — the king zig-zags up the board (1.Kg2!, Kf2-Kg3-Kf3-Kg4…) so the enemy king cannot both hold the opposition and stop the c- and d-pawns breaking through.",
     note: "Chapter 1 — outflanking beats mere opposition. Even Maia-1900 misplays it.",
     rating: 2203, band: "Expert", emRate: { anchor: null, themes: ["king march / outflanking"], confidence: "high", signals: { onlyMoves: 2, trap: true, sfSubtle: false, dtm: 9, reciprocalZugzwang: false } } },
-  { n: 11, num: "1-11", fen: "8/8/2p5/k1p3K1/p1P5/P7/8/8 w - - 0 1", page: 25, bb: [36, 40.5, 36, 25.4], side: "w", diff: "Win · study", goal: "win",
-    sol: ["g5f5", "a5b6", "f5f6", "b6b7", "f6f7", "b7b6", "f7e8", "b6a7", "e8e7", "a7a8", "e7d6", "a8b7", "d6d7", "b7b6", "d7c8"], sf: "White wins", maia: "—",
-    idea: "F. Sackmann, 1913. Black is a pawn up, but his pawns are fixed and weak. White wins by OUTFLANKING with the king: 1.Kf5! (the only move — every other king move draws) …Kb6 2.Kf6 Kb7 3.Kf7 Kb6 4.Ke8! Ka7 5.Ke7 Ka8 6.Kd6 Kb7 7.Kd7 Kb6 8.Kc8 and the king breaks through to the weak queenside pawns.",
+  { n: 11, num: "1-11", fen: "8/8/2p5/k1p1K3/p1P5/P7/8/8 w - - 0 1", page: 25, bb: [36, 40.5, 36, 25.4], side: "w", diff: "Win · study", goal: "win",
+    sol: ["e5f5", "a5b6", "f5f6", "b6b7", "f6f7", "b7a6", "f7e6", "a6a7", "e6e7", "a7a6", "e7d8", "a6b6", "d8c8"], sf: "White wins", maia: "—",
+    idea: "F. Sackmann, 1913. Black is a pawn up, but his pawns are fixed and weak. White wins by OUTFLANKING with the king: 1.Kf5! (the only move) …Kb6 2.Kf6 Kb7 3.Kf7 Kb6 4.Ke8! Ka7 5.Ke7 Ka8 6.Kd6 Kb7 7.Kd7 Kb6 8.Kc8 and the king breaks through to the weak queenside pawns.",
     note: "Chapter 1 — outflanking a pawn-up defender. Tablebase: 1.Kf5 is the UNIQUE win.",
     rating: 2220, band: "Expert", emRate: { anchor: null, themes: ["king march / outflanking", "distant opposition"], confidence: "high", signals: { onlyMoves: 3, trap: false, sfSubtle: false, dtm: 32, reciprocalZugzwang: false } } },
-  { n: 19, num: "1-19", fen: "8/3k4/8/2Pp3p/7P/3K4/8/8 w - - 0 1", page: 29, bb: [36, 2.7, 36, 25.4], side: "w", diff: "Mined squares · hold the draw", goal: "draw",
-    sol: ["d3c3", "d7c7", "c3d3", "c7d7"], sf: "Draw (½–½)", maia: "—",
-    idea: "\"Untouchable pawns.\" The squares c4 and b6 are MINED — step on one first and you fall into zugzwang. White's king just shuttles b3-c3-d3 while Black's shuttles c7-b7-a7; neither can ever attack the pawn. Draw.",
+  { n: 19, num: "1-19", fen: "8/2k5/8/1Pp3p1/6P1/1K6/8/8 w - - 0 1", page: 29, bb: [36, 2.7, 36, 25.4], side: "w", diff: "Mined squares · hold the draw", goal: "draw",
+    sol: ["b3a3", "c7b6", "a3a4", "b6a7", "a4a3", "a7b6"], sf: "Draw (½–½)", maia: "—",
+    idea: "“Untouchable pawns.” The squares a5 and b6 are MINED — step on one first and you fall into zugzwang. White's king just shuttles a3-a4-b3 while Black's shuttles b6-a7-c7; neither can ever attack the enemy pawn. Draw.",
     note: "Chapter 1 — Mined Squares. Tablebase-confirmed draw.",
     rating: 1300, band: "Club", emRate: { anchor: null, themes: ["mined squares", "reciprocal zugzwang", "defensive hold"], confidence: "medium", signals: { onlyMoves: 0, trap: true, sfSubtle: false, dtm: 0, reciprocalZugzwang: true } } },
   { n: 20, num: "1-20", fen: "8/8/1k1p4/3P1K2/8/8/8/8 w - - 0 1", page: 29, bb: [36, 36.3, 36, 25.4], side: "w", diff: "Mined squares · win", goal: "win",
@@ -223,9 +223,9 @@ const EM_PUZZLES: Puz[] = [
     idea: "N. Grigoriev, 1922. White threatens to break through to b3, so Black must hold the correspondence a2↔b4, b1↔c5, c1↔d4, d1↔e3, e1↔f3. The natural 1…Ke3? (opposition!) LOSES to 2.Kd1 (zugzwang). Correct is the “anti-opposition” 1…Kf3! 2.Kd1 Ke3 and Black draws — take the opposition only when it zugzwangs your opponent, not yourself.",
     note: "Chapter 1 — “anti-opposition” / corresponding squares. Tablebase-confirmed draw.",
     rating: 2050, band: "Expert", emRate: { anchor: null, themes: ["fortress/defensive hold"], confidence: "high", signals: { onlyMoves: 1, trap: false, sfSubtle: false, dtm: 3, reciprocalZugzwang: false } } },
-  { n: 33, num: "1-33", fen: "8/8/3pP1k1/3P1p2/5K2/8/8/8 w - - 0 1", page: 36, bb: [36.0, 61.9, 35.8, 25.2], side: "w", diff: "Corresponding squares · win", goal: "win",
-    sol: ["e6e7", "g6f7", "f4f5", "f7e7", "f5g6", "e7d8", "g6f6", "d8d7", "f6f7", "d7c8", "f7e6"], sf: "White wins", maia: "—",
-    idea: "N. Grigoriev, 1922. The squares f4↔f6 and g3↔g7 correspond. White breaks the correspondence with a pawn sacrifice: 1.e7! Kf7 2.Kxf5 Kxe7 3.Kg6! and the white king outruns Black to escort the d5-pawn home.",
+  { n: 33, num: "1-33", fen: "8/8/3pPk2/3P1p2/5K2/8/8/8 w - - 0 1", page: 36, bb: [36.0, 61.9, 35.8, 25.2], side: "w", diff: "Corresponding squares · win", goal: "win",
+    sol: ["f4f3", "f6g6", "f3g2", "g6f6", "g2h3", "f6g7", "h3g3", "g7g6", "g3h4"], sf: "White wins", maia: "—",
+    idea: "N. Grigoriev, 1922. The squares f4↔f6 correspond (reciprocal zugzwang). With White to move he triangulates via the h-file to hand Black the zugzwang, then breaks through (e6-e7 or K×f5) to win. The corresponding-square dance is the whole point.",
     note: "Chapter 1 — Corresponding squares (Grigoriev). Tablebase-verified win.",
     rating: 1659, band: "Advanced", emRate: { anchor: 1700, themes: [], confidence: "high", signals: { onlyMoves: 2, trap: false, sfSubtle: false, dtm: 20, reciprocalZugzwang: false } } },
   { n: 34, num: "1-34", fen: "5k2/8/5p2/7p/8/4PK2/8/8 w - - 0 1", page: 37, bb: [36.5, 24.5, 35.8, 25.2], side: "w", diff: "Corresponding squares · hold the draw", goal: "draw",
@@ -313,9 +313,9 @@ const EM_PUZZLES: Puz[] = [
     idea: "The floating square (corners a5, d5) does NOT reach the edge, so the king holds — and with the pawns only two files apart he captures BOTH: 1.Ka4! d4 2.Kb3 … Kc4 and K×d4, then rounds up the a-pawn. White wins.",
     note: "Chapter 1 — The Floating Square. Tablebase-verified win.",
     rating: 1606, band: "Advanced", emRate: { anchor: 1700, themes: ["rook's pawn"], confidence: "high", signals: { onlyMoves: 3, trap: false, sfSubtle: false, dtm: 7, reciprocalZugzwang: false } } },
-  { n: 51, num: "1-51", fen: "5k2/8/5P1P/8/p1p5/8/1K6/8 w - - 0 1", page: 46, bb: [36.0, 2.7, 35.6, 25.2], side: "w", diff: "Floating Square · win", goal: "win",
-    sol: ["h6h7", "f8f7", "h7h8q", "f7e6", "h8g7", "a4a3", "b2a2"], sf: "White wins", maia: "—",
-    idea: "Two independent floating squares. On the queenside White's king holds Black's a4/c4 pawns (their square doesn't reach the edge): 1.Kc3 a3 2.Kc2. On the kingside the far-advanced f6/h6 pawns queen — Black's king can't cover both, and zugzwang forces them through. White wins.",
+  { n: 51, num: "1-51", fen: "6k1/8/5P1P/8/p1p5/8/1K6/8 w - - 0 1", page: 46, bb: [36.0, 2.7, 35.6, 25.2], side: "w", diff: "Floating Square · win", goal: "win",
+    sol: ["b2b1", "c4c3", "b1c2", "a4a3", "c2c3", "g8f7", "h6h7"], sf: "White wins", maia: "—",
+    idea: "Two independent floating squares. On the queenside White's king holds Black's a4/c4 pawns via the reciprocal-zugzwang 1.Kb1! (their square doesn't reach the edge); on the kingside the far-advanced f6/h6 pawns queen — Black's king can't cover both. White wins.",
     note: "Chapter 1 — The Floating Square (both wings). Tablebase-verified win.",
     rating: 1005, band: "Beginner", emRate: { anchor: 1100, themes: ["rook's pawn"], confidence: "high", signals: { onlyMoves: 2, trap: false, sfSubtle: false, dtm: 11, reciprocalZugzwang: false } } },
   { n: 52, num: "1-52", fen: "8/2p3p1/2p2kP1/4pP1P/4K3/2P5/8/8 w - - 0 1", page: 46, bb: [36.1, 42.4, 35.8, 25.1], side: "w", diff: "Floating Square · win (game)", goal: "win",
@@ -514,7 +514,9 @@ async function engineBest(fen: string): Promise<string | null> {
 
 // ── position editor helpers ──
 const EDIT_PIECES = ["K", "Q", "R", "B", "N", "P", "k", "q", "r", "b", "n", "p"] as const;
-const PIECE_GLYPH: Record<string, string> = { K: "♔", Q: "♕", R: "♖", B: "♗", N: "♘", P: "♙", k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
+// filled glyphs for BOTH colours; colour is conveyed by the chip (white glyph on dark chip vs
+// dark glyph on light chip) so pieces don't invert on the dark UI background.
+const PIECE_GLYPH: Record<string, string> = { K: "♚", Q: "♛", R: "♜", B: "♝", N: "♞", P: "♟", k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
 function boardToGrid(board: string): string {   // board-part FEN → 64-char row-major (rank8/fileA), "." = empty
   return board.split("/").map((row) => { let s = ""; for (const ch of row) s += /\d/.test(ch) ? ".".repeat(+ch) : ch; return s.padEnd(8, ".").slice(0, 8); }).join("");
 }
@@ -837,9 +839,13 @@ export default function BookPage() {
             {editing ? (
               <div className="mt-1.5">
                 <div className="flex flex-wrap items-center justify-center gap-1">
-                  {EDIT_PIECES.map((p) => (
-                    <button key={p} onClick={() => setEditPiece(p)} title={p} className={`h-7 w-7 rounded border text-lg leading-none ${editPiece === p ? "border-brand-400 bg-brand-900/40" : "border-ink-700 hover:border-ink-500"}`}>{PIECE_GLYPH[p]}</button>
-                  ))}
+                  {EDIT_PIECES.map((p) => {
+                    const white = p === p.toUpperCase();
+                    return (
+                      <button key={p} onClick={() => setEditPiece(p)} title={`${white ? "White" : "Black"} ${p.toUpperCase()}`}
+                        className={`h-7 w-7 rounded border text-lg leading-none ${white ? "bg-ink-800 text-white" : "bg-ink-200 text-ink-950"} ${editPiece === p ? "ring-2 ring-brand-400 border-brand-400" : "border-ink-600"}`}>{PIECE_GLYPH[p]}</button>
+                    );
+                  })}
                   <button onClick={() => setEditPiece("")} title="Erase" className={`h-7 rounded border px-2 text-xs ${editPiece === "" ? "border-brand-400 bg-brand-900/40 text-white" : "border-ink-700 text-ink-300 hover:border-ink-500"}`}>⌫ erase</button>
                 </div>
                 <p className="mt-1 text-center text-[11px] text-ink-400">tap a piece, then tap squares to place · ⌫ then tap to clear</p>
