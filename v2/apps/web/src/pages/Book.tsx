@@ -868,7 +868,8 @@ export default function BookPage() {
                 onMove={editing ? undefined : handleMove}
                 onSelect={editing ? editSelect : undefined}
                 shapes={editing ? [] : shapes}
-                className="mini"
+                coordinates
+                className="mini coords-on"
               />
             </div>
             {editing ? (
