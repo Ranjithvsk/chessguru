@@ -535,6 +535,7 @@ export default function BookPage() {
   const book = BOOKS.find((b) => b.slug === bookSlug)!;
   const bookPuzzles = bookSlug === "endgame-manual" ? EM_BY_PAGE : PUZZLES;
   const [page, setPage] = useState(BOOKS[0]!.initialPage);
+  const [shelf, setShelf] = useState(true);   // true = on the bookshelf (library), false = a book is open
   const [cur, setCur] = useState<Puz | null>(null);
   const game = useRef(new Chess());
   const [ply, setPly] = useState(0);
@@ -740,24 +741,58 @@ export default function BookPage() {
   const myTurn = !!cur && !solving.current && view.turn() === solverSide && !view.isGameOver() && !(done.current && atLive);
   const engineTurn = !!cur && !solving.current && view.turn() !== solverSide && !view.isGameOver() && !(done.current && atLive);
 
-  const selectBook = (slug: string) => { const b = BOOKS.find((x) => x.slug === slug)!; setBookSlug(slug); setCur(null); setPage(b.initialPage); };
+  // per-book last-read page, remembered in localStorage (Kindle-style resume)
+  const pageKey = (slug: string) => `cg-book-page-${slug}`;
+  function lastPage(slug: string) {
+    const b = BOOKS.find((x) => x.slug === slug)!;
+    try { const v = Number(localStorage.getItem(pageKey(slug))); if (v >= 1 && v <= b.pages) return v; } catch { /* */ }
+    return b.initialPage;
+  }
+  const openBook = (slug: string) => { setBookSlug(slug); setCur(null); setPage(lastPage(slug)); setShelf(false); };
+  // persist the current page whenever it changes while a book is open
+  useEffect(() => { if (!shelf) { try { localStorage.setItem(pageKey(bookSlug), String(page)); } catch { /* */ } } }, [page, bookSlug, shelf]);
 
   return (
     <div>
       <h1 className="mb-1 font-display text-xl text-white">Book</h1>
-      {/* Book selector */}
-      <div className="mb-3 flex flex-wrap gap-2">
-        {BOOKS.map((b) => (
-          <button key={b.slug} onClick={() => selectBook(b.slug)}
-            className={`rounded-lg border px-3 py-1.5 text-sm transition ${b.slug === bookSlug ? "border-brand-500 bg-brand-600/20 text-white" : "border-ink-700 text-ink-300 hover:text-white"}`}>
-            {b.title}
-          </button>
-        ))}
-      </div>
-      <p className="mb-4 text-sm text-ink-400">{book.subtitle}</p>
+      {shelf ? (
+        /* ── BOOKSHELF (Kindle-style library) ── */
+        <div className="mt-2">
+          <p className="mb-3 text-sm text-ink-400">Your library — tap a book to open it. Each book remembers your last page.</p>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {BOOKS.map((b) => {
+              const lp = lastPage(b.slug); const started = lp !== b.initialPage;
+              return (
+                <button key={b.slug} onClick={() => openBook(b.slug)}
+                  className="group flex flex-col overflow-hidden rounded-xl border border-ink-700 bg-ink-900 text-left shadow-lg transition hover:-translate-y-0.5 hover:border-brand-500 hover:shadow-brand-900/40">
+                  <div className="relative aspect-[3/4] w-full overflow-hidden bg-white">
+                    <img src={`${BASE}${b.imgBase}p1.png`} alt={b.title} loading="lazy" className="h-full w-full object-cover" />
+                    <span className="pointer-events-none absolute inset-y-0 left-0 w-2 bg-gradient-to-r from-black/45 to-transparent" />
+                    <span className="absolute bottom-1 right-1 rounded bg-black/65 px-1.5 py-0.5 text-[10px] font-medium text-white">p{lp}/{b.pages}</span>
+                  </div>
+                  <div className="flex flex-1 flex-col p-2.5">
+                    <p className="line-clamp-2 text-sm font-semibold leading-snug text-white group-hover:text-brand-200">{b.title}</p>
+                    <p className="mt-1 text-[11px] font-medium text-brand-300">{started ? `▸ Continue · p.${lp}` : "▸ Start reading"}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        /* ── open-book header: back to library + title ── */
+        <div className="mb-3 flex items-start gap-3">
+          <button onClick={() => { setShelf(true); setCur(null); }} title="Back to library"
+            className="mt-0.5 shrink-0 rounded-lg border border-ink-700 px-2.5 py-1.5 text-sm text-ink-300 hover:border-brand-500 hover:text-white">‹ Library</button>
+          <div className="min-w-0">
+            <h2 className="truncate text-base font-semibold text-white">{book.title}</h2>
+            <p className="text-xs text-ink-400">{book.subtitle}</p>
+          </div>
+        </div>
+      )}
 
       {/* ── PAGES mode: flip through the book, click a ▶ diagram to play ── */}
-      {!cur && (
+      {!shelf && !cur && (
         <div className="mx-auto w-full max-w-xl">
           {/* nav bar: First / Prev / jump / Next / Last */}
           <div className="mb-2 flex items-center gap-1.5">
@@ -809,7 +844,7 @@ export default function BookPage() {
       )}
 
       {/* ── shared play panel ── */}
-      {cur && (
+      {!shelf && cur && (
         <div>
           <div className="sticky top-14 z-20 -mx-4 border-b border-ink-700 bg-ink-900/95 px-4 py-2 backdrop-blur">
             <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
