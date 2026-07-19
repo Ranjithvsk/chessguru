@@ -548,6 +548,7 @@ export default function BookPage() {
   const [comment, setComment] = useState<{ you: string; eng: string }>({ you: "", eng: "" }); // per-move reasoning
   const [viewPly, setViewPly] = useState(0);   // which ply of the played line is on the board (browse ◀ ▶)
   const [editing, setEditing] = useState(false);
+  const [bothSides, setBothSides] = useState(false);      // free two-sided play: move either colour, no auto-reply
   const [editBoard, setEditBoard] = useState("");         // board-part FEN being edited
   const [editSide, setEditSide] = useState<"w" | "b">("w");
   const [editPiece, setEditPiece] = useState<string>("K"); // selected palette piece; "" = erase
@@ -668,13 +669,20 @@ export default function BookPage() {
     if (!cur || solving.current) return;
     const g = new Chess(cur.fen); const ms = game.current.history();
     for (let i = 0; i < Math.min(viewPly, ms.length); i++) { try { g.move(ms[i]!); } catch { /* */ } }
-    if (g.turn() !== solverSide) return;                      // only on your turn
+    if (!bothSides && g.turn() !== solverSide) return;        // only on your turn (unless playing both sides)
     const fenBefore = g.fen();
     let mv: any = null;
     try { mv = g.move({ from, to, promotion: "q" }); } catch { mv = null; }
     if (!mv) { rerender(); return; }
     game.current = g; done.current = false;                   // branch: this line replaces the future
     const muci = mv.from + mv.to + (mv.promotion || "");
+    // Play-both-sides: you make every move yourself (including the engine's colour). No auto-reply,
+    // no adjudication verdict — just keep playing until a real game-over.
+    if (bothSides) {
+      setViewPly(g.history().length); setComment({ you: "", eng: "" });
+      if (g.isGameOver()) { finish(adjudicate() ?? "draw"); return; }
+      setFb({ t: `${g.turn() === "w" ? "White" : "Black"} to move.`, k: "" }); rerender(); return;
+    }
     setViewPly(g.history().length); solving.current = true; setFb({ t: "…", k: "" }); setComment({ you: "", eng: "" }); rerender();
     const overAfterYou = game.current.isGameOver();
     const a = await assessMove(fenBefore, muci, game.current.fen(), cur.goal ?? "win");
@@ -698,7 +706,7 @@ export default function BookPage() {
     if (!cur || solving.current) return;
     const g = new Chess(cur.fen); const ms = game.current.history();
     for (let i = 0; i < Math.min(viewPly, ms.length); i++) { try { g.move(ms[i]!); } catch { /* */ } }
-    if (g.turn() === solverSide || g.isGameOver()) return;   // only when it's the engine's turn
+    if (g.isGameOver() || (!bothSides && g.turn() === solverSide)) return;   // engine's turn (or either side in both-sides mode)
     game.current = g; done.current = false; solving.current = true;
     setViewPly(g.history().length); setFb({ t: "Stockfish is thinking…", k: "" }); setComment({ you: "", eng: "" }); rerender();
     const mv = await engineBest(g.fen());
@@ -739,7 +747,8 @@ export default function BookPage() {
   const solverColor: Color = solverSide === "b" ? "black" : "white";
   const turnColor: Color = view.turn() === "w" ? "white" : "black";
   const myTurn = !!cur && !solving.current && view.turn() === solverSide && !view.isGameOver() && !(done.current && atLive);
-  const engineTurn = !!cur && !solving.current && view.turn() !== solverSide && !view.isGameOver() && !(done.current && atLive);
+  const canMove = !!cur && !solving.current && !view.isGameOver() && !(done.current && atLive) && (bothSides || view.turn() === solverSide);
+  const engineTurn = !!cur && !solving.current && !view.isGameOver() && !(done.current && atLive) && (bothSides || view.turn() !== solverSide);
 
   // per-book last-read page, remembered in localStorage (Kindle-style resume)
   const pageKey = (slug: string) => `cg-book-page-${slug}`;
@@ -869,8 +878,8 @@ export default function BookPage() {
                   fen={editing ? `${editBoard} ${editSide} - - 0 1` : view.fen()}
                   orientation={solverColor}
                   turnColor={editing ? (editSide === "w" ? "white" : "black") : turnColor}
-                  movableColor={editing ? undefined : (myTurn ? solverColor : undefined)}
-                  dests={editing ? new Map() : (myTurn ? destsFromChess(view) : new Map())}
+                  movableColor={editing ? undefined : (canMove ? (bothSides ? turnColor : solverColor) : undefined)}
+                  dests={editing ? new Map() : (canMove ? destsFromChess(view) : new Map())}
                   lastMove={editing ? undefined : viewLastMove}
                   onMove={editing ? undefined : handleMove}
                   onSelect={editing ? editSelect : undefined}
@@ -917,7 +926,16 @@ export default function BookPage() {
                 <button onClick={engineMove} disabled={!engineTurn} title="Let Stockfish play its move from here" className="ml-1 rounded border border-sky-700/60 bg-sky-900/20 px-2 py-0.5 text-sky-200 hover:bg-sky-700/30 disabled:opacity-30">▷ Engine move</button>
                 <button onClick={undo} disabled={fullLen === 0 || solving.current} title="Take back your move" className="ml-1 rounded border border-amber-700/60 bg-amber-900/20 px-2 py-0.5 text-amber-200 hover:bg-amber-700/30 disabled:opacity-30">↶ Undo</button>
               </div>
-              {!atLive && fullLen > 0 && <p className="mt-0.5 text-center text-[11px] text-amber-400">browsing — {engineTurn ? "click ▷ Engine move to let Stockfish play, then it's your move" : "play a move here to continue from this point"}</p>}
+              <div className="mt-1.5 flex items-center justify-center text-xs">
+                <button
+                  onClick={() => setBothSides((b) => !b)}
+                  title="Play both colours yourself — move the engine's side too. No auto-reply; use ▷ Engine move whenever you want Stockfish to play the side to move."
+                  className={`rounded border px-2 py-0.5 ${bothSides ? "border-emerald-600 bg-emerald-900/30 text-emerald-200" : "border-ink-700 text-ink-300 hover:text-white"}`}
+                >
+                  {bothSides ? "✓ Playing both sides" : "⇄ Play both sides"}
+                </button>
+              </div>
+              {!atLive && fullLen > 0 && <p className="mt-0.5 text-center text-[11px] text-amber-400">browsing — {bothSides ? "move either colour, or ▷ Engine move — play continues from here" : engineTurn ? "click ▷ Engine move to let Stockfish play, then it's your move" : "play a move here to continue from this point"}</p>}
             </>)}
             {(comment.you || comment.eng) && (
               <div className="mt-1.5 rounded-lg border border-ink-700 bg-ink-950/60 p-2 text-[11px] leading-relaxed">
