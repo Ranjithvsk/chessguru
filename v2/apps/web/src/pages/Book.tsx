@@ -857,20 +857,33 @@ export default function BookPage() {
               <button onClick={() => setShowAn((v) => !v)} className={`rounded-lg border px-2.5 py-1 text-xs ${showAn ? "border-emerald-500 text-emerald-300" : "border-ink-700 text-ink-300 hover:text-white"}`}>{showAn ? "Engine ✓" : "Engine ▷"}</button>
               <span className={`ml-auto font-semibold ${fb.k === "good" ? "text-emerald-400" : fb.k === "bad" ? "text-rose-400" : "text-ink-300"}`}>{fb.t}</span>
             </div>
-            <div className="mx-auto w-full max-w-[300px]">
-              <Board
-                fen={editing ? `${editBoard} ${editSide} - - 0 1` : view.fen()}
-                orientation={solverColor}
-                turnColor={editing ? (editSide === "w" ? "white" : "black") : turnColor}
-                movableColor={editing ? undefined : (myTurn ? solverColor : undefined)}
-                dests={editing ? new Map() : (myTurn ? destsFromChess(view) : new Map())}
-                lastMove={editing ? undefined : viewLastMove}
-                onMove={editing ? undefined : handleMove}
-                onSelect={editing ? editSelect : undefined}
-                shapes={editing ? [] : shapes}
-                coordinates
-                className="mini coords-on"
-              />
+            <div className="mx-auto w-full max-w-[316px]">
+              {/* board with coordinates in the MARGIN (ranks left, files below) */}
+              <div className="grid" style={{ gridTemplateColumns: "0.95rem 1fr" }}>
+                <div className="grid grid-rows-8 pr-1 text-[10px] font-bold text-ink-400">
+                  {(solverColor === "black" ? [1, 2, 3, 4, 5, 6, 7, 8] : [8, 7, 6, 5, 4, 3, 2, 1]).map((r) => (
+                    <span key={r} className="flex items-center justify-center leading-none">{r}</span>
+                  ))}
+                </div>
+                <Board
+                  fen={editing ? `${editBoard} ${editSide} - - 0 1` : view.fen()}
+                  orientation={solverColor}
+                  turnColor={editing ? (editSide === "w" ? "white" : "black") : turnColor}
+                  movableColor={editing ? undefined : (myTurn ? solverColor : undefined)}
+                  dests={editing ? new Map() : (myTurn ? destsFromChess(view) : new Map())}
+                  lastMove={editing ? undefined : viewLastMove}
+                  onMove={editing ? undefined : handleMove}
+                  onSelect={editing ? editSelect : undefined}
+                  shapes={editing ? [] : shapes}
+                  coordinates={false}
+                  className="mini"
+                />
+              </div>
+              <div className="grid grid-cols-8 text-center text-[10px] font-bold text-ink-400" style={{ marginLeft: "0.95rem" }}>
+                {(solverColor === "black" ? [..."hgfedcba"] : [..."abcdefgh"]).map((f) => (
+                  <span key={f} className="pt-0.5 leading-none">{f}</span>
+                ))}
+              </div>
             </div>
             {editing ? (
               <div className="mt-1.5">
