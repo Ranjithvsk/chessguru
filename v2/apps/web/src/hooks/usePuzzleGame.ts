@@ -166,6 +166,19 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
       setFb({ kind: "good", title: "Best move!", sub: "Keep going…" });
       setTimeout(oppReply, 450);
     } else {
+      // Lichess rule: ANY move that delivers checkmate solves the puzzle, even when it
+      // deviates from the stored line — mate puzzles often have several mates (e.g.
+      // #0PlNX ends in both Qxg8# and Rxg8#, but the line records only one of them).
+      let mates = false;
+      try { const c = new Chess(game.current.fen()); const mv = c.move({ from, to, promotion: "q" }); mates = !!mv && c.isCheckmate(); } catch { mates = false; }
+      if (mates) {
+        game.current.move({ from, to, promotion: "q" });
+        idx.current = solution.current.length;
+        setLastMove([from, to]);
+        setFen(game.current.fen());
+        finish();
+        return;
+      }
       if (!failed.current && !hinted.current) submit(false); // deduct once
       failed.current = true;
       setFb({ kind: "bad", title: "Not the best", sub: "Try again." });
