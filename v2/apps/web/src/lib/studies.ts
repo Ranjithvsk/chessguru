@@ -1,4 +1,4 @@
-export type StudyKind = "mate" | "stopPawn" | "coordinate" | "memory";
+export type StudyKind = "mate" | "stopPawn" | "pawnEnd" | "coordinate" | "memory";
 export interface StudyDef {
   id: string;
   kind: StudyKind;
@@ -27,6 +27,8 @@ export const STUDIES: StudyDef[] = [
     detail: "Two bishops on opposite colours mate the lone king in a corner. Coordinate the bishops to build a wall and use your king to herd it.", mateIn: "Mate in ≤ 19" },
   { id: "bishop-knight-mate", kind: "mate", pieces: ["B", "N"], icon: "♝♞", title: "Bishop + Knight Mate", blurb: "King + Bishop + Knight vs King",
     detail: "The hardest basic mate. You must drive the king to a corner of the BISHOP's colour. Needs precise king+piece coordination (the 'W' manoeuvre).", mateIn: "Mate in ≤ 33 · hardest" },
+  { id: "pawn-endgames", kind: "pawnEnd", icon: "♟", title: "Pawn Endgames · Rated", blurb: "Real pawn endings at your level",
+    detail: "The rated follow-up to the Promote One Pawn course: real pawn endgames from Dvoretsky's Endgame Manual and the Lichess puzzle base, matched to your rating. You play White against full-strength Stockfish — promote a pawn and checkmate, or hold the theoretical draw. Ratings run 600 to 2800+, so even experienced players will find trouble.", mateIn: "Rated · win or hold" },
   { id: "stop-the-pawn", kind: "stopPawn", pieces: ["Q"], icon: "♛♟", title: "Queen vs Pawns", blurb: "King + Queen vs King + Pawns (pick 1–4)",
     detail: "Your opponent has passed pawns racing to promote. Pick how many pawns (1, 2, 3 or 4), capture or blockade them with the queen, then checkmate. If a pawn promotes you can still try to win the new queen — only a real draw or getting mated ends it.", mateIn: "1–4 pawns" },
   { id: "rook-stop-pawn", kind: "stopPawn", pieces: ["R"], icon: "♜♟", title: "Rook vs Pawns", blurb: "King + Rook vs King + Pawns (pick 1–4)",
