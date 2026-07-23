@@ -63,7 +63,7 @@ export default function StudyPage() {
                 <p className="text-xs text-ink-400">Guided course · start here</p>
               </div>
             </div>
-            <p className="mt-3 flex-1 text-sm text-ink-400">Five short chapters that teach the whole K+P vs K endgame from zero — promotion, the rule of the square, key squares, draw-or-win verdicts, then a final play-it-out exam against a perfect defender.</p>
+            <p className="mt-3 flex-1 text-sm text-ink-400">Six short chapters that teach pawn endings from zero — promotion, the rule of the square, key squares, draw-or-win verdicts, a play-it-out exam against a perfect defender, and the floating square: one king vs two pawns.</p>
             <div className="mt-4 flex items-center justify-between gap-2">
               <span className="rounded-full bg-ink-800 px-2.5 py-1 text-[11px] font-medium text-ink-300">Lesson course</span>
               <span className="shrink-0 text-sm font-semibold text-brand-400 group-hover:text-brand-300">Start →</span>
