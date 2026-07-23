@@ -54,6 +54,21 @@ export default function StudyPage() {
           <p className="text-sm text-ink-400">Endgame technique trainers — you play the winning side, Stockfish defends at full strength. The ★ rating is each drills difficulty (calibrated from play).</p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
+          <Link to="/study/promote"
+            className="group flex flex-col rounded-xl2 border border-ink-700 bg-ink-900 p-5 transition hover:border-brand-500 hover:bg-ink-800">
+            <div className="flex items-center gap-3">
+              <span className="grid h-12 w-12 place-items-center rounded-lg bg-brand-gradient text-2xl leading-none text-white">👑</span>
+              <div>
+                <h2 className="font-display text-lg text-white">Promote One Pawn</h2>
+                <p className="text-xs text-ink-400">Guided course · start here</p>
+              </div>
+            </div>
+            <p className="mt-3 flex-1 text-sm text-ink-400">Five short chapters that teach the whole K+P vs K endgame from zero — promotion, the rule of the square, key squares, draw-or-win verdicts, then a final play-it-out exam against a perfect defender.</p>
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <span className="rounded-full bg-ink-800 px-2.5 py-1 text-[11px] font-medium text-ink-300">Lesson course</span>
+              <span className="shrink-0 text-sm font-semibold text-brand-400 group-hover:text-brand-300">Start →</span>
+            </div>
+          </Link>
           <Link to="/study/endgame"
             className="group flex flex-col rounded-xl2 border border-ink-700 bg-ink-900 p-5 transition hover:border-brand-500 hover:bg-ink-800">
             <div className="flex items-center gap-3">

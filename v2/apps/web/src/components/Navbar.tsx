@@ -32,6 +32,7 @@ const GROUPS: Group[] = [
       { to: "/book", label: "📕 Book", desc: "Puzzles from the book games" },
       { to: "/study/coordinates", label: "🎯 Coordinates", desc: "Name squares at speed" },
       { to: "/study/memory-palace", label: "🏛️ Memory palace", desc: "Board memory training" },
+      { to: "/study/promote", label: "👑 Promote One Pawn", desc: "Guided endgame course" },
       { to: "/study/endgame", label: "🏁 Endgame trainer", desc: "Rule of the square, K+P vs K" },
       { to: "/study/key-squares", label: "🔑 Key squares", desc: "Tap the king's winning squares" },
     ],
