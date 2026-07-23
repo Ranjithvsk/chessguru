@@ -69,6 +69,21 @@ export default function StudyPage() {
               <span className="shrink-0 text-sm font-semibold text-brand-400 group-hover:text-brand-300">Start →</span>
             </div>
           </Link>
+          <Link to="/study/opposition"
+            className="group flex flex-col rounded-xl2 border border-ink-700 bg-ink-900 p-5 transition hover:border-brand-500 hover:bg-ink-800">
+            <div className="flex items-center gap-3">
+              <span className="grid h-12 w-12 place-items-center rounded-lg bg-brand-gradient text-2xl leading-none text-white">🤝</span>
+              <div>
+                <h2 className="font-display text-lg text-white">Opposition</h2>
+                <p className="text-xs text-ink-400">Direct · distant · very distant</p>
+              </div>
+            </div>
+            <p className="mt-3 flex-1 text-sm text-ink-400">The kings' duel: whoever must move loses the argument. Four chapters — direct opposition, distant, very distant — and the book classics (Neustadtl, Mattison, Drtina, Dvoretsky's holds) played out on the board.</p>
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <span className="rounded-full bg-ink-800 px-2.5 py-1 text-[11px] font-medium text-ink-300">Lesson course + books</span>
+              <span className="shrink-0 text-sm font-semibold text-brand-400 group-hover:text-brand-300">Start →</span>
+            </div>
+          </Link>
           <Link to="/study/endgame"
             className="group flex flex-col rounded-xl2 border border-ink-700 bg-ink-900 p-5 transition hover:border-brand-500 hover:bg-ink-800">
             <div className="flex items-center gap-3">
@@ -101,7 +116,7 @@ export default function StudyPage() {
           </Link>
           {rest.map((s) => <StudyCard key={s.id} s={s} level={levels[s.id]} />)}
         </div>
-        <p className="text-xs text-ink-500">More studies coming — opposition, triangulation…</p>
+        <p className="text-xs text-ink-500">More studies coming — triangulation, corresponding squares…</p>
       </section>
 
       {memory.length > 0 && (
