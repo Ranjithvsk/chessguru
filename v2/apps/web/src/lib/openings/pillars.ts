@@ -255,7 +255,334 @@ export const PILLARS: Opening[] = [
   },
 
   //───────────────────────────────────────────────────────────────────────────
-  // 5) King's Indian Defence — Bayonet Attack
+  // 6) Ruy Lopez — Closed, Chigorin Variation (the classic Spanish squeeze)
+  //───────────────────────────────────────────────────────────────────────────
+  {
+    slug: "ruy-lopez-chigorin",
+    eco: "C97",
+    ecoName: "Ruy Lopez: Closed, Chigorin",
+    name: "Ruy Lopez, Closed Chigorin",
+    aliases: ["Ruy Lopez Chigorin", "Closed Ruy Lopez"],
+    familyId: "ruy-lopez",
+    tier: 1,
+    frequencyBps: 260,
+    pgnStart: ["e4","e5","Nf3","Nc6","Bb5","a6","Ba4","Nf6","O-O","Be7","Re1","b5","Bb3","d6","c3","O-O","h3","Na5"],
+    mainlinePgn: [
+      "e4","e5","Nf3","Nc6","Bb5","a6","Ba4","Nf6","O-O","Be7","Re1","b5",
+      "Bb3","d6","c3","O-O","h3","Na5","Bc2","c5","d4","Qc7","Nbd2","cxd4",
+      "cxd4","Nc6","d5","Nb4","Bb1","a5",
+    ],
+    tagSlugs: ["strategic","positional","semi-open","kingside","classical","theory-heavy"],
+    // No structure among the 12 matches — the Ruy Closed builds its own signature
+    // "small centre" (d4/e4 vs d6/e5) that transitions to whatever break lands first.
+    criticalMoveNo: 9,
+    idea: {
+      short: "Pin the c6 knight, provoke …a6/…b5, then squeeze with the small centre for 30 moves.",
+      long:
+        "The Closed Ruy Lopez is the deepest positional battle in chess. White pins the c6 knight, " +
+        "gets Black to weaken the queenside with …a6/…b5, then retreats the bishop to b3-c2 " +
+        "(the 'Spanish bishop') aiming at the h7-b1 diagonal. Black responds by rerouting the " +
+        "knight from c6 to a5 (Chigorin) or via d7-f8-g6/e6 (Breyer). Both sides then " +
+        "manoeuvre for 15-25 moves before a break happens — usually …c5/…d5 for Black or a " +
+        "central d4-d5 for White. Fine wrote that the Ruy Lopez 'requires the deepest strategic " +
+        "understanding of any opening' and remains the most-played 1.e4 opening at world " +
+        "championship level. Kasparov, Karpov, Anand, Carlsen all made it their main weapon " +
+        "with the white pieces.",
+      whitePlans: [
+        "Nbd2 → f1 → g3 knight reroute for kingside pressure",
+        "Central break d4-d5 to clamp Black's queenside knight",
+        "Long-term Bc2-b1-Qd3 battery on the h7-b1 diagonal",
+      ],
+      blackPlans: [
+        "…Na5-c4 or …Nc6-b8-d7 knight reroute (Chigorin vs Breyer)",
+        "…c5 pawn break to challenge d4",
+        "…exd4, …Bb7, …Qc7 quiet development targeting c-file + e-file",
+      ],
+      storyHook:
+        "The Spanish Bishop makes a slow pilgrimage a4 → b3 → c2 → b1, and every step brings " +
+        "him closer to Black's king. The knight on a5 leaps to c4 to block the pilgrimage.",
+      storyLong:
+        "In old Madrid, the Spanish Bishop begins his pilgrimage on b5, pinning Sir Cavallero " +
+        "(Nc6). Black waves him off with …a6, so the Bishop steps back to a4. He steps again " +
+        "to b3 when …b5 shoos him. On move 9, Cavallero rides all the way over to a5 to threaten " +
+        "the Bishop again — the Chigorin manoeuvre — and the Bishop retreats one more square to " +
+        "c2. Now he aims at the far corner (h7). For 20 more moves, both armies shuffle to " +
+        "prepare a single decisive break: …c5, …d5, or White's d4-d5. Whoever times it right " +
+        "cracks the small centre open. The Ruy has been called 'the Mozart of chess'.",
+      citations: [
+        { author: "Fine",     work: "Ideas Behind the Chess Openings", section: "Ruy Lopez chapter", licence: "PD" },
+        { author: "Kasparov", work: "My Great Predecessors, vol. 1-2", section: "Steinitz/Lasker Ruy games", licence: "paraphrase" },
+        { author: "Watson",   work: "Mastering the Chess Openings, vol. 1", section: "Closed Ruy chapter", licence: "paraphrase" },
+        {                     work: "Wikipedia", section: "Ruy_Lopez#Closed_variations", licence: "CC-BY-SA",
+                              url: "https://en.wikipedia.org/wiki/Ruy_Lopez#Closed_variations" },
+      ],
+    },
+  },
+
+  //───────────────────────────────────────────────────────────────────────────
+  // 7) Sicilian — Sveshnikov (Pelikan/Cheliabinsk)
+  //───────────────────────────────────────────────────────────────────────────
+  {
+    slug: "sicilian-sveshnikov",
+    eco: "B33",
+    ecoName: "Sicilian: Sveshnikov Variation",
+    name: "Sicilian Sveshnikov",
+    aliases: ["Pelikan", "Cheliabinsk Variation", "Lasker-Pelikan"],
+    familyId: "sicilian",
+    tier: 1,
+    frequencyBps: 195,
+    pgnStart: ["e4","c5","Nf3","Nc6","d4","cxd4","Nxd4","Nf6","Nc3","e5"],
+    mainlinePgn: [
+      "e4","c5","Nf3","Nc6","d4","cxd4","Nxd4","Nf6","Nc3","e5","Ndb5","d6",
+      "Bg5","a6","Na3","b5","Nd5","Be7","Bxf6","Bxf6","c3","O-O","Nc2","Bg5",
+      "a4","bxa4","Rxa4","a5","Bc4","Rb8",
+    ],
+    tagSlugs: ["dynamic","aggressive","semi-open","central","modern","theory-heavy"],
+    structureSlug: "boleslavsky-hole",
+    criticalMoveNo: 5,
+    idea: {
+      short: "Accept a permanent hole on d5 for the bishop pair, …f5 counter-attack, and queenside space.",
+      long:
+        "On move 5, Black plays …e5, kicking White's centralised knight AND weakening the d5 " +
+        "square permanently. This looks anti-positional (a Sveshnikov Black often has a knight " +
+        "sitting on d5 forever), but Black gets: (a) the bishop pair after the standard " +
+        "Bg5xNf6 trade, (b) massive queenside space with …a6/…b5, and (c) the eventual …f5 " +
+        "kingside counter-attack. Carlsen used the Sveshnikov as his main defence to 1.e4 in " +
+        "the 2018 World Championship match. Watson: 'The Sveshnikov violates almost every " +
+        "classical rule and works precisely because piece activity + concrete threats trump " +
+        "structural principles in this specific position.' Sveshnikov himself (Evgeny) developed " +
+        "the theory in Cheliabinsk in the 1970s.",
+      whitePlans: [
+        "Nd5 outpost — plant the knight and don't move it",
+        "Trade Bg5xNf6 to secure d5 (Black's dark-squared bishop can't cover it)",
+        "a4-a5 clamp on the queenside, restricting Black's …b5",
+      ],
+      blackPlans: [
+        "…a6, …b5, …Be7-g5 (or Bh4) unblocking the bishop pair",
+        "…f5 kingside pawn break",
+        "Rook lift …Rb8 or …a8-a5 to challenge White's queenside space",
+      ],
+      storyHook:
+        "Black plants a flag on d5 that says 'YES, this square is weak — good luck holding it'. " +
+        "Then both bishops go for a walk while the pawns fight on the flanks.",
+      storyLong:
+        "In the Ural town of Cheliabinsk, the young student Sveshnikov noticed that Black's " +
+        "'weak' d5 square in the classical Sicilian was actually a trap for White: yes, White " +
+        "gets a knight there, but Black gets EVERYTHING else — the bishop pair, queenside space, " +
+        "and a kingside pawn storm ready to fire. On move 5, Black kicks the White knight with " +
+        "…e5, and though the d5 hole is permanent, the bishop pair goes on a slow walk (…Bg5 " +
+        "on move 12, then …Bh4 or …Bd8) while the pawns storm both wings. Carlsen used it in " +
+        "London 2018 to draw all 12 classical games vs Caruana.",
+      citations: [
+        { author: "Sveshnikov", work: "The Sveshnikov Reloaded", licence: "paraphrase" },
+        { author: "Kasparov",   work: "Revolution in the 70s", section: "Sveshnikov chapter", licence: "paraphrase" },
+        { author: "Watson",     work: "Mastering the Chess Openings, vol. 1", section: "Sveshnikov chapter", licence: "paraphrase" },
+        {                       work: "Wikipedia", section: "Sicilian_Defence,_Sveshnikov_Variation", licence: "CC-BY-SA",
+                                url: "https://en.wikipedia.org/wiki/Sicilian_Defence,_Sveshnikov_Variation" },
+      ],
+    },
+  },
+
+  //───────────────────────────────────────────────────────────────────────────
+  // 8) Caro-Kann — Advance Variation
+  //───────────────────────────────────────────────────────────────────────────
+  {
+    slug: "caro-kann-advance",
+    eco: "B12",
+    ecoName: "Caro-Kann: Advance Variation",
+    name: "Caro-Kann Advance",
+    aliases: ["Advance Caro-Kann", "3.e5 Caro"],
+    familyId: "caro-kann",
+    tier: 1,
+    frequencyBps: 170,
+    pgnStart: ["e4","c6","d4","d5","e5","Bf5"],
+    mainlinePgn: [
+      "e4","c6","d4","d5","e5","Bf5","Nf3","e6","Be2","Nd7","O-O","Ne7",
+      "Nh4","Bg6","Nxg6","hxg6","Nd2","Qb6","Nf3","O-O-O","b3","c5","c3","Nf5",
+      "g3","cxd4","cxd4","Nb4","a3","Nc6",
+    ],
+    tagSlugs: ["strategic","solid","semi-open","central","classical","idea-based"],
+    // Advance Caro reaches a French-like pawn chain (c6-d5 vs d4-e5) but with
+    // Black's light-squared bishop DEVELOPED outside the chain — the whole point.
+    criticalMoveNo: 3,
+    idea: {
+      short: "Solve the French's 'bad bishop' problem by developing …Bf5 before …e6.",
+      long:
+        "The Caro-Kann's defining advantage over the French is that Black can develop the " +
+        "queen's bishop OUTSIDE the pawn chain (…Bf5) before playing …e6. In the Advance " +
+        "Variation, White grabs central space with 3.e5, and Black immediately plays …Bf5 to " +
+        "prevent the bishop from being locked in behind the c6-d5-e6 chain. From there, the " +
+        "opening becomes a French Advance but with Black's problem piece already solved. Watson: " +
+        "'The Caro-Kann is not a passive defence — it's a strategic one. Black accepts less " +
+        "space in return for a superior piece placement, then patiently pressures White's " +
+        "advanced e-pawn.' Karpov and Anand made it their weapon of choice at world championship " +
+        "level.",
+      whitePlans: [
+        "Nh4 to trade off Black's light-squared bishop (its whole point of being on f5)",
+        "c3, Be2, O-O quiet development; slow squeeze",
+        "Central break c3-c4 or f4-f5 at the right moment",
+      ],
+      blackPlans: [
+        "…Nd7, …Ne7, …e6, …Qb6, castle long, attack White's centre with …c5",
+        "…Nh6-f5 alternative knight development",
+        "…f6 pawn break attacking the e5 pawn",
+      ],
+      storyHook:
+        "Sir Karpov opens his own door BEFORE building the wall — the light-squared Bishop " +
+        "steps out to f5 first, so when the wall goes up (…e6, …c6), the Bishop is free outside.",
+      storyLong:
+        "Black is building a fortress with pawns c6, d5, and eventually e6. But in the French, " +
+        "the light-squared bishop gets locked INSIDE the fortress and becomes useless. Karpov's " +
+        "solution: open the front door FIRST — send the bishop out to f5 before building the " +
+        "wall. Now the bishop is outside, the fortress is up, and Black slowly builds " +
+        "counterplay against White's advanced e5 pawn (…c5, …Nc6, …f6). It is chess' most " +
+        "patient opening — Karpov's Anand's, later Petrosian's — and utterly impossible to " +
+        "blitz through.",
+      citations: [
+        { author: "Karpov",  work: "Karpov's Caro-Kann", licence: "paraphrase" },
+        { author: "Watson",  work: "Play the Caro-Kann", licence: "paraphrase" },
+        { author: "Kasparov", work: "My Great Predecessors, vol. 5", section: "Karpov chapters", licence: "paraphrase" },
+        {                    work: "Wikipedia", section: "Caro%E2%80%93Kann_Defence", licence: "CC-BY-SA",
+                             url: "https://en.wikipedia.org/wiki/Caro%E2%80%93Kann_Defence" },
+      ],
+    },
+  },
+
+  //───────────────────────────────────────────────────────────────────────────
+  // 9) Semi-Slav — Meran Variation
+  //───────────────────────────────────────────────────────────────────────────
+  {
+    slug: "slav-meran",
+    eco: "D48",
+    ecoName: "Semi-Slav: Meran Variation",
+    name: "Semi-Slav, Meran",
+    aliases: ["Meran", "Meraner Variante"],
+    familyId: "slav",
+    tier: 1,
+    frequencyBps: 130,
+    pgnStart: ["d4","d5","c4","c6","Nc3","Nf6","Nf3","e6","e3","Nbd7","Bd3","dxc4","Bxc4","b5"],
+    mainlinePgn: [
+      "d4","d5","c4","c6","Nc3","Nf6","Nf3","e6","e3","Nbd7","Bd3","dxc4",
+      "Bxc4","b5","Bd3","a6","e4","c5","e5","cxd4","Nxb5","axb5","exf6","gxf6",
+      "O-O","Bb7","Qc2","Qb6","Rd1","Bd6",
+    ],
+    tagSlugs: ["dynamic","aggressive","semi-open","queenside","classical","theory-heavy"],
+    structureSlug: "slav-meran",
+    criticalMoveNo: 8,
+    idea: {
+      short: "Grab the c4 pawn, launch queenside pawn mass, race for open lines against White's king.",
+      long:
+        "The Meran Variation (named after the town in Italy where it was first analysed in 1924) " +
+        "is one of the sharpest lines in classical chess. Black concedes the centre by grabbing " +
+        "c4, then uses the tempo won by attacking White's bishop to push …b5/…a6 and prepare " +
+        "…c5. When White responds with e4-e5, the position explodes: piece sacrifices on b5 or " +
+        "d5, opposite-side castling, and race-condition attacks against both kings. Theory " +
+        "extends past move 25 in critical lines. Kramnik played it as Black; Kasparov used it " +
+        "with both colours. Watson describes the Meran as 'the queenside Najdorf' — same " +
+        "tempo-race feel, same requirement that you know theory 3 moves deeper than your " +
+        "opponent.",
+      whitePlans: [
+        "e4-e5 break to open lines against Black's king",
+        "Piece sacrifice on b5 (Nxb5!) to open the a-file + b-file",
+        "d4-d5 pawn break at the right moment",
+      ],
+      blackPlans: [
+        "…b5, …a6, …c5 queenside pawn mass",
+        "…Bb7 long-diagonal pressure vs the White king",
+        "Long castle to move the king away from White's kingside build-up",
+      ],
+      storyHook:
+        "Black grabs the c4 pawn (a gift the Bishop meant for himself), then throws the entire " +
+        "queenside — b5, a6, c5 — at White's king. Both sides open the box; loudest bang wins.",
+      storyLong:
+        "In Meran, Italy, 1924, two masters at a mountain hotel worked out that Black can grab " +
+        "the c4 pawn (a sacrifice by White's Bishop, who had wanted it for himself) and then " +
+        "immediately go on the attack. The Bishop retreats to safety on d3; Black plays …b5 " +
+        "with tempo (attacking the bishop again), then …a6 and …c5, launching every queenside " +
+        "pawn. On move 8, the critical moment: does Black continue with …Bb7 (calm) or …b4 " +
+        "(sharp)? The mainline explodes on move 11 with Nxb5, a piece sacrifice that opens " +
+        "the a- and b-files. Both kings run for cover, both sides castle opposite, and the " +
+        "loudest bang wins.",
+      citations: [
+        { author: "Kramnik",  work: "My Life & Games", licence: "paraphrase" },
+        { author: "Kasparov", work: "Revolution in the 70s", section: "Meran chapter", licence: "paraphrase" },
+        { author: "Watson",   work: "Mastering the Chess Openings, vol. 2", section: "Semi-Slav", licence: "paraphrase" },
+        {                     work: "Wikipedia", section: "Semi-Slav_Defense#Meran_Variation", licence: "CC-BY-SA",
+                              url: "https://en.wikipedia.org/wiki/Semi-Slav_Defense#Meran_Variation" },
+      ],
+    },
+  },
+
+  //───────────────────────────────────────────────────────────────────────────
+  // 10) Queen's Gambit Declined — Exchange Variation (Carlsbad)
+  //───────────────────────────────────────────────────────────────────────────
+  {
+    slug: "qgd-exchange",
+    eco: "D35",
+    ecoName: "QGD: Exchange Variation",
+    name: "QGD, Exchange (Carlsbad)",
+    aliases: ["QGD Exchange", "Carlsbad Variation"],
+    familyId: "qgd",
+    tier: 1,
+    frequencyBps: 140,
+    pgnStart: ["d4","d5","c4","e6","Nc3","Nf6","cxd5","exd5"],
+    mainlinePgn: [
+      "d4","d5","c4","e6","Nc3","Nf6","cxd5","exd5","Bg5","Be7","e3","O-O",
+      "Bd3","Nbd7","Qc2","Re8","Nf3","Nf8","O-O","c6","Rab1","a5","a3","Ng6",
+      "b4","axb4","axb4","Bd7","b5","cxb5",
+    ],
+    tagSlugs: ["strategic","positional","semi-open","queenside","classical","idea-based"],
+    structureSlug: "carlsbad",
+    criticalMoveNo: 4,
+    idea: {
+      short: "The purest 'minority attack' opening. White creates a weak Black c-pawn with b4-b5, then wins the endgame.",
+      long:
+        "The Carlsbad structure (named after the 1929 Carlsbad tournament) is the archetypal " +
+        "positional chess lesson. After 1.d4 d5 2.c4 e6 3.Nc3 Nf6 4.cxd5 exd5, the pawn " +
+        "skeleton becomes: White c3-d4-e3 vs Black c6-d5-e6 (once Black plays …c6). White's plan " +
+        "is the MINORITY ATTACK: push b4-b5, force an exchange of pawns on b5, and leave Black " +
+        "with a weak isolated c-pawn on c6. Black's counterplay: kingside piece build-up with " +
+        "…Ne4, …f5, …Bd6. Capablanca made this his signature — his book has 4 games with the " +
+        "Carlsbad plan explained move-by-move. Watson: 'If you understand the Carlsbad " +
+        "minority attack, you understand positional chess.'",
+      whitePlans: [
+        "Minority attack: b4-b5, force bxc6, leave Black with weak c6 pawn",
+        "Rooks on b1 + c1 to press the c-file after the exchange",
+        "Slow, patient piece rerouting — Nf3-e5, Qc2-b3",
+      ],
+      blackPlans: [
+        "Kingside piece attack: …Ne4, …Bd6, …f5, …Qf6 or …Rf6-h6",
+        "…Nb6-c4 knight jump to challenge White's queenside plans",
+        "…a5 preventing b4 (only slows the minority attack, doesn't stop it)",
+      ],
+      storyHook:
+        "The Carlsbad race: White marches TWO pawns (b + c) to attack Black's FOUR (a-b-c-d) — " +
+        "the 'minority attack'. It works because at the end, ONE pawn on c6 is left standing " +
+        "and it's weak.",
+      storyLong:
+        "In 1929 at the Carlsbad tournament, Aron Nimzowitsch and José Capablanca both showed " +
+        "that a small pawn majority on one side can defeat a large one on the other. The " +
+        "Carlsbad structure crystallises this: White's TWO queenside pawns (b + c) advance to " +
+        "attack Black's FOUR (a-b-c-d). White pushes b4, then b5, then trades: bxc6 forces " +
+        "…bxc6 or …Nxc6. Either way, Black is left with a weak, exposed pawn on c6 in the " +
+        "endgame. Meanwhile, Black tries a kingside attack to distract — …Ne4, …f5, …Bd6, " +
+        "…Rf6-h6 — but if White defends carefully, the queenside plan wins the endgame " +
+        "70 moves later. Capablanca made this look effortless.",
+      citations: [
+        { author: "Capablanca", work: "Chess Fundamentals + Last Lectures", licence: "PD" },
+        { author: "Nimzowitsch", work: "Chess Praxis", section: "on Carlsbad structure", licence: "PD" },
+        { author: "Watson",     work: "Mastering the Chess Openings, vol. 2", section: "QGD Exchange", licence: "paraphrase" },
+        { author: "Kasparov",   work: "My Great Predecessors, vol. 2", section: "Capablanca chapter", licence: "paraphrase" },
+        {                       work: "Wikipedia", section: "Queen%27s_Gambit_Declined#Exchange_Variation", licence: "CC-BY-SA",
+                                url: "https://en.wikipedia.org/wiki/Queen%27s_Gambit_Declined#Exchange_Variation" },
+      ],
+    },
+  },
+
+  //───────────────────────────────────────────────────────────────────────────
+  // 5) King's Indian Defence — Bayonet Attack (reordered by ECO chronology; kept
+  //    numbered "5" for stable Git blame — the DISPLAY order in the UI is
+  //    families.displayOrder + tags, not this file's line order.)
   //───────────────────────────────────────────────────────────────────────────
   {
     slug: "kings-indian-bayonet",
