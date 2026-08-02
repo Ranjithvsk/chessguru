@@ -900,6 +900,329 @@ export const PILLARS: Opening[] = [
   },
 
   //───────────────────────────────────────────────────────────────────────────
+  // 16) Alekhine's Defence — Modern Variation
+  //───────────────────────────────────────────────────────────────────────────
+  {
+    slug: "alekhine-modern",
+    eco: "B04",
+    ecoName: "Alekhine's Defence: Modern Variation",
+    name: "Alekhine's Defence, Modern",
+    aliases: ["Alekhine 4.Nf3", "Modern Alekhine"],
+    familyId: "scandi-alekhine",
+    tier: 1,
+    frequencyBps: 65,
+    pgnStart: ["e4","Nf6","e5","Nd5","d4","d6","Nf3"],
+    mainlinePgn: [
+      "e4","Nf6","e5","Nd5","d4","d6","Nf3","g6","Bc4","Nb6","Bb3","Bg7",
+      "a4","a5","Ng5","e6","f4","dxe5","fxe5","c5","c3","cxd4","cxd4","O-O",
+      "O-O","Nc6","h4","Nb4","Kh1","h6",
+    ],
+    tagSlugs: ["dynamic","risky","semi-open","central","hypermodern","surprise-weapon"],
+    // No exact match in my 12 structures — the Alekhine e5-pawn structure is its own.
+    criticalMoveNo: 2,
+    idea: {
+      short: "Provoke White to over-extend the pawn centre, then dismantle it. Hypermodernism to the extreme.",
+      long:
+        "Alexander Alekhine invented this defence in 1921 to shock White with a rule violation: " +
+        "on move 1, the KNIGHT (not a pawn) goes forward. The knight INVITES attack — 2.e5 " +
+        "chases it to d5, 3.d4 grabs more space, 4.c4 or 4.Nf3 keeps pushing. Black lets " +
+        "White build a huge but overextended centre (pawns on c4-d4-e5), then attacks it with " +
+        "…d6, …dxe5, …c5, …Nc6, …Bg4/Bf5. It's the boldest possible hypermodern statement. " +
+        "The Modern Variation (4.Nf3) is White's most flexible reply — keeping pieces active " +
+        "without committing to a specific pawn structure. Fischer used the Alekhine in his " +
+        "1972 world championship match; Bagirov and Alburt were its 20th-century advocates. " +
+        "Not fashionable at the elite level today, but a nasty surprise weapon.",
+      whitePlans: [
+        "Bc4 + Bb3 development, controlling f7 diagonal",
+        "Ng5 threatening f7 + e6 pawn probe",
+        "f4-f5 kingside pawn advance",
+      ],
+      blackPlans: [
+        "…Nb6 knight retreat away from Bb3 pressure",
+        "…dxe5 dismantling White's centre",
+        "…c5 immediate central challenge + …Nc6-Nb4 pressure",
+      ],
+      storyHook:
+        "Alekhine's knight leaps out on move 1 (Nf6) — an OFFERING, not a threat. White " +
+        "chases with pawns (e5, d4, more…), building a massive but overextended fortress. " +
+        "Then Black attacks the fortress from all sides.",
+      storyLong:
+        "In 1921, Alexander Alekhine (future world champion) sat down against a strong master " +
+        "and, on move 1, played a KNIGHT. Everyone gasped: 'you're supposed to move a PAWN'. " +
+        "But Alekhine's plan was clear: let White's pawns come rushing forward (e5 to chase " +
+        "the knight, d4 to grab space, c4 to grab more), then attack the overextended fortress " +
+        "from all sides. The knight retreats gracefully to d5, then b6, then …Nc4 or …Nd7 — " +
+        "always with tempo, always redeploying. Fischer used the Alekhine in his 1972 " +
+        "world championship match. Not mainstream today, but any player who understands the " +
+        "attack-the-centre plan can trouble a strict classical opponent.",
+      citations: [
+        { author: "Alekhine",  work: "My Best Games 1908-1923", licence: "paraphrase" },
+        { author: "Bagirov",   work: "Alekhine's Defence for the Tournament Player", licence: "paraphrase" },
+        { author: "Alburt",    work: "Alekhine's Defence: How to Play It", licence: "paraphrase" },
+        {                      work: "Wikipedia", section: "Alekhine%27s_Defence", licence: "CC-BY-SA",
+                               url: "https://en.wikipedia.org/wiki/Alekhine%27s_Defence" },
+      ],
+    },
+  },
+
+  //───────────────────────────────────────────────────────────────────────────
+  // 17) Modern Defence — Standard
+  //───────────────────────────────────────────────────────────────────────────
+  {
+    slug: "modern-defence",
+    eco: "B06",
+    ecoName: "Modern Defence: Standard Line",
+    name: "Modern Defence",
+    aliases: ["Robatsch Defence", "…g6 System"],
+    familyId: "modern-pirc",
+    tier: 1,
+    frequencyBps: 45,
+    pgnStart: ["e4","g6","d4","Bg7","Nc3","d6"],
+    mainlinePgn: [
+      "e4","g6","d4","Bg7","Nc3","d6","Be3","a6","Qd2","b5","f3","Nd7",
+      "g4","h5","gxh5","Rxh5","O-O-O","Nb6","Bg2","Bb7","a3","e6","h3","Ne7",
+      "Nge2","Nc4","Bxc4","bxc4","h4","Nc6",
+    ],
+    tagSlugs: ["dynamic","risky","fluid","central","hypermodern","idea-based"],
+    // No matching structure — Modern often reaches Hedgehog-like or KID-chain-like
+    // formations depending on Black's follow-up.
+    criticalMoveNo: 2,
+    idea: {
+      short: "Fianchetto without …Nf6 first — keep every option open.",
+      long:
+        "The Modern Defence (1…g6 2…Bg7) commits to the kingside fianchetto but not to any " +
+        "specific piece deployment yet. Unlike the Pirc (which commits to …Nf6 on move 2), the " +
+        "Modern lets Black delay …Nf6 for several moves and instead play …c6, …d6, …b5, …Nd7 " +
+        "in various orders. This flexibility is the whole point: White can't play a targeted " +
+        "'anti-KID' or 'anti-Pirc' system because it's not clear what Black is transposing to. " +
+        "Watson: 'The Modern Defence is a portmanteau opening — you're playing KID, Pirc, " +
+        "Robatsch, or something novel depending on what you play on move 4-6.' Larsen and " +
+        "Suba made it their signature; Nakamura still uses it occasionally as a blitz weapon.",
+      whitePlans: [
+        "Be3 + Qd2 + f3 + g4 + O-O-O kingside pawn storm (Yugoslav-attack style)",
+        "Bc4 targeting f7 + Nge2 flexible development",
+        "c4 grab central space (Sämisch-like setup)",
+      ],
+      blackPlans: [
+        "…a6 + …b5 queenside pawn expansion",
+        "…Nd7 + …Ngf6 flexible knight development",
+        "…c5 or …c6 + …Nb6/…Nc6 based on White's setup",
+      ],
+      storyHook:
+        "Sir Robatsch fianchettos his bishop before committing to ANY other plan — he waits, " +
+        "he watches, he plays whatever Black system fits White's response.",
+      storyLong:
+        "The Modern Defence (also called Robatsch Defence after the Austrian GM) is Black's " +
+        "'wait and see' hypermodern system. On move 1 Black plays …g6, on move 2 Black plays " +
+        "…Bg7, and THEN Black decides what kind of game to play based on White's setup. If " +
+        "White plays f3+Be3+Qd2 (Yugoslav-attack style), Black plays …b5 queenside expansion. " +
+        "If White plays a quiet c4+Nc3, Black might transpose to a KID with …Nf6+…O-O. If " +
+        "White plays Bc4, Black plays …e6 and defends. The whole point is flexibility. Not " +
+        "mainstream at the top level today but a genuine surprise weapon at club level.",
+      citations: [
+        { author: "Norwood",    work: "The Modern Defence", licence: "paraphrase" },
+        { author: "Speelman & McDonald", work: "Modern Defence", licence: "paraphrase" },
+        { author: "Watson",     work: "Mastering the Chess Openings, vol. 4", section: "Modern chapter", licence: "paraphrase" },
+        {                       work: "Wikipedia", section: "Modern_Defense", licence: "CC-BY-SA",
+                                url: "https://en.wikipedia.org/wiki/Modern_Defense" },
+      ],
+    },
+  },
+
+  //───────────────────────────────────────────────────────────────────────────
+  // 18) Pirc Defence — Austrian Attack (4.f4)
+  //───────────────────────────────────────────────────────────────────────────
+  {
+    slug: "pirc-austrian",
+    eco: "B09",
+    ecoName: "Pirc: Austrian Attack",
+    name: "Pirc, Austrian Attack",
+    aliases: ["Austrian Attack", "Pirc 4.f4"],
+    familyId: "modern-pirc",
+    tier: 1,
+    frequencyBps: 55,
+    pgnStart: ["e4","d6","d4","Nf6","Nc3","g6","f4"],
+    mainlinePgn: [
+      "e4","d6","d4","Nf6","Nc3","g6","f4","Bg7","Nf3","O-O","Bd3","Nc6",
+      "e5","dxe5","fxe5","Nd7","h4","Nb6","e6","fxe6","Ng5","Nd5","Nxd5","exd5",
+      "Qh5","Rf5","Qxh7+","Kf8","g4","Rxf3",
+    ],
+    tagSlugs: ["dynamic","aggressive","semi-open","kingside","modern","idea-based"],
+    criticalMoveNo: 4,
+    idea: {
+      short: "White throws pawns forward as fast as possible. Black must find precise defensive resources.",
+      long:
+        "The Austrian Attack (4.f4) is White's sharpest response to the Pirc. Instead of the " +
+        "quiet Classical setup (Nf3+Be2), White immediately builds a massive pawn centre with " +
+        "e4-d4-f4 and prepares e4-e5 to blow the position open. Black must defend precisely: " +
+        "the knight on f6 must jump correctly (…Nd7, …Nfd7, or …Ng4 depending on the line), " +
+        "and Black's fianchetto bishop needs to stay on g7 as long as possible for defence. " +
+        "It's one of the most spectacular openings in classical chess — theoretical, tactical, " +
+        "and unforgiving. Watson: 'The Austrian Attack is White's attempt to punish the Pirc " +
+        "for its slow start — either it works and White wins in 25 moves, or Black survives " +
+        "and gets a good middlegame.'",
+      whitePlans: [
+        "e4-e5 immediate central break, chasing Black's Nf6",
+        "h4-h5 kingside pawn storm targeting …g6",
+        "Bd3 + Qe1-h4 direct king attack",
+      ],
+      blackPlans: [
+        "…Nd7 (or …Nfd7) knight retreat after e5, preparing …Nb6-Nd5",
+        "…e6 solid central defence + queenside expansion",
+        "…c5 central counter to challenge White's pawn wedge",
+      ],
+      storyHook:
+        "White marches THREE pawns forward as fast as possible (e4, d4, f4) then pushes e5 " +
+        "to blow the game open. Black has ONE turn per move to defend precisely — one slip " +
+        "and mate follows.",
+      storyLong:
+        "The Austrian Attack was popularised in the 1950s by Austrian masters (hence the " +
+        "name) who wanted to punish the fashionable new Pirc Defence. Instead of quietly " +
+        "developing, White plays 4.f4 — turning the opening into a MIDDLEGAME by move 6. " +
+        "The e5 push comes on move 7 or 8, ripping open the g7 diagonal against Black's " +
+        "castled king. Every move for Black is a defensive puzzle: which square for the " +
+        "knight, when to trade, how to break White's initiative. Get it right and Black has " +
+        "a fine position with the bishop pair. Get it wrong and mate in 20.",
+      citations: [
+        { author: "Chandler & Nunn", work: "The Pirc for the Tournament Player", licence: "paraphrase" },
+        { author: "Vigus",     work: "The Pirc in Black and White", licence: "paraphrase" },
+        {                      work: "Wikipedia", section: "Pirc_Defence#Austrian_Attack", licence: "CC-BY-SA",
+                               url: "https://en.wikipedia.org/wiki/Pirc_Defence#Austrian_Attack" },
+      ],
+    },
+  },
+
+  //───────────────────────────────────────────────────────────────────────────
+  // 19) Dutch Defence — Stonewall
+  //───────────────────────────────────────────────────────────────────────────
+  {
+    slug: "dutch-stonewall",
+    eco: "A95",
+    ecoName: "Dutch: Stonewall Variation",
+    name: "Dutch, Stonewall",
+    aliases: ["Stonewall Dutch", "Modern Stonewall"],
+    familyId: "dutch",
+    tier: 1,
+    frequencyBps: 60,
+    pgnStart: ["d4","f5","g3","Nf6","Bg2","e6","Nf3","d5"],
+    mainlinePgn: [
+      "d4","f5","g3","Nf6","Bg2","e6","Nf3","d5","O-O","Bd6","c4","c6",
+      "b3","Qe7","Ne5","O-O","Nd2","Nbd7","Nxd7","Bxd7","Bb2","Rae8","Rc1","Bh4",
+      "Nf3","Bd8","Qd2","g5","Nxg5","Bxg5",
+    ],
+    tagSlugs: ["strategic","solid","closed","kingside","classical","idea-based"],
+    structureSlug: "stonewall",
+    criticalMoveNo: 4,
+    idea: {
+      short: "Pawns on c6, d5, e6, f5 form the Stonewall — Black attacks the kingside with pieces.",
+      long:
+        "The Stonewall Dutch commits Black to a specific pawn structure on move 4-5: pawns on " +
+        "c6, d5, e6, f5. This structure has a KEY weakness (the e5 outpost — Black's " +
+        "dark-squared bishop is bad, White can plant a knight on e5) and a KEY strength (Black " +
+        "has unbeatable kingside attacking chances via …Bd6-c7, …Ne4, …Qh4, …Rf6-h6). Great " +
+        "at club level — the plans are clear + the attacking chances are always there. Elite " +
+        "level less popular because the e5 hole is a real weakness against precise defence. " +
+        "Watson calls the Stonewall 'the most thematic Black attacking system in classical " +
+        "chess'.",
+      whitePlans: [
+        "Ne5 knight outpost + b3-Bb2 fianchetto pressuring e5",
+        "Trade Black's bad dark-squared bishop (White's is great, Black's is trapped)",
+        "c4-c5 queenside space grab",
+      ],
+      blackPlans: [
+        "…Bd6 + …Qe7 + …Ne4 kingside piece build-up",
+        "…g5 pawn break to open the g-file against White's king",
+        "…Bd7-e8-h5 bishop manoeuvre to the kingside",
+      ],
+      storyHook:
+        "Black builds a stone wall of pawns (c6, d5, e6, f5) — impossible to break through — " +
+        "then rams every piece into White's kingside via g5 and h5.",
+      storyLong:
+        "The Stonewall Dutch was named for its distinctive pawn wall: c6, d5, e6, f5 stand " +
+        "like immovable stones. White cannot break through the centre; Black cannot advance " +
+        "his queenside pawns easily either. Both sides know the deal: closed centre, opposite " +
+        "flanks, race for the enemy king. Black's advantage is the direct kingside attack — " +
+        "…Bd6, …Ne4, …Qh4, …Rf6-h6 is the classical attacking build-up. White's advantage is " +
+        "the e5 hole and the bad Black dark-squared bishop. Whoever plays better wins; whoever " +
+        "misunderstands the position gets mated in 20 moves.",
+      citations: [
+        { author: "Yrjölä & Tella", work: "An Explosive Chess Opening Repertoire for Black", licence: "paraphrase" },
+        { author: "Williams",  work: "The Killer Dutch (Ginger GM DVD)", licence: "paraphrase" },
+        { author: "Vaïsser",   work: "Beating the Anti-King's Indians", licence: "paraphrase" },
+        {                      work: "Wikipedia", section: "Dutch_Defence#Stonewall", licence: "CC-BY-SA",
+                               url: "https://en.wikipedia.org/wiki/Dutch_Defence#Stonewall" },
+      ],
+    },
+  },
+
+  //───────────────────────────────────────────────────────────────────────────
+  // 20) Catalan — Closed Main Line
+  //───────────────────────────────────────────────────────────────────────────
+  {
+    slug: "catalan-closed",
+    eco: "E06",
+    ecoName: "Catalan: Closed",
+    name: "Catalan, Closed",
+    aliases: ["Closed Catalan"],
+    familyId: "catalan",
+    tier: 1,
+    frequencyBps: 115,
+    pgnStart: ["d4","Nf6","c4","e6","g3","d5","Bg2","Be7","Nf3","O-O","O-O"],
+    mainlinePgn: [
+      "d4","Nf6","c4","e6","g3","d5","Bg2","Be7","Nf3","O-O","O-O","dxc4",
+      "Qc2","a6","Qxc4","b5","Qc2","Bb7","Bd2","Bd6","Ba5","Nbd7","Bd8","Rxd8",
+      "Rc1","c5","dxc5","Bxc5","Nbd2","Rac8",
+    ],
+    tagSlugs: ["strategic","positional","semi-open","central","modern","theory-heavy"],
+    structureSlug: "kings-fianchetto",
+    criticalMoveNo: 3,
+    idea: {
+      short: "The Catalan bishop on g2 pressures Black's queenside for the next 30 moves. Slow torture.",
+      long:
+        "The Catalan (named after the 1929 Barcelona tournament in Catalonia) combines the " +
+        "Queen's Gambit setup with a fianchettoed king's bishop. The Bg2 aims at the h1-a8 " +
+        "diagonal, pressuring c6 and b7 for the rest of the game. It's Kramnik's signature " +
+        "opening — he used it repeatedly at world championship level for its long-term " +
+        "positional pressure and low theoretical burden. In the Closed Catalan main line, " +
+        "Black plays …dxc4 grabbing the pawn but then must return it with …b5-…Bb7 as White " +
+        "regains material with tempo. The resulting position is quietly better for White " +
+        "— nothing dramatic, just a slow, patient squeeze. Sometimes it takes 40 moves before " +
+        "something concrete happens. Watson: 'The Catalan is the antithesis of the Najdorf. " +
+        "Where the Najdorf demands memorised tactics, the Catalan demands strategic patience.'",
+      whitePlans: [
+        "Qxc4 regaining the pawn with tempo, then Qc2 keeping the queen active",
+        "Bd2-Ba5-Bd8! (exchange bishop for rook trick, or force queen back)",
+        "Nc3 knight development + Rd1 building central pressure",
+      ],
+      blackPlans: [
+        "…dxc4 grab, then …b5-…Bb7 to hold the pawn OR give it back with …a6",
+        "…c5 central break to challenge d4",
+        "…Nbd7-b6-Nc4 knight outpost pressuring White's queenside",
+      ],
+      storyHook:
+        "The Catalan Bishop makes his home on g2 forever, staring down the long diagonal at " +
+        "b7. For 30+ moves, every Black move must consider what this bishop threatens next.",
+      storyLong:
+        "In 1929, at a great tournament in Barcelona, Catalonia, master Savielly Tartakower " +
+        "showed that combining the Queen's Gambit (1.d4 + 2.c4) with a KINGSIDE fianchetto " +
+        "(3.g3 + 4.Bg2) gave White a beautiful long-diagonal attack against Black's queenside " +
+        "for the rest of the game. Vladimir Kramnik took this idea to the top of chess: in " +
+        "the 2006, 2007, and 2008 world championship matches he used the Catalan as his main " +
+        "white weapon, winning several patient games from long endgame squeezes. In the Closed " +
+        "Catalan mainline, Black grabs a pawn (…dxc4) and must return it while White repositions " +
+        "pieces with tempo. The resulting endgame is quiet, slightly better for White, and " +
+        "requires patience — the antithesis of the Najdorf.",
+      citations: [
+        { author: "Kramnik", work: "My Life and Games", licence: "paraphrase" },
+        { author: "Avrukh",  work: "1.d4 Vol 1: Catalan chapters", licence: "paraphrase" },
+        { author: "Watson",  work: "Mastering the Chess Openings, vol. 2", section: "Catalan chapter", licence: "paraphrase" },
+        {                    work: "Wikipedia", section: "Catalan_Opening", licence: "CC-BY-SA",
+                             url: "https://en.wikipedia.org/wiki/Catalan_Opening" },
+      ],
+    },
+  },
+
+  //───────────────────────────────────────────────────────────────────────────
   // 5) King's Indian Defence — Bayonet Attack (reordered by ECO chronology; kept
   //    numbered "5" for stable Git blame — the DISPLAY order in the UI is
   //    families.displayOrder + tags, not this file's line order.)
