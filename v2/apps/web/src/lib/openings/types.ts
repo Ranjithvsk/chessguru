@@ -88,11 +88,13 @@ export interface OpeningIdea {
   // 2026-08-02 — Wikibooks "Chess Opening Theory" is our primary auto-source
   // (per-move tree with plans + variations, CC-BY-SA 3.0). URL pattern:
   // en.wikibooks.org/wiki/Chess_Opening_Theory/1._e4/1...c5/2._Nf3/...
-  wikibookUrl?: string;
-  wikibookExcerpt?: string;
-  wikipediaUrl?: string;      // article-level background (secondary)
-  wikipediaExcerpt?: string;
-  lichessWikiUrl?: string;    // lichess.org/opening/<slug>
+  // Excerpt is null when the Wikibook page doesn't exist for this ply-path
+  // (obscure sidelines) — URL still emitted as a link out.
+  wikibookUrl?: string | null;
+  wikibookExcerpt?: string | null;
+  wikipediaUrl?: string | null;
+  wikipediaExcerpt?: string | null;
+  lichessWikiUrl?: string | null;
 }
 
 /** Model games — canonical illustrations. */
