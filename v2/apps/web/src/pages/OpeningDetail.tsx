@@ -17,6 +17,7 @@ import {
   structureBySlug,
 } from "../lib/openings";
 import { OPENING_HANDOFF_KEY, type OpeningHandoff } from "../lib/openingMemory";
+import { activateOpening, deactivateOpening, isActivated } from "../lib/cards";
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -25,6 +26,8 @@ export default function OpeningDetail() {
   const nav = useNavigate();
   const opening = slug ? openingBySlug.get(slug) : undefined;
   const [ply, setPly] = useState(0);
+  const [activated, setActivated] = useState<boolean>(() => slug ? isActivated(slug) : false);
+  const [justAddedCount, setJustAddedCount] = useState<number | null>(null);
 
   const { positions, moves } = useMemo(() => {
     if (!opening) return { positions: [START_FEN], moves: [] as string[] };
@@ -59,6 +62,19 @@ export default function OpeningDetail() {
     const handoff: OpeningHandoff = { name: opening.name, sans: moves };
     try { sessionStorage.setItem(OPENING_HANDOFF_KEY, JSON.stringify(handoff)); } catch { /* */ }
     nav("/study/opening-memory");
+  };
+
+  const toggleActivated = () => {
+    if (!opening) return;
+    if (activated) {
+      deactivateOpening(opening.slug);
+      setActivated(false);
+      setJustAddedCount(null);
+    } else {
+      const n = activateOpening(opening.slug);
+      setActivated(true);
+      setJustAddedCount(n);
+    }
   };
 
   return (
@@ -157,6 +173,18 @@ export default function OpeningDetail() {
           >
             ▶ Learn this opening in the trainer
           </button>
+
+          <button
+            onClick={toggleActivated}
+            className={`mt-2 w-full rounded-xl py-3 text-sm font-bold ${activated ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}
+          >
+            {activated ? "✓ In your daily queue · click to remove" : "🔁 Add to daily spaced-repetition queue"}
+          </button>
+          {justAddedCount != null && (
+            <div className="mt-2 rounded-lg bg-indigo-50 px-3 py-2 text-center text-xs text-indigo-900">
+              Added <b>{justAddedCount}</b> cards. <Link to="/study/daily" className="font-bold underline">Start reviewing →</Link>
+            </div>
+          )}
         </div>
 
         {/* Text panel */}
