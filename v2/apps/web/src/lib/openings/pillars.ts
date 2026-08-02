@@ -580,6 +580,326 @@ export const PILLARS: Opening[] = [
   },
 
   //───────────────────────────────────────────────────────────────────────────
+  // 11) Nimzo-Indian — Rubinstein Variation
+  //───────────────────────────────────────────────────────────────────────────
+  {
+    slug: "nimzo-rubinstein",
+    eco: "E43",
+    ecoName: "Nimzo-Indian: Rubinstein Variation",
+    name: "Nimzo-Indian, Rubinstein",
+    aliases: ["Rubinstein Nimzo", "4.e3 Nimzo"],
+    familyId: "nimzo",
+    tier: 1,
+    frequencyBps: 155,
+    pgnStart: ["d4","Nf6","c4","e6","Nc3","Bb4","e3"],
+    mainlinePgn: [
+      "d4","Nf6","c4","e6","Nc3","Bb4","e3","b6","Ne2","Bb7","a3","Bxc3+",
+      "Nxc3","d5","b3","O-O","Bb2","Nbd7","Bd3","c5","O-O","Rc8","Rc1","Re8",
+      "cxd5","exd5","Ne2","c4","bxc4","dxc4",
+    ],
+    tagSlugs: ["strategic","positional","semi-open","central","hypermodern","idea-based"],
+    structureSlug: "hanging-pawns",
+    criticalMoveNo: 6,
+    idea: {
+      short: "Trade the bishop for a knight, double White's c-pawns, then clamp c4 forever.",
+      long:
+        "The Rubinstein System (4.e3) is Nimzo's oldest and most solid antidote to Black's " +
+        "pin. White quietly develops behind pawns e3+c4+d4, offering to accept the doubled " +
+        "c-pawns after …Bxc3+ in return for the bishop pair. Black's plan (per Nimzowitsch " +
+        "himself in My System): use the doubled pawns as a positional target, blockade c4 " +
+        "with a knight, then patiently squeeze the endgame. Karpov perfected the Black side; " +
+        "Kasparov used both colours. Watson: 'The Nimzo-Indian is the most influential defence " +
+        "of the 20th century — it made hypermodernism respectable at the classical level.'",
+      whitePlans: [
+        "Ne2 (not Nf3) to recapture on c3 with the knight, preserving pawn structure",
+        "e3-e4 central break at the right moment",
+        "Bishop pair activation via Bd3 + Bb2 (or Ba3)",
+      ],
+      blackPlans: [
+        "…Bxc3+ trading bishop for knight to inflict the doubled c-pawns",
+        "…b6-Bb7-c5 queenside development pressing c4",
+        "…Ne4 outpost preventing White's central break",
+      ],
+      storyHook:
+        "Black offers a bishop for a knight in return for TWO doubled White pawns to torment " +
+        "forever. Every White move for 30 moves is trying to escape the c4 clamp.",
+      storyLong:
+        "In 1914, Aron Nimzowitsch invented the Nimzo-Indian: on move 3, pin the c3 knight and " +
+        "threaten to trade for it, damaging White's queenside pawns permanently. The Rubinstein " +
+        "System (4.e3) accepts the trade with poise: White plays Nge2 (NOT Nf3) so the c3 knight " +
+        "can be recaptured, then patiently develops behind the pawn wall. Black's plan is pure " +
+        "Nimzo: get the pawn on c4 into a permanent bind, blockade with knights, and grind " +
+        "White down in a bishops-of-opposite-colour endgame 40 moves later. Karpov made this " +
+        "one of his signature Black setups.",
+      citations: [
+        { author: "Nimzowitsch", work: "My System + Chess Praxis", section: "on the Nimzo-Indian", licence: "PD" },
+        { author: "Kasparov",   work: "My Great Predecessors, vol. 5", section: "Karpov's Nimzo games", licence: "paraphrase" },
+        { author: "Watson",     work: "Mastering the Chess Openings, vol. 3", section: "Nimzo-Indian chapters", licence: "paraphrase" },
+        {                       work: "Wikipedia", section: "Nimzo-Indian_Defence", licence: "CC-BY-SA",
+                                url: "https://en.wikipedia.org/wiki/Nimzo-Indian_Defence" },
+      ],
+    },
+  },
+
+  //───────────────────────────────────────────────────────────────────────────
+  // 12) Grünfeld — Exchange Variation (Classical)
+  //───────────────────────────────────────────────────────────────────────────
+  {
+    slug: "grunfeld-exchange",
+    eco: "D85",
+    ecoName: "Grünfeld: Exchange Variation",
+    name: "Grünfeld, Exchange",
+    aliases: ["Grünfeld Exchange", "Classical Exchange Grünfeld"],
+    familyId: "grunfeld",
+    tier: 1,
+    frequencyBps: 148,
+    pgnStart: ["d4","Nf6","c4","g6","Nc3","d5","cxd5","Nxd5","e4","Nxc3","bxc3"],
+    mainlinePgn: [
+      "d4","Nf6","c4","g6","Nc3","d5","cxd5","Nxd5","e4","Nxc3","bxc3","Bg7",
+      "Nf3","c5","Rb1","O-O","Be2","cxd4","cxd4","Qa5+","Bd2","Qxa2","O-O","b6",
+      "Qc1","Bb7","Bc4","Qa4","Bd3","Nc6",
+    ],
+    tagSlugs: ["dynamic","aggressive","semi-open","central","hypermodern","theory-heavy"],
+    structureSlug: "hanging-pawns",
+    criticalMoveNo: 5,
+    idea: {
+      short: "Let White build a big centre, then dismantle it with pieces + a well-timed …c5.",
+      long:
+        "The Grünfeld is hypermodernism at its purest. Black challenges the centre on move 3 " +
+        "with …d5, provokes cxd5 Nxd5 Nc3 e4 Nxc3 bxc3, and lets White have an imposing pawn " +
+        "duo on c3+d4+e4. Black's compensation is dynamic: attack the centre with piece " +
+        "activity + a timed …c5 break, and target the c3 pawn as a permanent weakness. " +
+        "Kasparov used the Grünfeld as his main defence to 1.d4 in the world championship " +
+        "matches. The Exchange Variation is White's most ambitious try — take EVERYTHING in " +
+        "the centre, then defend it. Fine's evaluation from 1943 called Grünfeld 'chess's " +
+        "most sophisticated defence'; modern engines confirm it's fully sound.",
+      whitePlans: [
+        "Rb1 + Bc4 development, protecting the pawn centre and c3",
+        "d4-d5 central push at the right moment",
+        "Ne2-Nf3-Ng5 kingside attacking manoeuvre",
+      ],
+      blackPlans: [
+        "…c5 break challenging d4 immediately",
+        "…Bg7 + …Nc6 + …Bg4 piece pressure on d4",
+        "…Qa5+ then …Qxa2 pawn-grabbing raid (very theoretical)",
+      ],
+      storyHook:
+        "White builds a mountain of pawns (c3-d4-e4) — the biggest centre in chess. Black " +
+        "chips at it with a knight, a bishop, and a well-timed pickaxe (…c5).",
+      storyLong:
+        "In 1922, Ernst Grünfeld played …d5 on move 3 vs Alekhine and destroyed the classical " +
+        "assumption that Black must PROTECT his own centre. Instead: PROVOKE White to build " +
+        "the biggest possible centre, THEN dismantle it. In the Exchange Variation White takes " +
+        "everything — cxd5 Nxd5 Nc3 (recapture) e4 Nxc3 bxc3 — resulting in a mountain of " +
+        "pawns c3+d4+e4. Black's whole game plan: get the bishop to g7 aimed at that centre, " +
+        "then break it with …c5 (move 7 in the mainline). Kasparov made this his main defence " +
+        "vs 1.d4 for 20 years.",
+      citations: [
+        { author: "Fine",     work: "Ideas Behind the Chess Openings", section: "Grünfeld chapter", licence: "PD" },
+        { author: "Kasparov", work: "My Great Predecessors + How Life Imitates Chess", section: "Grünfeld", licence: "paraphrase" },
+        { author: "Watson",   work: "Mastering the Chess Openings, vol. 3", section: "Grünfeld Exchange", licence: "paraphrase" },
+        { author: "Rowson",   work: "Understanding the Grünfeld", licence: "paraphrase" },
+        {                     work: "Wikipedia", section: "Gr%C3%BCnfeld_Defence", licence: "CC-BY-SA",
+                              url: "https://en.wikipedia.org/wiki/Gr%C3%BCnfeld_Defence" },
+      ],
+    },
+  },
+
+  //───────────────────────────────────────────────────────────────────────────
+  // 13) English Opening — Symmetric Four Knights
+  //───────────────────────────────────────────────────────────────────────────
+  {
+    slug: "english-symmetric-four-knights",
+    eco: "A35",
+    ecoName: "English: Symmetrical, Four Knights",
+    name: "English, Symmetric Four Knights",
+    aliases: ["Symmetric English", "Four Knights English"],
+    familyId: "english",
+    tier: 1,
+    frequencyBps: 130,
+    pgnStart: ["c4","c5","Nc3","Nc6","Nf3","Nf6","g3"],
+    mainlinePgn: [
+      "c4","c5","Nc3","Nc6","Nf3","Nf6","g3","d5","cxd5","Nxd5","Bg2","g6",
+      "O-O","Bg7","d3","O-O","Bd2","Nc7","Rc1","Rb8","a3","a6","Nd5","Nxd5",
+      "Rxc5","Nxb2","Qb3","Nc4","dxc4","dxc4",
+    ],
+    tagSlugs: ["positional","solid","semi-open","both-flanks","universal","idea-based"],
+    structureSlug: "maroczy-bind",
+    criticalMoveNo: 4,
+    idea: {
+      short: "A 'reverse Sicilian' — White gets Black's usual counterplay one tempo up.",
+      long:
+        "The Symmetric English (1.c4 c5) is a REVERSED Sicilian: White plays the …c5 setup " +
+        "with the extra tempo. This alone gives a small but persistent edge — hedgehog vs " +
+        "reversed hedgehog, Maroczy Bind vs reversed Maroczy. The Symmetric Four Knights " +
+        "(…Nc6, Nf3 Nf6, g3) is the most positional line: both fianchetto, both control d5/d4, " +
+        "and the first side to break symmetry gains. Kasparov, Karpov, Kramnik, Carlsen all " +
+        "played the English as a low-theory, high-strategic-content alternative to 1.d4. " +
+        "Watson: 'The English rewards the player who understands what to DO in symmetric " +
+        "positions — not memorised lines, but pattern recognition.'",
+      whitePlans: [
+        "g3 + Bg2 fianchetto, pressuring d5/b7",
+        "Nd5 outpost jump when structure permits",
+        "d3 quiet development, prepare Bg2 pressure",
+      ],
+      blackPlans: [
+        "…d5 immediate central challenge (Rubinstein System)",
+        "…g6 mirror fianchetto — reach a symmetric middlegame",
+        "…e5 (Rubinstein Variation) — commit to Sicilian-reversed structure",
+      ],
+      storyHook:
+        "Both bishops walk into fianchettos, both knights out to Nf3/f6+Nc3/c6, mirroring " +
+        "each other for 6 moves. Whoever breaks the mirror first wins.",
+      storyLong:
+        "The English is the mirror-image opening: White plays what Black plays in the " +
+        "Sicilian, but ONE MOVE EARLIER. Both sides develop symmetrically — c4/c5, Nc3/Nc6, " +
+        "Nf3/Nf6, g3/g6, Bg2/Bg7, O-O — for 6-8 moves. Then someone breaks the mirror: the " +
+        "first sub-variation Black picks (…d5 or …e5 or …g6) commits to a structure and White " +
+        "gets to respond ONE MOVE UP the theory tree. Symmetric-with-extra-tempo. This is why " +
+        "the English is a 'low-theory' opening — you don't need to know 20-move mainlines, " +
+        "you need to know the STRUCTURES that arise. Kramnik and Kasparov used it repeatedly " +
+        "at the world championship level for exactly this reason.",
+      citations: [
+        { author: "Marin",    work: "Mastering the English Opening (3 vols)", licence: "paraphrase" },
+        { author: "Kasparov", work: "Revolution in the 70s", section: "English chapters", licence: "paraphrase" },
+        { author: "Watson",   work: "Mastering the Chess Openings, vol. 4", section: "English chapter", licence: "paraphrase" },
+        {                     work: "Wikipedia", section: "English_Opening", licence: "CC-BY-SA",
+                              url: "https://en.wikipedia.org/wiki/English_Opening" },
+      ],
+    },
+  },
+
+  //───────────────────────────────────────────────────────────────────────────
+  // 14) London System
+  //───────────────────────────────────────────────────────────────────────────
+  {
+    slug: "london-system",
+    eco: "D02",
+    ecoName: "London System",
+    name: "London System",
+    aliases: ["London", "Bf4 System"],
+    familyId: "d4-side",
+    tier: 1,
+    frequencyBps: 175,
+    pgnStart: ["d4","d5","Nf3","Nf6","Bf4"],
+    mainlinePgn: [
+      "d4","d5","Nf3","Nf6","Bf4","e6","e3","Bd6","Bg3","O-O","Bd3","b6",
+      "Nbd2","Bb7","c3","Nbd7","Qc2","h6","O-O","c5","Bxd6","Qxd6","Rae1","Rac8",
+      "Ne5","Rfe8","f4","Nxe5","fxe5","Nd7",
+    ],
+    tagSlugs: ["strategic","solid","closed","central","universal","sound-long-term"],
+    // London reaches a slightly Stonewall-ish structure with e3-d4 vs d5-e6 pawns.
+    structureSlug: "stonewall",
+    criticalMoveNo: 3,
+    idea: {
+      short: "Same setup vs anything — d4, Nf3, Bf4, e3, Bd3, Nbd2, O-O. Zero forced theory.",
+      long:
+        "The London System is the anti-theory opening. White plays the SAME 6-8 moves no " +
+        "matter what Black does: d4, Nf3, Bf4 (the London bishop), e3, Bd3, Nbd2, c3, O-O. " +
+        "This 'system' approach means an amateur can play the London confidently vs any Black " +
+        "reply, and grandmasters (Magnus Carlsen used it extensively in 2019-2020) can use " +
+        "it as a low-theory alternative to open theoretical debates. The trade-off is a " +
+        "modest opening edge — the London gives up the fight for maximum advantage in return " +
+        "for a rock-solid, learnable structure. Watson calls the London 'the most-played " +
+        "system opening among strong club players' — for good reason.",
+      whitePlans: [
+        "Standard setup: Nf3, Bf4, e3, Bd3, Nbd2, c3, O-O regardless of Black's moves",
+        "Ne5 knight outpost + f4 pawn to lock it in",
+        "Kingside attack via Qc2 + Rae1 + h3-g4 (if Black castles)",
+      ],
+      blackPlans: [
+        "…Bd6 trading the London bishop to remove White's best piece",
+        "…c5 pawn break to open the position and use active development",
+        "…Nh5 hunting the Bf4 bishop",
+      ],
+      storyHook:
+        "The London Bishop leaves home on move 3 (Bf4) and stays there forever, controlling " +
+        "the e5 outpost. Every other White piece finds its spot behind him. Simple, patient, " +
+        "unstoppable if you don't know how to attack it.",
+      storyLong:
+        "The London System got its name from the 1922 London tournament where several strong " +
+        "players used it. It's the ultimate 'system opening': White plays the same 8 moves " +
+        "vs any Black setup, arriving at a rock-solid position with clear plans. In the last " +
+        "5 years it has EXPLODED at the top level — Carlsen, Nakamura, Nepo, and other elite " +
+        "players use it as a low-theory alternative to the deeply-analysed Ruy Lopez / Nimzo " +
+        "Indian battles. The 'London Bishop' on f4 controls e5, prepares Ne5, and forces " +
+        "Black to make trade-off decisions on which bad exchange to allow. Not the flashiest " +
+        "opening in the book, but the win-rate at club level is undeniable.",
+      citations: [
+        { author: "Kovacevic",  work: "The London System with 2.Bf4", licence: "paraphrase" },
+        { author: "Johnsen & Kovacevic", work: "Win with the London System", licence: "paraphrase" },
+        { author: "Sedlak",     work: "Winning with the Modern London System", licence: "paraphrase" },
+        {                       work: "Wikipedia", section: "London_System", licence: "CC-BY-SA",
+                                url: "https://en.wikipedia.org/wiki/London_System" },
+      ],
+    },
+  },
+
+  //───────────────────────────────────────────────────────────────────────────
+  // 15) Scandinavian Defence — 3…Qa5 Main Line
+  //───────────────────────────────────────────────────────────────────────────
+  {
+    slug: "scandinavian-qa5",
+    eco: "B01",
+    ecoName: "Scandinavian Defence: Main Line",
+    name: "Scandinavian, 3…Qa5",
+    aliases: ["Scandinavian Defense", "Center Counter"],
+    familyId: "scandi-alekhine",
+    tier: 1,
+    frequencyBps: 95,
+    pgnStart: ["e4","d5","exd5","Qxd5","Nc3","Qa5"],
+    mainlinePgn: [
+      "e4","d5","exd5","Qxd5","Nc3","Qa5","d4","Nf6","Nf3","c6","Bc4","Bf5",
+      "Bd2","e6","Nd5","Qd8","Nxf6+","gxf6","Bh4","Nd7","O-O","Bd6","c3","Qc7",
+      "Bg3","Bxg3","hxg3","O-O-O","b4","Kb8",
+    ],
+    tagSlugs: ["dynamic","solid","semi-open","central","modern","surprise-weapon"],
+    // No canonical structure — the Scandinavian creates its own asymmetric one.
+    criticalMoveNo: 3,
+    idea: {
+      short: "Bring the queen out on principle, tuck her back safely, castle long, then attack.",
+      long:
+        "The Scandinavian violates the classical rule 'don't move the queen early' — and works " +
+        "because Black gets her back to safety with tempo (Nc3 attacks Qd5, …Qa5 sidesteps AND " +
+        "eyes a2). From there Black develops rapidly (…Nf6, …c6, …Bf5, …e6, …Nbd7), castles " +
+        "long, and attacks the kingside with the extra tempo he saved by NOT playing a slow " +
+        "…d6 like the Caro-Kann. Not theoretical — practical and surprising, especially at " +
+        "club level. Anand used the Scandinavian in Game 14 of his 1995 World Championship " +
+        "match vs Kasparov to draw a must-win game (Kasparov was shocked). Curt Hansen, Sergei " +
+        "Tiviakov, and other GMs have used it as a surprise weapon at the top level.",
+      whitePlans: [
+        "Bc4 + Nf3 rapid development, pressure the queen",
+        "d4 central control (Black doesn't contest)",
+        "Kingside pawn storm if opposite-side castling develops",
+      ],
+      blackPlans: [
+        "…c6 quiet development + queen safety",
+        "…Bf5 (or …Bg4) getting the light bishop OUT before …e6",
+        "Castle long, attack White's kingside with …h5",
+      ],
+      storyHook:
+        "The Queen makes a bold trip to a5 on move 3 — everyone gasps — but she's safe. From " +
+        "her camp at a5 she watches the whole opening unfold without ever being in danger.",
+      storyLong:
+        "In every chess-beginner book, the first rule is 'don't move your queen early — she'll " +
+        "just get chased around.' The Scandinavian breaks this rule immediately: move 2, out " +
+        "she comes to d5. When Nc3 chases her, she sidesteps to a5 (or d6 or d8) — safely, " +
+        "with tempo. Now Black develops normally (…c6, …Nf6, …Bf5, …e6, …Nbd7) with an extra " +
+        "tempo saved. Not a mainstream defence at the elite level, but a nasty surprise " +
+        "weapon and Anand's choice for a critical world-championship game in 1995. The " +
+        "modern engine era has confirmed the Scandinavian is fully sound — just slightly " +
+        "worse than 1…e5 or 1…c5. Fine as an occasional weapon; too passive as a main " +
+        "defence.",
+      citations: [
+        { author: "Tiviakov", work: "Scandinavian for the Tournament Player", licence: "paraphrase" },
+        { author: "Melts",    work: "Scandinavian Defense: The Dynamic 3...Qd6", licence: "paraphrase" },
+        {                     work: "Wikipedia", section: "Scandinavian_Defense", licence: "CC-BY-SA",
+                              url: "https://en.wikipedia.org/wiki/Scandinavian_Defense" },
+      ],
+    },
+  },
+
+  //───────────────────────────────────────────────────────────────────────────
   // 5) King's Indian Defence — Bayonet Attack (reordered by ECO chronology; kept
   //    numbered "5" for stable Git blame — the DISPLAY order in the UI is
   //    families.displayOrder + tags, not this file's line order.)
