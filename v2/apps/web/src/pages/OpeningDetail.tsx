@@ -19,6 +19,8 @@ import {
 import { OPENING_HANDOFF_KEY, type OpeningHandoff } from "../lib/openingMemory";
 import { activateOpening, deactivateOpening, isActivated } from "../lib/cards";
 import EngineCoach from "../components/EngineCoach";
+import { resolveStory, saveUserStory, speak, clearUserStory } from "../lib/userStories";
+import type { Opening } from "../lib/openings/types";
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -249,19 +251,8 @@ export default function OpeningDetail() {
             </div>
           )}
 
-          {/* Story */}
-          {idea?.storyHook && (
-            <div className="rounded-lg border border-purple-100 bg-purple-50 p-3">
-              <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-purple-700">Story hook</div>
-              <p className="text-sm italic text-purple-900">{idea.storyHook}</p>
-              {idea.storyLong && (
-                <details className="mt-2">
-                  <summary className="cursor-pointer text-xs font-semibold text-purple-700">Full narration</summary>
-                  <p className="mt-2 text-xs leading-relaxed text-purple-900">{idea.storyLong}</p>
-                </details>
-              )}
-            </div>
-          )}
+          {/* Story — user > pillar > auto */}
+          <StoryPanel opening={opening} />
 
           {/* Structure */}
           {structure && (
@@ -303,6 +294,120 @@ export default function OpeningDetail() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ---------- Story panel: resolves user > pillar > auto, edit + read-aloud ---------- */
+
+function StoryPanel({ opening }: { opening: Opening }) {
+  const [nonce, setNonce] = useState(0);
+  const story = useMemo(() => resolveStory(opening), [opening, nonce]);
+  const [editing, setEditing] = useState(false);
+  const [draftHook, setDraftHook] = useState("");
+  const [draftLong, setDraftLong] = useState("");
+  const [speaking, setSpeaking] = useState(false);
+
+  const startEdit = () => {
+    setDraftHook(story.source === "user" ? story.hook : "");
+    setDraftLong(story.source === "user" ? (story.long ?? "") : "");
+    setEditing(true);
+  };
+  const save = () => {
+    if (!draftHook.trim()) return;
+    saveUserStory(opening.slug, draftHook, draftLong);
+    setEditing(false);
+    setNonce((n) => n + 1);
+  };
+  const reset = () => {
+    clearUserStory(opening.slug);
+    setEditing(false);
+    setNonce((n) => n + 1);
+  };
+  const toggleSpeak = () => {
+    if (speaking) { window.speechSynthesis?.cancel(); setSpeaking(false); return; }
+    const text = story.long ? `${story.hook}. ${story.long}` : story.hook;
+    speak(text);
+    setSpeaking(true);
+    // Approximate stop-flag reset — speech has no reliable end event across browsers.
+    setTimeout(() => setSpeaking(false), Math.min(30_000, 3_000 + text.length * 60));
+  };
+
+  const badge = story.source === "user" ? { label: "Your story", cls: "bg-emerald-100 text-emerald-800" }
+    : story.source === "pillar" ? { label: "Author-written", cls: "bg-purple-100 text-purple-800" }
+    : { label: "Auto", cls: "bg-gray-200 text-gray-700" };
+
+  const bgCls = story.source === "user" ? "border-emerald-100 bg-emerald-50"
+    : story.source === "pillar" ? "border-purple-100 bg-purple-50"
+    : "border-gray-200 bg-gray-50";
+  const textCls = story.source === "user" ? "text-emerald-900" : story.source === "pillar" ? "text-purple-900" : "text-gray-800";
+
+  return (
+    <div className={`rounded-lg border p-3 ${bgCls}`}>
+      <div className="mb-1 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Story</div>
+          <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${badge.cls}`}>{badge.label}</span>
+        </div>
+        <div className="flex gap-1.5">
+          <button onClick={toggleSpeak}
+            className="rounded bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50">
+            {speaking ? "⏹ stop" : "🔊 read"}
+          </button>
+          {!editing && (
+            <button onClick={startEdit}
+              className="rounded bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50">
+              ✏️ your story
+            </button>
+          )}
+        </div>
+      </div>
+
+      {!editing && (
+        <>
+          <p className={`text-sm italic ${textCls}`}>{story.hook}</p>
+          {story.long && (
+            <details className="mt-2">
+              <summary className={`cursor-pointer text-xs font-semibold ${textCls}`}>Full narration</summary>
+              <p className={`mt-2 text-xs leading-relaxed ${textCls}`}>{story.long}</p>
+            </details>
+          )}
+        </>
+      )}
+
+      {editing && (
+        <div className="space-y-2">
+          <input
+            value={draftHook}
+            onChange={(e) => setDraftHook(e.target.value)}
+            placeholder="One sentence — the hook you'll remember"
+            className="w-full rounded border border-gray-200 bg-white px-2 py-1 text-sm outline-none focus:border-gray-400"
+          />
+          <textarea
+            value={draftLong}
+            onChange={(e) => setDraftLong(e.target.value)}
+            placeholder="Optional — longer narration"
+            rows={4}
+            className="w-full rounded border border-gray-200 bg-white px-2 py-1 text-xs outline-none focus:border-gray-400"
+          />
+          <div className="flex gap-1.5">
+            <button onClick={save} disabled={!draftHook.trim()}
+              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-40">
+              Save
+            </button>
+            <button onClick={() => setEditing(false)}
+              className="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-semibold hover:bg-gray-200">
+              Cancel
+            </button>
+            {story.source === "user" && (
+              <button onClick={reset}
+                className="ml-auto rounded-lg bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100">
+                Reset to default
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
