@@ -18,6 +18,7 @@ import {
   openingsByTags,
 } from "../lib/openings";
 import type { OpeningTag } from "../lib/openings/types";
+import { loadRepertoire, repertoireRoleOf } from "../lib/repertoire";
 
 const AXES: OpeningTag["axis"][] = ["CHARACTER", "STRUCTURE", "ATTACK", "SCHOOL", "PRACTICALITY"];
 
@@ -25,6 +26,8 @@ export default function Openings() {
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [selectedFamily, setSelectedFamily] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  const [onlyRepertoire, setOnlyRepertoire] = useState(false);
+  const repertoire = useMemo(() => loadRepertoire(), []);
 
   const filtered = useMemo(() => {
     let rows = OPENINGS;
@@ -38,12 +41,15 @@ export default function Openings() {
         o.aliases?.some((a) => a.toLowerCase().includes(needle))
       );
     }
+    if (onlyRepertoire && repertoire) {
+      rows = rows.filter((o) => !!repertoireRoleOf(o.slug, repertoire));
+    }
     // Sort: pillars (tier 1) first, then by frequency desc, then by ECO.
     return [...rows].sort((a, b) => {
       if (a.tier !== b.tier) return a.tier - b.tier;
       return (b.frequencyBps ?? 0) - (a.frequencyBps ?? 0) || a.eco.localeCompare(b.eco);
     });
-  }, [selectedTags, selectedFamily, q]);
+  }, [selectedTags, selectedFamily, q, onlyRepertoire, repertoire]);
 
   const toggleTag = (slug: string) => {
     setSelectedTags((prev) => {
@@ -67,6 +73,31 @@ export default function Openings() {
           {filtered.length}/{OPENINGS.length}
         </span>
       </header>
+
+      {/* Repertoire nudge — appears above the search when a user has (or hasn't) built one. */}
+      <div className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm">
+        {repertoire ? (
+          <div className="flex items-center gap-3">
+            <span className="text-indigo-900">
+              🎯 Your repertoire — <b>{repertoire.whiteSlugs.length + repertoire.blackVsE4.length + repertoire.blackVsD4.length}</b> openings across White · vs 1.e4 · vs 1.d4.
+            </span>
+            <button onClick={() => setOnlyRepertoire((v) => !v)}
+              className={`ml-auto rounded-full px-3 py-1 text-xs font-bold ${onlyRepertoire ? "bg-indigo-600 text-white" : "bg-white text-indigo-700 hover:bg-indigo-100"}`}>
+              {onlyRepertoire ? "showing repertoire only" : "show repertoire only"}
+            </button>
+            <Link to="/study/repertoire" className="text-xs font-semibold text-indigo-700 hover:underline">edit ›</Link>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <span className="text-indigo-900">
+              🎯 Build your <b>personal repertoire</b> — 10 questions, 30-40 openings picked for your style.
+            </span>
+            <Link to="/study/repertoire" className="ml-auto rounded-full bg-indigo-600 px-3 py-1 text-xs font-bold text-white hover:bg-indigo-700">
+              Start wizard
+            </Link>
+          </div>
+        )}
+      </div>
 
       <input
         type="text"
@@ -138,6 +169,7 @@ export default function Openings() {
             <div className="divide-y divide-gray-100 rounded-xl border border-gray-100 bg-white">
               {filtered.slice(0, 100).map((o) => {
                 const family = familyById.get(o.familyId);
+                const repRole = repertoireRoleOf(o.slug, repertoire);
                 return (
                   <Link
                     key={o.slug}
@@ -148,6 +180,11 @@ export default function Openings() {
                       <div className="rounded bg-gray-100 px-1.5 py-0.5 text-center font-mono text-xs font-bold">{o.eco}</div>
                       {o.tier === 1 && (
                         <div className="mt-1 text-center text-[9px] font-bold uppercase text-amber-600">Pillar</div>
+                      )}
+                      {repRole && (
+                        <div className="mt-1 text-center text-[9px] font-bold uppercase text-indigo-600" title={`In your repertoire (${repRole})`}>
+                          🎯 {repRole === "white" ? "white" : repRole === "vs-e4" ? "vs e4" : "vs d4"}
+                        </div>
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
