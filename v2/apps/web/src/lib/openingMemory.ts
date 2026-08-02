@@ -64,16 +64,30 @@ export function anchorFor(step: OpeningStep, scenes: Record<string, Scene>): Anc
 
 export interface OpeningPreset { id: string; name: string; eco: string; sans: string[] }
 
-// Built-in openings so the trainer works on its own (the "one opening works" default).
-export const OPENING_PRESETS: OpeningPreset[] = [
-  { id: "giuoco-piano", name: "Giuoco Piano", eco: "C53", sans: ["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5", "c3", "Nf6"] },
-  { id: "ruy-lopez", name: "Ruy Lopez", eco: "C60", sans: ["e4", "e5", "Nf3", "Nc6", "Bb5", "a6"] },
+// 2026-08-02 \u2014 Memory Master 500 (S1 seed). The Tier 1 pillars carry full
+// 15-move mainlines + metadata (tags, plans, story, citations); we surface them
+// here so the existing trainer picks them up with zero UI changes. As the corpus
+// grows via pillars.ts + generated branches, only that file updates \u2014 this stays
+// a thin adapter.
+import { PILLARS } from "./openings/pillars";
+const PILLAR_PRESETS: OpeningPreset[] = PILLARS.map((p) => ({
+  id: p.slug,
+  name: p.name,
+  eco: p.eco,
+  sans: p.mainlinePgn ?? p.pgnStart,
+}));
+
+// Short "starter" lines that shipped in the first Opening-Memory release. Kept for
+// coverage until every one has a pillar equivalent authored (Scotch, Scheveningen,
+// French Advance, Queen's Gambit \u2014 Tier 1 items pending Day-2 authoring).
+const STARTER_PRESETS: OpeningPreset[] = [
   { id: "scotch", name: "Scotch Game", eco: "C44", sans: ["e4", "e5", "Nf3", "Nc6", "d4", "exd4"] },
   { id: "sicilian-scheveningen", name: "Sicilian \u2014 Scheveningen", eco: "B80", sans: ["e4", "c5", "Nf3", "d6", "d4", "cxd4", "Nxd4", "Nf6", "Nc3", "e6"] },
   { id: "french-advance", name: "French Defence \u2014 Advance", eco: "C02", sans: ["e4", "e6", "d4", "d5", "e5", "c5", "c3", "Nc6"] },
-  { id: "french-winawer", name: "French Defence \u2014 Winawer", eco: "C15", sans: ["e4", "e6", "d4", "d5", "Nc3", "Bb4"] },
   { id: "queens-gambit", name: "Queen's Gambit", eco: "D06", sans: ["d4", "d5", "c4", "e6", "Nc3", "Nf6"] },
 ];
+
+export const OPENING_PRESETS: OpeningPreset[] = [...PILLAR_PRESETS, ...STARTER_PRESETS];
 
 // Handoff from the Opening tab: the explored line is dropped here, read once by the trainer.
 export const OPENING_HANDOFF_KEY = "cg_opening_to_memorize";
