@@ -18,6 +18,7 @@ import {
 } from "../lib/openings";
 import { OPENING_HANDOFF_KEY, type OpeningHandoff } from "../lib/openingMemory";
 import { activateOpening, deactivateOpening, isActivated } from "../lib/cards";
+import EngineCoach from "../components/EngineCoach";
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -185,6 +186,16 @@ export default function OpeningDetail() {
               Added <b>{justAddedCount}</b> cards. <Link to="/study/daily" className="font-bold underline">Start reviewing →</Link>
             </div>
           )}
+
+          {/* Engine coach — analyses the CURRENTLY-VIEWED position vs the mainline move at this ply */}
+          <div className="mt-4">
+            <EngineCoach
+              key={positions[cur]}
+              fen={positions[cur]!}
+              declaredSan={moves[cur]}
+              ctaLabel={cur < moves.length ? `Ask engine about move ${cur + 1}` : "Ask engine about this position"}
+            />
+          </div>
         </div>
 
         {/* Text panel */}

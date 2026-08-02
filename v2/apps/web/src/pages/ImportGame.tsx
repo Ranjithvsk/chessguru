@@ -11,6 +11,7 @@ import Board from "../components/Board";
 import { analyseGame, summarise, deviationCardId, type GameAnalysis } from "../lib/gameAnalysis";
 import { activateOpening, isActivated } from "../lib/cards";
 import { familyById, tagBySlug } from "../lib/openings";
+import EngineCoach from "../components/EngineCoach";
 
 const SAMPLE_PGN = `[Event "Casual game"]
 [Site "?"]
@@ -166,6 +167,10 @@ function ResultPanel({ a }: { a: GameAnalysis }) {
       {a.deviation && opening && (
         <div className="rounded-xl border border-orange-200 bg-orange-50 p-4">
           <div className="mb-2 text-xs font-bold uppercase tracking-wide text-orange-700">First deviation</div>
+          <div className="mb-3">
+            <EngineCoach fen={a.deviation.fenBefore} declaredSan={a.deviation.theory}
+              ctaLabel="Was theory right? Ask the engine" />
+          </div>
           <div className="grid gap-3 sm:grid-cols-[1fr_1fr]">
             <div className="max-w-xs">
               <Board fen={a.deviation.fenBefore} viewOnly coordinates
