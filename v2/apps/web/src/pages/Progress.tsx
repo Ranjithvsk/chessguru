@@ -6,9 +6,15 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { computeProgress } from "../lib/progress";
+import { computeBelt, computeBadges, nextFamilyToMaster, type Badge } from "../lib/badges";
 
 export default function ProgressPage() {
   const p = useMemo(() => computeProgress(), []);
+  const belt = useMemo(() => computeBelt(p.masteredCards), [p.masteredCards]);
+  const badges = useMemo(() => computeBadges(p), [p]);
+  const nextFamily = useMemo(() => nextFamilyToMaster(p), [p]);
+  const earnedBadges = badges.filter((b) => b.earned);
+  const lockedBadges = badges.filter((b) => !b.earned);
   const empty = p.totalCards === 0;
 
   return (
@@ -43,6 +49,43 @@ export default function ProgressPage() {
         </div>
       ) : (
         <>
+          {/* Belt card */}
+          <div className="mb-6 rounded-xl border p-4 shadow-sm"
+            style={{
+              borderColor: belt.current.colorHex,
+              background: `linear-gradient(90deg, ${belt.current.colorHex}22 0%, transparent 60%)`,
+            }}>
+            <div className="flex items-center gap-4">
+              <div
+                className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full ring-4 ring-white shadow"
+                style={{ backgroundColor: belt.current.colorHex }}
+              >
+                <span className={`text-xl font-black ${belt.current.name === "White" ? "text-gray-400" : "text-white"}`}>
+                  {belt.current.name[0]}
+                </span>
+              </div>
+              <div className="flex-1">
+                <div className="text-xs uppercase tracking-wide text-gray-500">Current belt</div>
+                <div className="text-2xl font-bold" style={{ color: belt.current.colorHex === "#f8fafc" ? "#111827" : belt.current.colorHex }}>
+                  {belt.current.name} belt
+                </div>
+                {belt.next ? (
+                  <div className="mt-1 text-xs text-gray-600">
+                    <b>{belt.toNext}</b> more mastered cards to <b style={{ color: belt.next.colorHex }}>{belt.next.name}</b>
+                  </div>
+                ) : (
+                  <div className="mt-1 text-xs text-gray-600">Highest tier — you've mastered chess memory.</div>
+                )}
+                {belt.next && (
+                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-gray-100">
+                    <div className="h-full rounded-full transition-all"
+                      style={{ width: `${belt.pct}%`, backgroundColor: belt.next.colorHex }} />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Top strip: 6 headline metrics */}
           <div className="mb-6 grid grid-cols-3 gap-2 sm:grid-cols-6">
             <Metric label="cards" value={p.totalCards} />
@@ -112,6 +155,24 @@ export default function ProgressPage() {
             )}
           </div>
 
+          {/* Badges */}
+          <div className="mb-6 rounded-xl border border-gray-100 bg-white p-4">
+            <div className="mb-3 flex items-baseline justify-between">
+              <div className="text-xs font-bold uppercase tracking-wide text-gray-500">
+                Badges <span className="text-gray-400">— {earnedBadges.length} of {badges.length}</span>
+              </div>
+              {nextFamily && (
+                <div className="text-[11px] text-gray-500">
+                  Next crown: <b>{nextFamily.familyName}</b> ({nextFamily.remaining} more)
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+              {earnedBadges.map((b) => <BadgeTile key={b.id} b={b} />)}
+              {lockedBadges.map((b) => <BadgeTile key={b.id} b={b} />)}
+            </div>
+          </div>
+
           {/* Recently studied */}
           {p.recent.length > 0 && (
             <div className="rounded-xl border border-gray-100 bg-white p-4">
@@ -166,6 +227,27 @@ function BarStrip({ title, accent, data, zeroHint }: { title: string; accent: st
             </div>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+function BadgeTile({ b }: { b: Badge }) {
+  return (
+    <div
+      className={`flex flex-col items-center rounded-lg p-2 text-center transition ${
+        b.earned
+          ? "bg-amber-50 ring-1 ring-amber-200"
+          : "bg-gray-50 opacity-60 ring-1 ring-gray-100"
+      }`}
+      title={b.hint}
+    >
+      <div className={`text-2xl ${b.earned ? "" : "grayscale"}`}>{b.glyph}</div>
+      <div className={`mt-1 text-[10px] font-bold leading-tight ${b.earned ? "text-amber-900" : "text-gray-600"}`}>
+        {b.name}
+      </div>
+      {!b.earned && b.progress && (
+        <div className="mt-0.5 text-[9px] text-gray-500">{b.progress}</div>
       )}
     </div>
   );
