@@ -6,12 +6,14 @@
 // citations. "Learn this opening" button hands the SAN sequence off to the
 // existing Opening Memory trainer via the sessionStorage handoff.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { Chess } from "chess.js";
 import Board from "../components/Board";
+import type { Key } from "chessground/types";
 import {
   openingBySlug,
+  openingsByFamily,
   familyById,
   tagBySlug,
   structureBySlug,
@@ -29,20 +31,32 @@ export default function OpeningDetail() {
   const nav = useNavigate();
   const opening = slug ? openingBySlug.get(slug) : undefined;
   const [ply, setPly] = useState(0);
+  const [orientation, setOrientation] = useState<"white" | "black">("white");
   const [activated, setActivated] = useState<boolean>(() => slug ? isActivated(slug) : false);
   const [justAddedCount, setJustAddedCount] = useState<number | null>(null);
 
-  const { positions, moves } = useMemo(() => {
-    if (!opening) return { positions: [START_FEN], moves: [] as string[] };
+  // Reset ply + activated state when the slug changes (prev/next family nav).
+  useEffect(() => {
+    setPly(0);
+    setActivated(slug ? isActivated(slug) : false);
+    setJustAddedCount(null);
+  }, [slug]);
+
+  const { positions, moves, fromTo } = useMemo(() => {
+    if (!opening) return { positions: [START_FEN], moves: [] as string[], fromTo: [] as Array<[Key, Key]> };
     const sans = opening.mainlinePgn ?? opening.pgnStart;
     const g = new Chess();
     const p: string[] = [g.fen()];
     const played: string[] = [];
+    const ft: Array<[Key, Key]> = [];
     for (const s of sans) {
-      try { const mv = g.move(s); if (mv) { played.push(mv.san); p.push(g.fen()); } }
+      try {
+        const mv = g.move(s);
+        if (mv) { played.push(mv.san); p.push(g.fen()); ft.push([mv.from as Key, mv.to as Key]); }
+      }
       catch { break; }
     }
-    return { positions: p, moves: played };
+    return { positions: p, moves: played, fromTo: ft };
   }, [opening]);
 
   if (!opening) {
@@ -60,6 +74,38 @@ export default function OpeningDetail() {
   const structure = opening.structureSlug ? structureBySlug.get(opening.structureSlug) : null;
   const idea = opening.idea;
   const cur = Math.max(0, Math.min(ply, positions.length - 1));
+  const lastMoveKey: [Key, Key] | undefined = cur > 0 ? fromTo[cur - 1] : undefined;
+
+  // Sibling openings in the same family — for the ← prev / next → nav.
+  const siblings = useMemo(() => {
+    const list = openingsByFamily(opening.familyId).sort((a, b) => {
+      if (a.tier !== b.tier) return a.tier - b.tier;
+      return (b.frequencyBps ?? 0) - (a.frequencyBps ?? 0);
+    });
+    const idx = list.findIndex((o) => o.slug === opening.slug);
+    return {
+      list,
+      idx,
+      prev: idx > 0 ? list[idx - 1] : null,
+      next: idx >= 0 && idx < list.length - 1 ? list[idx + 1] : null,
+    };
+  }, [opening]);
+
+  // Keyboard nav: ← → step; Home/End jump to start/end; F flips board.
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      // Ignore if the user is typing in an input/textarea (story editor, etc.)
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (e.key === "ArrowLeft")  { e.preventDefault(); setPly((p) => Math.max(0, p - 1)); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); setPly((p) => Math.min(positions.length - 1, p + 1)); }
+      else if (e.key === "Home") { e.preventDefault(); setPly(0); }
+      else if (e.key === "End")  { e.preventDefault(); setPly(positions.length - 1); }
+      else if (e.key === "f" || e.key === "F") { e.preventDefault(); setOrientation((o) => o === "white" ? "black" : "white"); }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [positions.length]);
 
   const handoffToTrainer = () => {
     const handoff: OpeningHandoff = { name: opening.name, sans: moves };
@@ -82,9 +128,30 @@ export default function OpeningDetail() {
 
   return (
     <div className="mx-auto max-w-6xl p-4">
-      <Link to="/study/openings" className="mb-3 inline-block text-xs text-gray-500 hover:text-gray-800">
-        ← All openings
-      </Link>
+      <div className="mb-3 flex items-center gap-3 text-xs">
+        <Link to="/study/openings" className="text-gray-500 hover:text-gray-800">← All openings</Link>
+        <div className="ml-auto flex items-center gap-2">
+          {siblings.prev ? (
+            <Link to={`/study/openings/${siblings.prev.slug}`}
+              className="rounded-full bg-gray-100 px-2.5 py-1 font-semibold text-gray-700 hover:bg-gray-200"
+              title={`Previous in ${family?.name ?? "family"}`}>
+              ← {siblings.prev.name.length > 30 ? siblings.prev.name.slice(0, 30) + "…" : siblings.prev.name}
+            </Link>
+          ) : <span className="rounded-full bg-gray-50 px-2.5 py-1 text-gray-300">← start of family</span>}
+          {family && (
+            <span className="text-[10px] text-gray-500">
+              {siblings.idx + 1}/{siblings.list.length} · {family.name}
+            </span>
+          )}
+          {siblings.next ? (
+            <Link to={`/study/openings/${siblings.next.slug}`}
+              className="rounded-full bg-gray-100 px-2.5 py-1 font-semibold text-gray-700 hover:bg-gray-200"
+              title={`Next in ${family?.name ?? "family"}`}>
+              {siblings.next.name.length > 30 ? siblings.next.name.slice(0, 30) + "…" : siblings.next.name} →
+            </Link>
+          ) : <span className="rounded-full bg-gray-50 px-2.5 py-1 text-gray-300">end of family →</span>}
+        </div>
+      </div>
 
       <header className="mb-4">
         <div className="flex flex-wrap items-baseline gap-3">
@@ -112,7 +179,7 @@ export default function OpeningDetail() {
         {/* Board + step-through */}
         <div>
           <div className="max-w-md">
-            <Board fen={positions[cur]!} viewOnly coordinates />
+            <Board fen={positions[cur]!} viewOnly coordinates orientation={orientation} lastMove={lastMoveKey} />
           </div>
           <div className="mt-3 flex items-center gap-2">
             <button
@@ -146,7 +213,17 @@ export default function OpeningDetail() {
             >
               ⏭
             </button>
+            <button
+              onClick={() => setOrientation((o) => o === "white" ? "black" : "white")}
+              className="ml-auto rounded border border-gray-200 px-2 py-1 text-xs hover:bg-gray-50"
+              title="Flip board (F)"
+            >
+              ⇅ flip
+            </button>
           </div>
+          <p className="mt-1 text-[10px] text-gray-400">
+            keys: ← → step · Home/End jump · F flip
+          </p>
 
           {/* Move list */}
           <div className="mt-3 rounded-lg border border-gray-100 bg-white p-3">
