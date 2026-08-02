@@ -15,6 +15,8 @@ import PromoteLesson from "./pages/PromoteLesson";
 import OppositionTrainer from "./pages/OppositionTrainer";
 import MemoryPalace from "./pages/MemoryPalace";
 import OpeningMemory from "./pages/OpeningMemory";
+import Openings from "./pages/Openings";
+import OpeningDetail from "./pages/OpeningDetail";
 import BlindfoldPage from "./pages/Blindfold";
 import OpeningPage from "./pages/Opening";
 import EngineBattlePage from "./pages/EngineBattle";
@@ -51,6 +53,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="study/opposition" element={<OppositionTrainer />} />
             <Route path="study/memory-palace" element={<MemoryPalace />} />
             <Route path="study/opening-memory" element={<OpeningMemory />} />
+            <Route path="study/openings" element={<Openings />} />
+            <Route path="study/openings/:slug" element={<OpeningDetail />} />
             <Route path="study/:id" element={<StudyTrainer />} />
             <Route path="opening" element={<OpeningPage />} />
             <Route path="engine-battle" element={<EngineBattlePage />} />

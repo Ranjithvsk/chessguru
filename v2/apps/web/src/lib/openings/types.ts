@@ -85,8 +85,13 @@ export interface OpeningIdea {
   storyHook?: string;         // one sentence — uses named squares + piece nicknames
   storyLong?: string;         // 30-sec narration script (S4/S6)
   citations?: Citation[];
-  wikipediaUrl?: string;      // canonical WP article
-  wikipediaExcerpt?: string;  // first 2 paragraphs, cached
+  // 2026-08-02 — Wikibooks "Chess Opening Theory" is our primary auto-source
+  // (per-move tree with plans + variations, CC-BY-SA 3.0). URL pattern:
+  // en.wikibooks.org/wiki/Chess_Opening_Theory/1._e4/1...c5/2._Nf3/...
+  wikibookUrl?: string;
+  wikibookExcerpt?: string;
+  wikipediaUrl?: string;      // article-level background (secondary)
+  wikipediaExcerpt?: string;
   lichessWikiUrl?: string;    // lichess.org/opening/<slug>
 }
 
