@@ -21,6 +21,7 @@ import RepertoireWizard from "./pages/RepertoireWizard";
 import DailyStudy from "./pages/DailyStudy";
 import ProgressPage from "./pages/Progress";
 import ImportGame from "./pages/ImportGame";
+import PrepTest from "./pages/PrepTest";
 import BlindfoldPage from "./pages/Blindfold";
 import OpeningPage from "./pages/Opening";
 import EngineBattlePage from "./pages/EngineBattle";
@@ -63,6 +64,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="study/daily" element={<DailyStudy />} />
             <Route path="study/progress" element={<ProgressPage />} />
             <Route path="study/import-game" element={<ImportGame />} />
+            <Route path="study/prep-test" element={<PrepTest />} />
             <Route path="study/:id" element={<StudyTrainer />} />
             <Route path="opening" element={<OpeningPage />} />
             <Route path="engine-battle" element={<EngineBattlePage />} />
