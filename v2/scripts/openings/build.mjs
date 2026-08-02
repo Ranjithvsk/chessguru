@@ -21,6 +21,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { Chess } from "chess.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../..");
@@ -57,12 +58,30 @@ async function fetchTsv() {
     const lines = text.split("\n").slice(1); // strip header
     for (const line of lines) {
       if (!line.trim()) continue;
-      const [eco, name, pgn, uci, epd] = line.split("\t");
+      // Lichess tsv has EXACTLY 3 tab-separated columns: eco, name, pgn.
+      // (Earlier revision assumed 5 columns and read uci/epd as undefined.)
+      const [eco, name, pgn] = line.split("\t");
       if (!eco || !name || !pgn) continue;
-      rows.push({ eco, name, pgn, uci, epd });
+      rows.push({ eco, name, pgn });
     }
   }
   return rows;
+}
+
+// Convert SAN moves to UCI (e.g. "e4 c5 Nf3" → "e2e4 c7c5 g1f3"). Needed
+// because Lichess Explorer's masters endpoint accepts `play=<uci-list>` but not
+// SAN. Uses chess.js — same lib the web app uses to replay openings.
+function sansToUci(sans) {
+  const g = new Chess();
+  const out = [];
+  for (const s of sans) {
+    try {
+      const mv = g.move(s);
+      if (!mv) return null;
+      out.push(mv.from + mv.to + (mv.promotion ?? ""));
+    } catch { return null; }
+  }
+  return out.join(",");
 }
 
 // ── 2. PGN → SAN array (strip move numbers + result markers) ─────────────
@@ -237,11 +256,20 @@ async function main() {
   const all = await fetchTsv();
   info(`  loaded ${all.length} rows`);
 
-  // De-dupe by UCI first — some rows share the exact same position under
-  // different names. Keep the SHORTEST name (family root, e.g. prefer "Sicilian
-  // Defence" over "Sicilian, Old Sicilian, Wing Gambit"), or the FIRST-seen.
-  const byUci = new Map();
+  // Convert every PGN to SAN[] + UCI once. Rows whose PGN doesn't cleanly parse
+  // (weird sidelines with dashes / non-standard notation) get dropped.
   for (const r of all) {
+    r.sans = pgnToSans(r.pgn);
+    r.uci = r.sans.length ? sansToUci(r.sans) : null;
+  }
+  const parsable = all.filter((r) => r.uci);
+  info(`  ${parsable.length} rows with parsable PGN`);
+
+  // De-dupe by UCI — some rows share the exact same position under different
+  // names. Keep the SHORTEST name (family root, e.g. prefer "Sicilian Defence"
+  // over "Sicilian, Old Sicilian, Wing Gambit").
+  const byUci = new Map();
+  for (const r of parsable) {
     const cur = byUci.get(r.uci);
     if (!cur || r.name.length < cur.name.length) byUci.set(r.uci, r);
   }
@@ -249,7 +277,7 @@ async function main() {
   info(`  ${unique.length} unique positions`);
 
   // Rank by Lichess masters DB frequency. This is Strategy A: the REAL top-500
-  // most-played openings from ~2M master games. Full run is ~1 h cold (rate
+  // most-played openings from ~2M master games. Full run is ~30 min cold (rate
   // limit ~2 req/s); cache is permanent per position, so subsequent runs are
   // instant.
   info(`Ranking ${unique.length} positions by masters DB frequency…`);
@@ -274,7 +302,7 @@ async function main() {
   let done = 0;
   let wbOk = 0;
   for (const r of targets) {
-    const sans = pgnToSans(r.pgn);
+    const sans = r.sans ?? pgnToSans(r.pgn);
     const wbUrl = wikibookUrl(sans);
     let wb = { exists: false };
     if (wbUrl) {
