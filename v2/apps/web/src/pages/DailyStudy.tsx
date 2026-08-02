@@ -70,9 +70,14 @@ export default function DailyStudy() {
           <h1 className="text-2xl font-bold">Daily Study</h1>
           <p className="mt-1 text-sm text-gray-500">Spaced repetition · FSRS scheduling · your active repertoire first.</p>
         </div>
-        <Link to="/study/openings" className="shrink-0 rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold hover:bg-gray-200">
-          + add openings
-        </Link>
+        <div className="flex shrink-0 gap-2">
+          <Link to="/study/progress" className="rounded-full bg-purple-100 px-3 py-1 text-xs font-semibold text-purple-700 hover:bg-purple-200">
+            📊 progress
+          </Link>
+          <Link to="/study/openings" className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold hover:bg-gray-200">
+            + add openings
+          </Link>
+        </div>
       </header>
 
       {/* Stats strip */}
