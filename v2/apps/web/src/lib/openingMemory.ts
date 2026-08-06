@@ -15,45 +15,76 @@ export interface OpeningStep {
   check: boolean;
   castle: boolean;
   fen: string;        // position AFTER the move
-  /** For Knights only: which of the two started this piece — "b" (queen-side)
-   *  or "g" (king-side). Undefined for non-knight moves. Tracked through
-   *  the whole game so a knight tour still points at the right character. */
-  knightVariant?: "b" | "g";
+  /** Which specific piece moved — used by anchorFor to pick the named character:
+   *   - Knight: "b" (queen-side) | "g" (king-side)
+   *   - Rook:   "a" | "h"
+   *   - Pawn:   "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" (starting file)
+   *   - Others: undefined (bishops derive from step.to colour). */
+  variant?: string;
 }
 
 const ROLE: Record<string, string> = { p: "Pawn", n: "Knight", b: "Bishop", r: "Rook", q: "Queen", k: "King" };
 
 /** Replay a SAN line into per-move steps (stops at the first illegal SAN).
- *  Also maintains a per-side knight-lineage map so `knightVariant` sticks to
- *  a specific knight across the whole game (Bheem vs Chutki, Tom vs Jerry). */
+ *  Maintains per-side lineage maps for KNIGHTS, ROOKS, and PAWNS so each
+ *  move's `variant` sticks to a specific piece across the whole game
+ *  (Bheem/Chutki, Dholu/Bholu, Kevin/Stuart/…, and their black counterparts).
+ *  Handles captures, castling (rook moves too), en passant, and promotion. */
 export function buildSteps(sans: string[]): OpeningStep[] {
   const g = new Chess();
   const out: OpeningStep[] = [];
-  // Track which starting knight currently occupies each square.
-  const whiteKnight: Record<string, "b" | "g"> = { b1: "b", g1: "g" };
-  const blackKnight: Record<string, "b" | "g"> = { b8: "b", g8: "g" };
+  const wKnight: Record<string, string> = { b1: "b", g1: "g" };
+  const bKnight: Record<string, string> = { b8: "b", g8: "g" };
+  const wRook:   Record<string, string> = { a1: "a", h1: "h" };
+  const bRook:   Record<string, string> = { a8: "a", h8: "h" };
+  const wPawn:   Record<string, string> = {};
+  const bPawn:   Record<string, string> = {};
+  for (const f of "abcdefgh") { wPawn[f + "2"] = f; bPawn[f + "7"] = f; }
+
+  const mapFor = (piece: string, color: string): Record<string, string> | null => {
+    if (piece === "n") return color === "w" ? wKnight : bKnight;
+    if (piece === "r") return color === "w" ? wRook : bRook;
+    if (piece === "p") return color === "w" ? wPawn : bPawn;
+    return null;
+  };
+
   for (const san of sans) {
     let mv;
     try { mv = g.move(san); } catch { break; }
     if (!mv) break;
-    // Resolve variant BEFORE we update lineage for this move.
-    let knightVariant: "b" | "g" | undefined;
-    if (mv.piece === "n") {
-      const map = mv.color === "w" ? whiteKnight : blackKnight;
-      knightVariant = map[mv.from];
+
+    // Resolve variant BEFORE we mutate lineage — read from the FROM square.
+    let variant: string | undefined;
+    const movingMap = mapFor(mv.piece, mv.color);
+    if (movingMap) variant = movingMap[mv.from];
+
+    // Captures — remove opponent's tracked piece.
+    if (mv.captured) {
+      const oppColor = mv.color === "w" ? "b" : "w";
+      // En passant: captured pawn sits behind the destination square.
+      const capSq = mv.flags.includes("e") ? mv.to[0]! + mv.from[1]! : mv.to;
+      const oppMap = mapFor(mv.captured, oppColor);
+      if (oppMap) delete oppMap[capSq];
     }
-    // Update lineage: a captured knight leaves the OPPOSITE-color map;
-    // a moving knight relocates in its OWN map.
-    if (mv.captured === "n") {
-      const oppMap = mv.color === "w" ? blackKnight : whiteKnight;
-      delete oppMap[mv.to];
+
+    // Move the piece in its own map (unless promoted — then it stops being a pawn).
+    if (movingMap) {
+      const v = movingMap[mv.from];
+      delete movingMap[mv.from];
+      if (v && !mv.promotion) movingMap[mv.to] = v;
     }
-    if (mv.piece === "n") {
-      const map = mv.color === "w" ? whiteKnight : blackKnight;
-      const v = map[mv.from];
-      delete map[mv.from];
-      if (v) map[mv.to] = v;
+
+    // Castling — the rook also moves. chess.js reports only the king in mv.
+    if (mv.flags.includes("k") || mv.flags.includes("q")) {
+      const rank = mv.color === "w" ? "1" : "8";
+      const rookMap = mv.color === "w" ? wRook : bRook;
+      if (mv.flags.includes("k")) {
+        const v = rookMap["h" + rank]; delete rookMap["h" + rank]; if (v) rookMap["f" + rank] = v;
+      } else {
+        const v = rookMap["a" + rank]; delete rookMap["a" + rank]; if (v) rookMap["d" + rank] = v;
+      }
     }
+
     out.push({
       ply: out.length + 1,
       san: mv.san,
@@ -65,7 +96,7 @@ export function buildSteps(sans: string[]): OpeningStep[] {
       check: mv.san.includes("+") || mv.san.includes("#"),
       castle: mv.flags.includes("k") || mv.flags.includes("q"),
       fen: g.fen(),
-      knightVariant,
+      variant,
     });
   }
   return out;
@@ -79,21 +110,25 @@ const VERB: Record<string, string> = {
 export interface Anchor { character: string; glyph: string; sentence: string; scene: Scene; }
 
 /** The anchor for one step, using the active picture set's scene for the destination square.
- *  Splits knights by starting file (Bheem b / Chutki g; Tom b / Jerry g) and
- *  bishops by square colour (Warrior Arjuna dark / Young Arjuna light). */
+ *  Splits pieces into named individuals:
+ *   - Knights by starting file (Bheem b / Chutki g; Tom b / Jerry g)
+ *   - Bishops by square colour (Warrior/Young Arjuna; Warrior/Young Karna)
+ *   - Rooks by starting file (Dholu a / Bholu h; Motu a / Patlu h)
+ *   - Pawns by starting file (Kevin/Stuart/… ; Lil-a/…). */
 export function anchorFor(step: OpeningStep, scenes: Record<string, Scene>): Anchor {
   const army = step.color === "w" ? WHITE_ARMY : BLACK_ARMY;
+  const generic = army.find((p) => p.role === step.role && !p.variant);
   let ch;
-  if (step.role === "Knight" && step.knightVariant) {
-    ch = army.find((p) => p.role === "Knight" && p.variant === step.knightVariant)!;
-  } else if (step.role === "Bishop") {
+  if (step.role === "Bishop") {
     // Bishops never change square colour, so `to` = same colour as its lifetime square.
     const wanted: "light" | "dark" = isLightSquare(step.to) ? "light" : "dark";
-    ch = army.find((p) => p.role === "Bishop" && p.variant === wanted)
-       ?? army.find((p) => p.role === "Bishop" && !p.variant)!;
+    ch = army.find((p) => p.role === "Bishop" && p.variant === wanted) ?? generic;
+  } else if ((step.role === "Knight" || step.role === "Rook" || step.role === "Pawn") && step.variant) {
+    ch = army.find((p) => p.role === step.role && p.variant === step.variant) ?? generic;
   } else {
-    ch = army.find((p) => p.role === step.role && !p.variant)!;
+    ch = generic;
   }
+  ch = ch ?? army.find((p) => p.role === step.role)!;
   const sc = scenes[step.to]!;
   const verb = step.castle ? "castles to" : (VERB[step.role] ?? "moves to");
   let sentence = `${ch.name} ${verb} the ${sc.pair}`;

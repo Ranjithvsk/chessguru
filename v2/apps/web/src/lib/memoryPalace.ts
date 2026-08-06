@@ -741,10 +741,13 @@ export interface PieceChar {
   name: string;
   feature: string;
   sound: string;
-  /** For Knights: "b" = queen-side b-file knight, "g" = king-side g-file knight.
-   *  For Bishops: "light" = light-square bishop, "dark" = dark-square bishop.
-   *  undefined = combined/generic entry. */
-  variant?: "b" | "g" | "light" | "dark";
+  /** Identifies WHICH of the pair/set this entry represents:
+   *   - Knight: "b" (queen-side, b-file) | "g" (king-side, g-file)
+   *   - Bishop: "light" (light-square) | "dark" (dark-square)
+   *   - Rook:   "a" (queen-side, a-file) | "h" (king-side, h-file)
+   *   - Pawn:   "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" (starting file)
+   *  undefined = combined/generic entry (fallback / gallery-only). */
+  variant?: string;
 }
 
 export const WHITE_ARMY: PieceChar[] = [
@@ -754,8 +757,16 @@ export const WHITE_ARMY: PieceChar[] = [
   { glyph: "♘", role: "Knight", name: "Chutki",         feature: "The g-knight — pink-dress girl on her white horse", sound: "“Heehee!”", variant: "g" },
   { glyph: "♗", role: "Bishop", name: "Warrior Arjuna", feature: "The dark-square bishop — battle-hardened Arjuna, Gandiva bow", sound: "Bowstring “TWANG!”", variant: "dark" },
   { glyph: "♗", role: "Bishop", name: "Young Arjuna",   feature: "The light-square bishop — young Arjuna, Gandiva bow",    sound: "Arrow whistle",   variant: "light" },
-  { glyph: "♖", role: "Rook",   name: "Dholu & Bholu",  feature: "Riding white elephants", sound: "“Hehehe!”" },
-  { glyph: "♙", role: "Pawn",   name: "8 Minions",      feature: "Yellow, brave; promote into Hanuman!", sound: "“Banana!”" },
+  { glyph: "♖", role: "Rook",   name: "Dholu",  feature: "The a-file (queen-side) rook — riding a white elephant", sound: "“Hehehe!”",  variant: "a" },
+  { glyph: "♖", role: "Rook",   name: "Bholu",  feature: "The h-file (king-side) rook — riding a white elephant",   sound: "“Hehehe!”",  variant: "h" },
+  { glyph: "♙", role: "Pawn",   name: "Kevin",  feature: "The a-pawn Minion — yellow, brave, promotes into Hanuman!", sound: "“Banana!”", variant: "a" },
+  { glyph: "♙", role: "Pawn",   name: "Stuart", feature: "The b-pawn Minion", sound: "“Banana!”", variant: "b" },
+  { glyph: "♙", role: "Pawn",   name: "Bob",    feature: "The c-pawn Minion", sound: "“Banana!”", variant: "c" },
+  { glyph: "♙", role: "Pawn",   name: "Dave",   feature: "The d-pawn Minion", sound: "“Banana!”", variant: "d" },
+  { glyph: "♙", role: "Pawn",   name: "Phil",   feature: "The e-pawn Minion", sound: "“Banana!”", variant: "e" },
+  { glyph: "♙", role: "Pawn",   name: "Carl",   feature: "The f-pawn Minion", sound: "“Banana!”", variant: "f" },
+  { glyph: "♙", role: "Pawn",   name: "Mel",    feature: "The g-pawn Minion", sound: "“Banana!”", variant: "g" },
+  { glyph: "♙", role: "Pawn",   name: "Larry",  feature: "The h-pawn Minion", sound: "“Banana!”", variant: "h" },
 ];
 
 export const BLACK_ARMY: PieceChar[] = [
@@ -765,8 +776,16 @@ export const BLACK_ARMY: PieceChar[] = [
   { glyph: "♞", role: "Knight", name: "Jerry",         feature: "The g-knight — cheeky mouse on his dark horse", sound: "“Eek eek!”", variant: "g" },
   { glyph: "♝", role: "Bishop", name: "Warrior Karna", feature: "The dark-square bishop — battle-hardened Karna, Vijaya bow", sound: "Arrow “FWOOSH!”", variant: "dark" },
   { glyph: "♝", role: "Bishop", name: "Young Karna",   feature: "The light-square bishop — young Karna, Vijaya bow",     sound: "Bowstring “TWANG!”", variant: "light" },
-  { glyph: "♜", role: "Rook",   name: "Motu & Patlu",  feature: "Riding dark elephants", sound: "“Samosa!” / “Motu, careful!”" },
-  { glyph: "♟", role: "Pawn",   name: "8 Lilliputs",   feature: "Tiny medieval warriors", sound: "Marching “Hup hup hup!”" },
+  { glyph: "♜", role: "Rook",   name: "Motu",   feature: "The a-file (queen-side) rook — riding a dark elephant", sound: "“Samosa!”",          variant: "a" },
+  { glyph: "♜", role: "Rook",   name: "Patlu",  feature: "The h-file (king-side) rook — riding a dark elephant",   sound: "“Motu, careful!”",  variant: "h" },
+  { glyph: "♟", role: "Pawn",   name: "Lil-a",  feature: "The a-pawn Lilliput — tiny medieval warrior", sound: "“Hup hup!”", variant: "a" },
+  { glyph: "♟", role: "Pawn",   name: "Lil-b",  feature: "The b-pawn Lilliput", sound: "“Hup hup!”", variant: "b" },
+  { glyph: "♟", role: "Pawn",   name: "Lil-c",  feature: "The c-pawn Lilliput", sound: "“Hup hup!”", variant: "c" },
+  { glyph: "♟", role: "Pawn",   name: "Lil-d",  feature: "The d-pawn Lilliput", sound: "“Hup hup!”", variant: "d" },
+  { glyph: "♟", role: "Pawn",   name: "Lil-e",  feature: "The e-pawn Lilliput", sound: "“Hup hup!”", variant: "e" },
+  { glyph: "♟", role: "Pawn",   name: "Lil-f",  feature: "The f-pawn Lilliput", sound: "“Hup hup!”", variant: "f" },
+  { glyph: "♟", role: "Pawn",   name: "Lil-g",  feature: "The g-pawn Lilliput", sound: "“Hup hup!”", variant: "g" },
+  { glyph: "♟", role: "Pawn",   name: "Lil-h",  feature: "The h-pawn Lilliput", sound: "“Hup hup!”", variant: "h" },
 ];
 
 export const ALL_SQUARES: string[] = (() => {
