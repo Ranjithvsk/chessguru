@@ -763,7 +763,8 @@ export const BLACK_ARMY: PieceChar[] = [
   { glyph: "♛", role: "Queen",  name: "Nandi",         feature: "Sacred bull, golden bells", sound: "“Mooooo” + bells" },
   { glyph: "♞", role: "Knight", name: "Tom",           feature: "The b-knight — sneering cat on his dark horse", sound: "Cat sneer", variant: "b" },
   { glyph: "♞", role: "Knight", name: "Jerry",         feature: "The g-knight — cheeky mouse on his dark horse", sound: "“Eek eek!”", variant: "g" },
-  { glyph: "♝", role: "Bishop", name: "The two Karnas", feature: "Warrior Karna (dark sq) + Young Karna (light sq), Vijaya bow", sound: "Arrow “FWOOSH!”" },
+  { glyph: "♝", role: "Bishop", name: "Warrior Karna", feature: "The dark-square bishop — battle-hardened Karna, Vijaya bow", sound: "Arrow “FWOOSH!”", variant: "dark" },
+  { glyph: "♝", role: "Bishop", name: "Young Karna",   feature: "The light-square bishop — young Karna, Vijaya bow",     sound: "Bowstring “TWANG!”", variant: "light" },
   { glyph: "♜", role: "Rook",   name: "Motu & Patlu",  feature: "Riding dark elephants", sound: "“Samosa!” / “Motu, careful!”" },
   { glyph: "♟", role: "Pawn",   name: "8 Lilliputs",   feature: "Tiny medieval warriors", sound: "Marching “Hup hup hup!”" },
 ];
