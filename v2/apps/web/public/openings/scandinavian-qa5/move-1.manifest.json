@@ -1,10 +1,10 @@
 {
   "openingSlug": "scandinavian-qa5",
   "openingName": "Scandinavian, 3…Qa5",
-  "theme": "set5",
-  "themeName": "Ocean",
+  "theme": "easy",
+  "themeName": "Easy Start",
   "mode": "single-move",
   "ply": 1,
   "model": "gemini-2.5-flash-image",
-  "generatedAt": "2026-08-06T05:13:44.908Z"
+  "generatedAt": "2026-08-06T05:38:50.182Z"
 }
