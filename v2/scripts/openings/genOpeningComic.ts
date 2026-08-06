@@ -37,7 +37,9 @@ function loadEnv() {
   const candidates = ["/home/dreamworld/apps/backend/.env", "/home/ubuntu/attendance-app/backend/.env"];
   for (const p of candidates) {
     if (!existsSync(p)) continue;
-    for (const line of readFileSync(p, "utf8").split("\n")) {
+    let text: string;
+    try { text = readFileSync(p, "utf8"); } catch { continue; } // EACCES etc. — skip
+    for (const line of text.split("\n")) {
       const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
       if (m && wanted.includes(m[1]!) && !process.env[m[1]!]) {
         process.env[m[1]!] = m[2]!.replace(/^["']|["']$/g, "");
