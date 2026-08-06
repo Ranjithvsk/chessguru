@@ -6,6 +6,7 @@ import { THEMES, themeById, DEFAULT_THEME_ID } from "../lib/memoryPalace";
 import { buildSteps, anchorFor, composeLineStory, OPENING_PRESETS, OPENING_HANDOFF_KEY, type OpeningHandoff } from "../lib/openingMemory";
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+const OPENING_LAST_PICK_KEY = "cg_opening_memory_last";
 
 export default function OpeningMemory() {
   const [themeId, setThemeId] = useState<string>(DEFAULT_THEME_ID);
@@ -18,8 +19,22 @@ export default function OpeningMemory() {
   }, []);
   useEffect(() => { try { sessionStorage.removeItem(OPENING_HANDOFF_KEY); } catch { /* */ } }, []);
 
-  const [line, setLine] = useState<{ name: string; sans: string[] }>(() =>
-    handoff ? { name: handoff.name, sans: handoff.sans } : { name: OPENING_PRESETS[0]!.name, sans: OPENING_PRESETS[0]!.sans });
+  // Priority: fresh handoff > last pick in localStorage > Italian (first preset).
+  const [line, setLine] = useState<{ name: string; sans: string[] }>(() => {
+    if (handoff) return { name: handoff.name, sans: handoff.sans };
+    try {
+      const raw = localStorage.getItem(OPENING_LAST_PICK_KEY);
+      if (raw) {
+        const p = JSON.parse(raw) as { name: string; sans: string[] };
+        if (p?.sans?.length) return p;
+      }
+    } catch { /* fall through */ }
+    return { name: OPENING_PRESETS[0]!.name, sans: OPENING_PRESETS[0]!.sans };
+  });
+  // Persist every change (handoff, preset click) so refresh restores the last pick.
+  useEffect(() => {
+    try { localStorage.setItem(OPENING_LAST_PICK_KEY, JSON.stringify(line)); } catch { /* */ }
+  }, [line]);
 
   const steps = useMemo(() => buildSteps(line.sans), [line]);
   const [ply, setPly] = useState(0); // 0 = starting position
