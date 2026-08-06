@@ -821,9 +821,9 @@ export default function BookPage() {
           {/* quick-jump to the playable diagrams */}
           {playable.length > 0 && (
             <div className="mb-3 flex flex-wrap items-center gap-1.5">
-              <span className="text-xs text-ink-500">Jump to diagram:</span>
+              <span className="text-xs text-ink-500">Click a puzzle to play:</span>
               {playable.map(({ pz, pg }) => (
-                <button key={pz.n} onClick={() => setPage(pg)} title={`Go to ${pz.num ?? "#" + pz.n} (page ${pg})`}
+                <button key={pz.n} onClick={() => { setPage(pg); start(pz); }} title={`Play ${pz.num ?? "#" + pz.n} (page ${pg})`}
                   className={`rounded-full border px-2 py-0.5 text-[11px] transition ${page === pg ? "border-brand-500 bg-brand-600/30 text-white" : "border-brand-700/50 bg-brand-900/25 text-brand-200 hover:bg-brand-600/25"}`}>
                   ▶ {pz.num ?? "#" + pz.n}
                 </button>
