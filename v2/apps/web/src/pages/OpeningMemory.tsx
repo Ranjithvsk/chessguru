@@ -121,15 +121,25 @@ export default function OpeningMemory() {
         </div>
       )}
 
+      {/* One combined story — its own card so it can breathe */}
+      {steps.length > 0 && (
+        <div className="rounded-xl2 border border-brand-700/50 bg-brand-900/25 p-5">
+          <div className="mb-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-brand-300">
+            <span>📖</span>
+            <span>One combined story</span>
+            <span className="text-ink-500">— read it out loud once, top to bottom</span>
+          </div>
+          <div className="space-y-2 text-base leading-8 text-ink-100">
+            {composeLineStory(steps, scenes).split(/(?<=\.)\s+/).map((sentence, i) => (
+              <p key={i}>{sentence}</p>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* full move list with anchors */}
       <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-2">
         <div className="px-2 py-1 text-[11px] uppercase tracking-wide text-ink-500">The whole line</div>
-        {steps.length > 0 && (
-          <div className="mx-2 mb-2 rounded-lg border border-brand-700/40 bg-brand-900/20 p-3">
-            <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-brand-300">One combined story</div>
-            <p className="text-sm leading-relaxed text-ink-200">{composeLineStory(steps, scenes)}</p>
-          </div>
-        )}
         <div className="divide-y divide-ink-800/70">
           {steps.map((st, i) => {
             const a = anchorFor(st, scenes);
