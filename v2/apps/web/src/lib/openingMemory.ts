@@ -62,6 +62,28 @@ export function anchorFor(step: OpeningStep, scenes: Record<string, Scene>): Anc
   return { character: ch.name, glyph: ch.glyph, sentence, scene: sc };
 }
 
+/** Compose the whole opening into ONE running story — every move's anchor
+ *  strung together with varied connectors so it reads aloud as one memorable
+ *  narrative chunk instead of 8-15 separate rows. Used by the "The whole line"
+ *  card so the reader can memorise the WHOLE line as one story. */
+export function composeLineStory(steps: OpeningStep[], scenes: Record<string, Scene>): string {
+  if (!steps.length) return "";
+  const CONNECTORS = ["Then", "Next", "So", "Now", "After that", "Suddenly", "Meanwhile"];
+  const parts: string[] = [];
+  for (let i = 0; i < steps.length; i++) {
+    const a = anchorFor(steps[i]!, scenes);
+    if (i === 0) {
+      parts.push(`First, ${a.sentence.charAt(0).toLowerCase()}${a.sentence.slice(1)}`);
+    } else if (i === steps.length - 1) {
+      parts.push(`and finally ${a.sentence.charAt(0).toLowerCase()}${a.sentence.slice(1)}`);
+    } else {
+      const c = CONNECTORS[(i - 1) % CONNECTORS.length]!;
+      parts.push(`${c.toLowerCase()} ${a.sentence.charAt(0).toLowerCase()}${a.sentence.slice(1)}`);
+    }
+  }
+  return parts.join(". ") + ".";
+}
+
 export interface OpeningPreset { id: string; name: string; eco: string; sans: string[] }
 
 // 2026-08-02 \u2014 Memory Master 500 (S1 seed). The Tier 1 pillars carry full
