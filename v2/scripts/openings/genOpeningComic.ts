@@ -255,13 +255,16 @@ async function callGemini(prompt: string): Promise<Buffer> {
 async function callOpenAI(prompt: string): Promise<Buffer> {
   const key = process.env.OPENAI_API_KEY!;
   const url = "https://api.openai.com/v1/images/generations";
+  // 2026: dall-e-3 is deprecated. The current OpenAI image model is
+  // gpt-image-1 (April 2025 launch). It returns b64_json by default and
+  // supports sizes 1024x1024 / 1024x1536 / 1536x1024, quality low|medium|
+  // high|auto. Notably better at rendering text-in-image than dall-e-3.
   const body = {
-    model: "dall-e-3",
+    model: "gpt-image-1",
     prompt,
     n: 1,
     size: "1024x1024",
-    response_format: "b64_json",
-    quality: "standard",
+    quality: "high",
   };
   const r = await fetch(url, {
     method: "POST",
@@ -272,10 +275,15 @@ async function callOpenAI(prompt: string): Promise<Buffer> {
     const t = await r.text();
     throw new Error(`OpenAI HTTP ${r.status}: ${t.slice(0, 500)}`);
   }
-  const j = (await r.json()) as { data?: Array<{ b64_json?: string; revised_prompt?: string }> };
-  const b64 = j.data?.[0]?.b64_json;
-  if (!b64) throw new Error(`no image in OpenAI response: ${JSON.stringify(j).slice(0, 500)}`);
-  return Buffer.from(b64, "base64");
+  const j = (await r.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+  const item = j.data?.[0];
+  if (item?.b64_json) return Buffer.from(item.b64_json, "base64");
+  if (item?.url) {
+    const imgR = await fetch(item.url);
+    if (!imgR.ok) throw new Error(`image fetch HTTP ${imgR.status}`);
+    return Buffer.from(await imgR.arrayBuffer());
+  }
+  throw new Error(`no image in OpenAI response: ${JSON.stringify(j).slice(0, 500)}`);
 }
 
 async function generate(prompt: string): Promise<Buffer> {
@@ -293,13 +301,15 @@ async function main() {
   const OUT_DIR = resolve(REPO_ROOT, "apps/web/public/openings", SLUG);
   mkdirSync(OUT_DIR, { recursive: true });
 
-  // Single-move mode writes move-<N>.png (or move-<N>-<theme>.png for non-default
-  // themes so 'easy' stays canonical for the trainer UI); strip mode writes comic.png.
+  // Single-move mode writes move-<N>[-<theme>][-<engine>].png. 'easy' + 'gemini'
+  // are the defaults and get no suffix — that's what the trainer UI loads.
+  // Other themes / engines get suffixed so they don't collide.
   const themeSuffix = THEME_ID === "easy" ? "" : `-${THEME_ID}`;
-  const stem = SINGLE_PLY ? `move-${SINGLE_PLY}${themeSuffix}` : "comic";
+  const engineSuffix = ENGINE === "gemini" ? "" : `-${ENGINE === "openai" ? "openai" : ENGINE}`;
+  const stem = SINGLE_PLY ? `move-${SINGLE_PLY}${themeSuffix}${engineSuffix}` : "comic";
   writeFileSync(`${OUT_DIR}/${stem}.prompt.txt`, prompt);
   console.log(`[gen] prompt written (${prompt.length} chars) → ${OUT_DIR}/${stem}.prompt.txt`);
-  console.log(`[gen] calling ${ENGINE === "openai" ? "OpenAI dall-e-3" : "Gemini gemini-2.5-flash-image"} …`);
+  console.log(`[gen] calling ${ENGINE === "openai" ? "OpenAI gpt-image-1" : "Gemini gemini-2.5-flash-image"} …`);
 
   const png = await generate(prompt);
   writeFileSync(`${OUT_DIR}/${stem}.png`, png);
@@ -315,7 +325,7 @@ async function main() {
         ply: SINGLE_PLY ?? undefined,
         plies: SINGLE_PLY ? undefined : spec.panels.length,
         engine: ENGINE,
-        model: ENGINE === "openai" ? "dall-e-3" : "gemini-2.5-flash-image",
+        model: ENGINE === "openai" ? "gpt-image-1" : "gemini-2.5-flash-image",
         generatedAt: new Date().toISOString(),
       },
       null,
