@@ -114,6 +114,8 @@ export default function OpeningMemory() {
           </div>
           <p className="mt-3 text-base font-semibold leading-relaxed text-white">“{anchor.sentence}”</p>
           <p className="mt-1 text-sm text-ink-400"><b className="text-ink-300">{anchor.scene.pair}</b> — {anchor.scene.scene}</p>
+          {/* AI single-move illustration (only if move-<ply>.png exists for this opening slug) */}
+          <MoveImage slug={OPENING_PRESETS.find((p) => p.name === line.name)?.id ?? null} ply={ply} />
         </div>
       ) : (
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-4 text-center text-sm text-ink-400">
@@ -158,6 +160,22 @@ export default function OpeningMemory() {
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Single-move illustration for the currently-viewed ply. Hides itself if
+ *  /openings/<slug>/move-<ply>.png doesn't exist. */
+function MoveImage({ slug, ply }: { slug: string | null; ply: number }) {
+  const [ok, setOk] = useState(true);
+  useEffect(() => { setOk(true); }, [slug, ply]);
+  if (!slug || !ok || ply < 1) return null;
+  const src = `${import.meta.env.BASE_URL}openings/${slug}/move-${ply}.png`;
+  return (
+    <div className="mt-3 overflow-hidden rounded-lg border border-brand-800/60">
+      <img src={src} alt={`move ${ply} illustration`}
+        onError={() => setOk(false)}
+        className="block w-full" />
     </div>
   );
 }
