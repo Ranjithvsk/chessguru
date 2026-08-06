@@ -4,7 +4,7 @@
   "theme": "easy",
   "themeName": "Easy Start",
   "mode": "single-move",
-  "ply": 1,
+  "ply": 3,
   "model": "gemini-2.5-flash-image",
-  "generatedAt": "2026-08-06T06:19:32.371Z"
+  "generatedAt": "2026-08-06T06:03:12.328Z"
 }

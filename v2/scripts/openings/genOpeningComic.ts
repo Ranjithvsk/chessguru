@@ -27,24 +27,31 @@ const SLUG = args.get("slug") ?? "scandinavian-qa5";
 const THEME_ID = args.get("theme") ?? "set5";
 const PLIES = Math.min(20, Math.max(1, Number(args.get("plies") ?? "12")));
 const SINGLE_PLY = args.has("ply") ? Math.max(1, Number(args.get("ply") ?? "1")) : null;
+const ENGINE = (args.get("engine") ?? "gemini").toLowerCase() as "gemini" | "openai";
 
 /* ---------- env ---------- */
 function loadEnv() {
-  if (process.env.GEMINI_API_KEY) return;
+  const wanted = ["GEMINI_API_KEY", "OPENAI_API_KEY"];
+  const missing = () => wanted.filter((k) => !process.env[k]);
+  if (missing().length === 0) return;
   const candidates = ["/home/dreamworld/apps/backend/.env", "/home/ubuntu/attendance-app/backend/.env"];
   for (const p of candidates) {
     if (!existsSync(p)) continue;
     for (const line of readFileSync(p, "utf8").split("\n")) {
       const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-      if (m && m[1] === "GEMINI_API_KEY" && !process.env.GEMINI_API_KEY) {
-        process.env.GEMINI_API_KEY = m[2]!.replace(/^["']|["']$/g, "");
+      if (m && wanted.includes(m[1]!) && !process.env[m[1]!]) {
+        process.env[m[1]!] = m[2]!.replace(/^["']|["']$/g, "");
       }
     }
   }
 }
 loadEnv();
-if (!process.env.GEMINI_API_KEY) {
+if (ENGINE === "gemini" && !process.env.GEMINI_API_KEY) {
   console.error("GEMINI_API_KEY not set — export it or put it in /home/dreamworld/apps/backend/.env");
+  process.exit(1);
+}
+if (ENGINE === "openai" && !process.env.OPENAI_API_KEY) {
+  console.error("OPENAI_API_KEY not set — export it before running with --engine openai");
   process.exit(1);
 }
 
@@ -163,10 +170,17 @@ function composePrompt({ opening, themeName, panels }: ReturnType<typeof buildPa
     .map((p) => {
       const charP = promptName(p.character);
       const [nounA, nounB] = p.scenePair.split(/\s*\+\s*/, 2);
-      const combo = nounA && nounB
-        ? `Draw one silly cartoon object that combines ${nounA} and ${nounB} into a single funny thing (e.g. ${nounB} riding on ${nounA}, or ${nounA} stuck inside ${nounB}). ${charP} walks into the panel toward it, eyes wide.`
-        : `${charP} walks into a scene of "${p.sceneText}".`;
-      const cap = `Bottom caption: "${p.n}. ${p.san} · ${charP}".`;
+      // Primary: render the narrative sceneText literally. Secondary: keep the
+      // two nouns from `pair` central + physically together. Tertiary: draw the
+      // two noun WORDS as visible labels in the scene (comic-book style) so the
+      // learner sees the mnemonic phonetic hook explicitly.
+      const nouns = nounA && nounB ? `${nounA} and ${nounB}` : p.scenePair;
+      const labels = nounA && nounB
+        ? ` Also draw the two words "${nounA}" and "${nounB}" as prominent bold hand-lettered labels floating INSIDE the panel next to each noun (comic-book style, chunky sans-serif, coloured ribbons or speech-bubble tags) — this is the mnemonic hook, not decoration.`
+        : "";
+      const combo =
+        `Illustrate this narrative: ${p.sceneText} Keep ${nouns} as the central subjects, both clearly visible and physically together in one action (touching, combined, or interacting — not sitting apart).${labels} ${charP} walks into the panel from one side toward the action, eyes wide with wonder.`;
+      const cap = `Bottom white ribbon caption: "${p.n}. ${p.san} · ${charP}".`;
       return `Panel ${p.n} (square ${p.toSquare}): ${combo} ${cap}`;
     })
     .join("\n");
@@ -229,6 +243,45 @@ async function callGemini(prompt: string): Promise<Buffer> {
   throw new Error(`no image in Gemini response: ${JSON.stringify(j).slice(0, 500)}`);
 }
 
+/* ---------- OpenAI DALL-E 3 call ----------
+ * POST /v1/images/generations, model=dall-e-3, response_format=b64_json.
+ * DALL-E 3 auto-rewrites prompts unless the caller opts out — but there's no
+ * official opt-out, so the rewritten prompt just gets logged in the response.
+ * DALL-E 3 is generally stronger at rendering text INSIDE images (which is
+ * exactly what we want for the "Emperor" + "More" mnemonic labels). Sizes:
+ * 1024x1024 (square), 1024x1792 (portrait), 1792x1024 (landscape).
+ * Cost: ~$0.04 standard / ~$0.08 HD.
+ */
+async function callOpenAI(prompt: string): Promise<Buffer> {
+  const key = process.env.OPENAI_API_KEY!;
+  const url = "https://api.openai.com/v1/images/generations";
+  const body = {
+    model: "dall-e-3",
+    prompt,
+    n: 1,
+    size: "1024x1024",
+    response_format: "b64_json",
+    quality: "standard",
+  };
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`OpenAI HTTP ${r.status}: ${t.slice(0, 500)}`);
+  }
+  const j = (await r.json()) as { data?: Array<{ b64_json?: string; revised_prompt?: string }> };
+  const b64 = j.data?.[0]?.b64_json;
+  if (!b64) throw new Error(`no image in OpenAI response: ${JSON.stringify(j).slice(0, 500)}`);
+  return Buffer.from(b64, "base64");
+}
+
+async function generate(prompt: string): Promise<Buffer> {
+  return ENGINE === "openai" ? callOpenAI(prompt) : callGemini(prompt);
+}
+
 /* ---------- main ---------- */
 async function main() {
   console.log(`[gen] slug=${SLUG} theme=${THEME_ID} ${SINGLE_PLY ? `ply=${SINGLE_PLY}` : `plies=${PLIES}`}`);
@@ -240,13 +293,15 @@ async function main() {
   const OUT_DIR = resolve(REPO_ROOT, "apps/web/public/openings", SLUG);
   mkdirSync(OUT_DIR, { recursive: true });
 
-  // Single-move mode writes move-<N>.png; strip mode writes comic.png.
-  const stem = SINGLE_PLY ? `move-${SINGLE_PLY}` : "comic";
+  // Single-move mode writes move-<N>.png (or move-<N>-<theme>.png for non-default
+  // themes so 'easy' stays canonical for the trainer UI); strip mode writes comic.png.
+  const themeSuffix = THEME_ID === "easy" ? "" : `-${THEME_ID}`;
+  const stem = SINGLE_PLY ? `move-${SINGLE_PLY}${themeSuffix}` : "comic";
   writeFileSync(`${OUT_DIR}/${stem}.prompt.txt`, prompt);
   console.log(`[gen] prompt written (${prompt.length} chars) → ${OUT_DIR}/${stem}.prompt.txt`);
-  console.log(`[gen] calling Gemini gemini-2.5-flash-image …`);
+  console.log(`[gen] calling ${ENGINE === "openai" ? "OpenAI dall-e-3" : "Gemini gemini-2.5-flash-image"} …`);
 
-  const png = await callGemini(prompt);
+  const png = await generate(prompt);
   writeFileSync(`${OUT_DIR}/${stem}.png`, png);
   writeFileSync(
     `${OUT_DIR}/${stem}.manifest.json`,
@@ -259,7 +314,8 @@ async function main() {
         mode: SINGLE_PLY ? "single-move" : "strip",
         ply: SINGLE_PLY ?? undefined,
         plies: SINGLE_PLY ? undefined : spec.panels.length,
-        model: "gemini-2.5-flash-image",
+        engine: ENGINE,
+        model: ENGINE === "openai" ? "dall-e-3" : "gemini-2.5-flash-image",
         generatedAt: new Date().toISOString(),
       },
       null,

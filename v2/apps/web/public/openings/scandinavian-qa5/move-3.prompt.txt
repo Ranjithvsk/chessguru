@@ -10,6 +10,6 @@ Character:
   - the Yellow-Overall Crew: a small group of cheerful one-eyed and two-eyed yellow-skinned workers in blue denim overalls, marching in a line
 
 Illustration:
-Panel 1 (square e4): Illustrate this narrative: Picture the Elephant with the Door. Say it out loud: “Elephant… Door!” Keep Elephant and Door as the central subjects, both clearly visible and physically together in one action (touching, combined, or interacting — not sitting apart). Also draw the two words "Elephant" and "Door" as prominent bold hand-lettered labels floating INSIDE the panel next to each noun (comic-book style, chunky sans-serif, coloured ribbons or speech-bubble tags) — this is the mnemonic hook, not decoration. the Yellow-Overall Crew walks into the panel from one side toward the action, eyes wide with wonder. Bottom white ribbon caption: "1. e4 · the Yellow-Overall Crew".
+Panel 3 (square d5): Draw one silly cartoon object that combines Dog and Hive into a single funny thing (e.g. Hive riding on Dog, or Dog stuck inside Hive). the Yellow-Overall Crew walks into the panel toward it, eyes wide. Bottom caption: "3. exd5 · the Yellow-Overall Crew".
 
 One simple black sans-serif caption in a white ribbon along the bottom.
