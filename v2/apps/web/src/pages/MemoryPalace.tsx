@@ -193,11 +193,11 @@ export default function MemoryPalace() {
             <div className="space-y-3">
               <div>
                 <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-400">🌟 White — Krishna's Heroes</div>
-                <div className="grid gap-2 sm:grid-cols-2">{WHITE_ARMY.map((p) => <PieceRow key={p.role} p={p} />)}</div>
+                <div className="grid gap-2 sm:grid-cols-2">{WHITE_ARMY.map((p) => <PieceRow key={p.role + (p.variant ?? "")} p={p} />)}</div>
               </div>
               <div>
                 <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-400">🌙 Black — Shiva's Heroes</div>
-                <div className="grid gap-2 sm:grid-cols-2">{BLACK_ARMY.map((p) => <PieceRow key={p.role} p={p} />)}</div>
+                <div className="grid gap-2 sm:grid-cols-2">{BLACK_ARMY.map((p) => <PieceRow key={p.role + (p.variant ?? "")} p={p} />)}</div>
               </div>
             </div>
           )}

@@ -15,18 +15,45 @@ export interface OpeningStep {
   check: boolean;
   castle: boolean;
   fen: string;        // position AFTER the move
+  /** For Knights only: which of the two started this piece — "b" (queen-side)
+   *  or "g" (king-side). Undefined for non-knight moves. Tracked through
+   *  the whole game so a knight tour still points at the right character. */
+  knightVariant?: "b" | "g";
 }
 
 const ROLE: Record<string, string> = { p: "Pawn", n: "Knight", b: "Bishop", r: "Rook", q: "Queen", k: "King" };
 
-/** Replay a SAN line into per-move steps (stops at the first illegal SAN). */
+/** Replay a SAN line into per-move steps (stops at the first illegal SAN).
+ *  Also maintains a per-side knight-lineage map so `knightVariant` sticks to
+ *  a specific knight across the whole game (Bheem vs Chutki, Tom vs Jerry). */
 export function buildSteps(sans: string[]): OpeningStep[] {
   const g = new Chess();
   const out: OpeningStep[] = [];
+  // Track which starting knight currently occupies each square.
+  const whiteKnight: Record<string, "b" | "g"> = { b1: "b", g1: "g" };
+  const blackKnight: Record<string, "b" | "g"> = { b8: "b", g8: "g" };
   for (const san of sans) {
     let mv;
     try { mv = g.move(san); } catch { break; }
     if (!mv) break;
+    // Resolve variant BEFORE we update lineage for this move.
+    let knightVariant: "b" | "g" | undefined;
+    if (mv.piece === "n") {
+      const map = mv.color === "w" ? whiteKnight : blackKnight;
+      knightVariant = map[mv.from];
+    }
+    // Update lineage: a captured knight leaves the OPPOSITE-color map;
+    // a moving knight relocates in its OWN map.
+    if (mv.captured === "n") {
+      const oppMap = mv.color === "w" ? blackKnight : whiteKnight;
+      delete oppMap[mv.to];
+    }
+    if (mv.piece === "n") {
+      const map = mv.color === "w" ? whiteKnight : blackKnight;
+      const v = map[mv.from];
+      delete map[mv.from];
+      if (v) map[mv.to] = v;
+    }
     out.push({
       ply: out.length + 1,
       san: mv.san,
@@ -38,6 +65,7 @@ export function buildSteps(sans: string[]): OpeningStep[] {
       check: mv.san.includes("+") || mv.san.includes("#"),
       castle: mv.flags.includes("k") || mv.flags.includes("q"),
       fen: g.fen(),
+      knightVariant,
     });
   }
   return out;
@@ -50,10 +78,14 @@ const VERB: Record<string, string> = {
 
 export interface Anchor { character: string; glyph: string; sentence: string; scene: Scene; }
 
-/** The anchor for one step, using the active picture set's scene for the destination square. */
+/** The anchor for one step, using the active picture set's scene for the destination square.
+ *  For knights, picks Bheem/Chutki (W) or Tom/Jerry (B) based on step.knightVariant. */
 export function anchorFor(step: OpeningStep, scenes: Record<string, Scene>): Anchor {
   const army = step.color === "w" ? WHITE_ARMY : BLACK_ARMY;
-  const ch = army.find((p) => p.role === step.role)!;
+  const ch =
+    step.role === "Knight" && step.knightVariant
+      ? army.find((p) => p.role === "Knight" && p.variant === step.knightVariant)!
+      : army.find((p) => p.role === step.role && !p.variant)!;
   const sc = scenes[step.to]!;
   const verb = step.castle ? "castles to" : (VERB[step.role] ?? "moves to");
   let sentence = `${ch.name} ${verb} the ${sc.pair}`;
