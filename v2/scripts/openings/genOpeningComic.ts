@@ -25,7 +25,8 @@ for (let i = 2; i < process.argv.length; i++) {
 }
 const SLUG = args.get("slug") ?? "scandinavian-qa5";
 const THEME_ID = args.get("theme") ?? "set5";
-const PLIES = Math.min(20, Math.max(4, Number(args.get("plies") ?? "12")));
+const PLIES = Math.min(20, Math.max(1, Number(args.get("plies") ?? "12")));
+const SINGLE_PLY = args.has("ply") ? Math.max(1, Number(args.get("ply") ?? "1")) : null;
 
 /* ---------- env ---------- */
 function loadEnv() {
@@ -125,16 +126,20 @@ interface PanelSpec {
   castle: boolean;
 }
 
-function buildPanels(slug: string, themeId: string, maxPlies: number) {
+function buildPanels(slug: string, themeId: string, maxPlies: number, singlePly: number | null) {
   const opening = PILLARS.find((p) => p.slug === slug);
   if (!opening) throw new Error(`opening not found: ${slug}`);
-  const mainline = (opening.mainlinePgn ?? opening.pgnStart).slice(0, maxPlies);
+  const fullLine = opening.mainlinePgn ?? opening.pgnStart;
+  const mainline = singlePly
+    ? fullLine.slice(0, singlePly)   // replay through the target ply
+    : fullLine.slice(0, maxPlies);
   const scenes = themeById(themeId).scenes;
-  const steps = buildSteps(mainline);
+  const allSteps = buildSteps(mainline);
+  const steps = singlePly ? [allSteps[singlePly - 1]!] : allSteps;
   const panels: PanelSpec[] = steps.map((step, i) => {
     const a = anchorFor(step, scenes);
     return {
-      n: i + 1,
+      n: singlePly ?? (i + 1),
       character: a.character,
       verb: step.castle ? "castles to" : (VERB[step.role] ?? "moves to"),
       role: step.role,
@@ -166,22 +171,31 @@ function composePrompt({ opening, themeName, panels }: ReturnType<typeof buildPa
     })
     .join("\n");
 
+  const isSingle = panels.length === 1;
   return [
-    `Draw ONE wide landscape (16:9) comic strip, ${panels.length} equal-width vertical panels numbered 1..${panels.length} left-to-right.`,
-    "Style: flat 2D cartoon, thick outlines, bright primary colours, painterly backgrounds. No photorealism, no anime.",
-    "Each panel: medium shot, character waist-up, the combined-noun object clearly in view. Panels separated by thin white gutters. Panel number in a small circle top-left.",
+    isSingle
+      ? "Draw ONE square (1:1) illustration — a single detailed panel, no strip, no grid."
+      : `Draw ONE wide landscape (16:9) comic strip, ${panels.length} equal-width vertical panels numbered 1..${panels.length} left-to-right.`,
+    "Style: flat 2D cartoon, thick outlines, bright primary colours, painterly background. No photorealism, no anime.",
+    isSingle
+      ? "Medium shot: character waist-up in the foreground, the combined-noun object filling the background."
+      : "Each panel: medium shot, character waist-up, the combined-noun object clearly in view. Panels separated by thin white gutters. Panel number in a small circle top-left.",
     "",
-    `Story: "${opening.name}", move-by-move, using the "${themeName}" set for backgrounds.`,
+    `Story: "${opening.name}"${isSingle ? "" : ", move-by-move"}, using the "${themeName}" set for the background${isSingle ? "" : "s"}.`,
     "",
-    "KEY RULE: each panel's two-noun pair must be drawn as ONE combined silly object (not two separate items side-by-side). The weirder the combination, the more memorable.",
+    isSingle
+      ? "KEY RULE: the two-noun pair must be drawn as ONE combined silly object (not two separate items side-by-side). The weirder the combination, the more memorable."
+      : "KEY RULE: each panel's two-noun pair must be drawn as ONE combined silly object (not two separate items side-by-side). The weirder the combination, the more memorable.",
     "",
-    "Characters (identical across every panel):",
+    `Character${isSingle ? "" : "s (identical across every panel)"}:`,
     charBlock,
     "",
-    "Panels:",
+    isSingle ? "Illustration:" : "Panels:",
     panelBlock,
     "",
-    "Simple black sans-serif captions in white ribbons.",
+    isSingle
+      ? "One simple black sans-serif caption in a white ribbon along the bottom."
+      : "Simple black sans-serif captions in white ribbons.",
   ].join("\n");
 }
 
@@ -217,8 +231,8 @@ async function callGemini(prompt: string): Promise<Buffer> {
 
 /* ---------- main ---------- */
 async function main() {
-  console.log(`[gen] slug=${SLUG} theme=${THEME_ID} plies=${PLIES}`);
-  const spec = buildPanels(SLUG, THEME_ID, PLIES);
+  console.log(`[gen] slug=${SLUG} theme=${THEME_ID} ${SINGLE_PLY ? `ply=${SINGLE_PLY}` : `plies=${PLIES}`}`);
+  const spec = buildPanels(SLUG, THEME_ID, PLIES, SINGLE_PLY);
   const prompt = composePrompt(spec);
 
   const HERE = dirname(fileURLToPath(import.meta.url));
@@ -226,21 +240,25 @@ async function main() {
   const OUT_DIR = resolve(REPO_ROOT, "apps/web/public/openings", SLUG);
   mkdirSync(OUT_DIR, { recursive: true });
 
-  writeFileSync(`${OUT_DIR}/comic.prompt.txt`, prompt);
-  console.log(`[gen] prompt written (${prompt.length} chars) → ${OUT_DIR}/comic.prompt.txt`);
+  // Single-move mode writes move-<N>.png; strip mode writes comic.png.
+  const stem = SINGLE_PLY ? `move-${SINGLE_PLY}` : "comic";
+  writeFileSync(`${OUT_DIR}/${stem}.prompt.txt`, prompt);
+  console.log(`[gen] prompt written (${prompt.length} chars) → ${OUT_DIR}/${stem}.prompt.txt`);
   console.log(`[gen] calling Gemini gemini-2.5-flash-image …`);
 
   const png = await callGemini(prompt);
-  writeFileSync(`${OUT_DIR}/comic.png`, png);
+  writeFileSync(`${OUT_DIR}/${stem}.png`, png);
   writeFileSync(
-    `${OUT_DIR}/comic.manifest.json`,
+    `${OUT_DIR}/${stem}.manifest.json`,
     JSON.stringify(
       {
         openingSlug: SLUG,
         openingName: spec.opening.name,
         theme: THEME_ID,
         themeName: spec.themeName,
-        plies: spec.panels.length,
+        mode: SINGLE_PLY ? "single-move" : "strip",
+        ply: SINGLE_PLY ?? undefined,
+        plies: SINGLE_PLY ? undefined : spec.panels.length,
         model: "gemini-2.5-flash-image",
         generatedAt: new Date().toISOString(),
       },
@@ -248,7 +266,7 @@ async function main() {
       2,
     ),
   );
-  console.log(`[gen] comic.png written (${(png.length / 1024).toFixed(0)} KB) → ${OUT_DIR}/comic.png`);
+  console.log(`[gen] ${stem}.png written (${(png.length / 1024).toFixed(0)} KB) → ${OUT_DIR}/${stem}.png`);
 }
 
 main().catch((e) => {
