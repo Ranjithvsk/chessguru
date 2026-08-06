@@ -2,7 +2,7 @@
 // something to the destination square's vivid scene. This is the doc's
 // "[Character] + [Action] + [Square scene]" move-reading, applied to a whole opening.
 import { Chess } from "chess.js";
-import { WHITE_ARMY, BLACK_ARMY, type Scene } from "./memoryPalace";
+import { WHITE_ARMY, BLACK_ARMY, isLightSquare, type Scene } from "./memoryPalace";
 
 export interface OpeningStep {
   ply: number;        // 1-based
@@ -79,13 +79,21 @@ const VERB: Record<string, string> = {
 export interface Anchor { character: string; glyph: string; sentence: string; scene: Scene; }
 
 /** The anchor for one step, using the active picture set's scene for the destination square.
- *  For knights, picks Bheem/Chutki (W) or Tom/Jerry (B) based on step.knightVariant. */
+ *  Splits knights by starting file (Bheem b / Chutki g; Tom b / Jerry g) and
+ *  bishops by square colour (Warrior Arjuna dark / Young Arjuna light). */
 export function anchorFor(step: OpeningStep, scenes: Record<string, Scene>): Anchor {
   const army = step.color === "w" ? WHITE_ARMY : BLACK_ARMY;
-  const ch =
-    step.role === "Knight" && step.knightVariant
-      ? army.find((p) => p.role === "Knight" && p.variant === step.knightVariant)!
-      : army.find((p) => p.role === step.role && !p.variant)!;
+  let ch;
+  if (step.role === "Knight" && step.knightVariant) {
+    ch = army.find((p) => p.role === "Knight" && p.variant === step.knightVariant)!;
+  } else if (step.role === "Bishop") {
+    // Bishops never change square colour, so `to` = same colour as its lifetime square.
+    const wanted: "light" | "dark" = isLightSquare(step.to) ? "light" : "dark";
+    ch = army.find((p) => p.role === "Bishop" && p.variant === wanted)
+       ?? army.find((p) => p.role === "Bishop" && !p.variant)!;
+  } else {
+    ch = army.find((p) => p.role === step.role && !p.variant)!;
+  }
   const sc = scenes[step.to]!;
   const verb = step.castle ? "castles to" : (VERB[step.role] ?? "moves to");
   let sentence = `${ch.name} ${verb} the ${sc.pair}`;

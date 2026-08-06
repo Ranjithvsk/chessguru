@@ -741,10 +741,10 @@ export interface PieceChar {
   name: string;
   feature: string;
   sound: string;
-  /** For Knights: "b" = the knight that starts on the b-file (queen-side),
-   *  "g" = the knight that starts on the g-file (king-side). undefined =
-   *  the combined/gallery entry (still shown in the picture-set browser). */
-  variant?: "b" | "g";
+  /** For Knights: "b" = queen-side b-file knight, "g" = king-side g-file knight.
+   *  For Bishops: "light" = light-square bishop, "dark" = dark-square bishop.
+   *  undefined = combined/generic entry. */
+  variant?: "b" | "g" | "light" | "dark";
 }
 
 export const WHITE_ARMY: PieceChar[] = [
@@ -752,7 +752,8 @@ export const WHITE_ARMY: PieceChar[] = [
   { glyph: "♕", role: "Queen",  name: "Hanuman",        feature: "Flying monkey-god, golden mace",  sound: "“Jai Shri Ram!”" },
   { glyph: "♘", role: "Knight", name: "Bheem",          feature: "The b-knight — laddoo-loving strongman on his white horse", sound: "“Dhishoom!”", variant: "b" },
   { glyph: "♘", role: "Knight", name: "Chutki",         feature: "The g-knight — pink-dress girl on her white horse", sound: "“Heehee!”", variant: "g" },
-  { glyph: "♗", role: "Bishop", name: "The two Arjunas", feature: "Warrior Arjuna (dark sq) + Young Arjuna (light sq), Gandiva bow", sound: "Bowstring “TWANG!”" },
+  { glyph: "♗", role: "Bishop", name: "Warrior Arjuna", feature: "The dark-square bishop — battle-hardened Arjuna, Gandiva bow", sound: "Bowstring “TWANG!”", variant: "dark" },
+  { glyph: "♗", role: "Bishop", name: "Young Arjuna",   feature: "The light-square bishop — young Arjuna, Gandiva bow",    sound: "Arrow whistle",   variant: "light" },
   { glyph: "♖", role: "Rook",   name: "Dholu & Bholu",  feature: "Riding white elephants", sound: "“Hehehe!”" },
   { glyph: "♙", role: "Pawn",   name: "8 Minions",      feature: "Yellow, brave; promote into Hanuman!", sound: "“Banana!”" },
 ];
