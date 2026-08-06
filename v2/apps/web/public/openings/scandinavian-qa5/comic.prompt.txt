@@ -1,0 +1,37 @@
+Draw ONE wide landscape (16:9) comic strip made of 12 equal-width vertical panels numbered 1 to 12 left-to-right.
+
+STYLE (locked, use for EVERY panel):
+- Flat 2D cartoon, thick friendly outlines (2-3 px), bright saturated primary colours, painterly backgrounds.
+- Think Cartoon Network / early Pixar shorts. NOT anime, NOT photorealistic, NOT dark fantasy.
+- Each panel is a medium shot: character shown waist-up, background scene fully visible behind them.
+- Panels separated by thin white gutters (~10 px). Panel number in a small black-outlined white circle top-left of each panel.
+
+STORY: "Scandinavian, 3…Qa5" — the opening move-by-move, using the "Ocean" memory-palace scenes as backgrounds.
+
+CHARACTERS (KEEP IDENTICAL across every panel they appear in — same face, costume, colour, proportions):
+  - Phil: tall one-eyed yellow worker in blue overalls, wide silly grin
+  - Lil-d: tiny medieval foot-soldier with BLOND hair, sepia tunic, wooden shield, small helmet
+  - Nandi: large white bull with soft grey markings, golden bells strung around the neck
+  - Bheem: sturdy young boy hero in an orange tunic, bare arms, holding a round sweet dumpling
+  - Dave: tall two-eyed yellow worker in blue overalls, hair combed over sideways
+  - Jerry: small brown cartoon mouse with big round ears and a cheeky smile
+  - Chutki: cheerful girl in a bright pink dress, two braided pigtails
+  - Lil-c: tiny medieval foot-soldier with BLACK hair, sepia tunic, wooden shield, small helmet
+  - Young Arjuna: teenage archer with no beard, light blue tunic, same longbow
+  - Young Karna: teenage warrior in golden armour and a light tunic, holding the same longbow
+
+PANELS (in order):
+Panel 1: Phil to the An epaulette shark walks on its fins and asks the waiter for More fish please.. Bottom caption: "1. e4 · Phil".
+Panel 2: Lil-d to the A tiny damselfish sits behind a wheel and takes a Drive through the coral reef.. Bottom caption: "2. d5 · Lil-d".
+Panel 3: Phil to the A tiny damselfish sits behind a wheel and takes a Drive through the coral reef. and snatches its prize. Bottom caption: "3. exd5 · Phil".
+Panel 4: Nandi to the A tiny damselfish sits behind a wheel and takes a Drive through the coral reef. and snatches its prize. Bottom caption: "4. Qxd5 · Nandi".
+Panel 5: Bheem to the A piece of Coral finds a shiny Key and wonders which treasure chest it opens.. Bottom caption: "5. Nc3 · Bheem".
+Panel 6: Nandi to the A big patch of Algae is actually a Hive where tiny sea bees make salty honey.. Bottom caption: "6. Qa5 · Nandi".
+Panel 7: Dave to the A dragonfish opens its giant jaws and lets out a Roar that shakes the ocean floor.. Bottom caption: "7. d4 · Dave".
+Panel 8: Jerry to the A feather star waves its frilly arms and does magic Tricks that dazzle every fish.. Bottom caption: "8. Nf6 · Jerry".
+Panel 9: Chutki to the A flying fish soars out of the water and nearly lands on a very surprised Flea.. Bottom caption: "9. Nf3 · Chutki".
+Panel 10: Lil-c to the A cuttlefish changes color to look like six fluffy Chicks and fools everyone.. Bottom caption: "10. c6 · Lil-c".
+Panel 11: Young Arjuna aims at the A catfish falls asleep on a lily pad and Snores so loud it makes bubbles.. Bottom caption: "11. Bc4 · Young Arjuna".
+Panel 12: Young Karna aims at the A glowing firefly squid blinks its lights and does the Jive on the ocean floor.. Bottom caption: "12. Bf5 · Young Karna".
+
+Read left-to-right like a book. Do not merge panels. Do not add extra panels. Do not stylise text — captions are simple black sans-serif inside a white ribbon at the bottom of each panel.
