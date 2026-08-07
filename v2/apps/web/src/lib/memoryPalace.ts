@@ -710,26 +710,94 @@ const SET10: Record<string, Scene> = {
   h8: { pair: "Horse-carriage + Ate", emoji: "🐴", scene: "A horse-drawn carriage pulls up and the horse Ate all eight cakes before anyone sat down." },
 };
 
-export interface Theme { id: string; name: string; emoji: string; blurb: string; scenes: Record<string, Scene>; }
+export interface Theme { id: string; name: string; emoji: string; blurb: string; level: 1 | 2 | 3 | 4 | 5; scenes: Record<string, Scene>; }
 
-// All themes share the SAME rank-rhyme grid (1=Sun, 2=Shoe, 3=Tree, 4=Door, 5=Hive,
-// 6=Sticks, 7=Heaven, 8=Gate). Only the file word changes per theme. Easy keeps the
-// file animal constant too (8 animals x 8 objects), so there are only 16 things to learn.
-export const THEMES: Theme[] = [
-  { id: "easy",  name: "Easy Start",       emoji: "\ud83d\udc23", blurb: "Just 8 animals + 8 objects", scenes: EASY },
-  { id: "set1",  name: "Classic Animals",  emoji: "\ud83d\udc1c", blurb: "Everyday animals being silly", scenes: SET1 },
-  { id: "set2",  name: "Indian Mythology", emoji: "\ud83d\udd49\ufe0f", blurb: "Gods & heroes of the epics", scenes: SET2 },
-  { id: "set3",  name: "Food Chaos",       emoji: "\ud83c\udf69", blurb: "Kitchen & snack silliness", scenes: SET3 },
-  { id: "set4",  name: "Space & Aliens",   emoji: "\ud83d\ude80", blurb: "Astronauts, planets, UFOs", scenes: SET4 },
-  { id: "set5",  name: "Ocean",            emoji: "\ud83d\udc2c", blurb: "Underwater creatures", scenes: SET5 },
-  { id: "set6",  name: "Jungle Safari",    emoji: "\ud83e\udd81", blurb: "Wild jungle animals", scenes: SET6 },
-  { id: "set7",  name: "Fairy Tales",      emoji: "\ud83c\udff0", blurb: "Princesses, dragons, magic", scenes: SET7 },
-  { id: "set8",  name: "Superheroes",      emoji: "\ud83e\uddb8", blurb: "Heroes & superpowers", scenes: SET8 },
-  { id: "set9",  name: "Cartoons",         emoji: "\ud83d\udcfa", blurb: "Beloved cartoon stars", scenes: SET9 },
-  { id: "set10", name: "Vehicles",         emoji: "\ud83d\ude97", blurb: "Cars, trains, planes, robots", scenes: SET10 },
+/* ---------- Level 1 auto-generation ----------
+ * Level 1 = MAXIMUM repetition / simplicity: every square with the same rank uses
+ * the same object (Sun/Shoe/Tree/Door/Hive/Sticks/Heaven/Gate). Only the file
+ * character varies per theme. Learners memorise 8 characters + 8 objects \u2014 16 things
+ * total \u2014 and every one of the 64 squares slots in automatically.
+ *
+ * A theme at Level 1 is generated from: one character per file (a-h) + the shared
+ * EASY_OBJECTS rank map.
+ *
+ * Higher levels progressively vary the object per file/theme, ending at Level 5
+ * (fully unique per theme).
+ */
+type L1Char = [string, string];  // [name, emoji]
+const L1_CHARS: Record<string, Record<string, L1Char>> = {
+  // Same as EASY \u2014 kept in sync so both themes render identically at L1.
+  easy:  { a: ["Ant","\ud83d\udc1c"], b: ["Bear","\ud83d\udc3b"], c: ["Cat","\ud83d\udc31"], d: ["Dog","\ud83d\udc36"], e: ["Elephant","\ud83d\udc18"], f: ["Fox","\ud83e\udd8a"], g: ["Goat","\ud83d\udc10"], h: ["Horse","\ud83d\udc34"] },
+  set1:  { a: ["Angel","\ud83d\udc7c"], b: ["Butterfly","\ud83e\udd8b"], c: ["Cuckoo","\ud83d\udc26"], d: ["Dinosaur","\ud83e\udd95"], e: ["Eagle","\ud83e\udd85"], f: ["Firefly","\u2728"], g: ["Gorilla","\ud83e\udd8d"], h: ["Hawk","\ud83e\udd85"] },
+  set2:  { a: ["Arjuna","\ud83c\udff9"], b: ["Bhima","\ud83d\udcaa"], c: ["Chitragupta","\ud83d\udcd6"], d: ["Drona","\ud83c\udf93"], e: ["Ekalavya","\ud83d\udd90\ufe0f"], f: ["Fulara","\ud83c\udf3a"], g: ["Ganesha","\ud83d\udc18"], h: ["Hanuman","\ud83d\udc12"] },
+  set3:  { a: ["Apple","\ud83c\udf4e"], b: ["Banana","\ud83c\udf4c"], c: ["Carrot","\ud83e\udd55"], d: ["Doughnut","\ud83c\udf69"], e: ["Egg","\ud83e\udd5a"], f: ["Fig","\ud83c\udf47"], g: ["Garlic","\ud83e\uddc4"], h: ["Honey","\ud83c\udf6f"] },
+  set4:  { a: ["Astronaut","\ud83d\udc68\u200d\ud83d\ude80"], b: ["Blackhole","\ud83d\udd73\ufe0f"], c: ["Comet","\u2604\ufe0f"], d: ["Droid","\ud83e\udd16"], e: ["Eclipse","\ud83c\udf11"], f: ["Firestar","\u2b50"], g: ["Galaxy","\ud83c\udf0c"], h: ["Hubble","\ud83d\udd2d"] },
+  set5:  { a: ["Anglerfish","\ud83d\udc1f"], b: ["Blowfish","\ud83d\udc21"], c: ["Clownfish","\ud83d\udc20"], d: ["Dolphin","\ud83d\udc2c"], e: ["Eel","\u26a1"], f: ["Flounder","\ud83d\udc1f"], g: ["Giant Squid","\ud83e\udd91"], h: ["Hammerhead","\ud83e\udd88"] },
+  set6:  { a: ["Ape","\ud83d\udc35"], b: ["Buffalo","\ud83e\uddac"], c: ["Croc","\ud83d\udc0a"], d: ["Dingo","\ud83d\udc15"], e: ["Elephant","\ud83d\udc18"], f: ["Flamingo","\ud83e\udda9"], g: ["Gorilla","\ud83e\udd8d"], h: ["Hippo","\ud83e\udd9b"] },
+  set7:  { a: ["Aladdin","\ud83e\ude94"], b: ["Beast","\ud83e\udd81"], c: ["Cinderella","\ud83d\udc60"], d: ["Dragon","\ud83d\udc09"], e: ["Elf","\ud83e\udddd"], f: ["Fairy","\ud83e\uddda"], g: ["Giant","\ud83c\udf29\ufe0f"], h: ["Hansel","\ud83c\udf6c"] },
+  set8:  { a: ["Aquaman","\ud83c\udf0a"], b: ["Batman","\ud83e\udd87"], c: ["Cap","\ud83d\udee1\ufe0f"], d: ["Deadpool","\u2764\ufe0f"], e: ["Ember","\ud83d\udd25"], f: ["Flash","\u26a1"], g: ["Green Lantern","\ud83d\udc9a"], h: ["Hulk","\ud83d\udcaa"] },
+  set9:  { a: ["Ash","\ud83c\udfae"], b: ["Bugs","\ud83d\udc30"], c: ["Charlie","\ud83d\ude00"], d: ["Dora","\ud83c\udf92"], e: ["Elmo","\ud83d\udd34"], f: ["Fred","\ud83e\udd95"], g: ["Garfield","\ud83d\udc31"], h: ["Homer","\ud83c\udf69"] },
+  set10: { a: ["Airplane","\u2708\ufe0f"], b: ["Bus","\ud83d\ude8c"], c: ["Car","\ud83d\ude97"], d: ["Drone","\ud83d\ude81"], e: ["Excavator","\ud83c\udfd7\ufe0f"], f: ["Firetruck","\ud83d\ude92"], g: ["Golf-cart","\u26f3"], h: ["Helicopter","\ud83d\ude81"] },
+};
+
+/** Build a Level-1 scene set for one theme: every square = {file char + rank object}
+ *  using EASY_OBJECTS as the shared rank map. */
+function buildLevel1(themeId: string): Record<string, Scene> {
+  const chars = L1_CHARS[themeId] ?? L1_CHARS.easy!;
+  const out: Record<string, Scene> = {};
+  for (const f of "abcdefgh") for (let r = 1; r <= 8; r++) {
+    const [char, emoji] = chars[f]!;
+    const obj = EASY_OBJECTS[r]!;
+    out[f + r] = {
+      pair: `${char} + ${obj}`,
+      emoji,
+      scene: `Picture the ${char} with the ${obj}. Say it out loud: \u201c${char}\u2026 ${obj}!\u201d`,
+    };
+  }
+  return out;
+}
+
+// Theme-metadata (used by both L1 and L5 registrations).
+interface ThemeMeta { id: string; name: string; emoji: string; blurb: string; }
+const THEME_META: ThemeMeta[] = [
+  { id: "easy",  name: "Easy Start",       emoji: "\ud83d\udc23", blurb: "Just 8 animals + 8 objects" },
+  { id: "set1",  name: "Classic Animals",  emoji: "\ud83d\udc1c", blurb: "Everyday animals being silly" },
+  { id: "set2",  name: "Indian Mythology", emoji: "\ud83d\udd49\ufe0f", blurb: "Gods & heroes of the epics" },
+  { id: "set3",  name: "Food Chaos",       emoji: "\ud83c\udf69", blurb: "Kitchen & snack silliness" },
+  { id: "set4",  name: "Space & Aliens",   emoji: "\ud83d\ude80", blurb: "Astronauts, planets, UFOs" },
+  { id: "set5",  name: "Ocean",            emoji: "\ud83d\udc2c", blurb: "Underwater creatures" },
+  { id: "set6",  name: "Jungle Safari",    emoji: "\ud83e\udd81", blurb: "Wild jungle animals" },
+  { id: "set7",  name: "Fairy Tales",      emoji: "\ud83c\udff0", blurb: "Princesses, dragons, magic" },
+  { id: "set8",  name: "Superheroes",      emoji: "\ud83e\uddb8", blurb: "Heroes & superpowers" },
+  { id: "set9",  name: "Cartoons",         emoji: "\ud83d\udcfa", blurb: "Beloved cartoon stars" },
+  { id: "set10", name: "Vehicles",         emoji: "\ud83d\ude97", blurb: "Cars, trains, planes, robots" },
 ];
-export const themeById = (id: string): Theme => THEMES.find((t) => t.id === id) ?? THEMES[0]!;
-export const DEFAULT_THEME_ID = "easy";
+
+// L5 = the hand-authored per-theme rosters (fully varied within each theme).
+// SET1 also plays the role of L5 for "Classic Animals" \u2014 it's the reference set.
+const L5_SCENES: Record<string, Record<string, Scene>> = {
+  easy: EASY, set1: SET1, set2: SET2, set3: SET3, set4: SET4, set5: SET5,
+  set6: SET6, set7: SET7, set8: SET8, set9: SET9, set10: SET10,
+};
+
+/** All themes at all supported levels. L2/L3/L4 currently fall back to L5 (the
+ *  intermediate blends aren't authored yet). */
+export const THEMES: Theme[] = THEME_META.flatMap((m) => {
+  const l1 = buildLevel1(m.id);
+  const l5 = L5_SCENES[m.id] ?? l1;
+  return [
+    { ...m, id: `${m.id}-l1`, level: 1 as const, scenes: l1 },
+    { ...m, id: `${m.id}-l5`, level: 5 as const, scenes: l5 },
+  ];
+});
+
+export const themeById = (id: string): Theme => {
+  // Back-compat: old ids (like "easy" / "set5") resolve to L5.
+  return THEMES.find((t) => t.id === id)
+    ?? THEMES.find((t) => t.id === `${id}-l5`)
+    ?? THEMES[0]!;
+};
+export const DEFAULT_THEME_ID = "easy-l1";
 
 // Back-compat: the original single export still points at Set 1.
 export const SCENES: Record<string, Scene> = SET1;

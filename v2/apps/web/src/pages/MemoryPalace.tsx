@@ -128,11 +128,31 @@ export default function MemoryPalace() {
         <p className="text-sm text-ink-400">Every square has a funny picture. <b className="text-ink-200">a</b>=animal that starts with the letter, the <b className="text-ink-200">number</b> rhymes (1=Sun, 2=Shoe…). Learn the 64 scenes, then quiz yourself!</p>
       </div>
 
-      {/* theme picker */}
+      {/* level + theme picker */}
       <div>
+        <div className="mb-1 flex items-baseline gap-2 text-[11px] uppercase tracking-wide text-ink-500">
+          <span>Level</span>
+          <span className="text-ink-600">— L1 easiest (all squares repeat objects) → L5 hardest (every theme uniquely varies)</span>
+        </div>
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {[1, 5].map((L) => {
+            const active = themeById(themeId).level === L;
+            return (
+              <button key={L} onClick={() => {
+                // Swap to same theme at the picked level (fall back to easy if not available).
+                const base = themeId.replace(/-l\d$/, "");
+                const next = `${base}-l${L}`;
+                setThemeId(THEMES.find(t => t.id === next)?.id ?? THEMES.find(t => t.level === L)!.id);
+                reset(dir);
+              }} className={`rounded-lg px-3 py-1.5 text-xs font-bold ${active ? "bg-amber-600 text-white" : "border border-ink-700 text-ink-300 hover:bg-ink-800"}`}>
+                Level {L}
+              </button>
+            );
+          })}
+        </div>
         <div className="mb-1 text-[11px] uppercase tracking-wide text-ink-500">Picture set</div>
         <div className="flex flex-wrap gap-1.5">
-          {THEMES.map((t) => (
+          {THEMES.filter((t) => t.level === themeById(themeId).level).map((t) => (
             <button key={t.id} onClick={() => { setThemeId(t.id); reset(dir); }} title={t.blurb}
               className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold ${themeId === t.id ? "bg-brand-600 text-white" : "border border-ink-700 text-ink-300 hover:bg-ink-800"}`}>
               {t.emoji} {t.name}

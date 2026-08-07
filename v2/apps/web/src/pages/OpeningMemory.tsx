@@ -77,11 +77,26 @@ export default function OpeningMemory() {
         </div>
       </div>
 
-      {/* picture set */}
+      {/* level + picture set */}
       <div>
+        <div className="mb-1 text-[11px] uppercase tracking-wide text-ink-500">Level (L1 = easiest / L5 = most varied)</div>
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {[1, 5].map((L) => {
+            const active = themeById(themeId).level === L;
+            return (
+              <button key={L} onClick={() => {
+                const base = themeId.replace(/-l\d$/, "");
+                const next = `${base}-l${L}`;
+                setThemeId(THEMES.find(t => t.id === next)?.id ?? THEMES.find(t => t.level === L)!.id);
+              }} className={`rounded-lg px-3 py-1.5 text-xs font-bold ${active ? "bg-amber-600 text-white" : "border border-ink-700 text-ink-300 hover:bg-ink-800"}`}>
+                Level {L}
+              </button>
+            );
+          })}
+        </div>
         <div className="mb-1 text-[11px] uppercase tracking-wide text-ink-500">Picture set (anchors)</div>
         <div className="flex flex-wrap gap-1.5">
-          {THEMES.map((t) => (
+          {THEMES.filter((t) => t.level === themeById(themeId).level).map((t) => (
             <button key={t.id} onClick={() => setThemeId(t.id)} title={t.blurb}
               className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold ${themeId === t.id ? "bg-brand-600 text-white" : "border border-ink-700 text-ink-300 hover:bg-ink-800"}`}>
               {t.emoji} {t.name}
