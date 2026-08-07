@@ -42,8 +42,17 @@ function timeTier(ms: number): { chip: string; emoji: string } {
   return                { chip: "bg-amber-500/10 text-amber-100 border-amber-500/25",           emoji: "🐢" };
 }
 
+// Rating-delta chip color: emerald for gain, rose for loss, muted for zero (a hint
+// solve or an even swap). Skipped entirely for null (legacy rows without a diff).
+function rdChip(rd: number): { chip: string; arrow: string; sign: string } {
+  if (rd > 0)  return { chip: "bg-emerald-500/25 text-emerald-100 border-emerald-400/50 ring-1 ring-emerald-400/20", arrow: "↑", sign: "+" };
+  if (rd < 0)  return { chip: "bg-rose-500/25 text-rose-100 border-rose-400/50 ring-1 ring-rose-400/20",              arrow: "↓", sign: "−" };
+  return           { chip: "bg-ink-700/40 text-ink-300 border-ink-600/50",                                             arrow: "·", sign: "" };
+}
+
 /** Mini board, mounted only when scrolled into view; green ring = solved, red = missed.
- *  Bottom-right badge shows solve time (when the row has one — legacy rows don't). */
+ *  Corner badges: top-right = rating delta (±N), bottom-right = solve time. Both are
+ *  optional — legacy rows without ms/ratingDiff simply omit them. */
 function LazyMini({ it }: { it: HistoryItem }) {
   const ref = useRef<HTMLDivElement>(null);
   const [show, setShow] = useState(false);
@@ -56,15 +65,24 @@ function LazyMini({ it }: { it: HistoryItem }) {
     return () => io.disconnect();
   }, [show]);
   const lm = it.lastMove ? ([it.lastMove.slice(0, 2), it.lastMove.slice(2, 4)] as [Key, Key]) : undefined;
-  const tier = typeof it.ms === "number" ? timeTier(it.ms) : null;
+  const tTier = typeof it.ms === "number" ? timeTier(it.ms) : null;
+  const rd = typeof it.ratingDiff === "number" ? it.ratingDiff : null;
+  const rdT = rd != null ? rdChip(rd) : null;
   return (
     <div ref={ref} className={`relative overflow-hidden rounded-md border-2 ${it.win ? "border-accent-500" : "border-rose-500"}`}>
       {show && it.fen
         ? <Board fen={it.fen} orientation={it.orientation} lastMove={lm} viewOnly coordinates={false} className="mini" />
         : <div className="aspect-square w-full bg-ink-800" />}
-      {tier && typeof it.ms === "number" && (
-        <span className={`absolute bottom-1 right-1 flex items-center gap-0.5 rounded-md border ${tier.chip} px-1.5 py-0.5 text-[10px] font-semibold shadow-sm backdrop-blur-sm`}>
-          <span>{tier.emoji}</span><span className="tabular-nums">{fmtMs(it.ms)}</span>
+      {rdT && rd != null && (
+        <span className={`absolute top-1 right-1 flex items-center gap-0.5 rounded-md border ${rdT.chip} px-1.5 py-0.5 text-[10px] font-bold shadow-sm backdrop-blur-sm tabular-nums`}
+              title={`Rating ${rd >= 0 ? "gained" : "lost"} on this solve`}>
+          <span>{rdT.arrow}</span><span>{rdT.sign}{Math.abs(rd)}</span>
+        </span>
+      )}
+      {tTier && typeof it.ms === "number" && (
+        <span className={`absolute bottom-1 right-1 flex items-center gap-0.5 rounded-md border ${tTier.chip} px-1.5 py-0.5 text-[10px] font-semibold shadow-sm backdrop-blur-sm`}
+              title="Time to solve this puzzle">
+          <span>{tTier.emoji}</span><span className="tabular-nums">{fmtMs(it.ms)}</span>
         </span>
       )}
     </div>
