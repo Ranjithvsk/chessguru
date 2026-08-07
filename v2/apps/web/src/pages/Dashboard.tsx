@@ -16,6 +16,12 @@ type Dash = {
   themesBf?: ThemeRow[];
   days?: { day: string; solves: number; wins: number; rating: number }[];
   bands?: { lo: number; hi: number; attempted: number; solved: number; accuracy: number }[];
+  personalBests?: {
+    bestRating: number | null; bestRatingDate: string | null;
+    bestDay: number | null; bestDayDate: string | null;
+    biggestGain: number | null; biggestGainDate: string | null;
+    fastestMs: number | null; fastestDate: string | null;
+  };
 };
 
 const PROVISIONAL_GAMES = 5;
@@ -132,6 +138,56 @@ function Heatmap({ days, weeks = 13 }: { days: NonNullable<Dash["days"]>; weeks?
             </div>
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Compact solve-time formatter for the "fastest solve" tile — matches the History
+// badge style ("8.4s", "1m 12s") so the same numbers read the same everywhere.
+function fmtSolveShort(ms: number): string {
+  const s = ms / 1000;
+  if (s < 10) return `${s.toFixed(1)}s`;
+  if (s < 60) return `${Math.round(s)}s`;
+  const m = Math.floor(s / 60), r = Math.round(s - m * 60);
+  return `${m}m${r ? ` ${r}s` : ""}`;
+}
+// Human date: "12 Aug" — dense enough for the tile footer, doesn't repeat the year.
+function niceDate(iso: string | null): string {
+  if (!iso) return "";
+  try { return new Date(iso + "T00:00:00Z").toLocaleDateString(undefined, { day: "2-digit", month: "short", timeZone: "UTC" }); }
+  catch { return iso; }
+}
+
+// Trophy shelf. Four mini-tiles, each with an icon + big number + label + date. Uses
+// a warm gold→amber gradient card so it reads as "celebration" and stands apart from
+// the ink-tone cards above. Tiles are skipped individually when their value is null
+// (e.g. no ms rows yet -> no fastest-solve tile) so the card never shows a "—" gap.
+function PersonalBests({ pb }: { pb: NonNullable<Dash["personalBests"]> }) {
+  const tiles = [
+    pb.bestRating   != null ? { icon: "🏆", label: "Best rating",       value: String(pb.bestRating),        date: pb.bestRatingDate,   tone: "text-amber-200" } : null,
+    pb.bestDay      != null ? { icon: "📅", label: "Most solves in a day", value: String(pb.bestDay),         date: pb.bestDayDate,      tone: "text-emerald-200" } : null,
+    pb.biggestGain  != null ? { icon: "📈", label: "Biggest 1-day gain", value: `+${pb.biggestGain}`,        date: pb.biggestGainDate,  tone: "text-cyan-200" } : null,
+    pb.fastestMs    != null ? { icon: "⚡", label: "Fastest solve",      value: fmtSolveShort(pb.fastestMs),  date: pb.fastestDate,      tone: "text-brand-200" } : null,
+  ].filter(Boolean) as Array<{ icon: string; label: string; value: string; date: string | null; tone: string }>;
+  if (tiles.length === 0) return null;
+  return (
+    <div className="rounded-xl2 border border-amber-500/30 bg-gradient-to-br from-amber-500/15 via-orange-500/5 to-ink-900 p-5">
+      <div className="mb-3 flex items-baseline justify-between">
+        <span className="text-sm font-semibold text-white">🏆 Personal bests</span>
+        <span className="text-xs text-ink-400">last 120 days</span>
+      </div>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {tiles.map((t) => (
+          <div key={t.label} className="rounded-lg border border-amber-500/20 bg-ink-900/60 p-3 transition-transform hover:-translate-y-0.5">
+            <div className="flex items-baseline justify-between">
+              <span className="text-lg">{t.icon}</span>
+              {t.date && <span className="text-[10px] text-ink-500">{niceDate(t.date)}</span>}
+            </div>
+            <div className={`mt-1 font-display text-2xl font-bold tabular-nums ${t.tone}`}>{t.value}</div>
+            <div className="mt-0.5 text-[11px] text-ink-400">{t.label}</div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -290,6 +346,7 @@ export default function DashboardPage() {
       </div>
 
       {data.days && <Heatmap days={data.days} />}
+      {data.personalBests && <PersonalBests pb={data.personalBests} />}
       {data.days && <RatingChart days={data.days} />}
       {data.bands && data.bands.length > 0 && <BandChart bands={data.bands} userRating={data.global?.rating ?? 1500} />}
 

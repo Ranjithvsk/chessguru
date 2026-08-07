@@ -172,7 +172,7 @@ export class PuzzlesService {
       this.conn.db!.collection("userperfs").findOne({ _id: userId as any }),
       this.conn.db!
         .collection("rounds")
-        .find({ _id: { $gte: `${userId}:` as any, $lt: `${userId};` as any } }, { projection: { w: 1, d: 1, r: 1, k: 1 } })
+        .find({ _id: { $gte: `${userId}:` as any, $lt: `${userId};` as any } }, { projection: { w: 1, d: 1, r: 1, k: 1, pr: 1, ms: 1 } })
         .sort({ d: -1 })
         .limit(2000)
         .toArray(),
@@ -229,6 +229,42 @@ export class PuzzlesService {
       .sort((a, b) => a[0] - b[0])
       .map(([lo, b]) => ({ lo, hi: lo + 199, attempted: b.attempted, solved: b.solved,
                            accuracy: b.attempted ? Math.round((b.solved / b.attempted) * 100) : 0 }));
+
+    // Personal bests — single-pass scan of rated puzzle rounds. Fastest solve is only
+    // meaningful on WINS (a fast miss isn't an achievement) and only when we have ms.
+    let bestRating = 0, bestRatingDate: string | null = null;
+    let fastestMs = Infinity, fastestDate: string | null = null;
+    for (const r of puzzleRounds) {
+      const rating = typeof r.r === "number" ? r.r : 0;
+      const day = r.d ? new Date(r.d).toISOString().slice(0, 10) : null;
+      if (rating > bestRating) { bestRating = rating; bestRatingDate = day; }
+      if (r.w && typeof r.ms === "number" && r.ms > 0 && r.ms < fastestMs) {
+        fastestMs = r.ms; fastestDate = day;
+      }
+    }
+    // Best day = day with most solves in the last 120d window. Biggest single-day
+    // rating gain = max positive jump in end-of-day rating vs the previous ACTIVE day.
+    // Sparse day-to-day (some days have 0 solves) matches how streak/heatmap treat it.
+    let bestDaySolves = 0, bestDayDate: string | null = null;
+    for (const d of days) {
+      if (d.solves > bestDaySolves) { bestDaySolves = d.solves; bestDayDate = d.day; }
+    }
+    let biggestGain = 0, biggestGainDate: string | null = null;
+    let prev: number | null = null;
+    for (const d of days) {
+      if (d.rating > 0) {
+        if (prev != null && d.rating - prev > biggestGain) {
+          biggestGain = d.rating - prev; biggestGainDate = d.day;
+        }
+        prev = d.rating;
+      }
+    }
+    const personalBests = {
+      bestRating: bestRating || null, bestRatingDate,
+      bestDay: bestDaySolves || null, bestDayDate,
+      biggestGain: biggestGain || null, biggestGainDate,
+      fastestMs: isFinite(fastestMs) ? fastestMs : null, fastestDate,
+    };
     return {
       loggedIn: true,
       global: { rating: Math.round(p.puzzle?.gl?.r ?? 1500), rd: Math.round(p.puzzle?.gl?.d ?? 500), games: p.puzzle?.nb ?? 0 },
@@ -238,6 +274,7 @@ export class PuzzlesService {
       themesBf,
       days,
       bands,
+      personalBests,
     };
   }
 
