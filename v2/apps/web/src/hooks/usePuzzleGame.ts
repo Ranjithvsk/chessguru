@@ -72,6 +72,11 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   // same puzzle are ignored — the player usually retries after the first miss and
   // we already recorded the fail). Stored so history can replay "what went wrong".
   const wrongMoveRef = useRef<string | null>(null);
+  // Practice mode: when true, submit() skips the api.complete call so a retry after
+  // seeing the analysis doesn't inflate your rating. Reset whenever a fresh puzzle
+  // loads (see the useEffect on `puzzle`).
+  const practiceRef = useRef(false);
+  const [practice, setPractice] = useState(false);
 
   const [fen, setFen] = useState("start");
   const [orientation, setOrientation] = useState<"white" | "black">("white");
@@ -100,6 +105,10 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
     solution.current = puzzle.solution ?? [];
     failed.current = false;
     hinted.current = false;
+    // Fresh puzzle => practice mode off, unless retry() just turned it on (retry
+    // doesn't refetch — it re-runs this effect via the puzzle ref, and clears
+    // reviewIdRef itself so we land in the "fresh puzzle" branch below).
+    if (!practiceRef.current) setPractice(false);
     const pc = playerColor();
     setOrientation(pc);
     setHintShapes([]);
@@ -153,6 +162,9 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
     // (guest review, edge cases).
     const ms = solveMsRef.current ?? (startedAtRef.current != null ? Date.now() - startedAtRef.current : null);
     if (solveMsRef.current == null && ms != null) { solveMsRef.current = ms; setSolveMs(ms); }
+    // Practice mode: retrying a puzzle you've already reviewed shouldn't move your
+    // rating (you already know the answer). Freeze the clock display but skip the API.
+    if (practiceRef.current) return;
     api.complete(puzzle.id, {
       win, hint: hinted.current, difficulty, userId, theme,
       mode, rating: displayRating, deviation: 200,
@@ -319,8 +331,35 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   }, []);
   const exploreDests = useMemo(() => (exploreFen ? destsFromChess(exploreGame.current as any) : new Map()), [exploreFen]);
 
-  const next = useCallback(() => { try { localStorage.removeItem(STORE_KEY); } catch { /* */ } setReviewId(null); setNonce((n) => n + 1); }, []);
-  const review = useCallback((id: string) => { setReplayPly(null); setReviewId(id); }, []);
+  const next = useCallback(() => { try { localStorage.removeItem(STORE_KEY); } catch { /* */ } setReviewId(null); setNonce((n) => n + 1); practiceRef.current = false; setPractice(false); }, []);
+  const review = useCallback((id: string) => { setReplayPly(null); setReviewId(id); practiceRef.current = false; setPractice(false); }, []);
+  // Retry the current puzzle in practice mode — resets state locally on the same
+  // puzzle object (no refetch, no rating impact). Called from the review view after
+  // the player has seen the analysis and wants to attempt the solve themselves.
+  const retry = useCallback(() => {
+    if (!puzzle) return;
+    practiceRef.current = true; setPractice(true);
+    // Rebuild the game position from the puzzle's start fen and reset all per-solve flags.
+    game.current = new Chess();
+    try { game.current.load(puzzle.fen); } catch { /* */ }
+    solution.current = puzzle.solution ?? [];
+    idx.current = 0;
+    solved.current = false;
+    failed.current = false;
+    hinted.current = false;
+    wrongMoveRef.current = null;
+    solveMsRef.current = null;
+    setSolveMs(null);
+    startedAtRef.current = Date.now();
+    setElapsedMs(0);
+    setLastMove(puzzle.lastMove ? [puzzle.lastMove.slice(0, 2) as Key, puzzle.lastMove.slice(2, 4) as Key] : undefined);
+    setFen(puzzle.fen);
+    setReplayPly(null);
+    setHintShapes([]);
+    setRatingDiff(null);
+    setFb({ kind: "wait", title: "Practice run", sub: "You've seen the answer — now find it yourself" });
+    force((n) => n + 1);
+  }, [puzzle]);
 
   const exploring = exploreFen != null;
   return {
@@ -333,11 +372,13 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
     lastMove: exploring ? exploreLast : replayView ? replayView.lastMove : lastMove,
     hintShapes: exploring ? [] : hintShapes,
     fb, ratingDiff, displayRating,
-    solveMs, elapsedMs,
+    solveMs, elapsedMs, practice,
     solved: solved.current, hinted: hinted.current, failed: failed.current,
-    onMove: exploring ? exploreMove : onMove, tryInput, showHint, viewSolution, next, review,
+    onMove: exploring ? exploreMove : onMove, tryInput, showHint, viewSolution, next, review, retry,
     replayPly, replayTotal: solution.current.length, replayPrev, replayNext,
-    reviewing: reviewId != null,
+    // Practice mode counts as NOT reviewing — the analysis card + arrows should hide
+    // and the player interacts freshly with the same puzzle.
+    reviewing: reviewId != null && !practice,
     exploring, startExplore, stopExplore, exploreUndo,
   };
 }

@@ -258,7 +258,9 @@ export default function PuzzlesPage() {
         {/* Analysis callout — visible only when reviewing a past solve. For a MISS it
             shows "you played X, best was Y" with matching red/green pills that echo the
             arrows drawn on the board. For a WIN it just labels the arrow legend so the
-            replay reads clearly. */}
+            replay reads clearly. Two follow-up buttons at the bottom: Try again (retry
+            the SAME puzzle in practice mode — no rating), Try similar (fresh puzzle at
+            same theme). */}
         {g.reviewing && analysis && (analysis.wrongSan || analysis.bestSan) && (
           <div className={`rounded-xl2 border p-4 ${analysis.win ? "border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 to-ink-900" : "border-rose-500/30 bg-gradient-to-br from-rose-500/10 to-ink-900"}`}>
             <div className="mb-2 text-sm font-semibold text-white">
@@ -281,6 +283,31 @@ export default function PuzzlesPage() {
               </div>
             )}
             <div className="mt-2 text-[11px] text-ink-500">Arrows on the board show the same moves — 🔴 wrong, 🟢 best.</div>
+            {/* Follow-up actions. Retry only for misses — a win has nothing to reprove.
+                Try-similar picks the first tactical theme so it filters, not resets. */}
+            <div className="mt-3 flex gap-2">
+              {!analysis.win && (
+                <button onClick={g.retry}
+                  className="flex-1 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:from-emerald-400 hover:to-teal-400">
+                  ▶ Try again
+                </button>
+              )}
+              {tacticalThemes.length > 0 && (
+                <button onClick={() => { const t = tacticalThemes[0]; try { localStorage.setItem("cg_theme", t); } catch { /* */ } setTheme(t); g.next(); }}
+                  className="flex-1 rounded-lg border border-brand-500/50 bg-brand-500/10 px-3 py-2 text-sm font-semibold text-brand-100 hover:bg-brand-500/20">
+                  ↻ Try similar
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Practice-mode banner — replaces the analysis card while retrying. Reminds the
+            user this attempt won't count so they don't wonder why their rating didn't move. */}
+        {g.practice && !g.solved && (
+          <div className="rounded-xl2 border border-teal-500/30 bg-gradient-to-br from-teal-500/10 to-ink-900 p-4">
+            <div className="text-sm font-semibold text-teal-200">🧪 Practice run</div>
+            <div className="mt-1 text-xs text-ink-400">Rating stays untouched — you're re-solving after seeing the answer.</div>
           </div>
         )}
 
