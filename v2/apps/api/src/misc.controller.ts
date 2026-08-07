@@ -1,4 +1,4 @@
-import { Controller, Get, Req, Query } from "@nestjs/common";
+import { Controller, Get, Req, Query, Param } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { THEMES } from "./themes";
@@ -17,6 +17,26 @@ export class MiscController {
 
   @Get("me/rating")
   myRating(@Req() req: any) { return this.auth.myRating(req.session); }
+
+  /** The signed-in user's round for a specific puzzle — used by the review view to
+   *  show what wrong move they played and what the best move was. Returns
+   *  { round: null } when there's no round (either not signed in, or the user
+   *  hasn't played this puzzle) so the client can render neutrally. */
+  @Get("me/round/:pid")
+  async myRound(@Req() req: any, @Param("pid") pid: string) {
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) return { round: null };
+    const r: any = await this.conn.db!.collection("rounds").findOne({ _id: `${userId}:${pid}` as any });
+    if (!r) return { round: null };
+    const p: any = await this.conn.db!.collection("puzzles").findOne({ _id: pid as any }, { projection: { line: 1 } });
+    const sol = String(p?.line || "").trim().split(" ").filter(Boolean);
+    return { round: {
+      win: !!r.w, date: r.d, ratingDiff: typeof r.rd === "number" ? r.rd : null,
+      ms: typeof r.ms === "number" ? r.ms : null,
+      wrong: typeof r.wr === "string" ? r.wr : null,
+      best: !r.w ? (sol[1] ?? null) : null,   // solver's expected first move (line[0] is the opponent's setup)
+    } };
+  }
 
   /** Solved-puzzle history + categorised summary for the signed-in user. */
   @Get("me/history")
@@ -48,6 +68,13 @@ export class MiscController {
         .toArray();
       for (const p of ps) pmap[String(p._id)] = p;
     }
+    // Which line-move index the solver was on when they mis-clicked. Every solved
+    // puzzle stores the OPPONENT's setup move as the FIRST token in `line`; the
+    // solver's expected move is index 1. So the "best move" to show on a miss = line[1].
+    const bestOf = (p: any): string | null => {
+      const sol = String(p?.line || "").trim().split(" ").filter(Boolean);
+      return sol[1] ?? null;
+    };
 
     // Position the solver faced (puzzle fen after the opponent's setup move).
     const miniOf = (p: any) => {
@@ -68,6 +95,8 @@ export class MiscController {
         ratingAfter: typeof r.r === "number" ? r.r : null,
         puzzleRating, themes, mode: r.k ?? "puzzle", sel: r.sel ?? null,
         ms: typeof r.ms === "number" ? r.ms : null,   // solve time in ms (null on legacy rows)
+        wrong: typeof r.wr === "string" ? r.wr : null, // UCI of the wrong move played (misses only)
+        best: !r.w ? bestOf(p) : null,                // expected first move — for the "best was X" callout
         ...miniOf(p),
       };
     });

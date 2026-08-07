@@ -21,7 +21,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 export interface RandomPuzzleOpts { theme: string; rating: number; difficulty: Difficulty; maxPc?: number; userId?: string | null; section?: string; player?: string;   mode?: string;
 }
 export interface MasterPlayer { name: string; count: number; }
-export interface CompleteBody { win: boolean; hint: boolean; difficulty: Difficulty; userId: string | null; mode?: "puzzle" | "blindfold"; rating?: number; deviation?: number; theme?: string; ms?: number; }
+export interface CompleteBody { win: boolean; hint: boolean; difficulty: Difficulty; userId: string | null; mode?: "puzzle" | "blindfold"; rating?: number; deviation?: number; theme?: string; ms?: number; wrong?: string; }
 export interface AuthResult { ok: boolean; error?: string; }
 
 export interface Overview { total: number; engineGenerated: number; verified: number; engineGames: number; pools: { bfPools: number; piecePools: number; paths: number }; users: number; }
@@ -33,6 +33,8 @@ export interface HistoryItem {
   ratingDiff: number | null; ratingAfter: number | null;
   puzzleRating: number | null; themes: string[]; mode: string; sel?: string | null;
   ms?: number | null;
+  wrong?: string | null;    // UCI of the wrong move played (only set on misses)
+  best?: string | null;     // UCI of the expected first move — for the "best was X" callout
   fen: string | null; lastMove: string | null; orientation: "white" | "black";
 }
 export interface HistoryReport {
@@ -45,10 +47,12 @@ export interface HistoryReport {
   nextOffset?: number;
 }
 
+export interface MyRound { win: boolean; date: string; ratingDiff: number | null; ms: number | null; wrong: string | null; best: string | null; }
 export const api = {
   me: () => get<AuthMe>("/auth/me"),
   myRating: () => get<MeRating>("/api/me/rating"),
   history: (offset = 0) => get<HistoryReport>(`/api/me/history?offset=${offset}`),
+  myRound: (pid: string) => get<{ round: MyRound | null }>(`/api/me/round/${encodeURIComponent(pid)}`),
   themes: () => get<{ themes: string[] }>("/api/themes"),
   randomPuzzle: (opts: RandomPuzzleOpts) => {
     const p = new URLSearchParams({ theme: opts.theme, rating: String(opts.rating), difficulty: opts.difficulty });

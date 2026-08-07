@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useOutletContext, Link } from "react-router-dom";
+import { useOutletContext, Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { Key } from "chessground/types";
 import Board from "../components/Board";
@@ -157,8 +157,10 @@ function rdChip(rd: number): { chip: string; arrow: string; sign: string } {
 
 /** Mini board, mounted only when scrolled into view; green ring = solved, red = missed.
  *  Corner badges: top-right = rating delta (±N), bottom-right = solve time. Both are
- *  optional — legacy rows without ms/ratingDiff simply omit them. */
-function LazyMini({ it }: { it: HistoryItem }) {
+ *  optional — legacy rows without ms/ratingDiff simply omit them.
+ *  Clicking navigates to the Puzzles page with ?review=<id> so the puzzle re-opens
+ *  in review mode (misses show a red arrow of the wrong move). */
+function LazyMini({ it, onOpen }: { it: HistoryItem; onOpen: (id: string) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [show, setShow] = useState(false);
   useEffect(() => {
@@ -173,11 +175,18 @@ function LazyMini({ it }: { it: HistoryItem }) {
   const tTier = typeof it.ms === "number" ? timeTier(it.ms) : null;
   const rd = typeof it.ratingDiff === "number" ? it.ratingDiff : null;
   const rdT = rd != null ? rdChip(rd) : null;
+  const hint = it.win ? "Replay this solve" : "Review — see the wrong move + best move";
   return (
-    <div ref={ref} className={`relative overflow-hidden rounded-md border-2 ${it.win ? "border-accent-500" : "border-rose-500"}`}>
+    <button ref={ref as unknown as React.RefObject<HTMLButtonElement>} onClick={() => onOpen(it.id)}
+      type="button" title={hint}
+      className={`group relative overflow-hidden rounded-md border-2 ${it.win ? "border-accent-500" : "border-rose-500"} transition-transform hover:-translate-y-0.5 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-brand-400`}>
       {show && it.fen
         ? <Board fen={it.fen} orientation={it.orientation} lastMove={lm} viewOnly coordinates={false} className="mini" />
         : <div className="aspect-square w-full bg-ink-800" />}
+      {/* Hover reveal: subtle "▶ replay" chip so it's obvious the tile is interactive. */}
+      <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/40 text-xs font-semibold text-white opacity-0 transition-opacity group-hover:opacity-100">
+        {it.win ? "▶ Replay" : "🔍 Review"}
+      </span>
       {rdT && rd != null && (
         <span className={`absolute top-1 right-1 flex items-center gap-0.5 rounded-md border ${rdT.chip} px-1.5 py-0.5 text-[10px] font-bold shadow-sm backdrop-blur-sm tabular-nums`}
               title={`Rating ${rd >= 0 ? "gained" : "lost"} on this solve`}>
@@ -190,7 +199,7 @@ function LazyMini({ it }: { it: HistoryItem }) {
           <span>{tTier.emoji}</span><span className="tabular-nums">{fmtMs(it.ms)}</span>
         </span>
       )}
-    </div>
+    </button>
   );
 }
 
@@ -203,6 +212,10 @@ export default function HistoryPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [result, setResult] = useState<Result>("all");
   const [theme,  setTheme]  = useState<string>("");
+  const nav = useNavigate();
+  // Open a past solve in the Puzzles-page review view. Query-string handoff means
+  // deep-links from anywhere (share, browser back) work without wiring extra props.
+  const openReview = (id: string) => nav(`/?review=${encodeURIComponent(id)}`);
   useEffect(() => {
     if (data?.loggedIn) { setPages([]); setMore(!!data.hasMore); setOff(data.nextOffset ?? null); }
   }, [data]);
@@ -327,7 +340,7 @@ export default function HistoryPage() {
                       {tg.label} <span className="font-normal text-ink-500">· {tg.items.length}</span>
                     </h3>
                     <div className="grid grid-cols-3 gap-2 sm:gap-3">
-                      {tg.items.map((it) => <LazyMini key={it.id + it.date} it={it} />)}
+                      {tg.items.map((it) => <LazyMini key={it.id + it.date} it={it} onOpen={openReview} />)}
                     </div>
                   </div>
                 ))}

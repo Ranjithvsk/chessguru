@@ -1,6 +1,9 @@
-import { useEffect, useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useOutletContext, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { Chess } from "chess.js";
+import type { Key } from "chessground/types";
+import type { DrawShape } from "chessground/draw";
 import type { Difficulty } from "@chessguru/types";
 import Board from "../components/Board";
 import SolvedStrip from "../components/SolvedStrip";
@@ -74,6 +77,56 @@ export default function PuzzlesPage() {
   const themePerf = theme !== "mix" && dashLite?.loggedIn ? dashLite.themes?.find((t) => t.theme === theme) : undefined;
 
   const g = usePuzzleGame({ theme, difficulty, userId, initialRating: rating, section, player });
+
+  // Deep-link handoff from the History page: /?review=<id> auto-loads that solve
+  // in review mode. We consume the param once, then strip it so a refresh doesn't
+  // trap the user in review-of-N forever.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const rid = searchParams.get("review");
+    if (!rid) return;
+    g.review(rid);
+    const next = new URLSearchParams(searchParams); next.delete("review");
+    setSearchParams(next, { replace: true });
+    // g.review is stable (useCallback) but eslint-plugin-react-hooks can't prove it —
+    // deliberately omit from deps so we consume the param exactly once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Reviewing a past solve? Fetch the user's round for the puzzle so we can show
+  // WHAT went wrong (red arrow of the wrong move + green arrow of the best move)
+  // and a SAN callout in the sidebar. Only runs while a review is active — hidden
+  // when the user clicks Next / picks a fresh puzzle.
+  const { data: reviewRound } = useQuery({
+    queryKey: ["me-round", g.puzzle?.id],
+    enabled: !!g.puzzle?.id && g.reviewing,
+    queryFn: () => api.myRound(g.puzzle!.id),
+    staleTime: 60_000,
+  });
+  const round = reviewRound?.round ?? null;
+  // Convert UCIs to SAN using the puzzle's starting FEN so the callout reads like a
+  // human ("Nf3", not "g1f3"). If SAN conversion fails (bad move / promotion edge),
+  // fall back to the raw UCI so we never crash the page.
+  const analysis = useMemo(() => {
+    if (!g.reviewing || !round || !g.puzzle?.fen) return null;
+    const toSan = (uci: string | null): string | null => {
+      if (!uci) return null;
+      try {
+        const c = new Chess(g.puzzle!.fen);
+        const mv = c.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: (uci[4] as any) || "q" });
+        return mv?.san ?? uci;
+      } catch { return uci; }
+    };
+    const wrongSan = toSan(round.wrong);
+    const bestSan  = toSan(round.best);
+    const shapes: DrawShape[] = [];
+    if (round.wrong) shapes.push({ orig: round.wrong.slice(0, 2) as Key, dest: round.wrong.slice(2, 4) as Key, brush: "red" });
+    if (round.best)  shapes.push({ orig: round.best.slice(0, 2) as Key,  dest: round.best.slice(2, 4) as Key,  brush: "green" });
+    return { shapes, wrongSan, bestSan, win: round.win };
+  }, [g.reviewing, g.puzzle?.fen, round]);
+  // Board shapes: analysis arrows take priority over normal hint shapes while reviewing.
+  const boardShapes = analysis?.shapes.length ? analysis.shapes : g.hintShapes;
+
   // Mixed ("All themes") puzzles hide their theme so it is not a spoiler;
   // reveal on demand and re-hide whenever the puzzle changes.
   const [showTheme, setShowTheme] = useState(false);
@@ -92,7 +145,7 @@ export default function PuzzlesPage() {
         <Board
           fen={g.fen} orientation={g.orientation} turnColor={g.turnColor}
           movableColor={g.movableColor} dests={g.dests} lastMove={g.lastMove}
-          shapes={g.hintShapes} onMove={g.onMove}
+          shapes={boardShapes} onMove={g.onMove}
         />
         {g.solved && g.replayTotal > 0 && !g.exploring && (
           <div className="mt-3 flex flex-wrap items-center justify-center gap-3">
@@ -201,6 +254,35 @@ export default function PuzzlesPage() {
             <button onClick={g.viewSolution} className="flex-1 rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">View Solution</button>
           </div>
         </div>
+
+        {/* Analysis callout — visible only when reviewing a past solve. For a MISS it
+            shows "you played X, best was Y" with matching red/green pills that echo the
+            arrows drawn on the board. For a WIN it just labels the arrow legend so the
+            replay reads clearly. */}
+        {g.reviewing && analysis && (analysis.wrongSan || analysis.bestSan) && (
+          <div className={`rounded-xl2 border p-4 ${analysis.win ? "border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 to-ink-900" : "border-rose-500/30 bg-gradient-to-br from-rose-500/10 to-ink-900"}`}>
+            <div className="mb-2 text-sm font-semibold text-white">
+              {analysis.win ? "🔍 Replay" : "🔎 What went wrong"}
+            </div>
+            {!analysis.win && analysis.wrongSan && (
+              <div className="flex items-center justify-between rounded-lg bg-rose-500/10 px-3 py-2">
+                <span className="text-xs text-rose-300/80">You played</span>
+                <span className="font-display text-base font-bold text-rose-200 tabular-nums">
+                  <span className="mr-1">↳</span>{analysis.wrongSan}
+                </span>
+              </div>
+            )}
+            {analysis.bestSan && (
+              <div className="mt-1.5 flex items-center justify-between rounded-lg bg-emerald-500/10 px-3 py-2">
+                <span className="text-xs text-emerald-300/80">{analysis.win ? "Winning move" : "Best move was"}</span>
+                <span className="font-display text-base font-bold text-emerald-200 tabular-nums">
+                  <span className="mr-1">✓</span>{analysis.bestSan}
+                </span>
+              </div>
+            )}
+            <div className="mt-2 text-[11px] text-ink-500">Arrows on the board show the same moves — 🔴 wrong, 🟢 best.</div>
+          </div>
+        )}
 
         {theme === "mix" && displayThemes.length > 0 && (
           <div className="rounded-xl2 border border-brand-500/25 bg-gradient-to-br from-brand-500/10 via-ink-900 to-ink-900 p-5">

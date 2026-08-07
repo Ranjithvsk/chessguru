@@ -68,6 +68,10 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   const solveMsRef = useRef<number | null>(null);
   const [solveMs, setSolveMs] = useState<number | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0); // live tick, only used for the display
+  // Wrong-move capture: UCI of the FIRST incorrect move played (later misses on the
+  // same puzzle are ignored — the player usually retries after the first miss and
+  // we already recorded the fail). Stored so history can replay "what went wrong".
+  const wrongMoveRef = useRef<string | null>(null);
 
   const [fen, setFen] = useState("start");
   const [orientation, setOrientation] = useState<"white" | "black">("white");
@@ -128,6 +132,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
       solveMsRef.current = null;
       setSolveMs(null);
       setElapsedMs(0);
+      wrongMoveRef.current = null;
       try { if (puzzle.id) localStorage.setItem(STORE_KEY, JSON.stringify({ id: puzzle.id, theme, maxPc: maxPc ?? 0 })); } catch { /* */ }
     }
   }, [puzzle]);
@@ -152,6 +157,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
       win, hint: hinted.current, difficulty, userId, theme,
       mode, rating: displayRating, deviation: 200,
       ...(ms != null ? { ms } : {}),
+      ...(wrongMoveRef.current ? { wrong: wrongMoveRef.current } : {}),
     }).then((r) => {
       if (typeof r.ratingDiff === "number") setRatingDiff(r.ratingDiff);
       if (r.glicko) setDisplayRating(Math.round(r.glicko.r));
@@ -206,7 +212,13 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
         finish();
         return;
       }
-      if (!failed.current && !hinted.current) submit(false); // deduct once
+      if (!failed.current && !hinted.current) {
+        // Snapshot the wrong UCI BEFORE calling submit() — the ref is read inside
+        // api.complete's payload. Later misses on the same puzzle don't overwrite:
+        // the first mistake is the diagnostic one, retries are just user recovery.
+        wrongMoveRef.current = uci;
+        submit(false);
+      }
       failed.current = true;
       setFb({ kind: "bad", title: "Not the best", sub: "Try again." });
       // Snap the wrong move back. It was never applied to game.current, so

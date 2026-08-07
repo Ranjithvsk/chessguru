@@ -224,7 +224,7 @@ export class PuzzlesService {
     };
   }
 
-  async complete(id: string, body: { win: boolean; userId?: string | null; hint?: boolean; mode?: string; rating?: number; deviation?: number; theme?: string; ms?: number }) {
+  async complete(id: string, body: { win: boolean; userId?: string | null; hint?: boolean; mode?: string; rating?: number; deviation?: number; theme?: string; ms?: number; wrong?: string }) {
     const pz = await this.col().findOne({ _id: id as any });
     if (!pz) return null;
     await this.col().updateOne({ _id: id as any }, { $inc: { plays: 1 } });
@@ -259,6 +259,10 @@ export class PuzzlesService {
       // theme-median stats later.
       const msRaw = typeof body.ms === "number" && isFinite(body.ms) ? Math.round(body.ms) : null;
       const ms = msRaw != null && msRaw >= 0 && msRaw <= 30 * 60 * 1000 ? msRaw : null;
+      // Wrong move (UCI, e.g. "e2e4" / "e7e8q"). Only stored on losses; validated
+      // to a 4-5 char UCI so we never persist arbitrary user input on the rounds row.
+      const wrongRaw = typeof body.wrong === "string" ? body.wrong.trim().toLowerCase() : "";
+      const wrong = !win && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(wrongRaw) ? wrongRaw : null;
       await this.conn.db!.collection("rounds").updateOne(
         { _id: `${userId}:${id}` as any },
         { $set: {
@@ -271,6 +275,7 @@ export class PuzzlesService {
           k: key,                                             // "puzzle" | "blindfold"
           sel: body.theme ?? null,                            // selected filter ("mix" = All themes)
           ...(ms != null ? { ms } : {}),                      // solve time in ms (missing on older rows)
+          ...(wrong != null ? { wr: wrong } : {}),            // wrong-move UCI (misses only, missing on wins)
         } },
         { upsert: true },
       );
