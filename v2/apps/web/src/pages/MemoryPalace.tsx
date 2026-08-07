@@ -135,7 +135,7 @@ export default function MemoryPalace() {
           <span className="text-ink-600">— L1 easiest (all squares repeat objects) → L5 hardest (every theme uniquely varies)</span>
         </div>
         <div className="mb-3 flex flex-wrap gap-1.5">
-          {[1, 5].map((L) => {
+          {[1, 2, 3, 4, 5].map((L) => {
             const active = themeById(themeId).level === L;
             return (
               <button key={L} onClick={() => {

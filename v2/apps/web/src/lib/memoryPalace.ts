@@ -740,22 +740,82 @@ const L1_CHARS: Record<string, Record<string, L1Char>> = {
   set10: { a: ["Airplane","\u2708\ufe0f"], b: ["Bus","\ud83d\ude8c"], c: ["Car","\ud83d\ude97"], d: ["Drone","\ud83d\ude81"], e: ["Excavator","\ud83c\udfd7\ufe0f"], f: ["Firetruck","\ud83d\ude92"], g: ["Golf-cart","\u26f3"], h: ["Helicopter","\ud83d\ude81"] },
 };
 
-/** Build a Level-1 scene set for one theme: every square = {file char + rank object}
- *  using EASY_OBJECTS as the shared rank map. */
-function buildLevel1(themeId: string): Record<string, Scene> {
+/** SET1-style rank rosters \u2014 8 objects per rank, indexed by file (a-h).
+ *  Used by Levels 2+ for the file-varied but theme-shared object grid. */
+const L2_OBJECTS: Record<number, string[]> = {
+  1: ["Sun","Bun","Fun","Run","One","Nun","Gun","Swan"],
+  2: ["Zoo","Glue","Stew","Moo","Crew","Chew","Blue","Shoe"],
+  3: ["Tree","Bee","Key","Sea","Tea","Flea","Ski","Knee"],
+  4: ["Door","Floor","Snore","Roar","More","Store","Pour","Boar"],
+  5: ["Hive","Dive","Five","Drive","Alive","Jive","Thrive","Chive"],
+  6: ["Fix","Bricks","Chicks","Kicks","Tricks","Sticks","Licks","Mix"],
+  7: ["Heaven","Eleven","Sky","Head","Sea","Leaven","Dwarfs","Skies"],
+  8: ["Gate","Plate","Late","Roar","Skate","Weight","Great","Ate"],
+};
+
+/** Theme-specific rank-3 rosters used by Level 3+ (unique per theme for rank 3). */
+const L3_RANK3: Record<string, string[]> = {
+  easy:  L2_OBJECTS[3]!,                                                   // shared with L2
+  set1:  L2_OBJECTS[3]!,                                                   // SET1 is the L2 baseline
+  set2:  ["Fee","Ghee","Pea","Chimpanzee","Manatee","Honeybee","Bumblebee","Referee"],
+  set3:  ["Wee","Plea","Spree","Glee","Jubilee","Jamboree","Employee","Chickadee"],
+  set4:  ["Absentee","Guarantee","Trainee","Devotee","Nominee","Committee","Trustee","TV"],
+  set5:  ["Bee","Ghee","Pea","Wee","Fee","Sea","Key","Tea"],
+  set6:  ["Fee","Pea","Ghee","Wee","Bee","Sea","Key","Tea"],
+  set7:  ["Ghee","Pea","Fee","Wee","Bumblebee","Chimpanzee","Honeybee","Manatee"],
+  set8:  ["Fee","Bee","Pea","Ghee","Wee","Sea","Key","Tea"],
+  set9:  ["Bee","Sea","Tea","Fee","Ghee","Pea","Wee","Key"],
+  set10: ["Bee","Ghee","Pea","Wee","Sea","Fee","Key","Tea"],
+};
+
+/** Theme-specific rank-4 rosters used by Level 4+. */
+const L4_RANK4: Record<string, string[]> = {
+  easy:  L2_OBJECTS[4]!,
+  set1:  L2_OBJECTS[4]!,
+  set2:  ["Chore","Sore","Bore","Adore","Encore","Score","War","Tore"],
+  set3:  ["Core","Explore","Restore","Ignore","Yore","Fore","Gore","Oar"],
+  set4:  ["Dinosaur","Corridor","Meteor","Metaphor","Emperor","Sophomore","Furthermore","Nevermore"],
+  set5:  ["War","Sore","Score","Chore","Bore","Adore","Encore","Tore"],
+  set6:  ["Chore","Sore","Adore","Score","Bore","Explore","Encore","Tore"],
+  set7:  ["Chore","Sore","Adore","Score","Bore","Explore","Encore","Tore"],
+  set8:  ["Chore","Sore","Adore","Score","Bore","Explore","Encore","Tore"],
+  set9:  ["Chore","Sore","Adore","Score","Bore","Explore","Encore","Tore"],
+  set10: ["Chore","Sore","Adore","Score","Bore","Explore","Encore","Tore"],
+};
+
+/** Build a scene set for one theme at a given level. */
+function buildLeveled(themeId: string, level: 1 | 2 | 3 | 4): Record<string, Scene> {
   const chars = L1_CHARS[themeId] ?? L1_CHARS.easy!;
   const out: Record<string, Scene> = {};
-  for (const f of "abcdefgh") for (let r = 1; r <= 8; r++) {
+  for (let fi = 0; fi < 8; fi++) {
+    const f = "abcdefgh"[fi]!;
     const [char, emoji] = chars[f]!;
-    const obj = EASY_OBJECTS[r]!;
-    out[f + r] = {
-      pair: `${char} + ${obj}`,
-      emoji,
-      scene: `Picture the ${char} with the ${obj}. Say it out loud: \u201c${char}\u2026 ${obj}!\u201d`,
-    };
+    for (let r = 1; r <= 8; r++) {
+      let obj: string;
+      if (level === 1) {
+        obj = EASY_OBJECTS[r]!;              // shared object per rank
+      } else if (level === 2) {
+        obj = L2_OBJECTS[r]![fi]!;           // file-varied, shared across themes
+      } else if (level === 3) {
+        // L3 = L2 with rank 3 theme-specific
+        obj = r === 3 ? (L3_RANK3[themeId] ?? L2_OBJECTS[3]!)[fi]! : L2_OBJECTS[r]![fi]!;
+      } else {
+        // L4 = L2 + rank 3 + rank 4 theme-specific
+        if (r === 3) obj = (L3_RANK3[themeId] ?? L2_OBJECTS[3]!)[fi]!;
+        else if (r === 4) obj = (L4_RANK4[themeId] ?? L2_OBJECTS[4]!)[fi]!;
+        else obj = L2_OBJECTS[r]![fi]!;
+      }
+      out[f + r] = {
+        pair: `${char} + ${obj}`,
+        emoji,
+        scene: `Picture the ${char} with the ${obj}. Say it out loud: \u201c${char}\u2026 ${obj}!\u201d`,
+      };
+    }
   }
   return out;
 }
+
+const buildLevel1 = (themeId: string) => buildLeveled(themeId, 1);
 
 // Theme-metadata (used by both L1 and L5 registrations).
 interface ThemeMeta { id: string; name: string; emoji: string; blurb: string; }
@@ -783,10 +843,16 @@ const L5_SCENES: Record<string, Record<string, Scene>> = {
 /** All themes at all supported levels. L2/L3/L4 currently fall back to L5 (the
  *  intermediate blends aren't authored yet). */
 export const THEMES: Theme[] = THEME_META.flatMap((m) => {
-  const l1 = buildLevel1(m.id);
-  const l5 = L5_SCENES[m.id] ?? l1;
+  const l1 = buildLeveled(m.id, 1);
+  const l2 = buildLeveled(m.id, 2);
+  const l3 = buildLeveled(m.id, 3);
+  const l4 = buildLeveled(m.id, 4);
+  const l5 = L5_SCENES[m.id] ?? l4;
   return [
     { ...m, id: `${m.id}-l1`, level: 1 as const, scenes: l1 },
+    { ...m, id: `${m.id}-l2`, level: 2 as const, scenes: l2 },
+    { ...m, id: `${m.id}-l3`, level: 3 as const, scenes: l3 },
+    { ...m, id: `${m.id}-l4`, level: 4 as const, scenes: l4 },
     { ...m, id: `${m.id}-l5`, level: 5 as const, scenes: l5 },
   ];
 });

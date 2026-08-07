@@ -81,7 +81,7 @@ export default function OpeningMemory() {
       <div>
         <div className="mb-1 text-[11px] uppercase tracking-wide text-ink-500">Level (L1 = easiest / L5 = most varied)</div>
         <div className="mb-3 flex flex-wrap gap-1.5">
-          {[1, 5].map((L) => {
+          {[1, 2, 3, 4, 5].map((L) => {
             const active = themeById(themeId).level === L;
             return (
               <button key={L} onClick={() => {
