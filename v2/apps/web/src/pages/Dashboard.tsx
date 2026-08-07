@@ -19,6 +19,123 @@ type Dash = {
 
 const PROVISIONAL_GAMES = 5;
 
+// Compute current + longest daily streaks from the days array (dates ISO yyyy-mm-dd,
+// sparse — only days with activity are present). Current streak = consecutive
+// today-and-back run of days-with-solves; a one-day grace if today has none yet.
+function streaks(days: NonNullable<Dash["days"]>): { current: number; longest: number } {
+  const active = new Set(days.filter((d) => d.solves > 0).map((d) => d.day));
+  if (active.size === 0) return { current: 0, longest: 0 };
+  const sorted = [...active].sort();
+  let longest = 1, run = 1;
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = new Date(sorted[i - 1] + "T00:00:00Z");
+    const cur  = new Date(sorted[i]     + "T00:00:00Z");
+    const diff = Math.round((cur.getTime() - prev.getTime()) / 86_400_000);
+    run = diff === 1 ? run + 1 : 1;
+    if (run > longest) longest = run;
+  }
+  const today = new Date(); today.setUTCHours(0, 0, 0, 0);
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const cursor = new Date(today);
+  let current = 0;
+  if (!active.has(iso(cursor))) cursor.setUTCDate(cursor.getUTCDate() - 1); // one-day grace
+  while (active.has(iso(cursor))) { current++; cursor.setUTCDate(cursor.getUTCDate() - 1); }
+  return { current, longest };
+}
+
+// Streak card — warm gradient with a big 🔥 count and the personal best underneath.
+function StreakCard({ current, longest }: { current: number; longest: number }) {
+  const hot = current > 0;
+  return (
+    <div className={`rounded-xl2 border p-5 ${hot ? "border-orange-400/50 bg-gradient-to-br from-orange-500/20 via-rose-500/10 to-amber-500/5" : "border-ink-700 bg-ink-900"}`}>
+      <div className="text-xs text-ink-400">Daily streak</div>
+      <div className={`mt-1 flex items-baseline gap-2 font-display font-bold tabular-nums ${hot ? "text-3xl text-orange-200" : "text-2xl text-white"}`}>
+        <span>{current}</span>
+        <span className={`text-2xl ${hot ? "" : "grayscale opacity-50"}`}>🔥</span>
+      </div>
+      <div className="mt-1 text-[11px] text-ink-500">
+        {hot ? `keep it going · ` : `no active streak · `}
+        <span className="text-amber-300">🏆 best {longest} day{longest === 1 ? "" : "s"}</span>
+      </div>
+    </div>
+  );
+}
+
+// GitHub-style contribution heatmap over the last N weeks (default 13). Sunday-first
+// columns; darker = more solves that day. Native title tooltip on each cell.
+function Heatmap({ days, weeks = 13 }: { days: NonNullable<Dash["days"]>; weeks?: number }) {
+  const byDay = new Map(days.map((d) => [d.day, d]));
+  const now = new Date(); now.setUTCHours(0, 0, 0, 0);
+  const endDow = now.getUTCDay();
+  const endSat = new Date(now); endSat.setUTCDate(now.getUTCDate() + (6 - endDow));
+  const start  = new Date(endSat); start.setUTCDate(endSat.getUTCDate() - weeks * 7 + 1);
+  const cells: { date: string; solves: number; future: boolean }[] = [];
+  for (let i = 0; i < weeks * 7; i++) {
+    const d = new Date(start); d.setUTCDate(start.getUTCDate() + i);
+    const iso = d.toISOString().slice(0, 10);
+    cells.push({ date: iso, solves: byDay.get(iso)?.solves ?? 0, future: d > now });
+  }
+  const tone = (n: number, future: boolean) => {
+    if (future) return "bg-ink-900/50";
+    if (n === 0) return "bg-ink-800 hover:bg-ink-700";
+    if (n < 5)   return "bg-emerald-900/80 hover:bg-emerald-800";
+    if (n < 10)  return "bg-emerald-700 hover:bg-emerald-600";
+    if (n < 20)  return "bg-emerald-500 hover:bg-emerald-400";
+    return              "bg-emerald-300 hover:bg-emerald-200";
+  };
+  const dayLabel = ["Sun", "", "Tue", "", "Thu", "", "Sat"];
+  const monthTicks: { col: number; label: string }[] = [];
+  for (let w = 0; w < weeks; w++) {
+    const c = cells[w * 7];
+    const d = new Date(c.date + "T00:00:00Z");
+    if (d.getUTCDate() <= 7) monthTicks.push({ col: w, label: d.toLocaleString(undefined, { month: "short", timeZone: "UTC" }) });
+  }
+  const totalSolves = cells.reduce((s, c) => s + c.solves, 0);
+  return (
+    <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
+      <div className="mb-3 flex items-baseline justify-between">
+        <span className="text-sm font-semibold text-white">📅 Activity · last {weeks} weeks
+          <span className="ml-2 text-xs font-normal text-ink-400">{totalSolves} solves</span>
+        </span>
+        <span className="flex items-center text-xs text-ink-400">
+          <span className="mr-1">less</span>
+          {[0, 3, 7, 15, 25].map((n) => (
+            <span key={n} className={`mx-0.5 inline-block h-3 w-3 rounded-[3px] align-middle ${tone(n, false)}`} />
+          ))}
+          <span className="ml-1">more</span>
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        {/* Month labels aligned to columns */}
+        <div className="ml-8 flex text-[10px] text-ink-500" style={{ gap: 3 }}>
+          {Array.from({ length: weeks }, (_, w) => {
+            const t = monthTicks.find((m) => m.col === w);
+            return <span key={w} style={{ width: 14, minWidth: 14 }}>{t?.label ?? ""}</span>;
+          })}
+        </div>
+        <div className="mt-1 flex" style={{ gap: 3 }}>
+          <div className="mr-2 flex flex-col justify-between text-[10px] leading-none text-ink-500" style={{ gap: 3 }}>
+            {dayLabel.map((l, i) => <span key={i} style={{ height: 14 }}>{l}</span>)}
+          </div>
+          {Array.from({ length: weeks }, (_, w) => (
+            <div key={w} className="flex flex-col" style={{ gap: 3 }}>
+              {Array.from({ length: 7 }, (_, r) => {
+                const c = cells[w * 7 + r];
+                return (
+                  <span key={r}
+                    title={c.future ? "" : `${c.solves} solve${c.solves === 1 ? "" : "s"} · ${c.date}`}
+                    className={`rounded-[3px] transition-transform hover:scale-125 ${tone(c.solves, c.future)}`}
+                    style={{ width: 14, height: 14 }} />
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RatingChart({ days }: { days: NonNullable<Dash["days"]> }) {
   const pts = days.filter((d) => d.rating > 0);
   if (pts.length < 2) return null;
@@ -94,12 +211,13 @@ export default function DashboardPage() {
     { label: "Themes trained", value: themes.length, sub: `${rated.length} with reliable ratings` },
     ...(data.blindfold ? [{ label: "Blindfold rating", value: data.blindfold.rating, sub: `${data.blindfold.games} solves` }] : []),
   ];
+  const streak = data.days ? streaks(data.days) : { current: 0, longest: 0 };
 
   return (
     <div className="space-y-5">
       <h1 className="font-display text-2xl text-white">📊 My performance</h1>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-5">
         {cards.map((c) => (
           <div key={c.label} className={`rounded-xl2 border p-5 ${c.hero ? "border-brand-600/50 bg-brand-600/10" : "border-ink-700 bg-ink-900"}`}>
             <div className="text-xs text-ink-400">{c.label}</div>
@@ -107,8 +225,10 @@ export default function DashboardPage() {
             <div className="mt-1 text-[11px] text-ink-500">{c.sub}</div>
           </div>
         ))}
+        <StreakCard current={streak.current} longest={streak.longest} />
       </div>
 
+      {data.days && <Heatmap days={data.days} />}
       {data.days && <RatingChart days={data.days} />}
 
       {rated.length >= 3 && (

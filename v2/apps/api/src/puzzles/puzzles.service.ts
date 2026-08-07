@@ -201,7 +201,8 @@ export class PuzzlesService {
       .sort((a, b) => b.rating - a.rating);
     const puzzleRounds = rounds.filter((r: any) => r.k !== "blindfold");
     const wins = puzzleRounds.filter((r: any) => r.w).length;
-    // daily series (last 30 days): solves + rating-after (for the progress chart)
+    // Daily series (last 120 days): solves + rating-after. 30d was enough for the
+    // rating sparkline; 120d powers the 13-week heatmap and multi-week streak calc.
     const byDay = new Map<string, { n: number; wins: number; lastR: number }>();
     for (const r of puzzleRounds) {
       const day = r.d ? new Date(r.d).toISOString().slice(0, 10) : null;
@@ -210,7 +211,7 @@ export class PuzzlesService {
       e.n++; if (r.w) e.wins++; if (!e.lastR) e.lastR = r.r || 0; // rounds sorted desc → first seen = last of day
       byDay.set(day, e);
     }
-    const days = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(-30)
+    const days = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(-120)
       .map(([day, e]) => ({ day, solves: e.n, wins: e.wins, rating: e.lastR }));
     return {
       loggedIn: true,
