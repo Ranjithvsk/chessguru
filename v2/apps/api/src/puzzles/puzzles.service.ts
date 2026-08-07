@@ -213,6 +213,22 @@ export class PuzzlesService {
     }
     const days = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(-120)
       .map(([day, e]) => ({ day, solves: e.n, wins: e.wins, rating: e.lastR }));
+    // Per-difficulty bands: bucket rated rounds by the PUZZLE's rating (r.pr) into 200-pt
+    // bins. Rounds with no puzzle-rating stamped (older rows) fall into 'unrated' and
+    // get excluded from the chart. Powers the "how you do at 1400 vs 1800" diagnostic.
+    const bandMap = new Map<number, { attempted: number; solved: number }>();
+    for (const r of puzzleRounds) {
+      const pr = typeof r.pr === "number" ? r.pr : null;
+      if (pr == null) continue;
+      const lo = Math.floor(pr / 200) * 200;
+      const b = bandMap.get(lo) || { attempted: 0, solved: 0 };
+      b.attempted++; if (r.w) b.solved++;
+      bandMap.set(lo, b);
+    }
+    const bands = [...bandMap.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([lo, b]) => ({ lo, hi: lo + 199, attempted: b.attempted, solved: b.solved,
+                           accuracy: b.attempted ? Math.round((b.solved / b.attempted) * 100) : 0 }));
     return {
       loggedIn: true,
       global: { rating: Math.round(p.puzzle?.gl?.r ?? 1500), rd: Math.round(p.puzzle?.gl?.d ?? 500), games: p.puzzle?.nb ?? 0 },
@@ -221,6 +237,7 @@ export class PuzzlesService {
       themes,
       themesBf,
       days,
+      bands,
     };
   }
 

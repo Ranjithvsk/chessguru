@@ -15,6 +15,7 @@ type Dash = {
   themes?: ThemeRow[];
   themesBf?: ThemeRow[];
   days?: { day: string; solves: number; wins: number; rating: number }[];
+  bands?: { lo: number; hi: number; attempted: number; solved: number; accuracy: number }[];
 };
 
 const PROVISIONAL_GAMES = 5;
@@ -136,6 +137,66 @@ function Heatmap({ days, weeks = 13 }: { days: NonNullable<Dash["days"]>; weeks?
   );
 }
 
+// Per-difficulty band chart: horizontal bars, one per 200-pt band, split solved/missed
+// with an accuracy % on the right. The band containing the user's CURRENT rating gets
+// a subtle ring so you can eyeball "am I holding accuracy where my rating claims I am?"
+// Accuracy tint: green ≥70, teal ≥55, amber ≥40, rose <40 — a coarse tier is honest
+// (small samples lie) and easier to scan than a raw gradient.
+function BandChart({ bands, userRating }: { bands: NonNullable<Dash["bands"]>; userRating: number }) {
+  if (bands.length === 0) return null;
+  const maxAttempted = Math.max(...bands.map((b) => b.attempted), 1);
+  const currentBandLo = Math.floor(userRating / 200) * 200;
+  const tint = (acc: number, attempted: number) => {
+    if (attempted < 3) return { bar: "bg-ink-700",     lab: "text-ink-400" };  // provisional
+    if (acc >= 70)      return { bar: "bg-emerald-500", lab: "text-emerald-300" };
+    if (acc >= 55)      return { bar: "bg-teal-500",    lab: "text-teal-300" };
+    if (acc >= 40)      return { bar: "bg-amber-500",   lab: "text-amber-300" };
+    return                     { bar: "bg-rose-500",    lab: "text-rose-300" };
+  };
+  return (
+    <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
+      <div className="mb-3 flex items-baseline justify-between">
+        <span className="text-sm font-semibold text-white">🎯 Accuracy by puzzle difficulty</span>
+        <span className="text-xs text-ink-400">your rating: <b className="text-brand-300">{userRating}</b></span>
+      </div>
+      <div className="space-y-1.5">
+        {bands.map((b) => {
+          const t = tint(b.accuracy, b.attempted);
+          const width = (b.attempted / maxAttempted) * 100;
+          const isCurrent = b.lo === currentBandLo;
+          const provisional = b.attempted < 3;
+          return (
+            <div key={b.lo} className={`grid grid-cols-[5rem_1fr_4.5rem] items-center gap-3 rounded-lg px-2 py-1 ${isCurrent ? "ring-1 ring-brand-500/50 bg-brand-500/5" : ""}`}
+                 title={`${b.solved}/${b.attempted} solved at ${b.lo}–${b.hi}`}>
+              <span className={`text-xs tabular-nums ${isCurrent ? "font-semibold text-brand-200" : "text-ink-300"}`}>
+                {b.lo}–{b.hi}
+              </span>
+              <span className="relative h-4 overflow-hidden rounded-md bg-ink-800">
+                <span className={`block h-full rounded-md ${t.bar} transition-all`} style={{ width: `${Math.max(3, width)}%` }} />
+                <span className="pointer-events-none absolute inset-0 flex items-center justify-end pr-1.5 text-[10px] font-semibold tabular-nums text-white/85 mix-blend-luminosity">
+                  {b.solved}/{b.attempted}
+                </span>
+              </span>
+              <span className={`text-right text-sm font-semibold tabular-nums ${t.lab}`}>
+                {b.accuracy}%{provisional && <span className="ml-0.5 text-gold-400" title="fewer than 3 attempts — noisy">?</span>}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-3 flex items-center justify-between text-[11px] text-ink-500">
+        <span>Bar width = how many you attempted in that band</span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-sm bg-rose-500" />&lt;40
+          <span className="h-2 w-2 rounded-sm bg-amber-500" />40+
+          <span className="h-2 w-2 rounded-sm bg-teal-500" />55+
+          <span className="h-2 w-2 rounded-sm bg-emerald-500" />70+
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function RatingChart({ days }: { days: NonNullable<Dash["days"]> }) {
   const pts = days.filter((d) => d.rating > 0);
   if (pts.length < 2) return null;
@@ -230,6 +291,7 @@ export default function DashboardPage() {
 
       {data.days && <Heatmap days={data.days} />}
       {data.days && <RatingChart days={data.days} />}
+      {data.bands && data.bands.length > 0 && <BandChart bands={data.bands} userRating={data.global?.rating ?? 1500} />}
 
       {rated.length >= 3 && (
         <div className="grid gap-3 md:grid-cols-2">
