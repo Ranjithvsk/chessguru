@@ -67,6 +67,7 @@ export class MiscController {
         ratingDiff: typeof r.rd === "number" ? r.rd : null,
         ratingAfter: typeof r.r === "number" ? r.r : null,
         puzzleRating, themes, mode: r.k ?? "puzzle", sel: r.sel ?? null,
+        ms: typeof r.ms === "number" ? r.ms : null,   // solve time in ms (null on legacy rows)
         ...miniOf(p),
       };
     });

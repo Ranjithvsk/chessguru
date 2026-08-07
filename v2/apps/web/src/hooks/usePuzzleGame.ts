@@ -62,6 +62,12 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   const solved = useRef(false);
   const failed = useRef(false);
   const hinted = useRef(false);
+  // Solve clock: startedAt stamped when a NEW puzzle loads (skipped for reviews).
+  // Frozen into solveMs on first submit so subsequent hint/replay clicks don't reset it.
+  const startedAtRef = useRef<number | null>(null);
+  const solveMsRef = useRef<number | null>(null);
+  const [solveMs, setSolveMs] = useState<number | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0); // live tick, only used for the display
 
   const [fen, setFen] = useState("start");
   const [orientation, setOrientation] = useState<"white" | "black">("white");
@@ -116,15 +122,36 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
       setFen(puzzle.fen);
       setReplayPly(null);
       setFb({ kind: "wait", title: "Your turn", sub: `Find the best move for ${pc}` });
+      // Start the solve clock — fresh puzzle only, never on reviews (handled by the
+      // reviewIdRef branch above).
+      startedAtRef.current = Date.now();
+      solveMsRef.current = null;
+      setSolveMs(null);
+      setElapsedMs(0);
       try { if (puzzle.id) localStorage.setItem(STORE_KEY, JSON.stringify({ id: puzzle.id, theme, maxPc: maxPc ?? 0 })); } catch { /* */ }
     }
   }, [puzzle]);
 
+  // Live-ticking elapsed clock (500ms). Runs only while the puzzle is unsolved so we
+  // don't churn re-renders on the review/solved views. Cheap: single state update.
+  useEffect(() => {
+    if (!puzzle || solved.current || startedAtRef.current == null) return;
+    const start = startedAtRef.current;
+    const t = setInterval(() => setElapsedMs(Date.now() - start), 500);
+    return () => clearInterval(t);
+  }, [puzzle, fb.kind]);
+
   const submit = useCallback((win: boolean) => {
     if (!puzzle) return;
+    // Freeze the solve time on the FIRST submit — later solves-with-hint / view-solution
+    // clicks must not extend the recorded time. null means the timer wasn't started
+    // (guest review, edge cases).
+    const ms = solveMsRef.current ?? (startedAtRef.current != null ? Date.now() - startedAtRef.current : null);
+    if (solveMsRef.current == null && ms != null) { solveMsRef.current = ms; setSolveMs(ms); }
     api.complete(puzzle.id, {
       win, hint: hinted.current, difficulty, userId, theme,
       mode, rating: displayRating, deviation: 200,
+      ...(ms != null ? { ms } : {}),
     }).then((r) => {
       if (typeof r.ratingDiff === "number") setRatingDiff(r.ratingDiff);
       if (r.glicko) setDisplayRating(Math.round(r.glicko.r));
@@ -294,6 +321,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
     lastMove: exploring ? exploreLast : replayView ? replayView.lastMove : lastMove,
     hintShapes: exploring ? [] : hintShapes,
     fb, ratingDiff, displayRating,
+    solveMs, elapsedMs,
     solved: solved.current, hinted: hinted.current, failed: failed.current,
     onMove: exploring ? exploreMove : onMove, tryInput, showHint, viewSolution, next, review,
     replayPly, replayTotal: solution.current.length, replayPrev, replayNext,

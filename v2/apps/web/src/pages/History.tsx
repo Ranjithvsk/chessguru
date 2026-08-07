@@ -25,7 +25,25 @@ function primaryTheme(themes: string[] = []) {
   return themes[0] ?? "Other";
 }
 
-/** Mini board, mounted only when scrolled into view; green ring = solved, red = missed. */
+// Compact "8s" / "1m 12s" for the time-badge under each mini board.
+function fmtMs(ms: number): string {
+  const s = ms / 1000;
+  if (s < 10) return `${s.toFixed(1)}s`;
+  if (s < 60) return `${Math.round(s)}s`;
+  const m = Math.floor(s / 60), r = Math.round(s - m * 60);
+  return `${m}m${r ? ` ${r}s` : ""}`;
+}
+// Speed tier => background + text color + emoji. Same thresholds as the live timer chip
+// on Puzzles.tsx so history badges match what the user saw immediately after solving.
+function timeTier(ms: number): { chip: string; emoji: string } {
+  if (ms < 10_000) return { chip: "bg-emerald-500/20 text-emerald-200 border-emerald-500/40", emoji: "⚡" };
+  if (ms < 30_000) return { chip: "bg-cyan-500/15 text-cyan-200 border-cyan-500/35",           emoji: "🚀" };
+  if (ms < 60_000) return { chip: "bg-brand-500/15 text-brand-100 border-brand-500/30",         emoji: "⏱" };
+  return                { chip: "bg-amber-500/10 text-amber-100 border-amber-500/25",           emoji: "🐢" };
+}
+
+/** Mini board, mounted only when scrolled into view; green ring = solved, red = missed.
+ *  Bottom-right badge shows solve time (when the row has one — legacy rows don't). */
 function LazyMini({ it }: { it: HistoryItem }) {
   const ref = useRef<HTMLDivElement>(null);
   const [show, setShow] = useState(false);
@@ -38,11 +56,17 @@ function LazyMini({ it }: { it: HistoryItem }) {
     return () => io.disconnect();
   }, [show]);
   const lm = it.lastMove ? ([it.lastMove.slice(0, 2), it.lastMove.slice(2, 4)] as [Key, Key]) : undefined;
+  const tier = typeof it.ms === "number" ? timeTier(it.ms) : null;
   return (
-    <div ref={ref} className={`overflow-hidden rounded-md border-2 ${it.win ? "border-accent-500" : "border-rose-500"}`}>
+    <div ref={ref} className={`relative overflow-hidden rounded-md border-2 ${it.win ? "border-accent-500" : "border-rose-500"}`}>
       {show && it.fen
         ? <Board fen={it.fen} orientation={it.orientation} lastMove={lm} viewOnly coordinates={false} className="mini" />
         : <div className="aspect-square w-full bg-ink-800" />}
+      {tier && typeof it.ms === "number" && (
+        <span className={`absolute bottom-1 right-1 flex items-center gap-0.5 rounded-md border ${tier.chip} px-1.5 py-0.5 text-[10px] font-semibold shadow-sm backdrop-blur-sm`}>
+          <span>{tier.emoji}</span><span className="tabular-nums">{fmtMs(it.ms)}</span>
+        </span>
+      )}
     </div>
   );
 }

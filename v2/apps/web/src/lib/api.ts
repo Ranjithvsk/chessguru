@@ -21,7 +21,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 export interface RandomPuzzleOpts { theme: string; rating: number; difficulty: Difficulty; maxPc?: number; userId?: string | null; section?: string; player?: string;   mode?: string;
 }
 export interface MasterPlayer { name: string; count: number; }
-export interface CompleteBody { win: boolean; hint: boolean; difficulty: Difficulty; userId: string | null; mode?: "puzzle" | "blindfold"; rating?: number; deviation?: number; theme?: string; }
+export interface CompleteBody { win: boolean; hint: boolean; difficulty: Difficulty; userId: string | null; mode?: "puzzle" | "blindfold"; rating?: number; deviation?: number; theme?: string; ms?: number; }
 export interface AuthResult { ok: boolean; error?: string; }
 
 export interface Overview { total: number; engineGenerated: number; verified: number; engineGames: number; pools: { bfPools: number; piecePools: number; paths: number }; users: number; }
@@ -32,6 +32,7 @@ export interface HistoryItem {
   id: string; date: string; win: boolean;
   ratingDiff: number | null; ratingAfter: number | null;
   puzzleRating: number | null; themes: string[]; mode: string; sel?: string | null;
+  ms?: number | null;
   fen: string | null; lastMove: string | null; orientation: "white" | "black";
 }
 export interface HistoryReport {

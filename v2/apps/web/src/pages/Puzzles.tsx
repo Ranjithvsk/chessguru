@@ -28,6 +28,38 @@ const NOISE_THEMES = new Set<string>([
   "master", "masterVsMaster", "superGM",
 ]);
 
+// Formats ms as a compact string ("8.4s", "1m 12s") for the timer chip.
+function fmtSolveTime(ms: number): string {
+  const s = ms / 1000;
+  if (s < 10) return `${s.toFixed(1)}s`;
+  if (s < 60) return `${Math.round(s)}s`;
+  const m = Math.floor(s / 60), rem = Math.round(s - m * 60);
+  return `${m}m ${rem}s`;
+}
+
+// Chip that shows a live-ticking clock while solving, then freezes with a color/emoji
+// tier once the puzzle is finished. Kept self-contained for reuse on Blindfold later.
+function SolveTimer({ solveMs, elapsedMs, done }: { solveMs: number | null; elapsedMs: number; done: boolean }) {
+  const ms = done ? (solveMs ?? elapsedMs) : elapsedMs;
+  // Speed tiers — chosen to feel motivating on typical puzzle solves (most 5-60s).
+  const tier = ms < 10_000 ? "fast" : ms < 30_000 ? "quick" : ms < 60_000 ? "steady" : "slow";
+  const style = done
+    ? { fast:   { grad: "from-emerald-500/25 to-teal-500/10",  border: "border-emerald-400/50", text: "text-emerald-200", emoji: "⚡" },
+        quick:  { grad: "from-cyan-500/25 to-sky-500/10",       border: "border-cyan-400/50",    text: "text-cyan-200",    emoji: "🚀" },
+        steady: { grad: "from-brand-500/25 to-accent-500/10",   border: "border-brand-400/40",   text: "text-brand-100",   emoji: "⏱️" },
+        slow:   { grad: "from-amber-500/20 to-orange-500/10",   border: "border-amber-400/40",   text: "text-amber-100",   emoji: "🐢" } }[tier]
+    : { grad: "from-brand-500/15 to-accent-500/5", border: "border-brand-500/25", text: "text-brand-200", emoji: "⏱️" };
+  return (
+    <div className={`flex items-center justify-between rounded-xl2 border ${style.border} bg-gradient-to-br ${style.grad} px-4 py-2.5`}>
+      <span className="text-sm text-ink-300">{done ? "Solved in" : "Time"}</span>
+      <span className={`flex items-center gap-1.5 font-display text-xl font-bold tabular-nums ${style.text}`}>
+        <span className={done ? "" : "animate-pulse"}>{style.emoji}</span>
+        {fmtSolveTime(ms)}
+      </span>
+    </div>
+  );
+}
+
 export default function PuzzlesPage() {
   const { userId, rating } = useOutletContext<Ctx>();
   const [theme, setTheme] = useState<string>(() => { try { return localStorage.getItem("cg_theme") || "mix"; } catch { return "mix"; } });
@@ -123,9 +155,13 @@ export default function PuzzlesPage() {
           </button>
         )}
         {g.puzzle && (
-          <div className="flex items-center justify-between rounded-xl2 border border-ink-700 bg-ink-900 px-4 py-2.5">
-            <span className="text-sm text-ink-400">Puzzle rating</span>
-            <span className="font-display text-xl font-bold tabular-nums text-white">{g.puzzle.rating}</span>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex items-center justify-between rounded-xl2 border border-ink-700 bg-ink-900 px-4 py-2.5">
+              <span className="text-sm text-ink-400">Puzzle rating</span>
+              <span className="font-display text-xl font-bold tabular-nums text-white">{g.puzzle.rating}</span>
+            </div>
+            <SolveTimer solveMs={g.solveMs} elapsedMs={g.elapsedMs}
+              done={g.fb.kind === "solved" || (g.fb.kind === "bad" && g.failed)} />
           </div>
         )}
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
@@ -167,21 +203,24 @@ export default function PuzzlesPage() {
         </div>
 
         {theme === "mix" && displayThemes.length > 0 && (
-          <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
+          <div className="rounded-xl2 border border-brand-500/25 bg-gradient-to-br from-brand-500/10 via-ink-900 to-ink-900 p-5">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-sm text-ink-400">Puzzle theme</span>
+              <span className="text-sm text-ink-300">
+                <span className="text-brand-300">🎭 This puzzle's theme</span>
+                <span className="ml-2 text-xs text-ink-500">(you're playing "All themes")</span>
+              </span>
               {g.fb.kind === "solved" ? (
-                <span className="shrink-0 text-xs text-ink-500">solved</span>
+                <span className="shrink-0 text-xs text-accent-400">✓ revealed</span>
               ) : showTheme ? (
                 <button onClick={() => setShowTheme(false)} className="shrink-0 text-xs text-ink-400 underline hover:text-ink-200">Hide</button>
               ) : (
-                <button onClick={() => setShowTheme(true)} className="shrink-0 rounded-lg border border-ink-600 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">Show</button>
+                <button onClick={() => setShowTheme(true)} className="shrink-0 rounded-lg border border-brand-500/40 bg-brand-500/10 px-3 py-1.5 text-xs font-medium text-brand-200 hover:bg-brand-500/20">Peek</button>
               )}
             </div>
             {revealTheme && (
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {displayThemes.map((t) => (
-                  <span key={t} className="rounded-md border border-ink-600 bg-ink-800 px-2 py-1 text-xs text-ink-200">{prettify(t)}</span>
+                  <span key={t} className="rounded-md border border-brand-500/30 bg-brand-500/10 px-2 py-1 text-xs font-medium text-brand-100">{prettify(t)}</span>
                 ))}
               </div>
             )}

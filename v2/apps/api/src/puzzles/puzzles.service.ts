@@ -223,7 +223,7 @@ export class PuzzlesService {
     };
   }
 
-  async complete(id: string, body: { win: boolean; userId?: string | null; hint?: boolean; mode?: string; rating?: number; deviation?: number; theme?: string }) {
+  async complete(id: string, body: { win: boolean; userId?: string | null; hint?: boolean; mode?: string; rating?: number; deviation?: number; theme?: string; ms?: number }) {
     const pz = await this.col().findOne({ _id: id as any });
     if (!pz) return null;
     await this.col().updateOne({ _id: id as any }, { $inc: { plays: 1 } });
@@ -253,6 +253,11 @@ export class PuzzlesService {
         }
       }
       await perfsCol.updateOne({ _id: userId as any }, { $set: sets }, { upsert: true });
+      // Solve time (ms): client-timed from puzzle-load to first submit. Sanity-clamp
+      // to [0, 30min] to reject clock skew / tabbed-away sessions from polluting
+      // theme-median stats later.
+      const msRaw = typeof body.ms === "number" && isFinite(body.ms) ? Math.round(body.ms) : null;
+      const ms = msRaw != null && msRaw >= 0 && msRaw <= 30 * 60 * 1000 ? msRaw : null;
       await this.conn.db!.collection("rounds").updateOne(
         { _id: `${userId}:${id}` as any },
         { $set: {
@@ -264,6 +269,7 @@ export class PuzzlesService {
           th: Array.isArray(pz.themes) ? pz.themes : [],      // puzzle themes (for categorising)
           k: key,                                             // "puzzle" | "blindfold"
           sel: body.theme ?? null,                            // selected filter ("mix" = All themes)
+          ...(ms != null ? { ms } : {}),                      // solve time in ms (missing on older rows)
         } },
         { upsert: true },
       );
