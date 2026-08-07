@@ -229,6 +229,34 @@ export default function HistoryPage() {
     } finally { setLoadingMore(false); }
   }
 
+  // IMPORTANT: every hook call MUST run on every render, in the same order.
+  // Compute derived data + memos here (before the early returns below) so the
+  // hook count is stable whether the page is loading, logged out, or fully
+  // rendered. Missing `data` is handled by defensive defaults inside each memo.
+  const allItems = useMemo(
+    () => [...(data?.items ?? []), ...pages],
+    [data, pages],
+  );
+
+  // Theme dropdown options — the union of every "primary" theme actually seen in
+  // the loaded pages. Keeps the picker honest (never surfaces a theme with 0 matches).
+  const availableThemes = useMemo(() => {
+    const s = new Set<string>();
+    for (const it of allItems) s.add(it.sel && it.sel !== "mix" ? it.sel : primaryTheme(it.themes));
+    return [...s].sort((a, b) => prettify(a).localeCompare(prettify(b)));
+  }, [allItems]);
+
+  // Filter applied to the flat items list BEFORE re-grouping by day/theme.
+  const filtered = useMemo(() => allItems.filter((it) => {
+    if (result === "solved" && !it.win) return false;
+    if (result === "missed" &&  it.win) return false;
+    if (theme) {
+      const t = it.sel && it.sel !== "mix" ? it.sel : primaryTheme(it.themes);
+      if (t !== theme) return false;
+    }
+    return true;
+  }), [allItems, result, theme]);
+
   if (isLoading) return <div className="py-16 text-center text-ink-400">Loading your report…</div>;
 
   if (!data?.loggedIn) {
@@ -250,27 +278,6 @@ export default function HistoryPage() {
     { label: "Win rate", value: `${t.winRate}%` },
     { label: "Rating", value: rating ?? "—" },
   ];
-
-  const allItems = [...(data.items ?? []), ...pages];
-
-  // Theme dropdown options — the union of every "primary" theme actually seen in
-  // the loaded pages. Keeps the picker honest (never surfaces a theme with 0 matches).
-  const availableThemes = useMemo(() => {
-    const s = new Set<string>();
-    for (const it of allItems) s.add(it.sel && it.sel !== "mix" ? it.sel : primaryTheme(it.themes));
-    return [...s].sort((a, b) => prettify(a).localeCompare(prettify(b)));
-  }, [allItems]);
-
-  // Filter applied to the flat items list BEFORE re-grouping by day/theme.
-  const filtered = useMemo(() => allItems.filter((it) => {
-    if (result === "solved" && !it.win) return false;
-    if (result === "missed" &&  it.win) return false;
-    if (theme) {
-      const t = it.sel && it.sel !== "mix" ? it.sel : primaryTheme(it.themes);
-      if (t !== theme) return false;
-    }
-    return true;
-  }), [allItems, result, theme]);
 
   // date groups (items are newest-first, so same-day items are contiguous)
   const dateGroups: { label: string; items: HistoryItem[] }[] = [];
