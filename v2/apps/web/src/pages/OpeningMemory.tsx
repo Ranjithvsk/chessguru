@@ -97,9 +97,9 @@ export default function OpeningMemory() {
         <div className="mb-1 text-[11px] uppercase tracking-wide text-ink-500">Picture set (anchors)</div>
         <div className="flex flex-wrap gap-1.5">
           {THEMES.filter((t) => t.level === themeById(themeId).level).map((t) => (
-            <button key={t.id} onClick={() => setThemeId(t.id)} title={t.blurb}
+            <button key={t.id} onClick={() => setThemeId(t.id)} title={`${t.blurb} · Level ${t.level}`}
               className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold ${themeId === t.id ? "bg-brand-600 text-white" : "border border-ink-700 text-ink-300 hover:bg-ink-800"}`}>
-              {t.emoji} {t.name}
+              {t.emoji} {t.name} <span className="ml-1 text-[10px] text-amber-400">{"★".repeat(t.level)}</span>
             </button>
           ))}
         </div>
