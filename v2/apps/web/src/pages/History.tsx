@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext, Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { Key } from "chessground/types";
@@ -160,7 +160,7 @@ function rdChip(rd: number): { chip: string; arrow: string; sign: string } {
  *  optional — legacy rows without ms/ratingDiff simply omit them.
  *  Clicking navigates to the Puzzles page with ?review=<id> so the puzzle re-opens
  *  in review mode (misses show a red arrow of the wrong move). */
-function LazyMini({ it, onOpen }: { it: HistoryItem; onOpen: (id: string) => void }) {
+const LazyMini = React.memo(function LazyMini({ it, onOpen }: { it: HistoryItem; onOpen: (id: string) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [show, setShow] = useState(false);
   useEffect(() => {
@@ -201,7 +201,7 @@ function LazyMini({ it, onOpen }: { it: HistoryItem; onOpen: (id: string) => voi
       )}
     </button>
   );
-}
+});
 
 export default function HistoryPage() {
   const { rating } = useOutletContext<Ctx>();
@@ -279,24 +279,30 @@ export default function HistoryPage() {
     { label: "Rating", value: rating ?? "—" },
   ];
 
-  // date groups (items are newest-first, so same-day items are contiguous)
-  const dateGroups: { label: string; items: HistoryItem[] }[] = [];
-  for (const it of filtered) {
-    const label = dateLabel(it.date);
-    const last = dateGroups[dateGroups.length - 1];
-    if (last && last.label === label) last.items.push(it);
-    else dateGroups.push({ label, items: [it] });
-  }
-  const themeGroupsOf = (items: HistoryItem[]) => {
-    const map = new Map<string, HistoryItem[]>();
-    for (const it of items) {
-      // group by the filter that was played: "All themes" when mix; else the picked theme; fall back to the puzzle's main theme (older solves)
-      const label = it.sel === "mix" ? "All themes" : it.sel ? prettify(it.sel) : prettify(primaryTheme(it.themes));
-      if (!map.has(label)) map.set(label, []);
-      map.get(label)!.push(it);
+  // date + theme groups — precomputed ONCE per filtered set, not per render.
+  // Prior code re-ran the O(N) grouping inside the JSX loop on every render
+  // (mouse move, scroll, hover), causing hundreds of chessground remounts.
+  const dateGroups = useMemo(() => {
+    const groups: { label: string; items: HistoryItem[]; themeGroups: { label: string; items: HistoryItem[] }[] }[] = [];
+    for (const it of filtered) {
+      const label = dateLabel(it.date);
+      const last = groups[groups.length - 1];
+      if (last && last.label === label) last.items.push(it);
+      else groups.push({ label, items: [it], themeGroups: [] });
     }
-    return [...map.entries()].map(([label, items]) => ({ label, items })).sort((a, b) => b.items.length - a.items.length);
-  };
+    for (const g of groups) {
+      const map = new Map<string, HistoryItem[]>();
+      for (const it of g.items) {
+        const label = it.sel === "mix" ? "All themes" : it.sel ? prettify(it.sel) : prettify(primaryTheme(it.themes));
+        if (!map.has(label)) map.set(label, []);
+        map.get(label)!.push(it);
+      }
+      g.themeGroups = [...map.entries()]
+        .map(([label, items]) => ({ label, items }))
+        .sort((a, b) => b.items.length - a.items.length);
+    }
+    return groups;
+  }, [filtered]);
 
   return (
     <div className="space-y-6">
@@ -341,7 +347,7 @@ export default function HistoryPage() {
                 <div className="h-px flex-1 bg-ink-800" />
               </div>
               <div className="space-y-4">
-                {themeGroupsOf(g.items).map((tg) => (
+                {g.themeGroups.map((tg) => (
                   <div key={tg.label}>
                     <h3 className="mb-2 text-sm font-semibold text-ink-300">
                       {tg.label} <span className="font-normal text-ink-500">· {tg.items.length}</span>
