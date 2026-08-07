@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { Key } from "chessground/types";
@@ -7,6 +7,7 @@ import { api, type HistoryItem } from "../lib/api";
 import { prettify } from "../lib/format";
 
 type Ctx = { userId: string | null; rating: number };
+type Result = "all" | "solved" | "missed";
 
 function dateLabel(d: string) {
   const day = new Date(d); const now = new Date();
@@ -40,6 +41,110 @@ function timeTier(ms: number): { chip: string; emoji: string } {
   if (ms < 30_000) return { chip: "bg-cyan-500/15 text-cyan-200 border-cyan-500/35",           emoji: "🚀" };
   if (ms < 60_000) return { chip: "bg-brand-500/15 text-brand-100 border-brand-500/30",         emoji: "⏱" };
   return                { chip: "bg-amber-500/10 text-amber-100 border-amber-500/25",           emoji: "🐢" };
+}
+
+// Start-of-week (Monday, local time) for the "this week" summary — matches how most
+// puzzle sites bucket streaks; not tied to the heatmap on Dashboard (which is Sun-first
+// GitHub-style — a display choice, not a data choice).
+function weekStartLocal(d: Date): Date {
+  const x = new Date(d); x.setHours(0, 0, 0, 0);
+  const dow = x.getDay();                          // 0=Sun..6=Sat
+  const back = dow === 0 ? 6 : dow - 1;            // Mon-start: Sunday counts as 6 back
+  x.setDate(x.getDate() - back);
+  return x;
+}
+
+// Aggregates for one date range — used by the WeekStrip to show "this week vs last week".
+type WeekAgg = { solved: number; missed: number; ratingDelta: number; count: number };
+function aggregateRange(items: HistoryItem[], from: Date, toExclusive: Date): WeekAgg {
+  const agg: WeekAgg = { solved: 0, missed: 0, ratingDelta: 0, count: 0 };
+  for (const it of items) {
+    const d = new Date(it.date);
+    if (d < from || d >= toExclusive) continue;
+    agg.count++;
+    if (it.win) agg.solved++; else agg.missed++;
+    if (typeof it.ratingDiff === "number") agg.ratingDelta += it.ratingDiff;
+  }
+  return agg;
+}
+
+// Colored "this week" strip. Three tiles + one trend arrow vs last week for the count.
+function WeekStrip({ items }: { items: HistoryItem[] }) {
+  const now = new Date();
+  const thisWeek = weekStartLocal(now);
+  const lastWeek = new Date(thisWeek); lastWeek.setDate(thisWeek.getDate() - 7);
+  const nextWeek = new Date(thisWeek); nextWeek.setDate(thisWeek.getDate() + 7);
+  const cur  = aggregateRange(items, thisWeek, nextWeek);
+  const prev = aggregateRange(items, lastWeek, thisWeek);
+  const trend = cur.count - prev.count;
+  const winPct = cur.count ? Math.round((cur.solved / cur.count) * 100) : 0;
+  return (
+    <div className="rounded-xl2 border border-brand-500/25 bg-gradient-to-br from-brand-500/10 via-ink-900 to-ink-900 p-4">
+      <div className="mb-2 flex items-baseline justify-between">
+        <span className="text-sm font-semibold text-white">📆 This week</span>
+        <span className="text-xs text-ink-400">
+          {trend > 0 && <span className="text-emerald-300">↑ {trend} vs last week</span>}
+          {trend < 0 && <span className="text-rose-300">↓ {Math.abs(trend)} vs last week</span>}
+          {trend === 0 && <span className="text-ink-500">same as last week</span>}
+        </span>
+      </div>
+      <div className="grid grid-cols-4 gap-2">
+        <div className="rounded-lg bg-ink-900/60 px-3 py-2">
+          <div className="text-lg font-bold tabular-nums text-white">{cur.count}</div>
+          <div className="text-[10px] uppercase tracking-wide text-ink-400">played</div>
+        </div>
+        <div className="rounded-lg bg-emerald-500/10 px-3 py-2">
+          <div className="text-lg font-bold tabular-nums text-emerald-200">{cur.solved}</div>
+          <div className="text-[10px] uppercase tracking-wide text-emerald-300/70">solved · {winPct}%</div>
+        </div>
+        <div className="rounded-lg bg-rose-500/10 px-3 py-2">
+          <div className="text-lg font-bold tabular-nums text-rose-200">{cur.missed}</div>
+          <div className="text-[10px] uppercase tracking-wide text-rose-300/70">missed</div>
+        </div>
+        <div className={`rounded-lg px-3 py-2 ${cur.ratingDelta >= 0 ? "bg-emerald-500/10" : "bg-rose-500/10"}`}>
+          <div className={`text-lg font-bold tabular-nums ${cur.ratingDelta >= 0 ? "text-emerald-200" : "text-rose-200"}`}>
+            {cur.ratingDelta >= 0 ? "+" : "−"}{Math.abs(cur.ratingDelta)}
+          </div>
+          <div className="text-[10px] uppercase tracking-wide text-ink-400">rating change</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Filter bar — result pill triplet + theme dropdown + reset. Compact so it doesn't
+// dominate the page. Theme options are the union of every theme the user has actually
+// touched (from the loaded pages) so we never show a picker that returns zero results.
+function FilterBar({ result, setResult, theme, setTheme, themes, matched, total }:
+  { result: Result; setResult: (r: Result) => void;
+    theme: string; setTheme: (t: string) => void;
+    themes: string[]; matched: number; total: number }) {
+  const pill = (active: boolean, base: string) =>
+    `rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${active ? base : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`;
+  const cleared = result === "all" && theme === "";
+  return (
+    <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-ink-400">Show</span>
+        <button onClick={() => setResult("all")}    className={pill(result === "all",    "border-brand-500/50 bg-brand-500/15 text-brand-100")}>All</button>
+        <button onClick={() => setResult("solved")} className={pill(result === "solved", "border-emerald-500/50 bg-emerald-500/15 text-emerald-200")}>✅ Solved</button>
+        <button onClick={() => setResult("missed")} className={pill(result === "missed", "border-rose-500/50 bg-rose-500/15 text-rose-200")}>❌ Missed</button>
+        <span className="mx-2 h-5 w-px bg-ink-700" />
+        <select value={theme} onChange={(e) => setTheme(e.target.value)}
+          className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-1 text-xs text-white">
+          <option value="">All themes</option>
+          {themes.map((t) => <option key={t} value={t}>{prettify(t)}</option>)}
+        </select>
+        {!cleared && (
+          <button onClick={() => { setResult("all"); setTheme(""); }}
+            className="ml-1 rounded-lg border border-ink-700 px-2 py-1 text-xs text-ink-300 hover:bg-ink-800">Clear</button>
+        )}
+        <span className="ml-auto text-xs text-ink-500 tabular-nums">
+          {matched === total ? `${total} puzzle${total === 1 ? "" : "s"}` : `${matched} of ${total} match`}
+        </span>
+      </div>
+    </div>
+  );
 }
 
 // Rating-delta chip color: emerald for gain, rose for loss, muted for zero (a hint
@@ -96,6 +201,8 @@ export default function HistoryPage() {
   const [off, setOff] = useState<number | null>(null);      // next offset to fetch (null = none)
   const [more, setMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [result, setResult] = useState<Result>("all");
+  const [theme,  setTheme]  = useState<string>("");
   useEffect(() => {
     if (data?.loggedIn) { setPages([]); setMore(!!data.hasMore); setOff(data.nextOffset ?? null); }
   }, [data]);
@@ -132,9 +239,29 @@ export default function HistoryPage() {
   ];
 
   const allItems = [...(data.items ?? []), ...pages];
+
+  // Theme dropdown options — the union of every "primary" theme actually seen in
+  // the loaded pages. Keeps the picker honest (never surfaces a theme with 0 matches).
+  const availableThemes = useMemo(() => {
+    const s = new Set<string>();
+    for (const it of allItems) s.add(it.sel && it.sel !== "mix" ? it.sel : primaryTheme(it.themes));
+    return [...s].sort((a, b) => prettify(a).localeCompare(prettify(b)));
+  }, [allItems]);
+
+  // Filter applied to the flat items list BEFORE re-grouping by day/theme.
+  const filtered = useMemo(() => allItems.filter((it) => {
+    if (result === "solved" && !it.win) return false;
+    if (result === "missed" &&  it.win) return false;
+    if (theme) {
+      const t = it.sel && it.sel !== "mix" ? it.sel : primaryTheme(it.themes);
+      if (t !== theme) return false;
+    }
+    return true;
+  }), [allItems, result, theme]);
+
   // date groups (items are newest-first, so same-day items are contiguous)
   const dateGroups: { label: string; items: HistoryItem[] }[] = [];
-  for (const it of allItems) {
+  for (const it of filtered) {
     const label = dateLabel(it.date);
     const last = dateGroups[dateGroups.length - 1];
     if (last && last.label === label) last.items.push(it);
@@ -167,9 +294,22 @@ export default function HistoryPage() {
         ))}
       </div>
 
+      {allItems.length > 0 && <WeekStrip items={allItems} />}
+
+      {allItems.length > 0 && (
+        <FilterBar result={result} setResult={setResult} theme={theme} setTheme={setTheme}
+          themes={availableThemes} matched={filtered.length} total={allItems.length} />
+      )}
+
       {t.attempted === 0 ? (
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-8 text-center text-ink-400">
           No solved puzzles yet — <Link to="/" className="text-brand-400 hover:underline">solve your first puzzle</Link> and it’ll show up here.
+        </div>
+      ) : dateGroups.length === 0 ? (
+        <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-8 text-center text-ink-400">
+          No puzzles match those filters —{" "}
+          <button onClick={() => { setResult("all"); setTheme(""); }} className="text-brand-400 hover:underline">clear filters</button>
+          {" "}to see everything.
         </div>
       ) : (
         <div className="space-y-7">
