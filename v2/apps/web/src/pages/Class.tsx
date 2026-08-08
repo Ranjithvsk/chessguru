@@ -233,6 +233,8 @@ function JitsiRoom({ roomId, displayName }: { roomId: string; displayName?: stri
 type ScheduledClass = {
   _id: string; title: string; coach: string;
   startAt: string; durationMin: number; notes: string;
+  createdByUserId?: string | null;
+  mine?: boolean;
 };
 
 // Human-friendly "in 2h 15m" / "started 4 min ago" / "3d ago" delta for a startAt.
@@ -261,6 +263,8 @@ function ClassLanding() {
   const nav = useNavigate();
   const [schedules, setSchedules] = useState<{ live: ScheduledClass[]; upcoming: ScheduledClass[] }>({ live: [], upcoming: [] });
   const [loading, setLoading] = useState(true);
+  const [me, setMe] = useState<{ loggedIn: boolean; username?: string }>({ loggedIn: false });
+  const [mineOnly, setMineOnly] = useState(false);
   const [form, setForm] = useState({
     title: "", coach: "", durationMin: 60,
     // Default start = next quarter-hour (15 min pad so the coach can share the
@@ -282,13 +286,40 @@ function ClassLanding() {
   const refresh = async () => {
     setLoading(true);
     try {
-      const r = await fetch(`${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/schedule`);
+      const r = await fetch(`${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/schedule`, { credentials: "include" });
       const j = await r.json();
       setSchedules({ live: j.live ?? [], upcoming: j.upcoming ?? [] });
     } catch { /* silent */ }
     finally { setLoading(false); }
   };
   useEffect(() => { refresh(); }, []);
+  // Pull the current session so the schedule form can pre-fill the coach name and
+  // the "Mine only" toggle can show up when the caller has any owned classes.
+  useEffect(() => {
+    fetch("/auth/me", { credentials: "include" })
+      .then((r) => r.json())
+      .then((j) => {
+        setMe({ loggedIn: !!j?.loggedIn, username: j?.username });
+        if (j?.loggedIn && j.username) setForm((f) => (f.coach ? f : { ...f, coach: j.username }));
+      })
+      .catch(() => { /* not signed in — leave defaults */ });
+  }, []);
+
+  const anyMine = [...schedules.live, ...schedules.upcoming].some((c) => c.mine);
+  const filterCards = (arr: ScheduledClass[]) => mineOnly ? arr.filter((c) => c.mine) : arr;
+  const visLive = filterCards(schedules.live);
+  const visUpcoming = filterCards(schedules.upcoming);
+
+  const cancel = async (c: ScheduledClass) => {
+    if (!c.mine) return;
+    if (!confirm(`Cancel "${c.title}"? This deletes the schedule; any recordings for the room stay accessible.`)) return;
+    try {
+      const res = await fetch(`${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/schedule/${encodeURIComponent(c._id)}`,
+        { method: "DELETE", credentials: "include" });
+      if (!res.ok) throw new Error(`cancel failed: ${res.status}`);
+      refresh();
+    } catch (e: any) { alert(e?.message || "Couldn't cancel"); }
+  };
 
   const startNow = () => nav(`/class/${newRoomId()}`);
   const submit = async (e: React.FormEvent) => {
@@ -297,6 +328,7 @@ function ClassLanding() {
     try {
       const res = await fetch(`${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/schedule`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: form.title, coach: form.coach, notes: form.notes,
@@ -328,15 +360,31 @@ function ClassLanding() {
         </button>
       </header>
 
+      {/* "Mine only" filter — only surfaces when the caller actually has any
+          scheduled classes. Keeps the landing simple for pure students. */}
+      {anyMine && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-ink-400">Show:</span>
+          <button onClick={() => setMineOnly(false)}
+            className={`rounded-full border px-3 py-1 text-xs font-semibold ${!mineOnly
+              ? "border-brand-500/50 bg-brand-500/15 text-brand-100"
+              : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>All classes</button>
+          <button onClick={() => setMineOnly(true)}
+            className={`rounded-full border px-3 py-1 text-xs font-semibold ${mineOnly
+              ? "border-amber-400/60 bg-amber-500/20 text-amber-100"
+              : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>👑 Mine only</button>
+        </div>
+      )}
+
       {/* Live now — pulsing rose highlight so it draws the eye. Empty when nothing's live. */}
-      {schedules.live.length > 0 && (
+      {visLive.length > 0 && (
         <section>
           <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-rose-300">
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-rose-500 shadow-[0_0_6px] shadow-rose-500" />
             Live now
           </h2>
           <div className="grid gap-3 md:grid-cols-2">
-            {schedules.live.map((c) => <ClassCard key={c._id} c={c} tone="live" />)}
+            {visLive.map((c) => <ClassCard key={c._id} c={c} tone="live" onCancel={c.mine ? () => cancel(c) : undefined} />)}
           </div>
         </section>
       )}
@@ -345,16 +393,18 @@ function ClassLanding() {
         <h2 className="mb-2 flex items-baseline justify-between text-sm font-semibold text-white">
           <span>📆 Upcoming</span>
           <span className="text-[10px] font-normal text-ink-500">
-            {loading ? "loading…" : `${schedules.upcoming.length} scheduled`}
+            {loading ? "loading…" : `${visUpcoming.length} scheduled${mineOnly ? " · yours" : ""}`}
           </span>
         </h2>
-        {!loading && schedules.upcoming.length === 0 ? (
+        {!loading && visUpcoming.length === 0 ? (
           <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-6 text-center text-sm text-ink-400">
-            No upcoming classes. Schedule one below or <button className="text-brand-400 hover:underline" onClick={startNow}>start now</button>.
+            {mineOnly
+              ? <>You haven't scheduled any classes yet. Fill in the form below to create one.</>
+              : <>No upcoming classes. Schedule one below or <button className="text-brand-400 hover:underline" onClick={startNow}>start now</button>.</>}
           </div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
-            {schedules.upcoming.map((c) => <ClassCard key={c._id} c={c} tone="upcoming" />)}
+            {visUpcoming.map((c) => <ClassCard key={c._id} c={c} tone="upcoming" onCancel={c.mine ? () => cancel(c) : undefined} />)}
           </div>
         )}
       </section>
@@ -413,12 +463,15 @@ function ClassLanding() {
   );
 }
 
-// Single card in the live/upcoming list. Clicking anywhere on the card jumps
-// straight into the room. Tone = live pulses rose, upcoming stays neutral brand.
-function ClassCard({ c, tone }: { c: ScheduledClass; tone: "live" | "upcoming" }) {
+// Single card in the live/upcoming list. Clicking the card body jumps straight
+// into the room. Cancel button is coach-only (onCancel is undefined otherwise) and
+// stops the click from propagating so it doesn't also open the class.
+function ClassCard({ c, tone, onCancel }: { c: ScheduledClass; tone: "live" | "upcoming"; onCancel?: () => void }) {
   const border = tone === "live"
     ? "border-rose-500/40 bg-gradient-to-br from-rose-500/10 via-ink-900 to-ink-900"
-    : "border-ink-700 bg-ink-900 hover:border-brand-500/40";
+    : c.mine
+      ? "border-amber-500/40 bg-gradient-to-br from-amber-500/10 via-ink-900 to-ink-900 hover:border-amber-400/60"
+      : "border-ink-700 bg-ink-900 hover:border-brand-500/40";
   const cta = tone === "live"
     ? "bg-gradient-to-r from-rose-500 to-rose-400 text-white hover:from-rose-400 hover:to-rose-300"
     : "bg-gradient-to-r from-brand-600 to-brand-500 text-white hover:from-brand-500 hover:to-brand-400";
@@ -427,7 +480,12 @@ function ClassCard({ c, tone }: { c: ScheduledClass; tone: "live" | "upcoming" }
       className={`group flex flex-col gap-2 rounded-xl2 border p-4 transition-colors ${border}`}>
       <div className="flex items-baseline justify-between gap-2">
         <div className="min-w-0">
-          <div className="truncate font-semibold text-white">{c.title}</div>
+          <div className="flex items-center gap-2">
+            <span className="truncate font-semibold text-white">{c.title}</span>
+            {c.mine && (
+              <span className="shrink-0 rounded bg-amber-500/25 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-100">Yours</span>
+            )}
+          </div>
           <div className="mt-0.5 text-xs text-ink-400">👑 {c.coach} · {c.durationMin} min</div>
         </div>
         {tone === "live" && (
@@ -441,9 +499,17 @@ function ClassCard({ c, tone }: { c: ScheduledClass; tone: "live" | "upcoming" }
         <span className="text-ink-400">
           {absTime(c.startAt)} <span className="text-ink-500">· {relTime(c.startAt)}</span>
         </span>
-        <span className={`rounded-lg px-3 py-1 text-xs font-semibold shadow-sm ${cta}`}>
-          {tone === "live" ? "Join →" : "Open"}
-        </span>
+        <div className="flex items-center gap-2">
+          {onCancel && (
+            <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCancel(); }}
+              className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-2.5 py-1 text-[11px] font-semibold text-rose-200 hover:bg-rose-500/20">
+              Cancel
+            </button>
+          )}
+          <span className={`rounded-lg px-3 py-1 text-xs font-semibold shadow-sm ${cta}`}>
+            {tone === "live" ? "Join →" : "Open"}
+          </span>
+        </div>
       </div>
       {c.notes && <p className="mt-1 line-clamp-2 text-xs text-ink-500">{c.notes}</p>}
     </Link>
