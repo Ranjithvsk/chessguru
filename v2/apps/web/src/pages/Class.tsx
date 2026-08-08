@@ -247,6 +247,7 @@ type ScheduledClass = {
   startAt: string; durationMin: number; notes: string;
   createdByUserId?: string | null;
   mine?: boolean;
+  attendedCount?: number;   // only present for rows the caller owns
 };
 
 // Human-friendly "in 2h 15m" / "started 4 min ago" / "3d ago" delta for a startAt.
@@ -497,6 +498,12 @@ function ClassCard({ c, tone, onCancel }: { c: ScheduledClass; tone: "live" | "u
             {c.mine && (
               <span className="shrink-0 rounded bg-amber-500/25 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-100">Yours</span>
             )}
+            {c.mine && (c.attendedCount ?? 0) > 0 && (
+              <span className="shrink-0 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-200"
+                title="Students who've joined this class">
+                🧑‍🎓 {c.attendedCount}
+              </span>
+            )}
           </div>
           <div className="mt-0.5 text-xs text-ink-400">👑 {c.coach} · {c.durationMin} min</div>
         </div>
@@ -534,7 +541,7 @@ type Attendee = { userId: string | null; name: string; joinedAt: string; lastSee
 // arrival order + last-seen. Refreshes every 10s so the coach's view stays fresh
 // during the class without hammering the API. All roles can see it (matches
 // Jitsi's own participant list) — coach-only gating is a Phase 6 policy call.
-function AttendancePanel({ roomId, live }: { roomId: string; live: number }) {
+function AttendancePanel({ roomId, live, isCoach }: { roomId: string; live: number; isCoach: boolean }) {
   const [items, setItems] = useState<Attendee[]>([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -561,10 +568,17 @@ function AttendancePanel({ roomId, live }: { roomId: string; live: number }) {
   };
   return (
     <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-3">
-      <div className="mb-2 flex items-baseline justify-between">
+      <div className="mb-2 flex items-baseline justify-between gap-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-ink-300">🧑‍🎓 Attendance</span>
-        <span className="text-[10px] text-ink-500">
-          {loading ? "loading…" : `${items.length} joined${live > 0 ? ` · ${live} live` : ""}`}
+        <span className="flex items-center gap-2 text-[10px] text-ink-500">
+          <span>{loading ? "loading…" : `${items.length} joined${live > 0 ? ` · ${live} live` : ""}`}</span>
+          {isCoach && items.length > 0 && (
+            <a href={`${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/${encodeURIComponent(roomId)}/attendance.csv`}
+               className="rounded border border-brand-500/40 bg-brand-500/10 px-2 py-0.5 font-semibold text-brand-100 hover:bg-brand-500/20"
+               title="Download attendance CSV (coach only)">
+              ⬇ CSV
+            </a>
+          )}
         </span>
       </div>
       {!loading && items.length === 0 ? (
@@ -948,7 +962,7 @@ export default function ClassPage() {
         </div>
         <SyncedBoard sync={sync} />
         <div className="mt-4 space-y-3">
-          <AttendancePanel roomId={id} live={sync.participants} />
+          <AttendancePanel roomId={id} live={sync.participants} isCoach={sync.role === "coach"} />
           <RecordingsPanel roomId={id} isCoach={sync.role === "coach"} sync={sync} />
         </div>
       </section>

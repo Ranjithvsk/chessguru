@@ -78,21 +78,40 @@ export class ClassScheduleController {
 
   // GET /api/class/schedule — list live + upcoming classes. Each row gets a
   // `mine: boolean` flag based on the caller's session so the client can render
-  // owner-only controls (Delete) without a second round-trip. Ended classes are
-  // hidden by default (a separate ?past=1 query would return the recent past).
+  // owner-only controls (Delete) without a second round-trip. Rows the caller
+  // OWNS also get `attendedCount` so the coach can see roster health at a glance
+  // on the landing (fetched via one aggregate to avoid N+1 on busy days).
+  // Ended classes are hidden by default (a separate ?past=1 query would return
+  // the recent past).
   @Get()
   async list(@Req() req: any) {
     const now = new Date();
     const me: string | null = req?.session?.userId ?? null;
     const rows = await this.col().find({}, { sort: { startAt: 1 } }).limit(200).toArray();
-    const live: (ScheduleDoc & { mine: boolean })[] = [];
-    const upcoming: (ScheduleDoc & { mine: boolean })[] = [];
+    const live: (ScheduleDoc & { mine: boolean; attendedCount?: number })[] = [];
+    const upcoming: (ScheduleDoc & { mine: boolean; attendedCount?: number })[] = [];
+    const mineIds: string[] = [];
     for (const r of rows) {
       const endAt = new Date(r.startAt.getTime() + r.durationMin * 60_000);
       if (endAt <= now) continue;
-      const flagged = { ...r, mine: !!me && r.createdByUserId === me };
+      const mine = !!me && r.createdByUserId === me;
+      if (mine) mineIds.push(r._id);
+      const flagged = { ...r, mine };
       if (r.startAt <= now) live.push(flagged);
       else upcoming.push(flagged);
+    }
+    // Attendance counts for the caller's own rows only — students can see live
+    // participants directly in the room anyway; coach cares about it on the
+    // landing when scanning their schedule.
+    if (mineIds.length) {
+      const counts = await this.conn.db!.collection("classAttendance").aggregate([
+        { $match: { classId: { $in: mineIds } } },
+        { $group: { _id: "$classId", n: { $sum: 1 } } },
+      ]).toArray();
+      const byId = new Map<string, number>(counts.map((c: any) => [c._id, c.n]));
+      for (const r of [...live, ...upcoming]) {
+        if (r.mine) r.attendedCount = byId.get(r._id) ?? 0;
+      }
     }
     return { live, upcoming };
   }
