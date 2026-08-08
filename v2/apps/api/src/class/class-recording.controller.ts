@@ -76,4 +76,51 @@ export class ClassRecordingController {
     res.setHeader("Cache-Control", "private, max-age=3600");
     createReadStream(full).pipe(res);
   }
+
+  // POST /api/class/:id/recording/:filename/timeline — sidecar JSON with the moves
+  // played during the recording, timestamped relative to record-start. Called by
+  // the coach's browser AFTER the .webm upload completes. Small enough (few KB
+  // even for a long class) that we accept it as a normal JSON body — no raw hook.
+  @Post(":id/recording/:filename/timeline")
+  async postTimeline(@Param("id") id: string, @Param("filename") filename: string, @Body() body: unknown) {
+    if (!ROOM_RE.test(id))    throw new HttpException("bad room", HttpStatus.BAD_REQUEST);
+    if (!FILE_RE.test(filename)) throw new HttpException("bad filename", HttpStatus.BAD_REQUEST);
+    // Validate shape: { events: [{ tMs: int, move: {from, to, promotion?} }, ...] }.
+    // Malformed rows are dropped rather than rejecting the whole payload — the
+    // primary asset is the video, timeline is an accompaniment that must never
+    // block saving.
+    const raw = (body as any)?.events;
+    if (!Array.isArray(raw)) throw new HttpException("bad body", HttpStatus.BAD_REQUEST);
+    const events: Array<{ tMs: number; move: { from: string; to: string; promotion?: string } }> = [];
+    for (const e of raw) {
+      if (typeof e?.tMs !== "number" || !e.move) continue;
+      const m = e.move;
+      if (typeof m.from !== "string" || typeof m.to !== "string") continue;
+      if (!/^[a-h][1-8]$/.test(m.from) || !/^[a-h][1-8]$/.test(m.to)) continue;
+      events.push({ tMs: Math.max(0, Math.round(e.tMs)),
+                    move: { from: m.from, to: m.to, promotion: typeof m.promotion === "string" ? m.promotion : undefined } });
+      if (events.length >= 5000) break;   // 5000 moves = 15+ hours of chess, well past any real class
+    }
+    const dir = join(RECORDINGS_DIR, id);
+    // Only accept a timeline for a video that actually exists — sidecar for a
+    // non-existent recording is meaningless (and would allow noise in the dir).
+    try { statSync(join(dir, filename)); } catch { throw new HttpException("recording not found", HttpStatus.NOT_FOUND); }
+    await fs.writeFile(join(dir, filename + ".timeline.json"), JSON.stringify({ events }));
+    return { ok: true, count: events.length };
+  }
+
+  // GET /api/class/:id/recording/:filename/timeline — returns { events: [] } if
+  // no sidecar exists yet (a recording made before this feature landed) so the
+  // replay page can render the video without a board and never crash.
+  @Get(":id/recording/:filename/timeline")
+  async getTimeline(@Param("id") id: string, @Param("filename") filename: string) {
+    if (!ROOM_RE.test(id))    throw new HttpException("bad room", HttpStatus.BAD_REQUEST);
+    if (!FILE_RE.test(filename)) throw new HttpException("bad filename", HttpStatus.BAD_REQUEST);
+    const path = join(RECORDINGS_DIR, id, filename + ".timeline.json");
+    try {
+      const raw = await fs.readFile(path, "utf8");
+      const parsed = JSON.parse(raw);
+      return { events: Array.isArray(parsed?.events) ? parsed.events : [] };
+    } catch { return { events: [] }; }
+  }
 }

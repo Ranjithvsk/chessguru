@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useOutletContext, useParams, useNavigate } from "react-router-dom";
+import { useOutletContext, useParams, useNavigate, Link } from "react-router-dom";
 import { Chess } from "chess.js";
 import type { Key } from "chessground/types";
 import type { DrawShape } from "chessground/draw";
@@ -234,7 +234,11 @@ function JitsiRoom({ roomId, displayName }: { roomId: string; displayName?: stri
 // runs in the coach's browser — no server-side compositor needed. When we swap to
 // self-hosted Jitsi + Jibri later, THIS hook goes away and Jibri becomes a fully
 // server-side alternative that posts to the same /api/class/:id/recording endpoint.
-function useRecorder(roomId: string | undefined, onUploaded: () => void) {
+function useRecorder(
+  roomId: string | undefined,
+  sync: ReturnType<typeof useClassSync>,
+  onUploaded: () => void,
+) {
   const [state, setState] = useState<"idle" | "recording" | "uploading" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<number | null>(null);
@@ -242,6 +246,13 @@ function useRecorder(roomId: string | undefined, onUploaded: () => void) {
   const recRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  // Timeline capture: while recording, every WS `move` frame observed by this browser
+  // is stamped with elapsed-ms and pushed. We snapshot the last-known move at record
+  // start so the FIRST post-start move is what triggers the initial timeline entry
+  // (not whatever was already on the board when the coach hit record).
+  const timelineRef = useRef<Array<{ tMs: number; move: WsMove }>>([]);
+  const seenMoveRef = useRef<WsMove | null>(null);
+  const startedAtRef = useRef<number | null>(null);
 
   // Tick elapsed seconds while recording. Not tied to state === "recording" via
   // closure so the interval always sees the latest startedAt.
@@ -250,6 +261,17 @@ function useRecorder(roomId: string | undefined, onUploaded: () => void) {
     const t = setInterval(() => setElapsed(Date.now() - startedAt), 500);
     return () => clearInterval(t);
   }, [state, startedAt]);
+
+  // Every time the room's lastMove changes AFTER record-start, push a timeline entry.
+  // Reference-equality check works because the sync hook allocates a new object per
+  // frame — even a takeback-then-replay of the same UCI is a distinct event.
+  useEffect(() => {
+    if (state !== "recording" || startedAtRef.current == null) return;
+    if (!sync.lastMove) return;
+    if (sync.lastMove === seenMoveRef.current) return;
+    seenMoveRef.current = sync.lastMove;
+    timelineRef.current.push({ tMs: Date.now() - startedAtRef.current, move: sync.lastMove });
+  }, [sync.lastMove, state]);
 
   const cleanup = () => {
     try { recRef.current?.stop(); } catch { /* */ }
@@ -284,7 +306,11 @@ function useRecorder(roomId: string | undefined, onUploaded: () => void) {
       // it as a Stop: finalize the recording rather than leaving the state dangling.
       stream.getVideoTracks()[0]?.addEventListener("ended", () => { if (recRef.current?.state === "recording") stop(); });
       rec.start(1000);   // gather in 1-sec chunks so a crash doesn't lose the whole take
-      setStartedAt(Date.now()); setElapsed(0); setState("recording");
+      const t0 = Date.now();
+      startedAtRef.current = t0;
+      seenMoveRef.current = sync.lastMove;   // baseline — don't record what's already on the board
+      timelineRef.current = [];
+      setStartedAt(t0); setElapsed(0); setState("recording");
     } catch (e: any) {
       setError(e?.name === "NotAllowedError" ? "Screen share was cancelled" : "Couldn't start recording");
       setState("error"); cleanup();
@@ -310,6 +336,19 @@ function useRecorder(roomId: string | undefined, onUploaded: () => void) {
         body: blob,
       });
       if (!res.ok) throw new Error(`upload failed: ${res.status}`);
+      const meta = await res.json().catch(() => ({} as any));
+      // Post the sidecar timeline. Best-effort — a failure here loses the board
+      // overlay on replay but the video is safely saved.
+      if (meta?.filename && timelineRef.current.length > 0) {
+        try {
+          await fetch(classApiPath(roomId, `/recording/${encodeURIComponent(meta.filename)}/timeline`), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ events: timelineRef.current }),
+          });
+        } catch { /* silent — video is safe */ }
+      }
+      timelineRef.current = []; startedAtRef.current = null;
       setState("idle"); setStartedAt(null); setElapsed(0);
       onUploaded();
     } catch (e: any) {
@@ -323,7 +362,7 @@ function useRecorder(roomId: string | undefined, onUploaded: () => void) {
 
 // Recordings panel — lists past .webm files for the class + coach's Record/Stop UI.
 // Both roles see the list; only coach sees the record button.
-function RecordingsPanel({ roomId, isCoach }: { roomId: string; isCoach: boolean }) {
+function RecordingsPanel({ roomId, isCoach, sync }: { roomId: string; isCoach: boolean; sync: ReturnType<typeof useClassSync> }) {
   const [items, setItems] = useState<Recording[]>([]);
   const [loading, setLoading] = useState(true);
   const refresh = useCallback(async () => {
@@ -336,7 +375,7 @@ function RecordingsPanel({ roomId, isCoach }: { roomId: string; isCoach: boolean
     finally { setLoading(false); }
   }, [roomId]);
   useEffect(() => { refresh(); }, [refresh]);
-  const rec = useRecorder(roomId, refresh);
+  const rec = useRecorder(roomId, sync, refresh);
 
   return (
     <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-3">
@@ -379,9 +418,8 @@ function RecordingsPanel({ roomId, isCoach }: { roomId: string; isCoach: boolean
               <span className="truncate text-ink-200">{new Date(r.createdAt).toLocaleString()}</span>
               <span className="flex shrink-0 items-center gap-2 text-ink-400">
                 <span className="tabular-nums text-[10px]">{fmtBytes(r.bytes)}</span>
-                <a href={classApiPath(roomId, `/recording/${encodeURIComponent(r.name)}`)}
-                   target="_blank" rel="noreferrer"
-                   className="rounded border border-brand-500/40 bg-brand-500/10 px-2 py-0.5 font-semibold text-brand-100 hover:bg-brand-500/20">▶ Open</a>
+                <Link to={`/class/${encodeURIComponent(roomId)}/replay/${encodeURIComponent(r.name)}`}
+                   className="rounded border border-brand-500/40 bg-brand-500/10 px-2 py-0.5 font-semibold text-brand-100 hover:bg-brand-500/20">▶ Replay</Link>
                 <a href={classApiPath(roomId, `/recording/${encodeURIComponent(r.name)}`)} download={r.name}
                    className="rounded border border-ink-600 bg-ink-800 px-2 py-0.5 font-semibold text-ink-200 hover:bg-ink-700">⬇</a>
               </span>
@@ -556,7 +594,7 @@ export default function ClassPage() {
         </div>
         <SyncedBoard sync={sync} />
         <div className="mt-4">
-          <RecordingsPanel roomId={id} isCoach={sync.role === "coach"} />
+          <RecordingsPanel roomId={id} isCoach={sync.role === "coach"} sync={sync} />
         </div>
       </section>
       {/* Video column — Jitsi iframe fills the rest. */}
