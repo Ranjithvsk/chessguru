@@ -14,21 +14,37 @@ function classWsUrl(roomId: string): string {
 }
 
 type WsMove = { from: string; to: string; promotion?: string };
+type Role = "coach" | "student";
 type WsFrame =
-  | { type: "state"; fen: string; lastMove: WsMove | null; history: WsMove[]; participants: number }
-  | { type: "move"; move: WsMove; fen: string; participants: number }
-  | { type: "reset"; fen: string; participants: number }
+  | { type: "role"; role: Role; coachToken?: string }
+  | { type: "state"; fen: string; lastMove: WsMove | null; history: WsMove[]; participants: number; locked: boolean }
+  | { type: "move"; move: WsMove; fen: string; participants: number; locked: boolean }
+  | { type: "reset"; fen: string; participants: number; locked: boolean }
+  | { type: "lock"; locked: boolean; participants: number }
   | { type: "participants"; participants: number }
   | { type: "pong" };
 
+// Coach token lives in sessionStorage keyed by class id — survives reloads within the
+// same tab, dies when the tab closes (safer than localStorage: no permanent claim on
+// a class URL). Any tab that has the token is coach on reconnect.
+const COACH_KEY_PREFIX = "cg_class_coach_";
+const loadCoachToken = (roomId: string): string | undefined => {
+  try { return sessionStorage.getItem(COACH_KEY_PREFIX + roomId) ?? undefined; } catch { return undefined; }
+};
+const saveCoachToken = (roomId: string, tok: string): void => {
+  try { sessionStorage.setItem(COACH_KEY_PREFIX + roomId, tok); } catch { /* */ }
+};
+
 // Bridges the class-ws bus into React. Returns the authoritative board state plus
-// helpers to publish moves/reset. Reconnects on transient drops with a small backoff
-// so a laptop lid-close doesn't kill the session permanently.
+// helpers to publish moves/reset/lock/takeback. Reconnects on transient drops with a
+// small backoff so a laptop lid-close doesn't kill the session permanently.
 function useClassSync(roomId: string | undefined) {
   const [fen, setFen] = useState(new Chess().fen());
   const [lastMove, setLastMove] = useState<WsMove | null>(null);
   const [participants, setParticipants] = useState(1);
   const [connected, setConnected] = useState(false);
+  const [role, setRole] = useState<Role>("student");
+  const [locked, setLocked] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef(0);
 
@@ -39,15 +55,26 @@ function useClassSync(roomId: string | undefined) {
     const connect = () => {
       const ws = new WebSocket(classWsUrl(roomId));
       wsRef.current = ws;
-      ws.onopen = () => { retryRef.current = 0; setConnected(true); };
+      ws.onopen = () => {
+        retryRef.current = 0; setConnected(true);
+        // Hello with our saved coach token (if any) so a reconnect resumes coach role.
+        try { ws.send(JSON.stringify({ type: "hello", coachToken: loadCoachToken(roomId) })); } catch { /* */ }
+      };
       ws.onmessage = (ev) => {
         let f: WsFrame; try { f = JSON.parse(ev.data); } catch { return; }
-        if (f.type === "state" || f.type === "move" || f.type === "reset") {
-          setFen(f.fen);
-          if ("lastMove" in f) setLastMove(f.lastMove);
-          if (f.type === "move") setLastMove(f.move);
-          if (f.type === "reset") setLastMove(null);
-          setParticipants(f.participants);
+        if (f.type === "role") {
+          setRole(f.role);
+          if (f.role === "coach" && f.coachToken) saveCoachToken(roomId, f.coachToken);
+          return;
+        }
+        if (f.type === "state") {
+          setFen(f.fen); setLastMove(f.lastMove); setParticipants(f.participants); setLocked(f.locked);
+        } else if (f.type === "move") {
+          setFen(f.fen); setLastMove(f.move); setParticipants(f.participants); setLocked(f.locked);
+        } else if (f.type === "reset") {
+          setFen(f.fen); setLastMove(null); setParticipants(f.participants); setLocked(f.locked);
+        } else if (f.type === "lock") {
+          setLocked(f.locked); setParticipants(f.participants);
         } else if (f.type === "participants") {
           setParticipants(f.participants);
         }
@@ -71,18 +98,18 @@ function useClassSync(roomId: string | undefined) {
     };
   }, [roomId]);
 
-  const sendMove = useCallback((mv: WsMove) => {
+  const send = (payload: unknown) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    try { ws.send(JSON.stringify({ type: "move", move: mv })); } catch { /* */ }
-  }, []);
-  const sendReset = useCallback(() => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    try { ws.send(JSON.stringify({ type: "reset" })); } catch { /* */ }
-  }, []);
+    try { ws.send(JSON.stringify(payload)); } catch { /* */ }
+  };
+  const sendMove     = useCallback((mv: WsMove) => send({ type: "move", move: mv }), []);
+  const sendReset    = useCallback(() => send({ type: "reset" }), []);
+  const sendLock     = useCallback((v: boolean) => send({ type: "lock", locked: v }), []);
+  const sendTakeback = useCallback(() => send({ type: "takeback" }), []);
 
-  return { fen, lastMove, participants, connected, sendMove, sendReset };
+  return { fen, lastMove, participants, connected, role, locked,
+           sendMove, sendReset, sendLock, sendTakeback };
 }
 
 // Live-class page — MVP video-conferencing surface (owner 2026-08-08 spec).
@@ -178,7 +205,9 @@ function JitsiRoom({ roomId, displayName }: { roomId: string; displayName?: stri
 // Legal-move validation happens locally (chessground destinations) AND on the server
 // (illegal frames dropped silently, sender reconciles from the next state frame).
 function SyncedBoard({ sync }: { sync: ReturnType<typeof useClassSync> }) {
-  const { fen, lastMove, participants, connected, sendMove, sendReset } = sync;
+  const { fen, lastMove, participants, connected, role, locked,
+          sendMove, sendReset, sendLock, sendTakeback } = sync;
+  const isCoach = role === "coach";
   // Local chess.js is kept in sync with the authoritative FEN — used solely to compute
   // legal destinations so chessground shows valid drop-targets while dragging.
   const chessRef = useRef<Chess>(new Chess());
@@ -187,29 +216,68 @@ function SyncedBoard({ sync }: { sync: ReturnType<typeof useClassSync> }) {
   const turnColor: "white" | "black" = chessRef.current.turn() === "w" ? "white" : "black";
   const lastMoveArrow: [Key, Key] | undefined = lastMove
     ? [lastMove.from as Key, lastMove.to as Key] : undefined;
+  // Movability gate: students can't move while the coach has the lock on.
+  const canMove = isCoach || !locked;
+  const movableColor: "both" | undefined = canMove ? "both" : undefined;
 
   const onMove = (from: Key, to: Key) => {
     // Optimistic local: apply the move immediately, then rely on the server's echo
-    // to confirm. If the server rejects (illegal), the follow-up `state` frame will
-    // reset us to truth so the user sees the piece snap back.
+    // to confirm. If the server rejects (illegal / locked), the follow-up `state`
+    // frame will reset us to truth so the user sees the piece snap back.
     try { chessRef.current.move({ from, to, promotion: "q" }); } catch { return; }
     sendMove({ from, to, promotion: "q" });
   };
 
   return (
     <div className="flex flex-col gap-3">
-      <Board fen={fen} orientation="white" turnColor={turnColor} movableColor="both"
-        dests={dests} lastMove={lastMoveArrow} onMove={onMove} />
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="flex items-center gap-2 text-xs text-ink-400">
+      <Board fen={fen} orientation="white" turnColor={turnColor} movableColor={movableColor}
+        dests={canMove ? dests : new Map()} lastMove={lastMoveArrow} onMove={onMove} />
+
+      {/* Status strip — connection dot + role badge + participant count + lock chip. */}
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="flex items-center gap-1.5 text-ink-400">
           <span className={`inline-block h-2 w-2 rounded-full ${connected ? "bg-emerald-400 shadow-[0_0_6px] shadow-emerald-400" : "bg-rose-400"}`} />
-          {connected ? `Live · ${participants} in room` : "Reconnecting…"}
+          {connected ? `${participants} in room` : "Reconnecting…"}
         </span>
-        <button onClick={sendReset}
-          className="rounded-lg border border-ink-600 bg-ink-800 px-3 py-1.5 text-xs font-semibold text-ink-200 hover:bg-ink-700">
-          ↺ Reset board
-        </button>
+        <span className={`rounded-full border px-2 py-0.5 font-semibold ${isCoach
+          ? "border-amber-400/60 bg-gradient-to-r from-amber-500/25 to-orange-500/15 text-amber-100"
+          : "border-ink-600 bg-ink-800 text-ink-300"}`}>
+          {isCoach ? "👑 Coach" : "👤 Student"}
+        </span>
+        {locked && (
+          <span className="rounded-full border border-rose-500/50 bg-rose-500/15 px-2 py-0.5 font-semibold text-rose-200">
+            🔒 Students locked
+          </span>
+        )}
       </div>
+
+      {/* Coach control bar — takeback / lock toggle / reset. Distinct amber-gold
+          palette so it reads as "you're the one driving the class". */}
+      {isCoach && (
+        <div className="rounded-xl2 border border-amber-500/30 bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-ink-900 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wide text-amber-200">Coach controls</span>
+            <span className="text-[10px] text-ink-500">only you see this</span>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <button onClick={sendTakeback}
+              className="rounded-lg bg-gradient-to-r from-brand-600 to-brand-500 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:from-brand-500 hover:to-brand-400 disabled:opacity-40"
+              disabled={!lastMove}>
+              ↶ Takeback
+            </button>
+            <button onClick={() => sendLock(!locked)}
+              className={`rounded-lg px-3 py-2 text-xs font-semibold shadow-sm ${locked
+                ? "bg-gradient-to-r from-rose-500 to-rose-400 text-white hover:from-rose-400 hover:to-rose-300"
+                : "bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-400 hover:to-teal-400"}`}>
+              {locked ? "🔓 Unlock" : "🔒 Lock students"}
+            </button>
+            <button onClick={sendReset}
+              className="rounded-lg border border-ink-600 bg-ink-800 px-3 py-2 text-xs font-semibold text-ink-200 hover:bg-ink-700">
+              ↺ Reset
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -30,14 +30,25 @@ import { WebSocketServer, WebSocket } from "ws";
 import { Chess } from "chess.js";
 
 type Move = { from: string; to: string; promotion?: string };
+// Client → server frames.
+//   hello: sent right after connect. If the client already has a coachToken
+//     saved (reconnect), server verifies + resumes coach role. Otherwise the
+//     first hello with no token claims the coach role for that room.
 type ClientFrame =
+  | { type: "hello"; coachToken?: string }
   | { type: "move"; move: Move }
   | { type: "reset" }
+  | { type: "lock"; locked: boolean }       // coach only — student moves are dropped when true
+  | { type: "takeback" }                    // coach only — pops the last move
   | { type: "ping" };
+// Server → client frames. `role` sent once after hello resolves; everything else
+// is broadcast to the room on state changes.
 type ServerFrame =
-  | { type: "state"; fen: string; lastMove: Move | null; history: Move[]; participants: number }
-  | { type: "move"; move: Move; fen: string; participants: number }
-  | { type: "reset"; fen: string; participants: number }
+  | { type: "role"; role: "coach" | "student"; coachToken?: string }
+  | { type: "state"; fen: string; lastMove: Move | null; history: Move[]; participants: number; locked: boolean }
+  | { type: "move"; move: Move; fen: string; participants: number; locked: boolean }
+  | { type: "reset"; fen: string; participants: number; locked: boolean }
+  | { type: "lock"; locked: boolean; participants: number }
   | { type: "participants"; participants: number }
   | { type: "pong" };
 
@@ -46,6 +57,16 @@ interface Room {
   lastMove: Move | null;
   history: Move[];
   clients: Set<WebSocket>;
+  coachToken: string | null;    // random shared secret — coach's browser keeps it
+  coach: WebSocket | null;      // currently-connected coach socket (may go null between reconnects)
+  locked: boolean;              // student-move lock
+}
+
+// role() and lookup helpers use a per-socket WeakMap so the ws frame handler can
+// answer "is this socket the coach?" without stashing state on the socket object.
+const socketRole = new WeakMap<WebSocket, "coach" | "student">();
+function mintCoachToken(): string {
+  return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
 }
 
 const START_FEN = new Chess().fen();
@@ -56,7 +77,11 @@ const rooms = new Map<string, Room>();
 
 function getRoom(id: string): Room {
   let r = rooms.get(id);
-  if (!r) { r = { fen: START_FEN, lastMove: null, history: [], clients: new Set() }; rooms.set(id, r); }
+  if (!r) {
+    r = { fen: START_FEN, lastMove: null, history: [], clients: new Set(),
+          coachToken: null, coach: null, locked: false };
+    rooms.set(id, r);
+  }
   return r;
 }
 
@@ -79,23 +104,72 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
   if (!roomId) { try { ws.close(1008, "bad room"); } catch { /* */ } return; }
   const room = getRoom(roomId);
   room.clients.add(ws);
-
-  // Snapshot the current board to the new participant.
   const send = (frame: ServerFrame) => { try { ws.send(JSON.stringify(frame)); } catch { /* */ } };
-  send({ type: "state", fen: room.fen, lastMove: room.lastMove, history: room.history, participants: room.clients.size });
-  // Let everyone else know a new participant joined (drives the "N in room" counter).
+
+  // Snapshot current board to the new participant. Role isn't decided here — client
+  // sends `hello` (optionally with its saved coachToken) and role is resolved there.
+  send({ type: "state", fen: room.fen, lastMove: room.lastMove, history: room.history, participants: room.clients.size, locked: room.locked });
   broadcast(room, { type: "participants", participants: room.clients.size });
+
+  const isCoach = () => socketRole.get(ws) === "coach";
 
   ws.on("message", (raw) => {
     let frame: ClientFrame;
     try { frame = JSON.parse(raw.toString()); } catch { return; }
     if (frame.type === "ping") { send({ type: "pong" }); return; }
-    if (frame.type === "reset") {
-      room.fen = START_FEN; room.lastMove = null; room.history = [];
-      broadcast(room, { type: "reset", fen: room.fen, participants: room.clients.size });
+
+    if (frame.type === "hello") {
+      // Coach resolution:
+      //   * client has token that matches the room's -> resume as coach
+      //   * room has no coach token yet -> mint one, promote this client to coach
+      //   * otherwise -> student
+      if (frame.coachToken && room.coachToken && frame.coachToken === room.coachToken) {
+        socketRole.set(ws, "coach"); room.coach = ws;
+        send({ type: "role", role: "coach", coachToken: room.coachToken });
+      } else if (!room.coachToken) {
+        room.coachToken = mintCoachToken();
+        socketRole.set(ws, "coach"); room.coach = ws;
+        send({ type: "role", role: "coach", coachToken: room.coachToken });
+      } else {
+        socketRole.set(ws, "student");
+        send({ type: "role", role: "student" });
+      }
       return;
     }
+
+    if (frame.type === "reset") {
+      if (!isCoach()) return;                            // coach-gated to prevent accidental reset by a student
+      room.fen = START_FEN; room.lastMove = null; room.history = [];
+      broadcast(room, { type: "reset", fen: room.fen, participants: room.clients.size, locked: room.locked });
+      return;
+    }
+
+    if (frame.type === "lock") {
+      if (!isCoach()) return;
+      room.locked = !!frame.locked;
+      broadcast(room, { type: "lock", locked: room.locked, participants: room.clients.size });
+      return;
+    }
+
+    if (frame.type === "takeback") {
+      if (!isCoach()) return;
+      if (room.history.length === 0) return;
+      room.history.pop();
+      // Re-derive the FEN by replaying the shortened history from the start position.
+      const c = new Chess();
+      for (const m of room.history) {
+        try { c.move({ from: m.from, to: m.to, promotion: (m.promotion as any) || "q" }); } catch { /* skip */ }
+      }
+      room.fen = c.fen();
+      room.lastMove = room.history[room.history.length - 1] ?? null;
+      broadcast(room, { type: "state", fen: room.fen, lastMove: room.lastMove, history: room.history, participants: room.clients.size, locked: room.locked });
+      return;
+    }
+
     if (frame.type === "move" && frame.move && typeof frame.move.from === "string" && typeof frame.move.to === "string") {
+      // Student-lock check: student moves are dropped when the coach has toggled the
+      // lock. The sender still gets a state snapshot to reconcile any optimistic UI.
+      if (room.locked && !isCoach()) { send({ type: "state", fen: room.fen, lastMove: room.lastMove, history: room.history, participants: room.clients.size, locked: room.locked }); return; }
       // Server-side chess.js is the tie-breaker: two racing clients can't diverge the
       // canonical FEN. Illegal moves are dropped silently — the sender's local board
       // will reconcile from the next authoritative state frame it receives.
@@ -105,17 +179,25 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         const applied = c.move({ from: frame.move.from, to: frame.move.to, promotion: (frame.move.promotion as any) || "q" });
         ok = !!applied;
       } catch { ok = false; }
-      if (!ok) { send({ type: "state", fen: room.fen, lastMove: room.lastMove, history: room.history, participants: room.clients.size }); return; }
+      if (!ok) { send({ type: "state", fen: room.fen, lastMove: room.lastMove, history: room.history, participants: room.clients.size, locked: room.locked }); return; }
       room.fen = c.fen();
       room.lastMove = { from: frame.move.from, to: frame.move.to, promotion: frame.move.promotion };
       room.history.push(room.lastMove);
-      broadcast(room, { type: "move", move: room.lastMove, fen: room.fen, participants: room.clients.size });
+      broadcast(room, { type: "move", move: room.lastMove, fen: room.fen, participants: room.clients.size, locked: room.locked });
     }
   });
 
   ws.on("close", () => {
     room.clients.delete(ws);
-    if (room.clients.size === 0) { rooms.delete(roomId); return; }
+    // If the coach socket dropped, clear the pointer so a future hello with the token
+    // can re-claim. The token itself is NOT reset — coach can reconnect and resume.
+    if (room.coach === ws) room.coach = null;
+    if (room.clients.size === 0) {
+      // Room is empty: drop everything (token included). Next class with the same id
+      // starts fresh, which is the right default for public URLs.
+      rooms.delete(roomId);
+      return;
+    }
     broadcast(room, { type: "participants", participants: room.clients.size });
   });
 });
