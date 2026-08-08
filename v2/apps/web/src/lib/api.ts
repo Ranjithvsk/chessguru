@@ -114,3 +114,31 @@ export interface AdminOverview {
 export const adminOverview = () => get<AdminOverview>("/api/admin/overview");
 export interface AdminUserDetail { username: string; email: string | null; createdAt: string | null; lastLogin: string | null; ratings: Record<string, { r: number; nb: number }>; recent: { puzzleId: string; win: boolean; at: string; rating: number | null; ratingDiff: number | null; themes: string[] }[]; recentStudy: { type: string; win: boolean; at: string; rating: number | null; ratingDiff: number | null }[]; solvesToday: number; solvesWeek: number; studySolves: number; studyWins: number; topThemes: { theme: string; n: number }[]; ratingHistory: number[]; }
 export const adminUserDetail = (u: string) => get<AdminUserDetail>(`/api/admin/users/${encodeURIComponent(u)}`);
+
+// ── Broadcast games (Lichess PGN dumps) ───────────────────────────────
+export interface BroadcastListItem {
+  id: string; event: string; site: string; round: string; date: string;
+  white: string; whiteElo: number; black: string; blackElo: number;
+  result: string; ply: number;
+}
+export interface BroadcastListResp {
+  items: BroadcastListItem[]; total: number; offset: number;
+  pageSize: number; hasMore: boolean;
+}
+export interface BroadcastGame extends BroadcastListItem {
+  found: true; moves: string[];
+}
+export const broadcastList = (params: { minElo?: number; result?: string; q?: string; from?: string; to?: string; offset?: number } = {}) => {
+  const p = new URLSearchParams();
+  if (params.minElo != null) p.set("minElo", String(params.minElo));
+  if (params.result)          p.set("result", params.result);
+  if (params.q)               p.set("q", params.q);
+  if (params.from)            p.set("from", params.from);
+  if (params.to)              p.set("to", params.to);
+  if (params.offset)          p.set("offset", String(params.offset));
+  return get<BroadcastListResp>(`/api/broadcasts?${p.toString()}`);
+};
+export const broadcastFacets = () =>
+  get<{ events: { event: string; n: number }[]; players: { name: string; n: number }[] }>("/api/broadcasts/facets");
+export const broadcastOne = (id: string) =>
+  get<BroadcastGame | { found: false }>(`/api/broadcasts/${encodeURIComponent(id)}`);

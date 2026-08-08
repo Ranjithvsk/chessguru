@@ -30,6 +30,7 @@ const GROUPS: Group[] = [
     items: [
       { to: "/study", label: "📚 Study", desc: "Guided lessons & drills" },
       { to: "/opening", label: "📖 Openings", desc: "Learn and drill openings" },
+      { to: "/broadcasts", label: "📡 Broadcast games", desc: "Master tournament games" },
       { to: "/book", label: "📕 Book", desc: "Puzzles from the book games" },
       { to: "/study/coordinates", label: "🎯 Coordinates", desc: "Name squares at speed" },
       { to: "/study/memory-palace", label: "🏛️ Memory palace", desc: "Board memory training" },
