@@ -7,6 +7,8 @@ import MongoStore from "connect-mongo";
 // we only reach for one static helper (.raw middleware) here.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const expressLib = require("express");
+import { getConnectionToken } from "@nestjs/mongoose";
+import type { Connection } from "mongoose";
 import { AppModule } from "./app.module";
 import { attachClassWs } from "./class/class-ws";
 
@@ -55,7 +57,9 @@ async function bootstrap() {
   await app.listen(port);
   // Attach the class-ws message bus to the same http.Server Nest is listening on.
   // Nest's http server is created lazily inside listen(), so this must run AFTER.
-  attachClassWs(app.getHttpServer());
+  // Pass the mongoose connection so the ws handler can persist attendance writes.
+  const dbConn = app.get<Connection>(getConnectionToken());
+  attachClassWs(app.getHttpServer(), dbConn as any);
   // eslint-disable-next-line no-console
   console.log(`ChessGuru v2 API on :${port}`);
 }

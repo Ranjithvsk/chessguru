@@ -28,6 +28,10 @@ import type { Server as HttpServer, IncomingMessage } from "http";
 // what we use — extend if you touch this file and hit new TS7016 errors.
 import { WebSocketServer, WebSocket } from "ws";
 import { Chess } from "chess.js";
+// Mongoose Connection is passed in from main.ts (via attachClassWs) so we can
+// persist attendance events without pulling this file into a Nest module.
+type Connection = { db?: { collection: (name: string) => any } };
+let dbConn: Connection | null = null;
 
 type Move = { from: string; to: string; promotion?: string };
 // Chessground DrawShape subset — we serialize only the fields we care about
@@ -38,7 +42,7 @@ type Shape = { orig: string; dest?: string; brush?: string };
 //     saved (reconnect), server verifies + resumes coach role. Otherwise the
 //     first hello with no token claims the coach role for that room.
 type ClientFrame =
-  | { type: "hello"; coachToken?: string }
+  | { type: "hello"; coachToken?: string; userId?: string; displayName?: string }
   | { type: "move"; move: Move }
   | { type: "reset" }
   | { type: "lock"; locked: boolean }       // coach only — student moves are dropped when true
@@ -71,8 +75,33 @@ interface Room {
 // role() and lookup helpers use a per-socket WeakMap so the ws frame handler can
 // answer "is this socket the coach?" without stashing state on the socket object.
 const socketRole = new WeakMap<WebSocket, "coach" | "student">();
+// Persistent identity per socket for attendance — captured on hello. userId is
+// null for anonymous joiners; name always has a value (falls back to "Guest").
+const socketWho = new WeakMap<WebSocket, { userId: string | null; name: string; classId: string }>();
 function mintCoachToken(): string {
   return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+}
+
+// Fire-and-forget attendance writes. Silent on error — attendance is a nice-to-have
+// stat; a Mongo hiccup must never disrupt a live class.
+async function recordAttendance(classId: string, userId: string | null, name: string, kind: "join" | "leave"): Promise<void> {
+  if (!dbConn?.db) return;
+  try {
+    const col = dbConn.db.collection("classAttendance");
+    // Key: classId + userId (or the socket-scoped id via 'guest:'+name for anon).
+    // Same user rejoining updates lastSeenAt but preserves the original joinedAt.
+    const key = userId ? userId : `guest:${name}`;
+    if (kind === "join") {
+      await col.updateOne(
+        { classId, key },
+        { $set: { classId, key, userId, name, lastSeenAt: new Date() },
+          $setOnInsert: { joinedAt: new Date() } },
+        { upsert: true },
+      );
+    } else {
+      await col.updateOne({ classId, key }, { $set: { lastSeenAt: new Date() } });
+    }
+  } catch { /* silent */ }
 }
 
 const START_FEN = new Chess().fen();
@@ -140,6 +169,13 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         socketRole.set(ws, "student");
         send({ type: "role", role: "student" });
       }
+      // Attendance: identity comes from the hello frame (client reads it from the
+      // session on its side). Anonymous joiners land as "Guest" and are keyed by
+      // their supplied name — good enough for the coach's post-class list.
+      const userId = typeof frame.userId === "string" && frame.userId.length ? frame.userId.slice(0, 64) : null;
+      const name = typeof frame.displayName === "string" && frame.displayName.trim() ? frame.displayName.trim().slice(0, 80) : "Guest";
+      socketWho.set(ws, { userId, name, classId: roomId });
+      void recordAttendance(roomId, userId, name, "join");
       return;
     }
 
@@ -216,6 +252,9 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     // If the coach socket dropped, clear the pointer so a future hello with the token
     // can re-claim. The token itself is NOT reset — coach can reconnect and resume.
     if (room.coach === ws) room.coach = null;
+    // Attendance leave — stamps lastSeenAt so the coach can see when someone left.
+    const who = socketWho.get(ws);
+    if (who) void recordAttendance(who.classId, who.userId, who.name, "leave");
     if (room.clients.size === 0) {
       // Room is empty: drop everything (token included). Next class with the same id
       // starts fresh, which is the right default for public URLs.
@@ -228,8 +267,10 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
 // Wire the upgrade handshake into Nest's http server. Only handles class-ws paths;
 // any other upgrade attempt is destroyed so we don't accidentally answer for another
-// (future) WebSocket path.
-export function attachClassWs(server: HttpServer): void {
+// (future) WebSocket path. Conn is Nest's mongoose Connection — used for attendance
+// writes (fire-and-forget so a Mongo hiccup never disrupts the live class).
+export function attachClassWs(server: HttpServer, conn?: Connection): void {
+  if (conn) dbConn = conn;
   server.on("upgrade", (req, socket, head) => {
     if (parseRoomId(req.url) == null) return; // let another handler (or default) close it
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));

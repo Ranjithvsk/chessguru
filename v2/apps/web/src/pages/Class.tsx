@@ -62,7 +62,9 @@ const saveCoachToken = (roomId: string, tok: string): void => {
 // Bridges the class-ws bus into React. Returns the authoritative board state plus
 // helpers to publish moves/reset/lock/takeback. Reconnects on transient drops with a
 // small backoff so a laptop lid-close doesn't kill the session permanently.
-function useClassSync(roomId: string | undefined) {
+// `identity` gets sent on every hello so the server can record attendance and the
+// coach can see who came to their class.
+function useClassSync(roomId: string | undefined, identity?: { userId?: string; displayName?: string }) {
   const [fen, setFen] = useState(new Chess().fen());
   const [lastMove, setLastMove] = useState<WsMove | null>(null);
   const [participants, setParticipants] = useState(1);
@@ -82,8 +84,14 @@ function useClassSync(roomId: string | undefined) {
       wsRef.current = ws;
       ws.onopen = () => {
         retryRef.current = 0; setConnected(true);
-        // Hello with our saved coach token (if any) so a reconnect resumes coach role.
-        try { ws.send(JSON.stringify({ type: "hello", coachToken: loadCoachToken(roomId) })); } catch { /* */ }
+        // Hello with our saved coach token (if any) so a reconnect resumes coach role,
+        // plus the caller's identity so the server can record attendance.
+        try { ws.send(JSON.stringify({
+          type: "hello",
+          coachToken: loadCoachToken(roomId),
+          userId: identity?.userId,
+          displayName: identity?.displayName,
+        })); } catch { /* */ }
       };
       ws.onmessage = (ev) => {
         let f: WsFrame; try { f = JSON.parse(ev.data); } catch { return; }
@@ -123,6 +131,10 @@ function useClassSync(roomId: string | undefined) {
       try { wsRef.current?.close(); } catch { /* */ }
       wsRef.current = null;
     };
+    // identity intentionally omitted from deps — first hello locks it for the
+    // connection; changing username mid-class would force a reconnect, which is
+    // more disruptive than the theoretical benefit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
 
   const send = (payload: unknown) => {
@@ -516,6 +528,71 @@ function ClassCard({ c, tone, onCancel }: { c: ScheduledClass; tone: "live" | "u
   );
 }
 
+type Attendee = { userId: string | null; name: string; joinedAt: string; lastSeenAt?: string };
+
+// Attendance list — populated from WS join/leave events by the server. Shows
+// arrival order + last-seen. Refreshes every 10s so the coach's view stays fresh
+// during the class without hammering the API. All roles can see it (matches
+// Jitsi's own participant list) — coach-only gating is a Phase 6 policy call.
+function AttendancePanel({ roomId, live }: { roomId: string; live: number }) {
+  const [items, setItems] = useState<Attendee[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const r = await fetch(`${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/${encodeURIComponent(roomId)}/attendance`);
+        const j = await r.json();
+        if (!cancelled) setItems(j.attendees ?? []);
+      } catch { /* silent */ }
+      finally { if (!cancelled) setLoading(false); }
+    };
+    load();
+    const t = setInterval(load, 10_000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [roomId]);
+  // "Active now" heuristic: last-seen within the last 30s AND we still have
+  // sockets in the room. Falls back to the WS live count when the row's timestamps
+  // are missing (very old data).
+  const now = Date.now();
+  const isActive = (a: Attendee) => {
+    const ls = a.lastSeenAt ? new Date(a.lastSeenAt).getTime() : 0;
+    return live > 0 && now - ls < 30_000;
+  };
+  return (
+    <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-3">
+      <div className="mb-2 flex items-baseline justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wide text-ink-300">🧑‍🎓 Attendance</span>
+        <span className="text-[10px] text-ink-500">
+          {loading ? "loading…" : `${items.length} joined${live > 0 ? ` · ${live} live` : ""}`}
+        </span>
+      </div>
+      {!loading && items.length === 0 ? (
+        <div className="text-[11px] text-ink-500">Nobody has joined this class yet.</div>
+      ) : (
+        <ul className="max-h-48 space-y-1 overflow-y-auto pr-1">
+          {items.map((a, i) => (
+            <li key={a.userId ?? `g${i}`} className="flex items-center justify-between gap-2 rounded-lg bg-ink-800/60 px-2 py-1.5 text-xs">
+              <span className="flex min-w-0 items-center gap-2">
+                <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${isActive(a)
+                  ? "bg-emerald-400 shadow-[0_0_5px] shadow-emerald-400"
+                  : "bg-ink-600"}`} />
+                <span className="truncate text-ink-100">
+                  {a.name}
+                  {!a.userId && <span className="ml-1 text-[10px] text-ink-500">(guest)</span>}
+                </span>
+              </span>
+              <span className="shrink-0 text-[10px] text-ink-500 tabular-nums">
+                {new Date(a.joinedAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // Browser-side recording via MediaRecorder + getDisplayMedia. The coach picks the
 // screen/tab to share, we capture it into a WebM blob, upload on Stop. Everything
 // runs in the coach's browser — no server-side compositor needed. When we swap to
@@ -833,6 +910,16 @@ export default function ClassPage() {
   const { userId } = useOutletContext<Ctx>();
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
+  // Pull session identity (username) once — passed into the sync hello so the
+  // server can record attendance under the user's real name. Anonymous joiners
+  // pass nothing and are recorded as "Guest".
+  const [me, setMe] = useState<{ userId?: string; displayName?: string }>({});
+  useEffect(() => {
+    fetch("/auth/me", { credentials: "include" })
+      .then((r) => r.json())
+      .then((j) => { if (j?.loggedIn) setMe({ userId: j.userId, displayName: j.username }); })
+      .catch(() => { /* not signed in — fine */ });
+  }, []);
 
   // No id in the URL => scheduling + landing view.
   if (!id) return <ClassLanding />;
@@ -843,7 +930,7 @@ export default function ClassPage() {
     catch { prompt("Copy the invite link:", inviteUrl); }
   };
 
-  const sync = useClassSync(id);
+  const sync = useClassSync(id, me);
 
   return (
     <div className="grid gap-4 lg:h-[calc(100dvh-6.5rem)] lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
@@ -860,7 +947,8 @@ export default function ClassPage() {
           </button>
         </div>
         <SyncedBoard sync={sync} />
-        <div className="mt-4">
+        <div className="mt-4 space-y-3">
+          <AttendancePanel roomId={id} live={sync.participants} />
           <RecordingsPanel roomId={id} isCoach={sync.role === "coach"} sync={sync} />
         </div>
       </section>
