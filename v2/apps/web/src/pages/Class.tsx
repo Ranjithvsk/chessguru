@@ -229,6 +229,227 @@ function JitsiRoom({ roomId, displayName }: { roomId: string; displayName?: stri
   );
 }
 
+// Scheduled-class data shape — matches ClassScheduleController.list()'s response.
+type ScheduledClass = {
+  _id: string; title: string; coach: string;
+  startAt: string; durationMin: number; notes: string;
+};
+
+// Human-friendly "in 2h 15m" / "started 4 min ago" / "3d ago" delta for a startAt.
+function relTime(iso: string): string {
+  const diffMs = new Date(iso).getTime() - Date.now();
+  const abs = Math.abs(diffMs);
+  const min = Math.round(abs / 60_000);
+  const hr = Math.round(abs / 3_600_000);
+  const day = Math.round(abs / 86_400_000);
+  const label = day >= 2 ? `${day}d` : hr >= 2 ? `${hr}h` : min >= 1 ? `${min} min` : "under a min";
+  return diffMs >= 0 ? `in ${label}` : `${label} ago`;
+}
+// Absolute local time — "Fri 8 Aug · 6:30 PM".
+function absTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    weekday: "short", day: "numeric", month: "short",
+    hour: "numeric", minute: "2-digit",
+  });
+}
+
+// Landing / directory for /class. Two lists (live now + upcoming) plus a form
+// to schedule a new class OR start one immediately. Ad-hoc "Start now" and a
+// planned schedule both create a joinable room id — the class page itself is
+// the same either way.
+function ClassLanding() {
+  const nav = useNavigate();
+  const [schedules, setSchedules] = useState<{ live: ScheduledClass[]; upcoming: ScheduledClass[] }>({ live: [], upcoming: [] });
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({
+    title: "", coach: "", durationMin: 60,
+    // Default start = next quarter-hour (15 min pad so the coach can share the
+    // link before the class begins).
+    startAt: (() => {
+      const d = new Date(Date.now() + 15 * 60_000);
+      d.setSeconds(0, 0);
+      d.setMinutes(Math.ceil(d.getMinutes() / 15) * 15);
+      // toISOString gives UTC; <input type="datetime-local"> wants "yyyy-MM-ddThh:mm"
+      // in LOCAL time — build it manually.
+      const pad = (n: number) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    })(),
+    notes: "",
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(`${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/schedule`);
+      const j = await r.json();
+      setSchedules({ live: j.live ?? [], upcoming: j.upcoming ?? [] });
+    } catch { /* silent */ }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { refresh(); }, []);
+
+  const startNow = () => nav(`/class/${newRoomId()}`);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null); setSubmitting(true);
+    try {
+      const res = await fetch(`${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/schedule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: form.title, coach: form.coach, notes: form.notes,
+          durationMin: Number(form.durationMin) || 60,
+          // <input datetime-local> gives a local wall time with no zone. new Date()
+          // parses it in the user's tz, which is exactly what we want here.
+          startAt: new Date(form.startAt).toISOString(),
+        }),
+      });
+      if (!res.ok) throw new Error(`create failed: ${res.status}`);
+      const created: ScheduledClass = await res.json();
+      // Show the coach the room they just created (with a copy-invite button).
+      nav(`/class/${encodeURIComponent(created._id)}`);
+    } catch (e: any) {
+      setError(e?.message || "Couldn't schedule class");
+    } finally { setSubmitting(false); }
+  };
+
+  return (
+    <div className="mx-auto max-w-4xl space-y-6 py-8">
+      <header className="flex items-baseline justify-between">
+        <div>
+          <div className="text-[10px] uppercase tracking-wide text-ink-500">Live class</div>
+          <h1 className="font-display text-2xl text-white">🎥 Classroom</h1>
+        </div>
+        <button onClick={startNow}
+          className="rounded-xl2 bg-gradient-to-r from-brand-600 to-accent-500 px-4 py-2 text-sm font-semibold text-white shadow-lg hover:from-brand-500 hover:to-accent-400">
+          ▶ Start now
+        </button>
+      </header>
+
+      {/* Live now — pulsing rose highlight so it draws the eye. Empty when nothing's live. */}
+      {schedules.live.length > 0 && (
+        <section>
+          <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-rose-300">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-rose-500 shadow-[0_0_6px] shadow-rose-500" />
+            Live now
+          </h2>
+          <div className="grid gap-3 md:grid-cols-2">
+            {schedules.live.map((c) => <ClassCard key={c._id} c={c} tone="live" />)}
+          </div>
+        </section>
+      )}
+
+      <section>
+        <h2 className="mb-2 flex items-baseline justify-between text-sm font-semibold text-white">
+          <span>📆 Upcoming</span>
+          <span className="text-[10px] font-normal text-ink-500">
+            {loading ? "loading…" : `${schedules.upcoming.length} scheduled`}
+          </span>
+        </h2>
+        {!loading && schedules.upcoming.length === 0 ? (
+          <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-6 text-center text-sm text-ink-400">
+            No upcoming classes. Schedule one below or <button className="text-brand-400 hover:underline" onClick={startNow}>start now</button>.
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            {schedules.upcoming.map((c) => <ClassCard key={c._id} c={c} tone="upcoming" />)}
+          </div>
+        )}
+      </section>
+
+      {/* Scheduling form — brand-gradient card so it visually pairs with the Start-now
+          button. No coach account gate; anyone with the URL can create + share. */}
+      <section className="rounded-xl2 border border-brand-500/25 bg-gradient-to-br from-brand-500/10 via-ink-900 to-ink-900 p-5">
+        <h2 className="mb-3 text-sm font-semibold text-brand-200">🗓️ Schedule a class</h2>
+        <form onSubmit={submit} className="grid gap-3 md:grid-cols-2">
+          <label className="md:col-span-2">
+            <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">Title</span>
+            <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })}
+              required maxLength={120}
+              placeholder="e.g. Rook endgames — the Lucena position"
+              className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500" />
+          </label>
+          <label>
+            <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">Coach name</span>
+            <input value={form.coach} onChange={(e) => setForm({ ...form, coach: e.target.value })}
+              maxLength={80} placeholder="Optional"
+              className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500" />
+          </label>
+          <label>
+            <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">Duration (min)</span>
+            <input type="number" min={5} max={600} step={5}
+              value={form.durationMin} onChange={(e) => setForm({ ...form, durationMin: Number(e.target.value) })}
+              className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
+          </label>
+          <label className="md:col-span-2">
+            <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">Starts at</span>
+            <input type="datetime-local" value={form.startAt}
+              onChange={(e) => setForm({ ...form, startAt: e.target.value })}
+              className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
+          </label>
+          <label className="md:col-span-2">
+            <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">Notes (optional)</span>
+            <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              rows={2} maxLength={2000}
+              placeholder="What you'll cover, any positions to study first…"
+              className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500" />
+          </label>
+          <div className="md:col-span-2 flex items-center justify-between gap-2">
+            {error && <span className="rounded bg-rose-500/15 px-2 py-1 text-xs text-rose-200">{error}</span>}
+            <button type="submit" disabled={submitting || !form.title}
+              className="ml-auto rounded-lg bg-gradient-to-r from-brand-600 to-accent-500 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:from-brand-500 hover:to-accent-400 disabled:opacity-40">
+              {submitting ? "Scheduling…" : "Schedule + get invite"}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <p className="text-center text-[11px] text-ink-500">
+        Powered by Jitsi Meet (open source video) · ChessGuru (board sync + recording + replay)
+      </p>
+    </div>
+  );
+}
+
+// Single card in the live/upcoming list. Clicking anywhere on the card jumps
+// straight into the room. Tone = live pulses rose, upcoming stays neutral brand.
+function ClassCard({ c, tone }: { c: ScheduledClass; tone: "live" | "upcoming" }) {
+  const border = tone === "live"
+    ? "border-rose-500/40 bg-gradient-to-br from-rose-500/10 via-ink-900 to-ink-900"
+    : "border-ink-700 bg-ink-900 hover:border-brand-500/40";
+  const cta = tone === "live"
+    ? "bg-gradient-to-r from-rose-500 to-rose-400 text-white hover:from-rose-400 hover:to-rose-300"
+    : "bg-gradient-to-r from-brand-600 to-brand-500 text-white hover:from-brand-500 hover:to-brand-400";
+  return (
+    <Link to={`/class/${encodeURIComponent(c._id)}`}
+      className={`group flex flex-col gap-2 rounded-xl2 border p-4 transition-colors ${border}`}>
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate font-semibold text-white">{c.title}</div>
+          <div className="mt-0.5 text-xs text-ink-400">👑 {c.coach} · {c.durationMin} min</div>
+        </div>
+        {tone === "live" && (
+          <span className="shrink-0 rounded-full bg-rose-500/25 px-2 py-0.5 text-[10px] font-semibold text-rose-200">
+            <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-rose-500 align-middle" />
+            LIVE
+          </span>
+        )}
+      </div>
+      <div className="flex items-center justify-between gap-2 text-xs">
+        <span className="text-ink-400">
+          {absTime(c.startAt)} <span className="text-ink-500">· {relTime(c.startAt)}</span>
+        </span>
+        <span className={`rounded-lg px-3 py-1 text-xs font-semibold shadow-sm ${cta}`}>
+          {tone === "live" ? "Join →" : "Open"}
+        </span>
+      </div>
+      {c.notes && <p className="mt-1 line-clamp-2 text-xs text-ink-500">{c.notes}</p>}
+    </Link>
+  );
+}
+
 // Browser-side recording via MediaRecorder + getDisplayMedia. The coach picks the
 // screen/tab to share, we capture it into a WebM blob, upload on Stop. Everything
 // runs in the coach's browser — no server-side compositor needed. When we swap to
@@ -547,28 +768,8 @@ export default function ClassPage() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
 
-  // No id in the URL => landing card with a Start button. Coach clicks Start,
-  // we mint a random room id and navigate — the invite URL then works for anyone.
-  if (!id) {
-    const start = () => nav(`/class/${newRoomId()}`);
-    return (
-      <div className="mx-auto max-w-lg space-y-4 py-10 text-center">
-        <div className="text-4xl">🎥</div>
-        <h1 className="font-display text-2xl text-white">Live class</h1>
-        <p className="text-sm text-ink-400">
-          Start a class and share the invite link. Anyone with the link joins the video
-          call and sees the shared analysis board.
-        </p>
-        <button onClick={start}
-          className="rounded-xl2 bg-gradient-to-r from-brand-600 to-accent-500 px-6 py-3 font-semibold text-white shadow-lg hover:from-brand-500 hover:to-accent-400">
-          ▶ Start a class
-        </button>
-        <p className="text-[11px] text-ink-500">
-          Powered by Jitsi Meet (open source). MVP — self-hosted infra + recording + roles land in Phase 2.
-        </p>
-      </div>
-    );
-  }
+  // No id in the URL => scheduling + landing view.
+  if (!id) return <ClassLanding />;
 
   const inviteUrl = typeof window !== "undefined" ? window.location.href : `/class/${id}`;
   const copyInvite = async () => {
