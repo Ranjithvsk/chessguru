@@ -33,6 +33,7 @@ import AdminUsersPage from "./pages/AdminUsers";
 import PlayPage from "./pages/Play";
 import FeedbackUITestPage from "./pages/FeedbackUITest";
 import BookPage from "./pages/Book";
+import ClassPage from "./pages/Class";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -76,6 +77,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="login" element={<LoginPage />} />
             <Route path="test/feedback-ui" element={<FeedbackUITestPage />} />
             <Route path="book" element={<BookPage />} />
+            <Route path="class" element={<ClassPage />} />
+            <Route path="class/:id" element={<ClassPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
