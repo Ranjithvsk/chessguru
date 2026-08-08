@@ -4,6 +4,7 @@ import { RequestMethod } from "@nestjs/common";
 import session from "express-session";
 import MongoStore from "connect-mongo";
 import { AppModule } from "./app.module";
+import { attachClassWs } from "./class/class-ws";
 
 const MONGO_URI = process.env.MONGO_URI ?? "mongodb://localhost:27017/chessguru";
 
@@ -44,6 +45,9 @@ async function bootstrap() {
   app.enableCors({ origin: true, credentials: true });
   const port = process.env.PORT ?? 4000;
   await app.listen(port);
+  // Attach the class-ws message bus to the same http.Server Nest is listening on.
+  // Nest's http server is created lazily inside listen(), so this must run AFTER.
+  attachClassWs(app.getHttpServer());
   // eslint-disable-next-line no-console
   console.log(`ChessGuru v2 API on :${port}`);
 }

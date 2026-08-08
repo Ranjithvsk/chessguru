@@ -1,8 +1,89 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext, useParams, useNavigate } from "react-router-dom";
 import { Chess } from "chess.js";
 import type { Key } from "chessground/types";
 import Board, { destsFromChess } from "../components/Board";
+
+// Board-sync WebSocket URL. `VITE_API_BASE` is /v2api in production, "" in dev — either
+// way we upgrade against the same origin so the cookie / same-site rules apply.
+function classWsUrl(roomId: string): string {
+  const base = (import.meta.env.VITE_API_BASE ?? "").toString();
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const host = window.location.host;
+  return `${proto}//${host}${base}/class-ws/${encodeURIComponent(roomId)}`;
+}
+
+type WsMove = { from: string; to: string; promotion?: string };
+type WsFrame =
+  | { type: "state"; fen: string; lastMove: WsMove | null; history: WsMove[]; participants: number }
+  | { type: "move"; move: WsMove; fen: string; participants: number }
+  | { type: "reset"; fen: string; participants: number }
+  | { type: "participants"; participants: number }
+  | { type: "pong" };
+
+// Bridges the class-ws bus into React. Returns the authoritative board state plus
+// helpers to publish moves/reset. Reconnects on transient drops with a small backoff
+// so a laptop lid-close doesn't kill the session permanently.
+function useClassSync(roomId: string | undefined) {
+  const [fen, setFen] = useState(new Chess().fen());
+  const [lastMove, setLastMove] = useState<WsMove | null>(null);
+  const [participants, setParticipants] = useState(1);
+  const [connected, setConnected] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+  const retryRef = useRef(0);
+
+  useEffect(() => {
+    if (!roomId) return;
+    let cancelled = false;
+
+    const connect = () => {
+      const ws = new WebSocket(classWsUrl(roomId));
+      wsRef.current = ws;
+      ws.onopen = () => { retryRef.current = 0; setConnected(true); };
+      ws.onmessage = (ev) => {
+        let f: WsFrame; try { f = JSON.parse(ev.data); } catch { return; }
+        if (f.type === "state" || f.type === "move" || f.type === "reset") {
+          setFen(f.fen);
+          if ("lastMove" in f) setLastMove(f.lastMove);
+          if (f.type === "move") setLastMove(f.move);
+          if (f.type === "reset") setLastMove(null);
+          setParticipants(f.participants);
+        } else if (f.type === "participants") {
+          setParticipants(f.participants);
+        }
+      };
+      const scheduleReconnect = () => {
+        if (cancelled) return;
+        setConnected(false);
+        // Exponential-ish backoff capped at 10s so a flaky link retries fast at first.
+        const wait = Math.min(10_000, 500 * 2 ** Math.min(retryRef.current++, 5));
+        setTimeout(() => { if (!cancelled) connect(); }, wait);
+      };
+      ws.onerror = () => { try { ws.close(); } catch { /* */ } };
+      ws.onclose = scheduleReconnect;
+    };
+
+    connect();
+    return () => {
+      cancelled = true;
+      try { wsRef.current?.close(); } catch { /* */ }
+      wsRef.current = null;
+    };
+  }, [roomId]);
+
+  const sendMove = useCallback((mv: WsMove) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try { ws.send(JSON.stringify({ type: "move", move: mv })); } catch { /* */ }
+  }, []);
+  const sendReset = useCallback(() => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try { ws.send(JSON.stringify({ type: "reset" })); } catch { /* */ }
+  }, []);
+
+  return { fen, lastMove, participants, connected, sendMove, sendReset };
+}
 
 // Live-class page — MVP video-conferencing surface (owner 2026-08-08 spec).
 //
@@ -93,45 +174,41 @@ function JitsiRoom({ roomId, displayName }: { roomId: string; displayName?: stri
   );
 }
 
-// Free-play analysis board — both colors movable, undo/reset available. This is what
-// the coach demonstrates on. Later phases sync moves + arrows across participants.
-function AnalysisBoard() {
+// Synced analysis board — moves broadcast to everyone in the room via /class-ws.
+// Legal-move validation happens locally (chessground destinations) AND on the server
+// (illegal frames dropped silently, sender reconciles from the next state frame).
+function SyncedBoard({ sync }: { sync: ReturnType<typeof useClassSync> }) {
+  const { fen, lastMove, participants, connected, sendMove, sendReset } = sync;
+  // Local chess.js is kept in sync with the authoritative FEN — used solely to compute
+  // legal destinations so chessground shows valid drop-targets while dragging.
   const chessRef = useRef<Chess>(new Chess());
-  const [fen, setFen] = useState<string>(() => chessRef.current.fen());
-  const [lastMove, setLastMove] = useState<[Key, Key] | undefined>(undefined);
+  useEffect(() => { try { chessRef.current = new Chess(fen); } catch { /* */ } }, [fen]);
   const dests = useMemo(() => destsFromChess(chessRef.current as any), [fen]);
   const turnColor: "white" | "black" = chessRef.current.turn() === "w" ? "white" : "black";
+  const lastMoveArrow: [Key, Key] | undefined = lastMove
+    ? [lastMove.from as Key, lastMove.to as Key] : undefined;
 
   const onMove = (from: Key, to: Key) => {
+    // Optimistic local: apply the move immediately, then rely on the server's echo
+    // to confirm. If the server rejects (illegal), the follow-up `state` frame will
+    // reset us to truth so the user sees the piece snap back.
     try { chessRef.current.move({ from, to, promotion: "q" }); } catch { return; }
-    setLastMove([from, to]);
-    setFen(chessRef.current.fen());
-  };
-  const undo = () => {
-    chessRef.current.undo();
-    const h = chessRef.current.history({ verbose: true });
-    const l = h[h.length - 1] as { from: string; to: string } | undefined;
-    setLastMove(l ? [l.from as Key, l.to as Key] : undefined);
-    setFen(chessRef.current.fen());
-  };
-  const reset = () => {
-    chessRef.current = new Chess();
-    setLastMove(undefined);
-    setFen(chessRef.current.fen());
+    sendMove({ from, to, promotion: "q" });
   };
 
   return (
     <div className="flex flex-col gap-3">
       <Board fen={fen} orientation="white" turnColor={turnColor} movableColor="both"
-        dests={dests} lastMove={lastMove} onMove={onMove} />
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs text-ink-500">Analysis board — moves are local. Sync coming soon.</span>
-        <div className="flex gap-2">
-          <button onClick={undo}
-            className="rounded-lg border border-ink-600 bg-ink-800 px-3 py-1.5 text-xs font-semibold text-ink-200 hover:bg-ink-700">↶ Undo</button>
-          <button onClick={reset}
-            className="rounded-lg border border-ink-600 bg-ink-800 px-3 py-1.5 text-xs font-semibold text-ink-200 hover:bg-ink-700">Reset</button>
-        </div>
+        dests={dests} lastMove={lastMoveArrow} onMove={onMove} />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-xs text-ink-400">
+          <span className={`inline-block h-2 w-2 rounded-full ${connected ? "bg-emerald-400 shadow-[0_0_6px] shadow-emerald-400" : "bg-rose-400"}`} />
+          {connected ? `Live · ${participants} in room` : "Reconnecting…"}
+        </span>
+        <button onClick={sendReset}
+          className="rounded-lg border border-ink-600 bg-ink-800 px-3 py-1.5 text-xs font-semibold text-ink-200 hover:bg-ink-700">
+          ↺ Reset board
+        </button>
       </div>
     </div>
   );
@@ -177,6 +254,8 @@ export default function ClassPage() {
     catch { prompt("Copy the invite link:", inviteUrl); }
   };
 
+  const sync = useClassSync(id);
+
   return (
     <div className="grid gap-4 lg:h-[calc(100dvh-6.5rem)] lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
       {/* Board column — fixed width on desktop, stacks on mobile. */}
@@ -191,7 +270,7 @@ export default function ClassPage() {
             🔗 Copy invite
           </button>
         </div>
-        <AnalysisBoard />
+        <SyncedBoard sync={sync} />
       </section>
       {/* Video column — Jitsi iframe fills the rest. */}
       <section className="min-w-0 lg:min-h-0">
