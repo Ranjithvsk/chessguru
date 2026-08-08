@@ -14,12 +14,13 @@ import { ExplorerController } from "./explorer/explorer.controller";
 import { ExplorerService } from "./explorer/explorer.service";
 import { StudyController } from "./study/study.controller";
 import { StudyService } from "./study/study.service";
+import { ClassRecordingController } from "./class/class-recording.controller";
 
 const MONGO_URI = process.env.MONGO_URI ?? "mongodb://localhost:27017/chessguru";
 
 @Module({
   imports: [MongooseModule.forRoot(MONGO_URI)],
-  controllers: [HealthController, MiscController, PuzzlesController, AuthController, AdminController, EngineController, ExplorerController, StudyController],
+  controllers: [HealthController, MiscController, PuzzlesController, AuthController, AdminController, EngineController, ExplorerController, StudyController, ClassRecordingController],
   providers: [PuzzlesService, AuthService, AdminService, EngineService, ExplorerService, StudyService],
 })
 export class AppModule {}

@@ -3,6 +3,10 @@ import { NestFactory } from "@nestjs/core";
 import { RequestMethod } from "@nestjs/common";
 import session from "express-session";
 import MongoStore from "connect-mongo";
+// express is loaded via require so we don't need @types/express in the api's deps —
+// we only reach for one static helper (.raw middleware) here.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const expressLib = require("express");
 import { AppModule } from "./app.module";
 import { attachClassWs } from "./class/class-ws";
 
@@ -18,6 +22,10 @@ async function bootstrap() {
     res.setHeader("Cache-Control", "no-store");
     next();
   });
+  // Class-recording upload is an application/octet-stream body up to 500MB (~2h of
+  // browser MediaRecorder at typical bitrates). Scoped to that ONE endpoint so the
+  // default JSON body-parser limits still protect every other route.
+  app.use("/api/class/:id/recording", expressLib.raw({ type: "application/octet-stream", limit: "500mb" }));
   app.use(
     session({
       // Unique name so it can't collide with the v1 app's connect.sid on this domain

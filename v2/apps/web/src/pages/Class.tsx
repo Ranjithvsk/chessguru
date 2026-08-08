@@ -14,6 +14,27 @@ function classWsUrl(roomId: string): string {
   return `${proto}//${host}${base}/class-ws/${encodeURIComponent(roomId)}`;
 }
 
+// Recording API path — same VITE_API_BASE prefix + /api/class/:id/... routes.
+function classApiPath(roomId: string, suffix = ""): string {
+  const base = (import.meta.env.VITE_API_BASE ?? "").toString();
+  return `${base}/api/class/${encodeURIComponent(roomId)}${suffix}`;
+}
+type Recording = { name: string; bytes: number; createdAt: string };
+
+// Human-friendly size + duration formatters for the recordings list.
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+function fmtDuration(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const sec = s - m * 60;
+  return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
 type WsMove = { from: string; to: string; promotion?: string };
 type WsShape = { orig: string; dest?: string; brush?: string };
 type Role = "coach" | "student";
@@ -208,6 +229,170 @@ function JitsiRoom({ roomId, displayName }: { roomId: string; displayName?: stri
   );
 }
 
+// Browser-side recording via MediaRecorder + getDisplayMedia. The coach picks the
+// screen/tab to share, we capture it into a WebM blob, upload on Stop. Everything
+// runs in the coach's browser — no server-side compositor needed. When we swap to
+// self-hosted Jitsi + Jibri later, THIS hook goes away and Jibri becomes a fully
+// server-side alternative that posts to the same /api/class/:id/recording endpoint.
+function useRecorder(roomId: string | undefined, onUploaded: () => void) {
+  const [state, setState] = useState<"idle" | "recording" | "uploading" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const recRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  // Tick elapsed seconds while recording. Not tied to state === "recording" via
+  // closure so the interval always sees the latest startedAt.
+  useEffect(() => {
+    if (state !== "recording" || startedAt == null) return;
+    const t = setInterval(() => setElapsed(Date.now() - startedAt), 500);
+    return () => clearInterval(t);
+  }, [state, startedAt]);
+
+  const cleanup = () => {
+    try { recRef.current?.stop(); } catch { /* */ }
+    recRef.current = null;
+    streamRef.current?.getTracks().forEach((t) => { try { t.stop(); } catch { /* */ } });
+    streamRef.current = null;
+    chunksRef.current = [];
+  };
+
+  const start = async () => {
+    if (state !== "idle" && state !== "error") return;
+    if (!roomId) return;
+    setError(null);
+    try {
+      // Ask for screen + system audio. User picks a screen / window / tab in the
+      // browser's native prompt. Audio may be declined silently — recording still
+      // works, just no sound (we surface this in the UI subtly).
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: { ideal: 24 } } as MediaTrackConstraints,
+        audio: true,
+      });
+      streamRef.current = stream;
+      // Pick the first mime type the browser supports so we don't send an empty blob.
+      const candidates = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
+      const mime = candidates.find((m) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(m)) || "video/webm";
+      const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 1_500_000 });
+      recRef.current = rec;
+      chunksRef.current = [];
+      rec.ondataavailable = (e) => { if (e.data && e.data.size) chunksRef.current.push(e.data); };
+      rec.onerror = () => { setError("Recorder error"); setState("error"); cleanup(); };
+      // If the user stops the share via the browser's native "Stop sharing" bar, treat
+      // it as a Stop: finalize the recording rather than leaving the state dangling.
+      stream.getVideoTracks()[0]?.addEventListener("ended", () => { if (recRef.current?.state === "recording") stop(); });
+      rec.start(1000);   // gather in 1-sec chunks so a crash doesn't lose the whole take
+      setStartedAt(Date.now()); setElapsed(0); setState("recording");
+    } catch (e: any) {
+      setError(e?.name === "NotAllowedError" ? "Screen share was cancelled" : "Couldn't start recording");
+      setState("error"); cleanup();
+    }
+  };
+
+  const stop = async () => {
+    const rec = recRef.current;
+    if (!rec || !roomId) return;
+    setState("uploading");
+    // MediaRecorder.stop is async — chunks flush via ondataavailable BEFORE `stop` fires.
+    await new Promise<void>((resolve) => {
+      rec.onstop = () => resolve();
+      try { rec.stop(); } catch { resolve(); }
+    });
+    streamRef.current?.getTracks().forEach((t) => { try { t.stop(); } catch { /* */ } });
+    const blob = new Blob(chunksRef.current, { type: chunksRef.current[0]?.type || "video/webm" });
+    chunksRef.current = [];
+    try {
+      const res = await fetch(classApiPath(roomId, "/recording"), {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: blob,
+      });
+      if (!res.ok) throw new Error(`upload failed: ${res.status}`);
+      setState("idle"); setStartedAt(null); setElapsed(0);
+      onUploaded();
+    } catch (e: any) {
+      setError(e?.message || "Upload failed"); setState("error");
+    }
+  };
+
+  useEffect(() => () => cleanup(), []);   // release camera/screen on unmount
+  return { state, error, elapsed, start, stop };
+}
+
+// Recordings panel — lists past .webm files for the class + coach's Record/Stop UI.
+// Both roles see the list; only coach sees the record button.
+function RecordingsPanel({ roomId, isCoach }: { roomId: string; isCoach: boolean }) {
+  const [items, setItems] = useState<Recording[]>([]);
+  const [loading, setLoading] = useState(true);
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(classApiPath(roomId, "/recordings"));
+      const j = await r.json();
+      setItems(j.recordings ?? []);
+    } catch { /* */ }
+    finally { setLoading(false); }
+  }, [roomId]);
+  useEffect(() => { refresh(); }, [refresh]);
+  const rec = useRecorder(roomId, refresh);
+
+  return (
+    <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wide text-ink-300">🎬 Recordings</span>
+        {rec.state === "recording" && (
+          <span className="flex items-center gap-1.5 rounded-full bg-rose-500/20 px-2 py-0.5 text-[10px] font-semibold text-rose-200">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-rose-500 shadow-[0_0_6px] shadow-rose-500" />
+            REC · {fmtDuration(rec.elapsed)}
+          </span>
+        )}
+      </div>
+      {isCoach && (
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          {rec.state === "recording" ? (
+            <button onClick={rec.stop}
+              className="rounded-lg bg-gradient-to-r from-rose-500 to-rose-400 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:from-rose-400 hover:to-rose-300">
+              ⏹ Stop &amp; save
+            </button>
+          ) : (
+            <button onClick={rec.start} disabled={rec.state === "uploading"}
+              className="rounded-lg bg-gradient-to-r from-rose-600 to-orange-500 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:from-rose-500 hover:to-orange-400 disabled:opacity-40">
+              {rec.state === "uploading" ? "Uploading…" : "🔴 Start recording"}
+            </button>
+          )}
+          <span className="text-[10px] text-ink-500">
+            Choose the tab/window to share. Recording stays in your browser until Stop.
+          </span>
+          {rec.error && <span className="rounded bg-rose-500/15 px-2 py-0.5 text-[10px] text-rose-200">{rec.error}</span>}
+        </div>
+      )}
+      {loading ? (
+        <div className="text-[11px] text-ink-500">Loading…</div>
+      ) : items.length === 0 ? (
+        <div className="text-[11px] text-ink-500">No recordings yet.</div>
+      ) : (
+        <ul className="space-y-1">
+          {items.map((r) => (
+            <li key={r.name} className="flex items-center justify-between gap-2 rounded-lg bg-ink-800/60 px-2 py-1.5 text-xs">
+              <span className="truncate text-ink-200">{new Date(r.createdAt).toLocaleString()}</span>
+              <span className="flex shrink-0 items-center gap-2 text-ink-400">
+                <span className="tabular-nums text-[10px]">{fmtBytes(r.bytes)}</span>
+                <a href={classApiPath(roomId, `/recording/${encodeURIComponent(r.name)}`)}
+                   target="_blank" rel="noreferrer"
+                   className="rounded border border-brand-500/40 bg-brand-500/10 px-2 py-0.5 font-semibold text-brand-100 hover:bg-brand-500/20">▶ Open</a>
+                <a href={classApiPath(roomId, `/recording/${encodeURIComponent(r.name)}`)} download={r.name}
+                   className="rounded border border-ink-600 bg-ink-800 px-2 py-0.5 font-semibold text-ink-200 hover:bg-ink-700">⬇</a>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // Synced analysis board — moves broadcast to everyone in the room via /class-ws.
 // Legal-move validation happens locally (chessground destinations) AND on the server
 // (illegal frames dropped silently, sender reconciles from the next state frame).
@@ -370,6 +555,9 @@ export default function ClassPage() {
           </button>
         </div>
         <SyncedBoard sync={sync} />
+        <div className="mt-4">
+          <RecordingsPanel roomId={id} isCoach={sync.role === "coach"} />
+        </div>
       </section>
       {/* Video column — Jitsi iframe fills the rest. */}
       <section className="min-w-0 lg:min-h-0">
