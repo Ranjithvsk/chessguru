@@ -30,6 +30,9 @@ import { WebSocketServer, WebSocket } from "ws";
 import { Chess } from "chess.js";
 
 type Move = { from: string; to: string; promotion?: string };
+// Chessground DrawShape subset — we serialize only the fields we care about
+// (orig/dest/brush) so the frame stays small even with many annotations.
+type Shape = { orig: string; dest?: string; brush?: string };
 // Client → server frames.
 //   hello: sent right after connect. If the client already has a coachToken
 //     saved (reconnect), server verifies + resumes coach role. Otherwise the
@@ -40,15 +43,17 @@ type ClientFrame =
   | { type: "reset" }
   | { type: "lock"; locked: boolean }       // coach only — student moves are dropped when true
   | { type: "takeback" }                    // coach only — pops the last move
+  | { type: "annot"; shapes: Shape[] }      // arrows/circles — anyone can annotate
   | { type: "ping" };
 // Server → client frames. `role` sent once after hello resolves; everything else
 // is broadcast to the room on state changes.
 type ServerFrame =
   | { type: "role"; role: "coach" | "student"; coachToken?: string }
-  | { type: "state"; fen: string; lastMove: Move | null; history: Move[]; participants: number; locked: boolean }
+  | { type: "state"; fen: string; lastMove: Move | null; history: Move[]; participants: number; locked: boolean; shapes: Shape[] }
   | { type: "move"; move: Move; fen: string; participants: number; locked: boolean }
   | { type: "reset"; fen: string; participants: number; locked: boolean }
   | { type: "lock"; locked: boolean; participants: number }
+  | { type: "annot"; shapes: Shape[]; participants: number }
   | { type: "participants"; participants: number }
   | { type: "pong" };
 
@@ -60,6 +65,7 @@ interface Room {
   coachToken: string | null;    // random shared secret — coach's browser keeps it
   coach: WebSocket | null;      // currently-connected coach socket (may go null between reconnects)
   locked: boolean;              // student-move lock
+  shapes: Shape[];              // last-published annotation set (echoed to new joiners)
 }
 
 // role() and lookup helpers use a per-socket WeakMap so the ws frame handler can
@@ -79,7 +85,7 @@ function getRoom(id: string): Room {
   let r = rooms.get(id);
   if (!r) {
     r = { fen: START_FEN, lastMove: null, history: [], clients: new Set(),
-          coachToken: null, coach: null, locked: false };
+          coachToken: null, coach: null, locked: false, shapes: [] };
     rooms.set(id, r);
   }
   return r;
@@ -108,7 +114,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
   // Snapshot current board to the new participant. Role isn't decided here — client
   // sends `hello` (optionally with its saved coachToken) and role is resolved there.
-  send({ type: "state", fen: room.fen, lastMove: room.lastMove, history: room.history, participants: room.clients.size, locked: room.locked });
+  send({ type: "state", fen: room.fen, lastMove: room.lastMove, history: room.history, participants: room.clients.size, locked: room.locked, shapes: room.shapes });
   broadcast(room, { type: "participants", participants: room.clients.size });
 
   const isCoach = () => socketRole.get(ws) === "coach";
@@ -162,14 +168,32 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       }
       room.fen = c.fen();
       room.lastMove = room.history[room.history.length - 1] ?? null;
-      broadcast(room, { type: "state", fen: room.fen, lastMove: room.lastMove, history: room.history, participants: room.clients.size, locked: room.locked });
+      broadcast(room, { type: "state", fen: room.fen, lastMove: room.lastMove, history: room.history, participants: room.clients.size, locked: room.locked, shapes: room.shapes });
+      return;
+    }
+
+    if (frame.type === "annot") {
+      // Anyone can annotate — this is a shared whiteboard. Coarse cap (64 shapes) so
+      // one runaway client can't blow up state or bandwidth. Coordinates validated
+      // so junk payloads never persist on the room.
+      const raw = Array.isArray(frame.shapes) ? frame.shapes : [];
+      const cleaned: Shape[] = [];
+      for (const s of raw) {
+        if (cleaned.length >= 64) break;
+        if (!s || typeof s.orig !== "string") continue;
+        if (!/^[a-h][1-8]$/.test(s.orig)) continue;
+        if (s.dest != null && !/^[a-h][1-8]$/.test(String(s.dest))) continue;
+        cleaned.push({ orig: s.orig, dest: s.dest, brush: typeof s.brush === "string" ? s.brush : undefined });
+      }
+      room.shapes = cleaned;
+      broadcast(room, { type: "annot", shapes: room.shapes, participants: room.clients.size });
       return;
     }
 
     if (frame.type === "move" && frame.move && typeof frame.move.from === "string" && typeof frame.move.to === "string") {
       // Student-lock check: student moves are dropped when the coach has toggled the
       // lock. The sender still gets a state snapshot to reconcile any optimistic UI.
-      if (room.locked && !isCoach()) { send({ type: "state", fen: room.fen, lastMove: room.lastMove, history: room.history, participants: room.clients.size, locked: room.locked }); return; }
+      if (room.locked && !isCoach()) { send({ type: "state", fen: room.fen, lastMove: room.lastMove, history: room.history, participants: room.clients.size, locked: room.locked, shapes: room.shapes }); return; }
       // Server-side chess.js is the tie-breaker: two racing clients can't diverge the
       // canonical FEN. Illegal moves are dropped silently — the sender's local board
       // will reconcile from the next authoritative state frame it receives.
@@ -179,7 +203,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         const applied = c.move({ from: frame.move.from, to: frame.move.to, promotion: (frame.move.promotion as any) || "q" });
         ok = !!applied;
       } catch { ok = false; }
-      if (!ok) { send({ type: "state", fen: room.fen, lastMove: room.lastMove, history: room.history, participants: room.clients.size, locked: room.locked }); return; }
+      if (!ok) { send({ type: "state", fen: room.fen, lastMove: room.lastMove, history: room.history, participants: room.clients.size, locked: room.locked, shapes: room.shapes }); return; }
       room.fen = c.fen();
       room.lastMove = { from: frame.move.from, to: frame.move.to, promotion: frame.move.promotion };
       room.history.push(room.lastMove);

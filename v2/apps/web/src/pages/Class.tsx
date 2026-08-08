@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext, useParams, useNavigate } from "react-router-dom";
 import { Chess } from "chess.js";
 import type { Key } from "chessground/types";
+import type { DrawShape } from "chessground/draw";
 import Board, { destsFromChess } from "../components/Board";
 
 // Board-sync WebSocket URL. `VITE_API_BASE` is /v2api in production, "" in dev — either
@@ -14,13 +15,15 @@ function classWsUrl(roomId: string): string {
 }
 
 type WsMove = { from: string; to: string; promotion?: string };
+type WsShape = { orig: string; dest?: string; brush?: string };
 type Role = "coach" | "student";
 type WsFrame =
   | { type: "role"; role: Role; coachToken?: string }
-  | { type: "state"; fen: string; lastMove: WsMove | null; history: WsMove[]; participants: number; locked: boolean }
+  | { type: "state"; fen: string; lastMove: WsMove | null; history: WsMove[]; participants: number; locked: boolean; shapes: WsShape[] }
   | { type: "move"; move: WsMove; fen: string; participants: number; locked: boolean }
   | { type: "reset"; fen: string; participants: number; locked: boolean }
   | { type: "lock"; locked: boolean; participants: number }
+  | { type: "annot"; shapes: WsShape[]; participants: number }
   | { type: "participants"; participants: number }
   | { type: "pong" };
 
@@ -45,6 +48,7 @@ function useClassSync(roomId: string | undefined) {
   const [connected, setConnected] = useState(false);
   const [role, setRole] = useState<Role>("student");
   const [locked, setLocked] = useState(false);
+  const [shapes, setShapes] = useState<WsShape[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef(0);
 
@@ -68,13 +72,15 @@ function useClassSync(roomId: string | undefined) {
           return;
         }
         if (f.type === "state") {
-          setFen(f.fen); setLastMove(f.lastMove); setParticipants(f.participants); setLocked(f.locked);
+          setFen(f.fen); setLastMove(f.lastMove); setParticipants(f.participants); setLocked(f.locked); setShapes(f.shapes ?? []);
         } else if (f.type === "move") {
           setFen(f.fen); setLastMove(f.move); setParticipants(f.participants); setLocked(f.locked);
         } else if (f.type === "reset") {
           setFen(f.fen); setLastMove(null); setParticipants(f.participants); setLocked(f.locked);
         } else if (f.type === "lock") {
           setLocked(f.locked); setParticipants(f.participants);
+        } else if (f.type === "annot") {
+          setShapes(f.shapes ?? []); setParticipants(f.participants);
         } else if (f.type === "participants") {
           setParticipants(f.participants);
         }
@@ -107,9 +113,10 @@ function useClassSync(roomId: string | undefined) {
   const sendReset    = useCallback(() => send({ type: "reset" }), []);
   const sendLock     = useCallback((v: boolean) => send({ type: "lock", locked: v }), []);
   const sendTakeback = useCallback(() => send({ type: "takeback" }), []);
+  const sendAnnot    = useCallback((s: WsShape[]) => send({ type: "annot", shapes: s }), []);
 
-  return { fen, lastMove, participants, connected, role, locked,
-           sendMove, sendReset, sendLock, sendTakeback };
+  return { fen, lastMove, participants, connected, role, locked, shapes,
+           sendMove, sendReset, sendLock, sendTakeback, sendAnnot };
 }
 
 // Live-class page — MVP video-conferencing surface (owner 2026-08-08 spec).
@@ -205,9 +212,24 @@ function JitsiRoom({ roomId, displayName }: { roomId: string; displayName?: stri
 // Legal-move validation happens locally (chessground destinations) AND on the server
 // (illegal frames dropped silently, sender reconciles from the next state frame).
 function SyncedBoard({ sync }: { sync: ReturnType<typeof useClassSync> }) {
-  const { fen, lastMove, participants, connected, role, locked,
-          sendMove, sendReset, sendLock, sendTakeback } = sync;
+  const { fen, lastMove, participants, connected, role, locked, shapes,
+          sendMove, sendReset, sendLock, sendTakeback, sendAnnot } = sync;
   const isCoach = role === "coach";
+  // Map WsShape (thin wire format) to chessground's DrawShape. Cast orig/dest to Key
+  // because chessground types are stricter than "any string".
+  const boardShapes: DrawShape[] = useMemo(
+    () => shapes.map((s) => ({ orig: s.orig as Key, dest: s.dest as Key | undefined, brush: s.brush || "green" })),
+    [shapes],
+  );
+  // Right-click drag on the board fires this; we forward the shape set to the server.
+  // Server echoes back an `annot` frame which updates `shapes` — no local optimism
+  // needed since chessground already renders the user's drawing immediately.
+  const onShapesChange = useCallback((next: DrawShape[]) => {
+    const wire: WsShape[] = next.map((s) => ({
+      orig: String(s.orig), dest: s.dest ? String(s.dest) : undefined, brush: s.brush || "green",
+    }));
+    sendAnnot(wire);
+  }, [sendAnnot]);
   // Local chess.js is kept in sync with the authoritative FEN — used solely to compute
   // legal destinations so chessground shows valid drop-targets while dragging.
   const chessRef = useRef<Chess>(new Chess());
@@ -231,7 +253,8 @@ function SyncedBoard({ sync }: { sync: ReturnType<typeof useClassSync> }) {
   return (
     <div className="flex flex-col gap-3">
       <Board fen={fen} orientation="white" turnColor={turnColor} movableColor={movableColor}
-        dests={canMove ? dests : new Map()} lastMove={lastMoveArrow} onMove={onMove} />
+        dests={canMove ? dests : new Map()} lastMove={lastMoveArrow} onMove={onMove}
+        shapes={boardShapes} onShapesChange={onShapesChange} />
 
       {/* Status strip — connection dot + role badge + participant count + lock chip. */}
       <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -259,7 +282,7 @@ function SyncedBoard({ sync }: { sync: ReturnType<typeof useClassSync> }) {
             <span className="text-xs font-semibold uppercase tracking-wide text-amber-200">Coach controls</span>
             <span className="text-[10px] text-ink-500">only you see this</span>
           </div>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
             <button onClick={sendTakeback}
               className="rounded-lg bg-gradient-to-r from-brand-600 to-brand-500 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:from-brand-500 hover:to-brand-400 disabled:opacity-40"
               disabled={!lastMove}>
@@ -271,10 +294,18 @@ function SyncedBoard({ sync }: { sync: ReturnType<typeof useClassSync> }) {
                 : "bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-400 hover:to-teal-400"}`}>
               {locked ? "🔓 Unlock" : "🔒 Lock students"}
             </button>
+            <button onClick={() => sendAnnot([])}
+              className="rounded-lg border border-ink-600 bg-ink-800 px-3 py-2 text-xs font-semibold text-ink-200 hover:bg-ink-700 disabled:opacity-40"
+              disabled={shapes.length === 0}>
+              🧽 Clear arrows
+            </button>
             <button onClick={sendReset}
               className="rounded-lg border border-ink-600 bg-ink-800 px-3 py-2 text-xs font-semibold text-ink-200 hover:bg-ink-700">
               ↺ Reset
             </button>
+          </div>
+          <div className="mt-2 text-[10px] text-ink-500">
+            Draw arrows: <b>right-click drag</b> a square to another. Highlight: <b>right-click</b> a square.
           </div>
         </div>
       )}

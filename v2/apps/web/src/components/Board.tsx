@@ -21,7 +21,8 @@ export interface BoardProps {
   viewOnly?: boolean;                  // spectator (Engine Battle)
   coordinates?: boolean;               // default true
   blindfold?: boolean;                 // hide pieces (Blindfold mode)
-  shapes?: DrawShape[];                // arrows/circles (hints, engine PV)
+  shapes?: DrawShape[];                // arrows/circles (hints, engine PV, coach annotations)
+  onShapesChange?: (shapes: DrawShape[]) => void; // fires on user draw/clear (right-click)
   onMove?: (from: Key, to: Key) => void;
   onPremove?: (from: Key, to: Key) => void;
   premovable?: boolean;
@@ -41,6 +42,7 @@ export default function Board({
   coordinates = true,
   blindfold = false,
   shapes,
+  onShapesChange,
   onMove,
   onPremove,
   premovable = false,
@@ -57,7 +59,8 @@ export default function Board({
   const onMoveRef = useRef(onMove);
   const onPremoveRef = useRef(onPremove);
   const onSelectRef = useRef(onSelect);
-  useEffect(() => { onMoveRef.current = onMove; onPremoveRef.current = onPremove; onSelectRef.current = onSelect; });
+  const onShapesChangeRef = useRef(onShapesChange);
+  useEffect(() => { onMoveRef.current = onMove; onPremoveRef.current = onPremove; onSelectRef.current = onSelect; onShapesChangeRef.current = onShapesChange; });
 
   // create once
   useEffect(() => {
@@ -86,7 +89,11 @@ export default function Board({
       },
       selectable: { enabled: true },
       events: { select: (key) => onSelectRef.current?.(key) },
-      drawable: { enabled: true, visible: true },
+      // drawable.onChange fires when the USER draws/erases shapes via right-click.
+      // Programmatic setShapes() from the sync effect below does NOT trigger it, so
+      // there's no echo loop with remote annotations.
+      drawable: { enabled: true, visible: true,
+        onChange: (s) => onShapesChangeRef.current?.(s) },
     };
     api.current = Chessground(el.current, config);
     if (shapes) api.current.setShapes(shapes);
