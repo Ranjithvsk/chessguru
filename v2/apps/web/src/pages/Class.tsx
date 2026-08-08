@@ -248,6 +248,9 @@ type ScheduledClass = {
   createdByUserId?: string | null;
   mine?: boolean;
   attendedCount?: number;   // only present for rows the caller owns
+  seriesId?: string | null; // set on every doc in a materialized recurring series
+  seriesIndex?: number;     // 1-based position, "2 of 8"
+  seriesTotal?: number;
 };
 
 // Human-friendly "in 2h 15m" / "started 4 min ago" / "3d ago" delta for a startAt.
@@ -292,6 +295,8 @@ function ClassLanding() {
       return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
     })(),
     notes: "",
+    recurrence: "none" as "none" | "weekly",
+    recurrenceCount: 8,
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -333,6 +338,16 @@ function ClassLanding() {
       refresh();
     } catch (e: any) { alert(e?.message || "Couldn't cancel"); }
   };
+  const cancelSeries = async (c: ScheduledClass) => {
+    if (!c.mine || !c.seriesId) return;
+    if (!confirm(`Cancel every FUTURE class in "${c.title}" series? Past classes and their recordings stay.`)) return;
+    try {
+      const res = await fetch(`${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/schedule/series/${encodeURIComponent(c.seriesId)}`,
+        { method: "DELETE", credentials: "include" });
+      if (!res.ok) throw new Error(`cancel series failed: ${res.status}`);
+      refresh();
+    } catch (e: any) { alert(e?.message || "Couldn't cancel series"); }
+  };
 
   const startNow = () => nav(`/class/${newRoomId()}`);
   const submit = async (e: React.FormEvent) => {
@@ -349,6 +364,8 @@ function ClassLanding() {
           // <input datetime-local> gives a local wall time with no zone. new Date()
           // parses it in the user's tz, which is exactly what we want here.
           startAt: new Date(form.startAt).toISOString(),
+          recurrence: form.recurrence,
+          recurrenceCount: form.recurrence === "weekly" ? Number(form.recurrenceCount) || 1 : 1,
         }),
       });
       if (!res.ok) throw new Error(`create failed: ${res.status}`);
@@ -397,7 +414,7 @@ function ClassLanding() {
             Live now
           </h2>
           <div className="grid gap-3 md:grid-cols-2">
-            {visLive.map((c) => <ClassCard key={c._id} c={c} tone="live" onCancel={c.mine ? () => cancel(c) : undefined} />)}
+            {visLive.map((c) => <ClassCard key={c._id} c={c} tone="live" onCancel={c.mine ? () => cancel(c) : undefined} onCancelSeries={c.mine && c.seriesId ? () => cancelSeries(c) : undefined} />)}
           </div>
         </section>
       )}
@@ -417,7 +434,7 @@ function ClassLanding() {
           </div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
-            {visUpcoming.map((c) => <ClassCard key={c._id} c={c} tone="upcoming" onCancel={c.mine ? () => cancel(c) : undefined} />)}
+            {visUpcoming.map((c) => <ClassCard key={c._id} c={c} tone="upcoming" onCancel={c.mine ? () => cancel(c) : undefined} onCancelSeries={c.mine && c.seriesId ? () => cancelSeries(c) : undefined} />)}
           </div>
         )}
       </section>
@@ -452,6 +469,21 @@ function ClassLanding() {
               onChange={(e) => setForm({ ...form, startAt: e.target.value })}
               className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
           </label>
+          <label>
+            <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">Repeats</span>
+            <select value={form.recurrence} onChange={(e) => setForm({ ...form, recurrence: e.target.value as "none" | "weekly" })}
+              className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white">
+              <option value="none">One-off class</option>
+              <option value="weekly">Weekly — same day &amp; time</option>
+            </select>
+          </label>
+          <label className={form.recurrence === "weekly" ? "" : "opacity-40 pointer-events-none"}>
+            <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">Weeks (max 12)</span>
+            <input type="number" min={1} max={12} step={1}
+              value={form.recurrenceCount} onChange={(e) => setForm({ ...form, recurrenceCount: Number(e.target.value) })}
+              disabled={form.recurrence !== "weekly"}
+              className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
+          </label>
           <label className="md:col-span-2">
             <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">Notes (optional)</span>
             <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}
@@ -477,9 +509,10 @@ function ClassLanding() {
 }
 
 // Single card in the live/upcoming list. Clicking the card body jumps straight
-// into the room. Cancel button is coach-only (onCancel is undefined otherwise) and
-// stops the click from propagating so it doesn't also open the class.
-function ClassCard({ c, tone, onCancel }: { c: ScheduledClass; tone: "live" | "upcoming"; onCancel?: () => void }) {
+// into the room. Cancel buttons are coach-only (undefined otherwise) and stop
+// the click from propagating so they don't also open the class.
+function ClassCard({ c, tone, onCancel, onCancelSeries }:
+  { c: ScheduledClass; tone: "live" | "upcoming"; onCancel?: () => void; onCancelSeries?: () => void }) {
   const border = tone === "live"
     ? "border-rose-500/40 bg-gradient-to-br from-rose-500/10 via-ink-900 to-ink-900"
     : c.mine
@@ -504,6 +537,12 @@ function ClassCard({ c, tone, onCancel }: { c: ScheduledClass; tone: "live" | "u
                 🧑‍🎓 {c.attendedCount}
               </span>
             )}
+            {c.seriesId && c.seriesIndex && c.seriesTotal && (
+              <span className="shrink-0 rounded-full border border-brand-500/40 bg-brand-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-brand-200"
+                title="Part of a weekly series">
+                🔁 {c.seriesIndex}/{c.seriesTotal}
+              </span>
+            )}
           </div>
           <div className="mt-0.5 text-xs text-ink-400">👑 {c.coach} · {c.durationMin} min</div>
         </div>
@@ -521,8 +560,16 @@ function ClassCard({ c, tone, onCancel }: { c: ScheduledClass; tone: "live" | "u
         <div className="flex items-center gap-2">
           {onCancel && (
             <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCancel(); }}
-              className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-2.5 py-1 text-[11px] font-semibold text-rose-200 hover:bg-rose-500/20">
+              className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-2.5 py-1 text-[11px] font-semibold text-rose-200 hover:bg-rose-500/20"
+              title="Cancel just this class">
               Cancel
+            </button>
+          )}
+          {onCancelSeries && (
+            <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCancelSeries(); }}
+              className="rounded-lg border border-rose-500/60 bg-rose-500/20 px-2.5 py-1 text-[11px] font-semibold text-rose-100 hover:bg-rose-500/30"
+              title="Cancel every FUTURE class in this weekly series">
+              Cancel series
             </button>
           )}
           <span className={`rounded-lg px-3 py-1 text-xs font-semibold shadow-sm ${cta}`}>

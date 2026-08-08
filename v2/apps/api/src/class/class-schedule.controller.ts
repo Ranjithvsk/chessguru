@@ -33,7 +33,16 @@ type ScheduleDoc = {
   // Coach identity — set from the session at create time. Anonymous coaches
   // (not signed in) get null and simply lose the ability to cancel/edit later.
   createdByUserId: string | null;
+  // Recurrence — materialized at create time. Every doc in a series shares
+  // the same seriesId (= the FIRST doc's _id). seriesIndex/seriesTotal drive
+  // the "3 of 12" badge on the client. Standalone one-off classes leave
+  // seriesId null (implicit series of one).
+  seriesId?: string | null;
+  seriesIndex?: number;    // 1-based position in the series
+  seriesTotal?: number;    // total number of instances originally created
 };
+
+const MAX_RECUR = 12;
 
 @Controller("class/schedule")
 export class ClassScheduleController {
@@ -55,25 +64,40 @@ export class ClassScheduleController {
     if (coach.length > MAX_COACH) throw new HttpException("coach name too long", HttpStatus.BAD_REQUEST);
     if (notes.length > MAX_NOTES) throw new HttpException("notes too long", HttpStatus.BAD_REQUEST);
     if (!Number.isFinite(startAtNum)) throw new HttpException("bad startAt", HttpStatus.BAD_REQUEST);
-    // Retry a couple of times on the vanishingly-rare id collision (6-char base36).
-    let id = newRoomId();
-    for (let i = 0; i < 3; i++) {
-      const existing = await this.col().findOne({ _id: id as any }, { projection: { _id: 1 } });
-      if (!existing) break;
-      id = newRoomId();
-    }
+    // Recurrence — 'none' or 'weekly'. Count is clamped so the API can't be used to
+    // spam thousands of docs from a single request; MAX_RECUR keeps the semester
+    // shape sane (12 weeks fits a typical school term).
+    const recurrence: "none" | "weekly" = b.recurrence === "weekly" ? "weekly" : "none";
+    const count = recurrence === "weekly"
+      ? Math.max(1, Math.min(MAX_RECUR, Math.floor(Number(b.recurrenceCount) || 1)))
+      : 1;
     const userId: string | null = req?.session?.userId ?? null;
     const username: string | null = req?.session?.username ?? null;
-    const doc: ScheduleDoc = {
-      _id: id, title,
-      // Default coach display = session username so a logged-in coach doesn't have to
-      // retype their name every time. Anonymous coaches fall back to "Coach".
-      coach: coach || username || "Coach",
-      startAt: new Date(startAtNum), durationMin, notes, createdAt: new Date(),
-      createdByUserId: userId,
-    };
-    await this.col().insertOne(doc);
-    return { ...doc, mine: true };
+    const coachName = coach || username || "Coach";
+    // Materialise N docs. First doc's _id doubles as the seriesId when count>1 so we
+    // don't need a separate uuid. One-off classes leave seriesId null.
+    const docs: ScheduleDoc[] = [];
+    for (let i = 0; i < count; i++) {
+      let id = newRoomId();
+      for (let r = 0; r < 3; r++) {
+        const existing = await this.col().findOne({ _id: id as any }, { projection: { _id: 1 } });
+        if (!existing) break;
+        id = newRoomId();
+      }
+      const seriesId = count > 1 ? (i === 0 ? id : docs[0]!._id) : null;
+      docs.push({
+        _id: id, title, coach: coachName,
+        startAt: new Date(startAtNum + i * 7 * 24 * 60 * 60 * 1000),
+        durationMin, notes, createdAt: new Date(),
+        createdByUserId: userId,
+        seriesId, seriesIndex: count > 1 ? i + 1 : undefined,
+        seriesTotal: count > 1 ? count : undefined,
+      });
+    }
+    await this.col().insertMany(docs);
+    // Return the FIRST doc — that's the "canonical" entry the client navigates into.
+    // Client's list refresh will pick up the rest.
+    return { ...docs[0], mine: true };
   }
 
   // GET /api/class/schedule — list live + upcoming classes. Each row gets a
@@ -129,6 +153,25 @@ export class ClassScheduleController {
     if (row.createdByUserId !== me) throw new HttpException("only the creator can cancel", HttpStatus.FORBIDDEN);
     await this.col().deleteOne({ _id: id as any });
     return { ok: true };
+  }
+
+  // DELETE /api/class/schedule/series/:sid — bulk cancel every FUTURE instance in
+  // the series (past instances stay — they're history and may have recordings /
+  // attendance rows). Coach-only. Returns how many were removed so the client can
+  // show a "N cancelled" toast if it wants.
+  @Delete("series/:sid")
+  async cancelSeries(@Param("sid") sid: string, @Req() req: any) {
+    if (!ROOM_RE.test(sid)) throw new HttpException("bad seriesId", HttpStatus.BAD_REQUEST);
+    const me: string | null = req?.session?.userId ?? null;
+    if (!me) throw new HttpException("sign in required", HttpStatus.UNAUTHORIZED);
+    // Verify ownership on any single doc in the series (they all share the same
+    // creator by construction) before touching anything.
+    const sample = await this.col().findOne({ seriesId: sid as any });
+    if (!sample) throw new HttpException("series not found", HttpStatus.NOT_FOUND);
+    if (sample.createdByUserId !== me) throw new HttpException("only the creator can cancel the series", HttpStatus.FORBIDDEN);
+    const now = new Date();
+    const r = await this.col().deleteMany({ seriesId: sid as any, startAt: { $gt: now } });
+    return { ok: true, cancelled: r.deletedCount ?? 0 };
   }
 
   // GET /api/class/schedule/:id — single class detail. 404 when not found (either
