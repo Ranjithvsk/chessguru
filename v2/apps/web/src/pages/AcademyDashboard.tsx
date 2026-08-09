@@ -1202,6 +1202,15 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
           {shapes.length > 0 && <span className="ml-1 text-[10px] text-amber-300">✏️{shapes.length}</span>}
           {(() => { const sec = estimateAudioSeconds(s.audioBytes); return s.hasAudio && sec != null ? <span className="ml-1 text-[10px] text-violet-300" title="Approximate clip length">🎙~{sec}s</span> : null; })()}
           {s.reviewedAt && <span className="ml-1 text-[10px] text-emerald-300" title={`Reviewed ${new Date(s.reviewedAt).toLocaleDateString()}`}>✓</span>}
+          {(() => {
+            // Stale badge: starred + unreviewed + taken > 30 days ago. Nudges
+            // the coach to either review or delete forgotten backlog items.
+            if (!s.starred || s.reviewedAt) return null;
+            const days = Math.floor((Date.now() - new Date(s.at).getTime()) / 86_400_000);
+            if (days < 30) return null;
+            return <span className="ml-1 text-[10px] text-rose-300"
+              title={`Starred ${days} days ago but never reviewed — worth revisiting or clearing.`}>⏰{days}d</span>;
+          })()}
           {canEdit && !editing && (
             <>
               <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDraft(s.note || ""); setEditing(true); }}
