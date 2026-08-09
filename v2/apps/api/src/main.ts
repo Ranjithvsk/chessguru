@@ -68,10 +68,11 @@ async function bootstrap() {
   // Pass the mongoose connection so the ws handler can persist attendance writes.
   const dbConn = app.get<Connection>(getConnectionToken());
   attachClassWs(app.getHttpServer(), dbConn as any);
-  // From-scratch video (CHESSGURU-VIDEO-FROM-SCRATCH.md P0): relays WebRTC
-  // signaling between exactly 2 peers per room. No SFU, no DB writes — purely
-  // in-memory forwarding, so it lives outside any Nest module.
-  attachVideoSignalWs(app.getHttpServer());
+  // From-scratch video (CHESSGURU-VIDEO-FROM-SCRATCH.md P0/P1): relays WebRTC
+  // signaling between exactly 2 peers per room. No SFU. P1 adds session-cookie
+  // auth via mongo lookup + writes to classAttendance on join/leave, so the
+  // handler needs the mongoose connection.
+  attachVideoSignalWs(app.getHttpServer(), dbConn as any);
   // eslint-disable-next-line no-console
   console.log(`ChessGuru v2 API on :${port}`);
 }

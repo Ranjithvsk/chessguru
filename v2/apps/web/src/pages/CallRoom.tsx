@@ -21,11 +21,23 @@ type ServerMsg =
   | { type: "answer"; from: string; sdp: RTCSessionDescriptionInit }
   | { type: "ice"; from: string; candidate: RTCIceCandidateInit | null };
 
-const ICE_SERVERS: RTCConfiguration = {
+// STUN-only fallback used if the /api/video/ice-config fetch fails (e.g. guest
+// visitor). TURN URLs are fetched from the server per-session so credentials are
+// fresh and short-lived (~1h). See fetchIceConfig() below.
+const FALLBACK_ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
   ],
 };
+
+async function fetchIceConfig(): Promise<RTCConfiguration> {
+  try {
+    const r = await fetch("/v2api/api/video/ice-config", { credentials: "include" });
+    if (!r.ok) return FALLBACK_ICE_SERVERS;
+    const j = await r.json();
+    return Array.isArray(j?.iceServers) && j.iceServers.length ? { iceServers: j.iceServers } : FALLBACK_ICE_SERVERS;
+  } catch { return FALLBACK_ICE_SERVERS; }
+}
 
 type Status =
   | "connecting"        // opening WS / getUserMedia
@@ -57,6 +69,9 @@ export default function CallRoomPage() {
   const peerIdRef = useRef<string>("");
   // ICE candidates buffered while remoteDescription is still null.
   const pendingIceRef = useRef<RTCIceCandidateInit[]>([]);
+  // RTCConfiguration fetched from /api/video/ice-config (or fallback). Populated
+  // before the WS opens so every createPc() gets the right servers.
+  const iceConfigRef = useRef<RTCConfiguration>(FALLBACK_ICE_SERVERS);
 
   // Send a JSON message to the signaling server (guarded — WS may be gone).
   const send = (msg: unknown) => {
@@ -66,7 +81,7 @@ export default function CallRoomPage() {
 
   // Build a fresh RTCPeerConnection and wire the standard handlers.
   const createPc = (peerId: string): RTCPeerConnection => {
-    const pc = new RTCPeerConnection(ICE_SERVERS);
+    const pc = new RTCPeerConnection(iceConfigRef.current);
 
     pc.onicecandidate = (e) => {
       // Send null too — signals end-of-candidates to the remote.
@@ -171,6 +186,12 @@ export default function CallRoomPage() {
       if (cancelled) { for (const t of stream.getTracks()) t.stop(); return; }
       localStreamRef.current = stream;
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+
+      // 1b) Fetch fresh iceServers (STUN + short-lived TURN creds) before any
+      //     RTCPeerConnection is constructed. Falls back to STUN-only if we
+      //     can't reach the endpoint (guest / dev / network issue).
+      iceConfigRef.current = await fetchIceConfig();
+      if (cancelled) return;
 
       // 2) Signaling WebSocket.
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
