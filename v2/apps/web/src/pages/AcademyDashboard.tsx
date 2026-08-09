@@ -654,6 +654,22 @@ function InvoiceCard({ inv, config, isOwner, onMarkPaid, markPaidPending }: {
 // Single-row renderer for a scheduled class. Live rows get a green ring and
 // a Join button; upcoming rows just show the start time and a Copy-link.
 function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
+  const [sending, setSending] = useState(false);
+  const [sendMsg, setSendMsg] = useState<string | null>(null);
+  async function sendSummary() {
+    if (sending) return;
+    const note = window.prompt("Add a one-line note to include in the summary? (optional)") ?? "";
+    setSending(true); setSendMsg(null);
+    try {
+      const r = await fetch(`${BASE}/api/academy/classes/${encodeURIComponent(c._id)}/summary`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note }),
+      }).then((res) => res.json());
+      if (!r.ok) setSendMsg(r.error || "Failed");
+      else setSendMsg(`Sent to ${r.sent} student${r.sent === 1 ? "" : "s"}${r.failed ? ` (${r.failed} failed)` : ""}`);
+    } catch (e) { setSendMsg("Network error"); }
+    finally { setSending(false); }
+  }
   return (
     <div className={`mb-1 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm ${live ? "border-emerald-500/40 bg-emerald-500/5" : "border-ink-700 bg-ink-800/40"}`}>
       <div className="flex-1 min-w-0">
@@ -661,8 +677,16 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
         <div className="text-[11px] text-ink-400">
           {c.coach}{" · "}{fmtStartAt(c.startAt)}{" · "}{c.durationMin}m
           {typeof c.attendedCount === "number" && c.mine && <span className="ml-2 text-emerald-300">✓ {c.attendedCount} attended</span>}
+          {sendMsg && <span className="ml-2 text-brand-300">· {sendMsg}</span>}
         </div>
       </div>
+      {c.mine && (
+        <button onClick={sendSummary} disabled={sending}
+          className="rounded-lg border border-brand-500/40 bg-brand-500/10 px-2 py-1 text-[11px] font-semibold text-brand-100 hover:bg-brand-500/20 disabled:opacity-50"
+          title="Emails per-student class recap via dw-otp">
+          {sending ? "Sending…" : "📧 Summary"}
+        </button>
+      )}
       {/* Route to ChessGuru Live (self-hosted Jitsi on meet.harinitharanjith.com,
        *  fully rebranded). The class _id is the room name; attendance auto-writes
        *  via Jitsi's participant events when we wire the IframeAPI in the next slice. */}

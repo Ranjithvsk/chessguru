@@ -57,4 +57,11 @@ export class AcademyController {
 
   @Post("fees/:id/waive")
   waiveInvoice(@Req() req: any, @Param("id") id: string, @Body() body: any) { return this.svc.waiveInvoice(req.session, id, body); }
+
+  // Post-class summary — emails per-student recap. Rule-based today; upgrade
+  // path is Claude-polished once ANTHROPIC_API_KEY lands in env.
+  @Post("classes/:classId/summary")
+  sendClassSummary(@Req() req: any, @Param("classId") classId: string, @Body() body: any) {
+    return this.svc.sendClassSummary(req.session, classId, body);
+  }
 }

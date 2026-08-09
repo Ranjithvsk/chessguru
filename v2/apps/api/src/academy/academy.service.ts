@@ -416,4 +416,86 @@ export class AcademyService {
     if (r.matchedCount === 0) return { ok: false, error: "Invoice not found or already resolved." };
     return { ok: true };
   }
+
+  /* ================================================================
+   * Post-class summary (rule-based today; Claude-polish comes when
+   * ANTHROPIC_API_KEY lands in env). Given a scheduled class, computes
+   * per-student attendance + puzzles solved during the class window
+   * and emails each attendee a personal summary via dw-otp.
+   * ================================================================ */
+  async sendClassSummary(session: any, classId: string, body: any) {
+    const g = this.ensureCoachOrOwner(session);
+    const note = String(body?.note || "").slice(0, 500);
+
+    const sched: any = await this.conn.db!.collection("classSchedules").findOne({ _id: classId as any });
+    if (!sched) return { ok: false, error: "Class not found." };
+    if (sched.academyId && sched.academyId !== g.academyId) return { ok: false, error: "Class not in your academy." };
+    if (g.role === "coach" && sched.createdByUserId !== g.userId) return { ok: false, error: "Only the class creator can send this." };
+
+    const start = new Date(sched.startAt);
+    const end = new Date(start.getTime() + (sched.durationMin || 60) * 60_000);
+    const winStart = new Date(start.getTime() - 15 * 60_000);   // count joins 15m early too
+
+    // Attendees during the class window (skip guests — no email to send to)
+    const attendees: any[] = await this.conn.db!.collection("classAttendance").find({
+      classId, joinedAt: { $gte: winStart, $lte: new Date(end.getTime() + 30 * 60_000) },
+      userId: { $ne: null },
+    }).toArray();
+    if (attendees.length === 0) return { ok: true, sent: 0, note: "No signed-in attendees to email." };
+
+    // Enrich each attendee with their email + puzzle-solve tally during the window
+    const uids = attendees.map((a: any) => String(a.userId));
+    const users: any[] = await this.users().find({ _id: { $in: uids as any } },
+      { projection: { _id: 1, username: 1, email: 1 } }).toArray();
+    const umap: Record<string, any> = {};
+    for (const u of users) umap[String(u._id)] = u;
+
+    // Puzzles solved by each user during the window (rounds._id = "<userId>:<puzzleId>")
+    // Use $regex on _id — collection is small enough per user that this is fine for MVP.
+    const puzzleCounts: Record<string, { total: number; wins: number }> = {};
+    for (const uid of uids) {
+      const rows: any[] = await this.conn.db!.collection("rounds").find({
+        _id: { $gte: `${uid}:`, $lt: `${uid};` } as any,
+        d: { $gte: winStart, $lte: new Date(end.getTime() + 30 * 60_000) },
+      }, { projection: { w: 1 } }).toArray();
+      puzzleCounts[uid] = { total: rows.length, wins: rows.filter((r: any) => r.w).length };
+    }
+
+    // Send one email per attendee (idempotent per-recipient; failures don't stop the batch)
+    const acadName: string = sched.title || `Class ${classId}`;
+    const dateStr = start.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+    let sent = 0, failed = 0;
+    for (const a of attendees) {
+      const uid = String(a.userId);
+      const u = umap[uid];
+      if (!u?.email) continue;
+      const p = puzzleCounts[uid] || { total: 0, wins: 0 };
+      const winRate = p.total ? Math.round((p.wins / p.total) * 100) : null;
+      const subject = `Class summary: ${acadName} — ${dateStr}`;
+      const html = `
+        <div style="font-family:system-ui,sans-serif;max-width:520px">
+          <h2 style="color:#111;margin-bottom:4px">${escHtml(acadName)}</h2>
+          <p style="color:#666;margin-top:0">${escHtml(dateStr)} · ${sched.durationMin || 60} min · Coach: ${escHtml(sched.coach || "")}</p>
+          <p>Hi <b>${escHtml(u.username)}</b> — here's your recap.</p>
+          <ul style="line-height:1.7">
+            <li>You attended <b>${sched.durationMin || 60}m</b> of the class.</li>
+            <li>Puzzles solved during class: <b>${p.total}</b>${winRate !== null ? ` (win rate <b>${winRate}%</b>)` : ""}.</li>
+          </ul>
+          ${note ? `<div style="border-left:3px solid #2563eb;padding:8px 12px;background:#f0f7ff;margin:16px 0"><b>Note from your coach:</b><br/>${escHtml(note)}</div>` : ""}
+          <p style="color:#666;font-size:13px">Keep it up! Log in at <a href="https://harinitharanjith.com">ChessGuru</a> to see your full history.</p>
+        </div>`;
+      const text = [
+        `${acadName} — ${dateStr}`, "",
+        `Hi ${u.username} — here's your recap.`, "",
+        `- Class duration: ${sched.durationMin || 60}m`,
+        `- Puzzles solved during class: ${p.total}${winRate !== null ? ` (win rate ${winRate}%)` : ""}`,
+        note ? `\nNote from your coach: ${note}` : "",
+        "",
+        "Keep it up! https://harinitharanjith.com",
+      ].join("\n");
+      const r = await sendMail({ to: u.email, subject, html, text });
+      if (r.ok) sent++; else failed++;
+    }
+    return { ok: true, sent, failed, attendees: attendees.length };
+  }
 }
