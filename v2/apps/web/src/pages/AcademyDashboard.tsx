@@ -1135,9 +1135,24 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
       window.prompt("Copy this join link:", url);
     }
   }
-  async function sendSummary() {
+  const [previewOpen, setPreviewOpen] = useState(false);
+  type SummaryPreview = { attendees: number; snapCount: number; hasRecording: boolean; recordingUrl: string | null };
+  const [preview, setPreview] = useState<SummaryPreview | null>(null);
+  const [previewErr, setPreviewErr] = useState<string | null>(null);
+  const [note, setNote] = useState("");
+  async function openPreview() {
+    setPreviewOpen(true); setPreview(null); setPreviewErr(null); setSendMsg(null);
+    try {
+      const r = await fetch(`${BASE}/api/academy/classes/${encodeURIComponent(c._id)}/summary`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dryRun: true, note: "" }),
+      }).then((res) => res.json());
+      if (!r.ok) { setPreviewErr(r.error || "Preview failed"); return; }
+      setPreview({ attendees: r.attendees, snapCount: r.snapCount, hasRecording: r.hasRecording, recordingUrl: r.recordingUrl });
+    } catch { setPreviewErr("Network error"); }
+  }
+  async function reallySend() {
     if (sending) return;
-    const note = window.prompt("Add a one-line note to include in the summary? (optional)") ?? "";
     setSending(true); setSendMsg(null);
     try {
       const r = await fetch(`${BASE}/api/academy/classes/${encodeURIComponent(c._id)}/summary`, {
@@ -1145,8 +1160,11 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
         headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note }),
       }).then((res) => res.json());
       if (!r.ok) setSendMsg(r.error || "Failed");
-      else setSendMsg(`Sent to ${r.sent} student${r.sent === 1 ? "" : "s"}${r.failed ? ` (${r.failed} failed)` : ""}`);
-    } catch (e) { setSendMsg("Network error"); }
+      else {
+        setSendMsg(`Sent to ${r.sent} student${r.sent === 1 ? "" : "s"}${r.failed ? ` (${r.failed} failed)` : ""}`);
+        setPreviewOpen(false);
+      }
+    } catch { setSendMsg("Network error"); }
     finally { setSending(false); }
   }
   return (
@@ -1160,11 +1178,60 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
         </div>
       </div>
       {c.mine && (
-        <button onClick={sendSummary} disabled={sending}
+        <button onClick={openPreview} disabled={sending}
           className="rounded-lg border border-brand-500/40 bg-brand-500/10 px-2 py-1 text-[11px] font-semibold text-brand-100 hover:bg-brand-500/20 disabled:opacity-50"
-          title="Emails per-student class recap via dw-otp">
+          title="Preview + email per-student class recap via dw-otp">
           {sending ? "Sending…" : "📧 Summary"}
         </button>
+      )}
+      {previewOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => !sending && setPreviewOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg rounded-xl2 border border-ink-700 bg-ink-900 p-6 shadow-2xl">
+            <div className="mb-3 flex items-baseline justify-between">
+              <h3 className="font-display text-lg text-white">📧 Class summary preview</h3>
+              <button onClick={() => !sending && setPreviewOpen(false)} className="text-ink-400 hover:text-white text-sm">Esc</button>
+            </div>
+            <div className="text-sm text-ink-200">
+              <div className="mb-1 text-white truncate"><b>{c.title}</b></div>
+              <div className="text-[11px] text-ink-400">{c.coach} · {fmtStartAt(c.startAt)} · {c.durationMin}m</div>
+            </div>
+            {previewErr && <div className="mt-3 rounded border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200">{previewErr}</div>}
+            {!preview && !previewErr && <div className="mt-3 text-sm text-ink-400">Computing preview…</div>}
+            {preview && (
+              <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-lg border border-ink-700 bg-ink-800/40 p-2">
+                  <div className="text-xl font-semibold text-white tabular-nums">{preview.attendees}</div>
+                  <div className="text-[10px] uppercase tracking-wide text-ink-400">Recipients</div>
+                </div>
+                <div className="rounded-lg border border-ink-700 bg-ink-800/40 p-2">
+                  <div className="text-xl font-semibold text-white tabular-nums">{preview.snapCount}</div>
+                  <div className="text-[10px] uppercase tracking-wide text-ink-400">Snaps included</div>
+                </div>
+                <div className={`rounded-lg border p-2 ${preview.hasRecording ? "border-emerald-500/40 bg-emerald-500/5" : "border-ink-700 bg-ink-800/40"}`}>
+                  <div className={`text-xl font-semibold tabular-nums ${preview.hasRecording ? "text-emerald-300" : "text-ink-500"}`}>{preview.hasRecording ? "✓" : "—"}</div>
+                  <div className="text-[10px] uppercase tracking-wide text-ink-400">Recording</div>
+                </div>
+              </div>
+            )}
+            <div className="mt-4">
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-400">Optional note to attach</label>
+              <textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} rows={3}
+                placeholder="e.g. Nice work on the Italian today — practice the tactics I flagged."
+                className="w-full resize-none rounded-lg border border-ink-600 bg-ink-800 px-3 py-2 text-sm text-white outline-none focus:border-brand-500" />
+              <div className="mt-1 text-right text-[10px] text-ink-500 tabular-nums">{note.length}/500</div>
+            </div>
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button onClick={() => !sending && setPreviewOpen(false)}
+                className="rounded-lg border border-ink-600 px-3 py-1.5 text-sm text-ink-300 hover:bg-ink-800">Cancel</button>
+              <button onClick={reallySend} disabled={sending || !preview || preview.attendees === 0}
+                className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
+                {sending ? "Sending…" : preview ? `Send to ${preview.attendees}` : "Send"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       {/* Route to our own from-scratch video call (/call/:room?board=1) — feature
        *  parity with Jitsi now: mesh up to 8, TURN, AV1, chat, hand, reactions,

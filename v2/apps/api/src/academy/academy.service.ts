@@ -481,6 +481,10 @@ export class AcademyService {
   async sendClassSummary(session: any, classId: string, body: any) {
     const g = this.ensureCoachOrOwner(session);
     const note = String(body?.note || "").slice(0, 500);
+    // Dry-run: compute everything except sendMail. Coach's UI uses this to
+    // show a preview modal (recipient count, whether a recording was found,
+    // how many snap items will appear) before committing.
+    const dryRun = !!body?.dryRun;
 
     const sched: any = await this.conn.db!.collection("classSchedules").findOne({ _id: classId as any });
     if (!sched) return { ok: false, error: "Class not found." };
@@ -614,10 +618,17 @@ export class AcademyService {
         "",
         "Keep it up! https://harinitharanjith.com",
       ].join("\n");
+      if (dryRun) { sent++; continue; }   // simulate a successful send for the caller's counter
       const r = await sendMail({ to: u.email, subject, html, text });
       if (r.ok) sent++; else failed++;
     }
-    return { ok: true, sent, failed, attendees: attendees.length };
+    return {
+      ok: true, dryRun, sent, failed, attendees: attendees.length,
+      // Extras used by the coach's preview modal.
+      snapCount: snaps.length,
+      hasRecording: !!recordingUrl,
+      recordingUrl: recordingUrl || null,
+    };
   }
 
   /** Owner OR coach: list recording files across the academy's classes.
