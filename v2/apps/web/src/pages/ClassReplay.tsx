@@ -72,6 +72,7 @@ export default function ClassReplayPage() {
   const [tMs, setTMs] = useState(0);
   const [snaps, setSnaps] = useState<Snap[]>([]);
   const [durationMs, setDurationMs] = useState(0);
+  const [showHelp, setShowHelp] = useState(false);
   // Playback speed pill. Applied to the video element via useEffect so any
   // future re-mount (e.g. source change) picks it up. Persisted so a coach
   // who always reviews at 1.5x doesn't have to re-click every session.
@@ -230,11 +231,16 @@ export default function ClassReplayPage() {
       } else if (e.key === "<" || e.key === ",") {
         e.preventDefault();
         setSpeed((s) => clampSpeed(s - 0.25));
+      } else if (e.key === "?") {
+        e.preventDefault();
+        setShowHelp((v) => !v);
+      } else if (e.key === "Escape") {
+        if (showHelp) { e.preventDefault(); setShowHelp(false); }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [idx, events]);
+  }, [idx, events, showHelp]);
 
   if (!id || !filename) {
     return <div className="py-16 text-center text-ink-400">Missing class or filename.</div>;
@@ -262,8 +268,9 @@ export default function ClassReplayPage() {
             <span className="text-[10px] text-ink-500">
               {loadingTimeline ? "loading…" : `${events.length} move${events.length === 1 ? "" : "s"}`}
               {snapMarkers.length > 0 && <span className="ml-2 text-amber-300">📸 {snapMarkers.length} snap{snapMarkers.length === 1 ? "" : "s"}</span>}
-              <span className="ml-2 hidden sm:inline text-ink-600"
-                title="← / →  step one move · Space or K  play/pause · J / L  ±10s · , / .  slower/faster">⌨️ ← → ␣ J L K , .</span>
+              <button onClick={() => setShowHelp(true)}
+                className="ml-2 hidden sm:inline text-ink-500 hover:text-ink-200"
+                title="Show all keyboard shortcuts (?)">⌨️ shortcuts</button>
             </span>
           </div>
           {!loadingTimeline && events.length === 0 ? (
@@ -339,6 +346,33 @@ export default function ClassReplayPage() {
           </div>
         )}
       </section>
+
+      {showHelp && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setShowHelp(false)}>
+          <div onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-xl2 border border-ink-700 bg-ink-900 p-6 shadow-2xl">
+            <div className="mb-3 flex items-baseline justify-between">
+              <h2 className="font-display text-lg text-white">⌨️ Keyboard shortcuts</h2>
+              <button onClick={() => setShowHelp(false)} className="text-ink-400 hover:text-white text-sm">Esc</button>
+            </div>
+            <table className="w-full text-sm">
+              <tbody className="[&_td]:py-1 [&_td:first-child]:font-mono [&_td:first-child]:text-brand-200 [&_td:first-child]:pr-4">
+                <tr><td>←  /  →</td><td className="text-ink-300">Previous / next move</td></tr>
+                <tr><td>J  /  L</td><td className="text-ink-300">Seek −10s / +10s</td></tr>
+                <tr><td>Space  or  K</td><td className="text-ink-300">Play / pause</td></tr>
+                <tr><td>,  or  &lt;</td><td className="text-ink-300">Slow down (−0.25×)</td></tr>
+                <tr><td>.  or  &gt;</td><td className="text-ink-300">Speed up (+0.25×)</td></tr>
+                <tr><td>?</td><td className="text-ink-300">Toggle this help</td></tr>
+                <tr><td>Esc</td><td className="text-ink-300">Close this help</td></tr>
+              </tbody>
+            </table>
+            <p className="mt-3 text-[11px] text-ink-500">
+              Shortcuts are disabled while typing in an input, so chat and the URL bar work normally.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
