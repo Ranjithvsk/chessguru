@@ -899,6 +899,7 @@ function TodayStrip({ schedule, snaps, recordings }: {
   // signal; small enough not to distract when zero.
   const starredTotal = (snaps ?? []).reduce((n, s) => n + (s.starred ? 1 : 0), 0);
   const reviewedTotal = (snaps ?? []).reduce((n, s) => n + (s.reviewedAt ? 1 : 0), 0);
+  const toReview = (snaps ?? []).reduce((n, s) => n + ((s.starred && !s.reviewedAt) ? 1 : 0), 0);
   const Tile = ({ label, value, tone }: { label: string; value: number | string; tone: string }) => (
     <div className={`rounded-xl2 border ${tone} p-3 text-center`}>
       <div className="text-2xl font-semibold text-white tabular-nums">{value}</div>
@@ -906,13 +907,14 @@ function TodayStrip({ schedule, snaps, recordings }: {
     </div>
   );
   return (
-    <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
+    <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:grid-cols-7">
       <Tile label="Classes today" value={classesToday} tone="border-ink-700 bg-ink-900" />
       <Tile label="Live now" value={liveNow} tone={liveNow > 0 ? "border-emerald-500/40 bg-emerald-500/5" : "border-ink-700 bg-ink-900"} />
       <Tile label="Snaps today" value={snapsToday} tone="border-ink-700 bg-ink-900" />
       <Tile label="Recordings today" value={recordingsToday} tone="border-ink-700 bg-ink-900" />
       <Tile label="★ Starred (all)" value={starredTotal} tone={starredTotal > 0 ? "border-amber-500/40 bg-amber-500/5" : "border-ink-700 bg-ink-900"} />
       <Tile label="✓ Reviewed (all)" value={reviewedTotal} tone={reviewedTotal > 0 ? "border-emerald-500/40 bg-emerald-500/5" : "border-ink-700 bg-ink-900"} />
+      <Tile label="🎯 To review" value={toReview} tone={toReview > 0 ? "border-brand-500/40 bg-brand-500/5" : "border-ink-700 bg-ink-900"} />
     </div>
   );
 }
