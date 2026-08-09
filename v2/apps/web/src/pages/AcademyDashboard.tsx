@@ -1198,19 +1198,26 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   // position with annotations. Excel-safe: commas quoted, quotes escaped.
   function exportCsv(rows: SnapItem[]) {
     const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
-    const header = ["At", "Class", "Author", "Starred", "Shapes", "Note", "FEN", "OpenLink"];
+    const header = ["At", "Class", "Author", "Starred", "Shapes", "AudioSec", "AudioBytes", "AudioUrl", "Note", "FEN", "OpenLink"];
     const lines = [header.map(esc).join(",")];
     for (const s of rows) {
       const shapes = Array.isArray(s.shapes) ? s.shapes : [];
       const link = shapes.length > 0
         ? `${location.origin}/board-editor?fen=${encodeURIComponent(s.fen)}&shapes=${encodeShapesForUrl(shapes)}`
         : `${location.origin}/board-editor?fen=${encodeURIComponent(s.fen)}`;
+      const estSec = estimateAudioSeconds(s.audioBytes);
+      const audioUrl = s.hasAudio
+        ? `${location.origin}/v2api/api/class/${encodeURIComponent(s.classId)}/snap/${encodeURIComponent(s._id)}/audio`
+        : "";
       lines.push([
         new Date(s.at).toISOString(),
         s.classTitle || s.classId,
         s.byName || s.byUserId || "",
         s.starred ? "yes" : "",
         shapes.length > 0 ? JSON.stringify(shapes) : "",
+        estSec != null ? String(estSec) : "",
+        typeof s.audioBytes === "number" ? String(s.audioBytes) : "",
+        audioUrl,
         s.note || "",
         s.fen,
         link,
