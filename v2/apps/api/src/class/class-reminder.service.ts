@@ -201,6 +201,16 @@ export class ClassReminderService implements OnModuleInit {
         </div>
       </div>
     `;
+    // Compliance log — one row per recipient at send-intent time. classId +
+    // kind lets a later "did Alice get the reminder?" query filter cleanly.
+    // Fire-and-forget so a Mongo hiccup never blocks the send batch.
+    const now = new Date();
+    this.conn.db!.collection("classMailLog").insertMany(
+      [...recipients].map((to) => ({
+        at: now, coachId: row.createdByUserId ?? null, classId: row._id,
+        to, subject, kind: `reminder:${stage.key}`,
+      })),
+    ).catch(() => { /* silent */ });
     // Fire in parallel. Each recipient gets their own unsubscribe link (HMAC
     // over classId+email) appended to both the plain-text and HTML footers.
     // Coach is skipped — no point unsubscribing them from their own class.

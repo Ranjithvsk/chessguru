@@ -112,7 +112,29 @@ export class ClassAttendanceController {
       })
       .filter(Boolean)
       .sort((a: any, b: any) => new Date(b.startAt).getTime() - new Date(a.startAt).getTime());
-    return { entries };
+
+    // Look up the student's email so we can pull their mail history. For
+    // signed-in students it's a single users lookup; guests have no email so
+    // mail history is naturally empty. Scoped to THIS coach's outgoing log
+    // so we never leak another coach's messages.
+    let mail: any[] = [];
+    if (key.startsWith("guest:")) {
+      mail = [];
+    } else {
+      const user: any = await this.conn.db!.collection("users").findOne(
+        { _id: key as any }, { projection: { email: 1 } as any },
+      );
+      const email: string | null = user && typeof user.email === "string" ? user.email.toLowerCase() : null;
+      if (email) {
+        mail = await this.conn.db!.collection("classMailLog")
+          .find({ coachId: me, to: email }, { sort: { at: -1 } as any })
+          .limit(50).toArray();
+      }
+    }
+    return { entries, mail: mail.map((m: any) => ({
+      at: m.at, subject: m.subject, kind: m.kind ?? "adhoc",
+      classId: m.classId ?? null,
+    })) };
   }
 
   // POST /api/class/coach/students/message — coach-only ad-hoc email to any
@@ -181,6 +203,15 @@ export class ClassAttendanceController {
         </div>
       </div>`;
     await Promise.all(toSend.map((to) => sendMail({ to, subject, html: bodyHtml, text: bodyText })));
+    // Compliance / recall log — one row per successful queued send. classId is
+    // null for ad-hoc (not tied to a specific class), kind = "adhoc". Failures
+    // aren't logged: we log intent-to-send, and sendMail's own retry semantics
+    // handle transient carrier hiccups. Fire-and-forget so a Mongo hiccup
+    // never breaks the send response.
+    const now = new Date();
+    this.conn.db!.collection("classMailLog").insertMany(
+      toSend.map((to) => ({ at: now, coachId: me, to, subject, kind: "adhoc", classId: null })),
+    ).catch(() => { /* silent */ });
     return { ok: true, sent: toSend.length, skipped: skipped.length, invalid: invalid.length };
   }
 

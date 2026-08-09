@@ -263,19 +263,21 @@ function keyOf(s: { userId: string | null; name: string }): string {
 }
 
 type StudentEntry = { classId: string; title: string; startAt: string; joinedAt: string; lastSeenAt?: string };
+type StudentMail  = { at: string; subject: string; kind: string; classId: string | null };
 
-// Modal: per-student attendance history. Fetched on open — small list of the
-// coach's classes this student joined, with dates.
+// Modal: per-student attendance history + recent mail log. Fetched on open —
+// classes the student joined + emails coach has sent them (ad-hoc + reminders).
 function StudentHistoryModal({ student, onClose }: { student: CoachStudent; onClose: () => void }) {
   const [entries, setEntries] = useState<StudentEntry[] | null>(null);
+  const [mail, setMail] = useState<StudentMail[]>([]);
   useEffect(() => {
     let cancelled = false;
     const key = keyOf(student);
     fetch(`${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/coach/students/history?key=${encodeURIComponent(key)}`,
           { credentials: "include" })
-      .then((r) => r.ok ? r.json() : { entries: [] })
-      .then((j) => { if (!cancelled) setEntries(j.entries ?? []); })
-      .catch(() => { if (!cancelled) setEntries([]); });
+      .then((r) => r.ok ? r.json() : { entries: [], mail: [] })
+      .then((j) => { if (!cancelled) { setEntries(j.entries ?? []); setMail(j.mail ?? []); } })
+      .catch(() => { if (!cancelled) { setEntries([]); setMail([]); } });
     return () => { cancelled = true; };
   }, [student]);
   return (
@@ -295,27 +297,64 @@ function StudentHistoryModal({ student, onClose }: { student: CoachStudent; onCl
         </div>
         {entries == null ? (
           <div className="py-6 text-center text-xs text-ink-400">Loading…</div>
-        ) : entries.length === 0 ? (
-          <div className="py-6 text-center text-xs text-ink-500">No class attendance recorded yet.</div>
         ) : (
-          <ul className="max-h-80 space-y-1.5 overflow-y-auto pr-1">
-            {entries.map((e) => (
-              <li key={e.classId + e.joinedAt}
-                  className="flex items-center justify-between gap-2 rounded-lg bg-ink-800/60 px-3 py-2">
-                <div className="min-w-0">
-                  <div className="truncate text-sm text-white">{e.title}</div>
-                  <div className="text-[10px] text-ink-500">
-                    {absTime(e.startAt)} · joined {shortAgo(e.joinedAt)}
-                  </div>
+          <div className="space-y-3">
+            <div>
+              <div className="mb-1 text-[10px] uppercase tracking-wide text-ink-500">
+                Classes attended {entries.length > 0 && <span className="ml-1 normal-case font-normal">({entries.length})</span>}
+              </div>
+              {entries.length === 0 ? (
+                <div className="rounded-lg bg-ink-800/60 px-3 py-2 text-[11px] text-ink-500">No class attendance recorded yet.</div>
+              ) : (
+                <ul className="max-h-52 space-y-1.5 overflow-y-auto pr-1">
+                  {entries.map((e) => (
+                    <li key={e.classId + e.joinedAt}
+                        className="flex items-center justify-between gap-2 rounded-lg bg-ink-800/60 px-3 py-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm text-white">{e.title}</div>
+                        <div className="text-[10px] text-ink-500">
+                          {absTime(e.startAt)} · joined {shortAgo(e.joinedAt)}
+                        </div>
+                      </div>
+                      <Link to={`/class/${encodeURIComponent(e.classId)}`}
+                            onClick={onClose}
+                            className="shrink-0 rounded-lg border border-brand-500/40 bg-brand-500/10 px-2.5 py-1 text-[11px] font-semibold text-brand-100 hover:bg-brand-500/20">
+                        Open class
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div>
+              <div className="mb-1 text-[10px] uppercase tracking-wide text-ink-500">
+                📬 Emails sent to this student {mail.length > 0 && <span className="ml-1 normal-case font-normal">({mail.length})</span>}
+              </div>
+              {mail.length === 0 ? (
+                <div className="rounded-lg bg-ink-800/60 px-3 py-2 text-[11px] text-ink-500">
+                  No emails yet. {!student.userId && <span className="text-ink-500">(Guests have no email on file.)</span>}
                 </div>
-                <Link to={`/class/${encodeURIComponent(e.classId)}`}
-                      onClick={onClose}
-                      className="shrink-0 rounded-lg border border-brand-500/40 bg-brand-500/10 px-2.5 py-1 text-[11px] font-semibold text-brand-100 hover:bg-brand-500/20">
-                  Open class
-                </Link>
-              </li>
-            ))}
-          </ul>
+              ) : (
+                <ul className="max-h-40 space-y-1 overflow-y-auto pr-1">
+                  {mail.map((m, i) => (
+                    <li key={m.at + i}
+                        className="flex items-center justify-between gap-2 rounded-lg bg-ink-800/60 px-3 py-1.5 text-xs">
+                      <div className="min-w-0">
+                        <div className="truncate text-ink-200">{m.subject}</div>
+                        <div className="text-[10px] text-ink-500">
+                          {shortAgo(m.at)} ·{" "}
+                          <span className={m.kind === "adhoc" ? "text-brand-300" : "text-ink-400"}>
+                            {m.kind === "adhoc" ? "message" : m.kind.replace("reminder:", "reminder ")}
+                          </span>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </div>
