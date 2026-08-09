@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
+import Board from "../components/Board";
 import { api } from "../lib/api";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
@@ -638,23 +639,28 @@ export default function AcademyDashboardPage() {
       {canManage && snaps && snaps.length > 0 && (
         <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
           <h2 className="mb-3 font-display text-lg text-white">📸 Recent snaps <span className="text-xs text-ink-500">({snaps.length})</span></h2>
-          <div className="grid gap-2 md:grid-cols-2">
-            {snaps.slice(0, 20).map((s) => (
-              <div key={s._id} className="flex flex-wrap items-baseline gap-2 rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2 text-sm">
-                <div className="flex-1 min-w-0">
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+            {snaps.slice(0, 12).map((s) => (
+              <Link key={s._id} to={`/board-editor?fen=${encodeURIComponent(s.fen)}`}
+                className="group flex gap-3 rounded-lg border border-ink-700 bg-ink-800/40 p-3 hover:border-brand-500/50 hover:bg-ink-800/60 transition-colors">
+                {/* Mini chessground — Board handles all the rendering; className=mini shrinks it. */}
+                <div className="w-24 h-24 shrink-0">
+                  <Board fen={s.fen} viewOnly coordinates={false} className="mini" />
+                </div>
+                <div className="flex-1 min-w-0 flex flex-col text-sm">
                   <div className="text-white truncate">
-                    <b>{s.byName}</b> in {s.classTitle}
+                    <b>{s.byName}</b>
                   </div>
-                  {s.note && <div className="text-[12px] text-ink-300 truncate">"{s.note}"</div>}
-                  <div className="text-[11px] text-ink-500">
+                  <div className="text-[11px] text-ink-400 truncate">{s.classTitle}</div>
+                  {s.note && (
+                    <div className="mt-1 text-[12px] text-ink-300 line-clamp-2">"{s.note}"</div>
+                  )}
+                  <div className="mt-auto text-[10px] text-ink-500">
                     {new Date(s.at).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                    <span className="ml-2 text-brand-300 opacity-0 group-hover:opacity-100 transition-opacity">🔬 Open →</span>
                   </div>
                 </div>
-                <Link to={`/board-editor?fen=${encodeURIComponent(s.fen)}`}
-                  className="rounded-lg bg-brand-600 hover:bg-brand-500 text-white px-3 py-1 text-xs font-semibold whitespace-nowrap">
-                  🔬 Open
-                </Link>
-              </div>
+              </Link>
             ))}
           </div>
         </section>
