@@ -12,6 +12,19 @@ import Board from "../components/Board";
 
 type WsMove = { from: string; to: string; promotion?: string };
 type TimelineEvent = { tMs: number; move: WsMove };
+type Snap = { _id: string; classId: string; fen: string; note?: string; byName?: string; at: string };
+
+// Filenames are ISO timestamps with colons/dots replaced by "-", suffixed .webm
+// (see class-recording.controller.ts). Restore them so new Date() parses:
+//   "2026-08-09T14-32-15-234Z.webm" → "2026-08-09T14:32:15.234Z"
+function parseFilenameUploadTime(filename: string): number | null {
+  const stem = filename.replace(/\.webm$/, "");
+  const m = stem.match(/^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/);
+  if (!m) return null;
+  const iso = `${m[1]}T${m[2]}:${m[3]}:${m[4]}.${m[5]}Z`;
+  const t = new Date(iso).getTime();
+  return Number.isFinite(t) ? t : null;
+}
 
 // Wire path helpers — mirror the ones in Class.tsx so this file can be lifted
 // out of the main class module cleanly.
@@ -57,6 +70,8 @@ export default function ClassReplayPage() {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [loadingTimeline, setLoadingTimeline] = useState(true);
   const [tMs, setTMs] = useState(0);
+  const [snaps, setSnaps] = useState<Snap[]>([]);
+  const [durationMs, setDurationMs] = useState(0);
 
   // Fetch the sidecar timeline. Missing sidecar (recording from before Phase 4) is
   // fine — the video still plays, board just stays at starting position.
@@ -71,6 +86,39 @@ export default function ClassReplayPage() {
       .finally(() => { if (!cancelled) setLoadingTimeline(false); });
     return () => { cancelled = true; };
   }, [id, filename]);
+
+  // Fetch snaps for this class — dot markers on the video timeline for every
+  // moment the coach hit Snap during class. Endpoint returns any snap ever
+  // taken in the room; we filter to the ones that fall inside this recording's
+  // window using the parsed upload-time in the filename minus video.duration.
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    fetch(classApiPath(id, `/snaps`), { credentials: "include" })
+      .then((r) => r.json())
+      .then((j) => { if (!cancelled) setSnaps(Array.isArray(j?.snaps) ? j.snaps : []); })
+      .catch(() => { if (!cancelled) setSnaps([]); });
+    return () => { cancelled = true; };
+  }, [id]);
+
+  // Snap → tMs within this recording. Precomputed once we know both the file
+  // upload time (parsed from filename) and the loaded video duration. Snaps
+  // outside the window (before start / after end) are dropped.
+  const snapMarkers = useMemo(() => {
+    if (!filename || durationMs <= 0) return [] as Array<{ id: string; tMs: number; note: string; by: string }>;
+    const uploadEndMs = parseFilenameUploadTime(filename);
+    if (uploadEndMs == null) return [];
+    const recordStartMs = uploadEndMs - durationMs;
+    const out: Array<{ id: string; tMs: number; note: string; by: string }> = [];
+    for (const s of snaps) {
+      const at = new Date(s.at).getTime();
+      if (!Number.isFinite(at)) continue;
+      const t = at - recordStartMs;
+      if (t < 0 || t > durationMs) continue;
+      out.push({ id: s._id, tMs: t, note: s.note || "", by: s.byName || "" });
+    }
+    return out;
+  }, [snaps, filename, durationMs]);
 
   const snapshots = useMemo(() => buildSnapshots(events), [events]);
   const idx = useMemo(() => findIndexAtTime(events, tMs), [events, tMs]);
@@ -125,6 +173,7 @@ export default function ClassReplayPage() {
             <span className="text-xs font-semibold uppercase tracking-wide text-ink-300">🎯 Move timeline</span>
             <span className="text-[10px] text-ink-500">
               {loadingTimeline ? "loading…" : `${events.length} move${events.length === 1 ? "" : "s"}`}
+              {snapMarkers.length > 0 && <span className="ml-2 text-amber-300">📸 {snapMarkers.length} snap{snapMarkers.length === 1 ? "" : "s"}</span>}
             </span>
           </div>
           {!loadingTimeline && events.length === 0 ? (
@@ -150,14 +199,38 @@ export default function ClassReplayPage() {
       </section>
 
       {/* Video column: standard <video controls>. Native seek bar drives the board
-          via the rAF loop above. Controls include full-screen for classroom playback. */}
-      <section className="min-w-0 lg:min-h-0">
-        <div className="h-full overflow-hidden rounded-xl2 border border-ink-700 bg-black">
+          via the rAF loop above. Controls include full-screen for classroom playback.
+          Snap marker strip under the video (only when we have any) — amber dots
+          positioned by percentage across the recording; click to jump to that moment
+          in both video and board. */}
+      <section className="min-w-0 lg:min-h-0 flex flex-col">
+        <div className="flex-1 overflow-hidden rounded-xl2 border border-ink-700 bg-black">
           <video ref={videoRef} controls playsInline preload="metadata"
             onSeeked={onSeek} onTimeUpdate={onSeek}
+            onLoadedMetadata={(e) => {
+              const v = e.currentTarget;
+              if (Number.isFinite(v.duration) && v.duration > 0) setDurationMs(v.duration * 1000);
+            }}
             src={classApiPath(id, `/recording/${encodeURIComponent(filename)}`)}
             className="h-full w-full" />
         </div>
+        {snapMarkers.length > 0 && durationMs > 0 && (
+          <div className="mt-2 rounded-lg border border-ink-700 bg-ink-900 px-3 py-2">
+            <div className="mb-1 flex items-baseline justify-between text-[10px]">
+              <span className="uppercase tracking-wide text-ink-400">📸 Snap markers</span>
+              <span className="text-ink-500">click to jump</span>
+            </div>
+            <div className="relative h-4">
+              <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-ink-700" />
+              {snapMarkers.map((m) => (
+                <button key={m.id} onClick={() => jumpTo(m.tMs)}
+                  title={`${fmtDuration(m.tMs)} — ${m.by}${m.note ? ` · ${m.note}` : ""}`}
+                  className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-amber-300 bg-amber-500 shadow hover:h-4 hover:w-4 hover:bg-amber-400 transition-all"
+                  style={{ left: `${(m.tMs / durationMs) * 100}%` }} />
+              ))}
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );
