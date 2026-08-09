@@ -16,6 +16,7 @@ import { Injectable, OnModuleInit } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { sendMail } from "../lib/mail";
+import { emailOptOutToken } from "../digest/email-optout.controller";
 
 const TICK_MS = 10 * 60_000;
 const WINDOW_HOUR_START = 8;
@@ -97,6 +98,7 @@ export class CoachStarredDigestService implements OnModuleInit {
       `${i + 1}. ${snapLink(s)}${s.note ? ` — ${String(s.note)}` : ""}`
     ).join("\n");
     const subject = `Your starred positions this week (${snaps.length})`;
+    const unsubUrl = `${PUBLIC_ORIGIN}/v2api/api/me/email/unsubscribe?u=${encodeURIComponent(userId)}&c=coachStarred&t=${emailOptOutToken(userId, "coachStarred")}`;
     const html = `
       <div style="font-family:system-ui,sans-serif;max-width:520px">
         <h2 style="color:#111;margin-bottom:4px">★ Your review shortlist</h2>
@@ -104,7 +106,8 @@ export class CoachStarredDigestService implements OnModuleInit {
         <ol style="line-height:1.6;padding-left:20px;color:#333">${rows}</ol>
         <p style="color:#666;font-size:13px">Every link opens the board editor with your arrows preserved. Pick a few for next week's lessons.</p>
         <p style="color:#9ca3af;font-size:11px;margin-top:24px">
-          Manage on <a href="${PUBLIC_ORIGIN}/academy" style="color:#9ca3af">Academy dashboard</a>.
+          Manage on <a href="${PUBLIC_ORIGIN}/academy" style="color:#9ca3af">Academy dashboard</a> ·
+          <a href="${unsubUrl}" style="color:#9ca3af;text-decoration:underline">Stop these emails</a>
         </p>
       </div>`;
     const text = [
@@ -112,6 +115,7 @@ export class CoachStarredDigestService implements OnModuleInit {
       `Hi ${username} — you starred ${snaps.length} position(s) in the last 7 days:`, "",
       rowsText, "",
       `Manage on ${PUBLIC_ORIGIN}/academy`,
+      `Stop these emails: ${unsubUrl}`,
     ].join("\n");
     const r = await sendMail({ to: email, subject, html, text });
     if (r.ok) {
