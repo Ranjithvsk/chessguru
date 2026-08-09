@@ -630,6 +630,13 @@ export class AcademyService {
         { _id: classId as any }, { $set: { summarySentAt: new Date() } }
       );
     }
+    if (!dryRun && body?._autoSummarySystem) {
+      // Stamp autoSummarySentAt regardless of `sent` so the worker doesn't
+      // retry the same zero-recipient class every 5 min forever.
+      await this.conn.db!.collection("classSchedules").updateOne(
+        { _id: classId as any }, { $set: { autoSummarySentAt: new Date() } }
+      );
+    }
     return {
       ok: true, dryRun, sent, failed, attendees: attendees.length,
       // Extras used by the coach's preview modal.
@@ -696,5 +703,26 @@ export class AcademyService {
       byUserId: String(r.byUserId), byName: r.byName || r.byUserId,
       at: r.at,
     }));
+  }
+
+  /** System entry-point for the auto-summary cron. Synthesises a session
+   *  from the class doc (as if the coach who scheduled it triggered the
+   *  send), then delegates to the existing sendClassSummary flow. Returns
+   *  { skipped: reason } when the class doesn't qualify (guardrails so
+   *  the caller can log without needing to duplicate the check). */
+  async runAutoSummaryFor(classId: string) {
+    const sched: any = await this.conn.db!.collection("classSchedules").findOne({ _id: classId as any });
+    if (!sched) return { skipped: "not-found" };
+    if (!sched.autoSummary) return { skipped: "not-opted-in" };
+    if (sched.summarySentAt) return { skipped: "already-sent-manual" };
+    if (sched.autoSummarySentAt) return { skipped: "already-sent-auto" };
+    if (!sched.createdByUserId) return { skipped: "no-coach" };
+    const session = {
+      userId: sched.createdByUserId,
+      username: sched.coach || "",
+      academyId: sched.academyId || null,
+      role: "academy_owner" as const,   // owner passes every ensure check
+    };
+    return this.sendClassSummary(session, classId, { note: "", _autoSummarySystem: true });
   }
 }
