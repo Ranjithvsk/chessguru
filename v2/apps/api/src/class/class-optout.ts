@@ -99,6 +99,23 @@ export class ClassOptOutController {
     ));
   }
 
+  // GET /api/class/:id/optouts — coach-only list of opted-out emails for a
+  // class. Used by the edit overlay to warn coach that certain invitees have
+  // silenced reminders (so the coach knows "why isn't Alice getting my
+  // emails?"). Gated to the schedule's creator; returns 403 otherwise.
+  @Get(":id/optouts")
+  async listOptouts(@Param("id") id: string, @Req() req: any) {
+    if (!ROOM_RE.test(id)) throw new HttpException("bad room", HttpStatus.BAD_REQUEST);
+    const me: string | null = req?.session?.userId ?? null;
+    if (!me) throw new HttpException("sign in required", HttpStatus.UNAUTHORIZED);
+    const sched: any = await this.conn.db!.collection("classSchedules").findOne({ _id: id as any });
+    if (!sched) throw new HttpException("not found", HttpStatus.NOT_FOUND);
+    if (sched.createdByUserId !== me) throw new HttpException("only the creator can see opt-outs", HttpStatus.FORBIDDEN);
+    const rows: any[] = await this.conn.db!.collection("classOptOuts")
+      .find({ classId: id }, { sort: { optedOutAt: -1 } as any }).limit(500).toArray();
+    return { emails: rows.map((r) => ({ email: r.email, optedOutAt: r.optedOutAt })) };
+  }
+
   // POST /api/class/:id/resubscribe — same token, undo. Exposed as GET too so
   // it can be linked from the confirmation page above (browser navigation is
   // GET, mailto clients likewise). Symmetric with unsubscribe.

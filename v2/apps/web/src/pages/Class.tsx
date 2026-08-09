@@ -669,6 +669,19 @@ function EditOverlay({ c, onClose, onSave }:
     Array.isArray(c.reminderStages) ? c.reminderStages : ["h24", "m15"],
   );
   const [propagate, setPropagate] = useState(!!c.seriesId);
+  // Coach-only: who's silenced reminders for this class? Fetched once on
+  // overlay open; a 403 means we're not the creator (shouldn't happen since
+  // Edit is only offered to owners, but handle gracefully anyway).
+  const [optOuts, setOptOuts] = useState<Array<{ email: string; optedOutAt: string }>>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/${encodeURIComponent(c._id)}/optouts`,
+          { credentials: "include" })
+      .then((r) => r.ok ? r.json() : { emails: [] })
+      .then((j) => { if (!cancelled) setOptOuts(j.emails ?? []); })
+      .catch(() => { /* silent — panel just stays empty */ });
+    return () => { cancelled = true; };
+  }, [c._id]);
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     onSave({ title, coach, notes, durationMin: Number(durationMin) || 60, invitees, reminderStages }, propagate && !!c.seriesId);
@@ -713,6 +726,21 @@ function EditOverlay({ c, onClose, onSave }:
           <textarea value={invitees} onChange={(e) => setInvitees(e.target.value)} rows={3}
             placeholder="alice@example.com"
             className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
+          {optOuts.length > 0 && (
+            <div className="mt-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-rose-200">
+                🔕 {optOuts.length} opted out <span className="ml-1 font-normal normal-case text-rose-300/80">— they won't get reminders even if listed above</span>
+              </div>
+              <ul className="mt-1 flex flex-wrap gap-1">
+                {optOuts.map((o) => (
+                  <li key={o.email} title={`opted out ${new Date(o.optedOutAt).toLocaleString()}`}
+                    className="rounded bg-rose-500/15 px-2 py-0.5 text-[11px] text-rose-100 line-through">
+                    {o.email}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </label>
         <div>
           <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">
