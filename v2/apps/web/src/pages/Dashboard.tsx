@@ -5,6 +5,34 @@ import { get } from "../lib/api";
 import { prettify } from "../lib/format";
 import * as push from "../lib/push";
 
+// Phase 8a: Puzzle of the Day card. Sits at the very top of the dashboard so
+// it's the first thing you see when you log in — the daily anchor for a habit.
+type DailyPreview = { date: string; puzzle: { rating: number; themes: string[] }; solvedByMe: boolean };
+function DailyCard() {
+  const { data } = useQuery({ queryKey: ["daily-preview"], queryFn: () => get<DailyPreview>("/api/puzzles/daily") });
+  if (!data) return null;
+  const done = data.solvedByMe;
+  return (
+    <Link to="/daily" className={`block rounded-2xl border p-4 transition hover:brightness-110 ${done ? "border-emerald-500/30 bg-emerald-500/5" : "border-brand-500/40 bg-gradient-to-r from-brand-600/20 via-purple-500/10 to-amber-500/5"}`}>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-brand-300">Puzzle of the day</div>
+          <div className="mt-1 font-display text-lg text-white">
+            {done ? "✓ Solved today" : "Take on today's puzzle"}
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-ink-400">
+            <span className="rounded bg-ink-800/70 px-1.5 py-0.5">Rating {data.puzzle.rating}</span>
+            {data.puzzle.themes.slice(0, 2).map((t) => (
+              <span key={t} className="rounded bg-ink-800/70 px-1.5 py-0.5">{t}</span>
+            ))}
+          </div>
+        </div>
+        <div className="shrink-0 text-3xl">{done ? "🌟" : "🎯"}</div>
+      </div>
+    </Link>
+  );
+}
+
 // Phase 7i: signed-in user's notification prefs — currently just the weekly
 // digest opt-in. Kept separate from the /puzzles/dashboard payload because
 // prefs mutate more often than dashboard stats and admins viewing another
@@ -685,6 +713,7 @@ export default function DashboardPage() {
       )}
       <h1 className="font-display text-2xl text-white">{viewedAs ? `${viewedAs}'s performance` : "📊 My performance"}</h1>
 
+      {!viewedAs && <DailyCard />}
       {data.lastSession && <LastSessionStrip s={data.lastSession} />}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-5">

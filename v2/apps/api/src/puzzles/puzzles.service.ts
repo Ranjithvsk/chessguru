@@ -168,6 +168,43 @@ export class PuzzlesService {
     return d ? applyLastMove(fmtPuzzle(d)) : null;
   }
 
+  /** Phase 8a: Puzzle of the Day. First caller each day rolls the dice; the
+   *  chosen puzzle is stashed in `dailyPuzzles` keyed by ISO date so every
+   *  subsequent caller gets the same one. Rating band 1400–1700 —
+   *  approachable enough that most users can attempt, meaty enough that it
+   *  actually tests something. Popular puzzles only (vote + plays), so a
+   *  buggy or ambiguous one doesn't get everyone's shared attempt. */
+  async daily(userId: string | null) {
+    const today = new Date().toISOString().slice(0, 10);
+    let doc: any = await this.conn.db!.collection("dailyPuzzles").findOne({ _id: today as any });
+    if (!doc) {
+      const picked = await this.col().aggregate([
+        { $match: { "glicko.r": { $gte: 1400, $lte: 1700 }, vote: { $gte: 0.75 }, plays: { $gte: 100 }, source: { $ne: "broadcast" } } },
+        { $sample: { size: 1 } },
+      ]).toArray();
+      if (picked.length) {
+        try {
+          await this.conn.db!.collection("dailyPuzzles").insertOne({ _id: today as any, puzzleId: picked[0]!._id, chosenAt: new Date() });
+        } catch { /* concurrent caller won the race — re-read below picks up their pick */ }
+      }
+      doc = await this.conn.db!.collection("dailyPuzzles").findOne({ _id: today as any });
+      if (!doc) return null;   // rating band had no candidates today — very unlikely
+    }
+    const puzzle = await this.col().findOne({ _id: doc.puzzleId });
+    if (!puzzle) return null;
+    let solvedByMe = false, myRound: any = null;
+    if (userId) {
+      myRound = await this.conn.db!.collection("rounds").findOne({ _id: `${userId}:${doc.puzzleId}` as any });
+      solvedByMe = !!myRound?.w;
+    }
+    return {
+      date: today,
+      puzzle: applyLastMove(fmtPuzzle(puzzle)),
+      solvedByMe,
+      myRound: myRound ? { win: !!myRound.w, ms: myRound.ms ?? null, ratingDiff: myRound.rd ?? null } : null,
+    };
+  }
+
   // Tags that describe the puzzle, not a skill — they don't get their own rating.
   static readonly UNRATED = new Set(["oneMove", "short", "long", "veryLong", "equality", "advantage", "crushing", "mate", "master", "masterVsMaster", "superGM"]);
 

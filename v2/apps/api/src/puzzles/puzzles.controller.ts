@@ -40,6 +40,12 @@ export class PuzzlesController {
     return this.svc.masterPlayers();
   }
 
+  @Get("daily")
+  async daily(@Req() req: any) {
+    const userId: string | null = req?.session?.userId ?? null;
+    return this.svc.daily(userId);
+  }
+
   @Post(":id/complete")
   async complete(@Param("id") id: string, @Body() body: any, @Req() req: any) {
     // Trust the session for identity, not the request body (secure + survives a
