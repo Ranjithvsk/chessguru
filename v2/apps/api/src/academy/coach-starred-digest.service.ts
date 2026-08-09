@@ -150,6 +150,16 @@ export class CoachStarredDigestService implements OnModuleInit {
       starred: true,
       at: { $gte: since },
     }).sort({ at: -1 }).limit(60).toArray();
+    // "N reviewed since your last digest" progress marker. Anchored on the
+    // last-sent timestamp (or 30d ago on first-ever send). Cheap count-only
+    // query; no docs fetched.
+    const reviewSince = user.coachStarredDigestSentAt
+      ? new Date(user.coachStarredDigestSentAt)
+      : new Date(Date.now() - 30 * 86_400_000);
+    const reviewedCount = await this.conn.db!.collection("classSnaps").countDocuments({
+      byUserId: userId,
+      reviewedAt: { $gte: reviewSince },
+    });
     if (snaps.length === 0) {
       // Nothing to say -- mark sent so we don't re-check every 10 min all
       // Sunday morning. Doesn't burn the weekly cadence for real content
@@ -186,6 +196,7 @@ export class CoachStarredDigestService implements OnModuleInit {
       <div style="font-family:system-ui,sans-serif;max-width:520px">
         <h2 style="color:#111;margin-bottom:4px">★ Your review shortlist</h2>
         <p style="color:#666;margin-top:0">Hi ${esc(username)} — you starred ${snaps.length} position${snaps.length === 1 ? "" : "s"} in ${windowLabel}.</p>
+        ${reviewedCount > 0 ? `<p style="margin:8px 0;color:#059669;font-size:13px">✓ You reviewed ${reviewedCount} snap${reviewedCount === 1 ? "" : "s"} since the last digest — nice work.</p>` : ""}
         <ol style="line-height:1.6;padding-left:20px;color:#333">${rows}</ol>
         <p style="color:#666;font-size:13px">Every link opens the board editor with your arrows preserved. Pick a few for next week's lessons.</p>
         <p style="color:#9ca3af;font-size:11px;margin-top:24px">
@@ -195,7 +206,8 @@ export class CoachStarredDigestService implements OnModuleInit {
       </div>`;
     const text = [
       `★ Your review shortlist`, "",
-      `Hi ${username} — you starred ${snaps.length} position(s) in ${windowLabel}:`, "",
+      `Hi ${username} — you starred ${snaps.length} position(s) in ${windowLabel}:`,
+      reviewedCount > 0 ? `✓ You reviewed ${reviewedCount} snap(s) since the last digest — nice work.\n` : "",
       rowsText, "",
       `Manage on ${PUBLIC_ORIGIN}/academy`,
       `Stop these emails: ${unsubUrl}`,
