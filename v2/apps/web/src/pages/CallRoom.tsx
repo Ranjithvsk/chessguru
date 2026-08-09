@@ -1218,6 +1218,26 @@ function BoardMainArea({
           >
             ↺ Reset board
           </button>
+          <button
+            onClick={async () => {
+              // Snap-position: coach flags a moment. Prompts for a note, POSTs FEN.
+              // Zero UI dependency on the video call — pure board-context capture.
+              const note = window.prompt("Note for this position? (optional)") ?? "";
+              try {
+                const r = await fetch(`/v2api/api/class/${encodeURIComponent(room)}/snap`, {
+                  method: "POST", credentials: "include",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ fen, note }),
+                });
+                if (r.ok) console.log("[snap] saved");
+                else console.warn("[snap] failed", r.status);
+              } catch (e) { console.warn("[snap] error", e); }
+            }}
+            className="rounded-xl2 px-3 py-1.5 text-xs bg-amber-600 hover:bg-amber-500 text-white"
+            title="Snap this position + note — reviewable later from /academy"
+          >
+            📸 Snap
+          </button>
           <span className={`text-[10px] ${connected ? "text-emerald-400" : "text-ink-500"}`}>
             {connected ? "board synced" : "board offline"}
           </span>
