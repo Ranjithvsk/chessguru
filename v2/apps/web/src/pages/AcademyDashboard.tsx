@@ -969,6 +969,10 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos }: {
       qc.invalidateQueries({ queryKey: ["academy-snaps"] });
     } catch (e) { window.alert(String((e as Error).message || e)); }
   }
+  // Duration of the modal-loaded audio (populated via loadedmetadata).
+  // Resets when a different snap becomes active so ← / → nav re-probes.
+  const [audioDur, setAudioDur] = useState<number>(0);
+  useEffect(() => { setAudioDur(0); }, [s._id, isOpen]);
   // Card click opens an inline detail modal (bigger board + audio + full note)
   // instead of navigating away. The modal itself is a portal-less <div> that
   // renders when isOpen is true. Modal state lives in the parent so ← / →
@@ -1090,9 +1094,18 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos }: {
                 <div className="text-[11px] text-ink-500">{describeFen(s.fen)}</div>
                 {s.note && <div className="rounded border border-ink-700 bg-ink-800/40 p-2 text-ink-200 whitespace-pre-wrap">"{s.note}"</div>}
                 {s.hasAudio && (
-                  <audio controls preload="none"
-                    src={`${BASE}/api/class/${encodeURIComponent(s.classId)}/snap/${encodeURIComponent(s._id)}/audio`}
-                    className="w-full" />
+                  <div>
+                    <audio controls preload="metadata"
+                      onLoadedMetadata={(e) => {
+                        const d = e.currentTarget.duration;
+                        if (Number.isFinite(d) && d > 0) setAudioDur(d);
+                      }}
+                      src={`${BASE}/api/class/${encodeURIComponent(s.classId)}/snap/${encodeURIComponent(s._id)}/audio`}
+                      className="w-full" />
+                    {audioDur > 0 && (
+                      <div className="mt-0.5 text-[10px] text-ink-500 tabular-nums">🎙 {audioDur.toFixed(1)}s clip</div>
+                    )}
+                  </div>
                 )}
                 {shapes.length > 0 && <div className="text-[11px] text-amber-300">✏️ {shapes.length} arrow{shapes.length === 1 ? "" : "s"} preserved</div>}
                 {/* Preload neighbour audio while the modal is open so ← / → to
