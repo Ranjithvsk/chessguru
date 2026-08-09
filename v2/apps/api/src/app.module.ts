@@ -29,12 +29,14 @@ import { WeeklyDigestService } from "./digest/weekly-digest.service";
 import { DigestOptOutController } from "./digest/digest-optout.controller";
 import { EmailOptOutController } from "./digest/email-optout.controller";
 import { StreakReminderService } from "./digest/streak-reminder.service";
+import { PushService } from "./push/push.service";
+import { PushController } from "./push/push.controller";
 
 const MONGO_URI = process.env.MONGO_URI ?? "mongodb://localhost:27017/chessguru";
 
 @Module({
   imports: [MongooseModule.forRoot(MONGO_URI), IntegrationsModule, LivekitModule, AcademyModule],
-  controllers: [HealthController, MiscController, BroadcastsController, PuzzlesController, AuthController, AdminController, EngineController, ExplorerController, StudyController, ClassRecordingController, ClassScheduleController, ClassAttendanceController, ClassOptOutController, MailWebhookController, IceConfigController, DigestOptOutController, EmailOptOutController],
-  providers: [PuzzlesService, AuthService, AdminService, EngineService, ExplorerService, StudyService, ClassReminderService, WeeklyDigestService, StreakReminderService],
+  controllers: [HealthController, MiscController, BroadcastsController, PuzzlesController, AuthController, AdminController, EngineController, ExplorerController, StudyController, ClassRecordingController, ClassScheduleController, ClassAttendanceController, ClassOptOutController, MailWebhookController, IceConfigController, DigestOptOutController, EmailOptOutController, PushController],
+  providers: [PuzzlesService, AuthService, AdminService, EngineService, ExplorerService, StudyService, ClassReminderService, WeeklyDigestService, StreakReminderService, PushService],
 })
 export class AppModule {}

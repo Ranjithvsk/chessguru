@@ -1,4 +1,10 @@
 import "reflect-metadata";
+// Load .env FIRST — before any AppModule import kicks off env-reading providers
+// (WeeklyDigestService reads PUBLIC_ORIGIN at import time, PushService reads
+// VAPID_* at construction). Falls through silently in dev where the file
+// doesn't exist; pm2 env still wins for anything set both places.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+try { require("dotenv").config(); } catch { /* dotenv optional in dev */ }
 import { NestFactory } from "@nestjs/core";
 import { RequestMethod } from "@nestjs/common";
 import session from "express-session";

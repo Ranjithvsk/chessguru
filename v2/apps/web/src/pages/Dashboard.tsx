@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { get } from "../lib/api";
 import { prettify } from "../lib/format";
+import * as push from "../lib/push";
 
 // Phase 7i: signed-in user's notification prefs — currently just the weekly
 // digest opt-in. Kept separate from the /puzzles/dashboard payload because
@@ -46,6 +48,68 @@ function PrefRow({
   );
 }
 
+// Phase 7m: browser push notifications. Separate row from the email toggles
+// because it's per-BROWSER (subscribing on your phone doesn't subscribe your
+// laptop) and has an OS-permission gate that email doesn't.
+function PushRow() {
+  const [st, setSt] = useState<push.PushStatus>({ supported: false, permission: "unsupported", subscribed: false });
+  const [busy, setBusy] = useState(false);
+  const [testMsg, setTestMsg] = useState<string | null>(null);
+  useEffect(() => { push.status().then(setSt).catch(() => {}); }, []);
+  if (!st.supported) {
+    return (
+      <div className="flex items-center gap-4 py-2 opacity-60">
+        <div className="h-6 w-11 shrink-0 rounded-full bg-ink-700" />
+        <div className="flex-1 text-sm">
+          <div className="text-white">Browser push notifications</div>
+          <div className="text-xs text-ink-400">Not supported in this browser.</div>
+        </div>
+      </div>
+    );
+  }
+  const toggle = async () => {
+    setBusy(true); setTestMsg(null);
+    try {
+      const next = st.subscribed ? await push.disable() : await push.enable();
+      setSt(next);
+    } catch (e: any) { setTestMsg(`✗ ${e?.message ?? e}`); }
+    finally { setBusy(false); }
+  };
+  const test = async () => {
+    setBusy(true); setTestMsg(null);
+    try { const r = await push.sendTest(); setTestMsg(`✓ sent to ${r.sent} device${r.sent === 1 ? "" : "s"}${r.pruned ? ` · ${r.pruned} pruned` : ""}${r.failed ? ` · ${r.failed} failed` : ""}`); }
+    catch (e: any) { setTestMsg(`✗ ${e?.message ?? e}`); }
+    finally { setBusy(false); }
+  };
+  const blocked = st.permission === "denied";
+  return (
+    <div className="flex items-center gap-4 py-2">
+      <button
+        type="button" role="switch" aria-checked={st.subscribed}
+        onClick={toggle} disabled={busy || blocked}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition ${st.subscribed ? "bg-brand-500" : "bg-ink-700"} ${busy || blocked ? "opacity-50" : ""}`}
+      >
+        <span className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform ${st.subscribed ? "translate-x-5" : ""}`} />
+      </button>
+      <div className="flex-1 text-sm">
+        <div className="text-white">Browser push notifications</div>
+        <div className="text-xs text-ink-400">
+          {blocked ? "Blocked in your browser settings — allow notifications for this site to re-enable."
+           : st.subscribed ? "On for this browser. Streak reminders will appear here."
+           : "Off. Turn on to get streak reminders even when the tab is closed."}
+          {testMsg && <span className={`ml-2 ${testMsg.startsWith("✓") ? "text-emerald-400" : "text-rose-400"}`}>{testMsg}</span>}
+        </div>
+      </div>
+      {st.subscribed && (
+        <button type="button" onClick={test} disabled={busy}
+          className="shrink-0 rounded-md border border-ink-700 px-2.5 py-1 text-xs text-ink-300 hover:bg-ink-800 hover:text-white disabled:opacity-50">
+          Send test
+        </button>
+      )}
+    </div>
+  );
+}
+
 function PrefsCard() {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ["me-prefs"], queryFn: () => get<Prefs>("/api/me/prefs") });
@@ -71,6 +135,8 @@ function PrefsCard() {
         on={digestOn} disabled={disabled}
         onToggle={() => mut.mutate({ weeklyDigestOptedOut: digestOn })}
       />
+      <div className="h-px bg-ink-800" />
+      <PushRow />
       <div className="h-px bg-ink-800" />
       <PrefRow
         label="Streak-save reminder"

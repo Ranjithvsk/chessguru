@@ -1,5 +1,5 @@
 // ChessGuru PWA service worker. Bump VERSION to invalidate caches on deploy.
-const VERSION = "cg-20260809170624";
+const VERSION = "cg-20260809171504";
 // Derive base from this SW's own URL so it's correct for both "/" and "/v2/" deploys.
 const BASE = self.location.pathname.replace(/sw\.js$/, "");
 const SHELL = [BASE, BASE + "manifest.webmanifest", BASE + "icons/icon-192.png", BASE + "icons/icon-512.png"];
@@ -40,4 +40,38 @@ self.addEventListener("fetch", (e) => {
     );
   }
   // everything else: let the browser handle it normally (no SW caching)
+});
+
+// Phase 7m — Web Push. Backend sends JSON like:
+//   { title, body, url?, tag?, icon?, badge? }
+// tag = collapse key so successive streak reminders replace instead of stacking.
+self.addEventListener("push", (e) => {
+  let payload = { title: "ChessGuru", body: "" };
+  try { payload = e.data ? e.data.json() : payload; } catch { /* accept non-JSON payloads */ }
+  const options = {
+    body: payload.body || "",
+    tag: payload.tag || "cg-general",
+    icon: payload.icon || (BASE + "icons/icon-192.png"),
+    badge: payload.badge || (BASE + "icons/icon-192.png"),
+    data: { url: payload.url || "/" },
+  };
+  e.waitUntil(self.registration.showNotification(payload.title || "ChessGuru", options));
+});
+
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const target = (e.notification.data && e.notification.data.url) || "/";
+  const absolute = new URL(target, self.location.origin + BASE).href;
+  e.waitUntil((async () => {
+    // Prefer focusing an existing window; only open a new one if none match.
+    const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const c of clients) {
+      if (c.url.startsWith(self.location.origin) && "focus" in c) {
+        await c.focus();
+        if ("navigate" in c) { try { await c.navigate(absolute); } catch { /* cross-origin nav */ } }
+        return;
+      }
+    }
+    await self.clients.openWindow(absolute);
+  })());
 });

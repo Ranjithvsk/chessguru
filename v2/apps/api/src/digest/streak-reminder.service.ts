@@ -17,6 +17,7 @@ import { Connection } from "mongoose";
 import { sendMail } from "../lib/mail";
 import { emailOptOutToken } from "./email-optout.controller";
 import { logMail } from "./mail-log";
+import { PushService } from "../push/push.service";
 
 const TICK_MS = 15 * 60_000;            // 15 min — narrower window than digest, still restart-tolerant
 const WINDOW_HOUR_START = 18;           // 18:00–20:00 server-local
@@ -46,7 +47,10 @@ function currentStreak(activeDays: string[]): number {
 
 @Injectable()
 export class StreakReminderService implements OnModuleInit {
-  constructor(@InjectConnection() private readonly conn: Connection) {}
+  constructor(
+    @InjectConnection() private readonly conn: Connection,
+    private readonly push: PushService,
+  ) {}
 
   onModuleInit(): void {
     setTimeout(() => { this.tick().catch(() => {}); }, 20_000);
@@ -107,6 +111,14 @@ export class StreakReminderService implements OnModuleInit {
     if (streak < MIN_STREAK) return;   // not a habit worth protecting yet
 
     await this.send(userId, user.username || userId, String(user.email).toLowerCase(), streak);
+    // Also fire a browser push if the user has subscribed devices. Same
+    // trigger, redundant channel — whichever the user notices first is fine.
+    await this.push.sendToUser(userId, {
+      title: `🔥 Your ${streak}-day streak is at risk`,
+      body: `One quick puzzle keeps it alive.`,
+      url: "/",
+      tag: "cg-streak",
+    }).catch(() => { /* push failures are per-service logged; don't block the mark-as-sent */ });
     await this.conn.db!.collection("users").updateOne({ _id: userId as any }, { $set: { streakReminderSentAt: new Date() } });
   }
 
