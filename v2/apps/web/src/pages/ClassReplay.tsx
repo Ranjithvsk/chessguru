@@ -168,6 +168,32 @@ export default function ClassReplayPage() {
     activeMoveRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [idx]);
 
+  // Keyboard nav: ← / → step through moves, Space toggles play/pause. Bail
+  // if focus is in a text input so typing in a chat/URL field still works.
+  useEffect(() => {
+    const isTextField = (el: EventTarget | null) => {
+      const t = el as HTMLElement | null;
+      if (!t) return false;
+      const tag = t.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || t.isContentEditable;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (isTextField(e.target)) return;
+      if (e.key === "ArrowRight") {
+        if (idx + 1 < events.length) { e.preventDefault(); jumpTo(events[idx + 1]!.tMs); }
+      } else if (e.key === "ArrowLeft") {
+        if (idx > 0) { e.preventDefault(); jumpTo(events[idx - 1]!.tMs); }
+        else if (idx === 0 && events[0]) { e.preventDefault(); jumpTo(events[0].tMs); }
+      } else if (e.key === " " || e.code === "Space") {
+        const v = videoRef.current; if (!v) return;
+        e.preventDefault();
+        if (v.paused) v.play().catch(() => {}); else v.pause();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [idx, events]);
+
   if (!id || !filename) {
     return <div className="py-16 text-center text-ink-400">Missing class or filename.</div>;
   }
@@ -194,6 +220,7 @@ export default function ClassReplayPage() {
             <span className="text-[10px] text-ink-500">
               {loadingTimeline ? "loading…" : `${events.length} move${events.length === 1 ? "" : "s"}`}
               {snapMarkers.length > 0 && <span className="ml-2 text-amber-300">📸 {snapMarkers.length} snap{snapMarkers.length === 1 ? "" : "s"}</span>}
+              <span className="ml-2 hidden sm:inline text-ink-600" title="Keyboard: ← / → step moves, Space play/pause">⌨️ ← → ␣</span>
             </span>
           </div>
           {!loadingTimeline && events.length === 0 ? (
