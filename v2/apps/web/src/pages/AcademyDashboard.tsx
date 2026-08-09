@@ -866,12 +866,13 @@ function TodayStrip({ schedule, snaps, recordings }: {
 // can edit (server enforces via PATCH /api/class/:id/snap/:snapId). Card is
 // a Link by default; edit mode swaps in a textarea + save/cancel so the
 // coach can fix a typo without re-opening the board.
-function SnapCard({ s, isOpen, onOpen, onClose, onNav }: {
+function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours }: {
   s: SnapItem;
   isOpen: boolean;
   onOpen: () => void;
   onClose: () => void;
   onNav: (delta: 1 | -1) => void;
+  neighbours?: { prev?: SnapItem; next?: SnapItem };
 }) {
   const qc = useQueryClient();
   const { data: me } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
@@ -1041,6 +1042,17 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav }: {
                     className="w-full" />
                 )}
                 {shapes.length > 0 && <div className="text-[11px] text-amber-300">✏️ {shapes.length} arrow{shapes.length === 1 ? "" : "s"} preserved</div>}
+                {/* Preload neighbour audio while the modal is open so ← / → to
+                    an audio snap starts playing without a fetch hitch. Hidden
+                    element, no controls, purely a network warmup. */}
+                {neighbours?.prev?.hasAudio && (
+                  <audio preload="auto" style={{ display: "none" }}
+                    src={`${BASE}/api/class/${encodeURIComponent(neighbours.prev.classId)}/snap/${encodeURIComponent(neighbours.prev._id)}/audio`} />
+                )}
+                {neighbours?.next?.hasAudio && (
+                  <audio preload="auto" style={{ display: "none" }}
+                    src={`${BASE}/api/class/${encodeURIComponent(neighbours.next.classId)}/snap/${encodeURIComponent(neighbours.next._id)}/audio`} />
+                )}
                 <div className="mt-auto flex flex-wrap items-center gap-2">
                   <Link to={href} onClick={() => onClose()}
                     className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500">
@@ -1211,6 +1223,7 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
                   if (next < 0 || next >= shown.length) return cur;
                   return next;
                 })}
+                neighbours={{ prev: shown[i - 1], next: shown[i + 1] }}
               />
             ));
           })()}
