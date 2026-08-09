@@ -12,7 +12,7 @@ import Board from "../components/Board";
 
 type WsMove = { from: string; to: string; promotion?: string };
 type TimelineEvent = { tMs: number; move: WsMove };
-type Snap = { _id: string; classId: string; fen: string; note?: string; byName?: string; at: string };
+type Snap = { _id: string; classId: string; fen: string; note?: string; byName?: string; at: string; shapes?: Array<{ orig: string; dest?: string; brush?: string }> };
 
 // Filenames are ISO timestamps with colons/dots replaced by "-", suffixed .webm
 // (see class-recording.controller.ts). Restore them so new Date() parses:
@@ -103,22 +103,33 @@ export default function ClassReplayPage() {
 
   // Snap → tMs within this recording. Precomputed once we know both the file
   // upload time (parsed from filename) and the loaded video duration. Snaps
-  // outside the window (before start / after end) are dropped.
-  const snapMarkers = useMemo(() => {
-    if (!filename || durationMs <= 0) return [] as Array<{ id: string; tMs: number; note: string; by: string }>;
+  // outside the window (before start / after end) are dropped. shapes carried
+  // through so click-marker → overlay-arrows-on-board works below.
+  type Marker = { id: string; tMs: number; note: string; by: string; shapes: Array<{ orig: string; dest?: string; brush?: string }> };
+  const snapMarkers = useMemo<Marker[]>(() => {
+    if (!filename || durationMs <= 0) return [];
     const uploadEndMs = parseFilenameUploadTime(filename);
     if (uploadEndMs == null) return [];
     const recordStartMs = uploadEndMs - durationMs;
-    const out: Array<{ id: string; tMs: number; note: string; by: string }> = [];
+    const out: Marker[] = [];
     for (const s of snaps) {
       const at = new Date(s.at).getTime();
       if (!Number.isFinite(at)) continue;
       const t = at - recordStartMs;
       if (t < 0 || t > durationMs) continue;
-      out.push({ id: s._id, tMs: t, note: s.note || "", by: s.byName || "" });
+      out.push({ id: s._id, tMs: t, note: s.note || "", by: s.byName || "", shapes: Array.isArray(s.shapes) ? s.shapes : [] });
     }
     return out;
   }, [snaps, filename, durationMs]);
+  // While a snap marker is active, overlay that snap's shapes on the board.
+  // Auto-clears when the playhead drifts more than 2s from the snap time so
+  // the arrows don't hang around into unrelated territory after playback.
+  const [activeSnapId, setActiveSnapId] = useState<string | null>(null);
+  const activeSnap = activeSnapId ? snapMarkers.find((m) => m.id === activeSnapId) : undefined;
+  useEffect(() => {
+    if (!activeSnap) return;
+    if (Math.abs(tMs - activeSnap.tMs) > 2000) setActiveSnapId(null);
+  }, [tMs, activeSnap]);
 
   const snapshots = useMemo(() => buildSnapshots(events), [events]);
   const idx = useMemo(() => findIndexAtTime(events, tMs), [events, tMs]);
@@ -167,7 +178,8 @@ export default function ClassReplayPage() {
             ← Back to class
           </Link>
         </div>
-        <Board fen={view.fen} orientation="white" viewOnly lastMove={lastMoveArrow} />
+        <Board fen={view.fen} orientation="white" viewOnly lastMove={lastMoveArrow}
+          shapes={activeSnap && activeSnap.shapes.length > 0 ? (activeSnap.shapes as any) : undefined} />
         <div className="mt-3 rounded-xl2 border border-ink-700 bg-ink-900 p-3">
           <div className="mb-1 flex items-baseline justify-between">
             <span className="text-xs font-semibold uppercase tracking-wide text-ink-300">🎯 Move timeline</span>
@@ -223,9 +235,12 @@ export default function ClassReplayPage() {
             <div className="relative h-4">
               <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-ink-700" />
               {snapMarkers.map((m) => (
-                <button key={m.id} onClick={() => jumpTo(m.tMs)}
-                  title={`${fmtDuration(m.tMs)} — ${m.by}${m.note ? ` · ${m.note}` : ""}`}
-                  className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-amber-300 bg-amber-500 shadow hover:h-4 hover:w-4 hover:bg-amber-400 transition-all"
+                <button key={m.id} onClick={() => { jumpTo(m.tMs); setActiveSnapId(m.id); }}
+                  title={`${fmtDuration(m.tMs)} — ${m.by}${m.note ? ` · ${m.note}` : ""}${m.shapes.length > 0 ? ` · ✏️${m.shapes.length}` : ""}`}
+                  className={`absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border shadow transition-all hover:h-4 hover:w-4
+                    ${activeSnapId === m.id
+                      ? "border-white bg-amber-300 ring-2 ring-amber-200/70"
+                      : "border-amber-300 bg-amber-500 hover:bg-amber-400"}`}
                   style={{ left: `${(m.tMs / durationMs) * 100}%` }} />
               ))}
             </div>
