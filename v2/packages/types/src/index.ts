@@ -49,6 +49,9 @@ export interface CompleteResult {
    *  either rating OR solve-count. If both fire on the same solve, the client
    *  gets the rating one — the count one still gets recorded + push-notified. */
   milestone?: { type: "rating" | "count"; milestone: number; firstTime: boolean } | null;
+  /** Phase 8c: daily-puzzle attendance streak, set only when body.daily=true
+   *  and the puzzleId matched today's daily on the server. */
+  dailyStreak?: { current: number; longest: number } | null;
 }
 
 export interface AuthMe {

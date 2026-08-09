@@ -192,10 +192,17 @@ export class PuzzlesService {
     }
     const puzzle = await this.col().findOne({ _id: doc.puzzleId });
     if (!puzzle) return null;
-    let solvedByMe = false, myRound: any = null;
+    let solvedByMe = false, myRound: any = null, streak: any = null;
     if (userId) {
       myRound = await this.conn.db!.collection("rounds").findOne({ _id: `${userId}:${doc.puzzleId}` as any });
       solvedByMe = !!myRound?.w;
+      const u: any = await this.conn.db!.collection("users").findOne({ _id: userId as any }, { projection: { dailyPuzzleStreak: 1 } as any });
+      const st = u?.dailyPuzzleStreak;
+      // "Alive" = last-attended is today or yesterday. Older means the streak
+      // has died; we still report longest for the personal-best line.
+      const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+      const alive = st?.lastDate === today || st?.lastDate === yesterday;
+      streak = st ? { current: alive ? (st.current || 0) : 0, longest: st.longest || 0, lastDate: st.lastDate || null } : { current: 0, longest: 0, lastDate: null };
     }
     // Phase 8b: today-so-far stats. Scan today's rounds (few hundred rows
     // typically) and filter to this puzzleId suffix — the rounds _id is
@@ -220,6 +227,7 @@ export class PuzzlesService {
       solvedByMe,
       myRound: myRound ? { win: !!myRound.w, ms: myRound.ms ?? null, ratingDiff: myRound.rd ?? null } : null,
       stats: { attempted, solved, medianMs },
+      streak,
     };
   }
 
@@ -449,7 +457,31 @@ export class PuzzlesService {
     };
   }
 
-  async complete(id: string, body: { win: boolean; userId?: string | null; hint?: boolean; mode?: string; rating?: number; deviation?: number; theme?: string; ms?: number; wrong?: string }) {
+  /** Phase 8c: bump the user's daily-puzzle attendance streak if this solve
+   *  really was TODAY's daily puzzle. Server-verified against dailyPuzzles so
+   *  a client-side `daily: true` hint can't pad someone's streak with random
+   *  puzzles. Streak rules: today = no-op (idempotent), yesterday = +1, gap
+   *  = reset to 1. Attempting counts — win or loss — because the value of
+   *  the daily is showing up, not being right. */
+  private async bumpDailyStreak(userId: string, puzzleId: string): Promise<{ current: number; longest: number } | null> {
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    const daily = await this.conn.db!.collection("dailyPuzzles").findOne({ _id: today as any });
+    if (!daily || String(daily.puzzleId) !== String(puzzleId)) return null;   // hint didn't match
+    const users = this.conn.db!.collection("users");
+    const u: any = await users.findOne({ _id: userId as any }, { projection: { dailyPuzzleStreak: 1 } as any });
+    const prev = u?.dailyPuzzleStreak ?? { current: 0, longest: 0, lastDate: null };
+    if (prev.lastDate === today) return { current: prev.current, longest: prev.longest };
+    const current = prev.lastDate === yesterday ? (prev.current || 0) + 1 : 1;
+    const longest = Math.max(prev.longest || 0, current);
+    await users.updateOne(
+      { _id: userId as any },
+      { $set: { dailyPuzzleStreak: { current, longest, lastDate: today } } },
+    );
+    return { current, longest };
+  }
+
+  async complete(id: string, body: { win: boolean; userId?: string | null; hint?: boolean; mode?: string; rating?: number; deviation?: number; theme?: string; ms?: number; wrong?: string; daily?: boolean }) {
     const pz = await this.col().findOne({ _id: id as any });
     if (!pz) return null;
     await this.col().updateOne({ _id: id as any }, { $inc: { plays: 1 } });
@@ -512,7 +544,13 @@ export class PuzzlesService {
       const milestone = key === "puzzle"
         ? await recordAndCelebrate(this.conn, this.push, userId, perf.gl.r, upd.userPerf.gl.r, beforeNb, afterNb).catch(() => null)
         : null;
-      return { win, ratingDiff: upd.ratingDiff, rating: upd.userPerf.gl.r, glicko: upd.userPerf.gl, milestone };
+      // Phase 8c: daily-puzzle attendance streak. `body.daily` is a client
+      // hint; bumpDailyStreak verifies against today's dailyPuzzles doc so
+      // it can't be gamed.
+      const dailyStreak = body.daily
+        ? await this.bumpDailyStreak(userId, id).catch(() => null)
+        : null;
+      return { win, ratingDiff: upd.ratingDiff, rating: upd.userPerf.gl.r, glicko: upd.userPerf.gl, milestone, dailyStreak };
     }
 
     // guest — one-off, non-persisted

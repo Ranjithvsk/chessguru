@@ -27,6 +27,7 @@ type DailyPayload = {
   solvedByMe: boolean;
   myRound: { win: boolean; ms: number | null; ratingDiff: number | null } | null;
   stats?: { attempted: number; solved: number; medianMs: number | null };
+  streak?: { current: number; longest: number; lastDate: string | null } | null;
 };
 
 const fmt = (iso: string) => new Date(iso + "T00:00:00Z").toLocaleDateString(undefined, {
@@ -95,6 +96,7 @@ export default function DailyPage() {
       const r = await api.complete(data.puzzle.id, {
         win, hint: false, difficulty: "normal", userId: null,
         mode: "puzzle", rating: 1500, deviation: 200,
+        daily: true,   // Phase 8c: server-verifies against today's dailyPuzzles
         ...(ms != null ? { ms } : {}),
         ...(!win && wrongRef.current ? { wrong: wrongRef.current } : {}),
       });
@@ -179,24 +181,36 @@ export default function DailyPage() {
               ))}
             </div>
           </div>
-          {data.stats && data.stats.attempted > 0 && (
-            <div className="flex gap-3 text-center">
-              <div className="rounded-lg bg-ink-900/60 px-3 py-2">
-                <div className="text-[10px] uppercase tracking-wide text-ink-400">Solved</div>
-                <div className="mt-0.5 text-lg font-bold tabular-nums text-white">
-                  {Math.round((data.stats.solved / data.stats.attempted) * 100)}%
+          <div className="flex gap-3 text-center">
+            {data.streak && (data.streak.current > 0 || data.streak.longest > 0) && (
+              <div className={`rounded-lg px-3 py-2 ${data.streak.current > 0 ? "bg-orange-500/10 ring-1 ring-orange-500/30" : "bg-ink-900/60"}`}>
+                <div className="text-[10px] uppercase tracking-wide text-ink-400">Daily streak</div>
+                <div className="mt-0.5 flex items-center justify-center gap-1 text-lg font-bold tabular-nums text-white">
+                  <span className={data.streak.current > 0 ? "text-orange-300" : ""}>{data.streak.current}</span>
+                  <span className={data.streak.current > 0 ? "" : "opacity-40 grayscale"}>🔥</span>
                 </div>
-                <div className="text-[10px] text-ink-500">{data.stats.solved} / {data.stats.attempted}</div>
+                <div className="text-[10px] text-ink-500">best {data.streak.longest}</div>
               </div>
-              {data.stats.medianMs != null && (
+            )}
+            {data.stats && data.stats.attempted > 0 && (
+              <>
                 <div className="rounded-lg bg-ink-900/60 px-3 py-2">
-                  <div className="text-[10px] uppercase tracking-wide text-ink-400">Median</div>
-                  <div className="mt-0.5 text-lg font-bold tabular-nums text-white">{fmtSec(data.stats.medianMs)}</div>
-                  <div className="text-[10px] text-ink-500">of winners</div>
+                  <div className="text-[10px] uppercase tracking-wide text-ink-400">Solved</div>
+                  <div className="mt-0.5 text-lg font-bold tabular-nums text-white">
+                    {Math.round((data.stats.solved / data.stats.attempted) * 100)}%
+                  </div>
+                  <div className="text-[10px] text-ink-500">{data.stats.solved} / {data.stats.attempted}</div>
                 </div>
-              )}
-            </div>
-          )}
+                {data.stats.medianMs != null && (
+                  <div className="rounded-lg bg-ink-900/60 px-3 py-2">
+                    <div className="text-[10px] uppercase tracking-wide text-ink-400">Median</div>
+                    <div className="mt-0.5 text-lg font-bold tabular-nums text-white">{fmtSec(data.stats.medianMs)}</div>
+                    <div className="text-[10px] text-ink-500">of winners</div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
 

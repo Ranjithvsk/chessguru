@@ -12,6 +12,7 @@ type DailyPreview = {
   puzzle: { rating: number; themes: string[] };
   solvedByMe: boolean;
   stats?: { attempted: number; solved: number; medianMs: number | null };
+  streak?: { current: number; longest: number; lastDate: string | null } | null;
 };
 function DailyCard() {
   const { data } = useQuery({ queryKey: ["daily-preview"], queryFn: () => get<DailyPreview>("/api/puzzles/daily") });
@@ -36,6 +37,11 @@ function DailyCard() {
             {solvePct != null && (
               <span className="rounded bg-ink-800/70 px-1.5 py-0.5 text-emerald-300">
                 {solvePct}% solved today
+              </span>
+            )}
+            {data.streak && data.streak.current > 0 && (
+              <span className="rounded bg-orange-500/15 px-1.5 py-0.5 text-orange-300">
+                🔥 {data.streak.current}-day streak
               </span>
             )}
           </div>
