@@ -5,7 +5,7 @@
 // Auth: session-cookie gated (any signed-in ChessGuru user in the room can
 // snap; academy-scoped listing/authz lives in AcademyService).
 
-import { BadRequestException, Body, Controller, ForbiddenException, Get, NotFoundException, Param, Patch, Post, Req, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, NotFoundException, Param, Patch, Post, Req, UnauthorizedException } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { randomBytes } from "crypto";
@@ -77,5 +77,21 @@ export class ClassSnapController {
     if (Object.keys($set).length === 0) return { ok: true, changed: false };
     await this.conn.db!.collection("classSnaps").updateOne({ _id: snapId as any }, { $set });
     return { ok: true, changed: true };
+  }
+
+  // DELETE /api/class/:id/snap/:snapId
+  // Same author-only rule as PATCH. Hard delete -- snaps are cheap to
+  // re-take mid-class and there's no audit requirement here.
+  @Delete(":id/snap/:snapId")
+  async remove(@Param("id") id: string, @Param("snapId") snapId: string, @Req() req: any) {
+    if (!ROOM_RE.test(id)) throw new BadRequestException("bad room");
+    if (!/^sn_[A-Za-z0-9_-]{6,32}$/.test(snapId)) throw new BadRequestException("bad snap id");
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) throw new UnauthorizedException();
+    const cur = await this.conn.db!.collection("classSnaps").findOne({ _id: snapId as any, classId: id });
+    if (!cur) throw new NotFoundException("snap not found");
+    if (cur.byUserId !== userId) throw new ForbiddenException("not your snap");
+    await this.conn.db!.collection("classSnaps").deleteOne({ _id: snapId as any });
+    return { ok: true };
   }
 }

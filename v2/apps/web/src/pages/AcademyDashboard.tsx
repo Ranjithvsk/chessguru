@@ -795,6 +795,16 @@ function SnapCard({ s }: { s: SnapItem }) {
     } catch (e) { setErr(String((e as Error).message || e)); }
     finally { setSaving(false); }
   }
+  async function deleteSnap() {
+    if (!window.confirm(`Delete this snap${s.note ? ` — "${s.note.slice(0, 60)}"` : ""}? This can't be undone.`)) return;
+    try {
+      const r = await fetch(`${BASE}/api/class/${encodeURIComponent(s.classId)}/snap/${encodeURIComponent(s._id)}`, {
+        method: "DELETE", credentials: "include",
+      });
+      if (!r.ok) { window.alert((await r.json().catch(() => ({}))).message || `Failed: HTTP ${r.status}`); return; }
+      qc.invalidateQueries({ queryKey: ["academy-snaps"] });
+    } catch (e) { window.alert(String((e as Error).message || e)); }
+  }
   const Wrapper: any = editing ? "div" : Link;
   const wrapperProps: any = editing ? {} : { to: href };
   return (
@@ -810,9 +820,14 @@ function SnapCard({ s }: { s: SnapItem }) {
           <b>{s.byName}</b>
           {shapes.length > 0 && <span className="ml-1 text-[10px] text-amber-300">✏️{shapes.length}</span>}
           {canEdit && !editing && (
-            <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDraft(s.note || ""); setEditing(true); }}
-              className="ml-2 text-[10px] text-ink-500 opacity-0 group-hover:opacity-100 transition-opacity hover:text-white"
-              title="Edit note">✎ edit</button>
+            <>
+              <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDraft(s.note || ""); setEditing(true); }}
+                className="ml-2 text-[10px] text-ink-500 opacity-0 group-hover:opacity-100 transition-opacity hover:text-white"
+                title="Edit note">✎ edit</button>
+              <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); deleteSnap(); }}
+                className="ml-1 text-[10px] text-ink-500 opacity-0 group-hover:opacity-100 transition-opacity hover:text-rose-300"
+                title="Delete snap">🗑</button>
+            </>
           )}
         </div>
         <div className="text-[11px] text-ink-400 truncate">{s.classTitle}</div>
