@@ -241,6 +241,69 @@ function JitsiRoom({ roomId, displayName }: { roomId: string; displayName?: stri
   );
 }
 
+// Aggregated attendee row — matches ClassAttendanceController.coachStudents()'s response.
+type CoachStudent = { userId: string | null; name: string; classesAttended: number; firstSeen: string; lastSeen: string };
+
+// "How long ago" tag used across the landing (attendance rows and now the
+// students roster). Compact: "5m", "3d", "2mo" — no need to be exact.
+function shortAgo(iso?: string): string {
+  if (!iso) return "";
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return "just now";
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m ago`;
+  if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}h ago`;
+  if (ms < 30 * 86_400_000) return `${Math.round(ms / 86_400_000)}d ago`;
+  return `${Math.round(ms / (30 * 86_400_000))}mo ago`;
+}
+
+// Coach-only roster. Fetch on mount; render as a compact grid below the schedule
+// sections. Skips itself entirely (no header, no empty state) for accounts that
+// have no owned classes / no attendees yet.
+function MyStudents() {
+  const [students, setStudents] = useState<CoachStudent[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/coach/students`,
+          { credentials: "include" })
+      .then((r) => r.ok ? r.json() : { students: [] })
+      .then((j) => { if (!cancelled) setStudents(j.students ?? []); })
+      .catch(() => { if (!cancelled) setStudents([]); });
+    return () => { cancelled = true; };
+  }, []);
+  if (!students || students.length === 0) return null;
+  const totalClasses = students.reduce((s, x) => s + (x.classesAttended || 0), 0);
+  return (
+    <section>
+      <h2 className="mb-2 flex items-baseline justify-between text-sm font-semibold text-white">
+        <span>🧑‍🎓 My students</span>
+        <span className="text-[10px] font-normal text-ink-500">
+          {students.length} unique · {totalClasses} class-attend{totalClasses === 1 ? "" : "s"} total
+        </span>
+      </h2>
+      <div className="grid gap-2 rounded-xl2 border border-ink-700 bg-ink-900 p-3 sm:grid-cols-2 lg:grid-cols-3">
+        {students.map((s) => (
+          <div key={(s.userId ?? "g") + s.name}
+               className="flex items-center justify-between gap-3 rounded-lg bg-ink-800/60 px-3 py-2">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="truncate text-sm font-semibold text-white">{s.name || "Guest"}</span>
+                {!s.userId && <span className="rounded bg-ink-700 px-1 text-[9px] text-ink-400">guest</span>}
+              </div>
+              <div className="text-[10px] text-ink-500">
+                last seen {shortAgo(s.lastSeen)} · joined {shortAgo(s.firstSeen)}
+              </div>
+            </div>
+            <span className="shrink-0 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-200"
+                  title={`Attended ${s.classesAttended} of your classes`}>
+              × {s.classesAttended}
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 // Scheduled-class data shape — matches ClassScheduleController.list()'s response.
 type ScheduledClass = {
   _id: string; title: string; coach: string;
@@ -637,6 +700,8 @@ function ClassLanding() {
           </div>
         </form>
       </section>
+
+      <MyStudents />
 
       <p className="text-center text-[11px] text-ink-500">
         Powered by Jitsi Meet (open source video) · ChessGuru (board sync + recording + replay)

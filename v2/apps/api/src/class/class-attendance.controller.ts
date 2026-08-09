@@ -10,7 +10,7 @@
 // Key = userId when signed in, "guest:<name>" otherwise. A rejoin updates
 // lastSeenAt but preserves the original joinedAt.
 
-import { Controller, Get, Param, Req, Res, HttpException, HttpStatus } from "@nestjs/common";
+import { Controller, Get, Param, Query, Req, Res, HttpException, HttpStatus } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 type Response = any;
@@ -20,6 +20,49 @@ const ROOM_RE = /^[A-Za-z0-9_-]{4,64}$/;
 @Controller("class")
 export class ClassAttendanceController {
   constructor(@InjectConnection() private readonly conn: Connection) {}
+
+  // GET /api/class/coach/students — coach-only roster of every unique attendee
+  // across the caller's classes. Aggregated on the fly (no separate rollup
+  // collection to keep in sync). Sorted newest-first by lastSeen so the
+  // people the coach is actively teaching float to the top.
+  //
+  // Query ?limit=N caps the row count client-side; default 500 is enough for
+  // even a busy academy without paying the wire cost of a full unbounded scan.
+  @Get("coach/students")
+  async coachStudents(@Req() req: any, @Query("limit") limitRaw?: string) {
+    const me: string | null = req?.session?.userId ?? null;
+    if (!me) throw new HttpException("sign in required", HttpStatus.UNAUTHORIZED);
+    const limit = Math.max(1, Math.min(2000, parseInt(String(limitRaw ?? "500"), 10) || 500));
+    // 1) find every class the caller owns
+    const owned: any[] = await this.conn.db!.collection("classSchedules")
+      .find({ createdByUserId: me }, { projection: { _id: 1 } as any }).limit(2000).toArray();
+    if (owned.length === 0) return { students: [] };
+    const classIds = owned.map((c) => c._id);
+    // 2) aggregate distinct attendees. Key = userId when signed in, else the
+    //    "guest:<name>" pattern class-ws already stores. Same person joining
+    //    with different guest names counts as different rows (there's no way
+    //    to tell them apart post-hoc); logged-in users always collapse to one.
+    const rows = await this.conn.db!.collection("classAttendance").aggregate([
+      { $match: { classId: { $in: classIds } } },
+      { $group: {
+          _id: "$key",
+          userId: { $last: "$userId" },
+          name:   { $last: "$name" },
+          classes: { $addToSet: "$classId" },
+          firstSeen: { $min: "$joinedAt" },
+          lastSeen:  { $max: "$lastSeenAt" },
+        } },
+      { $project: {
+          _id: 0,
+          userId: 1, name: 1,
+          classesAttended: { $size: "$classes" },
+          firstSeen: 1, lastSeen: 1,
+        } },
+      { $sort: { lastSeen: -1 } as any },
+      { $limit: limit },
+    ]).toArray();
+    return { students: rows };
+  }
 
   // GET /api/class/:id/attendance — sorted by joinedAt asc so the display reads
   // as an arrival order. Anonymous joiners have userId: null.
