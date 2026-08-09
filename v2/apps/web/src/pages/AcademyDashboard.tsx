@@ -913,6 +913,38 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   const [classFilter, setClassFilter] = useState<string>(""); // "" = all
   const [starredOnly, setStarredOnly] = useState(false);
   const starredCount = snaps.reduce((n, s) => n + (s.starred ? 1 : 0), 0);
+  // CSV export of the currently filtered snap set. Client-side blob download,
+  // one row per snap. FEN + shapes JSON on the end so a coach can paste any
+  // row back into /board-editor?fen=...&shapes=... to reconstruct the
+  // position with annotations. Excel-safe: commas quoted, quotes escaped.
+  function exportCsv(rows: SnapItem[]) {
+    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+    const header = ["At", "Class", "Author", "Starred", "Shapes", "Note", "FEN", "OpenLink"];
+    const lines = [header.map(esc).join(",")];
+    for (const s of rows) {
+      const shapes = Array.isArray(s.shapes) ? s.shapes : [];
+      const link = shapes.length > 0
+        ? `${location.origin}/board-editor?fen=${encodeURIComponent(s.fen)}&shapes=${encodeShapesForUrl(shapes)}`
+        : `${location.origin}/board-editor?fen=${encodeURIComponent(s.fen)}`;
+      lines.push([
+        new Date(s.at).toISOString(),
+        s.classTitle || s.classId,
+        s.byName || s.byUserId || "",
+        s.starred ? "yes" : "",
+        shapes.length > 0 ? JSON.stringify(shapes) : "",
+        s.note || "",
+        s.fen,
+        link,
+      ].map((c) => esc(String(c))).join(","));
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `snaps-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
   // Tally by class + track the most-recent snap timestamp per class. Chips
   // sort by recency (not count) so a coach who just finished a class sees
   // that class first regardless of how many snaps they took.
@@ -934,7 +966,7 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   return (
     <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
       <h2 className="mb-3 font-display text-lg text-white">📸 Recent snaps <span className="text-xs text-ink-500">({snaps.length})</span></h2>
-      {(topClasses.length > 1 || starredCount > 0) && (
+      {snaps.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-1.5">
           {topClasses.length > 1 && (
             <>
@@ -963,6 +995,11 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
               </button>
             </>
           )}
+          <button onClick={() => exportCsv(filtered)}
+            title="Download the currently filtered snaps as a CSV (openable in Excel/Sheets)"
+            className="ml-auto rounded-full border border-ink-700 bg-ink-900 px-2.5 py-0.5 text-[11px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-ink-100">
+            ⬇ CSV <span className="ml-1 opacity-70">{filtered.length}</span>
+          </button>
         </div>
       )}
       {filtered.length === 0 ? (
