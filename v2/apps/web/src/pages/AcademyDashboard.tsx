@@ -284,6 +284,7 @@ export default function AcademyDashboardPage() {
       </header>
 
       {canManage && <TodayStrip schedule={schedule} snaps={snaps} recordings={recordings} />}
+      {canManage && <NextUpToReview snaps={snaps} />}
       {canManage && <StarredDigestPreviewLink />}
 
       {/* ── Invite forms ── */}
@@ -912,6 +913,38 @@ function TodayStrip({ schedule, snaps, recordings }: {
       <Tile label="Recordings today" value={recordingsToday} tone="border-ink-700 bg-ink-900" />
       <Tile label="★ Starred (all)" value={starredTotal} tone={starredTotal > 0 ? "border-amber-500/40 bg-amber-500/5" : "border-ink-700 bg-ink-900"} />
       <Tile label="✓ Reviewed (all)" value={reviewedTotal} tone={reviewedTotal > 0 ? "border-emerald-500/40 bg-emerald-500/5" : "border-ink-700 bg-ink-900"} />
+    </div>
+  );
+}
+
+// The 3 oldest starred-but-not-yet-reviewed snaps -- surfaced under the
+// today ribbon so the coach's next prep action is one click away. Only
+// renders when there's at least one candidate; empty state stays hidden
+// so a coach with no shortlist doesn't see a nag strip.
+function NextUpToReview({ snaps }: { snaps?: SnapItem[] }) {
+  const shortlist = (snaps ?? [])
+    .filter((s) => !!s.starred && !s.reviewedAt)
+    .slice()
+    .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
+    .slice(0, 3);
+  if (shortlist.length === 0) return null;
+  return (
+    <div className="rounded-xl2 border border-brand-500/30 bg-brand-500/5 p-3">
+      <div className="mb-2 text-[11px] uppercase tracking-wide text-brand-300">🎯 Next up to review ({shortlist.length})</div>
+      <div className="grid gap-2 md:grid-cols-3">
+        {shortlist.map((s) => (
+          <Link key={s._id} to={`/academy?snap=${encodeURIComponent(s._id)}`}
+            className="flex gap-2 items-center rounded-lg border border-ink-700 bg-ink-800/60 p-2 hover:border-brand-500/50 hover:bg-ink-800 transition-colors">
+            <div className="w-12 h-12 shrink-0">
+              <Board fen={s.fen} viewOnly coordinates={false} className="mini" shapes={(s.shapes ?? []) as any} />
+            </div>
+            <div className="flex-1 min-w-0 text-[11px]">
+              <div className="text-white truncate">{s.note || <span className="italic text-ink-500">(no note)</span>}</div>
+              <div className="text-ink-500 truncate">{s.classTitle} · {new Date(s.at).toLocaleDateString(undefined, { day: "2-digit", month: "short" })}</div>
+            </div>
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }
