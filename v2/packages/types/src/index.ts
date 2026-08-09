@@ -52,4 +52,7 @@ export interface AuthMe {
   userId?: string;
   username?: string;
   admin?: boolean;
+  // Multi-tenant SaaS additions — set for members of any academy.
+  academyId?: string | null;   // academy slug (e.g. "stephens-chess-academy")
+  role?: "academy_owner" | "coach" | "student" | "parent" | null;
 }

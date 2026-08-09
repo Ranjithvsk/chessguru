@@ -31,6 +31,8 @@ import EngineBattlePage from "./pages/EngineBattle";
 import BoardEditorPage from "./pages/BoardEditor";
 import LoginPage from "./pages/Login";
 import ResetPasswordPage from "./pages/ResetPassword";
+import SignupAcademyPage from "./pages/SignupAcademy";
+import AcademyDashboardPage from "./pages/AcademyDashboard";
 import AdminPage from "./pages/Admin";
 import AdminUsersPage from "./pages/AdminUsers";
 import PlayPage from "./pages/Play";
@@ -82,6 +84,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="admin/users" element={<AdminUsersPage />} />
             <Route path="login" element={<LoginPage />} />
             <Route path="reset-password" element={<ResetPasswordPage />} />
+            <Route path="signup-academy" element={<SignupAcademyPage />} />
+            <Route path="academy" element={<AcademyDashboardPage />} />
             <Route path="test/feedback-ui" element={<FeedbackUITestPage />} />
             <Route path="book" element={<BookPage />} />
             <Route path="class" element={<ClassPage />} />

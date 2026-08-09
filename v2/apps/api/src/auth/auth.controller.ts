@@ -34,6 +34,13 @@ export class AuthController {
   @Post("logout")
   logout(@Req() req: any) { return this.auth.logout(req.session); }
 
+  // Multi-tenant SaaS: create a new academy + its owner user in one call
+  @Post("signup-academy")
+  signupAcademy(@Body() body: any, @Req() req: any, @Res({ passthrough: true }) res: any) {
+    clearHostOnlyTwin(req, res);
+    return this.auth.signupAcademy(body, req.session);
+  }
+
   // Password reset via emailed link
   @Post("request-reset")
   requestReset(@Body() body: any) { return this.auth.requestReset(body); }

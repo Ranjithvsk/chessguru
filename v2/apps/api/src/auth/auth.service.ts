@@ -63,7 +63,79 @@ export class AuthService {
 
   me(session: any) {
     if (!session?.userId) return { loggedIn: false };
-    return { loggedIn: true, username: session.username, userId: session.userId, admin: isAdmin(session.userId) };
+    return {
+      loggedIn: true,
+      username: session.username,
+      userId: session.userId,
+      admin: isAdmin(session.userId),
+      academyId: session.academyId ?? null,
+      role: session.role ?? null,
+    };
+  }
+
+  /* ================================================================
+   * Academy signup (multi-tenant SaaS).
+   * Creates: academies doc + owner user doc (role: 'academy_owner'),
+   * then logs the owner in. Slug is derived from academyName and made
+   * globally unique (append -2, -3, ... on collision).
+   * ================================================================ */
+  async signupAcademy(body: any, session: any) {
+    const academyName = String(body?.academyName || "").trim();
+    const ownerName   = String(body?.ownerName || "").trim();
+    const ownerEmail  = String(body?.ownerEmail || "").trim().toLowerCase();
+    const password    = String(body?.password || "");
+
+    if (!academyName || academyName.length < 2) return { ok: false, error: "Academy name is required." };
+    if (!ownerName   || !/^[a-zA-Z0-9_-]{2,30}$/.test(ownerName)) return { ok: false, error: "Owner username must be 2-30 chars (letters, numbers, _ or -)." };
+    if (!ownerEmail  || !ownerEmail.includes("@")) return { ok: false, error: "Valid email is required." };
+    if (password.length < 6) return { ok: false, error: "Password too short (min 6 chars)." };
+
+    const academies = this.conn.db!.collection("academies");
+    const users = this.users();
+
+    // Slug: lowercase, alphanumerics + dashes; append -N if taken
+    const base = academyName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "academy";
+    let slug = base; let n = 2;
+    while (await academies.findOne({ _id: slug as any })) { slug = `${base}-${n++}`; if (n > 999) break; }
+
+    // Username collision check (users._id is username.toLowerCase())
+    const uid = ownerName.toLowerCase();
+    if (await users.findOne({ _id: uid as any })) {
+      return { ok: false, error: "Owner username already taken — pick another." };
+    }
+    // Email collision — one email = one account (prevents double-signup)
+    if (await users.findOne({ email: ownerEmail })) {
+      return { ok: false, error: "This email already has an account — sign in first." };
+    }
+
+    const hash = await bcrypt.hash(password, 10);
+    const now = new Date();
+    const academyDoc = {
+      _id: slug,
+      name: academyName,
+      ownerId: uid,
+      plan: "trial",
+      createdAt: now,
+    };
+    const userDoc = {
+      _id: uid,
+      username: ownerName,
+      bpass: hash,
+      email: ownerEmail,
+      academyId: slug,
+      role: "academy_owner",
+      createdAt: now,
+      lastLogin: now,
+    };
+    await academies.insertOne(academyDoc as any);
+    await users.insertOne(userDoc as any);
+
+    session.userId = uid;
+    session.username = ownerName;
+    session.academyId = slug;
+    session.role = "academy_owner";
+    if (session.cookie) session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
+    return { ok: true, academyId: slug, academyName };
   }
 
   logout(session: any): Promise<{ ok: boolean }> {

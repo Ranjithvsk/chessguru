@@ -71,6 +71,8 @@ export const api = {
 
   signin: (username: string, password: string, keep: boolean) => post<AuthResult>("/auth/signin", { username, password, keep }),
   register: (username: string, password: string, email: string) => post<AuthResult>("/auth/register", { username, password, email }),
+  signupAcademy: (body: { academyName: string; ownerName: string; ownerEmail: string; password: string }) =>
+    post<AuthResult & { academyId?: string; academyName?: string }>("/auth/signup-academy", body),
   logout: () => post<{ ok: boolean }>("/auth/logout", {}),
   requestReset:  (email: string) => post<{ ok: boolean; error?: string }>("/auth/request-reset", { email }),
   resetPassword: (token: string, newPassword: string) => post<AuthResult & { username?: string }>("/auth/reset-password", { token, newPassword }),

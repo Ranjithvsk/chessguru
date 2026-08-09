@@ -54,6 +54,7 @@ async function bootstrap() {
       { path: "auth/reset-password", method: RequestMethod.POST },
       { path: "auth/request-otp", method: RequestMethod.POST },
       { path: "auth/otp-signin", method: RequestMethod.POST },
+      { path: "auth/signup-academy", method: RequestMethod.POST },
     ],
   });
   app.enableCors({ origin: true, credentials: true });
