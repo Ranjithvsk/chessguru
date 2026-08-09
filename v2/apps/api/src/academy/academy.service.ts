@@ -125,7 +125,10 @@ export class AcademyService {
     return { ok: true, invite: { token, email, displayName, role: wantRole, coachId, expiresAt, mail: mailRes.ok ? "sent" : "failed" } };
   }
 
-  /** Owner OR coach: list students in this academy. Owner sees ALL; coach sees theirs. */
+  /** Owner OR coach: list students in this academy. Owner sees ALL; coach sees theirs.
+   *  Enriches each row with:
+   *    - puzzleRating (from userperfs.puzzle.gl.r)
+   *    - attendedTotal + attendedThisWeek + lastAttendedAt (from classAttendance) */
   async listStudents(session: any) {
     const g = this.ensureCoachOrOwner(session);
     const filter: any = { academyId: g.academyId, role: "student" };
@@ -134,12 +137,42 @@ export class AcademyService {
       .find(filter, { projection: { _id: 1, username: 1, email: 1, coachId: 1, createdAt: 1, lastLogin: 1 } })
       .sort({ createdAt: -1 })
       .toArray();
-    // Attach current puzzle rating (userperfs.puzzle.gl.r) as a small enrichment.
+    if (rows.length === 0) return [];
+    const ids = rows.map((r: any) => r._id);
+
+    // Puzzle-rating snapshot
     const perfs = await this.conn.db!.collection("userperfs")
-      .find({ _id: { $in: rows.map((r: any) => r._id) } }, { projection: { _id: 1, puzzle: 1 } }).toArray();
+      .find({ _id: { $in: ids } }, { projection: { _id: 1, puzzle: 1 } }).toArray();
     const rmap: Record<string, number> = {};
     for (const p of perfs as any[]) rmap[String(p._id)] = Math.round(p?.puzzle?.gl?.r ?? 1500);
-    return rows.map((s: any) => ({ ...s, puzzleRating: rmap[String(s._id)] ?? 1500 }));
+
+    // Attendance rollup — aggregate classAttendance rows keyed by userId, in a
+    // single aggregation. Windows use UTC boundaries; the client formats to local.
+    const now = new Date();
+    const weekStart = new Date(now); weekStart.setUTCDate(weekStart.getUTCDate() - 7);
+    const attRows: any[] = await this.conn.db!.collection("classAttendance").aggregate([
+      { $match: { userId: { $in: ids } } },
+      { $group: {
+        _id: "$userId",
+        attendedTotal: { $sum: 1 },
+        lastAttendedAt: { $max: "$joinedAt" },
+        attendedThisWeek: { $sum: { $cond: [{ $gte: ["$joinedAt", weekStart] }, 1, 0] } },
+      } },
+    ]).toArray();
+    const amap: Record<string, { attendedTotal: number; attendedThisWeek: number; lastAttendedAt: Date | null }> = {};
+    for (const a of attRows) amap[String(a._id)] = {
+      attendedTotal: a.attendedTotal ?? 0,
+      attendedThisWeek: a.attendedThisWeek ?? 0,
+      lastAttendedAt: a.lastAttendedAt ?? null,
+    };
+
+    return rows.map((s: any) => ({
+      ...s,
+      puzzleRating: rmap[String(s._id)] ?? 1500,
+      attendedTotal:    amap[String(s._id)]?.attendedTotal    ?? 0,
+      attendedThisWeek: amap[String(s._id)]?.attendedThisWeek ?? 0,
+      lastAttendedAt:   amap[String(s._id)]?.lastAttendedAt   ?? null,
+    }));
   }
 
   /** Pending invites (not consumed, not expired). Owner sees ALL; coach sees theirs only. */

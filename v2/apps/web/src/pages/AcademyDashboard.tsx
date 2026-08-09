@@ -34,7 +34,13 @@ async function del<T>(path: string): Promise<T> {
 
 interface Invite { token: string; email: string; displayName?: string; role: "coach"|"student"; coachId?: string|null; createdAt: string; expiresAt: string; invitedByName?: string }
 interface Coach   { _id: string; username: string; email?: string|null; createdAt?: string; lastLogin?: string|null }
-interface Student { _id: string; username: string; email?: string|null; coachId?: string|null; createdAt?: string; lastLogin?: string|null; puzzleRating?: number }
+interface Student {
+  _id: string; username: string; email?: string|null; coachId?: string|null;
+  createdAt?: string; lastLogin?: string|null;
+  puzzleRating?: number;
+  // Attendance rollup from classAttendance (see AcademyService.listStudents)
+  attendedTotal?: number; attendedThisWeek?: number; lastAttendedAt?: string|null;
+}
 
 function fmtDate(d?: string|null) { return d ? new Date(d).toLocaleDateString(undefined, { day: "2-digit", month: "short" }) : "—"; }
 function fmtAgo(d?: string|null) {
@@ -281,27 +287,42 @@ export default function AcademyDashboardPage() {
                     <th className="px-3 py-2 text-left">Username</th>
                     <th className="px-3 py-2 text-left">Email</th>
                     {isOwner && <th className="px-3 py-2 text-left">Coach</th>}
-                    <th className="px-3 py-2 text-left">Puzzle rating</th>
+                    <th className="px-3 py-2 text-left">Rating</th>
+                    <th className="px-3 py-2 text-left" title="Classes attended (all-time · this week)">Attendance</th>
                     <th className="px-3 py-2 text-left">Last active</th>
                     <th className="px-3 py-2 text-right"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {studentsShown.map((s) => (
-                    <tr key={s._id} className="border-t border-ink-800">
-                      <td className="px-3 py-2 text-white">{s.username}</td>
-                      <td className="px-3 py-2 text-ink-300">{s.email || "—"}</td>
-                      {isOwner && <td className="px-3 py-2 text-ink-300">{s.coachId ? (coachById[s.coachId] ?? s.coachId) : "—"}</td>}
-                      <td className="px-3 py-2 text-white tabular-nums">{s.puzzleRating ?? 1500}</td>
-                      <td className="px-3 py-2 text-ink-400">{fmtAgo(s.lastLogin)}</td>
-                      <td className="px-3 py-2 text-right">
-                        <div className="flex justify-end gap-2 text-xs">
-                          <Link to={`/dashboard?as=${encodeURIComponent(s.username)}`} className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-2 py-1 text-brand-100 hover:bg-brand-500/20">📊 Perf</Link>
-                          <Link to={`/history?as=${encodeURIComponent(s.username)}`} className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-2 py-1 text-brand-100 hover:bg-brand-500/20">📜 History</Link>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {studentsShown.map((s) => {
+                    const att = s.attendedTotal ?? 0;
+                    const wk  = s.attendedThisWeek ?? 0;
+                    return (
+                      <tr key={s._id} className="border-t border-ink-800">
+                        <td className="px-3 py-2 text-white">{s.username}</td>
+                        <td className="px-3 py-2 text-ink-300">{s.email || "—"}</td>
+                        {isOwner && <td className="px-3 py-2 text-ink-300">{s.coachId ? (coachById[s.coachId] ?? s.coachId) : "—"}</td>}
+                        <td className="px-3 py-2 text-white tabular-nums">{s.puzzleRating ?? 1500}</td>
+                        <td className="px-3 py-2 tabular-nums" title={`Last attended: ${s.lastAttendedAt ? new Date(s.lastAttendedAt).toLocaleString() : "never"}`}>
+                          {att === 0 ? (
+                            <span className="text-ink-500">—</span>
+                          ) : (
+                            <span className="text-white">
+                              {att}
+                              {wk > 0 && <span className="ml-1 text-[10px] text-emerald-300">· {wk} this wk</span>}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-ink-400">{fmtAgo(s.lastLogin)}</td>
+                        <td className="px-3 py-2 text-right">
+                          <div className="flex justify-end gap-2 text-xs">
+                            <Link to={`/dashboard?as=${encodeURIComponent(s.username)}`} className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-2 py-1 text-brand-100 hover:bg-brand-500/20">📊 Perf</Link>
+                            <Link to={`/history?as=${encodeURIComponent(s.username)}`} className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-2 py-1 text-brand-100 hover:bg-brand-500/20">📜 History</Link>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -328,7 +349,7 @@ export default function AcademyDashboardPage() {
           <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">✅ Coach invitations</li>
           <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">✅ Student enrollment (coach rosters)</li>
           <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">✅ Owner/coach view student performance</li>
-          <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">🔜 Attendance rollup per student</li>
+          <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">✅ Attendance rollup per student</li>
           <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">🔜 Per-academy class scheduling</li>
           <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">🔜 Fees / billing (Razorpay)</li>
         </ul>
