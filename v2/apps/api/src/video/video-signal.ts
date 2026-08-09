@@ -155,6 +155,17 @@ export function attachVideoSignalWs(httpServer: HttpServer, conn: Connection | n
           case "ice":
             if (typeof msg.to === "string") forwardToPeer(client, msg.to, msg);
             break;
+          case "broadcast": {
+            // Generic room-wide relay for chat / raise-hand / reactions / any
+            // client-driven ephemeral event. Server adds `from` + `name` so
+            // recipients can render "who said what" without a lookup, and
+            // never trusts the client's own identity claim.
+            const room = rooms.get(client.roomId);
+            if (!room) break;
+            const outbound = { type: "broadcast", from: client.id, name: client.name, subtype: msg.subtype, payload: msg.payload };
+            for (const c of room.values()) if (c.id !== client.id) send(c.ws, outbound);
+            break;
+          }
           case "leave":
             ws.close();
             break;

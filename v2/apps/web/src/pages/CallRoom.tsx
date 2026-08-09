@@ -1,14 +1,13 @@
 // CallRoom — P2a of ChessGuru's "from-scratch Zoom" build.
 //
-// Mesh video call page (up to 8) on /v2api/api/video-signal/:room. Full mesh,
-// lex-lower peerId offers to avoid glare. Early-ICE buffered per peer.
+// Mesh video call (up to 8) on /v2api/api/video-signal/:room. Lex-lower id
+// offers to avoid glare; early-ICE buffered per peer. `?board=1` swaps to the
+// chess-native layout (Chessground + vertical video column) synced via the
+// existing class-ws bus with its own effect/teardown.
 //
-// `?board=1` opts into the chess-native layout: big Chessground on the left,
-// vertical column of video tiles on the right (stacks below md:). Board state
-// is synced through the EXISTING class-ws bus (/v2api/class-ws/:room) which
-// validates moves server-side with chess.js and echoes to everyone, so we
-// treat server as truth. The class-ws lives in its own useEffect with its own
-// teardown — independent of the signaling WS.
+// Ephemeral chat / raise-hand / reactions ride the server `broadcast` frame:
+// server adds {from,name} and relays to everyone-else — no echo to sender, so
+// every outbound send has a paired local apply.
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Chess } from "chess.js";
@@ -23,7 +22,8 @@ type ServerMsg =
   | { type: "full" }
   | { type: "offer"; from: string; sdp: RTCSessionDescriptionInit }
   | { type: "answer"; from: string; sdp: RTCSessionDescriptionInit }
-  | { type: "ice"; from: string; candidate: RTCIceCandidateInit | null };
+  | { type: "ice"; from: string; candidate: RTCIceCandidateInit | null }
+  | { type: "broadcast"; from: string; name: string; subtype: string; payload: any };
 
 type PeerState = {
   pc: RTCPeerConnection;
@@ -46,7 +46,15 @@ type BoardServerMsg =
   | { type: "reset"; fen: string }
   | { type: string; [k: string]: unknown };
 
+// Ephemeral chat message (list is not persisted; joining mid-call = blank).
+type ChatMsg = { id: string; from: string; name: string; text: string; at: number; own: boolean };
+// One in-flight floating reaction anchored to a peer (or self via "" or self id).
+type FloatingReaction = { id: string; emoji: string; peerId: string };
+
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+const REACTION_EMOJIS = ["👍", "👏", "❤️", "😂", "🎉", "🔥", "🤔", "👎"];
+// 2s float; keep in sync with the CSS keyframe duration below.
+const REACTION_LIFETIME_MS = 2000;
 
 // STUN-only fallback if /api/video/ice-config fails (guest / dev / network).
 // TURN URLs come per-session from that endpoint (~1h creds). See fetchIceConfig().
@@ -75,6 +83,11 @@ type Status =
   | "error"             // catch-all
   | "left";             // user hit Leave
 
+// Cheap unique id for chat messages + floating reactions. Not cryptographic —
+// only needs to be unique within this session's client-side lists.
+let __localIdSeq = 0;
+const nextLocalId = () => `L${Date.now().toString(36)}-${(__localIdSeq++).toString(36)}`;
+
 export default function CallRoomPage() {
   const { room = "" } = useParams<{ room: string }>();
   const [searchParams] = useSearchParams();
@@ -88,6 +101,18 @@ export default function CallRoomPage() {
   // Drives grid render; mirrors peersRef.keys() on every join/leave.
   const [peerIds, setPeerIds] = useState<string[]>([]);
 
+  // ---- Ephemeral interaction state ---------------------------------------
+  // Chat drawer + unread counter (cleared on open); raise-hand as a peerId
+  // array (includes self); reaction popover + in-flight floating emojis.
+  const [chatMsgs, setChatMsgs] = useState<ChatMsg[]>([]);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatUnread, setChatUnread] = useState(0);
+  const [chatDraft, setChatDraft] = useState("");
+  const [raisedHands, setRaisedHands] = useState<string[]>([]);
+  const [ownHandUp, setOwnHandUp] = useState(false);
+  const [reactionOpen, setReactionOpen] = useState(false);
+  const [floaters, setFloaters] = useState<FloatingReaction[]>([]);
+
   // Refs — stable identity, no re-renders. peersRef map is what actually holds
   // per-peer state; peerIds state array is the render trigger.
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -95,6 +120,7 @@ export default function CallRoomPage() {
   const peersRef = useRef<Map<string, PeerState>>(new Map());
   const wsRef = useRef<WebSocket | null>(null);
   const selfIdRef = useRef<string>("");
+  const selfNameRef = useRef<string>("You");
   // Fetched from /api/video/ice-config (or fallback) before any PC is built.
   const iceConfigRef = useRef<RTCConfiguration>(FALLBACK_ICE_SERVERS);
   // Screen-share display stream — kept so we can stop its tracks + restore cam.
@@ -103,6 +129,10 @@ export default function CallRoomPage() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   // Peer id of the current loudest speaker (or null). Drives tile spotlight.
   const [activeSpeaker, setActiveSpeaker] = useState<string | null>(null);
+  // Auto-scroll the chat list to bottom on new message OR on open.
+  const chatListRef = useRef<HTMLDivElement>(null);
+  // Track timers so unmount can clear them (avoids setState-on-unmount warnings).
+  const floaterTimersRef = useRef<Set<number>>(new Set());
 
   // Guarded send to signaling — WS may be gone.
   const send = (msg: unknown) => {
@@ -121,6 +151,64 @@ export default function CallRoomPage() {
     else if (peersRef.current.size > 0) setStatus("negotiating");
     else setStatus("waiting");
   };
+
+  // Fire a floating reaction on a tile (peerId "" or selfIdRef.current → self view).
+  const spawnFloater = (peerId: string, emoji: string) => {
+    const id = nextLocalId();
+    setFloaters((f) => [...f, { id, peerId, emoji }]);
+    const t = window.setTimeout(() => {
+      setFloaters((f) => f.filter((x) => x.id !== id));
+      floaterTimersRef.current.delete(t);
+    }, REACTION_LIFETIME_MS);
+    floaterTimersRef.current.add(t);
+  };
+
+  const sendChat = () => {
+    const text = chatDraft.trim();
+    if (!text) return;
+    // Local push first — server does not echo to sender.
+    setChatMsgs((m) => [...m, { id: nextLocalId(), from: selfIdRef.current || "self",
+      name: selfNameRef.current, text, at: Date.now(), own: true }]);
+    send({ type: "broadcast", subtype: "chat", payload: { text } });
+    setChatDraft("");
+  };
+
+  const toggleHand = () => {
+    const next = !ownHandUp;
+    setOwnHandUp(next);
+    // Local mirror keyed to self id ("" pre-hello → migrated on hello arrival).
+    const self = selfIdRef.current;
+    setRaisedHands((cur) => {
+      const s = new Set(cur);
+      if (next) s.add(self); else s.delete(self);
+      return [...s];
+    });
+    send({ type: "broadcast", subtype: "hand-toggle", payload: { up: next } });
+  };
+
+  const sendReaction = (emoji: string) => {
+    // Local echo first — anchor to the self id (or "" pre-hello, matching
+    // spawnFloater's self-view convention). Same reason as chat: no server echo.
+    spawnFloater(selfIdRef.current, emoji);
+    send({ type: "broadcast", subtype: "reaction", payload: { emoji } });
+    setReactionOpen(false);
+  };
+
+  // Auto-scroll the chat drawer whenever the list grows OR opens with content.
+  useEffect(() => {
+    if (!chatOpen) return;
+    const el = chatListRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [chatMsgs.length, chatOpen]);
+
+  // Clear unread badge on open.
+  useEffect(() => { if (chatOpen) setChatUnread(0); }, [chatOpen]);
+
+  // Clear all floater timers on unmount.
+  useEffect(() => () => {
+    for (const t of floaterTimersRef.current) clearTimeout(t);
+    floaterTimersRef.current.clear();
+  }, []);
 
   // Build one RTCPeerConnection for a remote peer, wire handlers, store in peersRef.
   // `peer` may be just an id (older peer-join without name) or a full summary.
@@ -241,6 +329,40 @@ export default function CallRoomPage() {
     try { await state.pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {/* stale */}
   };
 
+  // Route a `broadcast` frame from another peer to the right feature. Each
+  // subtype's payload shape is validated defensively — a malformed frame from
+  // a bad client shouldn't tank the room.
+  const handleBroadcast = (from: string, name: string, subtype: string, payload: any) => {
+    if (subtype === "chat") {
+      const text = typeof payload?.text === "string" ? payload.text : "";
+      if (!text) return;
+      setChatMsgs((m) => [
+        ...m,
+        { id: nextLocalId(), from, name: name || from, text, at: Date.now(), own: false },
+      ]);
+      // Only bump unread if drawer is closed. Uses functional set to stay
+      // correct even if multiple broadcasts land in the same tick.
+      setChatUnread((u) => (chatOpen ? 0 : u + 1));
+      return;
+    }
+    if (subtype === "hand-toggle") {
+      const up = !!payload?.up;
+      setRaisedHands((cur) => {
+        const s = new Set(cur);
+        if (up) s.add(from); else s.delete(from);
+        return [...s];
+      });
+      return;
+    }
+    if (subtype === "reaction") {
+      const emoji = typeof payload?.emoji === "string" ? payload.emoji : "";
+      if (!emoji) return;
+      spawnFloater(from, emoji);
+      return;
+    }
+    // Unknown subtypes: silently ignored — forward-compat with future features.
+  };
+
   // Full teardown — unmount + Leave. Signaling + media only; class-ws teardown
   // lives in its own effect and runs independently.
   const teardown = () => {
@@ -311,6 +433,15 @@ export default function CallRoomPage() {
         switch (msg.type) {
           case "hello": {
             selfIdRef.current = msg.self;
+            if (msg.as?.name) selfNameRef.current = msg.as.name;
+            // If we raised our hand before hello landed, the local mirror was
+            // keyed to "" — migrate it to the real self id so tiles line up.
+            setRaisedHands((cur) => {
+              if (!cur.includes("")) return cur;
+              const s = new Set(cur);
+              s.delete(""); s.add(msg.self);
+              return [...s];
+            });
             // For each peer already in the room, spin up a PC + apply pairwise offerer rule.
             for (const other of msg.peers) {
               const otherId = typeof other === "string" ? other : other.id;
@@ -340,12 +471,15 @@ export default function CallRoomPage() {
               syncPeerIds();
               recomputeStatus();
             }
+            // Leaver's hand goes down; pending floaters die with their timer.
+            setRaisedHands((cur) => (cur.includes(msg.peer) ? cur.filter((p) => p !== msg.peer) : cur));
             break;
           }
           case "full": setStatus("full"); break;
           case "offer":  await handleOffer(msg.from, msg.sdp); break;
           case "answer": await handleAnswer(msg.from, msg.sdp); break;
           case "ice":    await handleIce(msg.from, msg.candidate); break;
+          case "broadcast": handleBroadcast(msg.from, msg.name, msg.subtype, msg.payload); break;
         }
       };
     })();
@@ -440,9 +574,23 @@ export default function CallRoomPage() {
 
   // Header count includes self.
   const currentCount = peerIds.length + 1;
+  // Derived Set for O(1) hand lookups in tile render.
+  const handSet = new Set(raisedHands);
+  const selfHandUp = ownHandUp || handSet.has(selfIdRef.current);
 
   return (
     <div className="min-h-screen bg-ink-950 text-white flex flex-col">
+      {/* Keyframes for the floating-reaction animation. Scoped to this page. */}
+      <style>{`
+        @keyframes cgFloatUp {
+          0%   { transform: translate(-50%, 0) scale(0.9); opacity: 0; }
+          15%  { transform: translate(-50%, -12px) scale(1.1); opacity: 1; }
+          80%  { transform: translate(-50%, -100px) scale(1); opacity: 1; }
+          100% { transform: translate(-50%, -140px) scale(0.9); opacity: 0; }
+        }
+        .cg-float-up { animation: cgFloatUp 2s ease-out forwards; }
+      `}</style>
+
       <header className="flex items-center justify-between px-4 py-3 border-b border-ink-700">
         <div className="flex items-center gap-3">
           <Link to="/academy" className="text-ink-300 hover:text-white text-sm">← Back</Link>
@@ -462,13 +610,78 @@ export default function CallRoomPage() {
         </div>
       </header>
 
-      <main className="relative flex-1 flex items-stretch justify-center p-4">
-        {boardMode
-          ? <BoardMainArea room={room} peerIds={peerIds} peersRef={peersRef} localVideoRef={localVideoRef} camOn={camOn} />
-          : <ClassicMainArea room={room} peerIds={peerIds} peersRef={peersRef} localVideoRef={localVideoRef} camOn={camOn} />}
-      </main>
+      <div className="relative flex-1 flex min-h-0">
+        <main className="relative flex-1 flex items-stretch justify-center p-4">
+          {boardMode
+            ? <BoardMainArea room={room} peerIds={peerIds} peersRef={peersRef} localVideoRef={localVideoRef}
+                camOn={camOn} handSet={handSet} selfHandUp={selfHandUp} selfId={selfIdRef.current}
+                floaters={floaters} activeSpeaker={activeSpeaker} />
+            : <ClassicMainArea room={room} peerIds={peerIds} peersRef={peersRef} localVideoRef={localVideoRef}
+                camOn={camOn} handSet={handSet} selfHandUp={selfHandUp} selfId={selfIdRef.current}
+                floaters={floaters} activeSpeaker={activeSpeaker} />}
+        </main>
 
-      <footer className="flex items-center justify-center gap-3 py-4 border-t border-ink-700 bg-ink-900">
+        {chatOpen && (
+          <aside className="w-[320px] shrink-0 bg-ink-900 border-l border-ink-700 flex flex-col">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-ink-700">
+              <div className="text-sm font-semibold text-white">Chat</div>
+              <button
+                onClick={() => setChatOpen(false)}
+                className="text-ink-300 hover:text-white text-xs"
+                aria-label="Close chat"
+              >
+                ✕
+              </button>
+            </div>
+            <div ref={chatListRef} className="flex-1 overflow-y-auto p-3 space-y-2">
+              {chatMsgs.length === 0 ? (
+                <div className="text-ink-400 text-sm text-center pt-6">
+                  No messages yet — say hi!
+                </div>
+              ) : (
+                chatMsgs.map((m) => (
+                  <div key={m.id} className={`flex flex-col ${m.own ? "items-end" : "items-start"}`}>
+                    <div className="text-[10px] text-brand-400 mb-0.5 truncate max-w-[260px]">
+                      {m.own ? "You" : m.name}
+                    </div>
+                    <div
+                      className={`max-w-[260px] px-2.5 py-1.5 rounded-xl2 text-sm break-words ${
+                        m.own ? "bg-brand-600 text-white" : "bg-ink-800 text-white"
+                      }`}
+                    >
+                      {m.text}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="border-t border-ink-700 p-2 flex items-end gap-2">
+              <textarea
+                value={chatDraft}
+                onChange={(e) => setChatDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    sendChat();
+                  }
+                }}
+                rows={1}
+                placeholder="Type a message…"
+                className="flex-1 resize-none rounded-lg bg-ink-800 border border-ink-700 px-2 py-1.5 text-sm text-white placeholder:text-ink-500 focus:outline-none focus:border-brand-600 max-h-24"
+              />
+              <button
+                onClick={sendChat}
+                disabled={!chatDraft.trim()}
+                className="rounded-lg px-3 py-1.5 text-sm bg-brand-600 hover:bg-brand-500 disabled:opacity-40 disabled:cursor-not-allowed text-white"
+              >
+                Send
+              </button>
+            </div>
+          </aside>
+        )}
+      </div>
+
+      <footer className="relative flex items-center justify-center gap-3 py-4 border-t border-ink-700 bg-ink-900">
         <button
           onClick={toggleMic}
           className={`rounded-xl2 px-4 py-2 text-sm ${micOn ? "bg-ink-800 hover:bg-ink-700" : "bg-rose-600 hover:bg-rose-500"} text-white`}
@@ -482,10 +695,58 @@ export default function CallRoomPage() {
           {camOn ? "📷 Cam off" : "📷 Cam on"}
         </button>
         <button
+          onClick={toggleHand}
+          className={`rounded-xl2 px-4 py-2 text-sm ${ownHandUp ? "bg-amber-500 hover:bg-amber-400 text-white" : "bg-ink-800 hover:bg-ink-700 text-white"}`}
+          aria-pressed={ownHandUp}
+        >
+          {ownHandUp ? "✋ Lower hand" : "✋ Raise hand"}
+        </button>
+        <button
           onClick={toggleShare}
           className={`rounded-xl2 px-4 py-2 text-sm ${sharing ? "bg-emerald-600 hover:bg-emerald-500" : "bg-ink-800 hover:bg-ink-700"} text-white`}
         >
           {sharing ? "🛑 Stop sharing" : "🖥️ Share screen"}
+        </button>
+        {/* Reactions button + popover. Popover is absolutely positioned above
+            the button so it doesn't shift the footer's flex layout. */}
+        <div className="relative">
+          <button
+            onClick={() => setReactionOpen((v) => !v)}
+            className={`rounded-xl2 px-4 py-2 text-sm ${reactionOpen ? "bg-brand-600 hover:bg-brand-500" : "bg-ink-800 hover:bg-ink-700"} text-white`}
+            aria-haspopup="true"
+            aria-expanded={reactionOpen}
+          >
+            😀 React
+          </button>
+          {reactionOpen && (
+            <div
+              className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 flex gap-1 bg-ink-800 border border-ink-700 rounded-xl2 px-2 py-1.5 shadow-lg z-20"
+              role="menu"
+            >
+              {REACTION_EMOJIS.map((e) => (
+                <button
+                  key={e}
+                  onClick={() => sendReaction(e)}
+                  className="text-xl hover:scale-125 transition-transform px-1"
+                  aria-label={`React with ${e}`}
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <button
+          onClick={() => setChatOpen((v) => !v)}
+          className={`relative rounded-xl2 px-4 py-2 text-sm ${chatOpen ? "bg-brand-600 hover:bg-brand-500" : "bg-ink-800 hover:bg-ink-700"} text-white`}
+          aria-pressed={chatOpen}
+        >
+          💬 Chat
+          {!chatOpen && chatUnread > 0 && (
+            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] leading-[18px] font-semibold text-center">
+              {chatUnread > 99 ? "99+" : chatUnread}
+            </span>
+          )}
         </button>
         <button
           onClick={leave}
@@ -506,15 +767,27 @@ type MainAreaProps = {
   peersRef: React.MutableRefObject<Map<string, PeerState>>;
   localVideoRef: React.RefObject<HTMLVideoElement>;
   camOn: boolean;
+  handSet: Set<string>;
+  selfHandUp: boolean;
+  selfId: string;
+  floaters: FloatingReaction[];
+  activeSpeaker: string | null;
 };
 
-function ClassicMainArea({ room, peerIds, peersRef, localVideoRef, camOn }: MainAreaProps) {
+function ClassicMainArea({
+  room, peerIds, peersRef, localVideoRef, camOn,
+  handSet, selfHandUp, selfId, floaters, activeSpeaker,
+}: MainAreaProps) {
   // Explicit cols per count — keeps cell aspect predictable vs auto-fit.
   let gridCols = "grid-cols-1";
   if (peerIds.length === 2) gridCols = "grid-cols-2";
   else if (peerIds.length >= 3 && peerIds.length <= 4) gridCols = "grid-cols-2";
   else if (peerIds.length >= 5 && peerIds.length <= 6) gridCols = "grid-cols-3";
   else if (peerIds.length >= 7) gridCols = "grid-cols-3";
+
+  // Reactions anchored to self view render inside the PIP; ones anchored to a
+  // peer render inside their RemoteTile. "" is treated as self (pre-hello).
+  const selfFloaters = floaters.filter((f) => f.peerId === selfId || f.peerId === "");
 
   return (
     <div className="relative flex-1 flex items-center justify-center">
@@ -538,6 +811,8 @@ function ClassicMainArea({ room, peerIds, peersRef, localVideoRef, camOn }: Main
               getStream={() => peersRef.current.get(id)?.remoteStream ?? null}
               getName={() => peersRef.current.get(id)?.name || id}
               isActive={activeSpeaker === id}
+              handUp={handSet.has(id)}
+              floaters={floaters.filter((f) => f.peerId === id)}
             />
           ))}
         </div>
@@ -557,6 +832,17 @@ function ClassicMainArea({ room, peerIds, peersRef, localVideoRef, camOn }: Main
             Camera off
           </div>
         )}
+        {selfHandUp && (
+          <div className="absolute top-1 right-1 text-2xl bg-black/50 rounded-full px-2 py-1 leading-none">✋</div>
+        )}
+        {selfFloaters.map((f) => (
+          <div
+            key={f.id}
+            className="cg-float-up absolute left-1/2 bottom-2 text-3xl pointer-events-none select-none"
+          >
+            {f.emoji}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -564,7 +850,10 @@ function ClassicMainArea({ room, peerIds, peersRef, localVideoRef, camOn }: Main
 
 // Chess-native layout: board left, videos as a vertical column right (or a
 // horizontal strip below the board on narrow widths). Reset lives under board.
-function BoardMainArea({ room, peerIds, peersRef, localVideoRef, camOn }: MainAreaProps) {
+function BoardMainArea({
+  room, peerIds, peersRef, localVideoRef, camOn,
+  handSet, selfHandUp, selfId, floaters, activeSpeaker,
+}: MainAreaProps) {
   const { fen, lastMove, dests, sendMove, sendReset, connected } = useSharedBoard(room);
 
   const lastMoveTuple: [Key, Key] | undefined = lastMove ? [lastMove.from as Key, lastMove.to as Key] : undefined;
@@ -572,6 +861,8 @@ function BoardMainArea({ room, peerIds, peersRef, localVideoRef, camOn }: MainAr
   // No optimistic apply — server echoes back and applyFen re-derives. Promotion
   // is omitted; server defaults to "q" (fine for P0; picker is future work).
   const onBoardMove = (from: Key, to: Key) => sendMove(String(from), String(to));
+
+  const selfFloaters = floaters.filter((f) => f.peerId === selfId || f.peerId === "");
 
   return (
     <div className="flex-1 flex flex-col md:flex-row gap-4 items-stretch min-h-0">
@@ -619,6 +910,17 @@ function BoardMainArea({ room, peerIds, peersRef, localVideoRef, camOn }: MainAr
             </div>
           )}
           <div className="absolute bottom-1 left-1 px-2 py-0.5 rounded bg-black/60 text-[10px] text-white font-mono">You</div>
+          {selfHandUp && (
+            <div className="absolute top-1 right-1 text-2xl bg-black/50 rounded-full px-2 py-1 leading-none">✋</div>
+          )}
+          {selfFloaters.map((f) => (
+            <div
+              key={f.id}
+              className="cg-float-up absolute left-1/2 bottom-2 text-2xl pointer-events-none select-none"
+            >
+              {f.emoji}
+            </div>
+          ))}
         </div>
         {peerIds.length === 0 && (
           <div className="w-[160px] md:w-full aspect-video shrink-0 rounded-lg border border-ink-700 bg-ink-900 flex items-center justify-center text-[11px] text-ink-400 px-2 text-center">
@@ -631,6 +933,10 @@ function BoardMainArea({ room, peerIds, peersRef, localVideoRef, camOn }: MainAr
               peerId={id}
               index={idx}
               getStream={() => peersRef.current.get(id)?.remoteStream ?? null}
+              getName={() => peersRef.current.get(id)?.name || id}
+              isActive={activeSpeaker === id}
+              handUp={handSet.has(id)}
+              floaters={floaters.filter((f) => f.peerId === id)}
             />
           </div>
         ))}
@@ -725,12 +1031,16 @@ function RemoteTile({
   getStream,
   getName,
   isActive,
+  handUp,
+  floaters,
 }: {
   peerId: string;
   index: number;
   getStream: () => MediaStream | null;
   getName?: () => string;
   isActive?: boolean;
+  handUp?: boolean;
+  floaters?: FloatingReaction[];
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const stream = getStream();
@@ -760,6 +1070,17 @@ function RemoteTile({
         {isActive && <span className="text-emerald-300">🎤</span>}
         <span className="truncate max-w-[140px]">{name}</span>
       </div>
+      {handUp && (
+        <div className="absolute top-1 right-1 text-2xl bg-black/50 rounded-full px-2 py-1 leading-none">✋</div>
+      )}
+      {floaters && floaters.length > 0 && floaters.map((f) => (
+        <div
+          key={f.id}
+          className="cg-float-up absolute left-1/2 bottom-2 text-3xl pointer-events-none select-none"
+        >
+          {f.emoji}
+        </div>
+      ))}
     </div>
   );
 }
