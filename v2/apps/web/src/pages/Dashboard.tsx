@@ -340,7 +340,7 @@ export default function DashboardPage() {
     <div className="space-y-5">
       {viewedAs && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl2 border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-100">
-          <span>👑 Admin — viewing <b>{viewedAs}</b>'s performance</span>
+          <span>👀 Viewing <b>{viewedAs}</b>'s performance</span>
           <Link to={`/history?as=${encodeURIComponent(viewedAs)}`} className="underline hover:text-white">full history →</Link>
           <Link to="/dashboard" className="ml-auto underline hover:text-white">← view mine</Link>
         </div>

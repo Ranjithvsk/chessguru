@@ -427,7 +427,7 @@ export default function HistoryPage() {
     <div className="space-y-6">
       {data.viewedAs && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl2 border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-100">
-          <span>👑 Admin — viewing <b>{data.viewedAs}</b>'s history</span>
+          <span>👀 Viewing <b>{data.viewedAs}</b>'s history</span>
           <Link to="/history" className="ml-auto underline hover:text-white">← view mine</Link>
         </div>
       )}

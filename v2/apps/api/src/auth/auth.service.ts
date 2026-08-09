@@ -81,6 +81,11 @@ export class AuthService {
     if (!ok) return { ok: false, error: "Invalid username or password." };
     session.userId = user._id;
     session.username = user.username;
+    // Populate multi-tenant context on the session so /academy/* endpoints work
+    // for signed-in owners/coaches (fresh login previously left these null and
+    // the role gate rejected everything with 403 "owner or coach only").
+    session.academyId = user.academyId ?? null;
+    session.role = user.role ?? null;
     if (keep && session.cookie) session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
     await col.updateOne({ _id: user._id }, { $set: { lastLogin: new Date() } });
     return { ok: true };
@@ -278,6 +283,8 @@ export class AuthService {
     );
     session.userId = user._id;
     session.username = user.username;
+    session.academyId = user.academyId ?? null;   // same multi-tenant fix as signin()
+    session.role = user.role ?? null;
     if (session.cookie) session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000; // OTP flow = keep me signed in
     return { ok: true };
   }

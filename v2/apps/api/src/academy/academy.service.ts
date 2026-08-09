@@ -39,18 +39,50 @@ export class AcademyService {
     return { academyId, userId, username: session.username || userId };
   }
 
-  /** Create + email an invite for a coach to join the caller's academy. */
+  /** Owner-or-coach guard: session must have role in {academy_owner, coach} + academyId. */
+  private ensureCoachOrOwner(session: any): { academyId: string; userId: string; username: string; role: "academy_owner"|"coach" } {
+    const role = session?.role;
+    const academyId = session?.academyId;
+    const userId = session?.userId;
+    if (!userId) throw new ForbiddenException("sign in first");
+    if ((role !== "academy_owner" && role !== "coach") || !academyId) throw new ForbiddenException("owner or coach only");
+    return { academyId, userId, username: session.username || userId, role };
+  }
+
+  /** Create + email an invite for a coach OR student to join the caller's academy.
+   *  Coach path: only academy_owner can create.
+   *  Student path: owner OR coach can create. When an owner invites a student, they
+   *  must supply `coachId` (the target coach in this academy). When a coach invites a
+   *  student, `coachId` is auto-forced to the caller. */
   async createInvite(session: any, body: any) {
-    const { academyId, userId, username } = this.ensureOwner(session);
     const email = String(body?.email || "").trim().toLowerCase();
     const displayName = String(body?.displayName || "").trim().slice(0, 60);
-    const role = body?.role === "coach" ? "coach" : "coach";  // students later; owner-created coaches only for now
+    const wantRole = body?.role === "student" ? "student" : "coach";
     if (!email || !email.includes("@")) return { ok: false, error: "Valid email required." };
+
+    // Authz + coachId resolution
+    let academyId: string, userId: string, username: string;
+    let coachId: string | null = null;
+    if (wantRole === "coach") {
+      ({ academyId, userId, username } = this.ensureOwner(session));
+    } else {
+      const g = this.ensureCoachOrOwner(session);
+      academyId = g.academyId; userId = g.userId; username = g.username;
+      if (g.role === "coach") {
+        coachId = g.userId;
+      } else {
+        // owner-invite must specify a coach in this academy
+        const requestedCoach = String(body?.coachId || "").trim().toLowerCase();
+        if (!requestedCoach) return { ok: false, error: "Pick a coach for this student." };
+        const coach = await this.users().findOne({ _id: requestedCoach as any, academyId, role: "coach" });
+        if (!coach) return { ok: false, error: "That coach isn't in this academy." };
+        coachId = requestedCoach;
+      }
+    }
 
     // No duplicate active invite for the same (email, academy). Consumed ones don't count.
     const existing = await this.invites().findOne({ academyId, email, consumedAt: { $exists: false } });
     if (existing) return { ok: false, error: "That email already has a pending invite for this academy." };
-    // If the email already belongs to a user in this academy, no need to invite.
     const alreadyMember = await this.users().findOne({ email, academyId });
     if (alreadyMember) return { ok: false, error: "That email is already a member of this academy." };
 
@@ -64,15 +96,17 @@ export class AcademyService {
       _id: token as any,
       academyId, academyName,
       invitedBy: userId, invitedByName: username,
-      email, displayName, role,
+      email, displayName, role: wantRole,
+      ...(coachId ? { coachId } : {}),
       createdAt: now, expiresAt,
     });
 
     const publicUrl = (process.env.PUBLIC_URL || "https://harinitharanjith.com").replace(/\/+$/, "");
     const link = `${publicUrl}/accept-invite?token=${encodeURIComponent(token)}`;
+    const roleWord = wantRole === "student" ? "student" : "coach";
     const subject = `You're invited to ${academyName} on ChessGuru`;
     const text = [
-      `${username} invited you to join ${academyName} as a coach on ChessGuru.`,
+      `${username} invited you to join ${academyName} as a ${roleWord} on ChessGuru.`,
       "",
       `Accept the invitation and set your password: ${link}`,
       "",
@@ -81,35 +115,55 @@ export class AcademyService {
     const html = `
       <div style="font-family:system-ui,sans-serif;max-width:520px">
         <h2 style="color:#111">You're invited to <b>${escHtml(academyName)}</b> on ChessGuru</h2>
-        <p><b>${escHtml(username)}</b> invited you to join as a <b>coach</b>.</p>
+        <p><b>${escHtml(username)}</b> invited you to join as a <b>${escHtml(roleWord)}</b>.</p>
         <p style="margin:24px 0"><a href="${link}" style="background:#2563eb;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;display:inline-block">Accept & set your password</a></p>
         <p style="color:#666;font-size:13px">Or paste this link in your browser:<br/><a href="${link}">${escHtml(link)}</a></p>
         <p style="color:#999;font-size:12px">This link is valid for ${INVITE_TTL_DAYS} days. If you didn't expect this, just ignore it.</p>
       </div>`;
 
     const mailRes = await sendMail({ to: email, subject, html, text });
-    return { ok: true, invite: { token, email, displayName, expiresAt, mail: mailRes.ok ? "sent" : "failed" } };
+    return { ok: true, invite: { token, email, displayName, role: wantRole, coachId, expiresAt, mail: mailRes.ok ? "sent" : "failed" } };
   }
 
-  /** Owner-only listing of pending invites (not consumed, not expired). */
-  async listInvites(session: any) {
-    const { academyId } = this.ensureOwner(session);
-    const now = new Date();
-    const rows = await this.invites()
-      .find({ academyId, consumedAt: { $exists: false }, expiresAt: { $gt: now } })
+  /** Owner OR coach: list students in this academy. Owner sees ALL; coach sees theirs. */
+  async listStudents(session: any) {
+    const g = this.ensureCoachOrOwner(session);
+    const filter: any = { academyId: g.academyId, role: "student" };
+    if (g.role === "coach") filter.coachId = g.userId;
+    const rows = await this.users()
+      .find(filter, { projection: { _id: 1, username: 1, email: 1, coachId: 1, createdAt: 1, lastLogin: 1 } })
       .sort({ createdAt: -1 })
       .toArray();
+    // Attach current puzzle rating (userperfs.puzzle.gl.r) as a small enrichment.
+    const perfs = await this.conn.db!.collection("userperfs")
+      .find({ _id: { $in: rows.map((r: any) => r._id) } }, { projection: { _id: 1, puzzle: 1 } }).toArray();
+    const rmap: Record<string, number> = {};
+    for (const p of perfs as any[]) rmap[String(p._id)] = Math.round(p?.puzzle?.gl?.r ?? 1500);
+    return rows.map((s: any) => ({ ...s, puzzleRating: rmap[String(s._id)] ?? 1500 }));
+  }
+
+  /** Pending invites (not consumed, not expired). Owner sees ALL; coach sees theirs only. */
+  async listInvites(session: any) {
+    const g = this.ensureCoachOrOwner(session);
+    const now = new Date();
+    const filter: any = { academyId: g.academyId, consumedAt: { $exists: false }, expiresAt: { $gt: now } };
+    if (g.role === "coach") filter.invitedBy = g.userId;
+    const rows = await this.invites().find(filter).sort({ createdAt: -1 }).toArray();
     return rows.map((r: any) => ({
       token: r._id, email: r.email, displayName: r.displayName,
-      role: r.role, createdAt: r.createdAt, expiresAt: r.expiresAt,
+      role: r.role, coachId: r.coachId ?? null,
+      createdAt: r.createdAt, expiresAt: r.expiresAt,
       invitedByName: r.invitedByName,
     }));
   }
 
-  /** Owner-only revoke of a pending invite. Deletes the row so the token dies. */
+  /** Revoke a pending invite. Owner can revoke ANY invite in their academy;
+   *  coach can only revoke invites they created. */
   async revokeInvite(session: any, token: string) {
-    const { academyId } = this.ensureOwner(session);
-    const r = await this.invites().deleteOne({ _id: token as any, academyId, consumedAt: { $exists: false } });
+    const g = this.ensureCoachOrOwner(session);
+    const filter: any = { _id: token as any, academyId: g.academyId, consumedAt: { $exists: false } };
+    if (g.role === "coach") filter.invitedBy = g.userId;
+    const r = await this.invites().deleteOne(filter);
     return { ok: r.deletedCount === 1 };
   }
 
@@ -170,7 +224,11 @@ export class AcademyService {
     const bcrypt = await import("bcryptjs");
     const hash = await bcrypt.default.hash(password, 10);
     const now = new Date();
-    const userDoc = {
+    // For student invites, the invite row carries the assigned coachId — copy it
+    // onto the new user doc so /view-as authz and coach rosters both work.
+    const inviteDoc: any = await this.invites().findOne({ _id: token as any });
+    const coachId = inviteDoc?.coachId ?? null;
+    const userDoc: any = {
       _id: uid,
       username,
       bpass: hash,
@@ -179,7 +237,8 @@ export class AcademyService {
       role: inv.role,
       createdAt: now, lastLogin: now,
     };
-    await this.users().insertOne(userDoc as any);
+    if (coachId) userDoc.coachId = coachId;
+    await this.users().insertOne(userDoc);
     await this.invites().updateOne(
       { _id: token as any },
       { $set: { consumedAt: now, consumedByUserId: uid } },

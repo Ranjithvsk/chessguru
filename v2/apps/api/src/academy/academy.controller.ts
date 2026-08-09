@@ -28,4 +28,9 @@ export class AcademyController {
   listCoaches(@Req() req: any) {
     return this.svc.listCoaches(req.session);
   }
+
+  @Get("students")
+  listStudents(@Req() req: any) {
+    return this.svc.listStudents(req.session);
+  }
 }
