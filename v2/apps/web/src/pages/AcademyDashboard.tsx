@@ -911,6 +911,8 @@ function describeFen(fen: string): string {
 }
 function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   const [classFilter, setClassFilter] = useState<string>(""); // "" = all
+  const [starredOnly, setStarredOnly] = useState(false);
+  const starredCount = snaps.reduce((n, s) => n + (s.starred ? 1 : 0), 0);
   // Tally by class + track the most-recent snap timestamp per class. Chips
   // sort by recency (not count) so a coach who just finished a class sees
   // that class first regardless of how many snaps they took.
@@ -923,26 +925,44 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   }
   const topClasses = [...tally.entries()].sort((a, b) => b[1].lastAt - a[1].lastAt).slice(0, 5);
   // Starred snaps float to the top so the coach's review shortlist is one
-  // scroll-length away regardless of recency.
+  // scroll-length away regardless of recency. If the starred-only chip is on,
+  // non-starred snaps are dropped entirely.
   const filtered = (classFilter ? snaps.filter((s) => s.classId === classFilter) : snaps)
+    .filter((s) => (starredOnly ? !!s.starred : true))
     .slice()
     .sort((a, b) => Number(!!b.starred) - Number(!!a.starred));
   return (
     <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
       <h2 className="mb-3 font-display text-lg text-white">📸 Recent snaps <span className="text-xs text-ink-500">({snaps.length})</span></h2>
-      {topClasses.length > 1 && (
+      {(topClasses.length > 1 || starredCount > 0) && (
         <div className="mb-3 flex flex-wrap items-center gap-1.5">
-          <button onClick={() => setClassFilter("")}
-            className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${classFilter === "" ? "border-brand-500/60 bg-brand-500/15 text-brand-100" : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>
-            All {snaps.length}
-          </button>
-          {topClasses.map(([id, { title, n }]) => (
-            <button key={id} onClick={() => setClassFilter(id)}
-              className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${classFilter === id ? "border-brand-500/60 bg-brand-500/15 text-brand-100" : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>
-              <span className="max-w-[18ch] inline-block truncate align-bottom">{title}</span>
-              <span className="ml-1 opacity-70">{n}</span>
-            </button>
-          ))}
+          {topClasses.length > 1 && (
+            <>
+              <button onClick={() => setClassFilter("")}
+                className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${classFilter === "" ? "border-brand-500/60 bg-brand-500/15 text-brand-100" : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>
+                All {snaps.length}
+              </button>
+              {topClasses.map(([id, { title, n }]) => (
+                <button key={id} onClick={() => setClassFilter(id)}
+                  className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${classFilter === id ? "border-brand-500/60 bg-brand-500/15 text-brand-100" : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>
+                  <span className="max-w-[18ch] inline-block truncate align-bottom">{title}</span>
+                  <span className="ml-1 opacity-70">{n}</span>
+                </button>
+              ))}
+            </>
+          )}
+          {starredCount > 0 && (
+            <>
+              {topClasses.length > 1 && <span className="mx-1 h-4 w-px bg-ink-700" />}
+              <button onClick={() => setStarredOnly((v) => !v)}
+                title="Show only starred snaps"
+                className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${starredOnly
+                  ? "border-amber-400/60 bg-amber-500/15 text-amber-100"
+                  : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>
+                ★ Starred <span className="ml-1 opacity-70">{starredCount}</span>
+              </button>
+            </>
+          )}
         </div>
       )}
       {filtered.length === 0 ? (
