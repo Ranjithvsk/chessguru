@@ -265,6 +265,33 @@ export class PuzzlesService {
       biggestGain: biggestGain || null, biggestGainDate,
       fastestMs: isFinite(fastestMs) ? fastestMs : null, fastestDate,
     };
+    // Per-theme solve-speed medians — only counts WINS with a real ms (misses
+    // and legacy rows without ms are excluded so the "you crush X in 8s" read
+    // is honest). Themes are pulled from each round's stored th[] array. Filter
+    // to themes with >= 3 timed solves for stability; less than that reads as
+    // noise. Sorted fastest first so the trainer's leaderboard mental model works.
+    const speedByTheme = new Map<string, number[]>();
+    for (const r of puzzleRounds as any[]) {
+      if (!r.w) continue;
+      if (typeof r.ms !== "number" || r.ms <= 0) continue;
+      if (!Array.isArray(r.th)) continue;
+      for (const t of r.th) {
+        if (typeof t !== "string" || PuzzlesService.UNRATED.has(t)) continue;
+        const arr = speedByTheme.get(t) ?? [];
+        arr.push(r.ms);
+        speedByTheme.set(t, arr);
+      }
+    }
+    const themeSpeeds = [...speedByTheme.entries()]
+      .filter(([, arr]) => arr.length >= 3)
+      .map(([theme, arr]) => {
+        const sorted = arr.slice().sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        // Odd length → middle; even → mean of the two middles. Standard median.
+        const medianMs = sorted.length % 2 === 1 ? sorted[mid]! : Math.round((sorted[mid - 1]! + sorted[mid]!) / 2);
+        return { theme, medianMs, n: sorted.length };
+      })
+      .sort((a, b) => a.medianMs - b.medianMs);
     return {
       loggedIn: true,
       global: { rating: Math.round(p.puzzle?.gl?.r ?? 1500), rd: Math.round(p.puzzle?.gl?.d ?? 500), games: p.puzzle?.nb ?? 0 },
@@ -275,6 +302,7 @@ export class PuzzlesService {
       days,
       bands,
       personalBests,
+      themeSpeeds,
     };
   }
 

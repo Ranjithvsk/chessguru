@@ -16,6 +16,7 @@ type Dash = {
   themesBf?: ThemeRow[];
   days?: { day: string; solves: number; wins: number; rating: number }[];
   bands?: { lo: number; hi: number; attempted: number; solved: number; accuracy: number }[];
+  themeSpeeds?: { theme: string; medianMs: number; n: number }[];
   personalBests?: {
     bestRating: number | null; bestRatingDate: string | null;
     bestDay: number | null; bestDayDate: string | null;
@@ -193,6 +194,62 @@ function PersonalBests({ pb }: { pb: NonNullable<Dash["personalBests"]> }) {
   );
 }
 
+// Per-theme median solve time. Uses the same "click a theme to train it" affordance
+// as the ThemeBar so the card doubles as an "attack your slow themes" launch pad.
+// Only rendered when at least a few themes have >= 3 timed solves — otherwise it
+// reads as noise and the card hides itself.
+function SpeedByTheme({ speeds, onTrain }: { speeds: NonNullable<Dash["themeSpeeds"]>; onTrain: (theme: string) => void }) {
+  if (speeds.length === 0) return null;
+  // Coarse tint by absolute time — matches the speed-tier chips on Puzzles /
+  // History (⚡ fast, 🚀 quick, ⏱ steady, 🐢 slow) so the same numbers read the
+  // same everywhere.
+  const tint = (ms: number) =>
+    ms < 10_000 ? { emoji: "⚡", cls: "bg-emerald-500/15 text-emerald-200 border-emerald-500/30" }
+    : ms < 30_000 ? { emoji: "🚀", cls: "bg-cyan-500/15 text-cyan-200 border-cyan-500/35" }
+    : ms < 60_000 ? { emoji: "⏱", cls: "bg-brand-500/15 text-brand-100 border-brand-500/30" }
+    : { emoji: "🐢", cls: "bg-amber-500/10 text-amber-100 border-amber-500/25" };
+  const fastest = speeds.slice(0, 5);
+  const slowest = speeds.slice(-5).reverse().filter((s) => !fastest.some((f) => f.theme === s.theme));
+  const fmt = (ms: number) => ms < 10_000 ? `${(ms / 1000).toFixed(1)}s`
+    : ms < 60_000 ? `${Math.round(ms / 1000)}s`
+    : `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
+  const Row = ({ s }: { s: { theme: string; medianMs: number; n: number } }) => {
+    const t = tint(s.medianMs);
+    return (
+      <button onClick={() => onTrain(s.theme)} title={`Train ${prettify(s.theme)}`}
+        className="group flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-ink-800">
+        <span className="truncate text-sm text-ink-200 group-hover:text-white">{prettify(s.theme)}</span>
+        <span className="flex shrink-0 items-center gap-2">
+          <span className="text-[10px] text-ink-500 tabular-nums">n={s.n}</span>
+          <span className={`rounded border px-1.5 py-0.5 text-[11px] font-semibold ${t.cls}`}>
+            <span className="mr-1">{t.emoji}</span><span className="tabular-nums">{fmt(s.medianMs)}</span>
+          </span>
+        </span>
+      </button>
+    );
+  };
+  return (
+    <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
+      <div className="mb-3 flex items-baseline justify-between">
+        <span className="text-sm font-semibold text-white">⚡ Solve speed by theme</span>
+        <span className="text-xs text-ink-400">median · won puzzles only · min 3 solves</span>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="rounded-lg border border-emerald-400/25 bg-emerald-400/5 p-3">
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-300">Fastest</div>
+          {fastest.map((s) => <Row key={s.theme} s={s} />)}
+        </div>
+        <div className="rounded-lg border border-amber-400/25 bg-amber-400/5 p-3">
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-300">Slowest — worth drilling</div>
+          {slowest.length > 0
+            ? slowest.map((s) => <Row key={s.theme} s={s} />)
+            : <p className="py-4 text-center text-[11px] text-ink-500">Not enough distinct themes yet.</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Per-difficulty band chart: horizontal bars, one per 200-pt band, split solved/missed
 // with an accuracy % on the right. The band containing the user's CURRENT rating gets
 // a subtle ring so you can eyeball "am I holding accuracy where my rating claims I am?"
@@ -362,6 +419,7 @@ export default function DashboardPage() {
       {data.personalBests && <PersonalBests pb={data.personalBests} />}
       {data.days && <RatingChart days={data.days} />}
       {data.bands && data.bands.length > 0 && <BandChart bands={data.bands} userRating={data.global?.rating ?? 1500} />}
+      {data.themeSpeeds && data.themeSpeeds.length > 0 && <SpeedByTheme speeds={data.themeSpeeds} onTrain={train} />}
 
       {rated.length >= 3 && (
         <div className="grid gap-3 md:grid-cols-2">
