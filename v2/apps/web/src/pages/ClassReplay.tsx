@@ -72,6 +72,13 @@ export default function ClassReplayPage() {
   const [tMs, setTMs] = useState(0);
   const [snaps, setSnaps] = useState<Snap[]>([]);
   const [durationMs, setDurationMs] = useState(0);
+  // Playback speed pill. Applied to the video element via useEffect so any
+  // future re-mount (e.g. source change) picks it up.
+  const [speed, setSpeed] = useState(1);
+  useEffect(() => {
+    const v = videoRef.current;
+    if (v) v.playbackRate = speed;
+  }, [speed]);
 
   // Fetch the sidecar timeline. Missing sidecar (recording from before Phase 4) is
   // fine — the video still plays, board just stays at starting position.
@@ -251,6 +258,17 @@ export default function ClassReplayPage() {
           positioned by percentage across the recording; click to jump to that moment
           in both video and board. */}
       <section className="min-w-0 lg:min-h-0 flex flex-col">
+        {/* Playback-speed pills. Cheap and always-available; teacher can slow
+            down for a tricky sequence or fast-forward past a long think. */}
+        <div className="mb-2 flex items-center gap-1 text-[11px]">
+          <span className="uppercase tracking-wide text-ink-500 mr-1">Speed</span>
+          {[0.75, 1, 1.5, 2].map((s) => (
+            <button key={s} onClick={() => setSpeed(s)}
+              className={`rounded-full border px-2 py-0.5 font-semibold tabular-nums transition-colors ${speed === s
+                ? "border-brand-500/60 bg-brand-500/15 text-brand-100"
+                : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>{s}×</button>
+          ))}
+        </div>
         <div className="flex-1 overflow-hidden rounded-xl2 border border-ink-700 bg-black">
           <video ref={videoRef} controls playsInline preload="metadata"
             onSeeked={onSeek} onTimeUpdate={onSeek}
