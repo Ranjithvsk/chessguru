@@ -61,6 +61,22 @@ export class ClassAttendanceController {
       { $sort: { lastSeen: -1 } as any },
       { $limit: limit },
     ]).toArray();
+    // Enrich signed-in rows with the student's email so the client can offer
+    // "add to invitee list" bulk actions without a per-card lookup. Guests
+    // don't have userIds → email stays null and the bulk action will skip
+    // them with a visible reason.
+    const userIds = rows.map((r: any) => r.userId).filter((u: any) => typeof u === "string" && u.length > 0);
+    if (userIds.length) {
+      const users = await this.conn.db!.collection("users")
+        .find({ _id: { $in: userIds } as any }, { projection: { _id: 1, email: 1 } as any }).toArray();
+      const emailByUid = new Map<string, string | null>(users.map((u: any) => [String(u._id), typeof u.email === "string" ? u.email : null]));
+      for (const r of rows as any[]) {
+        if (r.userId) r.email = emailByUid.get(r.userId) ?? null;
+        else r.email = null;
+      }
+    } else {
+      for (const r of rows as any[]) r.email = null;
+    }
     return { students: rows };
   }
 

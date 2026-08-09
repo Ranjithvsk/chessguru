@@ -242,7 +242,7 @@ function JitsiRoom({ roomId, displayName }: { roomId: string; displayName?: stri
 }
 
 // Aggregated attendee row — matches ClassAttendanceController.coachStudents()'s response.
-type CoachStudent = { userId: string | null; name: string; classesAttended: number; firstSeen: string; lastSeen: string };
+type CoachStudent = { userId: string | null; email?: string | null; name: string; classesAttended: number; firstSeen: string; lastSeen: string };
 
 // "How long ago" tag used across the landing (attendance rows and now the
 // students roster). Compact: "5m", "3d", "2mo" — no need to be exact.
@@ -325,9 +325,17 @@ function StudentHistoryModal({ student, onClose }: { student: CoachStudent; onCl
 // Coach-only roster. Fetch on mount; render as a compact grid below the schedule
 // sections. Skips itself entirely (no header, no empty state) for accounts that
 // have no owned classes / no attendees yet.
-function MyStudents() {
+function MyStudents({ onAppendInvitees }: { onAppendInvitees?: (emails: string[]) => void }) {
   const [students, setStudents] = useState<CoachStudent[] | null>(null);
   const [detail, setDetail] = useState<CoachStudent | null>(null);
+  // Multi-select state. Selected students without an email (guests / signed-in
+  // users with no email on file) can still be selected — the bulk action
+  // handler filters them and shows a "N skipped" note.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const toggle = (k: string) => setSelected((s) => {
+    const next = new Set(s); next.has(k) ? next.delete(k) : next.add(k); return next;
+  });
+  const clearSel = () => setSelected(new Set());
   useEffect(() => {
     let cancelled = false;
     fetch(`${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/coach/students`,
@@ -340,6 +348,19 @@ function MyStudents() {
   if (!students || students.length === 0) return null;
   const totalClasses = students.reduce((s, x) => s + (x.classesAttended || 0), 0);
   const csvHref = `${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/coach/students.csv`;
+  // Bulk-invite: pick selected students that HAVE an email and hand them to
+  // the parent so it can append to the schedule form. Skipped (email-less)
+  // students surface in a small note next to the action button.
+  const selectedList = students.filter((s) => selected.has(keyOf(s)));
+  const withEmail = selectedList.filter((s) => !!s.email);
+  const skipped = selectedList.length - withEmail.length;
+  const doAddToInvitees = () => {
+    if (withEmail.length === 0 || !onAppendInvitees) return;
+    onAppendInvitees(withEmail.map((s) => s.email!));
+    clearSel();
+    // Bring the schedule form into view so the coach sees the emails landed.
+    document.getElementById("class-schedule-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
   return (
     <section>
       <h2 className="mb-2 flex flex-wrap items-baseline justify-between gap-2 text-sm font-semibold text-white">
@@ -354,26 +375,63 @@ function MyStudents() {
         </span>
       </h2>
       <div className="grid gap-2 rounded-xl2 border border-ink-700 bg-ink-900 p-3 sm:grid-cols-2 lg:grid-cols-3">
-        {students.map((s) => (
-          <button key={keyOf(s)} type="button" onClick={() => setDetail(s)}
-                  title="Click to see this student's class history"
-                  className="flex items-center justify-between gap-3 rounded-lg bg-ink-800/60 px-3 py-2 text-left transition-colors hover:bg-ink-800 focus:outline-none focus:ring-2 focus:ring-brand-400">
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
-                <span className="truncate text-sm font-semibold text-white">{s.name || "Guest"}</span>
-                {!s.userId && <span className="rounded bg-ink-700 px-1 text-[9px] text-ink-400">guest</span>}
-              </div>
-              <div className="text-[10px] text-ink-500">
-                last seen {shortAgo(s.lastSeen)} · joined {shortAgo(s.firstSeen)}
-              </div>
+        {students.map((s) => {
+          const k = keyOf(s);
+          const isSel = selected.has(k);
+          return (
+            <div key={k}
+                 className={`flex items-center justify-between gap-3 rounded-lg px-3 py-2 transition-colors ${isSel ? "bg-brand-500/15 ring-1 ring-brand-500/40" : "bg-ink-800/60 hover:bg-ink-800"}`}>
+              {/* Checkbox — self-contained so clicking it doesn't open the history modal. */}
+              <label className="flex shrink-0 items-center" onClick={(e) => e.stopPropagation()}>
+                <input type="checkbox" checked={isSel} onChange={() => toggle(k)}
+                  className="h-4 w-4 accent-brand-500 cursor-pointer" title="Select" />
+              </label>
+              <button type="button" onClick={() => setDetail(s)}
+                      title="Click to see this student's class history"
+                      className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left focus:outline-none">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-sm font-semibold text-white">{s.name || "Guest"}</span>
+                    {!s.userId && <span className="rounded bg-ink-700 px-1 text-[9px] text-ink-400">guest</span>}
+                    {!s.email && <span title="No email on file — bulk invite will skip"
+                                       className="rounded bg-amber-500/15 px-1 text-[9px] text-amber-200">no email</span>}
+                  </div>
+                  <div className="text-[10px] text-ink-500">
+                    last seen {shortAgo(s.lastSeen)} · joined {shortAgo(s.firstSeen)}
+                  </div>
+                </div>
+                <span className="shrink-0 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-200"
+                      title={`Attended ${s.classesAttended} of your classes`}>
+                  × {s.classesAttended}
+                </span>
+              </button>
             </div>
-            <span className="shrink-0 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-200"
-                  title={`Attended ${s.classesAttended} of your classes`}>
-              × {s.classesAttended}
-            </span>
-          </button>
-        ))}
+          );
+        })}
       </div>
+
+      {/* Floating action bar — only when a selection exists. Sits fixed at the
+          bottom of the viewport so scrolling through a big roster doesn't
+          hide it. */}
+      {selectedList.length > 0 && (
+        <div className="fixed inset-x-0 bottom-4 z-40 mx-auto flex max-w-lg items-center gap-3 rounded-xl2 border border-brand-500/50 bg-gradient-to-br from-brand-500/25 via-ink-900 to-ink-900 p-3 shadow-2xl">
+          <span className="text-xs font-semibold text-white">
+            {selectedList.length} selected
+            {skipped > 0 && <span className="ml-2 font-normal text-amber-300">· {skipped} skipped (no email)</span>}
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <button onClick={clearSel}
+              className="rounded-lg border border-ink-600 bg-ink-800 px-3 py-1.5 text-xs font-semibold text-ink-200 hover:bg-ink-700">
+              Clear
+            </button>
+            <button onClick={doAddToInvitees} disabled={withEmail.length === 0}
+              className="rounded-lg bg-gradient-to-r from-brand-600 to-accent-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:from-brand-500 hover:to-accent-400 disabled:opacity-40">
+              ✉ Add {withEmail.length} to new class
+            </button>
+          </div>
+        </div>
+      )}
+
       {detail && <StudentHistoryModal student={detail} onClose={() => setDetail(null)} />}
     </section>
   );
@@ -650,7 +708,7 @@ function ClassLanding() {
 
       {/* Scheduling form — brand-gradient card so it visually pairs with the Start-now
           button. No coach account gate; anyone with the URL can create + share. */}
-      <section className="rounded-xl2 border border-brand-500/25 bg-gradient-to-br from-brand-500/10 via-ink-900 to-ink-900 p-5">
+      <section id="class-schedule-form" className="rounded-xl2 border border-brand-500/25 bg-gradient-to-br from-brand-500/10 via-ink-900 to-ink-900 p-5">
         <h2 className="mb-3 text-sm font-semibold text-brand-200">🗓️ Schedule a class</h2>
         <form onSubmit={submit} className="grid gap-3 md:grid-cols-2">
           <label className="md:col-span-2">
@@ -776,7 +834,19 @@ function ClassLanding() {
         </form>
       </section>
 
-      <MyStudents />
+      <MyStudents onAppendInvitees={(emails) => {
+        // Merge into existing textarea, dedupe (case-insensitive) so a rapid
+        // second click doesn't spam the list.
+        setForm((f) => {
+          const existing = new Set(
+            (f.invitees || "").split(/[\s,;]+/).map((s) => s.trim().toLowerCase()).filter(Boolean),
+          );
+          const additions = emails.filter((e) => !existing.has(e.toLowerCase()));
+          if (additions.length === 0) return f;
+          const joined = [(f.invitees || "").trim(), ...additions].filter(Boolean).join("\n");
+          return { ...f, invitees: joined };
+        });
+      }} />
 
       <p className="text-center text-[11px] text-ink-500">
         Powered by Jitsi Meet (open source video) · ChessGuru (board sync + recording + replay)
