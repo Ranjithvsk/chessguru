@@ -168,6 +168,45 @@ export class PuzzlesService {
     return d ? applyLastMove(fmtPuzzle(d)) : null;
   }
 
+  /** Phase 8d: last N days of daily puzzles + the caller's per-day result.
+   *  Powers the 7-cell activity strip on the Daily page: a ✓/✗/– per day for
+   *  the past week so users see their consistency at a glance and can jump
+   *  back to review a specific day's puzzle. `null` daily means we hadn't
+   *  chosen a puzzle for that date yet (very early days). */
+  async dailyHistory(userId: string | null, days: number) {
+    const n = Math.max(1, Math.min(30, days | 0));
+    // Fetch the last `n` dailyPuzzles rows sorted desc by date (which is the _id).
+    const rows = await this.conn.db!.collection("dailyPuzzles")
+      .find({}, { projection: { _id: 1, puzzleId: 1 } as any })
+      .sort({ _id: -1 })
+      .limit(n)
+      .toArray();
+    if (rows.length === 0) return [];
+    // Batch-fetch the caller's rounds for those puzzleIds in one $in query.
+    let byPid = new Map<string, any>();
+    if (userId) {
+      const ids = rows.map((r) => `${userId}:${r.puzzleId}`);
+      const rounds = await this.conn.db!.collection("rounds")
+        .find({ _id: { $in: ids } as any }, { projection: { _id: 1, w: 1, ms: 1, d: 1 } as any })
+        .toArray();
+      for (const rd of rounds) {
+        const pid = String(rd._id).split(":")[1];
+        if (pid) byPid.set(pid, rd);
+      }
+    }
+    return rows.map((r) => {
+      const pid = String(r.puzzleId);
+      const round = byPid.get(pid);
+      return {
+        date: String(r._id),
+        puzzleId: pid,
+        attempted: !!round,
+        win: round ? !!round.w : null,
+        ms: round?.ms ?? null,
+      };
+    }).reverse();   // oldest → newest for left-to-right strip rendering
+  }
+
   /** Phase 8a: Puzzle of the Day. First caller each day rolls the dice; the
    *  chosen puzzle is stashed in `dailyPuzzles` keyed by ISO date so every
    *  subsequent caller gets the same one. Rating band 1400–1700 —

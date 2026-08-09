@@ -42,6 +42,11 @@ export default function DailyPage() {
     queryFn: () => get<DailyPayload>("/api/puzzles/daily"),
     staleTime: 60_000,
   });
+  const { data: history } = useQuery({
+    queryKey: ["daily-history"],
+    queryFn: () => get<Array<{ date: string; puzzleId: string; attempted: boolean; win: boolean | null; ms: number | null }>>("/api/puzzles/daily/history?days=7"),
+    staleTime: 60_000,
+  });
 
   const [outcome, setOutcome] = useState<null | "win" | "loss">(null);
   const [fb, setFb] = useState<string>("Your turn — find the best move");
@@ -213,6 +218,42 @@ export default function DailyPage() {
           </div>
         </div>
       </div>
+
+      {history && history.length > 0 && (
+        <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-xs uppercase tracking-wide text-ink-400">Past 7 dailies</div>
+            {history.filter((h) => h.win).length > 0 && (
+              <div className="text-[11px] text-ink-500">
+                {history.filter((h) => h.win).length}/{history.length} solved
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-7 gap-1.5">
+            {history.map((h) => {
+              const dayLabel = new Date(h.date + "T00:00:00Z").toLocaleDateString(undefined, { weekday: "short", timeZone: "UTC" });
+              const isToday = h.date === data.date;
+              const cls =
+                h.win === true  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+              : h.win === false ? "border-rose-500/40 bg-rose-500/10 text-rose-300"
+              : h.attempted     ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+              :                   "border-ink-700 bg-ink-800/40 text-ink-500";
+              return (
+                <div
+                  key={h.date}
+                  title={`${h.date} — ${h.win === true ? "solved" : h.win === false ? "missed" : "not attempted"}${h.ms ? ` (${fmtSec(h.ms)})` : ""}`}
+                  className={`flex flex-col items-center gap-1 rounded-md border py-2 text-center text-[10px] ${cls} ${isToday ? "ring-2 ring-brand-500/60" : ""}`}
+                >
+                  <span className="opacity-70">{dayLabel}</span>
+                  <span className="text-base leading-none">
+                    {h.win === true ? "✓" : h.win === false ? "✗" : "–"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_260px]">
         <div>
