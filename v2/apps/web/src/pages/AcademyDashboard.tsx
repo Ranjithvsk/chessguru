@@ -1285,11 +1285,25 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
   const [autoDraftNote, setAutoDraftNote] = useState(c.autoSummaryNote || "");
   const [autoApplyToSeries, setAutoApplyToSeries] = useState(false);
   const [autoSaving, setAutoSaving] = useState(false);
-  function openAutoEditor() {
+  // Preview data for the editor: dry-run of what the auto-send WILL include
+  // right now. Coach uses this to sanity-check ("will 5 students actually get
+  // the email? are today's snaps included?"). null = not yet loaded.
+  type AutoPreview = { attendees: number; snapCount: number; hasRecording: boolean };
+  const [autoPreview, setAutoPreview] = useState<AutoPreview | null>(null);
+  async function openAutoEditor() {
     setAutoDraftOn(!!c.autoSummary);
     setAutoDraftNote(c.autoSummaryNote || "");
     setAutoApplyToSeries(false);
+    setAutoPreview(null);
     setAutoEditorOpen(true);
+    try {
+      const r = await fetch(`${BASE}/api/academy/classes/${encodeURIComponent(c._id)}/summary`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dryRun: true, note: "" }),
+      }).then((res) => res.json());
+      if (r?.ok) setAutoPreview({ attendees: r.attendees ?? 0, snapCount: r.snapCount ?? 0, hasRecording: !!r.hasRecording });
+    } catch { /* preview is best-effort */ }
   }
   async function saveAuto() {
     if (autoSaving) return;
@@ -1380,6 +1394,38 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
               <button onClick={() => !autoSaving && setAutoEditorOpen(false)} className="text-ink-400 hover:text-white text-sm">Esc</button>
             </div>
             <div className="text-[11px] text-ink-400 mb-3">{c.title} · {fmtStartAt(c.startAt)}</div>
+            {(() => {
+              const endMs = new Date(c.startAt).getTime() + c.durationMin * 60_000;
+              const preClass = Date.now() < endMs;
+              return autoPreview ? (
+                <div className="mb-3">
+                  <div className="mb-1 text-[10px] uppercase tracking-wide text-ink-500">
+                    What the auto-send would contain right now
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="rounded-lg border border-ink-700 bg-ink-800/40 p-2">
+                      <div className="text-lg font-semibold text-white tabular-nums">{autoPreview.attendees}</div>
+                      <div className="text-[10px] uppercase tracking-wide text-ink-400">Recipients</div>
+                    </div>
+                    <div className="rounded-lg border border-ink-700 bg-ink-800/40 p-2">
+                      <div className="text-lg font-semibold text-white tabular-nums">{autoPreview.snapCount}</div>
+                      <div className="text-[10px] uppercase tracking-wide text-ink-400">Snaps</div>
+                    </div>
+                    <div className={`rounded-lg border p-2 ${autoPreview.hasRecording ? "border-emerald-500/40 bg-emerald-500/5" : "border-ink-700 bg-ink-800/40"}`}>
+                      <div className={`text-lg font-semibold tabular-nums ${autoPreview.hasRecording ? "text-emerald-300" : "text-ink-500"}`}>{autoPreview.hasRecording ? "✓" : "—"}</div>
+                      <div className="text-[10px] uppercase tracking-wide text-ink-400">Recording</div>
+                    </div>
+                  </div>
+                  {preClass && (
+                    <div className="mt-2 text-[11px] text-ink-500">
+                      Class hasn't ended yet — these counts will grow as students attend and you snap positions.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="mb-3 text-[11px] text-ink-500">Loading preview…</div>
+              );
+            })()}
             <label className="flex items-center gap-2 text-sm text-ink-200 cursor-pointer">
               <input type="checkbox" checked={autoDraftOn} onChange={(e) => setAutoDraftOn(e.target.checked)}
                 className="rounded border-ink-600 bg-ink-800 text-brand-500 focus:ring-brand-500/40" />
