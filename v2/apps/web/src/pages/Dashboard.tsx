@@ -18,6 +18,7 @@ type Dash = {
   bands?: { lo: number; hi: number; attempted: number; solved: number; accuracy: number }[];
   themeSpeeds?: { theme: string; medianMs: number; n: number; trend?: "faster" | "slower" | "steady" | "new" }[];
   byHour?: { hour: number; n: number; wins: number; medianMs: number | null }[];
+  lastSession?: { count: number; wins: number; ratingDelta: number; startAt: string; endAt: string } | null;
   personalBests?: {
     bestRating: number | null; bestRatingDate: string | null;
     bestDay: number | null; bestDayDate: string | null;
@@ -190,6 +191,47 @@ function PersonalBests({ pb }: { pb: NonNullable<Dash["personalBests"]> }) {
             <div className="mt-0.5 text-[11px] text-ink-400">{t.label}</div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// Compact "last session" strip pinned to the top of the dashboard when a session
+// happened recently (< 3 days ago). Rose→brand gradient so it visually anchors
+// the "you were just here" moment. Self-hides for cold-open visits so the
+// dashboard doesn't feel stale on its own.
+function LastSessionStrip({ s }: { s: NonNullable<Dash["lastSession"]> }) {
+  const endMs = new Date(s.endAt).getTime();
+  const age = Date.now() - endMs;
+  if (age > 3 * 86_400_000) return null;   // > 3d = irrelevant, skip
+  const durMs = endMs - new Date(s.startAt).getTime();
+  const durMin = Math.max(1, Math.round(durMs / 60_000));
+  const accuracy = s.count > 0 ? Math.round((s.wins / s.count) * 100) : 0;
+  const ago = age < 60_000 ? "just now"
+    : age < 3_600_000 ? `${Math.round(age / 60_000)} min ago`
+    : age < 86_400_000 ? `${Math.round(age / 3_600_000)}h ago`
+    : `${Math.round(age / 86_400_000)}d ago`;
+  const deltaColor = s.ratingDelta > 0 ? "text-emerald-200"
+    : s.ratingDelta < 0 ? "text-rose-200"
+    : "text-ink-300";
+  return (
+    <div className="rounded-xl2 border border-brand-500/30 bg-gradient-to-r from-brand-500/15 via-accent-500/10 to-ink-900 p-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="text-sm">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-brand-300">Last session</span>
+          <span className="ml-2 text-ink-500">· {ago}</span>
+        </div>
+        <div className="flex flex-wrap items-baseline gap-3 text-xs">
+          <span><b className="text-white tabular-nums">{s.count}</b> <span className="text-ink-500">solves</span></span>
+          <span><b className="text-emerald-200 tabular-nums">{s.wins}</b> <span className="text-ink-500">wins · {accuracy}%</span></span>
+          <span>
+            <b className={`tabular-nums ${deltaColor}`}>{s.ratingDelta > 0 ? "+" : ""}{s.ratingDelta}</b>{" "}
+            <span className="text-ink-500">rating</span>
+          </span>
+          <span className="text-ink-500">
+            {durMin} min
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -493,6 +535,8 @@ export default function DashboardPage() {
         </div>
       )}
       <h1 className="font-display text-2xl text-white">{viewedAs ? `${viewedAs}'s performance` : "📊 My performance"}</h1>
+
+      {data.lastSession && <LastSessionStrip s={data.lastSession} />}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-5">
         {cards.map((c) => (

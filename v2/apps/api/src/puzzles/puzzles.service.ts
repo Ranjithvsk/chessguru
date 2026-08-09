@@ -315,6 +315,37 @@ export class PuzzlesService {
         return { theme, medianMs, n: b.all.length, trend };
       })
       .sort((a, b) => a.medianMs - b.medianMs);
+    // Most-recent session. Walk rounds DESCENDING (newest first — matches how
+    // Mongo returned them) and group into contiguous bursts separated by <=
+    // SESSION_GAP_MS. The first such burst IS the last session. Cheap because
+    // we stop as soon as the gap opens.
+    const SESSION_GAP_MS = 30 * 60_000; // 30 min of silence starts a new session
+    let lastSession: { count: number; wins: number; ratingDelta: number; startAt: string; endAt: string } | null = null;
+    if (puzzleRounds.length > 0) {
+      let count = 0, wins = 0, ratingDelta = 0;
+      let startAt: Date | null = null, endAt: Date | null = null;
+      let prevMs: number | null = null;
+      for (const r of puzzleRounds as any[]) {
+        const d = r.d ? new Date(r.d) : null;
+        if (!d) continue;
+        const dMs = d.getTime();
+        // Rounds are newest-first: descending order in time. Once we see a
+        // gap > threshold vs the PREVIOUSLY-STAMPED (newer) round, the current
+        // session has ended and we bail.
+        if (prevMs != null && (prevMs - dMs) > SESSION_GAP_MS) break;
+        count++;
+        if (r.w) wins++;
+        if (typeof r.rd === "number") ratingDelta += r.rd;
+        if (!endAt) endAt = d;   // first round we see = end of the last session
+        startAt = d;             // keep walking; the OLDEST round in the session
+        prevMs = dMs;
+      }
+      if (count > 0 && startAt && endAt) {
+        lastSession = { count, wins, ratingDelta,
+                        startAt: startAt.toISOString(), endAt: endAt.toISOString() };
+      }
+    }
+
     // Hour-of-day activity in the caller's local time. rounds.d is a UTC Date;
     // client-side we'd read local hour trivially, but bucketing on the server
     // saves 2000 rounds worth of round trip. Server clock's local hour is used
@@ -354,6 +385,7 @@ export class PuzzlesService {
       personalBests,
       themeSpeeds,
       byHour,
+      lastSession,
     };
   }
 
