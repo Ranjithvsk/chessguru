@@ -537,6 +537,31 @@ export class AcademyService {
         : `https://harinitharanjith.com/board-editor?fen=${fenParam}`;
     };
 
+    // Latest recording for this class, if any. Coaches often finish class
+    // and stop the recorder just as they hit Summary, so the freshest .webm
+    // in the class dir is almost always the one they meant. Missing dir /
+    // empty class = no recording link in the email.
+    const recDir = process.env.CLASS_RECORDINGS_DIR ?? "/home/ubuntu/chessguru-recordings";
+    const fsp = await import("fs/promises");
+    const path = await import("path");
+    let recordingUrl: string | null = null;
+    try {
+      const entries = await fsp.readdir(path.join(recDir, classId));
+      const webms = entries.filter((e) => /\.webm$/.test(e));
+      if (webms.length > 0) {
+        const withMtime = await Promise.all(webms.map(async (f) => {
+          try { const st = await fsp.stat(path.join(recDir, classId, f)); return { f, m: st.mtimeMs }; }
+          catch { return null; }
+        }));
+        const alive = withMtime.filter((x): x is { f: string; m: number } => !!x);
+        alive.sort((a, b) => b.m - a.m);
+        const latest = alive[0]?.f;
+        if (latest) {
+          recordingUrl = `https://harinitharanjith.com/class/${encodeURIComponent(classId)}/replay/${encodeURIComponent(latest)}`;
+        }
+      }
+    } catch { /* no recording dir */ }
+
     // Send one email per attendee (idempotent per-recipient; failures don't stop the batch)
     const acadName: string = sched.title || `Class ${classId}`;
     const dateStr = start.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -548,6 +573,9 @@ export class AcademyService {
       const p = puzzleCounts[uid] || { total: 0, wins: 0 };
       const winRate = p.total ? Math.round((p.wins / p.total) * 100) : null;
       const subject = `Class summary: ${acadName} — ${dateStr}`;
+      const recordingHtml = recordingUrl ? `
+          <p style="margin:16px 0 8px"><a href="${recordingUrl}" style="display:inline-block;background:#2563eb;color:white;text-decoration:none;padding:8px 16px;border-radius:8px;font-weight:600">▶ Watch the recording</a></p>` : "";
+      const recordingText = recordingUrl ? `\nWatch the recording: ${recordingUrl}\n` : "";
       const snapListHtml = snaps.length === 0 ? "" : `
           <h3 style="color:#111;margin:20px 0 8px">📸 Positions to review</h3>
           <ol style="line-height:1.6;padding-left:20px;color:#333">${snaps.map((s: any) => `
@@ -571,6 +599,7 @@ export class AcademyService {
             <li>Puzzles solved during class: <b>${p.total}</b>${winRate !== null ? ` (win rate <b>${winRate}%</b>)` : ""}.</li>
           </ul>
           ${note ? `<div style="border-left:3px solid #2563eb;padding:8px 12px;background:#f0f7ff;margin:16px 0"><b>Note from your coach:</b><br/>${escHtml(note)}</div>` : ""}
+          ${recordingHtml}
           ${snapListHtml}
           <p style="color:#666;font-size:13px">Keep it up! Log in at <a href="https://harinitharanjith.com">ChessGuru</a> to see your full history.</p>
         </div>`;
@@ -580,6 +609,7 @@ export class AcademyService {
         `- Class duration: ${sched.durationMin || 60}m`,
         `- Puzzles solved during class: ${p.total}${winRate !== null ? ` (win rate ${winRate}%)` : ""}`,
         note ? `\nNote from your coach: ${note}` : "",
+        recordingText,
         snapListText,
         "",
         "Keep it up! https://harinitharanjith.com",
