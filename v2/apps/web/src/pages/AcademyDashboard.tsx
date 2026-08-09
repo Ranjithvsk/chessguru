@@ -1160,7 +1160,7 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
 function StarredDigestPreviewLink() {
   const [open, setOpen] = useState(false);
   type Row = { _id: string; classId: string; at: string; note: string; hasAudio: boolean; shapeCount: number; link: string };
-  type PreviewData = { snapCount: number; snaps: Row[]; cadence: "weekly" | "biweekly" | "monthly"; optedOut: boolean };
+  type PreviewData = { snapCount: number; snaps: Row[]; cadence: "weekly" | "biweekly" | "monthly"; windowDays: number; optedOut: boolean };
   const [data, setData] = useState<PreviewData | null>(null);
   const [savingCadence, setSavingCadence] = useState(false);
   async function setCadence(c: "weekly" | "biweekly" | "monthly") {
@@ -1172,7 +1172,9 @@ function StarredDigestPreviewLink() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cadence: c }),
       });
-      setData({ ...data, cadence: c });
+      // Refetch preview so the window resizes to match the new cadence.
+      const fresh = await fetch(`${BASE}/api/academy/starred-digest/preview`, { credentials: "include" }).then((r) => r.json());
+      setData(fresh);
     } catch { /* silent */ }
     finally { setSavingCadence(false); }
   }
@@ -1216,7 +1218,7 @@ function StarredDigestPreviewLink() {
             ) : (
               <>
                 <div className="mb-2 text-sm text-ink-200">
-                  You'd receive <b>{data.snapCount}</b> starred position{data.snapCount === 1 ? "" : "s"} on Sunday morning.
+                  You'd receive <b>{data.snapCount}</b> starred position{data.snapCount === 1 ? "" : "s"} — covering the last <b>{data.windowDays}</b> days.
                 </div>
                 <ol className="max-h-72 overflow-y-auto pr-1 space-y-1 text-sm">
                   {data.snaps.map((s, i) => (

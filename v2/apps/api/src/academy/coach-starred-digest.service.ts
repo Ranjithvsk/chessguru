@@ -29,6 +29,11 @@ function cadenceIntervalMs(v: unknown): number {
   if (v === "monthly")  return 28 * 86_400_000;   // ~4 weeks (loose)
   return DEFAULT_INTERVAL_MS;                     // "weekly" or unset
 }
+function cadenceWindowDays(v: unknown): number {
+  if (v === "biweekly") return 14;
+  if (v === "monthly")  return 28;
+  return 7;                                       // "weekly" or unset
+}
 const PUBLIC_ORIGIN = process.env.PUBLIC_ORIGIN ?? "https://harinitharanjith.com";
 
 function esc(s: string): string {
@@ -83,20 +88,24 @@ export class CoachStarredDigestService implements OnModuleInit {
   /** Read-only shape the dashboard preview shows so the coach knows what
    *  next Sunday's digest will contain. Same 7d window + starred filter as
    *  the send path. */
-  async previewFor(userId: string, sinceDaysBack = 7) {
-    const since = new Date(Date.now() - sinceDaysBack * 86_400_000);
-    const [snaps, user]: [any[], any] = await Promise.all([
-      this.conn.db!.collection("classSnaps").find({
-        byUserId: String(userId),
-        starred: true,
-        at: { $gte: since },
-      }).sort({ at: -1 }).limit(30).toArray(),
-      this.conn.db!.collection("users").findOne({ _id: userId as any },
-        { projection: { coachStarredDigestCadence: 1, coachStarredDigestOptedOut: 1 } as any }),
-    ]);
+  /** Preview window auto-sizes to the coach's chosen cadence so what they
+   *  see matches what the digest actually sends. Caller may override via
+   *  sinceDaysBack for QA. */
+  async previewFor(userId: string, sinceDaysBack?: number) {
+    const user: any = await this.conn.db!.collection("users").findOne({ _id: userId as any },
+      { projection: { coachStarredDigestCadence: 1, coachStarredDigestOptedOut: 1 } as any });
+    const cadence = (user?.coachStarredDigestCadence as "weekly" | "biweekly" | "monthly" | undefined) ?? "weekly";
+    const days = sinceDaysBack ?? cadenceWindowDays(cadence);
+    const since = new Date(Date.now() - days * 86_400_000);
+    const snaps: any[] = await this.conn.db!.collection("classSnaps").find({
+      byUserId: String(userId),
+      starred: true,
+      at: { $gte: since },
+    }).sort({ at: -1 }).limit(60).toArray();
     return {
       snapCount: snaps.length,
-      cadence: (user?.coachStarredDigestCadence as "weekly" | "biweekly" | "monthly" | undefined) ?? "weekly",
+      cadence,
+      windowDays: days,
       optedOut: !!user?.coachStarredDigestOptedOut,
       snaps: snaps.map((s) => ({
         _id: s._id,
@@ -129,12 +138,16 @@ export class CoachStarredDigestService implements OnModuleInit {
     const userId = String(user._id);
     const email = String(user.email).toLowerCase();
     const username = user.username || userId;
-    const since = new Date(Date.now() - 7 * 86_400_000);
+    // Window scales to the coach's cadence so a biweekly recipient gets 14
+    // days of context in one email instead of the last 7 (which would leave
+    // the previous week's snaps unseen).
+    const days = cadenceWindowDays(user.coachStarredDigestCadence);
+    const since = new Date(Date.now() - days * 86_400_000);
     const snaps: any[] = await this.conn.db!.collection("classSnaps").find({
       byUserId: userId,
       starred: true,
       at: { $gte: since },
-    }).sort({ at: -1 }).limit(30).toArray();
+    }).sort({ at: -1 }).limit(60).toArray();
     if (snaps.length === 0) {
       // Nothing to say -- mark sent so we don't re-check every 10 min all
       // Sunday morning. Doesn't burn the weekly cadence for real content
@@ -154,12 +167,13 @@ export class CoachStarredDigestService implements OnModuleInit {
     const rowsText = snaps.map((s, i) =>
       `${i + 1}. ${snapLink(s)}${s.note ? ` — ${String(s.note)}` : ""}`
     ).join("\n");
-    const subject = `Your starred positions this week (${snaps.length})`;
+    const windowLabel = days === 7 ? "this week" : days === 14 ? "the last 2 weeks" : days === 28 ? "this month" : `the last ${days} days`;
+    const subject = `Your starred positions ${windowLabel} (${snaps.length})`;
     const unsubUrl = `${PUBLIC_ORIGIN}/v2api/api/me/email/unsubscribe?u=${encodeURIComponent(userId)}&c=coachStarred&t=${emailOptOutToken(userId, "coachStarred")}`;
     const html = `
       <div style="font-family:system-ui,sans-serif;max-width:520px">
         <h2 style="color:#111;margin-bottom:4px">★ Your review shortlist</h2>
-        <p style="color:#666;margin-top:0">Hi ${esc(username)} — you starred ${snaps.length} position${snaps.length === 1 ? "" : "s"} in the last 7 days.</p>
+        <p style="color:#666;margin-top:0">Hi ${esc(username)} — you starred ${snaps.length} position${snaps.length === 1 ? "" : "s"} in ${windowLabel}.</p>
         <ol style="line-height:1.6;padding-left:20px;color:#333">${rows}</ol>
         <p style="color:#666;font-size:13px">Every link opens the board editor with your arrows preserved. Pick a few for next week's lessons.</p>
         <p style="color:#9ca3af;font-size:11px;margin-top:24px">
@@ -169,7 +183,7 @@ export class CoachStarredDigestService implements OnModuleInit {
       </div>`;
     const text = [
       `★ Your review shortlist`, "",
-      `Hi ${username} — you starred ${snaps.length} position(s) in the last 7 days:`, "",
+      `Hi ${username} — you starred ${snaps.length} position(s) in ${windowLabel}:`, "",
       rowsText, "",
       `Manage on ${PUBLIC_ORIGIN}/academy`,
       `Stop these emails: ${unsubUrl}`,
