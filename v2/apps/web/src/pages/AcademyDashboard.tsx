@@ -952,12 +952,26 @@ function ReviewHeatmapStrip({ snaps }: { snaps?: SnapItem[] }) {
   }
   const totalCount = buckets.reduce((n, b) => n + b.count, 0);
   const daysActive = buckets.reduce((n, b) => n + (b.count > 0 ? 1 : 0), 0);
+  // Streak = consecutive days ending today with >=1 review. Longest = max
+  // consecutive run in the 30d window. Both derived from the buckets.
+  let currentStreak = 0;
+  for (let i = buckets.length - 1; i >= 0; i--) {
+    if ((buckets[i]?.count ?? 0) > 0) currentStreak++;
+    else break;
+  }
+  let longest = 0, run = 0;
+  for (const b of buckets) {
+    if (b.count > 0) { run++; if (run > longest) longest = run; }
+    else run = 0;
+  }
   return (
     <div className="rounded-xl2 border border-ink-700 bg-ink-900 px-4 py-3 flex items-center gap-4">
       <div className="text-[11px] uppercase tracking-wide text-ink-400 shrink-0">
         30d review
         <div className="mt-0.5 text-[10px] normal-case tracking-normal text-ink-500 tabular-nums">
           {totalCount} snap{totalCount === 1 ? "" : "s"} · {daysActive} day{daysActive === 1 ? "" : "s"}
+          {currentStreak > 0 && <> · <span className="text-emerald-300">🔥 {currentStreak}d streak</span></>}
+          {longest > currentStreak && <> · best {longest}d</>}
         </div>
       </div>
       <div className="flex gap-0.5 flex-wrap" title="Days you marked snaps reviewed">
