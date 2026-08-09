@@ -1001,6 +1001,24 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
   // Resets when a different snap becomes active so ← / → nav re-probes.
   const [audioDur, setAudioDur] = useState<number>(0);
   useEffect(() => { setAudioDur(0); }, [s._id, isOpen]);
+  // Transcript editor state -- author-only. Resets on ← / → nav.
+  const [transEditing, setTransEditing] = useState(false);
+  const [transDraft, setTransDraft] = useState(s.transcript || "");
+  const [transSaving, setTransSaving] = useState(false);
+  useEffect(() => { setTransEditing(false); setTransDraft(s.transcript || ""); }, [s._id, isOpen]);
+  async function saveTranscript() {
+    if (transSaving) return;
+    setTransSaving(true);
+    try {
+      const r = await fetch(`${BASE}/api/class/${encodeURIComponent(s.classId)}/snap/${encodeURIComponent(s._id)}`, {
+        method: "PATCH", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript: transDraft }),
+      });
+      if (r.ok) { setTransEditing(false); qc.invalidateQueries({ queryKey: ["academy-snaps"] }); }
+    } catch { /* silent */ }
+    finally { setTransSaving(false); }
+  }
   // Card click opens an inline detail modal (bigger board + audio + full note)
   // instead of navigating away. The modal itself is a portal-less <div> that
   // renders when isOpen is true. Modal state lives in the parent so ← / →
@@ -1140,12 +1158,32 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
                   </div>
                 )}
                 {shapes.length > 0 && <div className="text-[11px] text-amber-300">✏️ {shapes.length} arrow{shapes.length === 1 ? "" : "s"} preserved</div>}
-                {s.transcript && (
-                  <details className="text-[12px] text-ink-300">
+                {(s.transcript || (canEdit && transEditing)) && (
+                  <details className="text-[12px] text-ink-300" open={transEditing}>
                     <summary className="cursor-pointer text-[10px] uppercase tracking-wide text-violet-300 hover:text-violet-100">
                       📝 Transcript (auto)
+                      {canEdit && !transEditing && (
+                        <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setTransEditing(true); }}
+                          className="ml-2 text-ink-500 hover:text-white normal-case tracking-normal">✎ edit</button>
+                      )}
                     </summary>
-                    <div className="mt-1 rounded border border-ink-700 bg-ink-800/40 p-2 italic whitespace-pre-wrap">{markText(s.transcript, query || "")}</div>
+                    {transEditing ? (
+                      <div className="mt-1">
+                        <textarea value={transDraft} onChange={(e) => setTransDraft(e.target.value)} rows={4} maxLength={2000}
+                          className="w-full resize-none rounded border border-ink-600 bg-ink-900 px-2 py-1 text-[12px] text-white outline-none focus:border-brand-500" />
+                        <div className="mt-1 flex items-center gap-2">
+                          <button onClick={saveTranscript} disabled={transSaving}
+                            className="rounded bg-brand-600 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
+                            {transSaving ? "Saving…" : "Save"}
+                          </button>
+                          <button onClick={() => { setTransEditing(false); setTransDraft(s.transcript || ""); }}
+                            className="rounded border border-ink-600 px-2 py-0.5 text-[11px] text-ink-300 hover:bg-ink-800">Cancel</button>
+                          <span className="ml-auto text-[10px] text-ink-500 tabular-nums">{transDraft.length}/2000</span>
+                        </div>
+                      </div>
+                    ) : s.transcript ? (
+                      <div className="mt-1 rounded border border-ink-700 bg-ink-800/40 p-2 italic whitespace-pre-wrap">{markText(s.transcript, query || "")}</div>
+                    ) : null}
                   </details>
                 )}
                 {/* Preload neighbour audio while the modal is open so ← / → to
