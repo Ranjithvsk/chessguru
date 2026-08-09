@@ -996,18 +996,22 @@ function SnapVolumeChart({ snaps }: { snaps?: SnapItem[] }) {
     return c;
   };
   const thisSunday = startOfWeek(now);
-  const buckets: { start: Date; count: number }[] = [];
+  const buckets: { start: Date; count: number; classes: Map<string, { title: string; n: number }> }[] = [];
   for (let i = WEEKS - 1; i >= 0; i--) {
     const start = new Date(thisSunday);
     start.setDate(start.getDate() - i * 7);
-    buckets.push({ start, count: 0 });
+    buckets.push({ start, count: 0, classes: new Map() });
   }
   for (const s of all) {
     const d = startOfWeek(new Date(s.at));
     const weeksBack = Math.round((thisSunday.getTime() - d.getTime()) / (7 * 86_400_000));
     if (weeksBack < 0 || weeksBack >= WEEKS) continue;
     const bucket = buckets[WEEKS - 1 - weeksBack];
-    if (bucket) bucket.count++;
+    if (!bucket) continue;
+    bucket.count++;
+    const cur = bucket.classes.get(s.classId);
+    if (cur) cur.n++;
+    else bucket.classes.set(s.classId, { title: s.classTitle, n: 1 });
   }
   const max = Math.max(1, ...buckets.map((b) => b.count));
   const totalRecent = buckets.reduce((n, b) => n + b.count, 0);
@@ -1035,7 +1039,11 @@ function SnapVolumeChart({ snaps }: { snaps?: SnapItem[] }) {
       <div className="flex items-end gap-1 h-8 flex-1 min-w-[160px]" title="Snaps per week — click to filter the grid to that week">
         {buckets.map((b, i) => {
           const h = b.count === 0 ? 2 : Math.round(4 + (b.count / max) * 28);
-          const label = `${b.start.toLocaleDateString(undefined, { day: "2-digit", month: "short" })} · ${b.count} snap${b.count === 1 ? "" : "s"} · click to filter`;
+          const topWeekClasses = [...b.classes.values()].sort((a, c) => c.n - a.n).slice(0, 2);
+          const classHint = topWeekClasses.length > 0
+            ? "\n" + topWeekClasses.map((c) => `${c.title}: ${c.n}`).join("\n")
+            : "";
+          const label = `${b.start.toLocaleDateString(undefined, { day: "2-digit", month: "short" })} · ${b.count} snap${b.count === 1 ? "" : "s"}${classHint}${b.count > 0 ? "\nclick to filter" : ""}`;
           const onClick = () => {
             if (b.count === 0) return;
             window.dispatchEvent(new CustomEvent(SNAP_WEEK_EVENT, { detail: { iso: b.start.toISOString() } }));
