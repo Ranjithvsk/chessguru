@@ -687,14 +687,16 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
           {sending ? "Sending…" : "📧 Summary"}
         </button>
       )}
-      {/* Route to ChessGuru Live (self-hosted Jitsi on meet.harinitharanjith.com,
-       *  fully rebranded). The class _id is the room name; attendance auto-writes
-       *  via Jitsi's participant events when we wire the IframeAPI in the next slice. */}
-      <a href={`https://meet.harinitharanjith.com/${encodeURIComponent(c._id)}`}
-        target="_blank" rel="noreferrer"
+      {/* Route to our own from-scratch video call (/call/:room?board=1) — feature
+       *  parity with Jitsi now: mesh up to 8, TURN, AV1, chat, hand, reactions,
+       *  moderator role, spotlight, blur, live captions, screen share, recording,
+       *  chess-native board mode. Attendance auto-writes to classAttendance on
+       *  join via the same collection the /academy roster reads. Jitsi fallback
+       *  at meet.harinitharanjith.com still works if a user types it directly. */}
+      <Link to={`/call/${encodeURIComponent(c._id)}?board=1`}
         className={`rounded-lg px-3 py-1 text-xs font-semibold ${live ? "bg-emerald-600 text-white hover:bg-emerald-500" : "bg-brand-600 text-white hover:bg-brand-500"}`}>
         {live ? "Join now" : "Open class"}
-      </a>
+      </Link>
     </div>
   );
 }

@@ -1181,7 +1181,7 @@ function BoardMainArea({
   handSet, selfHandUp, selfId, floaters, activeSpeaker,
   moderatorId, spotlightId, iAmMod, onKick, onSpotlight,
 }: MainAreaProps) {
-  const { fen, lastMove, dests, sendMove, sendReset, connected } = useSharedBoard(room);
+  const { fen, lastMove, dests, sendMove, sendReset, connected, shapes, sendAnnot } = useSharedBoard(room);
 
   const lastMoveTuple: [Key, Key] | undefined = lastMove ? [lastMove.from as Key, lastMove.to as Key] : undefined;
 
@@ -1203,7 +1203,12 @@ function BoardMainArea({
             lastMove={lastMoveTuple}
             onMove={onBoardMove}
             coordinates
+            shapes={shapes as any}
+            onShapesChange={(s) => sendAnnot(s as any)}
           />
+        </div>
+        <div className="mt-1 text-[11px] text-ink-500 text-center max-w-[600px]">
+          Right-click drag = draw arrows · Right-click = circles · Shared with everyone
         </div>
         <div className="mt-3 flex items-center gap-2">
           <button
@@ -1286,6 +1291,10 @@ function useSharedBoard(room: string) {
   const [lastMove, setLastMove] = useState<BoardMove | null>(null);
   const [dests, setDests] = useState(() => destsFromChess(new Chess()));
   const [connected, setConnected] = useState(false);
+  // Shared annotations (arrows / circles / laser pointer). class-ws already
+  // relays via {type:"annot", shapes:[{orig,dest?,brush?}]} — we just plumb
+  // it into chessground via the Board's shapes prop.
+  const [shapes, setShapes] = useState<Array<{ orig: string; dest?: string; brush?: string }>>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const gameRef = useRef<Chess>(new Chess());
@@ -1322,10 +1331,15 @@ function useSharedBoard(room: string) {
       if (cancelled) return;
       let msg: BoardServerMsg;
       try { msg = JSON.parse(ev.data); } catch { return; }
-      if (msg.type === "state") applyFen((msg as any).fen, (msg as any).lastMove ?? null);
+      if (msg.type === "state") {
+        applyFen((msg as any).fen, (msg as any).lastMove ?? null);
+        // Any current annotations set by whoever's in the room (chessground DrawShapes).
+        setShapes(Array.isArray((msg as any).shapes) ? (msg as any).shapes : []);
+      }
       else if (msg.type === "move") applyFen((msg as any).fen, (msg as any).move);
       else if (msg.type === "reset") applyFen((msg as any).fen, null);
-      // role / pong / participants / lock / annot: not needed for P0.
+      else if (msg.type === "annot") setShapes(Array.isArray((msg as any).shapes) ? (msg as any).shapes : []);
+      // role / pong / participants / lock: not needed for P0.
     };
 
     return () => {
@@ -1352,7 +1366,17 @@ function useSharedBoard(room: string) {
     try { ws.send(JSON.stringify({ type: "reset" })); } catch { /* */ }
   };
 
-  return { fen, lastMove, dests, connected, sendMove, sendReset };
+  // Broadcast whatever the local user drew on the board (chessground DrawShapes
+  // — right-click drag for arrows, right-click for circles). Server relays to
+  // everyone else via annot; each receiver's setShapes drives their board.
+  const sendAnnot = (nextShapes: Array<{ orig: string; dest?: string; brush?: string }>) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try { ws.send(JSON.stringify({ type: "annot", shapes: nextShapes.slice(0, 64) })); } catch { /* */ }
+    setShapes(nextShapes);   // local echo (server doesn't send annot back to sender)
+  };
+
+  return { fen, lastMove, dests, connected, sendMove, sendReset, shapes, sendAnnot };
 }
 
 // Remote video cell. getStream() runs each render so ontrack-triggered re-renders
