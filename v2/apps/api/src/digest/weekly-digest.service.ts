@@ -18,7 +18,7 @@ import { Injectable, OnModuleInit } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { sendMail } from "../lib/mail";
-import { digestOptOutToken } from "./digest-optout.controller";
+import { emailOptOutToken } from "./email-optout.controller";
 
 const TICK_MS = 10 * 60_000;             // 10 min — fine enough to hit the send window
 const WINDOW_HOUR_START = 8;             // server-local hours [8..10) inclusive
@@ -98,7 +98,7 @@ export class WeeklyDigestService implements OnModuleInit {
     const latest = puzzleRounds.slice().sort((a, b) => new Date(b.d).getTime() - new Date(a.d).getTime())[0];
     const rating = typeof latest?.r === "number" ? latest.r : null;
 
-    const unsubUrl = `${PUBLIC_ORIGIN}/v2api/api/me/digest/unsubscribe?u=${encodeURIComponent(userId)}&t=${digestOptOutToken(userId)}`;
+    const unsubUrl = `${PUBLIC_ORIGIN}/v2api/api/me/email/unsubscribe?u=${encodeURIComponent(userId)}&c=digest&t=${emailOptOutToken(userId, "digest")}`;
     const dashboardUrl = `${PUBLIC_ORIGIN}/dashboard`;
 
     const subject = `📊 Your ChessGuru week — ${wins}/${count} solved · ${ratingDelta >= 0 ? "+" : ""}${ratingDelta} rating`;

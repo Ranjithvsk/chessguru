@@ -35,12 +35,15 @@ export class MiscController {
       weeklyDigestOptedOut: !!u?.weeklyDigestOptedOut,
       weeklyDigestOptedOutAt: u?.weeklyDigestOptedOutAt ?? null,
       lastDigestAt: u?.digestSentAt ?? null,
+      streakReminderOptedOut: !!u?.streakReminderOptedOut,
+      streakReminderOptedOutAt: u?.streakReminderOptedOutAt ?? null,
+      lastStreakReminderAt: u?.streakReminderSentAt ?? null,
     };
   }
 
-  /** PATCH /api/me/prefs { weeklyDigestOptedOut: bool } — flip the digest
-   *  opt-in for the signed-in user. Complements the HMAC email-footer link;
-   *  users can also re-enable from the dashboard once they're back inside. */
+  /** PATCH /api/me/prefs { weeklyDigestOptedOut?, streakReminderOptedOut? } —
+   *  flip email-channel opt-ins for the signed-in user. Complements the HMAC
+   *  email-footer links; users can also re-enable from inside the app. */
   @Patch("me/prefs")
   async patchPrefs(@Req() req: any, @Body() body: any) {
     const userId: string | null = req?.session?.userId ?? null;
@@ -49,6 +52,10 @@ export class MiscController {
     if (typeof body?.weeklyDigestOptedOut === "boolean") {
       set.weeklyDigestOptedOut = body.weeklyDigestOptedOut;
       set.weeklyDigestOptedOutAt = body.weeklyDigestOptedOut ? new Date() : null;
+    }
+    if (typeof body?.streakReminderOptedOut === "boolean") {
+      set.streakReminderOptedOut = body.streakReminderOptedOut;
+      set.streakReminderOptedOutAt = body.streakReminderOptedOut ? new Date() : null;
     }
     if (Object.keys(set).length === 0) return { ok: true, changed: false };
     await this.conn.db!.collection("users").updateOne({ _id: userId as any }, { $set: set });

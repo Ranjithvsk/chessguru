@@ -7,14 +7,43 @@ import { prettify } from "../lib/format";
 // digest opt-in. Kept separate from the /puzzles/dashboard payload because
 // prefs mutate more often than dashboard stats and admins viewing another
 // user (?as=) shouldn't see or toggle that user's email prefs.
-type Prefs = { loggedIn: boolean; hasEmail: boolean; weeklyDigestOptedOut: boolean; weeklyDigestOptedOutAt: string | null; lastDigestAt: string | null };
-async function patchPrefs(body: { weeklyDigestOptedOut?: boolean }): Promise<{ ok: boolean }> {
+type Prefs = {
+  loggedIn: boolean; hasEmail: boolean;
+  weeklyDigestOptedOut: boolean; weeklyDigestOptedOutAt: string | null; lastDigestAt: string | null;
+  streakReminderOptedOut: boolean; streakReminderOptedOutAt: string | null; lastStreakReminderAt: string | null;
+};
+async function patchPrefs(body: { weeklyDigestOptedOut?: boolean; streakReminderOptedOut?: boolean }): Promise<{ ok: boolean }> {
   const res = await fetch("/api/me/prefs", {
     method: "PATCH", headers: { "Content-Type": "application/json" },
     credentials: "include", body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`PATCH prefs → ${res.status}`);
   return res.json();
+}
+
+function PrefRow({
+  label, description, on, disabled, onToggle,
+}: {
+  label: string; description: string; on: boolean; disabled: boolean; onToggle: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-4 py-2">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        onClick={onToggle}
+        disabled={disabled}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition ${on ? "bg-brand-500" : "bg-ink-700"} ${disabled ? "opacity-50" : ""}`}
+      >
+        <span className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform ${on ? "translate-x-5" : ""}`} />
+      </button>
+      <div className="flex-1 text-sm">
+        <div className="text-white">{label}</div>
+        <div className="text-xs text-ink-400">{description}</div>
+      </div>
+    </div>
+  );
 }
 
 function PrefsCard() {
@@ -25,33 +54,34 @@ function PrefsCard() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["me-prefs"] }),
   });
   if (!data?.loggedIn) return null;
-  const on = !data.weeklyDigestOptedOut;
-  const toggle = () => mut.mutate({ weeklyDigestOptedOut: on });
+  const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleDateString(undefined, { day: "2-digit", month: "short" }) : "";
+  const digestOn = !data.weeklyDigestOptedOut;
+  const streakOn = !data.streakReminderOptedOut;
+  const disabled = mut.isPending || !data.hasEmail;
   return (
     <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
       <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">✉️ Email notifications</div>
-      <div className="flex items-center gap-4">
-        <button
-          type="button"
-          role="switch"
-          aria-checked={on}
-          onClick={toggle}
-          disabled={mut.isPending || !data.hasEmail}
-          className={`relative h-6 w-11 shrink-0 rounded-full transition ${on ? "bg-brand-500" : "bg-ink-700"} ${!data.hasEmail || mut.isPending ? "opacity-50" : ""}`}
-        >
-          <span className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform ${on ? "translate-x-5" : ""}`} />
-        </button>
-        <div className="flex-1 text-sm">
-          <div className="text-white">Weekly progress digest</div>
-          <div className="text-xs text-ink-400">
-            {!data.hasEmail
-              ? "Add an email to your account to receive digests."
-              : on
-                ? `Sunday morning recap of your week${data.lastDigestAt ? ` · last sent ${new Date(data.lastDigestAt).toLocaleDateString(undefined, { day: "2-digit", month: "short" })}` : ""}.`
-                : `Currently off${data.weeklyDigestOptedOutAt ? ` since ${new Date(data.weeklyDigestOptedOutAt).toLocaleDateString(undefined, { day: "2-digit", month: "short" })}` : ""}.`}
-          </div>
-        </div>
-      </div>
+      <PrefRow
+        label="Weekly progress digest"
+        description={
+          !data.hasEmail ? "Add an email to your account to receive emails."
+          : digestOn ? `Sunday morning recap${data.lastDigestAt ? ` · last sent ${fmt(data.lastDigestAt)}` : ""}.`
+          : `Off${data.weeklyDigestOptedOutAt ? ` since ${fmt(data.weeklyDigestOptedOutAt)}` : ""}.`
+        }
+        on={digestOn} disabled={disabled}
+        onToggle={() => mut.mutate({ weeklyDigestOptedOut: digestOn })}
+      />
+      <div className="h-px bg-ink-800" />
+      <PrefRow
+        label="Streak-save reminder"
+        description={
+          !data.hasEmail ? "Add an email to your account to receive emails."
+          : streakOn ? `Evening nudge when your streak hasn't been fed${data.lastStreakReminderAt ? ` · last sent ${fmt(data.lastStreakReminderAt)}` : ""}.`
+          : `Off${data.streakReminderOptedOutAt ? ` since ${fmt(data.streakReminderOptedOutAt)}` : ""}.`
+        }
+        on={streakOn} disabled={disabled}
+        onToggle={() => mut.mutate({ streakReminderOptedOut: streakOn })}
+      />
     </div>
   );
 }
