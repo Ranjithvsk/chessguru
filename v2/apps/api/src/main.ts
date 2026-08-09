@@ -11,6 +11,7 @@ import { getConnectionToken } from "@nestjs/mongoose";
 import type { Connection } from "mongoose";
 import { AppModule } from "./app.module";
 import { attachClassWs } from "./class/class-ws";
+import { attachVideoSignalWs } from "./video/video-signal";
 
 const MONGO_URI = process.env.MONGO_URI ?? "mongodb://localhost:27017/chessguru";
 
@@ -67,6 +68,10 @@ async function bootstrap() {
   // Pass the mongoose connection so the ws handler can persist attendance writes.
   const dbConn = app.get<Connection>(getConnectionToken());
   attachClassWs(app.getHttpServer(), dbConn as any);
+  // From-scratch video (CHESSGURU-VIDEO-FROM-SCRATCH.md P0): relays WebRTC
+  // signaling between exactly 2 peers per room. No SFU, no DB writes — purely
+  // in-memory forwarding, so it lives outside any Nest module.
+  attachVideoSignalWs(app.getHttpServer());
   // eslint-disable-next-line no-console
   console.log(`ChessGuru v2 API on :${port}`);
 }

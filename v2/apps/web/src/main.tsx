@@ -34,6 +34,7 @@ import ResetPasswordPage from "./pages/ResetPassword";
 import SignupAcademyPage from "./pages/SignupAcademy";
 import AcademyDashboardPage from "./pages/AcademyDashboard";
 import AcceptInvitePage from "./pages/AcceptInvite";
+import CallRoomPage from "./pages/CallRoom";
 import AccountLinksPage from "./pages/AccountLinks";
 import ExternalGamePage from "./pages/ExternalGame";
 import AdminPage from "./pages/Admin";
@@ -91,6 +92,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="signup-academy" element={<SignupAcademyPage />} />
             <Route path="academy" element={<AcademyDashboardPage />} />
             <Route path="accept-invite" element={<AcceptInvitePage />} />
+            <Route path="call/:room" element={<CallRoomPage />} />
             <Route path="settings/accounts" element={<AccountLinksPage />} />
             <Route path="history/external/:id" element={<ExternalGamePage />} />
             <Route path="test/feedback-ui" element={<FeedbackUITestPage />} />
