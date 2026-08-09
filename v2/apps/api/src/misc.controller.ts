@@ -1,4 +1,4 @@
-import { Controller, Get, Req, Query, Param } from "@nestjs/common";
+import { Controller, Get, Req, Res, Query, Param } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { THEMES } from "./themes";
@@ -6,6 +6,7 @@ import { AuthService } from "./auth/auth.service";
 import { applyLastMove } from "./lib/puzzle-format";
 import { resolveViewedUser } from "./admin/view-as";
 import { isAdmin } from "./admin/admins";
+type Response = any;
 
 @Controller()
 export class MiscController {
@@ -16,6 +17,49 @@ export class MiscController {
 
   @Get("themes")
   themes() { return { themes: THEMES }; }
+
+  /** GET /api/me/history.csv — full flattened round history for the signed-in
+   *  user (or an admin-viewed user via ?as=). Same underlying scan as /me/history
+   *  but skips the mini-board / summary work — just the raw rows a coach or
+   *  compliance archive needs. RFC-4180 escaped so a stray comma in a theme
+   *  can't corrupt the file. Capped at 5000 rows — that's ~2 years of daily play
+   *  and well past what any spreadsheet workflow needs. */
+  @Get("me/history.csv")
+  async myHistoryCsv(@Req() req: any, @Res() res: Response, @Query("as") asRaw?: string) {
+    const userId: string | null = await resolveViewedUser(this.conn, req.session, asRaw);
+    if (!userId) throw new (await import("@nestjs/common")).HttpException("sign in required", 401);
+    const lo = `${userId}:`, hi = `${userId};`;
+    const rounds: any[] = await this.conn.db!.collection("rounds")
+      .find({ _id: { $gte: lo, $lt: hi } as any })
+      .sort({ d: -1 })
+      .limit(5000)
+      .toArray();
+    // Standard RFC 4180: quote anything with a comma / quote / newline, escape " as "".
+    const q = (v: unknown) => {
+      const s = v == null ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = ["date,puzzleId,puzzleRating,win,ratingDiff,ratingAfter,solveMs,themes,mode,selectedTheme"];
+    for (const r of rounds) {
+      const puzzleId = String(r._id).slice(lo.length);
+      const themes = Array.isArray(r.th) ? r.th.join("|") : "";
+      lines.push([
+        q(r.d ? new Date(r.d).toISOString() : ""),
+        q(puzzleId),
+        q(typeof r.pr === "number" ? r.pr : ""),
+        q(r.w ? "1" : "0"),
+        q(typeof r.rd === "number" ? r.rd : ""),
+        q(typeof r.r === "number" ? r.r : ""),
+        q(typeof r.ms === "number" ? r.ms : ""),
+        q(themes),
+        q(r.k ?? "puzzle"),
+        q(r.sel ?? ""),
+      ].join(","));
+    }
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="chessguru-history-${userId}.csv"`);
+    res.send(lines.join("\n"));
+  }
 
   @Get("me/rating")
   async myRating(@Req() req: any, @Query("as") asRaw?: string) {

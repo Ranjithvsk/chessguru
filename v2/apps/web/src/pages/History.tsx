@@ -438,9 +438,25 @@ export default function HistoryPage() {
           <Link to="/history" className="ml-auto underline hover:text-white">← view mine</Link>
         </div>
       )}
-      <div>
-        <h1 className="font-display text-2xl text-white">Puzzle report</h1>
-        <p className="text-sm text-ink-400">Green = solved, red = missed. Grouped by day and theme.</p>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <h1 className="font-display text-2xl text-white">Puzzle report</h1>
+          <p className="text-sm text-ink-400">Green = solved, red = missed. Grouped by day and theme.</p>
+        </div>
+        {/* CSV export — coach's own history (or ?as= view). Kept as a raw <a>
+            so the browser's Save-As dialog / download bar takes over cleanly. */}
+        {allItems.length > 0 && (() => {
+          const params = new URLSearchParams(window.location.search);
+          const asParam = params.get("as");
+          const href = `/api/me/history.csv${asParam ? `?as=${encodeURIComponent(asParam)}` : ""}`;
+          return (
+            <a href={href}
+               className="rounded-lg border border-brand-500/40 bg-brand-500/10 px-3 py-1.5 text-xs font-semibold text-brand-100 hover:bg-brand-500/20"
+               title="Download every round as CSV">
+              ⬇ CSV
+            </a>
+          );
+        })()}
       </div>
       <TabBar active="puzzles" onSwitch={switchTab} />
 
