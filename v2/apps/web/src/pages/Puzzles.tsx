@@ -131,6 +131,41 @@ export default function PuzzlesPage() {
   // reveal on demand and re-hide whenever the puzzle changes.
   const [showTheme, setShowTheme] = useState(false);
   useEffect(() => { setShowTheme(false); }, [g.puzzle?.id]);
+
+  // Keyboard shortcuts. Bound to window so they fire regardless of focus, but
+  // we bail whenever the user is typing into an input/textarea/contentEditable
+  // (Blindfold's SAN input in particular), or holding any modifier so we don't
+  // hijack the browser's own Ctrl+N / Cmd+R.
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  useEffect(() => {
+    const isTypingTarget = (t: EventTarget | null): boolean => {
+      const el = t as HTMLElement | null;
+      if (!el) return false;
+      const tag = el.tagName?.toLowerCase();
+      return tag === "input" || tag === "textarea" || tag === "select" || el.isContentEditable;
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      if (isTypingTarget(ev.target)) return;
+      const k = ev.key.toLowerCase();
+      if (k === "?" || (ev.key === "/" && ev.shiftKey)) { setShowShortcuts((v) => !v); ev.preventDefault(); return; }
+      if (k === "escape") { if (showShortcuts) setShowShortcuts(false); return; }
+      // Solved-only actions
+      if (g.solved && (k === "n" || k === " ")) { ev.preventDefault(); g.next(); return; }
+      if (g.solved && g.failed && k === "r") { ev.preventDefault(); g.retry(); return; }
+      if (g.solved && g.replayTotal > 0 && !g.exploring) {
+        if (k === "arrowleft")  { ev.preventDefault(); g.replayPrev(); return; }
+        if (k === "arrowright") { ev.preventDefault(); g.replayNext(); return; }
+      }
+      // Unsolved shortcuts — hint / solution only make sense mid-solve.
+      if (!g.solved) {
+        if (k === "h") { ev.preventDefault(); g.showHint(); return; }
+        if (k === "s") { ev.preventDefault(); g.viewSolution(); return; }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [g.solved, g.failed, g.replayTotal, g.exploring, showShortcuts, g.next, g.retry, g.replayPrev, g.replayNext, g.showHint, g.viewSolution]);
   const tacticalThemes = (g.puzzle?.themes ?? []).filter((t) => !META_THEMES.has(t));
   // Always surface something: a tactical motif if present, else the meaningful meta
   // tag (mate-in-N, endgame type, phase) — only pure-noise tags are dropped.
@@ -141,6 +176,48 @@ export default function PuzzlesPage() {
 
   return (
     <div className="grid gap-6 lg:h-[calc(100dvh-6.5rem)] lg:grid-cols-[minmax(0,1fr)_360px] lg:overflow-hidden">
+      {/* Floating keyboard-shortcut help chip. Fixed bottom-right so it's
+          always reachable without stealing valuable sidebar space. */}
+      <button onClick={() => setShowShortcuts((v) => !v)}
+        title="Keyboard shortcuts (press ? anytime)"
+        className="fixed bottom-4 right-4 z-30 grid h-9 w-9 place-items-center rounded-full border border-ink-600 bg-ink-800/90 text-sm text-ink-300 shadow-lg backdrop-blur hover:bg-ink-700 hover:text-white">
+        ?
+      </button>
+      {showShortcuts && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4" onClick={() => setShowShortcuts(false)}>
+          <div onClick={(e) => e.stopPropagation()}
+               className="w-full max-w-sm rounded-xl2 border border-brand-500/40 bg-gradient-to-br from-brand-500/10 via-ink-900 to-ink-900 p-5 shadow-2xl">
+            <div className="mb-3 flex items-baseline justify-between">
+              <h3 className="font-display text-lg text-white">⌨ Shortcuts</h3>
+              <button onClick={() => setShowShortcuts(false)}
+                className="rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-ink-300 hover:bg-ink-800">Close</button>
+            </div>
+            <dl className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 text-sm">
+              {[
+                { keys: ["N", "Space"], label: "Next puzzle", when: "when solved" },
+                { keys: ["R"],          label: "Try again",   when: "on a missed puzzle" },
+                { keys: ["H"],          label: "Hint",        when: "mid-solve" },
+                { keys: ["S"],          label: "View solution", when: "mid-solve" },
+                { keys: ["←", "→"],     label: "Replay prev / next", when: "when solved" },
+                { keys: ["?"],          label: "Toggle this panel", when: "" },
+              ].map((row) => (
+                <div key={row.label} className="contents">
+                  <span className="flex gap-1">
+                    {row.keys.map((k) => (
+                      <kbd key={k} className="rounded border border-ink-600 bg-ink-800 px-1.5 py-0.5 text-[11px] font-semibold text-brand-100 shadow-sm">{k}</kbd>
+                    ))}
+                  </span>
+                  <span className="text-ink-200">
+                    {row.label}
+                    {row.when && <span className="ml-1 text-[11px] text-ink-500">— {row.when}</span>}
+                  </span>
+                </div>
+              ))}
+            </dl>
+            <div className="mt-3 text-[11px] text-ink-500">Shortcuts skip while you're typing in an input.</div>
+          </div>
+        </div>
+      )}
       <section className="min-w-0 lg:flex lg:min-h-0 lg:flex-col lg:justify-center">
         <Board
           fen={g.fen} orientation={g.orientation} turnColor={g.turnColor}
