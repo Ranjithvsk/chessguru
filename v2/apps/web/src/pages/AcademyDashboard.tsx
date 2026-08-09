@@ -284,6 +284,7 @@ export default function AcademyDashboardPage() {
       </header>
 
       {canManage && <TodayStrip schedule={schedule} snaps={snaps} recordings={recordings} />}
+      {canManage && <ReviewHeatmapStrip snaps={snaps} />}
       {canManage && <NextUpToReview snaps={snaps} />}
       {canManage && <StarredDigestPreviewLink />}
 
@@ -915,6 +916,65 @@ function TodayStrip({ schedule, snaps, recordings }: {
       <Tile label="★ Starred (all)" value={starredTotal} tone={starredTotal > 0 ? "border-amber-500/40 bg-amber-500/5" : "border-ink-700 bg-ink-900"} />
       <Tile label="✓ Reviewed (all)" value={reviewedTotal} tone={reviewedTotal > 0 ? "border-emerald-500/40 bg-emerald-500/5" : "border-ink-700 bg-ink-900"} />
       <Tile label="🎯 To review" value={toReview} tone={toReview > 0 ? "border-brand-500/40 bg-brand-500/5" : "border-ink-700 bg-ink-900"} />
+    </div>
+  );
+}
+
+// 30-day heatmap of the coach's own reviewedAt timestamps. Compact strip
+// of 30 cells, emerald when they marked >=1 snap reviewed that day.
+// Hover any cell for the exact date + count. Auto-hides when the coach
+// has zero total reviews so a brand-new user doesn't see an empty ribbon.
+function ReviewHeatmapStrip({ snaps }: { snaps?: SnapItem[] }) {
+  const totals = (snaps ?? []).filter((s) => s.reviewedAt);
+  if (totals.length === 0) return null;
+  // Build day-buckets: index 0 = 29 days ago, 29 = today. Bucketed in local
+  // time so the coach's "today" matches midnight-to-midnight for them.
+  const today = new Date();
+  const startOfDay = (d: Date) => {
+    const c = new Date(d);
+    c.setHours(0, 0, 0, 0);
+    return c;
+  };
+  const todayStart = startOfDay(today);
+  const buckets: { d: Date; count: number }[] = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(todayStart);
+    d.setDate(d.getDate() - i);
+    buckets.push({ d, count: 0 });
+  }
+  for (const s of totals) {
+    const dt = new Date(s.reviewedAt!);
+    const days = Math.floor((todayStart.getTime() - startOfDay(dt).getTime()) / 86_400_000);
+    if (days < 0 || days > 29) continue;
+    const bucket = buckets[29 - days];
+    if (bucket) bucket.count++;
+  }
+  const totalCount = buckets.reduce((n, b) => n + b.count, 0);
+  const daysActive = buckets.reduce((n, b) => n + (b.count > 0 ? 1 : 0), 0);
+  return (
+    <div className="rounded-xl2 border border-ink-700 bg-ink-900 px-4 py-3 flex items-center gap-4">
+      <div className="text-[11px] uppercase tracking-wide text-ink-400 shrink-0">
+        30d review
+        <div className="mt-0.5 text-[10px] normal-case tracking-normal text-ink-500 tabular-nums">
+          {totalCount} snap{totalCount === 1 ? "" : "s"} · {daysActive} day{daysActive === 1 ? "" : "s"}
+        </div>
+      </div>
+      <div className="flex gap-0.5 flex-wrap" title="Days you marked snaps reviewed">
+        {buckets.map((b, i) => {
+          const tone = b.count === 0
+            ? "bg-ink-800"
+            : b.count === 1
+              ? "bg-emerald-500/30"
+              : b.count <= 3
+                ? "bg-emerald-500/60"
+                : "bg-emerald-400";
+          return (
+            <div key={i}
+              className={`h-4 w-[10px] rounded-sm ${tone}`}
+              title={`${b.d.toLocaleDateString(undefined, { day: "2-digit", month: "short" })} · ${b.count} reviewed`} />
+          );
+        })}
+      </div>
     </div>
   );
 }
