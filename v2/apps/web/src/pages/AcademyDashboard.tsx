@@ -8,9 +8,10 @@
 //
 // All lists auto-refresh so accepted invites turn into real rows without a
 // manual reload.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import QRCode from "qrcode";
 import { api } from "../lib/api";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
@@ -40,8 +41,20 @@ interface Student {
   puzzleRating?: number;
   // Attendance rollup from classAttendance (see AcademyService.listStudents)
   attendedTotal?: number; attendedThisWeek?: number; lastAttendedAt?: string|null;
+  // Fees rollup from feeInvoices
+  pendingFeesPaise?: number; oldestPendingPeriod?: string|null;
 }
 interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; attendedCount?: number; academyId?: string|null }
+interface FeesConfig { monthlyFeePaise: number; upiVpa: string; upiPayeeName: string; canEdit: boolean }
+interface Invoice { _id: string; academyId: string; studentId: string; studentUsername: string; period: string; amountPaise: number; status: "pending"|"paid"|"waived"; generatedAt: string; paidAt?: string; paymentMethod?: string }
+function rupees(paise: number) { return (paise / 100).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }); }
+function upiIntent(o: { vpa: string; name: string; amountPaise: number; note: string }) {
+  const p = new URLSearchParams({
+    pa: o.vpa, pn: o.name, am: (o.amountPaise / 100).toFixed(2),
+    cu: "INR", tn: o.note,
+  });
+  return `upi://pay?${p.toString()}`;
+}
 interface ScheduleResp { live: ClassRow[]; upcoming: ClassRow[] }
 function fmtStartAt(d: string) {
   const dt = new Date(d);
@@ -89,6 +102,14 @@ export default function AcademyDashboardPage() {
     queryKey: ["academy-schedule"], queryFn: () => get<ScheduleResp>("/api/class/schedule"),
     enabled: !!me?.loggedIn, refetchInterval: 30_000,
   });
+  const { data: feesConfig } = useQuery({
+    queryKey: ["academy-fees-config"], queryFn: () => get<FeesConfig>("/api/academy/fees/config"),
+    enabled: canManage,
+  });
+  const { data: invoices } = useQuery({
+    queryKey: ["academy-fees"], queryFn: () => get<Invoice[]>("/api/academy/fees?status=pending"),
+    enabled: canManage, refetchInterval: 30_000,
+  });
 
   // Scheduler form
   const [classTitle, setClassTitle] = useState("");
@@ -96,6 +117,50 @@ export default function AcademyDashboardPage() {
   const [classStartAt, setClassStartAt] = useState(localDatetimeDefault);
   const [classDur, setClassDur] = useState(60);
   const [scheduleMsg, setScheduleMsg] = useState<{ tone: "ok"|"err"; text: string }|null>(null);
+  // Fees form + actions
+  const [feeRupees, setFeeRupees] = useState<string>("");
+  const [feeVpa, setFeeVpa] = useState("");
+  const [feePayeeName, setFeePayeeName] = useState("");
+  useEffect(() => {
+    if (feesConfig) {
+      setFeeRupees(feesConfig.monthlyFeePaise ? String(feesConfig.monthlyFeePaise / 100) : "");
+      setFeeVpa(feesConfig.upiVpa || "");
+      setFeePayeeName(feesConfig.upiPayeeName || "");
+    }
+  }, [feesConfig]);
+  const [feesMsg, setFeesMsg] = useState<{ tone: "ok"|"err"; text: string }|null>(null);
+  const saveFeesMut = useMutation({
+    mutationFn: () => fetch(`${BASE}/api/academy/fees/config`, {
+      method: "PUT", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        monthlyFeePaise: Math.round(Number(feeRupees) * 100) || 0,
+        upiVpa: feeVpa, upiPayeeName: feePayeeName,
+      }),
+    }).then((r) => r.json()),
+    onSuccess: (r: any) => {
+      setFeesMsg(r.ok ? { tone: "ok", text: "Fees config saved." } : { tone: "err", text: r.error || "Save failed." });
+      qc.invalidateQueries({ queryKey: ["academy-fees-config"] });
+    },
+  });
+  const generateMut = useMutation({
+    mutationFn: () => post<{ ok: boolean; generated?: number; period?: string; pendingCount?: number; error?: string }>("/api/academy/fees/generate"),
+    onSuccess: (r) => {
+      setFeesMsg(r.ok
+        ? { tone: "ok", text: `Generated invoices for ${r.period} — ${r.pendingCount} still pending.` }
+        : { tone: "err", text: r.error || "Generate failed." });
+      qc.invalidateQueries({ queryKey: ["academy-fees"] });
+      qc.invalidateQueries({ queryKey: ["academy-students"] });
+    },
+  });
+  const markPaidMut = useMutation({
+    mutationFn: (id: string) => post<{ ok: boolean; error?: string }>(`/api/academy/fees/${encodeURIComponent(id)}/mark-paid`, { paymentMethod: "upi" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["academy-fees"] });
+      qc.invalidateQueries({ queryKey: ["academy-students"] });
+    },
+  });
+
   const scheduleMut = useMutation({
     mutationFn: () => post<{ _id: string; title: string }>("/api/class/schedule", {
       title: classTitle, coach: classCoach || (me?.username ?? ""), startAt: new Date(classStartAt).toISOString(), durationMin: classDur,
@@ -327,6 +392,7 @@ export default function AcademyDashboardPage() {
                     {isOwner && <th className="px-3 py-2 text-left">Coach</th>}
                     <th className="px-3 py-2 text-left">Rating</th>
                     <th className="px-3 py-2 text-left" title="Classes attended (all-time · this week)">Attendance</th>
+                    <th className="px-3 py-2 text-left">Fees pending</th>
                     <th className="px-3 py-2 text-left">Last active</th>
                     <th className="px-3 py-2 text-right"></th>
                   </tr>
@@ -349,6 +415,13 @@ export default function AcademyDashboardPage() {
                               {att}
                               {wk > 0 && <span className="ml-1 text-[10px] text-emerald-300">· {wk} this wk</span>}
                             </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 tabular-nums" title={s.oldestPendingPeriod ? `Oldest: ${s.oldestPendingPeriod}` : ""}>
+                          {(s.pendingFeesPaise ?? 0) === 0 ? (
+                            <span className="text-emerald-300">✓ paid</span>
+                          ) : (
+                            <span className="text-rose-300">{rupees(s.pendingFeesPaise!)}</span>
                           )}
                         </td>
                         <td className="px-3 py-2 text-ink-400">{fmtAgo(s.lastLogin)}</td>
@@ -443,6 +516,70 @@ export default function AcademyDashboardPage() {
         )}
       </section>
 
+      {/* ── Fees + billing (owner + coach; read-only for coach) ── */}
+      {canManage && (
+        <>
+          {isOwner && (
+            <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
+              <div className="mb-3 flex items-baseline gap-3">
+                <h2 className="font-display text-lg text-white">💰 Fees config</h2>
+                <span className="text-xs text-ink-500">UPI-only for now (no Razorpay). Parents scan the QR to pay.</span>
+              </div>
+              <div className="grid gap-2 md:grid-cols-3">
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wide text-ink-400">Monthly fee (₹)</label>
+                  <input type="number" min="0" value={feeRupees} onChange={(e) => setFeeRupees(e.target.value)}
+                    placeholder="e.g. 2500"
+                    className="mt-1 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wide text-ink-400">UPI VPA</label>
+                  <input type="text" value={feeVpa} onChange={(e) => setFeeVpa(e.target.value.toLowerCase())}
+                    placeholder="academy@ybl"
+                    className="mt-1 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wide text-ink-400">Payee name</label>
+                  <input type="text" value={feePayeeName} onChange={(e) => setFeePayeeName(e.target.value)}
+                    placeholder="Academy name shown in UPI app"
+                    className="mt-1 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
+                </div>
+                <button disabled={saveFeesMut.isPending} onClick={() => saveFeesMut.mutate()}
+                  className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
+                  {saveFeesMut.isPending ? "Saving…" : "Save fees config"}
+                </button>
+                <button disabled={generateMut.isPending || !feesConfig?.monthlyFeePaise}
+                  onClick={() => generateMut.mutate()}
+                  className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-4 py-2 text-sm font-semibold text-brand-100 hover:bg-brand-500/20 disabled:opacity-50">
+                  {generateMut.isPending ? "Generating…" : "🧾 Generate this month's invoices"}
+                </button>
+              </div>
+              {feesMsg && <p className={`mt-2 text-xs ${feesMsg.tone === "ok" ? "text-emerald-300" : "text-rose-300"}`}>{feesMsg.text}</p>}
+            </section>
+          )}
+
+          <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
+            <div className="mb-3 flex items-baseline gap-3">
+              <h2 className="font-display text-lg text-white">💸 Pending invoices <span className="text-xs text-ink-500">({invoices?.length ?? 0})</span></h2>
+              {(invoices?.length ?? 0) > 0 && feesConfig && (
+                <span className="text-xs text-ink-500">Parents scan the QR to pay via UPI. You mark it paid after seeing the bank credit.</span>
+              )}
+            </div>
+            {(invoices?.length ?? 0) === 0 && <p className="text-sm text-ink-400">No pending invoices.</p>}
+            {(invoices?.length ?? 0) > 0 && (
+              <div className="grid gap-3 md:grid-cols-2">
+                {invoices!.map((inv) => (
+                  <InvoiceCard key={inv._id} inv={inv} config={feesConfig} isOwner={!!isOwner}
+                    onMarkPaid={() => markPaidMut.mutate(inv._id)}
+                    markPaidPending={markPaidMut.isPending}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        </>
+      )}
+
       <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
         <h2 className="mb-1 font-display text-lg text-white">🚀 Q1 shipping list</h2>
         <ul className="grid gap-2 text-sm text-ink-200 md:grid-cols-2">
@@ -452,9 +589,64 @@ export default function AcademyDashboardPage() {
           <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">✅ Owner/coach view student performance</li>
           <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">✅ Attendance rollup per student</li>
           <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">✅ Per-academy class scheduling</li>
-          <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">🔜 Fees / billing (Razorpay)</li>
+          <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">✅ Fees + UPI QR payments</li>
+          <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">🚀 Q1 complete — Q2 next</li>
         </ul>
       </section>
+    </div>
+  );
+}
+
+// Invoice card with an inline UPI QR the parent scans. QR is generated
+// client-side (no external service). If UPI VPA isn't configured, we say so
+// so the owner knows to fill it in on the Fees config panel above.
+function InvoiceCard({ inv, config, isOwner, onMarkPaid, markPaidPending }: {
+  inv: Invoice; config?: FeesConfig; isOwner: boolean;
+  onMarkPaid: () => void; markPaidPending: boolean;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const vpa = config?.upiVpa || "";
+  const payee = config?.upiPayeeName || "";
+  const upiUrl = vpa ? upiIntent({
+    vpa, name: payee || "Academy",
+    amountPaise: inv.amountPaise,
+    note: `Fees ${inv.period} · ${inv.studentUsername}`,
+  }) : "";
+  useEffect(() => {
+    if (!upiUrl || !canvasRef.current) return;
+    QRCode.toCanvas(canvasRef.current, upiUrl, { width: 160, margin: 1, color: { dark: "#0f172a", light: "#ffffff" } })
+      .catch(() => {});
+  }, [upiUrl]);
+
+  return (
+    <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-3">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <span className="font-semibold text-white">{inv.studentUsername}</span>
+        <span className="text-xs text-ink-500">· {inv.period}</span>
+        <span className="ml-auto text-lg font-bold tabular-nums text-rose-200">{rupees(inv.amountPaise)}</span>
+      </div>
+      <div className="mt-2 flex items-center gap-3">
+        {upiUrl ? (
+          <>
+            <canvas ref={canvasRef} width={160} height={160} className="rounded bg-white" />
+            <div className="flex-1 text-xs text-ink-300">
+              <div className="mb-1">Scan with any UPI app.</div>
+              <div className="text-[10px] text-ink-500 break-all">to: <b className="text-ink-300">{vpa}</b></div>
+              <a href={upiUrl} className="mt-2 inline-block text-brand-300 underline">Open in UPI app ↗</a>
+            </div>
+          </>
+        ) : (
+          <div className="text-xs text-amber-200">Set your UPI VPA in Fees config to render a QR here.</div>
+        )}
+      </div>
+      {isOwner && (
+        <div className="mt-2 flex justify-end gap-2">
+          <button onClick={onMarkPaid} disabled={markPaidPending}
+            className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">
+            {markPaidPending ? "…" : "✓ Mark paid"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

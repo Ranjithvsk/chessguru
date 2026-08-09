@@ -2,7 +2,7 @@
 // session.role === 'academy_owner' — the guard lives inside AcademyService
 // so no controller code needs to duplicate it.
 
-import { Body, Controller, Delete, Get, Param, Post, Req } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, Req } from "@nestjs/common";
 import { AcademyService } from "./academy.service";
 
 @Controller("academy")
@@ -33,4 +33,28 @@ export class AcademyController {
   listStudents(@Req() req: any) {
     return this.svc.listStudents(req.session);
   }
+
+  // ── Fees + billing ──────────────────────────────────────────────
+  @Get("fees/config")
+  getFeesConfig(@Req() req: any) { return this.svc.getFeesConfig(req.session); }
+
+  @Put("fees/config")
+  setFeesConfig(@Body() body: any, @Req() req: any) { return this.svc.setFeesConfig(req.session, body); }
+
+  @Post("fees/generate")
+  generateInvoices(@Req() req: any) { return this.svc.generateInvoices(req.session); }
+
+  @Get("fees")
+  listInvoices(@Req() req: any, @Query("status") status?: string, @Query("period") period?: string) {
+    return this.svc.listInvoices(req.session, {
+      status: (status === "pending" || status === "paid" || status === "waived") ? status : undefined,
+      period,
+    });
+  }
+
+  @Post("fees/:id/mark-paid")
+  markPaid(@Req() req: any, @Param("id") id: string, @Body() body: any) { return this.svc.markPaid(req.session, id, body); }
+
+  @Post("fees/:id/waive")
+  waiveInvoice(@Req() req: any, @Param("id") id: string, @Body() body: any) { return this.svc.waiveInvoice(req.session, id, body); }
 }

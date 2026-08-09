@@ -166,12 +166,23 @@ export class AcademyService {
       lastAttendedAt: a.lastAttendedAt ?? null,
     };
 
+    // Fees rollup — sum of pending invoice amounts + oldest pending period
+    // per student. One aggregation for all students in this response.
+    const feeRows: any[] = await this.conn.db!.collection("feeInvoices").aggregate([
+      { $match: { studentId: { $in: ids }, status: "pending", academyId: g.academyId } },
+      { $group: { _id: "$studentId", pendingFeesPaise: { $sum: "$amountPaise" }, oldestPendingPeriod: { $min: "$period" } } },
+    ]).toArray();
+    const fmap: Record<string, { pendingFeesPaise: number; oldestPendingPeriod: string }> = {};
+    for (const f of feeRows) fmap[String(f._id)] = { pendingFeesPaise: f.pendingFeesPaise ?? 0, oldestPendingPeriod: f.oldestPendingPeriod ?? "" };
+
     return rows.map((s: any) => ({
       ...s,
       puzzleRating: rmap[String(s._id)] ?? 1500,
       attendedTotal:    amap[String(s._id)]?.attendedTotal    ?? 0,
       attendedThisWeek: amap[String(s._id)]?.attendedThisWeek ?? 0,
       lastAttendedAt:   amap[String(s._id)]?.lastAttendedAt   ?? null,
+      pendingFeesPaise:      fmap[String(s._id)]?.pendingFeesPaise      ?? 0,
+      oldestPendingPeriod:   fmap[String(s._id)]?.oldestPendingPeriod   ?? null,
     }));
   }
 
@@ -277,5 +288,132 @@ export class AcademyService {
       { $set: { consumedAt: now, consumedByUserId: uid } },
     );
     return { ok: true, user: { _id: uid, username, academyId: inv.academyId, role: inv.role } };
+  }
+
+  /* ================================================================
+   * Fees + billing (P0 — manual/offline). No Razorpay: the owner sets
+   * their UPI VPA once, parents scan a UPI QR to pay directly, owner
+   * marks the invoice paid after seeing the bank credit.
+   *
+   * Data model:
+   *   academies.monthlyFeePaise         — default fee per student per month
+   *   academies.upiVpa                  — e.g. "coach@ybl"
+   *   academies.upiPayeeName            — display name in UPI app
+   *   feeInvoices._id = <academyId>:<studentId>:<YYYY-MM> (idempotent)
+   *   feeInvoices: { academyId, studentId, period, amountPaise,
+   *                  status: "pending"|"paid"|"waived",
+   *                  generatedAt, paidAt?, paidBy?, paymentMethod?,
+   *                  waivedAt?, waivedBy?, note? }
+   * ================================================================ */
+
+  private invoices() { return this.conn.db!.collection("feeInvoices"); }
+  private currentPeriod() {
+    const d = new Date();
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+  }
+
+  async getFeesConfig(session: any) {
+    const g = this.ensureCoachOrOwner(session);
+    const a: any = await this.academies().findOne({ _id: g.academyId as any });
+    return {
+      monthlyFeePaise: a?.monthlyFeePaise ?? 0,
+      upiVpa:          a?.upiVpa ?? "",
+      upiPayeeName:    a?.upiPayeeName ?? a?.name ?? "",
+      canEdit:         g.role === "academy_owner",
+    };
+  }
+
+  async setFeesConfig(session: any, body: any) {
+    const { academyId } = this.ensureOwner(session);
+    const raw = body ?? {};
+    const monthlyFeePaise = Math.max(0, Math.min(1_00_00_00_00, Math.floor(Number(raw.monthlyFeePaise) || 0)));
+    const upiVpa = String(raw.upiVpa || "").trim().toLowerCase();
+    const upiPayeeName = String(raw.upiPayeeName || "").trim().slice(0, 80);
+    // Very loose VPA validation — real UPI accepts a lot; block obvious garbage.
+    if (upiVpa && !/^[a-z0-9._-]{2,50}@[a-z0-9.-]{2,40}$/.test(upiVpa)) {
+      return { ok: false, error: "UPI VPA looks wrong (should be name@bank)." };
+    }
+    await this.academies().updateOne(
+      { _id: academyId as any },
+      { $set: { monthlyFeePaise, upiVpa, upiPayeeName } },
+    );
+    return { ok: true, monthlyFeePaise, upiVpa, upiPayeeName };
+  }
+
+  /** Generate this month's invoices for every student in the academy. Idempotent —
+   *  the (academy,student,period) tuple is the _id, so re-running does nothing. */
+  async generateInvoices(session: any) {
+    const { academyId } = this.ensureOwner(session);
+    const a: any = await this.academies().findOne({ _id: academyId as any });
+    const fee = a?.monthlyFeePaise ?? 0;
+    if (fee <= 0) return { ok: false, error: "Set a monthly fee amount first." };
+    const period = this.currentPeriod();
+    const students: any[] = await this.users()
+      .find({ academyId, role: "student" }, { projection: { _id: 1, username: 1 } }).toArray();
+    if (students.length === 0) return { ok: true, generated: 0, period, note: "No students yet." };
+
+    const now = new Date();
+    const dueDate = new Date(now.getUTCFullYear(), now.getUTCMonth(), 10);   // 10th of the month
+    const docs = students.map((s) => ({
+      _id: `${academyId}:${s._id}:${period}`,
+      academyId, studentId: String(s._id), period,
+      amountPaise: fee, status: "pending",
+      generatedAt: now, dueDate,
+    }));
+    // insertMany with ordered:false so pre-existing rows (idempotent runs) don't
+    // abort the batch — Mongo silently skips duplicates when we ignore the error.
+    try {
+      await this.invoices().insertMany(docs as any, { ordered: false });
+    } catch (err: any) {
+      // Duplicate-key errors are expected on re-runs; anything else propagates.
+      const isDupOnly = err?.code === 11000 || err?.writeErrors?.every?.((w: any) => w?.code === 11000);
+      if (!isDupOnly) throw err;
+    }
+    const nowPending = await this.invoices().countDocuments({ academyId, period, status: "pending" });
+    return { ok: true, generated: docs.length, period, pendingCount: nowPending };
+  }
+
+  /** List invoices in caller's scope. Owner=all; coach=their students' only. */
+  async listInvoices(session: any, filter: { status?: "pending"|"paid"|"waived"; period?: string } = {}) {
+    const g = this.ensureCoachOrOwner(session);
+    const q: any = { academyId: g.academyId };
+    if (filter.status) q.status = filter.status;
+    if (filter.period) q.period = filter.period;
+    if (g.role === "coach") {
+      const myStudents = await this.users()
+        .find({ academyId: g.academyId, role: "student", coachId: g.userId }, { projection: { _id: 1 } })
+        .toArray();
+      q.studentId = { $in: myStudents.map((s: any) => String(s._id)) };
+    }
+    const rows = await this.invoices().find(q).sort({ period: -1, studentId: 1 }).limit(500).toArray();
+    // Attach student username for display
+    const uids = Array.from(new Set(rows.map((r: any) => String(r.studentId))));
+    const users = await this.users().find({ _id: { $in: uids as any } }, { projection: { _id: 1, username: 1 } }).toArray();
+    const uname: Record<string, string> = {};
+    for (const u of users as any[]) uname[String(u._id)] = u.username;
+    return rows.map((r: any) => ({ ...r, studentUsername: uname[String(r.studentId)] || r.studentId }));
+  }
+
+  async markPaid(session: any, invoiceId: string, body: any) {
+    const { academyId, userId } = this.ensureOwner(session);
+    const method = body?.paymentMethod === "upi" ? "upi" : "manual";
+    const note = String(body?.note || "").slice(0, 200);
+    const r = await this.invoices().updateOne(
+      { _id: invoiceId as any, academyId, status: "pending" },
+      { $set: { status: "paid", paidAt: new Date(), paidBy: userId, paymentMethod: method, ...(note ? { note } : {}) } },
+    );
+    if (r.matchedCount === 0) return { ok: false, error: "Invoice not found or already paid." };
+    return { ok: true };
+  }
+
+  async waiveInvoice(session: any, invoiceId: string, body: any) {
+    const { academyId, userId } = this.ensureOwner(session);
+    const note = String(body?.note || "").slice(0, 200);
+    const r = await this.invoices().updateOne(
+      { _id: invoiceId as any, academyId, status: "pending" },
+      { $set: { status: "waived", waivedAt: new Date(), waivedBy: userId, ...(note ? { note } : {}) } },
+    );
+    if (r.matchedCount === 0) return { ok: false, error: "Invoice not found or already resolved." };
+    return { ok: true };
   }
 }
