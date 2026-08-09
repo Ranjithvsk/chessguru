@@ -795,6 +795,17 @@ function SnapCard({ s }: { s: SnapItem }) {
     } catch (e) { setErr(String((e as Error).message || e)); }
     finally { setSaving(false); }
   }
+  async function toggleStar() {
+    try {
+      const r = await fetch(`${BASE}/api/class/${encodeURIComponent(s.classId)}/snap/${encodeURIComponent(s._id)}`, {
+        method: "PATCH", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ starred: !s.starred }),
+      });
+      if (!r.ok) return;
+      qc.invalidateQueries({ queryKey: ["academy-snaps"] });
+    } catch { /* ignore */ }
+  }
   async function deleteSnap() {
     if (!window.confirm(`Delete this snap${s.note ? ` — "${s.note.slice(0, 60)}"` : ""}? This can't be undone.`)) return;
     try {
@@ -817,6 +828,11 @@ function SnapCard({ s }: { s: SnapItem }) {
       </div>
       <div className="flex-1 min-w-0 flex flex-col text-sm">
         <div className="text-white truncate">
+          {canEdit ? (
+            <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleStar(); }}
+              className={`mr-1 text-xs align-middle ${s.starred ? "text-amber-300" : "text-ink-600 hover:text-amber-300 opacity-0 group-hover:opacity-100"} transition-opacity`}
+              title={s.starred ? "Un-star" : "Star for review shortlist"}>{s.starred ? "★" : "☆"}</button>
+          ) : s.starred ? <span className="mr-1 text-xs text-amber-300 align-middle">★</span> : null}
           <b>{s.byName}</b>
           {shapes.length > 0 && <span className="ml-1 text-[10px] text-amber-300">✏️{shapes.length}</span>}
           {canEdit && !editing && (
@@ -866,7 +882,7 @@ function SnapCard({ s }: { s: SnapItem }) {
 // scope the grid; click All to reset. The 12-card visible limit still
 // applies within the filtered view.
 type SnapShape = { orig: string; dest?: string; brush?: string };
-type SnapItem = { _id: string; classId: string; classTitle: string; fen: string; note: string; byName: string; byUserId?: string; at: string; shapes?: SnapShape[] };
+type SnapItem = { _id: string; classId: string; classTitle: string; fen: string; note: string; byName: string; byUserId?: string; at: string; shapes?: SnapShape[]; starred?: boolean };
 // URL-safe base64 encoder for the shapes deep-link. Matches decoder in BoardEditor.tsx.
 function encodeShapesForUrl(shapes: SnapShape[]): string {
   return btoa(JSON.stringify(shapes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -906,7 +922,11 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
     else tally.set(s.classId, { title: s.classTitle, n: 1, lastAt: t });
   }
   const topClasses = [...tally.entries()].sort((a, b) => b[1].lastAt - a[1].lastAt).slice(0, 5);
-  const filtered = classFilter ? snaps.filter((s) => s.classId === classFilter) : snaps;
+  // Starred snaps float to the top so the coach's review shortlist is one
+  // scroll-length away regardless of recency.
+  const filtered = (classFilter ? snaps.filter((s) => s.classId === classFilter) : snaps)
+    .slice()
+    .sort((a, b) => Number(!!b.starred) - Number(!!a.starred));
   return (
     <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
       <h2 className="mb-3 font-display text-lg text-white">📸 Recent snaps <span className="text-xs text-ink-500">({snaps.length})</span></h2>

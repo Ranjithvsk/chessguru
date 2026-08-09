@@ -606,6 +606,7 @@ export class AcademyService {
       classId: r.classId, classTitle: titleById[r.classId] || r.classId,
       fen: r.fen, note: r.note || "",
       shapes: Array.isArray(r.shapes) ? r.shapes : [],
+      starred: !!r.starred,
       byUserId: String(r.byUserId), byName: r.byName || r.byUserId,
       at: r.at,
     }));

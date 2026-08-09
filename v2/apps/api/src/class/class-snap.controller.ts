@@ -74,6 +74,7 @@ export class ClassSnapController {
     if (cur.byUserId !== userId) throw new ForbiddenException("not your snap");
     const $set: Record<string, unknown> = {};
     if (typeof body?.note === "string") $set.note = body.note.slice(0, 500);
+    if (typeof body?.starred === "boolean") $set.starred = body.starred;
     if (Object.keys($set).length === 0) return { ok: true, changed: false };
     await this.conn.db!.collection("classSnaps").updateOne({ _id: snapId as any }, { $set });
     return { ok: true, changed: true };
