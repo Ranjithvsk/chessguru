@@ -22,6 +22,16 @@ export class AcademyController {
     return this.digest.previewFor(userId);
   }
 
+  // POST /api/academy/starred-digest/send-now — one-off self-send. Bypasses
+  // the Sunday-morning schedule; still fails-fast on opted-out / no-email /
+  // empty-window. Coach uses it to QA the digest before Sunday.
+  @Post("starred-digest/send-now")
+  async sendNowStarredDigest(@Req() req: any) {
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) throw new UnauthorizedException();
+    return this.digest.sendNowFor(userId);
+  }
+
   @Post("invites")
   createInvite(@Body() body: any, @Req() req: any) {
     return this.svc.createInvite(req.session, body);

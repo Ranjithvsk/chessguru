@@ -1161,12 +1161,23 @@ function StarredDigestPreviewLink() {
   const [open, setOpen] = useState(false);
   type Row = { _id: string; classId: string; at: string; note: string; hasAudio: boolean; shapeCount: number; link: string };
   const [data, setData] = useState<{ snapCount: number; snaps: Row[] } | null>(null);
+  const [sending, setSending] = useState(false);
+  const [sendMsg, setSendMsg] = useState<string | null>(null);
   async function load() {
-    setData(null); setOpen(true);
+    setData(null); setSendMsg(null); setOpen(true);
     try {
       const r = await fetch(`${BASE}/api/academy/starred-digest/preview`, { credentials: "include" }).then((res) => res.json());
       setData(r);
     } catch { /* modal shows loading forever -- coach can close */ }
+  }
+  async function sendNow() {
+    if (sending) return;
+    setSending(true); setSendMsg(null);
+    try {
+      const r = await fetch(`${BASE}/api/academy/starred-digest/send-now`, { method: "POST", credentials: "include" }).then((res) => res.json());
+      setSendMsg(r?.ok ? `✓ Sent — ${r.snapCount} snap${r.snapCount === 1 ? "" : "s"}` : `⚠️ ${r?.note || "Send failed"}`);
+    } catch { setSendMsg("⚠️ Network error"); }
+    finally { setSending(false); }
   }
   return (
     <>
@@ -1206,6 +1217,15 @@ function StarredDigestPreviewLink() {
                   ))}
                 </ol>
               </>
+            )}
+            {data && data.snapCount > 0 && (
+              <div className="mt-4 flex items-center gap-2">
+                <button onClick={sendNow} disabled={sending}
+                  className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
+                  {sending ? "Sending…" : "📧 Send it to me now"}
+                </button>
+                {sendMsg && <span className="text-[11px] text-ink-300">{sendMsg}</span>}
+              </div>
             )}
           </div>
         </div>

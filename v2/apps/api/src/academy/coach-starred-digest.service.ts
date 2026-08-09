@@ -92,6 +92,21 @@ export class CoachStarredDigestService implements OnModuleInit {
     };
   }
 
+  /** Public: send the digest to a specific user right now, bypassing the
+   *  Sunday-window guard. Used by the dashboard's "Send it to me now" test
+   *  button. Still requires the user to have an email + not be opted out.
+   *  Zero-snap window is treated as a no-op with a note in the response. */
+  async sendNowFor(userId: string): Promise<{ ok: boolean; snapCount: number; note?: string }> {
+    const user: any = await this.conn.db!.collection("users").findOne({ _id: userId as any });
+    if (!user) return { ok: false, snapCount: 0, note: "user not found" };
+    if (!user.email) return { ok: false, snapCount: 0, note: "no email on account" };
+    if (user.coachStarredDigestOptedOut) return { ok: false, snapCount: 0, note: "you have opted out of this digest" };
+    const preview = await this.previewFor(userId, 7);
+    if (preview.snapCount === 0) return { ok: false, snapCount: 0, note: "no starred snaps in the last 7 days -- nothing to send" };
+    await this.sendFor(user);
+    return { ok: true, snapCount: preview.snapCount };
+  }
+
   private async sendFor(user: any): Promise<void> {
     const userId = String(user._id);
     const email = String(user.email).toLowerCase();
