@@ -1336,6 +1336,21 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
           </button>
           {selectMode && (
             <>
+              <button onClick={() => setSelectedIds((cur) => {
+                const shown = filtered.slice(0, 12);
+                const allShownIds = new Set(shown.map((s) => s._id));
+                const allSelected = shown.every((s) => cur.has(s._id));
+                if (allSelected) {
+                  const nxt = new Set(cur);
+                  for (const id of allShownIds) nxt.delete(id);
+                  return nxt;
+                }
+                return new Set([...cur, ...allShownIds]);
+              })}
+                title="Toggle-select every snap currently in view"
+                className="rounded-full border border-ink-700 bg-ink-900 px-2.5 py-0.5 text-[11px] font-semibold text-ink-300 hover:bg-ink-800">
+                ✓ All in view
+              </button>
               <button onClick={() => bulkSetStar(true)} disabled={selectedIds.size === 0}
                 title="Star selected snaps"
                 className="rounded-full border border-amber-400/40 bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-amber-100 hover:bg-amber-500/20 disabled:opacity-40">
