@@ -17,6 +17,7 @@ type Dash = {
   days?: { day: string; solves: number; wins: number; rating: number }[];
   bands?: { lo: number; hi: number; attempted: number; solved: number; accuracy: number }[];
   themeSpeeds?: { theme: string; medianMs: number; n: number; trend?: "faster" | "slower" | "steady" | "new" }[];
+  byHour?: { hour: number; n: number; wins: number; medianMs: number | null }[];
   personalBests?: {
     bestRating: number | null; bestRatingDate: string | null;
     bestDay: number | null; bestDayDate: string | null;
@@ -187,6 +188,81 @@ function PersonalBests({ pb }: { pb: NonNullable<Dash["personalBests"]> }) {
             </div>
             <div className={`mt-1 font-display text-2xl font-bold tabular-nums ${t.tone}`}>{t.value}</div>
             <div className="mt-0.5 text-[11px] text-ink-400">{t.label}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Compact "best time of day" card. 24-bar activity chart + a callout for the
+// sharpest hour (fastest median among hours with ≥5 solves and ≥3 timed wins,
+// so a single burst can't crown a random hour). Self-hides when there's not
+// enough data yet.
+function BestTimeOfDay({ hours }: { hours: NonNullable<Dash["byHour"]> }) {
+  const total = hours.reduce((s, h) => s + h.n, 0);
+  if (total < 20) return null;   // nothing meaningful to say with < 20 solves
+  const eligible = hours.filter((h) => h.n >= 5 && h.medianMs != null);
+  const sharpest = eligible.slice().sort((a, b) => (a.medianMs! - b.medianMs!))[0] ?? null;
+  const busiest  = hours.slice().sort((a, b) => b.n - a.n)[0] ?? null;
+  const maxN = Math.max(...hours.map((h) => h.n), 1);
+  // Human hour label: "7pm" style. midnight/noon get named for scanability.
+  const label = (h: number) => h === 0 ? "12am" : h === 12 ? "12pm" : h < 12 ? `${h}am` : `${h - 12}pm`;
+  const fmt = (ms: number) => ms < 10_000 ? `${(ms / 1000).toFixed(1)}s`
+    : ms < 60_000 ? `${Math.round(ms / 1000)}s`
+    : `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
+  return (
+    <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
+      <div className="mb-3 flex items-baseline justify-between">
+        <span className="text-sm font-semibold text-white">🕐 Best time of day</span>
+        <span className="text-xs text-ink-400">activity by hour (your local time)</span>
+      </div>
+      {/* Callouts */}
+      <div className="mb-3 grid gap-2 sm:grid-cols-2">
+        <div className="rounded-lg border border-brand-500/30 bg-brand-500/10 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-wide text-brand-300">Sharpest hour</div>
+          {sharpest ? (
+            <>
+              <div className="font-display text-lg font-bold text-brand-100">{label(sharpest.hour)}</div>
+              <div className="text-[11px] text-ink-500">
+                median {fmt(sharpest.medianMs!)} · {sharpest.wins} wins of {sharpest.n}
+              </div>
+            </>
+          ) : <div className="text-[11px] text-ink-500">Need more timed wins per hour to say.</div>}
+        </div>
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-wide text-amber-300">Most active hour</div>
+          {busiest && busiest.n > 0 ? (
+            <>
+              <div className="font-display text-lg font-bold text-amber-100">{label(busiest.hour)}</div>
+              <div className="text-[11px] text-ink-500">
+                {busiest.n} solves · {busiest.n > 0 ? Math.round((busiest.wins / busiest.n) * 100) : 0}% accuracy
+              </div>
+            </>
+          ) : <div className="text-[11px] text-ink-500">No activity yet.</div>}
+        </div>
+      </div>
+      {/* 24-bar activity chart. Height ∝ solve count; sharpest hour gets a
+          highlight ring so the callout finds itself visually. */}
+      <div className="flex items-end gap-0.5" style={{ height: 72 }}>
+        {hours.map((h) => {
+          const pct = (h.n / maxN) * 100;
+          const isSharp = sharpest?.hour === h.hour;
+          return (
+            <div key={h.hour} className="flex-1 flex flex-col items-stretch justify-end" title={`${label(h.hour)} — ${h.n} solves · ${h.wins} wins${h.medianMs != null ? ` · median ${fmt(h.medianMs)}` : ""}`}>
+              <div className={`rounded-t ${isSharp
+                ? "bg-gradient-to-t from-brand-500 to-accent-400 ring-1 ring-brand-300/60"
+                : "bg-ink-700"}`}
+                style={{ height: `${Math.max(4, pct)}%` }} />
+            </div>
+          );
+        })}
+      </div>
+      {/* Hour ticks — every 3rd hour, small, keeps the axis readable without noise. */}
+      <div className="mt-1 flex text-[9px] text-ink-500">
+        {hours.map((h) => (
+          <div key={h.hour} className="flex-1 text-center">
+            {h.hour % 3 === 0 ? label(h.hour) : ""}
           </div>
         ))}
       </div>
@@ -434,6 +510,7 @@ export default function DashboardPage() {
       {data.days && <RatingChart days={data.days} />}
       {data.bands && data.bands.length > 0 && <BandChart bands={data.bands} userRating={data.global?.rating ?? 1500} />}
       {data.themeSpeeds && data.themeSpeeds.length > 0 && <SpeedByTheme speeds={data.themeSpeeds} onTrain={train} />}
+      {data.byHour && <BestTimeOfDay hours={data.byHour} />}
 
       {rated.length >= 3 && (
         <div className="grid gap-3 md:grid-cols-2">

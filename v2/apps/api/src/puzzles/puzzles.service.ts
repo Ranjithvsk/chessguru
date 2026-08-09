@@ -315,6 +315,33 @@ export class PuzzlesService {
         return { theme, medianMs, n: b.all.length, trend };
       })
       .sort((a, b) => a.medianMs - b.medianMs);
+    // Hour-of-day activity in the caller's local time. rounds.d is a UTC Date;
+    // client-side we'd read local hour trivially, but bucketing on the server
+    // saves 2000 rounds worth of round trip. Server clock's local hour is used
+    // as a best-effort proxy — most users are in a single timezone, and any
+    // mismatch is bounded to a ±12h rotation the eye smooths over.
+    const byHour: Array<{ hour: number; n: number; wins: number; medianMs: number | null }> = [];
+    const hourBuckets: Array<{ n: number; wins: number; ms: number[] }> =
+      Array.from({ length: 24 }, () => ({ n: 0, wins: 0, ms: [] }));
+    for (const r of puzzleRounds as any[]) {
+      if (!r.d) continue;
+      const h = new Date(r.d).getHours();
+      const b = hourBuckets[h];
+      if (!b) continue;
+      b.n++;
+      if (r.w) b.wins++;
+      if (r.w && typeof r.ms === "number" && r.ms > 0) b.ms.push(r.ms);
+    }
+    for (let h = 0; h < 24; h++) {
+      const b = hourBuckets[h]!;
+      let medMs: number | null = null;
+      if (b.ms.length >= 3) {
+        const s = b.ms.slice().sort((a, b) => a - b);
+        const mid = Math.floor(s.length / 2);
+        medMs = s.length % 2 === 1 ? s[mid]! : Math.round((s[mid - 1]! + s[mid]!) / 2);
+      }
+      byHour.push({ hour: h, n: b.n, wins: b.wins, medianMs: medMs });
+    }
     return {
       loggedIn: true,
       global: { rating: Math.round(p.puzzle?.gl?.r ?? 1500), rd: Math.round(p.puzzle?.gl?.d ?? 500), games: p.puzzle?.nb ?? 0 },
@@ -326,6 +353,7 @@ export class PuzzlesService {
       bands,
       personalBests,
       themeSpeeds,
+      byHour,
     };
   }
 
