@@ -26,6 +26,7 @@ import { Injectable, OnModuleInit } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { sendMail } from "../lib/mail";
+import { loadOptOuts, optOutToken } from "./class-optout";
 
 const TICK_MS = 60_000;                    // scan cadence
 // Stages: { stamp field, near-boundary, far-boundary } — startAt must fall in
@@ -111,10 +112,22 @@ export class ClassReminderService implements OnModuleInit {
         if (inv?.email && typeof inv.email === "string") recipients.add(inv.email.toLowerCase());
       }
     }
+    // Track coach email separately so we can skip the unsubscribe footer for
+    // the coach themselves — no point offering the coach a link to stop being
+    // told about their own class.
+    let coachEmail: string | null = null;
     if (row.createdByUserId) {
       const user: any = await this.conn.db!.collection("users").findOne({ _id: row.createdByUserId as any });
-      if (user?.email && typeof user.email === "string") recipients.add(String(user.email).toLowerCase());
+      if (user?.email && typeof user.email === "string") {
+        coachEmail = String(user.email).toLowerCase();
+        recipients.add(coachEmail);
+      }
     }
+    if (recipients.size === 0) return;
+    // Remove anyone who opted out of THIS class (invitees only — coach still
+    // gets their own class reminder even if they unsubscribed on another).
+    const optedOut = await loadOptOuts(this.conn, row._id);
+    for (const e of optedOut) if (e !== coachEmail) recipients.delete(e);
     if (recipients.size === 0) return;
 
     const joinUrl = `${PUBLIC_ORIGIN}/class/${encodeURIComponent(row._id)}`;
@@ -188,9 +201,24 @@ export class ClassReminderService implements OnModuleInit {
         </div>
       </div>
     `;
-    // Fire in parallel. Individual send failures logged in sendMail; we don't
-    // unwind the stamp so a Resend outage doesn't cause a resend storm.
-    await Promise.all([...recipients].map((to) => sendMail({ to, subject, html, text })));
+    // Fire in parallel. Each recipient gets their own unsubscribe link (HMAC
+    // over classId+email) appended to both the plain-text and HTML footers.
+    // Coach is skipped — no point unsubscribing them from their own class.
+    await Promise.all([...recipients].map((to) => {
+      const isCoach = to === coachEmail;
+      const unsubUrl = isCoach ? null
+        : `${PUBLIC_ORIGIN}/v2api/api/class/${encodeURIComponent(row._id)}/unsubscribe?email=${encodeURIComponent(to)}&t=${optOutToken(row._id, to)}`;
+      const finalText = unsubUrl
+        ? `${text}\n\nStop reminders for this class: ${unsubUrl}`
+        : text;
+      const finalHtml = unsubUrl
+        ? html.replace(/(<\/div>\s*<\/div>\s*)$/,
+            `<p style="font-size:11px;color:#9ca3af;margin-top:14px;text-align:center">
+               <a href="${escapeAttr(unsubUrl)}" style="color:#9ca3af;text-decoration:underline">Stop reminders for this class</a>
+             </p>$1`)
+        : html;
+      return sendMail({ to, subject, html: finalHtml, text: finalText });
+    }));
   }
 }
 
