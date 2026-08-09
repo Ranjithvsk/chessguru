@@ -736,16 +736,41 @@ function InvoiceCard({ inv, config, isOwner, onMarkPaid, markPaidPending }: {
 // scope the grid; click All to reset. The 12-card visible limit still
 // applies within the filtered view.
 type SnapItem = { _id: string; classId: string; classTitle: string; fen: string; note: string; byName: string; at: string };
+// Quick position summary from a FEN — just enough to tell an endgame study
+// from a middlegame at a glance without opening the board editor. No chess.js
+// dependency; parses the piece-placement field with a regex.
+function describeFen(fen: string): string {
+  const piece = fen.split(" ")[0] ?? "";
+  const w = { P: 0, N: 0, B: 0, R: 0, Q: 0 };
+  const b = { P: 0, N: 0, B: 0, R: 0, Q: 0 };
+  for (const ch of piece) {
+    if (ch >= "A" && ch <= "Z" && ch in w) (w as Record<string, number>)[ch]!++;
+    else if (ch >= "a" && ch <= "z") { const u = ch.toUpperCase(); if (u in b) (b as Record<string, number>)[u]!++; }
+  }
+  const totalW = w.P + w.N + w.B + w.R + w.Q;
+  const totalB = b.P + b.N + b.B + b.R + b.Q;
+  const total = totalW + totalB;
+  const fmtSide = (s: typeof w) => {
+    const parts: string[] = ["K"];
+    (["Q", "R", "B", "N", "P"] as const).forEach((k) => { if (s[k] > 1) parts.push(`${s[k]}${k}`); else if (s[k] === 1) parts.push(k); });
+    return parts.join("+");
+  };
+  const phase = total <= 6 ? "Endgame" : total >= 24 ? "Opening/Middlegame" : "Middlegame";
+  return `${phase} · ${fmtSide(w)} vs ${fmtSide(b)}`;
+}
 function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   const [classFilter, setClassFilter] = useState<string>(""); // "" = all
-  // Tally by class, keep insertion order (snaps come newest-first from API).
-  const tally = new Map<string, { title: string; n: number }>();
+  // Tally by class + track the most-recent snap timestamp per class. Chips
+  // sort by recency (not count) so a coach who just finished a class sees
+  // that class first regardless of how many snaps they took.
+  const tally = new Map<string, { title: string; n: number; lastAt: number }>();
   for (const s of snaps) {
+    const t = new Date(s.at).getTime();
     const cur = tally.get(s.classId);
-    if (cur) cur.n++;
-    else tally.set(s.classId, { title: s.classTitle, n: 1 });
+    if (cur) { cur.n++; if (t > cur.lastAt) cur.lastAt = t; }
+    else tally.set(s.classId, { title: s.classTitle, n: 1, lastAt: t });
   }
-  const topClasses = [...tally.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 5);
+  const topClasses = [...tally.entries()].sort((a, b) => b[1].lastAt - a[1].lastAt).slice(0, 5);
   const filtered = classFilter ? snaps.filter((s) => s.classId === classFilter) : snaps;
   return (
     <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
@@ -778,6 +803,7 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
               <div className="flex-1 min-w-0 flex flex-col text-sm">
                 <div className="text-white truncate"><b>{s.byName}</b></div>
                 <div className="text-[11px] text-ink-400 truncate">{s.classTitle}</div>
+                <div className="mt-0.5 text-[10px] font-mono text-ink-500 truncate" title={s.fen}>{describeFen(s.fen)}</div>
                 {s.note && <div className="mt-1 text-[12px] text-ink-300 line-clamp-2">"{s.note}"</div>}
                 <div className="mt-auto text-[10px] text-ink-500">
                   {new Date(s.at).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
