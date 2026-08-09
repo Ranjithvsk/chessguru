@@ -184,6 +184,18 @@ export default function ClassReplayPage() {
       const tag = t.tagName;
       return tag === "INPUT" || tag === "TEXTAREA" || t.isContentEditable;
     };
+    const seekBy = (deltaMs: number) => {
+      const v = videoRef.current; if (!v) return;
+      const cur = v.currentTime * 1000;
+      const dur = (Number.isFinite(v.duration) ? v.duration : 0) * 1000;
+      const next = Math.max(0, dur > 0 ? Math.min(dur - 100, cur + deltaMs) : cur + deltaMs);
+      v.currentTime = next / 1000;
+      setTMs(next);
+    };
+    const togglePlay = () => {
+      const v = videoRef.current; if (!v) return;
+      if (v.paused) v.play().catch(() => {}); else v.pause();
+    };
     const onKey = (e: KeyboardEvent) => {
       if (isTextField(e.target)) return;
       if (e.key === "ArrowRight") {
@@ -191,10 +203,15 @@ export default function ClassReplayPage() {
       } else if (e.key === "ArrowLeft") {
         if (idx > 0) { e.preventDefault(); jumpTo(events[idx - 1]!.tMs); }
         else if (idx === 0 && events[0]) { e.preventDefault(); jumpTo(events[0].tMs); }
-      } else if (e.key === " " || e.code === "Space") {
-        const v = videoRef.current; if (!v) return;
+      } else if (e.key === " " || e.code === "Space" || e.key === "k" || e.key === "K") {
         e.preventDefault();
-        if (v.paused) v.play().catch(() => {}); else v.pause();
+        togglePlay();
+      } else if (e.key === "j" || e.key === "J") {
+        e.preventDefault();
+        seekBy(-10_000);
+      } else if (e.key === "l" || e.key === "L") {
+        e.preventDefault();
+        seekBy(10_000);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -227,7 +244,8 @@ export default function ClassReplayPage() {
             <span className="text-[10px] text-ink-500">
               {loadingTimeline ? "loading…" : `${events.length} move${events.length === 1 ? "" : "s"}`}
               {snapMarkers.length > 0 && <span className="ml-2 text-amber-300">📸 {snapMarkers.length} snap{snapMarkers.length === 1 ? "" : "s"}</span>}
-              <span className="ml-2 hidden sm:inline text-ink-600" title="Keyboard: ← / → step moves, Space play/pause">⌨️ ← → ␣</span>
+              <span className="ml-2 hidden sm:inline text-ink-600"
+                title="← / →  step one move · Space or K  play/pause · J / L  ±10s">⌨️ ← → ␣ J L K</span>
             </span>
           </div>
           {!loadingTimeline && events.length === 0 ? (
