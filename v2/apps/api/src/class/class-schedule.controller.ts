@@ -57,6 +57,11 @@ type ScheduleDoc = {
   // treat as ["h24","m15"] in the scheduler so unpatched classes keep
   // yesterday's behaviour. Set to [] to disable all reminders.
   reminderStages?: string[];
+  // Auto-summary opt-in. When true, a cron worker fires the class-summary
+  // email 15 min after endAt (if not already sent manually). Coach can flip
+  // on the schedule form or via PATCH.
+  autoSummary?: boolean;
+  summarySentAt?: Date | null;
 };
 
 const ALLOWED_STAGES = new Set(["m15", "h1", "h24"]);
@@ -196,6 +201,7 @@ export class ClassScheduleController {
         reminded1hAt: null,
         reminded24hAt: null,
         reminderStages: reminderStages as string[],
+        autoSummary: !!b.autoSummary,
       });
     }
     await this.col().insertMany(docs);
@@ -300,6 +306,9 @@ export class ClassScheduleController {
         ? Array.from(new Set(b.reminderStages.filter((s: unknown) => typeof s === "string" && ALLOWED_STAGES.has(s))))
         : DEFAULT_STAGES.slice();
       patch.reminderStages = arr as string[];
+    }
+    if (typeof b.autoSummary === "boolean") {
+      patch.autoSummary = b.autoSummary;
     }
     if (Object.keys(patch).length === 0) return { ok: true, matched: 0 };
     if (scope === "series" && row.seriesId) {

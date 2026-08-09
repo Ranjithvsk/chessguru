@@ -60,7 +60,7 @@ function AttendanceStrip({ days }: { days?: boolean[] }) {
     </div>
   );
 }
-interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; attendedCount?: number; academyId?: string|null; summarySentAt?: string|null }
+interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; attendedCount?: number; academyId?: string|null; summarySentAt?: string|null; autoSummary?: boolean }
 interface FeesConfig { monthlyFeePaise: number; upiVpa: string; upiPayeeName: string; canEdit: boolean }
 interface Invoice { _id: string; academyId: string; studentId: string; studentUsername: string; period: string; amountPaise: number; status: "pending"|"paid"|"waived"; generatedAt: string; paidAt?: string; paymentMethod?: string }
 function rupees(paise: number) { return (paise / 100).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }); }
@@ -142,6 +142,7 @@ export default function AcademyDashboardPage() {
   const [classCoach, setClassCoach] = useState("");
   const [classStartAt, setClassStartAt] = useState(localDatetimeDefault);
   const [classDur, setClassDur] = useState(60);
+  const [classAutoSummary, setClassAutoSummary] = useState(false);
   const [scheduleMsg, setScheduleMsg] = useState<{ tone: "ok"|"err"; text: string }|null>(null);
   // Fees form + actions
   const [feeRupees, setFeeRupees] = useState<string>("");
@@ -190,6 +191,7 @@ export default function AcademyDashboardPage() {
   const scheduleMut = useMutation({
     mutationFn: () => post<{ _id: string; title: string }>("/api/class/schedule", {
       title: classTitle, coach: classCoach || (me?.username ?? ""), startAt: new Date(classStartAt).toISOString(), durationMin: classDur,
+      autoSummary: classAutoSummary,
     }),
     onSuccess: (r: any) => {
       if (r && r._id) {
@@ -563,6 +565,12 @@ export default function AcademyDashboardPage() {
                 className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white focus:border-brand-500 focus:outline-none"
                 title="Duration (minutes)" />
             </div>
+            <label className="md:col-span-2 flex items-center gap-2 text-xs text-ink-300 cursor-pointer">
+              <input type="checkbox" checked={classAutoSummary} onChange={(e) => setClassAutoSummary(e.target.checked)}
+                className="rounded border-ink-600 bg-ink-800 text-brand-500 focus:ring-brand-500/40" />
+              🤖 Auto-email a class summary 15 minutes after this class ends
+              <span className="ml-1 text-ink-500">(you can still preview / send earlier manually)</span>
+            </label>
             <button disabled={!classTitle || scheduleMut.isPending} onClick={() => scheduleMut.mutate()}
               className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50 md:col-span-2">
               {scheduleMut.isPending ? "Scheduling…" : "Schedule class"}
@@ -1303,6 +1311,9 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
             <span className="ml-2 text-brand-300" title={`Summary emailed ${new Date(c.summarySentAt).toLocaleString()}`}>
               📧 sent {fmtAgo(c.summarySentAt)}
             </span>
+          )}
+          {c.mine && c.autoSummary && !c.summarySentAt && (
+            <span className="ml-2 text-ink-500" title="Auto-email will fire 15 min after class ends">🤖 auto</span>
           )}
           {sendMsg && <span className="ml-2 text-brand-300">· {sendMsg}</span>}
         </div>
