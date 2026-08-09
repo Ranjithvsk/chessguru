@@ -657,35 +657,7 @@ export default function AcademyDashboardPage() {
       )}
 
       {/* ── Recent snaps (owner + coach) — coach-flagged mid-class positions ── */}
-      {canManage && snaps && snaps.length > 0 && (
-        <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
-          <h2 className="mb-3 font-display text-lg text-white">📸 Recent snaps <span className="text-xs text-ink-500">({snaps.length})</span></h2>
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-            {snaps.slice(0, 12).map((s) => (
-              <Link key={s._id} to={`/board-editor?fen=${encodeURIComponent(s.fen)}`}
-                className="group flex gap-3 rounded-lg border border-ink-700 bg-ink-800/40 p-3 hover:border-brand-500/50 hover:bg-ink-800/60 transition-colors">
-                {/* Mini chessground — Board handles all the rendering; className=mini shrinks it. */}
-                <div className="w-24 h-24 shrink-0">
-                  <Board fen={s.fen} viewOnly coordinates={false} className="mini" />
-                </div>
-                <div className="flex-1 min-w-0 flex flex-col text-sm">
-                  <div className="text-white truncate">
-                    <b>{s.byName}</b>
-                  </div>
-                  <div className="text-[11px] text-ink-400 truncate">{s.classTitle}</div>
-                  {s.note && (
-                    <div className="mt-1 text-[12px] text-ink-300 line-clamp-2">"{s.note}"</div>
-                  )}
-                  <div className="mt-auto text-[10px] text-ink-500">
-                    {new Date(s.at).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
-                    <span className="ml-2 text-brand-300 opacity-0 group-hover:opacity-100 transition-opacity">🔬 Open →</span>
-                  </div>
-                </div>
-              </Link>
-            ))}
-          </div>
-        </section>
-      )}
+      {canManage && snaps && snaps.length > 0 && <RecentSnapsSection snaps={snaps} />}
 
       <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
         <h2 className="mb-1 font-display text-lg text-white">🚀 Q1 shipping list</h2>
@@ -755,6 +727,68 @@ function InvoiceCard({ inv, config, isOwner, onMarkPaid, markPaidPending }: {
         </div>
       )}
     </div>
+  );
+}
+
+// Snaps grouped-by-class with a chip filter above the grid. Chips read like
+// "All (23) · Middlegame 6 · Endgame drill 4", auto-collapsed to the top 5
+// classes so a busy academy doesn't get a 30-chip wrap. Click a chip to
+// scope the grid; click All to reset. The 12-card visible limit still
+// applies within the filtered view.
+type SnapItem = { _id: string; classId: string; classTitle: string; fen: string; note: string; byName: string; at: string };
+function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
+  const [classFilter, setClassFilter] = useState<string>(""); // "" = all
+  // Tally by class, keep insertion order (snaps come newest-first from API).
+  const tally = new Map<string, { title: string; n: number }>();
+  for (const s of snaps) {
+    const cur = tally.get(s.classId);
+    if (cur) cur.n++;
+    else tally.set(s.classId, { title: s.classTitle, n: 1 });
+  }
+  const topClasses = [...tally.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 5);
+  const filtered = classFilter ? snaps.filter((s) => s.classId === classFilter) : snaps;
+  return (
+    <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
+      <h2 className="mb-3 font-display text-lg text-white">📸 Recent snaps <span className="text-xs text-ink-500">({snaps.length})</span></h2>
+      {topClasses.length > 1 && (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          <button onClick={() => setClassFilter("")}
+            className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${classFilter === "" ? "border-brand-500/60 bg-brand-500/15 text-brand-100" : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>
+            All {snaps.length}
+          </button>
+          {topClasses.map(([id, { title, n }]) => (
+            <button key={id} onClick={() => setClassFilter(id)}
+              className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${classFilter === id ? "border-brand-500/60 bg-brand-500/15 text-brand-100" : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>
+              <span className="max-w-[18ch] inline-block truncate align-bottom">{title}</span>
+              <span className="ml-1 opacity-70">{n}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {filtered.length === 0 ? (
+        <div className="text-sm text-ink-400">No snaps match this filter.</div>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+          {filtered.slice(0, 12).map((s) => (
+            <Link key={s._id} to={`/board-editor?fen=${encodeURIComponent(s.fen)}`}
+              className="group flex gap-3 rounded-lg border border-ink-700 bg-ink-800/40 p-3 hover:border-brand-500/50 hover:bg-ink-800/60 transition-colors">
+              <div className="w-24 h-24 shrink-0">
+                <Board fen={s.fen} viewOnly coordinates={false} className="mini" />
+              </div>
+              <div className="flex-1 min-w-0 flex flex-col text-sm">
+                <div className="text-white truncate"><b>{s.byName}</b></div>
+                <div className="text-[11px] text-ink-400 truncate">{s.classTitle}</div>
+                {s.note && <div className="mt-1 text-[12px] text-ink-300 line-clamp-2">"{s.note}"</div>}
+                <div className="mt-auto text-[10px] text-ink-500">
+                  {new Date(s.at).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                  <span className="ml-2 text-brand-300 opacity-0 group-hover:opacity-100 transition-opacity">🔬 Open →</span>
+                </div>
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
