@@ -1,7 +1,60 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { get } from "../lib/api";
 import { prettify } from "../lib/format";
+
+// Phase 7i: signed-in user's notification prefs — currently just the weekly
+// digest opt-in. Kept separate from the /puzzles/dashboard payload because
+// prefs mutate more often than dashboard stats and admins viewing another
+// user (?as=) shouldn't see or toggle that user's email prefs.
+type Prefs = { loggedIn: boolean; hasEmail: boolean; weeklyDigestOptedOut: boolean; weeklyDigestOptedOutAt: string | null; lastDigestAt: string | null };
+async function patchPrefs(body: { weeklyDigestOptedOut?: boolean }): Promise<{ ok: boolean }> {
+  const res = await fetch("/api/me/prefs", {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    credentials: "include", body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`PATCH prefs → ${res.status}`);
+  return res.json();
+}
+
+function PrefsCard() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["me-prefs"], queryFn: () => get<Prefs>("/api/me/prefs") });
+  const mut = useMutation({
+    mutationFn: patchPrefs,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["me-prefs"] }),
+  });
+  if (!data?.loggedIn) return null;
+  const on = !data.weeklyDigestOptedOut;
+  const toggle = () => mut.mutate({ weeklyDigestOptedOut: on });
+  return (
+    <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
+      <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">✉️ Email notifications</div>
+      <div className="flex items-center gap-4">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={on}
+          onClick={toggle}
+          disabled={mut.isPending || !data.hasEmail}
+          className={`relative h-6 w-11 shrink-0 rounded-full transition ${on ? "bg-brand-500" : "bg-ink-700"} ${!data.hasEmail || mut.isPending ? "opacity-50" : ""}`}
+        >
+          <span className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform ${on ? "translate-x-5" : ""}`} />
+        </button>
+        <div className="flex-1 text-sm">
+          <div className="text-white">Weekly progress digest</div>
+          <div className="text-xs text-ink-400">
+            {!data.hasEmail
+              ? "Add an email to your account to receive digests."
+              : on
+                ? `Sunday morning recap of your week${data.lastDigestAt ? ` · last sent ${new Date(data.lastDigestAt).toLocaleDateString(undefined, { day: "2-digit", month: "short" })}` : ""}.`
+                : `Currently off${data.weeklyDigestOptedOutAt ? ` since ${new Date(data.weeklyDigestOptedOutAt).toLocaleDateString(undefined, { day: "2-digit", month: "short" })}` : ""}.`}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // My Performance dashboard (owner 2026-07-08): global rating, per-theme Glicko
 // strengths & weaknesses, 30-day progress. Theme ratings only exist once trained;
@@ -590,6 +643,8 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {!viewedAs && <PrefsCard />}
 
       <p className="text-xs text-ink-500">
         Your main puzzle rating is its own independent rating from every solve — untrained themes never affect it.

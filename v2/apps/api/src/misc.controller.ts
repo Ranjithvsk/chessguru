@@ -1,4 +1,4 @@
-import { Controller, Get, Req, Res, Query, Param } from "@nestjs/common";
+import { Controller, Get, Patch, Req, Res, Query, Param, Body } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { THEMES } from "./themes";
@@ -17,6 +17,43 @@ export class MiscController {
 
   @Get("themes")
   themes() { return { themes: THEMES }; }
+
+  /** GET /api/me/prefs — the signed-in user's notification preferences. Cheap
+   *  read; the dashboard shows the current opt-in state for the weekly digest.
+   *  Anonymous callers get { loggedIn: false } so the UI can degrade silently. */
+  @Get("me/prefs")
+  async myPrefs(@Req() req: any) {
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) return { loggedIn: false };
+    const u: any = await this.conn.db!.collection("users").findOne(
+      { _id: userId as any },
+      { projection: { email: 1, weeklyDigestOptedOut: 1, weeklyDigestOptedOutAt: 1, digestSentAt: 1 } },
+    );
+    return {
+      loggedIn: true,
+      hasEmail: typeof u?.email === "string" && u.email.length > 0,
+      weeklyDigestOptedOut: !!u?.weeklyDigestOptedOut,
+      weeklyDigestOptedOutAt: u?.weeklyDigestOptedOutAt ?? null,
+      lastDigestAt: u?.digestSentAt ?? null,
+    };
+  }
+
+  /** PATCH /api/me/prefs { weeklyDigestOptedOut: bool } — flip the digest
+   *  opt-in for the signed-in user. Complements the HMAC email-footer link;
+   *  users can also re-enable from the dashboard once they're back inside. */
+  @Patch("me/prefs")
+  async patchPrefs(@Req() req: any, @Body() body: any) {
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) throw new (await import("@nestjs/common")).HttpException("sign in required", 401);
+    const set: any = {};
+    if (typeof body?.weeklyDigestOptedOut === "boolean") {
+      set.weeklyDigestOptedOut = body.weeklyDigestOptedOut;
+      set.weeklyDigestOptedOutAt = body.weeklyDigestOptedOut ? new Date() : null;
+    }
+    if (Object.keys(set).length === 0) return { ok: true, changed: false };
+    await this.conn.db!.collection("users").updateOne({ _id: userId as any }, { $set: set });
+    return { ok: true, changed: true };
+  }
 
   /** GET /api/me/history.csv — full flattened round history for the signed-in
    *  user (or an admin-viewed user via ?as=). Same underlying scan as /me/history
