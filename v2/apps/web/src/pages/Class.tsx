@@ -694,10 +694,13 @@ function ClassLanding() {
   const [me, setMe] = useState<{ loggedIn: boolean; username?: string }>({ loggedIn: false });
   const [mineOnly, setMineOnly] = useState(false);
   // Persisted view mode. Coaches with 20+ scheduled classes want a dense list
-  // that skims like a calendar; casual users prefer the info-rich cards.
-  const [view, setView] = useState<"cards" | "list">(() => {
-    try { return (localStorage.getItem("cg_class_view") as "cards" | "list") || "cards"; }
-    catch { return "cards"; }
+  // that skims like a calendar; casual users prefer the info-rich cards; the
+  // month grid is best for a full weekly-recurring pattern at a glance.
+  const [view, setView] = useState<"cards" | "list" | "month">(() => {
+    try {
+      const raw = localStorage.getItem("cg_class_view");
+      return (raw === "list" || raw === "month" || raw === "cards") ? raw : "cards";
+    } catch { return "cards"; }
   });
   useEffect(() => { try { localStorage.setItem("cg_class_view", view); } catch { /* */ } }, [view]);
   const [form, setForm] = useState({
@@ -872,12 +875,22 @@ function ClassLanding() {
                 ? "bg-brand-500/25 text-brand-100"
                 : "text-ink-400 hover:text-white"}`}
               title="Dense one-line per class">☰ List</button>
+            <button onClick={() => setView("month")}
+              className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${view === "month"
+                ? "bg-brand-500/25 text-brand-100"
+                : "text-ink-400 hover:text-white"}`}
+              title="Month calendar grid">📅 Month</button>
           </div>
         )}
       </div>
 
+      {/* Month view — takes over the Live+Upcoming sections when active. */}
+      {view === "month" ? (
+        <MonthCalendar classes={[...visLive, ...visUpcoming]} onOpen={(id) => nav(`/class/${encodeURIComponent(id)}`)} />
+      ) : null}
+
       {/* Live now — pulsing rose highlight so it draws the eye. Empty when nothing's live. */}
-      {visLive.length > 0 && (
+      {view !== "month" && visLive.length > 0 && (
         <section>
           <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-rose-300">
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-rose-500 shadow-[0_0_6px] shadow-rose-500" />
@@ -895,7 +908,7 @@ function ClassLanding() {
         </section>
       )}
 
-      <section>
+      {view !== "month" && <section>
         <h2 className="mb-2 flex items-baseline justify-between text-sm font-semibold text-white">
           <span>📆 Upcoming</span>
           <span className="text-[10px] font-normal text-ink-500">
@@ -917,7 +930,7 @@ function ClassLanding() {
               {visUpcoming.map((c) => <ClassRow key={c._id} c={c} tone="upcoming" onCancel={c.mine ? () => cancel(c) : undefined} onCancelSeries={c.mine && c.seriesId ? () => cancelSeries(c) : undefined} onEdit={c.mine ? () => setEditing(c) : undefined} />)}
             </div>
           )}
-      </section>
+      </section>}
 
       {/* Scheduling form — brand-gradient card so it visually pairs with the Start-now
           button. No coach account gate; anyone with the URL can create + share. */}
@@ -1246,6 +1259,115 @@ function ClassRow({ c, tone, onCancel, onCancelSeries, onEdit }:
         </span>
       </div>
     </Link>
+  );
+}
+
+// Month-grid view. 7 columns (Sun-first), enough rows to cover the current
+// month. Each cell shows compact chips for classes that fall on that day;
+// today's cell has a subtle brand ring. Prev / Next / Today nav in the header.
+function MonthCalendar({ classes, onOpen }: { classes: ScheduledClass[]; onOpen: (id: string) => void }) {
+  // Cursor is any date in the currently-viewed month. Persist across renders so
+  // clicking around doesn't reset when the parent re-fetches schedules.
+  const [cursor, setCursor] = useState<Date>(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d; });
+  const y = cursor.getFullYear();
+  const m = cursor.getMonth();
+  const monthLabel = cursor.toLocaleString(undefined, { month: "long", year: "numeric" });
+  // Build the 7-col grid. First column is Sunday; pad leading + trailing days
+  // from adjacent months so weeks always fill a full 7.
+  const first = new Date(y, m, 1);
+  const leading = first.getDay();                          // 0..6
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const totalCells = Math.ceil((leading + daysInMonth) / 7) * 7;
+  const cells: Array<{ date: Date; inMonth: boolean }> = [];
+  for (let i = 0; i < totalCells; i++) {
+    const d = new Date(y, m, 1 - leading + i);
+    cells.push({ date: d, inMonth: d.getMonth() === m });
+  }
+  // Bucket classes by yyyy-mm-dd for O(1) day lookup.
+  const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  const byDay = new Map<string, ScheduledClass[]>();
+  for (const c of classes) {
+    const d = new Date(c.startAt);
+    const k = dayKey(d);
+    const arr = byDay.get(k) ?? [];
+    arr.push(c);
+    byDay.set(k, arr);
+  }
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const isToday = (d: Date) => d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
+  const shiftMonth = (delta: number) => { const n = new Date(cursor); n.setMonth(n.getMonth() + delta); setCursor(n); };
+  const goToday = () => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); setCursor(d); };
+  const totalInMonth = classes.filter((c) => {
+    const d = new Date(c.startAt);
+    return d.getFullYear() === y && d.getMonth() === m;
+  }).length;
+
+  return (
+    <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-4">
+      <div className="mb-3 flex items-baseline justify-between gap-2">
+        <div>
+          <div className="text-[10px] uppercase tracking-wide text-ink-500">Month view</div>
+          <h2 className="font-display text-lg text-white">{monthLabel}</h2>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="mr-2 text-[10px] text-ink-500">{totalInMonth} class{totalInMonth === 1 ? "" : "es"}</span>
+          <button onClick={() => shiftMonth(-1)} title="Previous month"
+            className="rounded-lg border border-ink-700 bg-ink-800 px-2.5 py-1 text-sm text-ink-200 hover:bg-ink-700">◀</button>
+          <button onClick={goToday} title="Jump to this month"
+            className="rounded-lg border border-brand-500/40 bg-brand-500/10 px-2.5 py-1 text-xs font-semibold text-brand-100 hover:bg-brand-500/20">Today</button>
+          <button onClick={() => shiftMonth(1)} title="Next month"
+            className="rounded-lg border border-ink-700 bg-ink-800 px-2.5 py-1 text-sm text-ink-200 hover:bg-ink-700">▶</button>
+        </div>
+      </div>
+      {/* Weekday headers */}
+      <div className="grid grid-cols-7 gap-1 text-center text-[10px] uppercase tracking-wide text-ink-500">
+        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => <div key={d} className="py-1">{d}</div>)}
+      </div>
+      {/* Day cells */}
+      <div className="mt-1 grid grid-cols-7 gap-1">
+        {cells.map((cell, i) => {
+          const inMonth = cell.inMonth;
+          const isTd = isToday(cell.date);
+          const dayClasses = byDay.get(dayKey(cell.date)) ?? [];
+          return (
+            <div key={i}
+                 className={`min-h-[86px] rounded-lg border p-1.5 text-xs ${isTd
+                   ? "border-brand-500/50 bg-brand-500/10"
+                   : inMonth ? "border-ink-700 bg-ink-800/40" : "border-ink-800 bg-ink-900/30"}`}>
+              <div className={`mb-1 flex items-baseline justify-between ${inMonth ? "text-ink-300" : "text-ink-600"}`}>
+                <span className={`text-[11px] font-semibold ${isTd ? "text-brand-200" : ""}`}>{cell.date.getDate()}</span>
+                {dayClasses.length > 3 && (
+                  <span className="text-[9px] text-ink-500">+{dayClasses.length - 3}</span>
+                )}
+              </div>
+              <div className="space-y-0.5">
+                {dayClasses.slice(0, 3).map((c) => {
+                  const t = new Date(c.startAt);
+                  const tstr = t.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+                  const live = t <= new Date() && (t.getTime() + c.durationMin * 60_000) > Date.now();
+                  return (
+                    <button key={c._id} onClick={() => onOpen(c._id)}
+                      title={`${c.title} · ${c.coach} · ${tstr}`}
+                      className={`block w-full truncate rounded px-1.5 py-0.5 text-left text-[10px] font-semibold transition-colors ${live
+                        ? "bg-gradient-to-r from-rose-500/40 to-rose-500/20 text-rose-100 hover:brightness-110"
+                        : c.mine
+                          ? "bg-gradient-to-r from-amber-500/25 to-amber-500/10 text-amber-100 hover:brightness-110"
+                          : "bg-brand-500/20 text-brand-100 hover:bg-brand-500/30"}`}>
+                      <span className="tabular-nums">{tstr}</span> · {c.title}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-[10px] text-ink-500">
+        <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded bg-rose-500/60" /> live now</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded bg-amber-500/60" /> yours</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded bg-brand-500/60" /> other coach</span>
+      </div>
+    </section>
   );
 }
 
