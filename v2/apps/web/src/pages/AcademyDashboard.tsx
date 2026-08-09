@@ -41,7 +41,7 @@ export default function AcademyDashboardPage() {
       <section className="grid gap-3 md:grid-cols-3">
         <NextStepCard emoji="🧑‍🏫" title="Invite coaches" body="Add coaches to your academy — they'll get an email with a signup link." disabled />
         <NextStepCard emoji="👦" title="Enroll students" body="Add students under each coach. Students train with your academy's brand." disabled />
-        <NextStepCard emoji="🎥" title="Schedule a class" body="Create a live video class — the AI Coach Copilot rides along." disabled />
+        <NextStepCard emoji="🎥" title="Schedule a class" body="Create a live video class — students join with one link, attendance auto-tracks." disabled />
       </section>
 
       <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
@@ -52,8 +52,8 @@ export default function AcademyDashboardPage() {
           <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">🔜 Coach invitations</li>
           <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">🔜 Student enrollment + rosters</li>
           <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">🔜 Per-student attendance rollup</li>
-          <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">🔜 AI Coach Copilot (live-class whisper)</li>
-          <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">🔜 Post-class Auto-Report to parents</li>
+          <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">🔜 Per-academy class scheduling</li>
+          <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">🔜 Billing skeleton (Razorpay)</li>
         </ul>
       </section>
     </div>
