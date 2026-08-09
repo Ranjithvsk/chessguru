@@ -297,6 +297,10 @@ function ClassLanding() {
     notes: "",
     recurrence: "none" as "none" | "weekly",
     recurrenceCount: 8,
+    // Weekday mask for recurring series (Sun=0..Sat=6). Empty => classic every-7-days
+    // cadence from startAt. Chips in the form let coach flip individual days on/off
+    // (e.g. [1,3,5] for a Mon/Wed/Fri pattern).
+    recurrenceWeekdays: [] as number[],
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -385,6 +389,7 @@ function ClassLanding() {
           startAt: new Date(form.startAt).toISOString(),
           recurrence: form.recurrence,
           recurrenceCount: form.recurrence === "weekly" ? Number(form.recurrenceCount) || 1 : 1,
+          recurrenceWeekdays: form.recurrence === "weekly" ? form.recurrenceWeekdays : [],
         }),
       });
       if (!res.ok) throw new Error(`create failed: ${res.status}`);
@@ -497,12 +502,57 @@ function ClassLanding() {
             </select>
           </label>
           <label className={form.recurrence === "weekly" ? "" : "opacity-40 pointer-events-none"}>
-            <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">Weeks (max 12)</span>
+            <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">
+              {form.recurrenceWeekdays.length ? "Total classes (max 12)" : "Weeks (max 12)"}
+            </span>
             <input type="number" min={1} max={12} step={1}
               value={form.recurrenceCount} onChange={(e) => setForm({ ...form, recurrenceCount: Number(e.target.value) })}
               disabled={form.recurrence !== "weekly"}
               className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
           </label>
+          {form.recurrence === "weekly" && (
+            <div className="md:col-span-2">
+              <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">
+                Days of the week
+                <span className="ml-2 font-normal normal-case text-ink-500">
+                  optional — leave blank for "every 7 days from the start date"
+                </span>
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label, dow) => {
+                  const active = form.recurrenceWeekdays.includes(dow);
+                  return (
+                    <button key={dow} type="button"
+                      onClick={() => setForm((f) => ({
+                        ...f,
+                        recurrenceWeekdays: active
+                          ? f.recurrenceWeekdays.filter((d) => d !== dow)
+                          : [...f.recurrenceWeekdays, dow].sort((a, b) => a - b),
+                      }))}
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${active
+                        ? "border-brand-500/60 bg-gradient-to-r from-brand-500/30 to-accent-500/20 text-brand-100"
+                        : "border-ink-700 bg-ink-800 text-ink-400 hover:bg-ink-700"}`}>
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              {form.recurrenceWeekdays.length > 0 && (() => {
+                // Live hint: warn if the picked start-date's weekday isn't in the mask,
+                // since the server will 400 that. Non-blocking — coach sees + fixes.
+                const dow = new Date(form.startAt).getDay();
+                if (!form.recurrenceWeekdays.includes(dow)) {
+                  const wname = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][dow];
+                  return (
+                    <p className="mt-1.5 text-[11px] text-amber-300">
+                      ⚠️ Start date is a {wname} — pick it as one of the days above, or move the start date.
+                    </p>
+                  );
+                }
+                return null;
+              })()}
+            </div>
+          )}
           <label className="md:col-span-2">
             <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">Notes (optional)</span>
             <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}

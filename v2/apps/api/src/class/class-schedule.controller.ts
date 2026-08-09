@@ -71,27 +71,66 @@ export class ClassScheduleController {
     const count = recurrence === "weekly"
       ? Math.max(1, Math.min(MAX_RECUR, Math.floor(Number(b.recurrenceCount) || 1)))
       : 1;
+    // Optional weekday mask for weekly recurrence (Sunday=0..Saturday=6). Empty →
+    // every-7-days from startAt (classic behaviour). Populated → walk day-by-day
+    // and materialize on matching weekdays. Coaches teaching Mon/Wed/Fri or
+    // Tue/Thu patterns can now schedule the whole term in one form.
+    const weekdaysRaw = Array.isArray(b.recurrenceWeekdays) ? b.recurrenceWeekdays : [];
+    const weekdays = Array.from(new Set(weekdaysRaw
+      .map((n: unknown) => Math.floor(Number(n)))
+      .filter((n: number) => Number.isInteger(n) && n >= 0 && n <= 6))) as number[];
+    if (recurrence === "weekly" && weekdays.length > 0) {
+      // Reject when startAt's weekday isn't in the mask — otherwise the FIRST
+      // instance would fall on a "not selected" day, which is confusing.
+      const startDow = new Date(startAtNum).getDay();
+      if (!weekdays.includes(startDow)) {
+        throw new HttpException(
+          "Start date's weekday must be one of the selected recurrence days.",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    }
     const userId: string | null = req?.session?.userId ?? null;
     const username: string | null = req?.session?.username ?? null;
     const coachName = coach || username || "Coach";
+    // Build the list of instance start times.
+    // - No weekday mask: instances 7 days apart (existing behaviour).
+    // - Mask given: start at startAt, then walk 1 day at a time, taking dates
+    //   whose weekday is in the mask, until we have `count` instances. Cap the
+    //   walk at count * 14 iterations so pathological input (e.g. count=12 with
+    //   weekdays=[Sun] which only fires once per week) can't infinite-loop.
+    const startTimes: number[] = [startAtNum];
+    if (recurrence === "weekly" && count > 1) {
+      if (weekdays.length === 0) {
+        for (let i = 1; i < count; i++) startTimes.push(startAtNum + i * 7 * 24 * 60 * 60 * 1000);
+      } else {
+        let cursor = startAtNum;
+        const dayMs = 24 * 60 * 60 * 1000;
+        for (let step = 1; startTimes.length < count && step <= count * 14; step++) {
+          const next = cursor + step * dayMs;
+          if (weekdays.includes(new Date(next).getDay())) startTimes.push(next);
+        }
+      }
+    }
     // Materialise N docs. First doc's _id doubles as the seriesId when count>1 so we
     // don't need a separate uuid. One-off classes leave seriesId null.
+    const total = startTimes.length;
     const docs: ScheduleDoc[] = [];
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < total; i++) {
       let id = newRoomId();
       for (let r = 0; r < 3; r++) {
         const existing = await this.col().findOne({ _id: id as any }, { projection: { _id: 1 } });
         if (!existing) break;
         id = newRoomId();
       }
-      const seriesId = count > 1 ? (i === 0 ? id : docs[0]!._id) : null;
+      const seriesId = total > 1 ? (i === 0 ? id : docs[0]!._id) : null;
       docs.push({
         _id: id, title, coach: coachName,
-        startAt: new Date(startAtNum + i * 7 * 24 * 60 * 60 * 1000),
+        startAt: new Date(startTimes[i]!),
         durationMin, notes, createdAt: new Date(),
         createdByUserId: userId,
-        seriesId, seriesIndex: count > 1 ? i + 1 : undefined,
-        seriesTotal: count > 1 ? count : undefined,
+        seriesId, seriesIndex: total > 1 ? i + 1 : undefined,
+        seriesTotal: total > 1 ? total : undefined,
       });
     }
     await this.col().insertMany(docs);
