@@ -375,7 +375,7 @@ export default function PuzzlesPage() {
                 </button>
               )}
               {tacticalThemes.length > 0 && (
-                <button onClick={() => { const t = tacticalThemes[0]; try { localStorage.setItem("cg_theme", t); } catch { /* */ } setTheme(t); g.next(); }}
+                <button onClick={() => { const t = tacticalThemes[0]; if (!t) return; try { localStorage.setItem("cg_theme", t); } catch { /* */ } setTheme(t); g.next(); }}
                   className="flex-1 rounded-lg border border-brand-500/50 bg-brand-500/10 px-3 py-2 text-sm font-semibold text-brand-100 hover:bg-brand-500/20">
                   ↻ Try similar
                 </button>

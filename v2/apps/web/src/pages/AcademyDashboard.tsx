@@ -763,6 +763,19 @@ function InvoiceCard({ inv, config, isOwner, onMarkPaid, markPaidPending }: {
 function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
   const [sending, setSending] = useState(false);
   const [sendMsg, setSendMsg] = useState<string | null>(null);
+  // Copy-link: 1500ms "Copied!" flash then reverts. Falls back to a manual
+  // prompt on the (rare) old browsers where navigator.clipboard is missing.
+  const [copied, setCopied] = useState(false);
+  async function copyJoinLink() {
+    const url = `${location.origin}/call/${encodeURIComponent(c._id)}?board=1`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      window.prompt("Copy this join link:", url);
+    }
+  }
   async function sendSummary() {
     if (sending) return;
     const note = window.prompt("Add a one-line note to include in the summary? (optional)") ?? "";
@@ -800,6 +813,11 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
        *  chess-native board mode. Attendance auto-writes to classAttendance on
        *  join via the same collection the /academy roster reads. Jitsi fallback
        *  at meet.harinitharanjith.com still works if a user types it directly. */}
+      <button onClick={copyJoinLink}
+        className="rounded-lg border border-ink-600 bg-ink-800 px-2 py-1 text-[11px] font-semibold text-ink-100 hover:bg-ink-700"
+        title="Copy the join link to share with a student or parent">
+        {copied ? "✓ Copied" : "🔗 Copy link"}
+      </button>
       <Link to={`/call/${encodeURIComponent(c._id)}?board=1`}
         className={`rounded-lg px-3 py-1 text-xs font-semibold ${live ? "bg-emerald-600 text-white hover:bg-emerald-500" : "bg-brand-600 text-white hover:bg-brand-500"}`}>
         {live ? "Join now" : "Open class"}

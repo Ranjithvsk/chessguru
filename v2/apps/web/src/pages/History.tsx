@@ -9,6 +9,9 @@ import ExternalGamesList from "./ExternalGamesList";
 
 type Ctx = { userId: string | null; rating: number };
 type Result = "all" | "solved" | "missed";
+// Phase 7f timeframe pill. RANGE_DAYS[k]=null → skip the date cutoff (any date).
+type Range = "all" | "30d" | "7d";
+const RANGE_DAYS: Record<Range, number | null> = { all: null, "30d": 30, "7d": 7 };
 
 function dateLabel(d: string) {
   const day = new Date(d); const now = new Date();
@@ -116,13 +119,14 @@ function WeekStrip({ items }: { items: HistoryItem[] }) {
 // Filter bar — result pill triplet + theme dropdown + reset. Compact so it doesn't
 // dominate the page. Theme options are the union of every theme the user has actually
 // touched (from the loaded pages) so we never show a picker that returns zero results.
-function FilterBar({ result, setResult, theme, setTheme, themes, matched, total }:
+function FilterBar({ result, setResult, theme, setTheme, range, setRange, themes, matched, total }:
   { result: Result; setResult: (r: Result) => void;
     theme: string; setTheme: (t: string) => void;
+    range: Range; setRange: (r: Range) => void;
     themes: string[]; matched: number; total: number }) {
   const pill = (active: boolean, base: string) =>
     `rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${active ? base : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`;
-  const cleared = result === "all" && theme === "";
+  const cleared = result === "all" && theme === "" && range === "all";
   return (
     <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -131,13 +135,18 @@ function FilterBar({ result, setResult, theme, setTheme, themes, matched, total 
         <button onClick={() => setResult("solved")} className={pill(result === "solved", "border-emerald-500/50 bg-emerald-500/15 text-emerald-200")}>✅ Solved</button>
         <button onClick={() => setResult("missed")} className={pill(result === "missed", "border-rose-500/50 bg-rose-500/15 text-rose-200")}>❌ Missed</button>
         <span className="mx-2 h-5 w-px bg-ink-700" />
+        {/* Timeframe — cyan tint so it reads as "time" not "category". */}
+        <button onClick={() => setRange("all")} className={pill(range === "all", "border-cyan-500/50 bg-cyan-500/15 text-cyan-100")}>Any date</button>
+        <button onClick={() => setRange("30d")} className={pill(range === "30d", "border-cyan-500/50 bg-cyan-500/15 text-cyan-100")}>30d</button>
+        <button onClick={() => setRange("7d")}  className={pill(range === "7d",  "border-cyan-500/50 bg-cyan-500/15 text-cyan-100")}>7d</button>
+        <span className="mx-2 h-5 w-px bg-ink-700" />
         <select value={theme} onChange={(e) => setTheme(e.target.value)}
           className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-1 text-xs text-white">
           <option value="">All themes</option>
           {themes.map((t) => <option key={t} value={t}>{prettify(t)}</option>)}
         </select>
         {!cleared && (
-          <button onClick={() => { setResult("all"); setTheme(""); }}
+          <button onClick={() => { setResult("all"); setTheme(""); setRange("all"); }}
             className="ml-1 rounded-lg border border-ink-700 px-2 py-1 text-xs text-ink-300 hover:bg-ink-800">Clear</button>
         )}
         <span className="ml-auto text-xs text-ink-500 tabular-nums">
@@ -303,6 +312,12 @@ export default function HistoryPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [result, setResult] = useState<Result>("all");
   const [theme,  setTheme]  = useState<string>("");
+  // Timeframe persisted per browser so revisits keep the user's chosen window.
+  const [range, setRange] = useState<Range>(() => {
+    const v = (typeof localStorage !== "undefined" && localStorage.getItem("cg_history_range")) as Range | null;
+    return v === "30d" || v === "7d" || v === "all" ? v : "all";
+  });
+  useEffect(() => { try { localStorage.setItem("cg_history_range", range); } catch { /* private mode */ } }, [range]);
   const nav = useNavigate();
   // Open a past solve in the Puzzles-page review view. Query-string handoff means
   // deep-links from anywhere (share, browser back) work without wiring extra props.

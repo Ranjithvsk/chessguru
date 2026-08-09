@@ -293,6 +293,7 @@ function Heatmap({ days, weeks = 13 }: { days: NonNullable<Dash["days"]>; weeks?
   const monthTicks: { col: number; label: string }[] = [];
   for (let w = 0; w < weeks; w++) {
     const c = cells[w * 7];
+    if (!c) continue;
     const d = new Date(c.date + "T00:00:00Z");
     if (d.getUTCDate() <= 7) monthTicks.push({ col: w, label: d.toLocaleString(undefined, { month: "short", timeZone: "UTC" }) });
   }
@@ -327,6 +328,7 @@ function Heatmap({ days, weeks = 13 }: { days: NonNullable<Dash["days"]>; weeks?
             <div key={w} className="flex flex-col" style={{ gap: 3 }}>
               {Array.from({ length: 7 }, (_, r) => {
                 const c = cells[w * 7 + r];
+                if (!c) return <span key={r} style={{ width: 14, height: 14 }} />;
                 return (
                   <span key={r}
                     title={c.future ? "" : `${c.solves} solve${c.solves === 1 ? "" : "s"} · ${c.date}`}

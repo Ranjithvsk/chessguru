@@ -46,7 +46,7 @@ function buildSnapshots(events: TimelineEvent[]): Snapshot[] {
 function findIndexAtTime(events: TimelineEvent[], tMs: number): number {
   let i = -1;
   for (let k = 0; k < events.length; k++) {
-    if (events[k].tMs <= tMs) i = k; else break;
+    if (events[k]!.tMs <= tMs) i = k; else break;
   }
   return i;
 }
@@ -74,7 +74,7 @@ export default function ClassReplayPage() {
 
   const snapshots = useMemo(() => buildSnapshots(events), [events]);
   const idx = useMemo(() => findIndexAtTime(events, tMs), [events, tMs]);
-  const view: Snapshot = idx >= 0 ? snapshots[idx] : { fen: new Chess().fen(), lastMove: null };
+  const view: Snapshot = idx >= 0 ? snapshots[idx]! : { fen: new Chess().fen(), lastMove: null };
   const lastMoveArrow: [Key, Key] | undefined = view.lastMove
     ? [view.lastMove.from as Key, view.lastMove.to as Key] : undefined;
 

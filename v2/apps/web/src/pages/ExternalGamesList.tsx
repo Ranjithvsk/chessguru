@@ -48,7 +48,7 @@ function pickHandle(c: LinkedStatus["chesscom"]) { return c && "username" in c ?
 
 export default function ExternalGamesList() {
   const { data: status } = useQuery({ queryKey: ["linked-accounts"], queryFn: () => get<LinkedStatus>("/api/me/linked-accounts") });
-  const myHandles = { lichess: status?.lichess?.username, chesscom: pickHandle(status?.chesscom) };
+  const myHandles = { lichess: status?.lichess?.username, chesscom: pickHandle(status?.chesscom ?? null) };
   const [source, setSource] = useState<"all"|"lichess"|"chesscom">("all");
   const [offset, setOffset] = useState(0);
   const q = new URLSearchParams();

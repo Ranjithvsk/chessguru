@@ -84,7 +84,8 @@ type Status =
   | "full"              // server rejected: room already has 8
   | "denied"            // getUserMedia rejected
   | "error"             // catch-all
-  | "left";             // user hit Leave
+  | "left"              // user hit Leave
+  | "kicked";           // moderator removed this user
 
 // Cheap unique id for chat messages + floating reactions. Not cryptographic —
 // only needs to be unique within this session's client-side lists.
@@ -597,7 +598,8 @@ export default function CallRoomPage() {
               setMicOn(false);
             } else if (msg.action === "kicked") {
               // Server closes the ws immediately after; anticipate that.
-              stopRecording(); stopCaptions(); teardown(); setStatus("left");
+              // Distinct status → friendlier splash than the plain "You left" one.
+              stopRecording(); stopCaptions(); teardown(); setStatus("kicked");
             } else if (msg.action === "spotlight") {
               setSpotlightId(msg.target ?? null);
             }
@@ -835,6 +837,8 @@ export default function CallRoomPage() {
   if (status === "full")   return <Splash title="This room is full"
     body="Rooms are capped at 8 participants." />;
   if (status === "left")   return <Splash title="You left the call" />;
+  if (status === "kicked") return <Splash title="Removed by the coach"
+    body="The coach ended your participation in this class. If you think this was a mistake, please reach out to them." />;
   if (status === "error")  return <Splash title="Something went wrong" body={errorMsg} />;
 
   // ---- Live call view ------------------------------------------------------
