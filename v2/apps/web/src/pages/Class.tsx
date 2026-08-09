@@ -693,6 +693,13 @@ function ClassLanding() {
   const [loading, setLoading] = useState(true);
   const [me, setMe] = useState<{ loggedIn: boolean; username?: string }>({ loggedIn: false });
   const [mineOnly, setMineOnly] = useState(false);
+  // Persisted view mode. Coaches with 20+ scheduled classes want a dense list
+  // that skims like a calendar; casual users prefer the info-rich cards.
+  const [view, setView] = useState<"cards" | "list">(() => {
+    try { return (localStorage.getItem("cg_class_view") as "cards" | "list") || "cards"; }
+    catch { return "cards"; }
+  });
+  useEffect(() => { try { localStorage.setItem("cg_class_view", view); } catch { /* */ } }, [view]);
   const [form, setForm] = useState({
     title: "", coach: "", durationMin: 60,
     // Default start = next quarter-hour (15 min pad so the coach can share the
@@ -836,20 +843,38 @@ function ClassLanding() {
       </header>
 
       {/* "Mine only" filter — only surfaces when the caller actually has any
-          scheduled classes. Keeps the landing simple for pure students. */}
-      {anyMine && (
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-ink-400">Show:</span>
-          <button onClick={() => setMineOnly(false)}
-            className={`rounded-full border px-3 py-1 text-xs font-semibold ${!mineOnly
-              ? "border-brand-500/50 bg-brand-500/15 text-brand-100"
-              : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>All classes</button>
-          <button onClick={() => setMineOnly(true)}
-            className={`rounded-full border px-3 py-1 text-xs font-semibold ${mineOnly
-              ? "border-amber-400/60 bg-amber-500/20 text-amber-100"
-              : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>👑 Mine only</button>
-        </div>
-      )}
+          scheduled classes. Keeps the landing simple for pure students.
+          Cards / List toggle sits on the right of the same row so both view
+          controls stay together. */}
+      <div className="flex flex-wrap items-center gap-2">
+        {anyMine && (
+          <>
+            <span className="text-xs text-ink-400">Show:</span>
+            <button onClick={() => setMineOnly(false)}
+              className={`rounded-full border px-3 py-1 text-xs font-semibold ${!mineOnly
+                ? "border-brand-500/50 bg-brand-500/15 text-brand-100"
+                : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>All classes</button>
+            <button onClick={() => setMineOnly(true)}
+              className={`rounded-full border px-3 py-1 text-xs font-semibold ${mineOnly
+                ? "border-amber-400/60 bg-amber-500/20 text-amber-100"
+                : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>👑 Mine only</button>
+          </>
+        )}
+        {(schedules.live.length + schedules.upcoming.length) > 0 && (
+          <div className="ml-auto flex items-center gap-1 rounded-full border border-ink-700 bg-ink-900 p-0.5">
+            <button onClick={() => setView("cards")}
+              className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${view === "cards"
+                ? "bg-brand-500/25 text-brand-100"
+                : "text-ink-400 hover:text-white"}`}
+              title="Rich cards with notes + actions">▦ Cards</button>
+            <button onClick={() => setView("list")}
+              className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${view === "list"
+                ? "bg-brand-500/25 text-brand-100"
+                : "text-ink-400 hover:text-white"}`}
+              title="Dense one-line per class">☰ List</button>
+          </div>
+        )}
+      </div>
 
       {/* Live now — pulsing rose highlight so it draws the eye. Empty when nothing's live. */}
       {visLive.length > 0 && (
@@ -858,9 +883,15 @@ function ClassLanding() {
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-rose-500 shadow-[0_0_6px] shadow-rose-500" />
             Live now
           </h2>
-          <div className="grid gap-3 md:grid-cols-2">
-            {visLive.map((c) => <ClassCard key={c._id} c={c} tone="live" onCancel={c.mine ? () => cancel(c) : undefined} onCancelSeries={c.mine && c.seriesId ? () => cancelSeries(c) : undefined} onEdit={c.mine ? () => setEditing(c) : undefined} />)}
-          </div>
+          {view === "cards" ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              {visLive.map((c) => <ClassCard key={c._id} c={c} tone="live" onCancel={c.mine ? () => cancel(c) : undefined} onCancelSeries={c.mine && c.seriesId ? () => cancelSeries(c) : undefined} onEdit={c.mine ? () => setEditing(c) : undefined} />)}
+            </div>
+          ) : (
+            <div className="divide-y divide-ink-800 overflow-hidden rounded-xl2 border border-rose-500/40 bg-gradient-to-br from-rose-500/5 via-ink-900 to-ink-900">
+              {visLive.map((c) => <ClassRow key={c._id} c={c} tone="live" onCancel={c.mine ? () => cancel(c) : undefined} onCancelSeries={c.mine && c.seriesId ? () => cancelSeries(c) : undefined} onEdit={c.mine ? () => setEditing(c) : undefined} />)}
+            </div>
+          )}
         </section>
       )}
 
@@ -877,11 +908,15 @@ function ClassLanding() {
               ? <>You haven't scheduled any classes yet. Fill in the form below to create one.</>
               : <>No upcoming classes. Schedule one below or <button className="text-brand-400 hover:underline" onClick={startNow}>start now</button>.</>}
           </div>
-        ) : (
-          <div className="grid gap-3 md:grid-cols-2">
-            {visUpcoming.map((c) => <ClassCard key={c._id} c={c} tone="upcoming" onCancel={c.mine ? () => cancel(c) : undefined} onCancelSeries={c.mine && c.seriesId ? () => cancelSeries(c) : undefined} onEdit={c.mine ? () => setEditing(c) : undefined} />)}
-          </div>
-        )}
+        ) : view === "cards" ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              {visUpcoming.map((c) => <ClassCard key={c._id} c={c} tone="upcoming" onCancel={c.mine ? () => cancel(c) : undefined} onCancelSeries={c.mine && c.seriesId ? () => cancelSeries(c) : undefined} onEdit={c.mine ? () => setEditing(c) : undefined} />)}
+            </div>
+          ) : (
+            <div className="divide-y divide-ink-800 overflow-hidden rounded-xl2 border border-ink-700 bg-ink-900">
+              {visUpcoming.map((c) => <ClassRow key={c._id} c={c} tone="upcoming" onCancel={c.mine ? () => cancel(c) : undefined} onCancelSeries={c.mine && c.seriesId ? () => cancelSeries(c) : undefined} onEdit={c.mine ? () => setEditing(c) : undefined} />)}
+            </div>
+          )}
       </section>
 
       {/* Scheduling form — brand-gradient card so it visually pairs with the Start-now
@@ -1154,6 +1189,63 @@ function EditOverlay({ c, onClose, onSave }:
         </div>
       </form>
     </div>
+  );
+}
+
+// Compact one-line row — the "list" view alternative to ClassCard. Same
+// affordances (title / coach / time / attended / actions / status) squeezed
+// into a single horizontal strip so coaches with 20+ classes can scan a term
+// at a glance. Whole row is a Link (Cancel/Edit inside use stopPropagation).
+function ClassRow({ c, tone, onCancel, onCancelSeries, onEdit }:
+  { c: ScheduledClass; tone: "live" | "upcoming"; onCancel?: () => void; onCancelSeries?: () => void; onEdit?: () => void }) {
+  const hoverTint = tone === "live" ? "hover:bg-rose-500/10" : "hover:bg-brand-500/5";
+  return (
+    <Link to={`/class/${encodeURIComponent(c._id)}`}
+      className={`flex items-center gap-3 px-3 py-2 text-sm transition-colors ${hoverTint}`}>
+      {tone === "live" && (
+        <span className="shrink-0 inline-block h-2 w-2 animate-pulse rounded-full bg-rose-500 shadow-[0_0_6px] shadow-rose-500" title="Live" />
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="truncate font-semibold text-white">{c.title}</span>
+          {c.mine && (
+            <span className="shrink-0 rounded bg-amber-500/25 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-100">Yours</span>
+          )}
+          {c.seriesId && c.seriesIndex && c.seriesTotal && (
+            <span className="shrink-0 rounded-full border border-brand-500/40 bg-brand-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-brand-200" title="Part of a weekly series">
+              🔁 {c.seriesIndex}/{c.seriesTotal}
+            </span>
+          )}
+          {c.mine && (c.attendedCount ?? 0) > 0 && (
+            <span className="shrink-0 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-200" title={`${c.attendedCount} attended`}>
+              🧑‍🎓 {c.attendedCount}
+            </span>
+          )}
+        </div>
+        <div className="truncate text-[11px] text-ink-500">
+          👑 {c.coach} · {absTime(c.startAt)} <span className="text-ink-500">· {relTime(c.startAt)}</span> · {c.durationMin} min
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        {onEdit && (
+          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); onEdit(); }}
+            className="rounded border border-brand-500/40 bg-brand-500/10 px-2 py-0.5 text-[11px] font-semibold text-brand-200 hover:bg-brand-500/20">Edit</button>
+        )}
+        {onCancel && (
+          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCancel(); }}
+            className="rounded border border-rose-500/40 bg-rose-500/10 px-2 py-0.5 text-[11px] font-semibold text-rose-200 hover:bg-rose-500/20">Cancel</button>
+        )}
+        {onCancelSeries && (
+          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCancelSeries(); }}
+            className="rounded border border-rose-500/60 bg-rose-500/20 px-2 py-0.5 text-[11px] font-semibold text-rose-100 hover:bg-rose-500/30" title="Cancel every FUTURE class in this series">Cancel series</button>
+        )}
+        <span className={`ml-1 rounded px-2 py-0.5 text-[11px] font-semibold shadow-sm ${tone === "live"
+          ? "bg-gradient-to-r from-rose-500 to-rose-400 text-white"
+          : "bg-gradient-to-r from-brand-600 to-brand-500 text-white"}`}>
+          {tone === "live" ? "Join →" : "Open"}
+        </span>
+      </div>
+    </Link>
   );
 }
 
