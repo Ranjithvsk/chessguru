@@ -9,7 +9,7 @@
 // All lists auto-refresh so accepted invites turn into real rows without a
 // manual reload.
 import { useEffect, useRef, useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
 import Board from "../components/Board";
@@ -1378,9 +1378,23 @@ function describeFen(fen: string): string {
   return `${phase} · ${fmtSide(w)} vs ${fmtSide(b)}`;
 }
 function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
-  const [classFilter, setClassFilter] = useState<string>(""); // "" = all
-  const [starredOnly, setStarredOnly] = useState(false);
-  const [textFilter, setTextFilter] = useState("");
+  // Filter state is URL-synced so a coach can share the exact view with a
+  // colleague ("look at ?q=diagonal&starred=1"). Hydrate from URL on first
+  // render, then push changes back with replace so we don't spam history.
+  const [sp, setSp] = useSearchParams();
+  const [classFilter, setClassFilter] = useState<string>(sp.get("class") || "");
+  const [starredOnly, setStarredOnly] = useState<boolean>(sp.get("starred") === "1");
+  const [textFilter, setTextFilter] = useState<string>(sp.get("q") || "");
+  useEffect(() => {
+    // Rebuild the URL query from state. Empty values drop out so links stay clean.
+    const next = new URLSearchParams(sp);
+    if (classFilter) next.set("class", classFilter); else next.delete("class");
+    if (starredOnly) next.set("starred", "1"); else next.delete("starred");
+    if (textFilter) next.set("q", textFilter); else next.delete("q");
+    setSp(next, { replace: true });
+    // Only depend on the filters -- sp change is already how we write, so skip
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [classFilter, starredOnly, textFilter]);
   const [openIdx, setOpenIdx] = useState<number | null>(null);
   // Reset the open snap when filters change so we don't end up pointing at a
   // row that just got filtered out.
