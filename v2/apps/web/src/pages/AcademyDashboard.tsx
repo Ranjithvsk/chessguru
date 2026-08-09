@@ -1160,7 +1160,7 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
 function StarredDigestPreviewLink() {
   const [open, setOpen] = useState(false);
   type Row = { _id: string; classId: string; at: string; note: string; hasAudio: boolean; shapeCount: number; link: string };
-  type PreviewData = { snapCount: number; snaps: Row[]; cadence: "weekly" | "biweekly" | "monthly"; windowDays: number; optedOut: boolean };
+  type PreviewData = { snapCount: number; snaps: Row[]; cadence: "weekly" | "biweekly" | "monthly"; windowDays: number; optedOut: boolean; sentCount: number; lastSentAt: string | null };
   const [data, setData] = useState<PreviewData | null>(null);
   const [savingCadence, setSavingCadence] = useState(false);
   async function setCadence(c: "weekly" | "biweekly" | "monthly") {
@@ -1254,6 +1254,13 @@ function StarredDigestPreviewLink() {
                     {sendMsg && <span className="text-[11px] text-ink-300">{sendMsg}</span>}
                   </>
                 )}
+              </div>
+            )}
+            {data && (
+              <div className="mt-2 text-[10px] text-ink-500">
+                {data.sentCount === 0
+                  ? "No digests sent yet."
+                  : `You've been sent ${data.sentCount} digest${data.sentCount === 1 ? "" : "s"}${data.lastSentAt ? ` · last on ${new Date(data.lastSentAt).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}` : ""}.`}
               </div>
             )}
           </div>

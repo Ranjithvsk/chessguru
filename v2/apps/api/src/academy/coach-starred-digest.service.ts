@@ -93,7 +93,7 @@ export class CoachStarredDigestService implements OnModuleInit {
    *  sinceDaysBack for QA. */
   async previewFor(userId: string, sinceDaysBack?: number) {
     const user: any = await this.conn.db!.collection("users").findOne({ _id: userId as any },
-      { projection: { coachStarredDigestCadence: 1, coachStarredDigestOptedOut: 1 } as any });
+      { projection: { coachStarredDigestCadence: 1, coachStarredDigestOptedOut: 1, coachStarredDigestSentAt: 1, coachStarredDigestSentCount: 1 } as any });
     const cadence = (user?.coachStarredDigestCadence as "weekly" | "biweekly" | "monthly" | undefined) ?? "weekly";
     const days = sinceDaysBack ?? cadenceWindowDays(cadence);
     const since = new Date(Date.now() - days * 86_400_000);
@@ -107,6 +107,8 @@ export class CoachStarredDigestService implements OnModuleInit {
       cadence,
       windowDays: days,
       optedOut: !!user?.coachStarredDigestOptedOut,
+      sentCount: typeof user?.coachStarredDigestSentCount === "number" ? user.coachStarredDigestSentCount : 0,
+      lastSentAt: user?.coachStarredDigestSentAt ?? null,
       snaps: snaps.map((s) => ({
         _id: s._id,
         classId: s.classId,
@@ -191,7 +193,11 @@ export class CoachStarredDigestService implements OnModuleInit {
     const r = await sendMail({ to: email, subject, html, text });
     if (r.ok) {
       await this.conn.db!.collection("users").updateOne(
-        { _id: userId as any }, { $set: { coachStarredDigestSentAt: new Date() } }
+        { _id: userId as any },
+        {
+          $set: { coachStarredDigestSentAt: new Date() },
+          $inc: { coachStarredDigestSentCount: 1 },
+        }
       );
     }
   }
