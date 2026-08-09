@@ -15,6 +15,7 @@ const GROUPS: Group[] = [
       { to: "/blindfold", label: "🕶️ Blindfold", desc: "Solve without seeing the pieces" },
       { to: "/dashboard", label: "📊 My performance", desc: "Ratings, strengths & progress" },
       { to: "/history", label: "📜 My history", desc: "Every puzzle you've solved" },
+      { to: "/settings/accounts", label: "🔗 Linked accounts", desc: "Link Lichess + Chess.com" },
     ],
   },
   {

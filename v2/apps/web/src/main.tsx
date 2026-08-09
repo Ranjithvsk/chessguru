@@ -33,6 +33,7 @@ import LoginPage from "./pages/Login";
 import ResetPasswordPage from "./pages/ResetPassword";
 import SignupAcademyPage from "./pages/SignupAcademy";
 import AcademyDashboardPage from "./pages/AcademyDashboard";
+import AccountLinksPage from "./pages/AccountLinks";
 import AdminPage from "./pages/Admin";
 import AdminUsersPage from "./pages/AdminUsers";
 import PlayPage from "./pages/Play";
@@ -86,6 +87,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="reset-password" element={<ResetPasswordPage />} />
             <Route path="signup-academy" element={<SignupAcademyPage />} />
             <Route path="academy" element={<AcademyDashboardPage />} />
+            <Route path="settings/accounts" element={<AccountLinksPage />} />
             <Route path="test/feedback-ui" element={<FeedbackUITestPage />} />
             <Route path="book" element={<BookPage />} />
             <Route path="class" element={<ClassPage />} />

@@ -18,11 +18,12 @@ import { StudyService } from "./study/study.service";
 import { ClassRecordingController } from "./class/class-recording.controller";
 import { ClassScheduleController } from "./class/class-schedule.controller";
 import { ClassAttendanceController } from "./class/class-attendance.controller";
+import { IntegrationsModule } from "./integrations/integrations.module";
 
 const MONGO_URI = process.env.MONGO_URI ?? "mongodb://localhost:27017/chessguru";
 
 @Module({
-  imports: [MongooseModule.forRoot(MONGO_URI)],
+  imports: [MongooseModule.forRoot(MONGO_URI), IntegrationsModule],
   controllers: [HealthController, MiscController, BroadcastsController, PuzzlesController, AuthController, AdminController, EngineController, ExplorerController, StudyController, ClassRecordingController, ClassScheduleController, ClassAttendanceController],
   providers: [PuzzlesService, AuthService, AdminService, EngineService, ExplorerService, StudyService],
 })
