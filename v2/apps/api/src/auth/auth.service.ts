@@ -5,6 +5,7 @@ import { Connection } from "mongoose";
 import bcrypt from "bcryptjs";
 import { randomBytes, createHash } from "crypto";
 import { sendMail } from "../lib/mail";
+import { AcademyService } from "../academy/academy.service";
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -15,8 +16,32 @@ const OTP_MAX_TRIES = 5;    // wrong-code attempts per issued OTP
 
 @Injectable()
 export class AuthService {
-  constructor(@InjectConnection() private readonly conn: Connection) {}
+  constructor(
+    @InjectConnection() private readonly conn: Connection,
+    private readonly academy: AcademyService,
+  ) {}
   private users() { return this.conn.db!.collection("users"); }
+
+  /* ================================================================
+   * Coach / student invites — peek (public read of one) + accept.
+   * The actual invite machinery lives in AcademyService; we just wrap
+   * consumeInvite() here so we can set the session on success.
+   * ================================================================ */
+  peekInvite(token: string) { return this.academy.peekInvite(token); }
+
+  async acceptInvite(body: any, session: any) {
+    const token = String(body?.token || "");
+    const username = String(body?.username || "").trim();
+    const password = String(body?.password || "");
+    const r = await this.academy.consumeInvite(token, username, password);
+    if (!r.ok) return r;
+    session.userId = r.user._id;
+    session.username = r.user.username;
+    session.academyId = r.user.academyId;
+    session.role = r.user.role;
+    if (session.cookie) session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
+    return { ok: true, academyId: r.user.academyId, role: r.user.role };
+  }
 
   async register(body: any, session: any) {
     const { username, password, email } = body ?? {};

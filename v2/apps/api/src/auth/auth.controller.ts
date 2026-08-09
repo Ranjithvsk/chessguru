@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, Res } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Req, Res } from "@nestjs/common";
 import { AuthService } from "./auth.service";
 
 // See auth.service.ts for context on the hostonly-cookie twin — this helper
@@ -54,5 +54,17 @@ export class AuthController {
   otpSignin(@Body() body: any, @Req() req: any, @Res({ passthrough: true }) res: any) {
     clearHostOnlyTwin(req, res);
     return this.auth.otpSignin(body, req.session);
+  }
+
+  // Coach/student invite acceptance — public. Peek shows the invite's academy
+  // + inviter so the accept page can greet the invitee before they set a password.
+  @Get("invite/:token")
+  peekInvite(@Param("token") token: string) {
+    return this.auth.peekInvite(token);
+  }
+  @Post("accept-invite")
+  acceptInvite(@Body() body: any, @Req() req: any, @Res({ passthrough: true }) res: any) {
+    clearHostOnlyTwin(req, res);
+    return this.auth.acceptInvite(body, req.session);
   }
 }

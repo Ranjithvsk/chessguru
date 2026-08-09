@@ -160,6 +160,15 @@ export default function LoginPage() {
       <p className="mt-3 text-center text-xs text-ink-500">
         Signing in? <Link to="/" className="hover:underline">Back home</Link>
       </p>
+      <div className="mt-4 rounded-xl2 border border-brand-500/30 bg-gradient-to-br from-brand-500/10 via-ink-900 to-ink-900 p-4 text-center text-sm">
+        <div className="mb-1">🏛️ Running a chess academy?</div>
+        <Link to="/signup-academy" className="font-semibold text-brand-300 hover:underline">
+          Create your Academy →
+        </Link>
+        <p className="mt-1 text-[11px] text-ink-500">
+          Invite coaches, enroll students, run classes. Free during trial.
+        </p>
+      </div>
     </div>
   );
 }
