@@ -1369,6 +1369,17 @@ function StarredDigestPreviewLink() {
   type Row = { _id: string; classId: string; at: string; note: string; hasAudio: boolean; shapeCount: number; link: string };
   type PreviewData = { snapCount: number; snaps: Row[]; cadence: "weekly" | "biweekly" | "monthly"; windowDays: number; optedOut: boolean; sentCount: number; lastSentAt: string | null; reviewedSinceLast: number; pendingBacklog: number; stuck: boolean };
   const [data, setData] = useState<PreviewData | null>(null);
+  // Ambient stats fetched on mount so the link line shows current cadence +
+  // last-sent + backlog before the coach opens the modal. Same endpoint.
+  const [stats, setStats] = useState<{ cadence: string; sentCount: number; lastSentAt: string | null; pendingBacklog: number } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${BASE}/api/academy/starred-digest/preview`, { credentials: "include" })
+      .then((r) => r.json())
+      .then((j) => { if (!cancelled && j && typeof j.snapCount === "number") setStats({ cadence: j.cadence, sentCount: j.sentCount, lastSentAt: j.lastSentAt, pendingBacklog: j.pendingBacklog }); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
   const [savingCadence, setSavingCadence] = useState(false);
   async function setCadence(c: "weekly" | "biweekly" | "monthly") {
     if (savingCadence || !data || data.cadence === c) return;
@@ -1404,11 +1415,20 @@ function StarredDigestPreviewLink() {
     finally { setSending(false); }
   }
   return (
-    <>
+    <div className="flex items-baseline flex-wrap gap-2">
       <button onClick={load}
         className="text-[11px] text-brand-300 hover:text-brand-100 underline">
         📧 Preview my Sunday digest
       </button>
+      {stats && (
+        <span className="text-[10px] text-ink-500">
+          · cadence: <b className="text-ink-300">{stats.cadence}</b>
+          {stats.sentCount > 0
+            ? <> · <b className="text-ink-300">{stats.sentCount}</b> sent{stats.lastSentAt ? <> · last {fmtAgo(stats.lastSentAt)}</> : null}</>
+            : <> · never sent yet</>}
+          {stats.pendingBacklog > 0 && <> · <b className="text-brand-300">{stats.pendingBacklog}</b> queued</>}
+        </span>
+      )}
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setOpen(false)}>
           <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg rounded-xl2 border border-ink-700 bg-ink-900 p-5 shadow-2xl">
@@ -1498,7 +1518,7 @@ function StarredDigestPreviewLink() {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
 
