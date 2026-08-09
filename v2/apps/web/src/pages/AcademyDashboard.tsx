@@ -1849,6 +1849,13 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
             <option value="arrows">Sort: most arrows</option>
             <option value="stale">Sort: most stale</option>
           </select>
+          {(classFilter || starredOnly || textFilter || hideReviewed || sortKey !== "recent") && (
+            <button onClick={() => { setClassFilter(""); setStarredOnly(false); setTextFilter(""); setHideReviewed(false); setSortKey("recent"); }}
+              title="Reset every filter + sort to default"
+              className="rounded-full border border-ink-700 bg-ink-900 px-2 py-0.5 text-[10px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-ink-100">
+              🔄 Clear all
+            </button>
+          )}
           <button onClick={() => setSelectMode((v) => !v)}
             title={selectMode ? "Exit multi-select" : "Multi-select for bulk actions"}
             className={`ml-auto rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${selectMode
