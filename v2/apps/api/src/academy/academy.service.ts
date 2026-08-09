@@ -707,6 +707,7 @@ export class AcademyService {
       shapes: Array.isArray(r.shapes) ? r.shapes : [],
       starred: !!r.starred,
       hasAudio: !!r.hasAudio,
+      audioBytes: typeof r.audioBytes === "number" ? r.audioBytes : undefined,
       byUserId: String(r.byUserId), byName: r.byName || r.byUserId,
       at: r.at,
     }));

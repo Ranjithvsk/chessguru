@@ -1018,6 +1018,7 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos }: {
           ) : s.starred ? <span className="mr-1 text-xs text-amber-300 align-middle">★</span> : null}
           <b>{s.byName}</b>
           {shapes.length > 0 && <span className="ml-1 text-[10px] text-amber-300">✏️{shapes.length}</span>}
+          {(() => { const sec = estimateAudioSeconds(s.audioBytes); return s.hasAudio && sec != null ? <span className="ml-1 text-[10px] text-violet-300" title="Approximate clip length">🎙~{sec}s</span> : null; })()}
           {canEdit && !editing && (
             <>
               <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDraft(s.note || ""); setEditing(true); }}
@@ -1148,7 +1149,15 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos }: {
 // scope the grid; click All to reset. The 12-card visible limit still
 // applies within the filtered view.
 type SnapShape = { orig: string; dest?: string; brush?: string };
-type SnapItem = { _id: string; classId: string; classTitle: string; fen: string; note: string; byName: string; byUserId?: string; at: string; shapes?: SnapShape[]; starred?: boolean; hasAudio?: boolean };
+type SnapItem = { _id: string; classId: string; classTitle: string; fen: string; note: string; byName: string; byUserId?: string; at: string; shapes?: SnapShape[]; starred?: boolean; hasAudio?: boolean; audioBytes?: number };
+// Nominal opus bitrate MediaRecorder uses by default (~48 kbps). Cheap
+// duration estimate for the card badge -- coach uses it to eyeball short
+// vs long clips without opening each modal. Off by a couple seconds if a
+// browser encoded at a different rate; that's fine at this granularity.
+function estimateAudioSeconds(bytes?: number): number | null {
+  if (!bytes || bytes < 500) return null;
+  return Math.max(1, Math.round(bytes / 6000));
+}
 // URL-safe base64 encoder for the shapes deep-link. Matches decoder in BoardEditor.tsx.
 function encodeShapesForUrl(shapes: SnapShape[]): string {
   return btoa(JSON.stringify(shapes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
