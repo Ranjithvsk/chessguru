@@ -256,11 +256,78 @@ function shortAgo(iso?: string): string {
   return `${Math.round(ms / (30 * 86_400_000))}mo ago`;
 }
 
+// Roster `key` matches the class-ws.ts convention — userId when signed in,
+// else "guest:<name>". Used as the lookup key for the per-student history modal.
+function keyOf(s: { userId: string | null; name: string }): string {
+  return s.userId ? s.userId : `guest:${s.name || "Guest"}`;
+}
+
+type StudentEntry = { classId: string; title: string; startAt: string; joinedAt: string; lastSeenAt?: string };
+
+// Modal: per-student attendance history. Fetched on open — small list of the
+// coach's classes this student joined, with dates.
+function StudentHistoryModal({ student, onClose }: { student: CoachStudent; onClose: () => void }) {
+  const [entries, setEntries] = useState<StudentEntry[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const key = keyOf(student);
+    fetch(`${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/coach/students/history?key=${encodeURIComponent(key)}`,
+          { credentials: "include" })
+      .then((r) => r.ok ? r.json() : { entries: [] })
+      .then((j) => { if (!cancelled) setEntries(j.entries ?? []); })
+      .catch(() => { if (!cancelled) setEntries([]); });
+    return () => { cancelled = true; };
+  }, [student]);
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}
+           className="w-full max-w-lg space-y-3 rounded-xl2 border border-brand-500/40 bg-gradient-to-br from-brand-500/10 via-ink-900 to-ink-900 p-5 shadow-2xl">
+        <div className="flex items-baseline justify-between">
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-ink-500">Student history</div>
+            <h3 className="font-display text-lg text-white">
+              🧑‍🎓 {student.name || "Guest"}
+              {!student.userId && <span className="ml-2 rounded bg-ink-700 px-1.5 py-0.5 text-[10px] font-normal text-ink-400">guest</span>}
+            </h3>
+          </div>
+          <button type="button" onClick={onClose}
+            className="rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-ink-300 hover:bg-ink-800">Close</button>
+        </div>
+        {entries == null ? (
+          <div className="py-6 text-center text-xs text-ink-400">Loading…</div>
+        ) : entries.length === 0 ? (
+          <div className="py-6 text-center text-xs text-ink-500">No class attendance recorded yet.</div>
+        ) : (
+          <ul className="max-h-80 space-y-1.5 overflow-y-auto pr-1">
+            {entries.map((e) => (
+              <li key={e.classId + e.joinedAt}
+                  className="flex items-center justify-between gap-2 rounded-lg bg-ink-800/60 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm text-white">{e.title}</div>
+                  <div className="text-[10px] text-ink-500">
+                    {absTime(e.startAt)} · joined {shortAgo(e.joinedAt)}
+                  </div>
+                </div>
+                <Link to={`/class/${encodeURIComponent(e.classId)}`}
+                      onClick={onClose}
+                      className="shrink-0 rounded-lg border border-brand-500/40 bg-brand-500/10 px-2.5 py-1 text-[11px] font-semibold text-brand-100 hover:bg-brand-500/20">
+                  Open class
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Coach-only roster. Fetch on mount; render as a compact grid below the schedule
 // sections. Skips itself entirely (no header, no empty state) for accounts that
 // have no owned classes / no attendees yet.
 function MyStudents() {
   const [students, setStudents] = useState<CoachStudent[] | null>(null);
+  const [detail, setDetail] = useState<CoachStudent | null>(null);
   useEffect(() => {
     let cancelled = false;
     fetch(`${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/coach/students`,
@@ -272,18 +339,25 @@ function MyStudents() {
   }, []);
   if (!students || students.length === 0) return null;
   const totalClasses = students.reduce((s, x) => s + (x.classesAttended || 0), 0);
+  const csvHref = `${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/coach/students.csv`;
   return (
     <section>
-      <h2 className="mb-2 flex items-baseline justify-between text-sm font-semibold text-white">
+      <h2 className="mb-2 flex flex-wrap items-baseline justify-between gap-2 text-sm font-semibold text-white">
         <span>🧑‍🎓 My students</span>
-        <span className="text-[10px] font-normal text-ink-500">
-          {students.length} unique · {totalClasses} class-attend{totalClasses === 1 ? "" : "s"} total
+        <span className="flex items-center gap-2 text-[10px] font-normal text-ink-500">
+          <span>{students.length} unique · {totalClasses} class-attend{totalClasses === 1 ? "" : "s"} total</span>
+          <a href={csvHref}
+             className="rounded border border-brand-500/40 bg-brand-500/10 px-2 py-0.5 font-semibold text-brand-100 hover:bg-brand-500/20"
+             title="Download roster as CSV">
+            ⬇ CSV
+          </a>
         </span>
       </h2>
       <div className="grid gap-2 rounded-xl2 border border-ink-700 bg-ink-900 p-3 sm:grid-cols-2 lg:grid-cols-3">
         {students.map((s) => (
-          <div key={(s.userId ?? "g") + s.name}
-               className="flex items-center justify-between gap-3 rounded-lg bg-ink-800/60 px-3 py-2">
+          <button key={keyOf(s)} type="button" onClick={() => setDetail(s)}
+                  title="Click to see this student's class history"
+                  className="flex items-center justify-between gap-3 rounded-lg bg-ink-800/60 px-3 py-2 text-left transition-colors hover:bg-ink-800 focus:outline-none focus:ring-2 focus:ring-brand-400">
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
                 <span className="truncate text-sm font-semibold text-white">{s.name || "Guest"}</span>
@@ -297,9 +371,10 @@ function MyStudents() {
                   title={`Attended ${s.classesAttended} of your classes`}>
               × {s.classesAttended}
             </span>
-          </div>
+          </button>
         ))}
       </div>
+      {detail && <StudentHistoryModal student={detail} onClose={() => setDetail(null)} />}
     </section>
   );
 }

@@ -64,6 +64,76 @@ export class ClassAttendanceController {
     return { students: rows };
   }
 
+  // GET /api/class/coach/students/history?key=X — coach-only per-student
+  // attendance history. Returns the list of THIS coach's classes the student
+  // joined, with the class title / startAt + the student's joinedAt / lastSeenAt
+  // per row. Sorted newest-first by class startAt. Restricted to classes the
+  // caller owns so a student's activity in someone else's classes stays private.
+  @Get("coach/students/history")
+  async coachStudentHistory(@Req() req: any, @Query("key") keyRaw?: string) {
+    const me: string | null = req?.session?.userId ?? null;
+    if (!me) throw new HttpException("sign in required", HttpStatus.UNAUTHORIZED);
+    const key = String(keyRaw ?? "").trim().slice(0, 200);
+    if (!key) throw new HttpException("key required", HttpStatus.BAD_REQUEST);
+    const owned: any[] = await this.conn.db!.collection("classSchedules")
+      .find({ createdByUserId: me }, { projection: { _id: 1, title: 1, startAt: 1 } as any }).limit(2000).toArray();
+    if (owned.length === 0) return { entries: [] };
+    const classById = new Map<string, { title: string; startAt: Date }>(owned.map((c) => [String(c._id), { title: c.title, startAt: c.startAt }]));
+    const rows: any[] = await this.conn.db!.collection("classAttendance")
+      .find({ key, classId: { $in: owned.map((c) => c._id) } }).limit(1000).toArray();
+    const entries = rows
+      .map((r) => {
+        const c = classById.get(String(r.classId));
+        return c ? { classId: r.classId, title: c.title, startAt: c.startAt,
+                     joinedAt: r.joinedAt, lastSeenAt: r.lastSeenAt } : null;
+      })
+      .filter(Boolean)
+      .sort((a: any, b: any) => new Date(b.startAt).getTime() - new Date(a.startAt).getTime());
+    return { entries };
+  }
+
+  // GET /api/class/coach/students.csv — coach-only bulk roster export. Same
+  // rows as /coach/students but flattened as CSV for archive / academy roll-up.
+  @Get("coach/students.csv")
+  async coachStudentsCsv(@Req() req: any, @Res() res: Response) {
+    const me: string | null = req?.session?.userId ?? null;
+    if (!me) throw new HttpException("sign in required", HttpStatus.UNAUTHORIZED);
+    const owned: any[] = await this.conn.db!.collection("classSchedules")
+      .find({ createdByUserId: me }, { projection: { _id: 1 } as any }).limit(2000).toArray();
+    if (owned.length === 0) {
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="my-students.csv"`);
+      return res.send("userId,name,classesAttended,firstSeen,lastSeen\n");
+    }
+    const rows = await this.conn.db!.collection("classAttendance").aggregate([
+      { $match: { classId: { $in: owned.map((c) => c._id) } } },
+      { $group: {
+          _id: "$key",
+          userId: { $last: "$userId" },
+          name:   { $last: "$name" },
+          classes: { $addToSet: "$classId" },
+          firstSeen: { $min: "$joinedAt" },
+          lastSeen:  { $max: "$lastSeenAt" },
+        } },
+      { $sort: { lastSeen: -1 } as any },
+    ]).toArray();
+    // RFC 4180 style — quote fields with commas / quotes / newlines, escape " as "".
+    const q = (v: unknown) => {
+      const s = v == null ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = ["userId,name,classesAttended,firstSeen,lastSeen"];
+    for (const r of rows as any[]) {
+      lines.push([q(r.userId ?? ""), q(r.name ?? "Guest"),
+                  q(Array.isArray(r.classes) ? r.classes.length : 0),
+                  q(new Date(r.firstSeen).toISOString()),
+                  q(r.lastSeen ? new Date(r.lastSeen).toISOString() : "")].join(","));
+    }
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="my-students.csv"`);
+    res.send(lines.join("\n"));
+  }
+
   // GET /api/class/:id/attendance — sorted by joinedAt asc so the display reads
   // as an arrival order. Anonymous joiners have userId: null.
   @Get(":id/attendance")
