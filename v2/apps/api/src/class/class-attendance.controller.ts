@@ -134,6 +134,10 @@ export class ClassAttendanceController {
     return { entries, mail: mail.map((m: any) => ({
       at: m.at, subject: m.subject, kind: m.kind ?? "adhoc",
       classId: m.classId ?? null,
+      // Only the body of adhoc messages is exposed — reminder bodies are
+      // auto-generated boilerplate the coach never wrote, so surfacing them
+      // for "resend" would be more confusing than useful.
+      body: (m.kind === "adhoc" && typeof m.body === "string") ? m.body : null,
     })) };
   }
 
@@ -209,8 +213,11 @@ export class ClassAttendanceController {
     // handle transient carrier hiccups. Fire-and-forget so a Mongo hiccup
     // never breaks the send response.
     const now = new Date();
+    // Adhoc rows carry the body so the coach can click a past message and
+    // resend a tweaked copy. Reminder rows don't need this (auto-generated).
+    // Body is capped upstream at 5000 chars, so persisting is a bounded cost.
     this.conn.db!.collection("classMailLog").insertMany(
-      toSend.map((to) => ({ at: now, coachId: me, to, subject, kind: "adhoc", classId: null })),
+      toSend.map((to) => ({ at: now, coachId: me, to, subject, body: message, kind: "adhoc", classId: null })),
     ).catch(() => { /* silent */ });
     return { ok: true, sent: toSend.length, skipped: skipped.length, invalid: invalid.length };
   }

@@ -263,13 +263,17 @@ function keyOf(s: { userId: string | null; name: string }): string {
 }
 
 type StudentEntry = { classId: string; title: string; startAt: string; joinedAt: string; lastSeenAt?: string };
-type StudentMail  = { at: string; subject: string; kind: string; classId: string | null };
+type StudentMail  = { at: string; subject: string; kind: string; classId: string | null; body?: string | null };
 
 // Modal: per-student attendance history + recent mail log. Fetched on open —
 // classes the student joined + emails coach has sent them (ad-hoc + reminders).
 function StudentHistoryModal({ student, onClose }: { student: CoachStudent; onClose: () => void }) {
   const [entries, setEntries] = useState<StudentEntry[] | null>(null);
   const [mail, setMail] = useState<StudentMail[]>([]);
+  // Local compose state. Two entry points: the "Email this student" button
+  // (blank prefill) and clicking any adhoc log row (prefilled from that row).
+  const [compose, setCompose] = useState<{ subject: string; body: string } | null>(null);
+  const canEmail = !!student.email;
   useEffect(() => {
     let cancelled = false;
     const key = keyOf(student);
@@ -292,8 +296,17 @@ function StudentHistoryModal({ student, onClose }: { student: CoachStudent; onCl
               {!student.userId && <span className="ml-2 rounded bg-ink-700 px-1.5 py-0.5 text-[10px] font-normal text-ink-400">guest</span>}
             </h3>
           </div>
-          <button type="button" onClick={onClose}
-            className="rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-ink-300 hover:bg-ink-800">Close</button>
+          <div className="flex items-center gap-2">
+            {canEmail && (
+              <button type="button" onClick={() => setCompose({ subject: "", body: "" })}
+                className="rounded-lg border border-brand-500/50 bg-brand-500/15 px-2.5 py-1 text-xs font-semibold text-brand-100 hover:bg-brand-500/25"
+                title={`Send an email to ${student.email}`}>
+                ✉ Email this student
+              </button>
+            )}
+            <button type="button" onClick={onClose}
+              className="rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-ink-300 hover:bg-ink-800">Close</button>
+          </div>
         </div>
         {entries == null ? (
           <div className="py-6 text-center text-xs text-ink-400">Loading…</div>
@@ -337,26 +350,49 @@ function StudentHistoryModal({ student, onClose }: { student: CoachStudent; onCl
                 </div>
               ) : (
                 <ul className="max-h-40 space-y-1 overflow-y-auto pr-1">
-                  {mail.map((m, i) => (
-                    <li key={m.at + i}
-                        className="flex items-center justify-between gap-2 rounded-lg bg-ink-800/60 px-3 py-1.5 text-xs">
-                      <div className="min-w-0">
-                        <div className="truncate text-ink-200">{m.subject}</div>
-                        <div className="text-[10px] text-ink-500">
-                          {shortAgo(m.at)} ·{" "}
-                          <span className={m.kind === "adhoc" ? "text-brand-300" : "text-ink-400"}>
-                            {m.kind === "adhoc" ? "message" : m.kind.replace("reminder:", "reminder ")}
-                          </span>
+                  {mail.map((m, i) => {
+                    const isAdhoc = m.kind === "adhoc";
+                    const clickable = isAdhoc && canEmail && !!m.body;
+                    const row = (
+                      <div className="flex items-center justify-between gap-2 rounded-lg bg-ink-800/60 px-3 py-1.5 text-xs">
+                        <div className="min-w-0">
+                          <div className="truncate text-ink-200">{m.subject}</div>
+                          <div className="text-[10px] text-ink-500">
+                            {shortAgo(m.at)} ·{" "}
+                            <span className={isAdhoc ? "text-brand-300" : "text-ink-400"}>
+                              {isAdhoc ? "message" : m.kind.replace("reminder:", "reminder ")}
+                            </span>
+                            {clickable && <span className="ml-2 text-ink-500">— tap to resend</span>}
+                          </div>
                         </div>
                       </div>
-                    </li>
-                  ))}
+                    );
+                    return (
+                      <li key={m.at + i}>
+                        {clickable ? (
+                          <button type="button" className="block w-full text-left transition-colors hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-brand-400 rounded-lg"
+                                  onClick={() => setCompose({ subject: m.subject, body: m.body || "" })}>
+                            {row}
+                          </button>
+                        ) : row}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>
           </div>
         )}
       </div>
+      {compose && canEmail && (
+        <ComposeModal recipients={[student.email!]}
+          prefillSubject={compose.subject} prefillMessage={compose.body}
+          onClose={() => setCompose(null)}
+          onSent={(r) => {
+            setCompose(null);
+            alert(`Sent ${r.sent}${r.skipped ? ` · ${r.skipped} skipped` : ""}${r.invalid ? ` · ${r.invalid} invalid` : ""}`);
+          }} />
+      )}
     </div>
   );
 }
@@ -366,10 +402,11 @@ function StudentHistoryModal({ student, onClose }: { student: CoachStudent; onCl
 // have no owned classes / no attendees yet.
 // Ad-hoc email compose modal. Coach types subject + message and hits Send;
 // server double-checks recipients are actually in caller's roster before sending.
-function ComposeModal({ recipients, onClose, onSent }:
-  { recipients: string[]; onClose: () => void; onSent: (r: { sent: number; skipped: number; invalid: number }) => void }) {
-  const [subject, setSubject] = useState("");
-  const [message, setMessage] = useState("");
+function ComposeModal({ recipients, onClose, onSent, prefillSubject, prefillMessage }:
+  { recipients: string[]; onClose: () => void; onSent: (r: { sent: number; skipped: number; invalid: number }) => void;
+    prefillSubject?: string; prefillMessage?: string }) {
+  const [subject, setSubject] = useState(prefillSubject ?? "");
+  const [message, setMessage] = useState(prefillMessage ?? "");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submit = async (e: React.FormEvent) => {
