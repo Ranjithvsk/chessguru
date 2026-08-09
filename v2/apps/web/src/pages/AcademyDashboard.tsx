@@ -1160,7 +1160,22 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
 function StarredDigestPreviewLink() {
   const [open, setOpen] = useState(false);
   type Row = { _id: string; classId: string; at: string; note: string; hasAudio: boolean; shapeCount: number; link: string };
-  const [data, setData] = useState<{ snapCount: number; snaps: Row[] } | null>(null);
+  type PreviewData = { snapCount: number; snaps: Row[]; cadence: "weekly" | "biweekly" | "monthly"; optedOut: boolean };
+  const [data, setData] = useState<PreviewData | null>(null);
+  const [savingCadence, setSavingCadence] = useState(false);
+  async function setCadence(c: "weekly" | "biweekly" | "monthly") {
+    if (savingCadence || !data || data.cadence === c) return;
+    setSavingCadence(true);
+    try {
+      await fetch(`${BASE}/api/academy/starred-digest/cadence`, {
+        method: "PUT", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cadence: c }),
+      });
+      setData({ ...data, cadence: c });
+    } catch { /* silent */ }
+    finally { setSavingCadence(false); }
+  }
   const [sending, setSending] = useState(false);
   const [sendMsg, setSendMsg] = useState<string | null>(null);
   async function load() {
@@ -1218,13 +1233,25 @@ function StarredDigestPreviewLink() {
                 </ol>
               </>
             )}
-            {data && data.snapCount > 0 && (
-              <div className="mt-4 flex items-center gap-2">
-                <button onClick={sendNow} disabled={sending}
-                  className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
-                  {sending ? "Sending…" : "📧 Send it to me now"}
-                </button>
-                {sendMsg && <span className="text-[11px] text-ink-300">{sendMsg}</span>}
+            {data && (
+              <div className="mt-4 flex items-center flex-wrap gap-2 border-t border-ink-800 pt-3">
+                <span className="text-[11px] uppercase tracking-wide text-ink-500">Cadence</span>
+                {(["weekly", "biweekly", "monthly"] as const).map((c) => (
+                  <button key={c} onClick={() => setCadence(c)} disabled={savingCadence}
+                    className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${data.cadence === c
+                      ? "border-brand-500/60 bg-brand-500/15 text-brand-100"
+                      : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>{c}</button>
+                ))}
+                {data.snapCount > 0 && (
+                  <>
+                    <span className="ml-auto" />
+                    <button onClick={sendNow} disabled={sending}
+                      className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
+                      {sending ? "Sending…" : "📧 Send it to me now"}
+                    </button>
+                    {sendMsg && <span className="text-[11px] text-ink-300">{sendMsg}</span>}
+                  </>
+                )}
               </div>
             )}
           </div>

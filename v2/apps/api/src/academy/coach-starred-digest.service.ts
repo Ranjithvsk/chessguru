@@ -21,7 +21,14 @@ import { emailOptOutToken } from "../digest/email-optout.controller";
 const TICK_MS = 10 * 60_000;
 const WINDOW_HOUR_START = 8;
 const WINDOW_HOUR_END = 10;
-const SEND_INTERVAL_MS = 6 * 86_400_000;
+// Default cadence when the user hasn't set one. Individual coaches can pick
+// weekly / biweekly / monthly (see cadenceInterval below).
+const DEFAULT_INTERVAL_MS = 6 * 86_400_000;
+function cadenceIntervalMs(v: unknown): number {
+  if (v === "biweekly") return 13 * 86_400_000;   // ~2 weeks
+  if (v === "monthly")  return 28 * 86_400_000;   // ~4 weeks (loose)
+  return DEFAULT_INTERVAL_MS;                     // "weekly" or unset
+}
 const PUBLIC_ORIGIN = process.env.PUBLIC_ORIGIN ?? "https://harinitharanjith.com";
 
 function esc(s: string): string {
@@ -53,14 +60,19 @@ export class CoachStarredDigestService implements OnModuleInit {
     if (now.getDay() !== 0) return;
     const hour = now.getHours();
     if (hour < WINDOW_HOUR_START || hour >= WINDOW_HOUR_END) return;
-    const cutoff = new Date(now.getTime() - SEND_INTERVAL_MS);
+    // Coarse pre-filter with the most-lax cadence -- per-user cadence check
+    // happens below so we don't send monthly-picking coaches every week.
+    const laxCutoff = new Date(now.getTime() - DEFAULT_INTERVAL_MS);
     const users = await this.conn.db!.collection("users").find({
       email: { $type: "string" },
       role: { $in: ["academy_owner", "coach"] as any },
       coachStarredDigestOptedOut: { $ne: true },
-      $or: [{ coachStarredDigestSentAt: { $exists: false } }, { coachStarredDigestSentAt: { $lt: cutoff } }],
-    }, { projection: { _id: 1, username: 1, email: 1 } as any }).limit(500).toArray();
+      $or: [{ coachStarredDigestSentAt: { $exists: false } }, { coachStarredDigestSentAt: { $lt: laxCutoff } }],
+    }, { projection: { _id: 1, username: 1, email: 1, coachStarredDigestCadence: 1, coachStarredDigestSentAt: 1 } as any }).limit(500).toArray();
     for (const u of users) {
+      const iv = cadenceIntervalMs(u.coachStarredDigestCadence);
+      const lastSent = u.coachStarredDigestSentAt ? new Date(u.coachStarredDigestSentAt).getTime() : 0;
+      if (lastSent && (now.getTime() - lastSent) < iv) continue;
       await this.sendFor(u).catch((e) => {
         // eslint-disable-next-line no-console
         console.warn("[coach-starred-digest] failed for", u._id, e);
@@ -73,13 +85,19 @@ export class CoachStarredDigestService implements OnModuleInit {
    *  the send path. */
   async previewFor(userId: string, sinceDaysBack = 7) {
     const since = new Date(Date.now() - sinceDaysBack * 86_400_000);
-    const snaps: any[] = await this.conn.db!.collection("classSnaps").find({
-      byUserId: String(userId),
-      starred: true,
-      at: { $gte: since },
-    }).sort({ at: -1 }).limit(30).toArray();
+    const [snaps, user]: [any[], any] = await Promise.all([
+      this.conn.db!.collection("classSnaps").find({
+        byUserId: String(userId),
+        starred: true,
+        at: { $gte: since },
+      }).sort({ at: -1 }).limit(30).toArray(),
+      this.conn.db!.collection("users").findOne({ _id: userId as any },
+        { projection: { coachStarredDigestCadence: 1, coachStarredDigestOptedOut: 1 } as any }),
+    ]);
     return {
       snapCount: snaps.length,
+      cadence: (user?.coachStarredDigestCadence as "weekly" | "biweekly" | "monthly" | undefined) ?? "weekly",
+      optedOut: !!user?.coachStarredDigestOptedOut,
       snaps: snaps.map((s) => ({
         _id: s._id,
         classId: s.classId,

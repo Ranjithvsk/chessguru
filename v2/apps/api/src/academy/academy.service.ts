@@ -734,4 +734,15 @@ export class AcademyService {
     const note = typeof sched.autoSummaryNote === "string" ? sched.autoSummaryNote : "";
     return this.sendClassSummary(session, classId, { note, _autoSummarySystem: true });
   }
+
+  /** Set the current user's coach-starred-digest cadence. Unknown values are
+   *  rejected so a client-side typo can't wedge the field into garbage. */
+  async setCoachStarredDigestCadence(userId: string, cadence: unknown) {
+    const allowed = ["weekly", "biweekly", "monthly"] as const;
+    if (typeof cadence !== "string" || !(allowed as readonly string[]).includes(cadence)) {
+      return { ok: false, error: "cadence must be one of weekly / biweekly / monthly" };
+    }
+    await this.users().updateOne({ _id: userId as any }, { $set: { coachStarredDigestCadence: cadence } });
+    return { ok: true, cadence };
+  }
 }

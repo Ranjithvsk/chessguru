@@ -32,6 +32,14 @@ export class AcademyController {
     return this.digest.sendNowFor(userId);
   }
 
+  // PUT /api/academy/starred-digest/cadence  { cadence: "weekly"|"biweekly"|"monthly" }
+  @Put("starred-digest/cadence")
+  async setStarredDigestCadence(@Req() req: any, @Body() body: any) {
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) throw new UnauthorizedException();
+    return this.svc.setCoachStarredDigestCadence(userId, body?.cadence);
+  }
+
   @Post("invites")
   createInvite(@Body() body: any, @Req() req: any) {
     return this.svc.createInvite(req.session, body);
