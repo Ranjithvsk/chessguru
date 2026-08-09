@@ -516,6 +516,27 @@ export class AcademyService {
       puzzleCounts[uid] = { total: rows.length, wins: rows.filter((r: any) => r.w).length };
     }
 
+    // Positions the coach flagged during the class -- students get direct
+    // links back to /board-editor so they can review the exact position
+    // (with arrows the coach drew, if any). Starred snaps float to the
+    // top; capped at 6 to keep the email compact.
+    const rawSnaps: any[] = await this.conn.db!.collection("classSnaps")
+      .find({ classId, at: { $gte: winStart, $lte: new Date(end.getTime() + 30 * 60_000) } })
+      .sort({ at: -1 }).limit(24).toArray();
+    const snaps = rawSnaps
+      .sort((a: any, b: any) => Number(!!b.starred) - Number(!!a.starred))
+      .slice(0, 6);
+    const encodeShapes = (shapes: any[]): string =>
+      Buffer.from(JSON.stringify(shapes)).toString("base64")
+        .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const snapLink = (s: any): string => {
+      const fenParam = encodeURIComponent(String(s.fen));
+      const shapes = Array.isArray(s.shapes) ? s.shapes : [];
+      return shapes.length > 0
+        ? `https://harinitharanjith.com/board-editor?fen=${fenParam}&shapes=${encodeShapes(shapes)}`
+        : `https://harinitharanjith.com/board-editor?fen=${fenParam}`;
+    };
+
     // Send one email per attendee (idempotent per-recipient; failures don't stop the batch)
     const acadName: string = sched.title || `Class ${classId}`;
     const dateStr = start.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -527,6 +548,19 @@ export class AcademyService {
       const p = puzzleCounts[uid] || { total: 0, wins: 0 };
       const winRate = p.total ? Math.round((p.wins / p.total) * 100) : null;
       const subject = `Class summary: ${acadName} — ${dateStr}`;
+      const snapListHtml = snaps.length === 0 ? "" : `
+          <h3 style="color:#111;margin:20px 0 8px">📸 Positions to review</h3>
+          <ol style="line-height:1.6;padding-left:20px;color:#333">${snaps.map((s: any) => `
+            <li style="margin-bottom:6px">
+              <a href="${snapLink(s)}" style="color:#2563eb;text-decoration:none;font-weight:600">Open position${s.starred ? " ★" : ""}</a>
+              ${s.note ? ` — ${escHtml(String(s.note))}` : ""}
+              ${Array.isArray(s.shapes) && s.shapes.length > 0 ? ` <span style="color:#b45309;font-size:12px">(with ${s.shapes.length} arrow${s.shapes.length === 1 ? "" : "s"})</span>` : ""}
+              ${s.hasAudio ? ` <span style="color:#7c3aed;font-size:12px">(🎙 voice note)</span>` : ""}
+            </li>`).join("")}
+          </ol>`;
+      const snapListText = snaps.length === 0 ? "" : "\nPositions to review:\n" + snaps.map((s: any, i: number) =>
+        `${i + 1}. ${snapLink(s)}${s.note ? ` — ${String(s.note)}` : ""}${Array.isArray(s.shapes) && s.shapes.length > 0 ? ` (${s.shapes.length} arrow${s.shapes.length === 1 ? "" : "s"})` : ""}${s.hasAudio ? " (voice note)" : ""}`
+      ).join("\n") + "\n";
       const html = `
         <div style="font-family:system-ui,sans-serif;max-width:520px">
           <h2 style="color:#111;margin-bottom:4px">${escHtml(acadName)}</h2>
@@ -537,6 +571,7 @@ export class AcademyService {
             <li>Puzzles solved during class: <b>${p.total}</b>${winRate !== null ? ` (win rate <b>${winRate}%</b>)` : ""}.</li>
           </ul>
           ${note ? `<div style="border-left:3px solid #2563eb;padding:8px 12px;background:#f0f7ff;margin:16px 0"><b>Note from your coach:</b><br/>${escHtml(note)}</div>` : ""}
+          ${snapListHtml}
           <p style="color:#666;font-size:13px">Keep it up! Log in at <a href="https://harinitharanjith.com">ChessGuru</a> to see your full history.</p>
         </div>`;
       const text = [
@@ -545,6 +580,7 @@ export class AcademyService {
         `- Class duration: ${sched.durationMin || 60}m`,
         `- Puzzles solved during class: ${p.total}${winRate !== null ? ` (win rate ${winRate}%)` : ""}`,
         note ? `\nNote from your coach: ${note}` : "",
+        snapListText,
         "",
         "Keep it up! https://harinitharanjith.com",
       ].join("\n");
