@@ -1392,6 +1392,10 @@ function SnapButtons({ room, fen, shapes, onSnap, getMicStream }: {
   getMicStream?: () => MediaStream | null;
 }) {
   const [msg, setMsg] = useState<string | null>(null);
+  // Ready-signal for the coach: green dot means rolling recorder is running
+  // and Snap+audio will have coverage. Grey means the mic isn't wired yet
+  // (getUserMedia hadn't resolved at mount, retrying every 3s).
+  const [micReady, setMicReady] = useState(false);
   // Rolling recorder state -- refs so we don't rerender per chunk.
   const recRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
@@ -1433,6 +1437,7 @@ function SnapButtons({ room, fen, shapes, onSnap, getMicStream }: {
       };
       rec.start(1000);   // 1s timeslice -- lets us stop-and-use partial windows cleanly
       recRef.current = rec;
+      setMicReady(true);
       cycleRef.current = setTimeout(() => {
         if (cancelled) return;
         try { rec.state === "recording" && rec.stop(); } catch { /* */ }
@@ -1444,12 +1449,13 @@ function SnapButtons({ room, fen, shapes, onSnap, getMicStream }: {
     }
     if (!startCycle()) {
       const retry = setInterval(() => { if (cancelled) { clearInterval(retry); return; } if (startCycle()) clearInterval(retry); }, 3_000);
-      return () => { cancelled = true; clearInterval(retry); if (cycleRef.current) clearTimeout(cycleRef.current); try { recRef.current?.stop(); } catch { /* */ } };
+      return () => { cancelled = true; clearInterval(retry); if (cycleRef.current) clearTimeout(cycleRef.current); try { recRef.current?.stop(); } catch { /* */ } setMicReady(false); };
     }
     return () => {
       cancelled = true;
       if (cycleRef.current) clearTimeout(cycleRef.current);
       try { recRef.current?.stop(); } catch { /* */ }
+      setMicReady(false);
     };
   }, [getMicStream]);
 
@@ -1530,8 +1536,10 @@ function SnapButtons({ room, fen, shapes, onSnap, getMicStream }: {
         className="rounded-xl2 px-3 py-1.5 text-xs bg-amber-600 hover:bg-amber-500 text-white"
         title="Snap this position + note — reviewable later from /academy">📸 Snap</button>
       <button onClick={snapWithAudio}
-        className="rounded-xl2 px-3 py-1.5 text-xs bg-amber-700 hover:bg-amber-600 text-white"
-        title="Snap + attach the past ~30s of your voice (rolling capture)">
+        className="rounded-xl2 px-3 py-1.5 text-xs bg-amber-700 hover:bg-amber-600 text-white inline-flex items-center gap-1.5"
+        title={micReady ? "Snap + attach the past ~30s of your voice (rolling capture)" : "Waiting for mic — click will still snap the position; audio will attach as soon as the recorder is ready."}>
+        {/* Ready dot: green when the rolling recorder is running, grey otherwise. */}
+        <span className={`h-1.5 w-1.5 rounded-full ${micReady ? "bg-emerald-400 animate-pulse" : "bg-ink-500"}`} />
         🎙 Snap+audio
       </button>
       {msg && <span className="text-[10px] text-ink-300">{msg}</span>}
