@@ -325,9 +325,78 @@ function StudentHistoryModal({ student, onClose }: { student: CoachStudent; onCl
 // Coach-only roster. Fetch on mount; render as a compact grid below the schedule
 // sections. Skips itself entirely (no header, no empty state) for accounts that
 // have no owned classes / no attendees yet.
+// Ad-hoc email compose modal. Coach types subject + message and hits Send;
+// server double-checks recipients are actually in caller's roster before sending.
+function ComposeModal({ recipients, onClose, onSent }:
+  { recipients: string[]; onClose: () => void; onSent: (r: { sent: number; skipped: number; invalid: number }) => void }) {
+  const [subject, setSubject] = useState("");
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null); setSending(true);
+    try {
+      const res = await fetch(`${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/coach/students/message`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject, message, recipients }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.message || `send failed: ${res.status}`);
+      onSent({ sent: j.sent ?? 0, skipped: j.skipped ?? 0, invalid: j.invalid ?? 0 });
+    } catch (e: any) {
+      setError(e?.message || "Couldn't send");
+    } finally { setSending(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
+      <form onSubmit={submit} onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg space-y-3 rounded-xl2 border border-brand-500/40 bg-gradient-to-br from-brand-500/10 via-ink-900 to-ink-900 p-5 shadow-2xl">
+        <div className="flex items-baseline justify-between">
+          <h3 className="font-display text-lg text-white">✉ Email {recipients.length} student{recipients.length === 1 ? "" : "s"}</h3>
+          <button type="button" onClick={onClose}
+            className="rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-ink-300 hover:bg-ink-800">Close</button>
+        </div>
+        <label className="block">
+          <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">Subject</span>
+          <input value={subject} onChange={(e) => setSubject(e.target.value)}
+            required maxLength={160}
+            placeholder="e.g. Class cancelled tonight"
+            className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500" />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">
+            Message <span className="normal-case font-normal text-ink-500">(plain text — links auto-detected by most email clients)</span>
+          </span>
+          <textarea value={message} onChange={(e) => setMessage(e.target.value)}
+            required rows={6} maxLength={5000}
+            placeholder="Hi everyone, tonight's class is moving to tomorrow same time…"
+            className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500" />
+        </label>
+        <div className="rounded-lg border border-ink-700 bg-ink-800/60 px-3 py-2 text-[11px] text-ink-400">
+          Recipients: {recipients.slice(0, 8).join(", ")}{recipients.length > 8 ? ` +${recipients.length - 8} more` : ""}
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          {error && <span className="rounded bg-rose-500/15 px-2 py-1 text-xs text-rose-200">{error}</span>}
+          <div className="ml-auto flex items-center gap-2">
+            <button type="button" onClick={onClose}
+              className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-200 hover:bg-ink-700">Cancel</button>
+            <button type="submit" disabled={sending || !subject || !message}
+              className="rounded-lg bg-gradient-to-r from-brand-600 to-accent-500 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:from-brand-500 hover:to-accent-400 disabled:opacity-40">
+              {sending ? "Sending…" : "Send"}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function MyStudents({ onAppendInvitees }: { onAppendInvitees?: (emails: string[]) => void }) {
   const [students, setStudents] = useState<CoachStudent[] | null>(null);
   const [detail, setDetail] = useState<CoachStudent | null>(null);
+  const [composing, setComposing] = useState<string[] | null>(null);
   // Multi-select state. Selected students without an email (guests / signed-in
   // users with no email on file) can still be selected — the bulk action
   // handler filters them and shows a "N skipped" note.
@@ -424,15 +493,28 @@ function MyStudents({ onAppendInvitees }: { onAppendInvitees?: (emails: string[]
               className="rounded-lg border border-ink-600 bg-ink-800 px-3 py-1.5 text-xs font-semibold text-ink-200 hover:bg-ink-700">
               Clear
             </button>
+            <button onClick={() => setComposing(withEmail.map((s) => s.email!))}
+              disabled={withEmail.length === 0}
+              className="rounded-lg border border-brand-500/50 bg-brand-500/15 px-3 py-1.5 text-xs font-semibold text-brand-100 hover:bg-brand-500/25 disabled:opacity-40">
+              ✉ Email {withEmail.length}
+            </button>
             <button onClick={doAddToInvitees} disabled={withEmail.length === 0}
               className="rounded-lg bg-gradient-to-r from-brand-600 to-accent-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:from-brand-500 hover:to-accent-400 disabled:opacity-40">
-              ✉ Add {withEmail.length} to new class
+              ➕ Add {withEmail.length} to new class
             </button>
           </div>
         </div>
       )}
 
       {detail && <StudentHistoryModal student={detail} onClose={() => setDetail(null)} />}
+      {composing && (
+        <ComposeModal recipients={composing} onClose={() => setComposing(null)}
+          onSent={(r) => {
+            setComposing(null);
+            clearSel();
+            alert(`Sent ${r.sent}${r.skipped ? ` · ${r.skipped} skipped (not in roster)` : ""}${r.invalid ? ` · ${r.invalid} invalid` : ""}`);
+          }} />
+      )}
     </section>
   );
 }

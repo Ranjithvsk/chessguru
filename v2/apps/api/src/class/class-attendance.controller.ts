@@ -10,10 +10,17 @@
 // Key = userId when signed in, "guest:<name>" otherwise. A rejoin updates
 // lastSeenAt but preserves the original joinedAt.
 
-import { Controller, Get, Param, Query, Req, Res, HttpException, HttpStatus } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, Req, Res, HttpException, HttpStatus } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
+import { sendMail } from "../lib/mail";
 type Response = any;
+
+// Shape used by the escape helpers in this controller — same as the reminder
+// service so the visual style stays consistent across coach → student emails.
+function escapeHtml(s: string): string {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]!));
+}
 
 const ROOM_RE = /^[A-Za-z0-9_-]{4,64}$/;
 
@@ -106,6 +113,75 @@ export class ClassAttendanceController {
       .filter(Boolean)
       .sort((a: any, b: any) => new Date(b.startAt).getTime() - new Date(a.startAt).getTime());
     return { entries };
+  }
+
+  // POST /api/class/coach/students/message — coach-only ad-hoc email to any
+  // subset of the caller's roster. Recipients are server-verified against the
+  // caller's own classAttendance rows so this endpoint can't be used as a
+  // spam relay to arbitrary addresses.
+  //
+  // Body: { subject: string, message: string (plain text), recipients: string[] }
+  // Returns: { ok, sent, skipped, invalid } — coach's UI can show a toast.
+  @Post("coach/students/message")
+  async coachMessage(@Req() req: any, @Body() body: unknown) {
+    const me: string | null = req?.session?.userId ?? null;
+    const meName: string | null = req?.session?.username ?? null;
+    if (!me) throw new HttpException("sign in required", HttpStatus.UNAUTHORIZED);
+    const b: any = body ?? {};
+    const subject = String(b.subject ?? "").trim().slice(0, 160);
+    const message = String(b.message ?? "").trim().slice(0, 5000);
+    const asked: string[] = Array.isArray(b.recipients)
+      ? b.recipients.filter((r: unknown) => typeof r === "string").map((r: string) => r.trim().toLowerCase())
+      : [];
+    if (!subject) throw new HttpException("subject required", HttpStatus.BAD_REQUEST);
+    if (!message) throw new HttpException("message required", HttpStatus.BAD_REQUEST);
+    if (asked.length === 0) throw new HttpException("recipients required", HttpStatus.BAD_REQUEST);
+    if (asked.length > 200) throw new HttpException("too many recipients", HttpStatus.BAD_REQUEST);
+
+    // Build the set of emails legitimately in the coach's roster (any email
+    // ever attached to a user who joined one of the coach's classes).
+    const owned: any[] = await this.conn.db!.collection("classSchedules")
+      .find({ createdByUserId: me }, { projection: { _id: 1 } as any }).limit(2000).toArray();
+    if (owned.length === 0) throw new HttpException("no roster", HttpStatus.FORBIDDEN);
+    const classIds = owned.map((c) => c._id);
+    const attRows: any[] = await this.conn.db!.collection("classAttendance")
+      .find({ classId: { $in: classIds } }, { projection: { userId: 1 } as any }).limit(5000).toArray();
+    const uids = Array.from(new Set(attRows.map((r) => r.userId).filter((u: unknown) => typeof u === "string")));
+    const users: any[] = uids.length
+      ? await this.conn.db!.collection("users").find({ _id: { $in: uids } as any }, { projection: { email: 1 } as any }).toArray()
+      : [];
+    const allowed = new Set<string>();
+    for (const u of users) if (typeof u.email === "string") allowed.add(u.email.toLowerCase());
+
+    const toSend: string[] = [];
+    const skipped: string[] = [];
+    const invalid: string[] = [];
+    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const seen = new Set<string>();
+    for (const raw of asked) {
+      if (!emailRe.test(raw)) { invalid.push(raw); continue; }
+      if (seen.has(raw)) continue;
+      seen.add(raw);
+      if (!allowed.has(raw)) { skipped.push(raw); continue; }   // not in roster
+      toSend.push(raw);
+    }
+    if (toSend.length === 0) return { ok: true, sent: 0, skipped: skipped.length, invalid: invalid.length };
+
+    const coachName = meName || "your coach";
+    const bodyText = `${message}\n\n— ${coachName} (via ChessGuru)`;
+    const bodyHtml = `
+      <div style="font-family:system-ui,-apple-system,sans-serif;line-height:1.55;color:#111;max-width:520px">
+        <div style="background:linear-gradient(135deg,#6d28d9,#4338ca);color:#fff;padding:20px 24px;border-radius:12px 12px 0 0">
+          <div style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;opacity:.75">Message from your coach</div>
+          <div style="font-size:20px;font-weight:700;margin-top:4px">${escapeHtml(subject)}</div>
+        </div>
+        <div style="border:1px solid #e5e7eb;border-top:0;padding:20px 24px;border-radius:0 0 12px 12px">
+          <p style="font-size:14px;color:#374151;white-space:pre-wrap;margin:0">${escapeHtml(message)}</p>
+          <p style="font-size:12px;color:#6b7280;margin:20px 0 0">— ${escapeHtml(coachName)} (via ChessGuru)</p>
+        </div>
+      </div>`;
+    await Promise.all(toSend.map((to) => sendMail({ to, subject, html: bodyHtml, text: bodyText })));
+    return { ok: true, sent: toSend.length, skipped: skipped.length, invalid: invalid.length };
   }
 
   // GET /api/class/coach/students.csv — coach-only bulk roster export. Same
