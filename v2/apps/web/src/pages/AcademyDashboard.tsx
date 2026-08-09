@@ -1272,7 +1272,7 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
 function StarredDigestPreviewLink() {
   const [open, setOpen] = useState(false);
   type Row = { _id: string; classId: string; at: string; note: string; hasAudio: boolean; shapeCount: number; link: string };
-  type PreviewData = { snapCount: number; snaps: Row[]; cadence: "weekly" | "biweekly" | "monthly"; windowDays: number; optedOut: boolean; sentCount: number; lastSentAt: string | null };
+  type PreviewData = { snapCount: number; snaps: Row[]; cadence: "weekly" | "biweekly" | "monthly"; windowDays: number; optedOut: boolean; sentCount: number; lastSentAt: string | null; reviewedSinceLast: number };
   const [data, setData] = useState<PreviewData | null>(null);
   const [savingCadence, setSavingCadence] = useState(false);
   async function setCadence(c: "weekly" | "biweekly" | "monthly") {
@@ -1332,6 +1332,11 @@ function StarredDigestPreviewLink() {
                 <div className="mb-2 text-sm text-ink-200">
                   You'd receive <b>{data.snapCount}</b> starred position{data.snapCount === 1 ? "" : "s"} — covering the last <b>{data.windowDays}</b> days.
                 </div>
+                {data.reviewedSinceLast > 0 && (
+                  <div className="mb-2 text-[11px] text-emerald-300">
+                    ✓ You've reviewed {data.reviewedSinceLast} snap{data.reviewedSinceLast === 1 ? "" : "s"} since the last digest{data.lastSentAt ? "" : " (or in the last 30 days)"} — this'll be called out in the email.
+                  </div>
+                )}
                 <ol className="max-h-72 overflow-y-auto pr-1 space-y-1 text-sm">
                   {data.snaps.map((s, i) => (
                     <li key={s._id} className="flex items-baseline gap-2 rounded border border-ink-700 bg-ink-800/40 px-2 py-1.5">

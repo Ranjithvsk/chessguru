@@ -97,11 +97,20 @@ export class CoachStarredDigestService implements OnModuleInit {
     const cadence = (user?.coachStarredDigestCadence as "weekly" | "biweekly" | "monthly" | undefined) ?? "weekly";
     const days = sinceDaysBack ?? cadenceWindowDays(cadence);
     const since = new Date(Date.now() - days * 86_400_000);
-    const snaps: any[] = await this.conn.db!.collection("classSnaps").find({
-      byUserId: String(userId),
-      starred: true,
-      at: { $gte: since },
-    }).sort({ at: -1 }).limit(60).toArray();
+    const reviewSince = user?.coachStarredDigestSentAt
+      ? new Date(user.coachStarredDigestSentAt)
+      : new Date(Date.now() - 30 * 86_400_000);
+    const [snaps, reviewedCount]: [any[], number] = await Promise.all([
+      this.conn.db!.collection("classSnaps").find({
+        byUserId: String(userId),
+        starred: true,
+        at: { $gte: since },
+      }).sort({ at: -1 }).limit(60).toArray(),
+      this.conn.db!.collection("classSnaps").countDocuments({
+        byUserId: String(userId),
+        reviewedAt: { $gte: reviewSince },
+      }),
+    ]);
     return {
       snapCount: snaps.length,
       cadence,
@@ -109,6 +118,7 @@ export class CoachStarredDigestService implements OnModuleInit {
       optedOut: !!user?.coachStarredDigestOptedOut,
       sentCount: typeof user?.coachStarredDigestSentCount === "number" ? user.coachStarredDigestSentCount : 0,
       lastSentAt: user?.coachStarredDigestSentAt ?? null,
+      reviewedSinceLast: reviewedCount,
       snaps: snaps.map((s) => ({
         _id: s._id,
         classId: s.classId,
