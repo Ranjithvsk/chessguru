@@ -1605,6 +1605,11 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   const [starredOnly, setStarredOnly] = useState<boolean>(sp.get("starred") === "1");
   const [textFilter, setTextFilter] = useState<string>(sp.get("q") || "");
   const [hideReviewed, setHideReviewed] = useState<boolean>(sp.get("hidedone") === "1");
+  type SortKey = "recent" | "oldest" | "arrows" | "stale";
+  const [sortKey, setSortKey] = useState<SortKey>(() => {
+    const v = sp.get("sort");
+    return (v === "oldest" || v === "arrows" || v === "stale") ? (v as SortKey) : "recent";
+  });
   useEffect(() => {
     // Rebuild the URL query from state. Empty values drop out so links stay clean.
     const next = new URLSearchParams(sp);
@@ -1612,10 +1617,11 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
     if (starredOnly) next.set("starred", "1"); else next.delete("starred");
     if (textFilter) next.set("q", textFilter); else next.delete("q");
     if (hideReviewed) next.set("hidedone", "1"); else next.delete("hidedone");
+    if (sortKey !== "recent") next.set("sort", sortKey); else next.delete("sort");
     setSp(next, { replace: true });
     // Only depend on the filters -- sp change is already how we write, so skip
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [classFilter, starredOnly, textFilter, hideReviewed]);
+  }, [classFilter, starredOnly, textFilter, hideReviewed, sortKey]);
   const [openIdx, setOpenIdx] = useState<number | null>(null);
   // Reset the open snap when filters change so we don't end up pointing at a
   // row that just got filtered out.
@@ -1771,7 +1777,19 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
       || String(s.transcript || "").toLowerCase().includes(q)
       || String(s.classTitle || "").toLowerCase().includes(q)))
     .slice()
-    .sort((a, b) => Number(!!b.starred) - Number(!!a.starred));
+    .sort((a, b) => {
+      // Sort key drives the primary order; starred always floats above non-
+      // starred within any sort so the coach's shortlist doesn't drown.
+      if (!!b.starred !== !!a.starred) return Number(!!b.starred) - Number(!!a.starred);
+      if (sortKey === "oldest") return new Date(a.at).getTime() - new Date(b.at).getTime();
+      if (sortKey === "arrows") return (b.shapes?.length ?? 0) - (a.shapes?.length ?? 0);
+      if (sortKey === "stale") {
+        // "stale" = un-reviewed first, then oldest first (most stale on top).
+        if (!!b.reviewedAt !== !!a.reviewedAt) return Number(!!a.reviewedAt) - Number(!!b.reviewedAt);
+        return new Date(a.at).getTime() - new Date(b.at).getTime();
+      }
+      return 0; // "recent" -- API order (already reverse-chronological)
+    });
   return (
     <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
       <h2 className="mb-3 font-display text-lg text-white">📸 Recent snaps <span className="text-xs text-ink-500">({snaps.length})</span></h2>
@@ -1823,6 +1841,14 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
               : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>
             {hideReviewed ? "✓ Hiding done" : "Hide done"}
           </button>
+          <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}
+            title="Sort snaps"
+            className="rounded-full border border-ink-700 bg-ink-900 px-2 py-0.5 text-[11px] font-semibold text-ink-400 hover:bg-ink-800">
+            <option value="recent">Sort: recent</option>
+            <option value="oldest">Sort: oldest</option>
+            <option value="arrows">Sort: most arrows</option>
+            <option value="stale">Sort: most stale</option>
+          </select>
           <button onClick={() => setSelectMode((v) => !v)}
             title={selectMode ? "Exit multi-select" : "Multi-select for bulk actions"}
             className={`ml-auto rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${selectMode
