@@ -18,6 +18,36 @@ export class MiscController {
   @Get("themes")
   themes() { return { themes: THEMES }; }
 
+  /** GET /api/me/streak-status — the pieces the frontend needs to decide
+   *  whether to show the "your streak is at risk" banner (Phase 7k). We return
+   *  raw pieces (streak count + solvedToday flag) rather than a computed
+   *  at_risk boolean because the "evening" check depends on the USER'S local
+   *  timezone, which the browser knows better than we do. Anonymous callers
+   *  get loggedIn:false so the banner just doesn't render. */
+  @Get("me/streak-status")
+  async streakStatus(@Req() req: any) {
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) return { loggedIn: false };
+    const lo = `${userId}:`, hi = `${userId};`;
+    const since = new Date(Date.now() - 30 * 86_400_000);
+    const rounds: any[] = await this.conn.db!.collection("rounds").find({
+      _id: { $gte: lo, $lt: hi } as any,
+      d: { $gte: since },
+    }, { projection: { d: 1 } as any }).limit(500).toArray();
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    const todayIso = iso(new Date());
+    const set = new Set<string>();
+    let solvedToday = false;
+    for (const r of rounds) { const day = iso(new Date(r.d)); set.add(day); if (day === todayIso) solvedToday = true; }
+    // Same streak calc the dashboard uses so the banner number matches.
+    let streak = 0;
+    const today = new Date(); today.setUTCHours(0, 0, 0, 0);
+    const cursor = new Date(today);
+    if (!set.has(iso(cursor))) cursor.setUTCDate(cursor.getUTCDate() - 1);
+    while (set.has(iso(cursor))) { streak++; cursor.setUTCDate(cursor.getUTCDate() - 1); }
+    return { loggedIn: true, streak, solvedToday };
+  }
+
   /** GET /api/me/prefs — the signed-in user's notification preferences. Cheap
    *  read; the dashboard shows the current opt-in state for the weekly digest.
    *  Anonymous callers get { loggedIn: false } so the UI can degrade silently. */

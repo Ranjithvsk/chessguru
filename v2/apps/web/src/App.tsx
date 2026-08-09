@@ -1,6 +1,7 @@
 import { Outlet, useLocation, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Navbar from "./components/Navbar";
+import StreakAtRiskBanner from "./components/StreakAtRiskBanner";
 import { api } from "./lib/api";
 
 export default function App() {
@@ -28,6 +29,7 @@ export default function App() {
             <Link to="/login" className="shrink-0 rounded-lg bg-amber-500 px-3 py-1.5 font-semibold text-ink-900 hover:bg-amber-400">Sign in</Link>
           </div>
         )}
+        <StreakAtRiskBanner />
         <Outlet context={{ userId, rating: rating?.rating ?? 1500 }} />
       </main>
     </div>
