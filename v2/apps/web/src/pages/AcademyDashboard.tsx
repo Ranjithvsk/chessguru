@@ -1461,8 +1461,13 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
             placeholder="🔎 search notes / transcript"
             className="rounded-full border border-ink-700 bg-ink-900 px-2.5 py-0.5 text-[11px] text-ink-100 placeholder:text-ink-500 focus:border-brand-500/60 focus:outline-none w-52" />
           {textFilter && (
-            <button onClick={() => setTextFilter("")}
-              className="text-[10px] text-ink-400 hover:text-ink-100" title="Clear text filter">✕</button>
+            <>
+              <button onClick={() => setTextFilter("")}
+                className="text-[10px] text-ink-400 hover:text-ink-100" title="Clear text filter">✕</button>
+              <span className="text-[10px] text-ink-500 tabular-nums" title="Matched snaps in the filtered set">
+                {filtered.length} match{filtered.length === 1 ? "" : "es"}
+              </span>
+            </>
           )}
           {topClasses.length > 1 && (
             <>
