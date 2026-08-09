@@ -98,6 +98,16 @@ export default function CallRoomPage() {
   const boardMode = searchParams.get("board") === "1";
 
   const [status, setStatus] = useState<Status>("connecting");
+  // Per-session tallies for the header ribbon. Snap count bumps each time the
+  // ★ Snap button lands a successful POST; elapsed clock is wall-time from the
+  // moment WS opened (first "waiting" transition) to now, ticked at 1Hz.
+  const [snapCount, setSnapCount] = useState(0);
+  const sessionStartRef = useRef<number | null>(null);
+  const [nowTick, setNowTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setNowTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
@@ -533,7 +543,13 @@ export default function CallRoomPage() {
       const ws = new WebSocket(url);
       wsRef.current = ws;
 
-      ws.onopen = () => { if (!cancelled) setStatus("waiting"); };
+      ws.onopen = () => {
+        if (cancelled) return;
+        setStatus("waiting");
+        // First real connection to the room = class start. Guarded so a WS
+        // reconnect mid-class doesn't reset the elapsed timer.
+        if (sessionStartRef.current == null) sessionStartRef.current = Date.now();
+      };
       ws.onerror = () => { if (!cancelled) { setStatus("error"); setErrorMsg("Signaling connection error."); } };
       ws.onclose = () => { /* {type:"full"} already flipped status; other closes benign */ };
 
@@ -872,11 +888,25 @@ export default function CallRoomPage() {
             {boardMode ? "Hide board" : "♟ Chess board"}
           </Link>
         </div>
-        <div className="text-xs text-ink-300">
+        <div className="flex items-center gap-2 text-xs text-ink-300">
           <span className="font-mono">{room}</span>
-          <span className="mx-2 text-ink-500">·</span>
+          <span className="text-ink-500">·</span>
           <span>{currentCount}/8 in room</span>
-          <span className="mx-2 text-ink-500">·</span>
+          {sessionStartRef.current != null && (
+            <>
+              <span className="text-ink-500">·</span>
+              <span className="rounded-full border border-brand-500/40 bg-brand-500/10 px-2 py-0.5 tabular-nums text-brand-200"
+                title="Elapsed since class start">
+                ⏱ {(() => { void nowTick; const s = Math.max(0, Math.floor((Date.now() - (sessionStartRef.current ?? Date.now())) / 1000));
+                  const m = Math.floor(s / 60); const r = s - m * 60; return `${m}:${String(r).padStart(2, "0")}`; })()}
+              </span>
+            </>
+          )}
+          {snapCount > 0 && (
+            <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 tabular-nums text-amber-200"
+              title="Snaps you flagged this class">📸 {snapCount}</span>
+          )}
+          <span className="text-ink-500">·</span>
           <span>{status}</span>
         </div>
       </header>
@@ -888,7 +918,8 @@ export default function CallRoomPage() {
                 camOn={camOn} handSet={handSet} selfHandUp={selfHandUp} selfId={selfIdRef.current}
                 floaters={floaters} activeSpeaker={activeSpeaker}
                 moderatorId={moderatorId} spotlightId={spotlightId} iAmMod={iAmMod}
-                onKick={kickPeer} onSpotlight={spotlightPeer} />
+                onKick={kickPeer} onSpotlight={spotlightPeer}
+                onSnap={() => setSnapCount((n) => n + 1)} />
             : <ClassicMainArea room={room} peerIds={peerIds} peersRef={peersRef} localVideoRef={localVideoRef}
                 camOn={camOn} handSet={handSet} selfHandUp={selfHandUp} selfId={selfIdRef.current}
                 floaters={floaters} activeSpeaker={activeSpeaker}
@@ -1096,6 +1127,7 @@ type MainAreaProps = {
   iAmMod: boolean;
   onKick: (peerId: string) => void;
   onSpotlight: (peerId: string | null) => void;
+  onSnap?: () => void;
 };
 
 function ClassicMainArea({
@@ -1225,7 +1257,7 @@ function ClassicMainArea({
 function BoardMainArea({
   room, peerIds, peersRef, localVideoRef, camOn,
   handSet, selfHandUp, selfId, floaters, activeSpeaker,
-  moderatorId, spotlightId, iAmMod, onKick, onSpotlight,
+  moderatorId, spotlightId, iAmMod, onKick, onSpotlight, onSnap,
 }: MainAreaProps) {
   const { fen, lastMove, dests, sendMove, sendReset, connected, shapes, sendAnnot } = useSharedBoard(room);
 
@@ -1275,7 +1307,7 @@ function BoardMainArea({
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ fen, note }),
                 });
-                if (r.ok) console.log("[snap] saved");
+                if (r.ok) { console.log("[snap] saved"); onSnap?.(); }
                 else console.warn("[snap] failed", r.status);
               } catch (e) { console.warn("[snap] error", e); }
             }}
