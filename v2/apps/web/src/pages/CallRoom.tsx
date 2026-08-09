@@ -1,18 +1,19 @@
 // CallRoom — P2a of ChessGuru's "from-scratch Zoom" build.
 //
-// Mesh video call page (up to 8 participants) wired to the server-side
-// WebSocket signaling relay at /v2api/api/video-signal/:room. Vanilla browser
-// WebRTC APIs, no libs.
+// Mesh video call page (up to 8) on /v2api/api/video-signal/:room. Full mesh,
+// lex-lower peerId offers to avoid glare. Early-ICE buffered per peer.
 //
-// Topology: full mesh. Each participant holds one RTCPeerConnection per other
-// participant (N-1 PCs when there are N people in the room). Role assignment
-// per-pair is deterministic: the peer with the LEXICOGRAPHICALLY LOWER peerId
-// offers, the other answers. This avoids glare.
-//
-// ICE candidates that arrive before setRemoteDescription are buffered per-peer
-// — ICE can start flowing before the SDP answer lands.
+// `?board=1` opts into the chess-native layout: big Chessground on the left,
+// vertical column of video tiles on the right (stacks below md:). Board state
+// is synced through the EXISTING class-ws bus (/v2api/class-ws/:room) which
+// validates moves server-side with chess.js and echoes to everyone, so we
+// treat server as truth. The class-ws lives in its own useEffect with its own
+// teardown — independent of the signaling WS.
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Chess } from "chess.js";
+import type { Key } from "chessground/types";
+import Board, { destsFromChess } from "../components/Board";
 
 type ServerMsg =
   | { type: "hello"; self: string; peers: string[] }
@@ -29,9 +30,18 @@ type PeerState = {
   pendingIce: RTCIceCandidateInit[];
 };
 
-// STUN-only fallback used if the /api/video/ice-config fetch fails (e.g. guest
-// visitor). TURN URLs are fetched from the server per-session so credentials are
-// fresh and short-lived (~1h). See fetchIceConfig() below.
+// Class-ws (shared-board) frames — subset we handle. See apps/api/src/class/class-ws.ts.
+type BoardMove = { from: string; to: string; promotion?: string };
+type BoardServerMsg =
+  | { type: "state"; fen: string; lastMove: BoardMove | null; history: BoardMove[] }
+  | { type: "move"; move: BoardMove; fen: string }
+  | { type: "reset"; fen: string }
+  | { type: string; [k: string]: unknown };
+
+const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+// STUN-only fallback if /api/video/ice-config fails (guest / dev / network).
+// TURN URLs come per-session from that endpoint (~1h creds). See fetchIceConfig().
 const FALLBACK_ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
@@ -59,46 +69,37 @@ type Status =
 
 export default function CallRoomPage() {
   const { room = "" } = useParams<{ room: string }>();
+  const [searchParams] = useSearchParams();
+  const boardMode = searchParams.get("board") === "1";
 
   const [status, setStatus] = useState<Status>("connecting");
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
   const [sharing, setSharing] = useState(false);
-  // Ordered list of remote peer ids — drives the grid render. Kept in sync
-  // with peersRef's key set on every join/leave.
+  // Drives grid render; mirrors peersRef.keys() on every join/leave.
   const [peerIds, setPeerIds] = useState<string[]>([]);
 
-  // Refs — held outside React state because they never trigger re-renders
-  // and we need stable identity across effect closures.
+  // Refs — stable identity, no re-renders. peersRef map is what actually holds
+  // per-peer state; peerIds state array is the render trigger.
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
-  // One entry per remote peer in the room. Map is stable across renders; the
-  // peerIds state array is what actually triggers re-renders when membership
-  // changes.
   const peersRef = useRef<Map<string, PeerState>>(new Map());
   const wsRef = useRef<WebSocket | null>(null);
   const selfIdRef = useRef<string>("");
-  // RTCConfiguration fetched from /api/video/ice-config (or fallback). Populated
-  // before the WS opens so every createPc() gets the right servers.
+  // Fetched from /api/video/ice-config (or fallback) before any PC is built.
   const iceConfigRef = useRef<RTCConfiguration>(FALLBACK_ICE_SERVERS);
-  // While screen-sharing: the display stream, so we can restore camera cleanly.
-  // Video RTCRtpSender's track gets replaced via replaceTrack() — no SDP re-neg.
+  // Screen-share display stream — kept so we can stop its tracks + restore cam.
   const displayStreamRef = useRef<MediaStream | null>(null);
 
-  // Send a JSON message to the signaling server (guarded — WS may be gone).
+  // Guarded send to signaling — WS may be gone.
   const send = (msg: unknown) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
   };
-
-  // Sync the peerIds state array from the map. Called after any structural
-  // change to peersRef (join, leave, initial hello).
+  // Push peersRef membership → peerIds state (also nudges React for stream updates).
   const syncPeerIds = () => setPeerIds([...peersRef.current.keys()]);
-
-  // Recompute call-level status from the current set of PCs. If any PC is
-  // connected → "connected"; else if any peers exist → "negotiating"; else
-  // "waiting".
+  // any PC connected → "connected"; else any peers → "negotiating"; else "waiting".
   const recomputeStatus = () => {
     let anyConnected = false;
     for (const p of peersRef.current.values()) {
@@ -109,32 +110,23 @@ export default function CallRoomPage() {
     else setStatus("waiting");
   };
 
-  // Build a fresh RTCPeerConnection for one specific remote peer and wire the
-  // standard handlers. Stores the PeerState in peersRef and returns it.
+  // Build one RTCPeerConnection for a remote peer, wire handlers, store in peersRef.
   const createPc = (peerId: string): PeerState => {
     const pc = new RTCPeerConnection(iceConfigRef.current);
     const state: PeerState = { pc, remoteStream: null, pendingIce: [] };
     peersRef.current.set(peerId, state);
 
-    pc.onicecandidate = (e) => {
-      // Send null too — signals end-of-candidates to the remote.
-      send({ type: "ice", to: peerId, candidate: e.candidate });
-    };
+    // Send null too — signals end-of-candidates to the remote.
+    pc.onicecandidate = (e) => send({ type: "ice", to: peerId, candidate: e.candidate });
     pc.ontrack = (e) => {
       const [stream] = e.streams;
       const cur = peersRef.current.get(peerId);
-      if (cur && stream) {
-        cur.remoteStream = stream;
-        // Nudge React so the RemoteTile picks up the new stream. syncPeerIds
-        // sets a fresh array reference even if membership hasn't changed.
-        syncPeerIds();
-      }
+      if (cur && stream) { cur.remoteStream = stream; syncPeerIds(); }
     };
     pc.onconnectionstatechange = () => {
       const s = pc.connectionState;
       if (s === "failed" || s === "closed") {
-        // Peer gone-bad: drop it so the grid updates. peer-leave from server
-        // will usually beat us here, but be defensive.
+        // Defensive drop — peer-leave from server usually beats us here.
         const existing = peersRef.current.get(peerId);
         if (existing && existing.pc === pc) {
           try { pc.close(); } catch { /* already closed */ }
@@ -145,13 +137,11 @@ export default function CallRoomPage() {
       recomputeStatus();
     };
 
-    // Attach our local tracks so the remote receives us.
     const local = localStreamRef.current;
     if (local) for (const t of local.getTracks()) pc.addTrack(t, local);
 
-    // Prefer AV1 → VP9 → H264 for video: ~30% less bandwidth at the same
-    // quality vs H264 (Zoom's default). setCodecPreferences is best-effort;
-    // browsers without AV1 hardware fall through the list cleanly.
+    // Prefer AV1 → VP9 → H264: ~30% less bandwidth vs H264 at same quality.
+    // Best-effort; browsers without AV1 fall through the list cleanly.
     try {
       const videoTx = pc.getTransceivers().find((t) => t.receiver.track?.kind === "video" || t.sender.track?.kind === "video");
       const caps = (RTCRtpSender as any).getCapabilities?.("video");
@@ -172,8 +162,7 @@ export default function CallRoomPage() {
     return state;
   };
 
-  // I offer if my id sorts before theirs. Deterministic, no glare. Applied
-  // pairwise, so every ordered pair has exactly one offerer.
+  // Lex-lower id offers → deterministic, no glare (one offerer per pair).
   const shouldOffer = (self: string, other: string) => self < other;
 
   const startOffer = async (peerId: string) => {
@@ -211,18 +200,16 @@ export default function CallRoomPage() {
   };
 
   const handleIce = async (from: string, candidate: RTCIceCandidateInit | null) => {
-    if (!candidate) return; // end-of-candidates marker; nothing to add
+    if (!candidate) return; // end-of-candidates marker
     const state = peersRef.current.get(from);
-    if (!state) return; // ICE for a peer we never opened; drop.
-    if (!state.pc.remoteDescription) {
-      // Race: candidate arrived before remote SDP. Buffer for later.
-      state.pendingIce.push(candidate);
-      return;
-    }
+    if (!state) return;
+    // Race: candidate before remote SDP → buffer.
+    if (!state.pc.remoteDescription) { state.pendingIce.push(candidate); return; }
     try { await state.pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {/* stale */}
   };
 
-  // Full teardown — used by unmount + Leave button.
+  // Full teardown — unmount + Leave. Signaling + media only; class-ws teardown
+  // lives in its own effect and runs independently.
   const teardown = () => {
     for (const [, state] of peersRef.current) {
       try { state.pc.close(); } catch { /* already closed */ }
@@ -247,10 +234,16 @@ export default function CallRoomPage() {
     let cancelled = false;
 
     (async () => {
-      // 1) Local media first — no point wiring signaling if we can't send anything.
+      // 1) Local media first — no signaling without a stream to send.
       let stream: MediaStream;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        // Browser-native audio quality: echo cancellation, noise suppression,
+        // AGC. Chrome/Edge use their built-in RNNoise; Firefox/Safari have
+        // similar. Meaningful win vs raw mic capture, zero deps or WASM setup.
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        });
       } catch (e) {
         if (!cancelled) { setStatus("denied"); setErrorMsg(String((e as Error).message || e)); }
         return;
@@ -259,9 +252,7 @@ export default function CallRoomPage() {
       localStreamRef.current = stream;
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
-      // 1b) Fetch fresh iceServers (STUN + short-lived TURN creds) before any
-      //     RTCPeerConnection is constructed. Falls back to STUN-only if we
-      //     can't reach the endpoint (guest / dev / network issue).
+      // 1b) Fresh iceServers (STUN + short-lived TURN) before any PC is built.
       iceConfigRef.current = await fetchIceConfig();
       if (cancelled) return;
 
@@ -273,10 +264,7 @@ export default function CallRoomPage() {
 
       ws.onopen = () => { if (!cancelled) setStatus("waiting"); };
       ws.onerror = () => { if (!cancelled) { setStatus("error"); setErrorMsg("Signaling connection error."); } };
-      ws.onclose = () => {
-        // Server closes after sending {type:"full"}; we already switched status there.
-        // Any other close is benign if we've already left.
-      };
+      ws.onclose = () => { /* {type:"full"} already flipped status; other closes benign */ };
 
       ws.onmessage = async (ev) => {
         let msg: ServerMsg;
@@ -286,8 +274,7 @@ export default function CallRoomPage() {
         switch (msg.type) {
           case "hello": {
             selfIdRef.current = msg.self;
-            // For EACH peer already in the room, spin up a PC. If our id sorts
-            // before theirs, we offer; else we wait for their offer.
+            // For each peer already in the room, spin up a PC + apply pairwise offerer rule.
             for (const other of msg.peers) {
               if (peersRef.current.has(other)) continue;
               createPc(other);
@@ -298,8 +285,6 @@ export default function CallRoomPage() {
             break;
           }
           case "peer-join": {
-            // A new participant arrived. Spin up a PC and apply the same
-            // pairwise offerer rule.
             if (!peersRef.current.has(msg.peer)) createPc(msg.peer);
             syncPeerIds();
             if (shouldOffer(selfIdRef.current, msg.peer)) await startOffer(msg.peer);
@@ -316,10 +301,7 @@ export default function CallRoomPage() {
             }
             break;
           }
-          case "full": {
-            setStatus("full");
-            break;
-          }
+          case "full": setStatus("full"); break;
           case "offer":  await handleOffer(msg.from, msg.sdp); break;
           case "answer": await handleAnswer(msg.from, msg.sdp); break;
           case "ice":    await handleIce(msg.from, msg.candidate); break;
@@ -346,10 +328,8 @@ export default function CallRoomPage() {
   };
   const leave = () => { teardown(); setStatus("left"); };
 
-  // Screen share: swap the outgoing video track on every peer connection to
-  // the display-media track via RTCRtpSender.replaceTrack (no SDP re-neg,
-  // hot swap in <200ms). On stop or displayTrack.onended, swap back to the
-  // camera track. Self-view also switches to the display for feedback.
+  // Screen share: replaceTrack the outgoing video sender on every PC (no SDP re-neg,
+  // <200ms). Restore on stop / displayTrack.onended. Self-view mirrors the display.
   const toggleShare = async () => {
     if (sharing) {
       // Stop sharing → put camera back.
@@ -397,18 +377,18 @@ export default function CallRoomPage() {
   // Header count includes self.
   const currentCount = peerIds.length + 1;
 
-  // Explicit grid columns tuned per participant count. auto-fit with a min
-  // width would also work; explicit keeps the cell aspect predictable.
-  let gridCols = "grid-cols-1";
-  if (peerIds.length === 2) gridCols = "grid-cols-2";
-  else if (peerIds.length >= 3 && peerIds.length <= 4) gridCols = "grid-cols-2";
-  else if (peerIds.length >= 5 && peerIds.length <= 6) gridCols = "grid-cols-3";
-  else if (peerIds.length >= 7) gridCols = "grid-cols-3";
-
   return (
     <div className="min-h-screen bg-ink-950 text-white flex flex-col">
       <header className="flex items-center justify-between px-4 py-3 border-b border-ink-700">
-        <Link to="/academy" className="text-ink-300 hover:text-white text-sm">← Back</Link>
+        <div className="flex items-center gap-3">
+          <Link to="/academy" className="text-ink-300 hover:text-white text-sm">← Back</Link>
+          <Link
+            to={boardMode ? `/call/${room}` : `/call/${room}?board=1`}
+            className="text-brand-400 hover:text-brand-300 text-xs"
+          >
+            {boardMode ? "Hide board" : "♟ Chess board"}
+          </Link>
+        </div>
         <div className="text-xs text-ink-300">
           <span className="font-mono">{room}</span>
           <span className="mx-2 text-ink-500">·</span>
@@ -418,45 +398,10 @@ export default function CallRoomPage() {
         </div>
       </header>
 
-      <main className="relative flex-1 flex items-center justify-center p-4">
-        {peerIds.length === 0 ? (
-          <div className="w-full max-w-4xl aspect-video rounded-xl2 border border-ink-700 bg-black overflow-hidden shadow-lg">
-            <div className="w-full h-full flex flex-col items-center justify-center text-center px-6">
-              <div className="h-12 w-12 rounded-full border-2 border-brand-600 border-t-transparent animate-spin mb-4" />
-              <p className="text-lg text-white">Waiting for someone to join…</p>
-              <p className="mt-2 text-sm text-ink-300">
-                Room <span className="font-mono">{room}</span> (0/8)
-              </p>
-            </div>
-          </div>
-        ) : (
-          <div className={`grid ${gridCols} gap-3 w-full max-w-6xl`}>
-            {peerIds.map((id, idx) => (
-              <RemoteTile
-                key={id}
-                peerId={id}
-                index={idx}
-                getStream={() => peersRef.current.get(id)?.remoteStream ?? null}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Self-view: always visible, bottom-right */}
-        <div className="absolute bottom-6 right-6 w-40 h-28 rounded-lg overflow-hidden border border-white/20 shadow-lg bg-black">
-          <video
-            ref={localVideoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-full object-cover"
-          />
-          {!camOn && (
-            <div className="absolute inset-0 flex items-center justify-center bg-ink-800/90 text-xs text-ink-300">
-              Camera off
-            </div>
-          )}
-        </div>
+      <main className="relative flex-1 flex items-stretch justify-center p-4">
+        {boardMode
+          ? <BoardMainArea room={room} peerIds={peerIds} peersRef={peersRef} localVideoRef={localVideoRef} camOn={camOn} />
+          : <ClassicMainArea room={room} peerIds={peerIds} peersRef={peersRef} localVideoRef={localVideoRef} camOn={camOn} />}
       </main>
 
       <footer className="flex items-center justify-center gap-3 py-4 border-t border-ink-700 bg-ink-900">
@@ -489,10 +434,225 @@ export default function CallRoomPage() {
   );
 }
 
-// One remote peer's video cell. Reads its MediaStream via getStream() on each
-// render, which lets the parent keep the actual stream on peersRef (a ref) and
-// still get the srcObject attached every time React re-renders — including the
-// re-render triggered by ontrack via syncPeerIds().
+// Original layout: grid of remote video tiles + floating self-view PIP.
+// Extracted verbatim from the pre-board version so behavior is identical.
+type MainAreaProps = {
+  room: string;
+  peerIds: string[];
+  peersRef: React.MutableRefObject<Map<string, PeerState>>;
+  localVideoRef: React.RefObject<HTMLVideoElement>;
+  camOn: boolean;
+};
+
+function ClassicMainArea({ room, peerIds, peersRef, localVideoRef, camOn }: MainAreaProps) {
+  // Explicit cols per count — keeps cell aspect predictable vs auto-fit.
+  let gridCols = "grid-cols-1";
+  if (peerIds.length === 2) gridCols = "grid-cols-2";
+  else if (peerIds.length >= 3 && peerIds.length <= 4) gridCols = "grid-cols-2";
+  else if (peerIds.length >= 5 && peerIds.length <= 6) gridCols = "grid-cols-3";
+  else if (peerIds.length >= 7) gridCols = "grid-cols-3";
+
+  return (
+    <div className="relative flex-1 flex items-center justify-center">
+      {peerIds.length === 0 ? (
+        <div className="w-full max-w-4xl aspect-video rounded-xl2 border border-ink-700 bg-black overflow-hidden shadow-lg">
+          <div className="w-full h-full flex flex-col items-center justify-center text-center px-6">
+            <div className="h-12 w-12 rounded-full border-2 border-brand-600 border-t-transparent animate-spin mb-4" />
+            <p className="text-lg text-white">Waiting for someone to join…</p>
+            <p className="mt-2 text-sm text-ink-300">
+              Room <span className="font-mono">{room}</span> (0/8)
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className={`grid ${gridCols} gap-3 w-full max-w-6xl`}>
+          {peerIds.map((id, idx) => (
+            <RemoteTile
+              key={id}
+              peerId={id}
+              index={idx}
+              getStream={() => peersRef.current.get(id)?.remoteStream ?? null}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Self-view: always visible, bottom-right */}
+      <div className="absolute bottom-6 right-6 w-40 h-28 rounded-lg overflow-hidden border border-white/20 shadow-lg bg-black">
+        <video
+          ref={localVideoRef}
+          autoPlay
+          playsInline
+          muted
+          className="w-full h-full object-cover"
+        />
+        {!camOn && (
+          <div className="absolute inset-0 flex items-center justify-center bg-ink-800/90 text-xs text-ink-300">
+            Camera off
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Chess-native layout: board left, videos as a vertical column right (or a
+// horizontal strip below the board on narrow widths). Reset lives under board.
+function BoardMainArea({ room, peerIds, peersRef, localVideoRef, camOn }: MainAreaProps) {
+  const { fen, lastMove, dests, sendMove, sendReset, connected } = useSharedBoard(room);
+
+  const lastMoveTuple: [Key, Key] | undefined = lastMove ? [lastMove.from as Key, lastMove.to as Key] : undefined;
+
+  // No optimistic apply — server echoes back and applyFen re-derives. Promotion
+  // is omitted; server defaults to "q" (fine for P0; picker is future work).
+  const onBoardMove = (from: Key, to: Key) => sendMove(String(from), String(to));
+
+  return (
+    <div className="flex-1 flex flex-col md:flex-row gap-4 items-stretch min-h-0">
+      {/* Board column */}
+      <div className="flex-1 flex flex-col items-center justify-center min-h-0">
+        <div className="w-full max-w-[600px] aspect-square">
+          <Board
+            fen={fen}
+            movableColor="both"
+            dests={dests}
+            lastMove={lastMoveTuple}
+            onMove={onBoardMove}
+            coordinates
+          />
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            onClick={sendReset}
+            className="rounded-xl2 px-3 py-1.5 text-xs bg-ink-800 hover:bg-ink-700 text-white border border-ink-700"
+            title="Only the coach can reset — server-enforced"
+          >
+            ↺ Reset board
+          </button>
+          <span className={`text-[10px] ${connected ? "text-emerald-400" : "text-ink-500"}`}>
+            {connected ? "board synced" : "board offline"}
+          </span>
+        </div>
+      </div>
+
+      {/* Video column (md+) / horizontal strip (below md) */}
+      <div className="flex flex-row md:flex-col gap-2 md:w-[190px] shrink-0 overflow-x-auto md:overflow-y-auto md:overflow-x-hidden md:max-h-[calc(100vh-180px)]">
+        {/* Self-view: mirrored small tile, first in the column */}
+        <div className="relative w-[160px] md:w-full aspect-video shrink-0 rounded-lg overflow-hidden border border-white/20 bg-black">
+          <video
+            ref={localVideoRef}
+            autoPlay
+            playsInline
+            muted
+            className="w-full h-full object-cover"
+            style={{ transform: "scaleX(-1)" }}
+          />
+          {!camOn && (
+            <div className="absolute inset-0 flex items-center justify-center bg-ink-800/90 text-xs text-ink-300">
+              Camera off
+            </div>
+          )}
+          <div className="absolute bottom-1 left-1 px-2 py-0.5 rounded bg-black/60 text-[10px] text-white font-mono">You</div>
+        </div>
+        {peerIds.length === 0 && (
+          <div className="w-[160px] md:w-full aspect-video shrink-0 rounded-lg border border-ink-700 bg-ink-900 flex items-center justify-center text-[11px] text-ink-400 px-2 text-center">
+            Waiting for others…
+          </div>
+        )}
+        {peerIds.map((id, idx) => (
+          <div key={id} className="w-[160px] md:w-full shrink-0">
+            <RemoteTile
+              peerId={id}
+              index={idx}
+              getStream={() => peersRef.current.get(id)?.remoteStream ?? null}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---- Shared board hook ----------------------------------------------------
+
+// One WebSocket to /v2api/class-ws/:room, one chess.js engine, one state. Its own
+// effect so ?board=1 toggles don't ripple into the signaling mesh.
+function useSharedBoard(room: string) {
+  const [fen, setFen] = useState<string>(START_FEN);
+  const [lastMove, setLastMove] = useState<BoardMove | null>(null);
+  const [dests, setDests] = useState(() => destsFromChess(new Chess()));
+  const [connected, setConnected] = useState(false);
+
+  const wsRef = useRef<WebSocket | null>(null);
+  const gameRef = useRef<Chess>(new Chess());
+
+  // Apply an authoritative fen from the server. Server is truth; if chess.js
+  // rejects it we reset so dests stops offering moves for a bogus position.
+  const applyFen = (nextFen: string, nextLast: BoardMove | null) => {
+    try { gameRef.current = new Chess(nextFen); }
+    catch { gameRef.current = new Chess(); }
+    setLastMove(nextLast);
+    setFen(gameRef.current.fen());
+    setDests(destsFromChess(gameRef.current));
+  };
+
+  useEffect(() => {
+    if (!room) return;
+    let cancelled = false;
+
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    const url = `${proto}//${location.host}/v2api/class-ws/${encodeURIComponent(room)}`;
+    const ws = new WebSocket(url);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      if (cancelled) return;
+      setConnected(true);
+      // hello with no coachToken → server mints one, first joiner becomes coach.
+      // Role only gates reset/lock/takeback server-side; moves are free-for-all.
+      try { ws.send(JSON.stringify({ type: "hello" })); } catch { /* */ }
+    };
+    ws.onerror = () => { if (!cancelled) setConnected(false); };
+    ws.onclose = () => { if (!cancelled) setConnected(false); };
+    ws.onmessage = (ev) => {
+      if (cancelled) return;
+      let msg: BoardServerMsg;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      if (msg.type === "state") applyFen((msg as any).fen, (msg as any).lastMove ?? null);
+      else if (msg.type === "move") applyFen((msg as any).fen, (msg as any).move);
+      else if (msg.type === "reset") applyFen((msg as any).fen, null);
+      // role / pong / participants / lock / annot: not needed for P0.
+    };
+
+    return () => {
+      cancelled = true;
+      setConnected(false);
+      if (wsRef.current) {
+        try { wsRef.current.close(); } catch { /* */ }
+        wsRef.current = null;
+      }
+    };
+  }, [room]);
+
+  const sendMove = (from: string, to: string, promotion?: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try { ws.send(JSON.stringify({ type: "move", move: { from, to, promotion } })); } catch { /* */ }
+  };
+
+  // Server silently drops non-coach resets. UI feedback would require tracking
+  // {type:"role"} — deferred; P0 assumes the coach is the one clicking.
+  const sendReset = () => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try { ws.send(JSON.stringify({ type: "reset" })); } catch { /* */ }
+  };
+
+  return { fen, lastMove, dests, connected, sendMove, sendReset };
+}
+
+// Remote video cell. getStream() runs each render so ontrack-triggered re-renders
+// (via syncPeerIds) reattach srcObject even though the stream lives in peersRef.
 function RemoteTile({
   peerId,
   index,
@@ -529,7 +689,7 @@ function RemoteTile({
   );
 }
 
-// Shared wrapper for pre-call / error states — one place for the card styling.
+// Shared wrapper for pre-call / error states.
 function Splash({ title, body, detail }: { title: string; body?: string; detail?: string }) {
   return (
     <div className="min-h-screen bg-ink-950 flex items-center justify-center p-6">
@@ -537,9 +697,7 @@ function Splash({ title, body, detail }: { title: string; body?: string; detail?
         <h2 className="text-xl font-semibold text-white">{title}</h2>
         {body && <p className="mt-2 text-ink-300">{body}</p>}
         {detail && <p className="mt-3 text-xs text-ink-400">{detail}</p>}
-        <Link to="/academy" className="mt-6 inline-block rounded-xl2 bg-brand-600 px-4 py-2 text-white">
-          Back to Academy
-        </Link>
+        <Link to="/academy" className="mt-6 inline-block rounded-xl2 bg-brand-600 px-4 py-2 text-white">Back to Academy</Link>
       </div>
     </div>
   );
