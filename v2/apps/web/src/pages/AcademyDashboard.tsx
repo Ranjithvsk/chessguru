@@ -1505,6 +1505,15 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
       body: JSON.stringify({ starred }),
     }), "star updates");
   }
+  async function bulkSetReviewed(reviewed: boolean) {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    await runPerSnap(ids, (s, id) => fetch(`${BASE}/api/class/${encodeURIComponent(s.classId)}/snap/${encodeURIComponent(id)}`, {
+      method: "PATCH", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reviewed }),
+    }), "review updates");
+  }
   async function runPerSnap(ids: string[], call: (s: SnapItem, id: string) => Promise<Response>, label: string) {
     const byId: Record<string, SnapItem> = {};
     for (const s of snaps) byId[s._id] = s;
@@ -1671,6 +1680,16 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
                 title="Un-star selected snaps"
                 className="rounded-full border border-ink-700 bg-ink-900 px-2.5 py-0.5 text-[11px] font-semibold text-ink-300 hover:bg-ink-800 disabled:opacity-40">
                 ☆ Un-star
+              </button>
+              <button onClick={() => bulkSetReviewed(true)} disabled={selectedIds.size === 0}
+                title="Mark selected snaps as reviewed"
+                className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-100 hover:bg-emerald-500/20 disabled:opacity-40">
+                ✓ Reviewed
+              </button>
+              <button onClick={() => bulkSetReviewed(false)} disabled={selectedIds.size === 0}
+                title="Un-review selected snaps"
+                className="rounded-full border border-ink-700 bg-ink-900 px-2.5 py-0.5 text-[11px] font-semibold text-ink-300 hover:bg-ink-800 disabled:opacity-40">
+                ☐ Un-review
               </button>
               <button onClick={bulkDelete} disabled={selectedIds.size === 0}
                 title="Delete selected snaps (author-only per snap; failures reported)"
