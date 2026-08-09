@@ -1539,7 +1539,7 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   // position with annotations. Excel-safe: commas quoted, quotes escaped.
   function exportCsv(rows: SnapItem[]) {
     const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
-    const header = ["At", "Class", "Author", "Starred", "Shapes", "AudioSec", "AudioBytes", "AudioUrl", "Transcript", "Note", "FEN", "OpenLink"];
+    const header = ["At", "Class", "Author", "Starred", "ReviewedAt", "Shapes", "AudioSec", "AudioBytes", "AudioUrl", "Transcript", "Note", "FEN", "OpenLink"];
     const lines = [header.map(esc).join(",")];
     for (const s of rows) {
       const shapes = Array.isArray(s.shapes) ? s.shapes : [];
@@ -1555,6 +1555,7 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
         s.classTitle || s.classId,
         s.byName || s.byUserId || "",
         s.starred ? "yes" : "",
+        s.reviewedAt ? new Date(s.reviewedAt).toISOString() : "",
         shapes.length > 0 ? JSON.stringify(shapes) : "",
         estSec != null ? String(estSec) : "",
         typeof s.audioBytes === "number" ? String(s.audioBytes) : "",
