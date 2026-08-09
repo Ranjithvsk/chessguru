@@ -1377,7 +1377,7 @@ function StarredDigestPreviewLink() {
   const [open, setOpen] = useState(false);
   type Row = { _id: string; classId: string; at: string; note: string; hasAudio: boolean; shapeCount: number; link: string };
   type HistoryRow = { sentAt: string; snapCount: number; windowDays: number };
-  type PreviewData = { snapCount: number; snaps: Row[]; cadence: "weekly" | "biweekly" | "monthly"; windowDays: number; optedOut: boolean; sentCount: number; lastSentAt: string | null; reviewedSinceLast: number; pendingBacklog: number; stuck: boolean; history: HistoryRow[] };
+  type PreviewData = { snapCount: number; snaps: Row[]; cadence: "weekly" | "biweekly" | "monthly"; windowDays: number; optedOut: boolean; sentCount: number; lastSentAt: string | null; reviewedSinceLast: number; pendingBacklog: number; stuck: boolean; staleCount: number; history: HistoryRow[] };
   const [data, setData] = useState<PreviewData | null>(null);
   // Ambient stats fetched on mount so the link line shows current cadence +
   // last-sent + backlog before the coach opens the modal. Same endpoint.
@@ -1465,6 +1465,11 @@ function StarredDigestPreviewLink() {
                 {data.stuck && (
                   <div className="mb-2 rounded border-l-4 border-amber-500 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
                     💤 It's been a while — <b>{data.pendingBacklog}</b> starred position{data.pendingBacklog === 1 ? "" : "s"} still waiting for review. Sunday's email will include a friendly nudge line.
+                  </div>
+                )}
+                {data.staleCount > 0 && (
+                  <div className="mb-2 text-[11px] text-orange-300">
+                    ⏰ <b>{data.staleCount}</b> starred position{data.staleCount === 1 ? "" : "s"} over 30 days old — the email calls these out too.
                   </div>
                 )}
                 {(() => {

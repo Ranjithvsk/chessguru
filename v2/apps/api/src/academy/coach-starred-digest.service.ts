@@ -100,7 +100,7 @@ export class CoachStarredDigestService implements OnModuleInit {
     const reviewSince = user?.coachStarredDigestSentAt
       ? new Date(user.coachStarredDigestSentAt)
       : new Date(Date.now() - 30 * 86_400_000);
-    const [snaps, reviewedCount, pendingBacklog, recentReviewCount]: [any[], number, number, number] = await Promise.all([
+    const [snaps, reviewedCount, pendingBacklog, recentReviewCount, staleCount]: [any[], number, number, number, number] = await Promise.all([
       this.conn.db!.collection("classSnaps").find({
         byUserId: String(userId),
         starred: true,
@@ -116,6 +116,12 @@ export class CoachStarredDigestService implements OnModuleInit {
       this.conn.db!.collection("classSnaps").countDocuments({
         byUserId: String(userId), reviewedAt: { $gte: new Date(Date.now() - 21 * 86_400_000) },
       }),
+      this.conn.db!.collection("classSnaps").countDocuments({
+        byUserId: String(userId),
+        starred: true,
+        reviewedAt: { $in: [null, undefined] as any },
+        at: { $lt: new Date(Date.now() - 30 * 86_400_000) },
+      }),
     ]);
     const stuck = pendingBacklog >= 3 && recentReviewCount === 0;
     return {
@@ -128,6 +134,7 @@ export class CoachStarredDigestService implements OnModuleInit {
       reviewedSinceLast: reviewedCount,
       pendingBacklog,
       stuck,
+      staleCount,
       history: Array.isArray(user?.coachStarredDigestHistory)
         ? user.coachStarredDigestHistory.slice(-12).reverse().map((h: any) => ({
             sentAt: h.sentAt, snapCount: h.snapCount ?? 0, windowDays: h.windowDays ?? 7,
