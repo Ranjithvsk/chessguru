@@ -69,4 +69,8 @@ export class AcademyController {
   // coach sees only their own scheduled classes' recordings.
   @Get("recordings")
   listRecordings(@Req() req: any) { return this.svc.listRecordings(req.session); }
+
+  // Snaps across the caller's scope. Same authz as recordings.
+  @Get("snaps")
+  listSnaps(@Req() req: any) { return this.svc.listSnaps(req.session); }
 }

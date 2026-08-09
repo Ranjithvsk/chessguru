@@ -529,4 +529,29 @@ export class AcademyService {
     }
     return out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, limit);
   }
+
+  /** Owner OR coach: list classSnaps rows across the academy's classes.
+   *  Same authz shape as listRecordings — coach sees theirs only. */
+  async listSnaps(session: any, limit = 100) {
+    const g = this.ensureCoachOrOwner(session);
+    const classFilter: any = { academyId: g.academyId };
+    if (g.role === "coach") classFilter.createdByUserId = g.userId;
+    const classes: any[] = await this.conn.db!.collection("classSchedules")
+      .find(classFilter, { projection: { _id: 1, title: 1 } }).limit(200).toArray();
+    if (classes.length === 0) return [];
+    const classIds = classes.map((c) => String(c._id));
+    const titleById: Record<string, string> = {};
+    for (const c of classes) titleById[String(c._id)] = c.title || String(c._id);
+
+    const rows = await this.conn.db!.collection("classSnaps")
+      .find({ classId: { $in: classIds } })
+      .sort({ at: -1 }).limit(limit).toArray();
+    return rows.map((r: any) => ({
+      _id: r._id,
+      classId: r.classId, classTitle: titleById[r.classId] || r.classId,
+      fen: r.fen, note: r.note || "",
+      byUserId: r.byUserId, byName: r.byName || r.byUserId,
+      at: r.at,
+    }));
+  }
 }

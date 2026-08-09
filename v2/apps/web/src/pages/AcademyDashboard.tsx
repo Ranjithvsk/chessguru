@@ -107,6 +107,11 @@ export default function AcademyDashboardPage() {
     queryFn: () => get<Array<{ classId: string; title: string; startAt: string; filename: string; bytes: number; createdAt: string }>>("/api/academy/recordings"),
     enabled: canManage, refetchInterval: 60_000,
   });
+  const { data: snaps } = useQuery({
+    queryKey: ["academy-snaps"],
+    queryFn: () => get<Array<{ _id: string; classId: string; classTitle: string; fen: string; note: string; byName: string; at: string }>>("/api/academy/snaps"),
+    enabled: canManage, refetchInterval: 60_000,
+  });
   const { data: feesConfig } = useQuery({
     queryKey: ["academy-fees-config"], queryFn: () => get<FeesConfig>("/api/academy/fees/config"),
     enabled: canManage,
@@ -608,6 +613,32 @@ export default function AcademyDashboardPage() {
                   className="rounded-lg border border-ink-700 hover:bg-ink-800 text-ink-300 px-3 py-1 text-xs">
                   ⬇ Download
                 </a>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ── Recent snaps (owner + coach) — coach-flagged mid-class positions ── */}
+      {canManage && snaps && snaps.length > 0 && (
+        <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
+          <h2 className="mb-3 font-display text-lg text-white">📸 Recent snaps <span className="text-xs text-ink-500">({snaps.length})</span></h2>
+          <div className="grid gap-2 md:grid-cols-2">
+            {snaps.slice(0, 20).map((s) => (
+              <div key={s._id} className="flex flex-wrap items-baseline gap-2 rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2 text-sm">
+                <div className="flex-1 min-w-0">
+                  <div className="text-white truncate">
+                    <b>{s.byName}</b> in {s.classTitle}
+                  </div>
+                  {s.note && <div className="text-[12px] text-ink-300 truncate">"{s.note}"</div>}
+                  <div className="text-[11px] text-ink-500">
+                    {new Date(s.at).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                  </div>
+                </div>
+                <Link to={`/board-editor?fen=${encodeURIComponent(s.fen)}`}
+                  className="rounded-lg bg-brand-600 hover:bg-brand-500 text-white px-3 py-1 text-xs font-semibold whitespace-nowrap">
+                  🔬 Open
+                </Link>
               </div>
             ))}
           </div>
