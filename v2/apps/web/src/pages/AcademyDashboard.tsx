@@ -1032,13 +1032,17 @@ function SnapVolumeChart({ snaps }: { snaps?: SnapItem[] }) {
           {totalRecent} total · peak {max}
         </div>
       </div>
-      <div className="flex items-end gap-1 h-8 flex-1 min-w-[160px]" title="Snaps per week">
+      <div className="flex items-end gap-1 h-8 flex-1 min-w-[160px]" title="Snaps per week — click to filter the grid to that week">
         {buckets.map((b, i) => {
           const h = b.count === 0 ? 2 : Math.round(4 + (b.count / max) * 28);
-          const label = `${b.start.toLocaleDateString(undefined, { day: "2-digit", month: "short" })} · ${b.count} snap${b.count === 1 ? "" : "s"}`;
+          const label = `${b.start.toLocaleDateString(undefined, { day: "2-digit", month: "short" })} · ${b.count} snap${b.count === 1 ? "" : "s"} · click to filter`;
+          const onClick = () => {
+            if (b.count === 0) return;
+            window.dispatchEvent(new CustomEvent(SNAP_WEEK_EVENT, { detail: { iso: b.start.toISOString() } }));
+          };
           return (
-            <div key={i}
-              className={`flex-1 rounded-sm ${b.count === 0 ? "bg-ink-800" : "bg-brand-500/70 hover:bg-brand-400"}`}
+            <button key={i} onClick={onClick} disabled={b.count === 0}
+              className={`flex-1 rounded-sm ${b.count === 0 ? "bg-ink-800 cursor-default" : "bg-brand-500/70 hover:bg-brand-400 cursor-pointer"}`}
               style={{ height: `${h}px` }}
               title={label} />
           );
@@ -1677,6 +1681,10 @@ function describeFen(fen: string): string {
   const phase = total <= 6 ? "Endgame" : total >= 24 ? "Opening/Middlegame" : "Middlegame";
   return `${phase} · ${fmtSide(w)} vs ${fmtSide(b)}`;
 }
+// Small module-level bus so SnapVolumeChart (rendered ABOVE RecentSnapsSection
+// in the tree) can push a week-filter down without prop-drilling through the
+// whole layout. Chart dispatches a CustomEvent, section listens on window.
+const SNAP_WEEK_EVENT = "cg-snap-week-filter";
 function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   // Filter state is URL-synced so a coach can share the exact view with a
   // colleague ("look at ?q=diagonal&starred=1"). Hydrate from URL on first
@@ -1686,6 +1694,15 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   const [starredOnly, setStarredOnly] = useState<boolean>(sp.get("starred") === "1");
   const [textFilter, setTextFilter] = useState<string>(sp.get("q") || "");
   const [hideReviewed, setHideReviewed] = useState<boolean>(sp.get("hidedone") === "1");
+  const [weekFilter, setWeekFilter] = useState<string>(sp.get("week") || "");   // ISO date of week-start (Sun)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const iso = (e as CustomEvent<{ iso: string }>).detail?.iso;
+      if (iso) setWeekFilter(iso);
+    };
+    window.addEventListener(SNAP_WEEK_EVENT, handler as EventListener);
+    return () => window.removeEventListener(SNAP_WEEK_EVENT, handler as EventListener);
+  }, []);
   type SortKey = "recent" | "oldest" | "arrows" | "stale";
   const [sortKey, setSortKey] = useState<SortKey>(() => {
     const v = sp.get("sort");
@@ -1698,11 +1715,12 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
     if (starredOnly) next.set("starred", "1"); else next.delete("starred");
     if (textFilter) next.set("q", textFilter); else next.delete("q");
     if (hideReviewed) next.set("hidedone", "1"); else next.delete("hidedone");
+    if (weekFilter) next.set("week", weekFilter); else next.delete("week");
     if (sortKey !== "recent") next.set("sort", sortKey); else next.delete("sort");
     setSp(next, { replace: true });
     // Only depend on the filters -- sp change is already how we write, so skip
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [classFilter, starredOnly, textFilter, hideReviewed, sortKey]);
+  }, [classFilter, starredOnly, textFilter, hideReviewed, sortKey, weekFilter]);
   const [openIdx, setOpenIdx] = useState<number | null>(null);
   // Reset the open snap when filters change so we don't end up pointing at a
   // row that just got filtered out.
@@ -1851,9 +1869,18 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   // case-insensitive so "diagonal" surfaces every position where the coach
   // said the word during class or wrote it in the note.
   const q = textFilter.trim().toLowerCase();
+  // Week filter (from volume-chart bar click) narrows snaps to a specific
+  // 7-day window. weekFilter holds an ISO date string of Sunday-midnight.
+  const weekStartMs = weekFilter ? new Date(weekFilter).getTime() : 0;
+  const weekEndMs = weekStartMs ? weekStartMs + 7 * 86_400_000 : 0;
   const filtered = (classFilter ? snaps.filter((s) => s.classId === classFilter) : snaps)
     .filter((s) => (starredOnly ? !!s.starred : true))
     .filter((s) => (hideReviewed ? !s.reviewedAt : true))
+    .filter((s) => {
+      if (!weekStartMs) return true;
+      const at = new Date(s.at).getTime();
+      return at >= weekStartMs && at < weekEndMs;
+    })
     .filter((s) => !q || (String(s.note || "").toLowerCase().includes(q)
       || String(s.transcript || "").toLowerCase().includes(q)
       || String(s.classTitle || "").toLowerCase().includes(q)))
@@ -1930,8 +1957,14 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
             <option value="arrows">Sort: most arrows</option>
             <option value="stale">Sort: most stale</option>
           </select>
-          {(classFilter || starredOnly || textFilter || hideReviewed || sortKey !== "recent") && (
-            <button onClick={() => { setClassFilter(""); setStarredOnly(false); setTextFilter(""); setHideReviewed(false); setSortKey("recent"); }}
+          {weekFilter && (
+            <span className="rounded-full border border-brand-500/40 bg-brand-500/10 px-2 py-0.5 text-[11px] font-semibold text-brand-100 inline-flex items-center gap-1">
+              📅 Week of {new Date(weekFilter).toLocaleDateString(undefined, { day: "2-digit", month: "short" })}
+              <button onClick={() => setWeekFilter("")} className="ml-1 text-brand-300 hover:text-white" title="Clear week filter">✕</button>
+            </span>
+          )}
+          {(classFilter || starredOnly || textFilter || hideReviewed || sortKey !== "recent" || weekFilter) && (
+            <button onClick={() => { setClassFilter(""); setStarredOnly(false); setTextFilter(""); setHideReviewed(false); setSortKey("recent"); setWeekFilter(""); }}
               title="Reset every filter + sort to default"
               className="rounded-full border border-ink-700 bg-ink-900 px-2 py-0.5 text-[10px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-ink-100">
               🔄 Clear all
