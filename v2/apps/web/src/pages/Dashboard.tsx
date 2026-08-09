@@ -16,7 +16,7 @@ type Dash = {
   themesBf?: ThemeRow[];
   days?: { day: string; solves: number; wins: number; rating: number }[];
   bands?: { lo: number; hi: number; attempted: number; solved: number; accuracy: number }[];
-  themeSpeeds?: { theme: string; medianMs: number; n: number }[];
+  themeSpeeds?: { theme: string; medianMs: number; n: number; trend?: "faster" | "slower" | "steady" | "new" }[];
   personalBests?: {
     bestRating: number | null; bestRatingDate: string | null;
     bestDay: number | null; bestDayDate: string | null;
@@ -213,7 +213,20 @@ function SpeedByTheme({ speeds, onTrain }: { speeds: NonNullable<Dash["themeSpee
   const fmt = (ms: number) => ms < 10_000 ? `${(ms / 1000).toFixed(1)}s`
     : ms < 60_000 ? `${Math.round(ms / 1000)}s`
     : `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
-  const Row = ({ s }: { s: { theme: string; medianMs: number; n: number } }) => {
+  // Trend chip: ↓ green for faster, ↑ rose for slower, ✦ brand for a brand-new
+  // theme (no prior-window data yet), muted em-dash for steady. Nothing rendered
+  // when the backend didn't compute a trend (old dashboard payloads).
+  const trendChip = (trend?: "faster" | "slower" | "steady" | "new") => {
+    if (!trend) return null;
+    const meta = trend === "faster" ? { icon: "↓", cls: "bg-emerald-500/15 text-emerald-200 border-emerald-500/30", title: "20%+ faster in the last 30 days" }
+      : trend === "slower" ? { icon: "↑", cls: "bg-rose-500/15 text-rose-200 border-rose-500/30",              title: "20%+ slower in the last 30 days" }
+      : trend === "new"    ? { icon: "✦", cls: "bg-brand-500/15 text-brand-100 border-brand-500/30",           title: "New — no data from before the last 30 days" }
+      :                      { icon: "–", cls: "bg-ink-700/40 text-ink-400 border-ink-600",                     title: "Steady within ±20% vs the previous 30 days" };
+    return (
+      <span title={meta.title} className={`rounded border px-1 text-[11px] font-semibold ${meta.cls}`}>{meta.icon}</span>
+    );
+  };
+  const Row = ({ s }: { s: { theme: string; medianMs: number; n: number; trend?: "faster" | "slower" | "steady" | "new" } }) => {
     const t = tint(s.medianMs);
     return (
       <button onClick={() => onTrain(s.theme)} title={`Train ${prettify(s.theme)}`}
@@ -221,6 +234,7 @@ function SpeedByTheme({ speeds, onTrain }: { speeds: NonNullable<Dash["themeSpee
         <span className="truncate text-sm text-ink-200 group-hover:text-white">{prettify(s.theme)}</span>
         <span className="flex shrink-0 items-center gap-2">
           <span className="text-[10px] text-ink-500 tabular-nums">n={s.n}</span>
+          {trendChip(s.trend)}
           <span className={`rounded border px-1.5 py-0.5 text-[11px] font-semibold ${t.cls}`}>
             <span className="mr-1">{t.emoji}</span><span className="tabular-nums">{fmt(s.medianMs)}</span>
           </span>

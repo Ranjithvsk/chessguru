@@ -270,26 +270,49 @@ export class PuzzlesService {
     // is honest). Themes are pulled from each round's stored th[] array. Filter
     // to themes with >= 3 timed solves for stability; less than that reads as
     // noise. Sorted fastest first so the trainer's leaderboard mental model works.
-    const speedByTheme = new Map<string, number[]>();
+    //
+    // Trend classification: compare median of ms in the last 30 days vs median
+    // of the previous 30 days. "faster"/"slower" require both windows to have
+    // >= 3 samples so a single fast solve last week doesn't fake a trend.
+    const now30 = Date.now() - 30 * 86_400_000;
+    const now60 = Date.now() - 60 * 86_400_000;
+    const speedByTheme = new Map<string, { recent: number[]; prior: number[]; all: number[] }>();
     for (const r of puzzleRounds as any[]) {
       if (!r.w) continue;
       if (typeof r.ms !== "number" || r.ms <= 0) continue;
       if (!Array.isArray(r.th)) continue;
+      const d = r.d ? new Date(r.d).getTime() : 0;
       for (const t of r.th) {
         if (typeof t !== "string" || PuzzlesService.UNRATED.has(t)) continue;
-        const arr = speedByTheme.get(t) ?? [];
-        arr.push(r.ms);
-        speedByTheme.set(t, arr);
+        const b = speedByTheme.get(t) ?? { recent: [], prior: [], all: [] };
+        b.all.push(r.ms);
+        if (d >= now30)      b.recent.push(r.ms);
+        else if (d >= now60) b.prior.push(r.ms);
+        speedByTheme.set(t, b);
       }
     }
+    const median = (arr: number[]): number => {
+      const s = arr.slice().sort((a, b) => a - b);
+      const mid = Math.floor(s.length / 2);
+      return s.length % 2 === 1 ? s[mid]! : Math.round((s[mid - 1]! + s[mid]!) / 2);
+    };
     const themeSpeeds = [...speedByTheme.entries()]
-      .filter(([, arr]) => arr.length >= 3)
-      .map(([theme, arr]) => {
-        const sorted = arr.slice().sort((a, b) => a - b);
-        const mid = Math.floor(sorted.length / 2);
-        // Odd length → middle; even → mean of the two middles. Standard median.
-        const medianMs = sorted.length % 2 === 1 ? sorted[mid]! : Math.round((sorted[mid - 1]! + sorted[mid]!) / 2);
-        return { theme, medianMs, n: sorted.length };
+      .filter(([, b]) => b.all.length >= 3)
+      .map(([theme, b]) => {
+        const medianMs = median(b.all);
+        let trend: "faster" | "slower" | "steady" | "new" = "steady";
+        // "new" tag: no priors — the theme showed up only in the last 30 days.
+        if (b.prior.length === 0 && b.recent.length >= 3) trend = "new";
+        // Need enough in BOTH windows for a real comparison. 20% delta is the
+        // "meaningful" bar — chess solves are noisy day-to-day.
+        else if (b.recent.length >= 3 && b.prior.length >= 3) {
+          const mRecent = median(b.recent);
+          const mPrior  = median(b.prior);
+          const delta = (mRecent - mPrior) / mPrior;
+          if (delta <= -0.20) trend = "faster";
+          else if (delta >= 0.20) trend = "slower";
+        }
+        return { theme, medianMs, n: b.all.length, trend };
       })
       .sort((a, b) => a.medianMs - b.medianMs);
     return {
