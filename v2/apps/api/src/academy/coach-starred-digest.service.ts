@@ -1,0 +1,123 @@
+// Weekly rollup email for coaches -- Sunday morning digest of the snaps
+// they starred in the past 7 days. Chess coaches often plan the next
+// week's lessons Sunday evening; this email lands the shortlist directly
+// in their inbox with click-through links back to /board-editor (fen +
+// arrows preserved).
+//
+// Design mirrors WeeklyDigestService:
+//   * Single-process only (setInterval). One send per coach per week
+//     guarded by coachStarredDigestSentAt on the user doc.
+//   * Send window: Sunday 08..10 local. 10 min tick catches restart
+//     tolerance without spamming.
+//   * Skips coaches with zero recent starred snaps.
+//   * Fails-open per coach so a mail-transport hiccup doesn't stop the batch.
+
+import { Injectable, OnModuleInit } from "@nestjs/common";
+import { InjectConnection } from "@nestjs/mongoose";
+import { Connection } from "mongoose";
+import { sendMail } from "../lib/mail";
+
+const TICK_MS = 10 * 60_000;
+const WINDOW_HOUR_START = 8;
+const WINDOW_HOUR_END = 10;
+const SEND_INTERVAL_MS = 6 * 86_400_000;
+const PUBLIC_ORIGIN = process.env.PUBLIC_ORIGIN ?? "https://harinitharanjith.com";
+
+function esc(s: string): string {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]!));
+}
+function encodeShapes(shapes: any[]): string {
+  return Buffer.from(JSON.stringify(shapes)).toString("base64")
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function snapLink(s: any): string {
+  const fenParam = encodeURIComponent(String(s.fen));
+  const shapes = Array.isArray(s.shapes) ? s.shapes : [];
+  return shapes.length > 0
+    ? `${PUBLIC_ORIGIN}/board-editor?fen=${fenParam}&shapes=${encodeShapes(shapes)}`
+    : `${PUBLIC_ORIGIN}/board-editor?fen=${fenParam}`;
+}
+
+@Injectable()
+export class CoachStarredDigestService implements OnModuleInit {
+  constructor(@InjectConnection() private readonly conn: Connection) {}
+
+  onModuleInit(): void {
+    setTimeout(() => { this.tick().catch(() => {}); }, 20_000);
+    setInterval(() => { this.tick().catch(() => {}); }, TICK_MS);
+  }
+
+  async tick(): Promise<void> {
+    const now = new Date();
+    if (now.getDay() !== 0) return;
+    const hour = now.getHours();
+    if (hour < WINDOW_HOUR_START || hour >= WINDOW_HOUR_END) return;
+    const cutoff = new Date(now.getTime() - SEND_INTERVAL_MS);
+    const users = await this.conn.db!.collection("users").find({
+      email: { $type: "string" },
+      role: { $in: ["academy_owner", "coach"] as any },
+      coachStarredDigestOptedOut: { $ne: true },
+      $or: [{ coachStarredDigestSentAt: { $exists: false } }, { coachStarredDigestSentAt: { $lt: cutoff } }],
+    }, { projection: { _id: 1, username: 1, email: 1 } as any }).limit(500).toArray();
+    for (const u of users) {
+      await this.sendFor(u).catch((e) => {
+        // eslint-disable-next-line no-console
+        console.warn("[coach-starred-digest] failed for", u._id, e);
+      });
+    }
+  }
+
+  private async sendFor(user: any): Promise<void> {
+    const userId = String(user._id);
+    const email = String(user.email).toLowerCase();
+    const username = user.username || userId;
+    const since = new Date(Date.now() - 7 * 86_400_000);
+    const snaps: any[] = await this.conn.db!.collection("classSnaps").find({
+      byUserId: userId,
+      starred: true,
+      at: { $gte: since },
+    }).sort({ at: -1 }).limit(30).toArray();
+    if (snaps.length === 0) {
+      // Nothing to say -- mark sent so we don't re-check every 10 min all
+      // Sunday morning. Doesn't burn the weekly cadence for real content
+      // (next week's tick clears the guard once past cutoff).
+      await this.conn.db!.collection("users").updateOne(
+        { _id: userId as any }, { $set: { coachStarredDigestSentAt: new Date() } }
+      );
+      return;
+    }
+    const rows = snaps.map((s) => `
+      <li style="margin-bottom:6px">
+        <a href="${snapLink(s)}" style="color:#2563eb;text-decoration:none;font-weight:600">Open position</a>
+        ${s.note ? ` — ${esc(String(s.note))}` : ""}
+        ${Array.isArray(s.shapes) && s.shapes.length > 0 ? ` <span style="color:#b45309;font-size:12px">(${s.shapes.length} arrow${s.shapes.length === 1 ? "" : "s"})</span>` : ""}
+        ${s.hasAudio ? ` <span style="color:#7c3aed;font-size:12px">(🎙 voice note)</span>` : ""}
+      </li>`).join("");
+    const rowsText = snaps.map((s, i) =>
+      `${i + 1}. ${snapLink(s)}${s.note ? ` — ${String(s.note)}` : ""}`
+    ).join("\n");
+    const subject = `Your starred positions this week (${snaps.length})`;
+    const html = `
+      <div style="font-family:system-ui,sans-serif;max-width:520px">
+        <h2 style="color:#111;margin-bottom:4px">★ Your review shortlist</h2>
+        <p style="color:#666;margin-top:0">Hi ${esc(username)} — you starred ${snaps.length} position${snaps.length === 1 ? "" : "s"} in the last 7 days.</p>
+        <ol style="line-height:1.6;padding-left:20px;color:#333">${rows}</ol>
+        <p style="color:#666;font-size:13px">Every link opens the board editor with your arrows preserved. Pick a few for next week's lessons.</p>
+        <p style="color:#9ca3af;font-size:11px;margin-top:24px">
+          Manage on <a href="${PUBLIC_ORIGIN}/academy" style="color:#9ca3af">Academy dashboard</a>.
+        </p>
+      </div>`;
+    const text = [
+      `★ Your review shortlist`, "",
+      `Hi ${username} — you starred ${snaps.length} position(s) in the last 7 days:`, "",
+      rowsText, "",
+      `Manage on ${PUBLIC_ORIGIN}/academy`,
+    ].join("\n");
+    const r = await sendMail({ to: email, subject, html, text });
+    if (r.ok) {
+      await this.conn.db!.collection("users").updateOne(
+        { _id: userId as any }, { $set: { coachStarredDigestSentAt: new Date() } }
+      );
+    }
+  }
+}
