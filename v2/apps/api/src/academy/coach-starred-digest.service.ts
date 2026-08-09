@@ -93,7 +93,7 @@ export class CoachStarredDigestService implements OnModuleInit {
    *  sinceDaysBack for QA. */
   async previewFor(userId: string, sinceDaysBack?: number) {
     const user: any = await this.conn.db!.collection("users").findOne({ _id: userId as any },
-      { projection: { coachStarredDigestCadence: 1, coachStarredDigestOptedOut: 1, coachStarredDigestSentAt: 1, coachStarredDigestSentCount: 1 } as any });
+      { projection: { coachStarredDigestCadence: 1, coachStarredDigestOptedOut: 1, coachStarredDigestSentAt: 1, coachStarredDigestSentCount: 1, coachStarredDigestHistory: 1 } as any });
     const cadence = (user?.coachStarredDigestCadence as "weekly" | "biweekly" | "monthly" | undefined) ?? "weekly";
     const days = sinceDaysBack ?? cadenceWindowDays(cadence);
     const since = new Date(Date.now() - days * 86_400_000);
@@ -128,6 +128,11 @@ export class CoachStarredDigestService implements OnModuleInit {
       reviewedSinceLast: reviewedCount,
       pendingBacklog,
       stuck,
+      history: Array.isArray(user?.coachStarredDigestHistory)
+        ? user.coachStarredDigestHistory.slice(-12).reverse().map((h: any) => ({
+            sentAt: h.sentAt, snapCount: h.snapCount ?? 0, windowDays: h.windowDays ?? 7,
+          }))
+        : [],
       snaps: snaps.map((s) => ({
         _id: s._id,
         classId: s.classId,
@@ -249,11 +254,15 @@ export class CoachStarredDigestService implements OnModuleInit {
     ].join("\n");
     const r = await sendMail({ to: email, subject, html, text });
     if (r.ok) {
+      // Append the send to a bounded history array. $push + $slice keeps the
+      // last 12 entries only so the doc doesn't bloat over years of Sundays.
+      const historyEntry = { sentAt: new Date(), snapCount: snaps.length, windowDays: days };
       await this.conn.db!.collection("users").updateOne(
         { _id: userId as any },
         {
           $set: { coachStarredDigestSentAt: new Date() },
           $inc: { coachStarredDigestSentCount: 1 },
+          $push: { coachStarredDigestHistory: { $each: [historyEntry], $slice: -12 } as any } as any,
         }
       );
     }

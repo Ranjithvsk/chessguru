@@ -1367,7 +1367,8 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
 function StarredDigestPreviewLink() {
   const [open, setOpen] = useState(false);
   type Row = { _id: string; classId: string; at: string; note: string; hasAudio: boolean; shapeCount: number; link: string };
-  type PreviewData = { snapCount: number; snaps: Row[]; cadence: "weekly" | "biweekly" | "monthly"; windowDays: number; optedOut: boolean; sentCount: number; lastSentAt: string | null; reviewedSinceLast: number; pendingBacklog: number; stuck: boolean };
+  type HistoryRow = { sentAt: string; snapCount: number; windowDays: number };
+  type PreviewData = { snapCount: number; snaps: Row[]; cadence: "weekly" | "biweekly" | "monthly"; windowDays: number; optedOut: boolean; sentCount: number; lastSentAt: string | null; reviewedSinceLast: number; pendingBacklog: number; stuck: boolean; history: HistoryRow[] };
   const [data, setData] = useState<PreviewData | null>(null);
   // Ambient stats fetched on mount so the link line shows current cadence +
   // last-sent + backlog before the coach opens the modal. Same endpoint.
@@ -1514,6 +1515,24 @@ function StarredDigestPreviewLink() {
                   ? "No digests sent yet."
                   : `You've been sent ${data.sentCount} digest${data.sentCount === 1 ? "" : "s"}${data.lastSentAt ? ` · last on ${new Date(data.lastSentAt).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}` : ""}.`}
               </div>
+            )}
+            {data && data.history.length > 0 && (
+              <details className="mt-2">
+                <summary className="cursor-pointer text-[10px] uppercase tracking-wide text-ink-500 hover:text-ink-300">
+                  📊 Recent digest history ({data.history.length})
+                </summary>
+                <ul className="mt-1 space-y-0.5 text-[11px]">
+                  {data.history.map((h) => (
+                    <li key={h.sentAt} className="flex items-baseline gap-2 rounded px-2 py-0.5 hover:bg-ink-800/60">
+                      <span className="tabular-nums text-ink-400 w-24">
+                        {new Date(h.sentAt).toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short" })}
+                      </span>
+                      <span className="tabular-nums text-ink-300">{h.snapCount} snap{h.snapCount === 1 ? "" : "s"}</span>
+                      <span className="tabular-nums text-ink-500">· {h.windowDays}d window</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
             )}
           </div>
         </div>
