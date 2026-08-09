@@ -1370,6 +1370,21 @@ function StarredDigestPreviewLink() {
                     ✓ You've reviewed {data.reviewedSinceLast} snap{data.reviewedSinceLast === 1 ? "" : "s"} since the last digest{data.lastSentAt ? "" : " (or in the last 30 days)"} — this'll be called out in the email.
                   </div>
                 )}
+                {(() => {
+                  // Cadence auto-suggest: nudge toward the cadence that fits
+                  // the coach's actual snap volume. Too many per window = long
+                  // email + delayed review; too few = wasted send.
+                  const perDay = data.snapCount / Math.max(1, data.windowDays);
+                  let suggest: "weekly" | "biweekly" | "monthly" | null = null;
+                  if (perDay >= 2) suggest = "weekly";
+                  else if (perDay < 0.15) suggest = "monthly";
+                  if (!suggest || suggest === data.cadence) return null;
+                  return (
+                    <div className="mb-2 text-[11px] text-brand-300">
+                      💡 At this rate ({data.snapCount} snap{data.snapCount === 1 ? "" : "s"} / {data.windowDays}d), you might prefer <b>{suggest}</b> cadence — click the pill below to switch.
+                    </div>
+                  );
+                })()}
                 <ol className="max-h-72 overflow-y-auto pr-1 space-y-1 text-sm">
                   {data.snaps.map((s, i) => (
                     <li key={s._id} className="flex items-baseline gap-2 rounded border border-ink-700 bg-ink-800/40 px-2 py-1.5">
