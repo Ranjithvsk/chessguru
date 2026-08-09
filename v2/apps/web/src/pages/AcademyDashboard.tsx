@@ -918,6 +918,31 @@ function TodayStrip({ schedule, snaps, recordings }: {
 // can edit (server enforces via PATCH /api/class/:id/snap/:snapId). Card is
 // a Link by default; edit mode swaps in a textarea + save/cancel so the
 // coach can fix a typo without re-opening the board.
+// Copies the current window URL to the clipboard. The snap-deep-link effect
+// keeps ?snap=<id> synced to the URL while a modal is open, so pasting the
+// clipboard drops the recipient into the same modal state.
+function ShareLinkButton() {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      window.prompt("Copy this link:", window.location.href);
+    }
+  }
+  return (
+    <button onClick={copy}
+      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold transition-colors ${copied
+        ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-100"
+        : "border-ink-700 bg-ink-900 text-ink-300 hover:bg-ink-800"}`}
+      title="Copy a link that opens this exact snap for a colleague">
+      {copied ? "✓ Copied" : "🔗 Copy link"}
+    </button>
+  );
+}
+
 // Wraps matches of `query` (case-insensitive) in <mark> so they visually
 // pop when the coach is text-searching. No regex escaping needed for the
 // split call since we lowercase both sides and only use the length to slice.
@@ -1130,6 +1155,7 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
                     {pos.i + 1} / {pos.n}
                   </span>
                 )}
+                <ShareLinkButton />
                 <span className="hidden sm:inline" title="← / → step through snaps">← →</span>
                 <button onClick={() => onClose()}
                   className="text-ink-400 hover:text-white text-sm">Esc</button>
