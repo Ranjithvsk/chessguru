@@ -663,10 +663,14 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
           {typeof c.attendedCount === "number" && c.mine && <span className="ml-2 text-emerald-300">✓ {c.attendedCount} attended</span>}
         </div>
       </div>
-      <Link to={`/class/${encodeURIComponent(c._id)}`}
+      {/* Route to ChessGuru Live (self-hosted Jitsi on meet.harinitharanjith.com,
+       *  fully rebranded). The class _id is the room name; attendance auto-writes
+       *  via Jitsi's participant events when we wire the IframeAPI in the next slice. */}
+      <a href={`https://meet.harinitharanjith.com/${encodeURIComponent(c._id)}`}
+        target="_blank" rel="noreferrer"
         className={`rounded-lg px-3 py-1 text-xs font-semibold ${live ? "bg-emerald-600 text-white hover:bg-emerald-500" : "bg-brand-600 text-white hover:bg-brand-500"}`}>
         {live ? "Join now" : "Open class"}
-      </Link>
+      </a>
     </div>
   );
 }
