@@ -35,6 +35,9 @@ async function bootstrap() {
   // browser MediaRecorder at typical bitrates). Scoped to that ONE endpoint so the
   // default JSON body-parser limits still protect every other route.
   app.use("/api/class/:id/recording", expressLib.raw({ type: "application/octet-stream", limit: "500mb" }));
+  // Snap audio clip is a short (<=30s) coach mic recording uploaded alongside
+  // the snap FEN. 5MB cap comfortably covers webm/opus at 128kbps for 30s.
+  app.use("/api/class/:id/snap/:snapId/audio", expressLib.raw({ type: "application/octet-stream", limit: "5mb" }));
   app.use(
     session({
       // Unique name so it can't collide with the v1 app's connect.sid on this domain

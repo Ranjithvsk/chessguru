@@ -5,10 +5,15 @@
 // Auth: session-cookie gated (any signed-in ChessGuru user in the room can
 // snap; academy-scoped listing/authz lives in AcademyService).
 
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, NotFoundException, Param, Patch, Post, Req, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, HttpException, HttpStatus, NotFoundException, Param, Patch, Post, Req, Res, UnauthorizedException } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { randomBytes } from "crypto";
+import { promises as fs, createReadStream, statSync } from "fs";
+import { join } from "path";
+type ExpressRes = any;
+const SNAP_AUDIO_DIR = process.env.CLASS_SNAP_AUDIO_DIR ?? "/home/ubuntu/chessguru-snap-audio";
+const SNAP_ID_RE = /^sn_[A-Za-z0-9_-]{6,32}$/;
 
 const ROOM_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const FEN_RE = /^[a-zA-Z0-9\/\-\s]{10,120}$/;   // loose but catches obvious garbage
@@ -93,6 +98,45 @@ export class ClassSnapController {
     if (!cur) throw new NotFoundException("snap not found");
     if (cur.byUserId !== userId) throw new ForbiddenException("not your snap");
     await this.conn.db!.collection("classSnaps").deleteOne({ _id: snapId as any });
+    // Best-effort audio-file cleanup — ignore missing.
+    try { await fs.unlink(join(SNAP_AUDIO_DIR, id, `${snapId}.webm`)); } catch { /* no clip */ }
     return { ok: true };
+  }
+
+  // POST /api/class/:id/snap/:snapId/audio  (application/octet-stream)
+  // Coach uploads a short (<=30s) webm/opus mic clip immediately after taking
+  // the snap. Author-only. On success sets hasAudio:true on the doc so the
+  // dashboard can render an inline audio player.
+  @Post(":id/snap/:snapId/audio")
+  async uploadAudio(@Param("id") id: string, @Param("snapId") snapId: string, @Req() req: any, @Body() body: Buffer, @Res() res: ExpressRes) {
+    if (!ROOM_RE.test(id)) throw new HttpException("bad room", HttpStatus.BAD_REQUEST);
+    if (!SNAP_ID_RE.test(snapId)) throw new HttpException("bad snap id", HttpStatus.BAD_REQUEST);
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) throw new UnauthorizedException();
+    const cur = await this.conn.db!.collection("classSnaps").findOne({ _id: snapId as any, classId: id });
+    if (!cur) throw new NotFoundException("snap not found");
+    if (cur.byUserId !== userId) throw new ForbiddenException("not your snap");
+    if (!Buffer.isBuffer(body) || body.byteLength === 0) throw new HttpException("empty body", HttpStatus.BAD_REQUEST);
+    if (body.byteLength > 5 * 1024 * 1024) throw new HttpException("too large", HttpStatus.PAYLOAD_TOO_LARGE);
+    const dir = join(SNAP_AUDIO_DIR, id);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(join(dir, `${snapId}.webm`), body);
+    await this.conn.db!.collection("classSnaps").updateOne({ _id: snapId as any }, { $set: { hasAudio: true, audioBytes: body.byteLength } });
+    res.status(HttpStatus.CREATED).json({ ok: true, bytes: body.byteLength });
+  }
+
+  // GET /api/class/:id/snap/:snapId/audio — streams back the clip. Public
+  // within-class (matches snap doc listing which is coach/owner already).
+  @Get(":id/snap/:snapId/audio")
+  async getAudio(@Param("id") id: string, @Param("snapId") snapId: string, @Res() res: ExpressRes) {
+    if (!ROOM_RE.test(id)) throw new HttpException("bad room", HttpStatus.BAD_REQUEST);
+    if (!SNAP_ID_RE.test(snapId)) throw new HttpException("bad snap id", HttpStatus.BAD_REQUEST);
+    const full = join(SNAP_AUDIO_DIR, id, `${snapId}.webm`);
+    let size = 0;
+    try { size = statSync(full).size; } catch { throw new HttpException("not found", HttpStatus.NOT_FOUND); }
+    res.setHeader("Content-Type", "audio/webm");
+    res.setHeader("Content-Length", String(size));
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    createReadStream(full).pipe(res);
   }
 }

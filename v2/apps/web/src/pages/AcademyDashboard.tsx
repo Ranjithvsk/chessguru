@@ -965,6 +965,12 @@ function SnapCard({ s }: { s: SnapItem }) {
         ) : (
           s.note && <div className="mt-1 text-[12px] text-ink-300 line-clamp-2">"{s.note}"</div>
         )}
+        {s.hasAudio && !editing && (
+          <audio controls preload="none"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            src={`${BASE}/api/class/${encodeURIComponent(s.classId)}/snap/${encodeURIComponent(s._id)}/audio`}
+            className="mt-1 h-6 w-full" />
+        )}
         <div className="mt-auto text-[10px] text-ink-500">
           {new Date(s.at).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
           {!editing && <span className="ml-2 text-brand-300 opacity-0 group-hover:opacity-100 transition-opacity">🔬 Open →</span>}
@@ -980,7 +986,7 @@ function SnapCard({ s }: { s: SnapItem }) {
 // scope the grid; click All to reset. The 12-card visible limit still
 // applies within the filtered view.
 type SnapShape = { orig: string; dest?: string; brush?: string };
-type SnapItem = { _id: string; classId: string; classTitle: string; fen: string; note: string; byName: string; byUserId?: string; at: string; shapes?: SnapShape[]; starred?: boolean };
+type SnapItem = { _id: string; classId: string; classTitle: string; fen: string; note: string; byName: string; byUserId?: string; at: string; shapes?: SnapShape[]; starred?: boolean; hasAudio?: boolean };
 // URL-safe base64 encoder for the shapes deep-link. Matches decoder in BoardEditor.tsx.
 function encodeShapesForUrl(shapes: SnapShape[]): string {
   return btoa(JSON.stringify(shapes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");

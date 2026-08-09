@@ -1296,30 +1296,7 @@ function BoardMainArea({
           >
             ↺ Reset board
           </button>
-          <button
-            onClick={async () => {
-              // Snap-position: coach flags a moment. Prompts for a note, POSTs FEN.
-              // Zero UI dependency on the video call — pure board-context capture.
-              const note = window.prompt("Note for this position? (optional)") ?? "";
-              try {
-                const r = await fetch(`/v2api/api/class/${encodeURIComponent(room)}/snap`, {
-                  method: "POST", credentials: "include",
-                  headers: { "Content-Type": "application/json" },
-                  // Include any live arrows/circles the coach has drawn -- these
-                  // are usually the whole point of the flag ("look at this
-                  // diagonal") so persisting them into the snap doc means the
-                  // replay/board-editor can restore them later.
-                  body: JSON.stringify({ fen, note, shapes: (shapes ?? []).slice(0, 64) }),
-                });
-                if (r.ok) { console.log("[snap] saved"); onSnap?.(); }
-                else console.warn("[snap] failed", r.status);
-              } catch (e) { console.warn("[snap] error", e); }
-            }}
-            className="rounded-xl2 px-3 py-1.5 text-xs bg-amber-600 hover:bg-amber-500 text-white"
-            title="Snap this position + note — reviewable later from /academy"
-          >
-            📸 Snap
-          </button>
+          <SnapButtons room={room} fen={fen} shapes={shapes as any} onSnap={onSnap} />
           <span className={`text-[10px] ${connected ? "text-emerald-400" : "text-ink-500"}`}>
             {connected ? "board synced" : "board offline"}
           </span>
@@ -1388,6 +1365,83 @@ function BoardMainArea({
 
 // One WebSocket to /v2api/class-ws/:room, one chess.js engine, one state. Its own
 // effect so ?board=1 toggles don't ripple into the signaling mesh.
+// Snap + optional 15s mic audio clip. Two buttons: plain 📸 Snap and
+// 🎙 Snap+audio. Audio variant POSTs the snap first (fen+note+shapes), then
+// records a fresh 15s webm/opus mic clip via MediaRecorder and uploads it to
+// the snap's audio endpoint. Uses navigator.mediaDevices.getUserMedia({audio})
+// standalone rather than piggybacking the call's local stream so this component
+// can live in the module scope without prop-drilling the mic ref.
+function SnapButtons({ room, fen, shapes, onSnap }: {
+  room: string;
+  fen: string;
+  shapes: Array<{ orig: string; dest?: string; brush?: string }>;
+  onSnap?: () => void;
+}) {
+  const [recording, setRecording] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  async function takeSnap(withAudio: boolean): Promise<string | null> {
+    const note = window.prompt("Note for this position? (optional)") ?? "";
+    try {
+      const r = await fetch(`/v2api/api/class/${encodeURIComponent(room)}/snap`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fen, note, shapes: (shapes ?? []).slice(0, 64) }),
+      });
+      if (!r.ok) { setMsg("Snap failed"); setTimeout(() => setMsg(null), 2000); return null; }
+      const j = await r.json().catch(() => ({}));
+      onSnap?.();
+      if (!withAudio) { setMsg("Snapped"); setTimeout(() => setMsg(null), 1200); }
+      return j?.id || null;
+    } catch { setMsg("Snap failed"); setTimeout(() => setMsg(null), 2000); return null; }
+  }
+  async function snapWithAudio() {
+    if (recording) return;
+    const snapId = await takeSnap(true);
+    if (!snapId) return;
+    let stream: MediaStream | null = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch { setMsg("Mic denied"); setTimeout(() => setMsg(null), 2500); return; }
+    let mime = "";
+    for (const t of ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"]) {
+      if ((window as any).MediaRecorder?.isTypeSupported?.(t)) { mime = t; break; }
+    }
+    const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    const chunks: BlobPart[] = [];
+    rec.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+    rec.onstop = async () => {
+      stream?.getTracks().forEach((t) => t.stop());
+      const blob = new Blob(chunks, { type: mime || "audio/webm" });
+      try {
+        const up = await fetch(`/v2api/api/class/${encodeURIComponent(room)}/snap/${encodeURIComponent(snapId)}/audio`, {
+          method: "POST", credentials: "include",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: blob,
+        });
+        setMsg(up.ok ? "Snap+audio saved" : "Audio upload failed");
+      } catch { setMsg("Audio upload failed"); }
+      finally { setRecording(false); setTimeout(() => setMsg(null), 2000); }
+    };
+    setRecording(true);
+    setMsg("Recording 15s… speak now");
+    rec.start();
+    setTimeout(() => { try { rec.state === "recording" && rec.stop(); } catch { /* already stopped */ } }, 15_000);
+  }
+  return (
+    <>
+      <button onClick={() => takeSnap(false)}
+        className="rounded-xl2 px-3 py-1.5 text-xs bg-amber-600 hover:bg-amber-500 text-white"
+        title="Snap this position + note — reviewable later from /academy">📸 Snap</button>
+      <button onClick={snapWithAudio} disabled={recording}
+        className={`rounded-xl2 px-3 py-1.5 text-xs text-white ${recording ? "bg-rose-600" : "bg-amber-700 hover:bg-amber-600"} disabled:opacity-70`}
+        title="Snap + record a 15s voice memo attached to this position">
+        {recording ? "● recording…" : "🎙 Snap+audio"}
+      </button>
+      {msg && <span className="text-[10px] text-ink-300">{msg}</span>}
+    </>
+  );
+}
+
 function useSharedBoard(room: string) {
   const [fen, setFen] = useState<string>(START_FEN);
   const [lastMove, setLastMove] = useState<BoardMove | null>(null);
