@@ -100,7 +100,7 @@ export class CoachStarredDigestService implements OnModuleInit {
     const reviewSince = user?.coachStarredDigestSentAt
       ? new Date(user.coachStarredDigestSentAt)
       : new Date(Date.now() - 30 * 86_400_000);
-    const [snaps, reviewedCount, pendingBacklog, recentReviewCount, staleCount]: [any[], number, number, number, number] = await Promise.all([
+    const [snaps, reviewedCount, pendingBacklog, recentReviewCount, staleCount, reviewedIn30d]: [any[], number, number, number, number, any[]] = await Promise.all([
       this.conn.db!.collection("classSnaps").find({
         byUserId: String(userId),
         starred: true,
@@ -122,8 +122,23 @@ export class CoachStarredDigestService implements OnModuleInit {
         reviewedAt: { $in: [null, undefined] as any },
         at: { $lt: new Date(Date.now() - 30 * 86_400_000) },
       }),
+      this.conn.db!.collection("classSnaps").find({
+        byUserId: String(userId),
+        reviewedAt: { $gte: new Date(Date.now() - 30 * 86_400_000) },
+      }, { projection: { reviewedAt: 1 } as any }).limit(500).toArray(),
     ]);
     const stuck = pendingBacklog >= 3 && recentReviewCount === 0;
+    // Review streak (parallels the sendFor / dashboard heatmap calc).
+    let streakDays = 0;
+    if (reviewedIn30d.length > 0) {
+      const dayMs = (d: Date) => { const c = new Date(d); c.setHours(0, 0, 0, 0); return c.getTime(); };
+      const todayStart = dayMs(new Date());
+      const set = new Set(reviewedIn30d.map((r) => dayMs(new Date(r.reviewedAt))));
+      for (let i = 0; i < 30; i++) {
+        if (set.has(todayStart - i * 86_400_000)) streakDays++;
+        else break;
+      }
+    }
     // Busiest class this window -- mirrors the digest-email stat so the
     // preview shows the same signal.
     const classTallyPreview = new Map<string, { title: string; n: number }>();
@@ -148,6 +163,7 @@ export class CoachStarredDigestService implements OnModuleInit {
       stuck,
       staleCount,
       busiestClass,
+      streakDays,
       history: Array.isArray(user?.coachStarredDigestHistory)
         ? user.coachStarredDigestHistory.slice(-12).reverse().map((h: any) => ({
             sentAt: h.sentAt, snapCount: h.snapCount ?? 0, windowDays: h.windowDays ?? 7,

@@ -1484,7 +1484,7 @@ function StarredDigestPreviewLink() {
   const [open, setOpen] = useState(false);
   type Row = { _id: string; classId: string; at: string; note: string; hasAudio: boolean; shapeCount: number; link: string };
   type HistoryRow = { sentAt: string; snapCount: number; windowDays: number };
-  type PreviewData = { snapCount: number; snaps: Row[]; cadence: "weekly" | "biweekly" | "monthly"; windowDays: number; optedOut: boolean; sentCount: number; lastSentAt: string | null; reviewedSinceLast: number; pendingBacklog: number; stuck: boolean; staleCount: number; busiestClass: { title: string; n: number } | null; history: HistoryRow[] };
+  type PreviewData = { snapCount: number; snaps: Row[]; cadence: "weekly" | "biweekly" | "monthly"; windowDays: number; optedOut: boolean; sentCount: number; lastSentAt: string | null; reviewedSinceLast: number; pendingBacklog: number; stuck: boolean; staleCount: number; busiestClass: { title: string; n: number } | null; streakDays: number; history: HistoryRow[] };
   const [data, setData] = useState<PreviewData | null>(null);
   // Ambient stats fetched on mount so the link line shows current cadence +
   // last-sent + backlog before the coach opens the modal. Same endpoint.
@@ -1572,6 +1572,7 @@ function StarredDigestPreviewLink() {
                 {data.reviewedSinceLast > 0 && (
                   <div className="mb-2 text-[11px] text-emerald-300">
                     ✓ You've reviewed {data.reviewedSinceLast} snap{data.reviewedSinceLast === 1 ? "" : "s"} since the last digest{data.lastSentAt ? "" : " (or in the last 30 days)"} — this'll be called out in the email.
+                    {data.streakDays >= 3 && <span className="ml-1 text-orange-300">🔥 {data.streakDays}-day streak</span>}
                   </div>
                 )}
                 {data.stuck && (
