@@ -15,9 +15,10 @@ import { Chess } from "chess.js";
 import type { Key } from "chessground/types";
 import Board, { destsFromChess } from "../components/Board";
 
+type PeerSummary = { id: string; name: string; userId: string | null };
 type ServerMsg =
-  | { type: "hello"; self: string; peers: string[] }
-  | { type: "peer-join"; peer: string }
+  | { type: "hello"; self: string; peers: PeerSummary[]; as?: { userId: string | null; name: string } }
+  | { type: "peer-join"; peer: string; name?: string; userId?: string | null }
   | { type: "peer-leave"; peer: string }
   | { type: "full" }
   | { type: "offer"; from: string; sdp: RTCSessionDescriptionInit }
@@ -28,6 +29,13 @@ type PeerState = {
   pc: RTCPeerConnection;
   remoteStream: MediaStream | null;
   pendingIce: RTCIceCandidateInit[];
+  name: string;              // human-readable label for the tile
+  userId: string | null;
+  // Active-speaker detection: analyser + last sampled RMS. Populated when the
+  // remote audio track lands (in ontrack), sampled by a shared 200ms rAF loop.
+  analyser?: AnalyserNode;
+  levelBuf?: Uint8Array;
+  level?: number;            // 0..1 RMS, higher = louder
 };
 
 // Class-ws (shared-board) frames — subset we handle. See apps/api/src/class/class-ws.ts.
@@ -91,6 +99,10 @@ export default function CallRoomPage() {
   const iceConfigRef = useRef<RTCConfiguration>(FALLBACK_ICE_SERVERS);
   // Screen-share display stream — kept so we can stop its tracks + restore cam.
   const displayStreamRef = useRef<MediaStream | null>(null);
+  // Shared AudioContext for active-speaker detection (one per page, reused).
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  // Peer id of the current loudest speaker (or null). Drives tile spotlight.
+  const [activeSpeaker, setActiveSpeaker] = useState<string | null>(null);
 
   // Guarded send to signaling — WS may be gone.
   const send = (msg: unknown) => {
@@ -111,9 +123,13 @@ export default function CallRoomPage() {
   };
 
   // Build one RTCPeerConnection for a remote peer, wire handlers, store in peersRef.
-  const createPc = (peerId: string): PeerState => {
+  // `peer` may be just an id (older peer-join without name) or a full summary.
+  const createPc = (peerOrId: string | PeerSummary): PeerState => {
+    const peerId = typeof peerOrId === "string" ? peerOrId : peerOrId.id;
+    const name   = typeof peerOrId === "string" ? peerId : (peerOrId.name || peerId);
+    const userId = typeof peerOrId === "string" ? null   : peerOrId.userId;
     const pc = new RTCPeerConnection(iceConfigRef.current);
-    const state: PeerState = { pc, remoteStream: null, pendingIce: [] };
+    const state: PeerState = { pc, remoteStream: null, pendingIce: [], name, userId };
     peersRef.current.set(peerId, state);
 
     // Send null too — signals end-of-candidates to the remote.
@@ -121,7 +137,24 @@ export default function CallRoomPage() {
     pc.ontrack = (e) => {
       const [stream] = e.streams;
       const cur = peersRef.current.get(peerId);
-      if (cur && stream) { cur.remoteStream = stream; syncPeerIds(); }
+      if (cur && stream) {
+        cur.remoteStream = stream;
+        // Active-speaker analyser on the remote AUDIO track — sampled by the
+        // shared rAF loop in useEffect. Skipped for video-only streams.
+        try {
+          const audio = stream.getAudioTracks();
+          if (audio.length && !cur.analyser) {
+            const ctx = audioCtxRef.current || (audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)());
+            const source = ctx.createMediaStreamSource(new MediaStream(audio));
+            const an = ctx.createAnalyser();
+            an.fftSize = 256;
+            source.connect(an);
+            cur.analyser = an;
+            cur.levelBuf = new Uint8Array(an.frequencyBinCount);
+          }
+        } catch { /* AudioContext may fail if not user-gestured; skip silently */ }
+        syncPeerIds();
+      }
     };
     pc.onconnectionstatechange = () => {
       const s = pc.connectionState;
@@ -223,6 +256,10 @@ export default function CallRoomPage() {
       for (const t of displayStreamRef.current.getTracks()) t.stop();
       displayStreamRef.current = null;
     }
+    if (audioCtxRef.current) {
+      try { audioCtxRef.current.close(); } catch { /* already closed */ }
+      audioCtxRef.current = null;
+    }
     if (wsRef.current) { try { wsRef.current.close(); } catch { /* already closed */ } wsRef.current = null; }
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     setPeerIds([]);
@@ -276,16 +313,20 @@ export default function CallRoomPage() {
             selfIdRef.current = msg.self;
             // For each peer already in the room, spin up a PC + apply pairwise offerer rule.
             for (const other of msg.peers) {
-              if (peersRef.current.has(other)) continue;
+              const otherId = typeof other === "string" ? other : other.id;
+              if (peersRef.current.has(otherId)) continue;
               createPc(other);
-              if (shouldOffer(msg.self, other)) await startOffer(other);
+              if (shouldOffer(msg.self, otherId)) await startOffer(otherId);
             }
             syncPeerIds();
             if (msg.peers.length > 0) setStatus("negotiating");
             break;
           }
           case "peer-join": {
-            if (!peersRef.current.has(msg.peer)) createPc(msg.peer);
+            if (!peersRef.current.has(msg.peer)) {
+              const summary: PeerSummary = { id: msg.peer, name: msg.name || msg.peer, userId: msg.userId ?? null };
+              createPc(summary);
+            }
             syncPeerIds();
             if (shouldOffer(selfIdRef.current, msg.peer)) await startOffer(msg.peer);
             else setStatus("negotiating");
@@ -313,6 +354,29 @@ export default function CallRoomPage() {
     // Room id fully drives the effect; nothing else should re-run it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room]);
+
+  // Active-speaker detection: every 250ms sample each peer's analyser RMS,
+  // pick the loudest above a noise-gate threshold, expose as activeSpeaker
+  // state → drives the spotlight ring on the tile. Cheap: one interval,
+  // O(N) tiny sample per tick.
+  useEffect(() => {
+    const iv = setInterval(() => {
+      let winner: string | null = null;
+      let max = 0;
+      for (const [id, state] of peersRef.current) {
+        const an = state.analyser, buf = state.levelBuf;
+        if (!an || !buf) continue;
+        an.getByteFrequencyData(buf as any);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) sum += buf[i]! * buf[i]!;
+        const rms = Math.sqrt(sum / buf.length) / 255;
+        state.level = rms;
+        if (rms > max && rms > 0.05) { max = rms; winner = id; }   // noise gate
+      }
+      setActiveSpeaker(winner);
+    }, 250);
+    return () => clearInterval(iv);
+  }, []);
 
   const toggleMic = () => {
     const s = localStreamRef.current; if (!s) return;
@@ -472,6 +536,8 @@ function ClassicMainArea({ room, peerIds, peersRef, localVideoRef, camOn }: Main
               peerId={id}
               index={idx}
               getStream={() => peersRef.current.get(id)?.remoteStream ?? null}
+              getName={() => peersRef.current.get(id)?.name || id}
+              isActive={activeSpeaker === id}
             />
           ))}
         </div>
@@ -657,20 +723,28 @@ function RemoteTile({
   peerId,
   index,
   getStream,
+  getName,
+  isActive,
 }: {
   peerId: string;
   index: number;
   getStream: () => MediaStream | null;
+  getName?: () => string;
+  isActive?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const stream = getStream();
+  const name = getName ? getName() : `Peer ${index + 1}`;
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.srcObject = stream;
   }, [stream]);
 
+  // Active-speaker: emerald ring + subtle glow. Kept subtle so the tile doesn't
+  // jump around visually every time someone breathes near their mic.
+  const ring = isActive ? "ring-2 ring-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.35)]" : "border border-ink-700";
   return (
-    <div className="relative aspect-video rounded-lg border border-ink-700 bg-ink-900 overflow-hidden">
+    <div className={`relative aspect-video rounded-lg bg-ink-900 overflow-hidden ${ring}`}>
       <video
         ref={videoRef}
         autoPlay
@@ -682,8 +756,9 @@ function RemoteTile({
           Connecting…
         </div>
       )}
-      <div className="absolute bottom-1 left-1 px-2 py-0.5 rounded bg-black/60 text-[10px] text-white font-mono">
-        Peer {index + 1} · {peerId.slice(0, 6)}
+      <div className="absolute bottom-1 left-1 flex items-center gap-1 px-2 py-0.5 rounded bg-black/60 text-[11px] text-white">
+        {isActive && <span className="text-emerald-300">🎤</span>}
+        <span className="truncate max-w-[140px]">{name}</span>
       </div>
     </div>
   );

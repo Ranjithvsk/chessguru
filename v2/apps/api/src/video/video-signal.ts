@@ -94,12 +94,15 @@ async function writeLeave(conn: Connection | null, client: Client) {
   } catch { /* log-only */ }
 }
 
-function joinRoom(roomId: string, client: Client): { ok: true; peers: string[] } | { ok: false; reason: string } {
+type PeerSummary = { id: string; name: string; userId: string | null };
+function joinRoom(roomId: string, client: Client): { ok: true; peers: PeerSummary[] } | { ok: false; reason: string } {
   let room = rooms.get(roomId);
   if (!room) { room = new Map(); rooms.set(roomId, room); }
   if (room.size >= MAX_PER_ROOM) return { ok: false, reason: "full" };
   room.set(client.id, client);
-  const peers = [...room.keys()].filter((k) => k !== client.id);
+  // Return name + userId so joiners can render real names on tiles immediately.
+  const peers: PeerSummary[] = [];
+  for (const c of room.values()) if (c.id !== client.id) peers.push({ id: c.id, name: c.name, userId: c.userId });
   return { ok: true, peers };
 }
 function leaveRoom(client: Client) {
@@ -140,7 +143,7 @@ export function attachVideoSignalWs(httpServer: HttpServer, conn: Connection | n
 
       send(ws, { type: "hello", self: client.id, peers: r.peers, as: { userId: client.userId, name: client.name } });
       const room = rooms.get(roomId)!;
-      for (const c of room.values()) if (c.id !== client.id) send(c.ws, { type: "peer-join", peer: client.id });
+      for (const c of room.values()) if (c.id !== client.id) send(c.ws, { type: "peer-join", peer: client.id, name: client.name, userId: client.userId });
       writeJoin(conn, client);
 
       ws.on("message", (raw) => {
