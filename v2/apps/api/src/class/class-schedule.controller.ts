@@ -43,9 +43,12 @@ type ScheduleDoc = {
   // Invitee emails (validated on the way in). The reminder scheduler emails
   // each ~15 min before startAt. Small cap so a runaway paste can't spam.
   invitees?: Array<{ email: string }>;
-  // Stamped by the reminder scheduler once the email batch has been queued;
-  // presence of this field means "don't send again for this class".
+  // Reminder-stage stamps. reminderSentAt = the 15-min-before nudge;
+  // reminded24hAt = the day-before nudge. Each is stamped by the scheduler
+  // when it starts sending that stage's batch (belt-and-braces against a
+  // mid-batch crash resending to everyone on restart).
   reminderSentAt?: Date | null;
+  reminded24hAt?: Date | null;
 };
 
 const MAX_RECUR = 12;
@@ -171,6 +174,7 @@ export class ClassScheduleController {
         seriesTotal: total > 1 ? total : undefined,
         invitees: invitees.length ? invitees : undefined,
         reminderSentAt: null,
+        reminded24hAt: null,
       });
     }
     await this.col().insertMany(docs);

@@ -1,22 +1,26 @@
-// Phase 6d: class-reminder scheduler.
+// Phase 6d + 6e: class-reminder scheduler.
 //
-// Runs a small setInterval inside the Nest process. Every minute it looks for
-// scheduled classes starting within the next REMIND_WINDOW_MIN minutes that
-// haven't had their reminder queued yet, and emails each invitee + the coach
-// with a short "your class starts soon" note including the join link.
+// Runs a small setInterval inside the Nest process. Every minute it fires TWO
+// stages:
+//   * 15-min stage — a "starts in N min" nudge, right before class
+//   * 24h stage   — a "tomorrow at X" heads-up so coach + invitees can plan
 //
-// Design:
+// Each stage has its own stamp field on the schedule doc (reminderSentAt for
+// 15-min, reminded24hAt for 24h) — sends are independent, and either flag is
+// atomic-claimed before send so a double tick / restart mid-batch can't
+// re-fire.
+//
+// Design notes:
 //   * Single-process only (setInterval on the API pod). If we ever run more
 //     than one API replica we should move this to a BullMQ job with a Redis
-//     lock — but until then the atomic findOneAndUpdate below is enough to
-//     de-dupe against a double tick.
-//   * "Reminder queued" is a one-way state — reminderSentAt is set to now()
-//     as soon as we START emailing, not after. Belt-and-braces against a
-//     crash-and-restart mid-batch resending to everyone.
-//   * Coach's email pulled from the users collection via createdByUserId.
-//     Anonymous-coach classes still get their invitees pinged.
-//   * Failure to send an individual invitee is logged but doesn't roll back
-//     reminderSentAt — half a batch is better than an infinite retry loop.
+//     lock — until then the atomic findOneAndUpdate is enough.
+//   * Wide tolerance windows so a server hiccup doesn't miss a fire. For
+//     example, the 24h window is (now+22h, now+26h] — even if the scheduler
+//     was down for an hour, next tick still catches every class in that band.
+//   * Coach's email pulled from users via createdByUserId. Anonymous-coach
+//     classes still get their invitees pinged.
+//   * Failure to send an individual address is logged but doesn't roll back
+//     the stamp — half a batch beats an infinite retry loop.
 
 import { Injectable, OnModuleInit } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
@@ -24,7 +28,18 @@ import { Connection } from "mongoose";
 import { sendMail } from "../lib/mail";
 
 const TICK_MS = 60_000;                    // scan cadence
-const REMIND_WINDOW_MIN = 15;              // fire when startAt is within this many minutes
+// Stages: { stamp field, near-boundary, far-boundary } — startAt must fall in
+// (near, far] to be a candidate. Wider than the "true" firing point on the
+// far side so a missed tick still gets caught by the next one.
+type Stage = { key: "m15" | "h24"; stampField: "reminderSentAt" | "reminded24hAt";
+               nearMs: number; farMs: number; label: string };
+const STAGES: Stage[] = [
+  // 15-min stage: fire from just-starting (nearMs=0) up to 15 min ahead.
+  { key: "m15", stampField: "reminderSentAt", nearMs: 0, farMs: 15 * 60_000, label: "starts soon" },
+  // 24h stage: 22h..26h window (2h grace either side of exactly-24h before).
+  { key: "h24", stampField: "reminded24hAt",  nearMs: 22 * 3_600_000, farMs: 26 * 3_600_000, label: "tomorrow" },
+];
+
 // Public origin used in email join links. Falls back to the DNS name we know
 // this API is behind; overridable in prod via env.
 const PUBLIC_ORIGIN = process.env.PUBLIC_ORIGIN ?? "https://harinitharanjith.com";
@@ -41,35 +56,43 @@ export class ClassReminderService implements OnModuleInit {
   }
 
   async tick(): Promise<void> {
-    const now = new Date();
-    const soon = new Date(now.getTime() + REMIND_WINDOW_MIN * 60_000);
-    const schedules = this.conn.db!.collection("classSchedules");
-    // Grab everything eligible in one go (small list — a busy day has maybe
-    // 20 classes total, most of them not in the window).
-    const candidates = await schedules.find({
-      startAt: { $gt: now, $lte: soon },
-      $or: [{ reminderSentAt: null }, { reminderSentAt: { $exists: false } }],
-    }).limit(50).toArray();
-    if (candidates.length === 0) return;
-    for (const row of candidates) {
-      // Claim the row so a second tick (or a peer process if we ever multi-instance)
-      // can't re-send. If we don't win the claim, skip — someone else got it.
-      const claimed: any = await schedules.findOneAndUpdate(
-        { _id: row._id, $or: [{ reminderSentAt: null }, { reminderSentAt: { $exists: false } }] },
-        { $set: { reminderSentAt: now } },
-        { returnDocument: "before" } as any,
-      );
-      const target = claimed?.value ?? claimed;
-      if (!target || !target._id) continue;   // lost the race
-      await this.sendFor(target).catch((e) => {
+    for (const stage of STAGES) {
+      await this.runStage(stage).catch((e) => {
         // eslint-disable-next-line no-console
-        console.warn("[class-reminder] send failed for", row._id, e);
+        console.warn(`[class-reminder] stage ${stage.key} failed:`, e);
       });
     }
   }
 
-  private async sendFor(row: any): Promise<void> {
-    // Collect recipient set — coach + invitees, deduped, lowercased.
+  private async runStage(stage: Stage): Promise<void> {
+    const now = new Date();
+    const nearAt = new Date(now.getTime() + stage.nearMs);
+    const farAt  = new Date(now.getTime() + stage.farMs);
+    const schedules = this.conn.db!.collection("classSchedules");
+    const stamp = stage.stampField;
+    const candidates = await schedules.find({
+      startAt: { $gt: nearAt, $lte: farAt },
+      $or: [{ [stamp]: null }, { [stamp]: { $exists: false } }],
+    }).limit(50).toArray();
+    if (candidates.length === 0) return;
+    for (const row of candidates) {
+      // Atomic claim so a peer tick can't re-fire this stage for this class.
+      const claimed: any = await schedules.findOneAndUpdate(
+        { _id: row._id, $or: [{ [stamp]: null }, { [stamp]: { $exists: false } }] },
+        { $set: { [stamp]: now } },
+        { returnDocument: "before" } as any,
+      );
+      const target = claimed?.value ?? claimed;
+      if (!target || !target._id) continue;
+      await this.sendFor(target, stage).catch((e) => {
+        // eslint-disable-next-line no-console
+        console.warn(`[class-reminder] ${stage.key} send failed for`, row._id, e);
+      });
+    }
+  }
+
+  private async sendFor(row: any, stage: Stage): Promise<void> {
+    // Coach + invitees, deduped, lowercased.
     const recipients = new Set<string>();
     if (Array.isArray(row.invitees)) {
       for (const inv of row.invitees) {
@@ -88,12 +111,23 @@ export class ClassReminderService implements OnModuleInit {
       weekday: "short", day: "numeric", month: "short",
       hour: "numeric", minute: "2-digit",
     });
-    const minsAway = Math.max(1, Math.round((start.getTime() - Date.now()) / 60_000));
-    const subject = `Reminder: ${row.title} starts in ${minsAway} min`;
+    const msAway = Math.max(0, start.getTime() - Date.now());
+    // Human "in X" tag — differs by stage so the email reads correctly.
+    // 15-min stage: "in 12 min" / "starting now" (if <1 min)
+    // 24h stage:    "tomorrow at 6:30 PM" style
+    const inTag = stage.key === "m15"
+      ? (msAway < 60_000 ? "starting now" : `in ${Math.round(msAway / 60_000)} min`)
+      : (msAway < 36 * 3_600_000
+          ? `tomorrow · ${start.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
+          : `on ${when}`);
+    const subject = stage.key === "m15"
+      ? `⏰ ${row.title} — ${inTag}`
+      : `📅 Tomorrow: ${row.title} at ${start.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+    const kicker = stage.key === "m15" ? "Class reminder" : "Class tomorrow";
     const text = [
       `${row.title}`,
       ``,
-      `Starts: ${when} (in ${minsAway} min)`,
+      `${inTag} (${when})`,
       `Coach:  ${row.coach}`,
       `Duration: ${row.durationMin} min`,
       row.notes ? `Notes: ${row.notes}` : "",
@@ -106,9 +140,9 @@ export class ClassReminderService implements OnModuleInit {
     const html = `
       <div style="font-family:system-ui,-apple-system,sans-serif;line-height:1.55;color:#111;max-width:520px">
         <div style="background:linear-gradient(135deg,#6d28d9,#4338ca);color:#fff;padding:20px 24px;border-radius:12px 12px 0 0">
-          <div style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;opacity:.75">Class reminder</div>
+          <div style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;opacity:.75">${escapeHtml(kicker)}</div>
           <div style="font-size:22px;font-weight:700;margin-top:4px">${escapeHtml(row.title)}</div>
-          <div style="font-size:13px;margin-top:6px;opacity:.85">${escapeHtml(when)} · in ${minsAway} min</div>
+          <div style="font-size:13px;margin-top:6px;opacity:.85">${escapeHtml(when)} · ${escapeHtml(inTag)}</div>
         </div>
         <div style="border:1px solid #e5e7eb;border-top:0;padding:20px 24px;border-radius:0 0 12px 12px">
           <div style="font-size:14px;color:#374151">
@@ -128,8 +162,8 @@ export class ClassReminderService implements OnModuleInit {
         </div>
       </div>
     `;
-    // Fire in parallel. Individual send failures are logged inside sendMail;
-    // we don't unwind reminderSentAt so a Resend hiccup doesn't cause a resend storm.
+    // Fire in parallel. Individual send failures logged in sendMail; we don't
+    // unwind the stamp so a Resend outage doesn't cause a resend storm.
     await Promise.all([...recipients].map((to) => sendMail({ to, subject, html, text })));
   }
 }
