@@ -918,7 +918,26 @@ function TodayStrip({ schedule, snaps, recordings }: {
 // can edit (server enforces via PATCH /api/class/:id/snap/:snapId). Card is
 // a Link by default; edit mode swaps in a textarea + save/cancel so the
 // coach can fix a typo without re-opening the board.
-function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMode, isSelected, onToggleSelect }: {
+// Wraps matches of `query` (case-insensitive) in <mark> so they visually
+// pop when the coach is text-searching. No regex escaping needed for the
+// split call since we lowercase both sides and only use the length to slice.
+function markText(text: string, query: string): React.ReactNode {
+  if (!query) return text;
+  const lower = text.toLowerCase();
+  const q = query.toLowerCase();
+  if (!lower.includes(q)) return text;
+  const out: React.ReactNode[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const found = lower.indexOf(q, i);
+    if (found === -1) { out.push(text.slice(i)); break; }
+    if (found > i) out.push(text.slice(i, found));
+    out.push(<mark key={found} className="rounded bg-amber-300/30 text-amber-100 px-0.5">{text.slice(found, found + q.length)}</mark>);
+    i = found + q.length;
+  }
+  return <>{out}</>;
+}
+function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMode, isSelected, onToggleSelect, query }: {
   s: SnapItem;
   isOpen: boolean;
   onOpen: () => void;
@@ -929,6 +948,7 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
   selectMode?: boolean;
   isSelected?: boolean;
   onToggleSelect?: () => void;
+  query?: string;
 }) {
   const qc = useQueryClient();
   const { data: me } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
@@ -1060,7 +1080,7 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
             </div>
           </div>
         ) : (
-          s.note && <div className="mt-1 text-[12px] text-ink-300 line-clamp-2">"{s.note}"</div>
+          s.note && <div className="mt-1 text-[12px] text-ink-300 line-clamp-2">"{markText(s.note, query || "")}"</div>
         )}
         {s.hasAudio && !editing && (
           <audio controls preload="none"
@@ -1104,7 +1124,7 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
               <div className="min-w-0 flex flex-col gap-3 text-sm">
                 <div className="text-[10px] font-mono text-ink-500 break-all" title="FEN">{s.fen}</div>
                 <div className="text-[11px] text-ink-500">{describeFen(s.fen)}</div>
-                {s.note && <div className="rounded border border-ink-700 bg-ink-800/40 p-2 text-ink-200 whitespace-pre-wrap">"{s.note}"</div>}
+                {s.note && <div className="rounded border border-ink-700 bg-ink-800/40 p-2 text-ink-200 whitespace-pre-wrap">"{markText(s.note, query || "")}"</div>}
                 {s.hasAudio && (
                   <div>
                     <audio controls preload="metadata"
@@ -1125,7 +1145,7 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
                     <summary className="cursor-pointer text-[10px] uppercase tracking-wide text-violet-300 hover:text-violet-100">
                       📝 Transcript (auto)
                     </summary>
-                    <div className="mt-1 rounded border border-ink-700 bg-ink-800/40 p-2 italic whitespace-pre-wrap">{s.transcript}</div>
+                    <div className="mt-1 rounded border border-ink-700 bg-ink-800/40 p-2 italic whitespace-pre-wrap">{markText(s.transcript, query || "")}</div>
                   </details>
                 )}
                 {/* Preload neighbour audio while the modal is open so ← / → to
@@ -1545,6 +1565,7 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
                   if (nxt.has(s._id)) nxt.delete(s._id); else nxt.add(s._id);
                   return nxt;
                 })}
+                query={textFilter}
               />
             ));
           })()}
