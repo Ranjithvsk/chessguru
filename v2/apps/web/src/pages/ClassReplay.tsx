@@ -160,6 +160,14 @@ export default function ClassReplayPage() {
     setTMs(ms);
   };
 
+  // Keep the active move-row visible in the moves scroller as playback
+  // advances. Only nudges when the highlighted row is out of view; block=nearest
+  // avoids jumpy behaviour when the user is manually scrolling nearby.
+  const activeMoveRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    activeMoveRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [idx]);
+
   if (!id || !filename) {
     return <div className="py-16 text-center text-ink-400">Missing class or filename.</div>;
   }
@@ -195,7 +203,7 @@ export default function ClassReplayPage() {
               <ol className="space-y-0.5">
                 {events.map((e, i) => (
                   <li key={i}>
-                    <button onClick={() => jumpTo(e.tMs)}
+                    <button ref={i === idx ? activeMoveRef : undefined} onClick={() => jumpTo(e.tMs)}
                       className={`flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs transition-colors ${i === idx
                         ? "bg-brand-500/20 text-brand-100"
                         : "text-ink-300 hover:bg-ink-800"}`}>
