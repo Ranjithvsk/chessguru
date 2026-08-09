@@ -1208,7 +1208,20 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
     const ids = [...selectedIds];
     if (ids.length === 0) return;
     if (!window.confirm(`Delete ${ids.length} snap${ids.length === 1 ? "" : "s"}? This can't be undone.`)) return;
-    // Need classId per snap for the URL. Look up from the source snaps list.
+    await runPerSnap(ids, (s, id) => fetch(`${BASE}/api/class/${encodeURIComponent(s.classId)}/snap/${encodeURIComponent(id)}`, {
+      method: "DELETE", credentials: "include",
+    }), "deletes");
+  }
+  async function bulkSetStar(starred: boolean) {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    await runPerSnap(ids, (s, id) => fetch(`${BASE}/api/class/${encodeURIComponent(s.classId)}/snap/${encodeURIComponent(id)}`, {
+      method: "PATCH", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ starred }),
+    }), "star updates");
+  }
+  async function runPerSnap(ids: string[], call: (s: SnapItem, id: string) => Promise<Response>, label: string) {
     const byId: Record<string, SnapItem> = {};
     for (const s of snaps) byId[s._id] = s;
     let failed = 0;
@@ -1216,13 +1229,11 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
       const s = byId[id];
       if (!s) { failed++; continue; }
       try {
-        const r = await fetch(`${BASE}/api/class/${encodeURIComponent(s.classId)}/snap/${encodeURIComponent(id)}`, {
-          method: "DELETE", credentials: "include",
-        });
+        const r = await call(s, id);
         if (!r.ok) failed++;
       } catch { failed++; }
     }
-    if (failed > 0) window.alert(`${failed} of ${ids.length} deletes failed (likely not your snap).`);
+    if (failed > 0) window.alert(`${failed} of ${ids.length} ${label} failed (likely not your snap).`);
     setSelectMode(false);
     qcSnap.invalidateQueries({ queryKey: ["academy-snaps"] });
   }
@@ -1324,11 +1335,23 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
             {selectMode ? "✕ Cancel" : "☐ Select"}
           </button>
           {selectMode && (
-            <button onClick={bulkDelete} disabled={selectedIds.size === 0}
-              title="Delete selected snaps (author-only per snap; failures reported)"
-              className="rounded-full border border-rose-500/40 bg-rose-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-rose-200 hover:bg-rose-500/20 disabled:opacity-40">
-              🗑 Delete <span className="ml-1 opacity-70">{selectedIds.size}</span>
-            </button>
+            <>
+              <button onClick={() => bulkSetStar(true)} disabled={selectedIds.size === 0}
+                title="Star selected snaps"
+                className="rounded-full border border-amber-400/40 bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-amber-100 hover:bg-amber-500/20 disabled:opacity-40">
+                ★ Star <span className="ml-1 opacity-70">{selectedIds.size}</span>
+              </button>
+              <button onClick={() => bulkSetStar(false)} disabled={selectedIds.size === 0}
+                title="Un-star selected snaps"
+                className="rounded-full border border-ink-700 bg-ink-900 px-2.5 py-0.5 text-[11px] font-semibold text-ink-300 hover:bg-ink-800 disabled:opacity-40">
+                ☆ Un-star
+              </button>
+              <button onClick={bulkDelete} disabled={selectedIds.size === 0}
+                title="Delete selected snaps (author-only per snap; failures reported)"
+                className="rounded-full border border-rose-500/40 bg-rose-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-rose-200 hover:bg-rose-500/20 disabled:opacity-40">
+                🗑 Delete <span className="ml-1 opacity-70">{selectedIds.size}</span>
+              </button>
+            </>
           )}
           <button onClick={() => exportCsv(filtered)}
             title="Download the currently filtered snaps as a CSV (openable in Excel/Sheets)"
