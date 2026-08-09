@@ -33,6 +33,10 @@ type ScheduleDoc = {
   // Coach identity — set from the session at create time. Anonymous coaches
   // (not signed in) get null and simply lose the ability to cancel/edit later.
   createdByUserId: string | null;
+  // Multi-tenant SaaS: stamped from session.academyId on create. Null for
+  // legacy / non-tenant users; non-null rows are scoped to that academy and
+  // only surfaced to its members in list()/detail().
+  academyId?: string | null;
   // Recurrence — materialized at create time. Every doc in a series shares
   // the same seriesId (= the FIRST doc's _id). seriesIndex/seriesTotal drive
   // the "3 of 12" badge on the client. Standalone one-off classes leave
@@ -136,6 +140,7 @@ export class ClassScheduleController {
     }
     const userId: string | null = req?.session?.userId ?? null;
     const username: string | null = req?.session?.username ?? null;
+    const academyId: string | null = req?.session?.academyId ?? null;
     const coachName = coach || username || "Coach";
     // Invitees — optional, deduped + validated. Same list is stamped on every
     // instance of a materialized series so the reminder scheduler doesn't have
@@ -183,6 +188,7 @@ export class ClassScheduleController {
         startAt: new Date(startTimes[i]!),
         durationMin, notes, createdAt: new Date(),
         createdByUserId: userId,
+        academyId,
         seriesId, seriesIndex: total > 1 ? i + 1 : undefined,
         seriesTotal: total > 1 ? total : undefined,
         invitees: invitees.length ? invitees : undefined,
@@ -209,7 +215,14 @@ export class ClassScheduleController {
   async list(@Req() req: any) {
     const now = new Date();
     const me: string | null = req?.session?.userId ?? null;
-    const rows = await this.col().find({}, { sort: { startAt: 1 } }).limit(200).toArray();
+    const myAcademy: string | null = req?.session?.academyId ?? null;
+    // Academy scoping: signed-in academy members see their academy's classes
+    // PLUS the legacy public rows (no academyId). Non-tenant users see only
+    // the public rows — mirrors today's behaviour for them.
+    const filter: any = myAcademy
+      ? { $or: [{ academyId: myAcademy }, { academyId: { $in: [null, undefined] } }] }
+      : { academyId: { $in: [null, undefined] } };
+    const rows = await this.col().find(filter, { sort: { startAt: 1 } }).limit(200).toArray();
     const live: (ScheduleDoc & { mine: boolean; attendedCount?: number })[] = [];
     const upcoming: (ScheduleDoc & { mine: boolean; attendedCount?: number })[] = [];
     const mineIds: string[] = [];
@@ -336,11 +349,17 @@ export class ClassScheduleController {
 
   // GET /api/class/schedule/:id — single class detail. 404 when not found (either
   // never scheduled or an ad-hoc room that never created a schedule row).
+  // Also 404 (not 403) when the caller isn't in this class's academy — same
+  // shape as a missing row so no info-leak on which academies host what.
   @Get(":id")
-  async detail(@Param("id") id: string) {
+  async detail(@Param("id") id: string, @Req() req: any) {
     if (!ROOM_RE.test(id)) throw new HttpException("bad room", HttpStatus.BAD_REQUEST);
     const row = await this.col().findOne({ _id: id as any });
     if (!row) throw new HttpException("not found", HttpStatus.NOT_FOUND);
+    if (row.academyId) {
+      const myAcademy: string | null = req?.session?.academyId ?? null;
+      if (myAcademy !== row.academyId) throw new HttpException("not found", HttpStatus.NOT_FOUND);
+    }
     return row;
   }
 }

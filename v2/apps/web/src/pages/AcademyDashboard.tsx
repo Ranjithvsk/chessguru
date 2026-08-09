@@ -41,6 +41,19 @@ interface Student {
   // Attendance rollup from classAttendance (see AcademyService.listStudents)
   attendedTotal?: number; attendedThisWeek?: number; lastAttendedAt?: string|null;
 }
+interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; attendedCount?: number; academyId?: string|null }
+interface ScheduleResp { live: ClassRow[]; upcoming: ClassRow[] }
+function fmtStartAt(d: string) {
+  const dt = new Date(d);
+  return dt.toLocaleString(undefined, { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+function localDatetimeDefault() {
+  // Default the scheduler form's startAt to the next quarter-hour, local time.
+  const d = new Date();
+  d.setMinutes(d.getMinutes() + (15 - d.getMinutes() % 15), 0, 0);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 function fmtDate(d?: string|null) { return d ? new Date(d).toLocaleDateString(undefined, { day: "2-digit", month: "short" }) : "—"; }
 function fmtAgo(d?: string|null) {
@@ -71,6 +84,31 @@ export default function AcademyDashboardPage() {
   const { data: students } = useQuery({
     queryKey: ["academy-students"], queryFn: () => get<Student[]>("/api/academy/students"),
     enabled: canManage, refetchInterval: 30_000,
+  });
+  const { data: schedule } = useQuery({
+    queryKey: ["academy-schedule"], queryFn: () => get<ScheduleResp>("/api/class/schedule"),
+    enabled: !!me?.loggedIn, refetchInterval: 30_000,
+  });
+
+  // Scheduler form
+  const [classTitle, setClassTitle] = useState("");
+  const [classCoach, setClassCoach] = useState("");
+  const [classStartAt, setClassStartAt] = useState(localDatetimeDefault);
+  const [classDur, setClassDur] = useState(60);
+  const [scheduleMsg, setScheduleMsg] = useState<{ tone: "ok"|"err"; text: string }|null>(null);
+  const scheduleMut = useMutation({
+    mutationFn: () => post<{ _id: string; title: string }>("/api/class/schedule", {
+      title: classTitle, coach: classCoach || (me?.username ?? ""), startAt: new Date(classStartAt).toISOString(), durationMin: classDur,
+    }),
+    onSuccess: (r: any) => {
+      if (r && r._id) {
+        setScheduleMsg({ tone: "ok", text: `"${r.title}" scheduled — join link ready.` });
+        setClassTitle(""); setClassCoach(""); setClassStartAt(localDatetimeDefault()); setClassDur(60);
+      } else {
+        setScheduleMsg({ tone: "err", text: (r as any)?.message || "Schedule failed." });
+      }
+      qc.invalidateQueries({ queryKey: ["academy-schedule"] });
+    },
   });
 
   // Invite forms
@@ -342,6 +380,69 @@ export default function AcademyDashboardPage() {
         </section>
       )}
 
+      {/* ── Schedule a class (owner + coach) ── */}
+      {canManage && (
+        <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
+          <div className="mb-3 flex items-baseline gap-3">
+            <h2 className="font-display text-lg text-white">🎥 Schedule a class</h2>
+            <span className="text-xs text-ink-500">Only academy members see it (join link is private).</span>
+          </div>
+          <div className="grid gap-2 md:grid-cols-2">
+            <input type="text" placeholder="Class title (e.g. Endgame drills)" value={classTitle}
+              onChange={(e) => setClassTitle(e.target.value)}
+              className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none md:col-span-2" />
+            <input type="text" placeholder={`Coach name (default: ${me?.username || "you"})`} value={classCoach}
+              onChange={(e) => setClassCoach(e.target.value)}
+              className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
+            <div className="grid grid-cols-[1fr_120px] gap-2">
+              <input type="datetime-local" value={classStartAt}
+                onChange={(e) => setClassStartAt(e.target.value)}
+                className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white focus:border-brand-500 focus:outline-none" />
+              <input type="number" min={5} max={600} value={classDur}
+                onChange={(e) => setClassDur(Math.max(5, Math.min(600, Number(e.target.value) || 60)))}
+                className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white focus:border-brand-500 focus:outline-none"
+                title="Duration (minutes)" />
+            </div>
+            <button disabled={!classTitle || scheduleMut.isPending} onClick={() => scheduleMut.mutate()}
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50 md:col-span-2">
+              {scheduleMut.isPending ? "Scheduling…" : "Schedule class"}
+            </button>
+          </div>
+          {scheduleMsg && <p className={`mt-2 text-xs ${scheduleMsg.tone === "ok" ? "text-emerald-300" : "text-rose-300"}`}>{scheduleMsg.text}</p>}
+        </section>
+      )}
+
+      {/* ── Upcoming + live classes ── */}
+      <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
+        <h2 className="mb-3 font-display text-lg text-white">
+          📅 Classes
+          <span className="ml-2 text-xs text-ink-500">
+            {(schedule?.live?.length ?? 0)} live · {(schedule?.upcoming?.length ?? 0)} upcoming
+          </span>
+        </h2>
+        {((schedule?.live?.length ?? 0) + (schedule?.upcoming?.length ?? 0)) === 0 && (
+          <p className="text-sm text-ink-400">
+            No scheduled classes yet. {canManage ? "Use the form above to schedule one." : "Your coach hasn't scheduled anything yet."}
+          </p>
+        )}
+        {(schedule?.live?.length ?? 0) > 0 && (
+          <div className="mb-3">
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-300">🟢 Live now</div>
+            {schedule!.live.map((c) => (
+              <ClassRowUI key={c._id} c={c} live />
+            ))}
+          </div>
+        )}
+        {(schedule?.upcoming?.length ?? 0) > 0 && (
+          <div>
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-400">Upcoming</div>
+            {schedule!.upcoming.slice(0, 10).map((c) => (
+              <ClassRowUI key={c._id} c={c} />
+            ))}
+          </div>
+        )}
+      </section>
+
       <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
         <h2 className="mb-1 font-display text-lg text-white">🚀 Q1 shipping list</h2>
         <ul className="grid gap-2 text-sm text-ink-200 md:grid-cols-2">
@@ -350,10 +451,30 @@ export default function AcademyDashboardPage() {
           <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">✅ Student enrollment (coach rosters)</li>
           <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">✅ Owner/coach view student performance</li>
           <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">✅ Attendance rollup per student</li>
-          <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">🔜 Per-academy class scheduling</li>
+          <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">✅ Per-academy class scheduling</li>
           <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">🔜 Fees / billing (Razorpay)</li>
         </ul>
       </section>
+    </div>
+  );
+}
+
+// Single-row renderer for a scheduled class. Live rows get a green ring and
+// a Join button; upcoming rows just show the start time and a Copy-link.
+function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
+  return (
+    <div className={`mb-1 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm ${live ? "border-emerald-500/40 bg-emerald-500/5" : "border-ink-700 bg-ink-800/40"}`}>
+      <div className="flex-1 min-w-0">
+        <div className="text-white truncate">{c.title}</div>
+        <div className="text-[11px] text-ink-400">
+          {c.coach}{" · "}{fmtStartAt(c.startAt)}{" · "}{c.durationMin}m
+          {typeof c.attendedCount === "number" && c.mine && <span className="ml-2 text-emerald-300">✓ {c.attendedCount} attended</span>}
+        </div>
+      </div>
+      <Link to={`/class/${encodeURIComponent(c._id)}`}
+        className={`rounded-lg px-3 py-1 text-xs font-semibold ${live ? "bg-emerald-600 text-white hover:bg-emerald-500" : "bg-brand-600 text-white hover:bg-brand-500"}`}>
+        {live ? "Join now" : "Open class"}
+      </Link>
     </div>
   );
 }
