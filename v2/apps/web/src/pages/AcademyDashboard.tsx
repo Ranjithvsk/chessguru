@@ -1322,10 +1322,11 @@ function describeFen(fen: string): string {
 function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   const [classFilter, setClassFilter] = useState<string>(""); // "" = all
   const [starredOnly, setStarredOnly] = useState(false);
+  const [textFilter, setTextFilter] = useState("");
   const [openIdx, setOpenIdx] = useState<number | null>(null);
   // Reset the open snap when filters change so we don't end up pointing at a
   // row that just got filtered out.
-  useEffect(() => { setOpenIdx(null); }, [classFilter, starredOnly]);
+  useEffect(() => { setOpenIdx(null); }, [classFilter, starredOnly, textFilter]);
   // Multi-select for bulk actions. Enter mode via "☐ Select" chip; clicking
   // cards toggles selection instead of opening the modal. Explicit mode is
   // friendlier than Ctrl+click magic for the coach audience.
@@ -1420,9 +1421,15 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   const topClasses = [...tally.entries()].sort((a, b) => b[1].lastAt - a[1].lastAt).slice(0, 5);
   // Starred snaps float to the top so the coach's review shortlist is one
   // scroll-length away regardless of recency. If the starred-only chip is on,
-  // non-starred snaps are dropped entirely.
+  // non-starred snaps are dropped entirely. Text filter greps note + transcript
+  // case-insensitive so "diagonal" surfaces every position where the coach
+  // said the word during class or wrote it in the note.
+  const q = textFilter.trim().toLowerCase();
   const filtered = (classFilter ? snaps.filter((s) => s.classId === classFilter) : snaps)
     .filter((s) => (starredOnly ? !!s.starred : true))
+    .filter((s) => !q || (String(s.note || "").toLowerCase().includes(q)
+      || String(s.transcript || "").toLowerCase().includes(q)
+      || String(s.classTitle || "").toLowerCase().includes(q)))
     .slice()
     .sort((a, b) => Number(!!b.starred) - Number(!!a.starred));
   return (
@@ -1430,6 +1437,13 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
       <h2 className="mb-3 font-display text-lg text-white">📸 Recent snaps <span className="text-xs text-ink-500">({snaps.length})</span></h2>
       {snaps.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          <input value={textFilter} onChange={(e) => setTextFilter(e.target.value)}
+            placeholder="🔎 search notes / transcript"
+            className="rounded-full border border-ink-700 bg-ink-900 px-2.5 py-0.5 text-[11px] text-ink-100 placeholder:text-ink-500 focus:border-brand-500/60 focus:outline-none w-52" />
+          {textFilter && (
+            <button onClick={() => setTextFilter("")}
+              className="text-[10px] text-ink-400 hover:text-ink-100" title="Clear text filter">✕</button>
+          )}
           {topClasses.length > 1 && (
             <>
               <button onClick={() => setClassFilter("")}
