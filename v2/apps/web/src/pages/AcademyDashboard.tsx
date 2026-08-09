@@ -866,7 +866,13 @@ function TodayStrip({ schedule, snaps, recordings }: {
 // can edit (server enforces via PATCH /api/class/:id/snap/:snapId). Card is
 // a Link by default; edit mode swaps in a textarea + save/cancel so the
 // coach can fix a typo without re-opening the board.
-function SnapCard({ s }: { s: SnapItem }) {
+function SnapCard({ s, isOpen, onOpen, onClose, onNav }: {
+  s: SnapItem;
+  isOpen: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+  onNav: (delta: 1 | -1) => void;
+}) {
   const qc = useQueryClient();
   const { data: me } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
   const canEdit = !!me?.userId && s.byUserId === me.userId;
@@ -915,17 +921,35 @@ function SnapCard({ s }: { s: SnapItem }) {
     } catch (e) { window.alert(String((e as Error).message || e)); }
   }
   // Card click opens an inline detail modal (bigger board + audio + full note)
-  // instead of navigating away. The modal has its own "Open in board editor"
-  // button for the deep-dive flow, so the old navigation is still one click away.
-  const [detailOpen, setDetailOpen] = useState(false);
+  // instead of navigating away. The modal itself is a portal-less <div> that
+  // renders when isOpen is true. Modal state lives in the parent so ← / →
+  // keys can walk across cards without prop-drilling through refs.
   const cardOnClick = (e: React.MouseEvent) => {
     if (editing) return;
     e.preventDefault(); e.stopPropagation();
-    setDetailOpen(true);
+    onOpen();
   };
+  // ← / → walk the filtered snap list; Esc closes. Bail if the user is typing
+  // in a text field so chat/URL bar still work.
+  useEffect(() => {
+    if (!isOpen) return;
+    const isTextField = (t: EventTarget | null) => {
+      const el = t as HTMLElement | null;
+      if (!el) return false;
+      return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (isTextField(e.target)) return;
+      if (e.key === "ArrowRight") { e.preventDefault(); onNav(1); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); onNav(-1); }
+      else if (e.key === "Escape") { e.preventDefault(); onClose(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isOpen, onNav, onClose]);
   return (
     <div onClick={cardOnClick} role={editing ? undefined : "button"} tabIndex={editing ? undefined : 0}
-      onKeyDown={(e) => { if (!editing && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setDetailOpen(true); } }}
+      onKeyDown={(e) => { if (!editing && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onOpen(); } }}
       className={`group flex gap-3 rounded-lg border p-3 transition-colors ${editing
         ? "border-brand-500/60 bg-ink-800"
         : "border-ink-700 bg-ink-800/40 hover:border-brand-500/50 hover:bg-ink-800/60 cursor-pointer"}`}>
@@ -984,9 +1008,9 @@ function SnapCard({ s }: { s: SnapItem }) {
           {!editing && <span className="ml-2 text-brand-300 opacity-0 group-hover:opacity-100 transition-opacity">🔍 Expand</span>}
         </div>
       </div>
-      {detailOpen && (
+      {isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-          onClick={(e) => { e.stopPropagation(); setDetailOpen(false); }}>
+          onClick={(e) => { e.stopPropagation(); onClose(); }}>
           <div onClick={(e) => e.stopPropagation()}
             className="w-full max-w-2xl rounded-xl2 border border-ink-700 bg-ink-900 p-5 shadow-2xl">
             <div className="mb-3 flex items-baseline justify-between gap-2">
@@ -997,8 +1021,11 @@ function SnapCard({ s }: { s: SnapItem }) {
                 </div>
                 <div className="text-[11px] text-ink-400 truncate">{s.classTitle} · {new Date(s.at).toLocaleString()}</div>
               </div>
-              <button onClick={() => setDetailOpen(false)}
-                className="text-ink-400 hover:text-white text-sm">Esc</button>
+              <div className="flex items-center gap-2 text-[10px] text-ink-500 shrink-0">
+                <span className="hidden sm:inline" title="← / → step through snaps">← →</span>
+                <button onClick={() => onClose()}
+                  className="text-ink-400 hover:text-white text-sm">Esc</button>
+              </div>
             </div>
             <div className="grid gap-4 md:grid-cols-[minmax(0,320px)_1fr]">
               <div className="w-full">
@@ -1015,13 +1042,13 @@ function SnapCard({ s }: { s: SnapItem }) {
                 )}
                 {shapes.length > 0 && <div className="text-[11px] text-amber-300">✏️ {shapes.length} arrow{shapes.length === 1 ? "" : "s"} preserved</div>}
                 <div className="mt-auto flex flex-wrap items-center gap-2">
-                  <Link to={href} onClick={() => setDetailOpen(false)}
+                  <Link to={href} onClick={() => onClose()}
                     className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500">
                     🔬 Open in board editor
                   </Link>
                   {canEdit && (
                     <>
-                      <button onClick={() => { setDraft(s.note || ""); setEditing(true); setDetailOpen(false); }}
+                      <button onClick={() => { setDraft(s.note || ""); setEditing(true); onClose(); }}
                         className="rounded-lg border border-ink-600 px-3 py-1.5 text-sm text-ink-200 hover:bg-ink-800">✎ Edit note</button>
                       <button onClick={() => { toggleStar(); }}
                         className="rounded-lg border border-ink-600 px-3 py-1.5 text-sm text-ink-200 hover:bg-ink-800">{s.starred ? "★ Un-star" : "☆ Star"}</button>
@@ -1073,6 +1100,10 @@ function describeFen(fen: string): string {
 function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   const [classFilter, setClassFilter] = useState<string>(""); // "" = all
   const [starredOnly, setStarredOnly] = useState(false);
+  const [openIdx, setOpenIdx] = useState<number | null>(null);
+  // Reset the open snap when filters change so we don't end up pointing at a
+  // row that just got filtered out.
+  useEffect(() => { setOpenIdx(null); }, [classFilter, starredOnly]);
   const starredCount = snaps.reduce((n, s) => n + (s.starred ? 1 : 0), 0);
   // CSV export of the currently filtered snap set. Client-side blob download,
   // one row per snap. FEN + shapes JSON on the end so a coach can paste any
@@ -1167,7 +1198,22 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
         <div className="text-sm text-ink-400">No snaps match this filter.</div>
       ) : (
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-          {filtered.slice(0, 12).map((s) => <SnapCard key={s._id} s={s} />)}
+          {(() => {
+            const shown = filtered.slice(0, 12);
+            return shown.map((s, i) => (
+              <SnapCard key={s._id} s={s}
+                isOpen={openIdx === i}
+                onOpen={() => setOpenIdx(i)}
+                onClose={() => setOpenIdx(null)}
+                onNav={(d) => setOpenIdx((cur) => {
+                  const cur0 = cur ?? i;
+                  const next = cur0 + d;
+                  if (next < 0 || next >= shown.length) return cur;
+                  return next;
+                })}
+              />
+            ));
+          })()}
         </div>
       )}
     </section>
