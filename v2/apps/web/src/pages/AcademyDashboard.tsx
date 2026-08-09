@@ -1737,7 +1737,27 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   const [starredOnly, setStarredOnly] = useState<boolean>(sp.get("starred") === "1");
   const [textFilter, setTextFilter] = useState<string>(sp.get("q") || "");
   const [hideReviewed, setHideReviewed] = useState<boolean>(sp.get("hidedone") === "1");
-  const [weekFilter, setWeekFilter] = useState<string>(sp.get("week") || "");   // ISO date of week-start (Sun)
+  const [weekFilter, setWeekFilter] = useState<string>(sp.get("week") || "");
+  // Global "/" hotkey focuses the search input -- Slack/GitHub convention.
+  // Bail if the user is already typing in some input so mid-text "/" chars
+  // (URLs, timestamps) aren't hijacked.
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "/") return;
+      const tgt = e.target as HTMLElement | null;
+      if (!tgt) return;
+      const tag = tgt.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tgt.isContentEditable) return;
+      const el = searchInputRef.current;
+      if (!el) return;
+      e.preventDefault();
+      el.focus();
+      el.select();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);   // ISO date of week-start (Sun)
   useEffect(() => {
     const handler = (e: Event) => {
       const iso = (e as CustomEvent<{ iso: string }>).detail?.iso;
@@ -1955,8 +1975,10 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
       {snaps.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-1.5">
           <input value={textFilter} onChange={(e) => setTextFilter(e.target.value)}
-            placeholder="🔎 search notes / transcript"
-            className="rounded-full border border-ink-700 bg-ink-900 px-2.5 py-0.5 text-[11px] text-ink-100 placeholder:text-ink-500 focus:border-brand-500/60 focus:outline-none w-52" />
+            ref={searchInputRef}
+            placeholder="🔎 search notes / transcript · press /"
+            onKeyDown={(e) => { if (e.key === "Escape") { setTextFilter(""); (e.target as HTMLInputElement).blur(); } }}
+            className="rounded-full border border-ink-700 bg-ink-900 px-2.5 py-0.5 text-[11px] text-ink-100 placeholder:text-ink-500 focus:border-brand-500/60 focus:outline-none w-56" />
           {textFilter && (
             <>
               <button onClick={() => setTextFilter("")}
