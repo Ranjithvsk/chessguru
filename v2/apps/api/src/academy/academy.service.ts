@@ -498,4 +498,35 @@ export class AcademyService {
     }
     return { ok: true, sent, failed, attendees: attendees.length };
   }
+
+  /** Owner OR coach: list recording files across the academy's classes.
+   *  Owner sees every scheduled class in the academy; coach sees only classes
+   *  they created. Reads the on-disk RECORDINGS_DIR/<classId>/*.webm tree. */
+  async listRecordings(session: any, limit = 100) {
+    const g = this.ensureCoachOrOwner(session);
+    const filter: any = { academyId: g.academyId };
+    if (g.role === "coach") filter.createdByUserId = g.userId;
+    const classes: any[] = await this.conn.db!.collection("classSchedules")
+      .find(filter, { projection: { _id: 1, title: 1, startAt: 1 } })
+      .sort({ startAt: -1 }).limit(200).toArray();
+    if (classes.length === 0) return [];
+
+    const dir = process.env.CLASS_RECORDINGS_DIR ?? "/home/ubuntu/chessguru-recordings";
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    const out: Array<{ classId: string; title: string; startAt: Date; filename: string; bytes: number; createdAt: Date }> = [];
+    for (const c of classes) {
+      const classDir = path.join(dir, String(c._id));
+      let entries: string[] = [];
+      try { entries = await fs.readdir(classDir); } catch { continue; }
+      for (const name of entries) {
+        if (!/\.webm$/i.test(name)) continue;
+        try {
+          const st = await fs.stat(path.join(classDir, name));
+          out.push({ classId: String(c._id), title: c.title || c._id, startAt: c.startAt, filename: name, bytes: st.size, createdAt: st.mtime });
+        } catch { /* skip unreadable */ }
+      }
+    }
+    return out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, limit);
+  }
 }

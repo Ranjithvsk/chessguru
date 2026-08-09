@@ -64,4 +64,9 @@ export class AcademyController {
   sendClassSummary(@Req() req: any, @Param("classId") classId: string, @Body() body: any) {
     return this.svc.sendClassSummary(req.session, classId, body);
   }
+
+  // Recordings across the caller's scope. Owner sees every class in academy;
+  // coach sees only their own scheduled classes' recordings.
+  @Get("recordings")
+  listRecordings(@Req() req: any) { return this.svc.listRecordings(req.session); }
 }

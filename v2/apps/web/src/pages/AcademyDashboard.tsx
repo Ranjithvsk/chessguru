@@ -102,6 +102,11 @@ export default function AcademyDashboardPage() {
     queryKey: ["academy-schedule"], queryFn: () => get<ScheduleResp>("/api/class/schedule"),
     enabled: !!me?.loggedIn, refetchInterval: 30_000,
   });
+  const { data: recordings } = useQuery({
+    queryKey: ["academy-recordings"],
+    queryFn: () => get<Array<{ classId: string; title: string; startAt: string; filename: string; bytes: number; createdAt: string }>>("/api/academy/recordings"),
+    enabled: canManage, refetchInterval: 60_000,
+  });
   const { data: feesConfig } = useQuery({
     queryKey: ["academy-fees-config"], queryFn: () => get<FeesConfig>("/api/academy/fees/config"),
     enabled: canManage,
@@ -578,6 +583,35 @@ export default function AcademyDashboardPage() {
             )}
           </section>
         </>
+      )}
+
+      {/* ── Recent recordings (owner + coach) ── */}
+      {canManage && recordings && recordings.length > 0 && (
+        <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
+          <h2 className="mb-3 font-display text-lg text-white">🎬 Recent recordings <span className="text-xs text-ink-500">({recordings.length})</span></h2>
+          <div className="grid gap-2">
+            {recordings.slice(0, 20).map((r) => (
+              <div key={`${r.classId}/${r.filename}`} className="flex flex-wrap items-center gap-3 rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2 text-sm">
+                <div className="flex-1 min-w-0">
+                  <div className="text-white truncate">{r.title}</div>
+                  <div className="text-[11px] text-ink-400">
+                    {new Date(r.createdAt).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                    {" · "}{(r.bytes / (1024 * 1024)).toFixed(1)} MB
+                  </div>
+                </div>
+                <Link to={`/class/${encodeURIComponent(r.classId)}/replay/${encodeURIComponent(r.filename)}`}
+                  className="rounded-lg bg-brand-600 hover:bg-brand-500 text-white px-3 py-1 text-xs font-semibold">
+                  ▶ Play
+                </Link>
+                <a href={`/v2api/api/class/${encodeURIComponent(r.classId)}/recording/${encodeURIComponent(r.filename)}`}
+                  download
+                  className="rounded-lg border border-ink-700 hover:bg-ink-800 text-ink-300 px-3 py-1 text-xs">
+                  ⬇ Download
+                </a>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
