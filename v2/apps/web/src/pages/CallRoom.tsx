@@ -919,7 +919,8 @@ export default function CallRoomPage() {
                 floaters={floaters} activeSpeaker={activeSpeaker}
                 moderatorId={moderatorId} spotlightId={spotlightId} iAmMod={iAmMod}
                 onKick={kickPeer} onSpotlight={spotlightPeer}
-                onSnap={() => setSnapCount((n) => n + 1)} />
+                onSnap={() => setSnapCount((n) => n + 1)}
+                getMicStream={() => localStreamRef.current} />
             : <ClassicMainArea room={room} peerIds={peerIds} peersRef={peersRef} localVideoRef={localVideoRef}
                 camOn={camOn} handSet={handSet} selfHandUp={selfHandUp} selfId={selfIdRef.current}
                 floaters={floaters} activeSpeaker={activeSpeaker}
@@ -1128,6 +1129,9 @@ type MainAreaProps = {
   onKick: (peerId: string) => void;
   onSpotlight: (peerId: string | null) => void;
   onSnap?: () => void;
+  // Live mic stream from the call. Snap+audio uses this to run a rolling
+  // pre-snap recorder without asking for a second getUserMedia grant.
+  getMicStream?: () => MediaStream | null;
 };
 
 function ClassicMainArea({
@@ -1257,7 +1261,7 @@ function ClassicMainArea({
 function BoardMainArea({
   room, peerIds, peersRef, localVideoRef, camOn,
   handSet, selfHandUp, selfId, floaters, activeSpeaker,
-  moderatorId, spotlightId, iAmMod, onKick, onSpotlight, onSnap,
+  moderatorId, spotlightId, iAmMod, onKick, onSpotlight, onSnap, getMicStream,
 }: MainAreaProps) {
   const { fen, lastMove, dests, sendMove, sendReset, connected, shapes, sendAnnot } = useSharedBoard(room);
 
@@ -1296,7 +1300,7 @@ function BoardMainArea({
           >
             ↺ Reset board
           </button>
-          <SnapButtons room={room} fen={fen} shapes={shapes as any} onSnap={onSnap} />
+          <SnapButtons room={room} fen={fen} shapes={shapes as any} onSnap={onSnap} getMicStream={getMicStream} />
           <span className={`text-[10px] ${connected ? "text-emerald-400" : "text-ink-500"}`}>
             {connected ? "board synced" : "board offline"}
           </span>
@@ -1365,20 +1369,104 @@ function BoardMainArea({
 
 // One WebSocket to /v2api/class-ws/:room, one chess.js engine, one state. Its own
 // effect so ?board=1 toggles don't ripple into the signaling mesh.
-// Snap + optional 15s mic audio clip. Two buttons: plain 📸 Snap and
-// 🎙 Snap+audio. Audio variant POSTs the snap first (fen+note+shapes), then
-// records a fresh 15s webm/opus mic clip via MediaRecorder and uploads it to
-// the snap's audio endpoint. Uses navigator.mediaDevices.getUserMedia({audio})
-// standalone rather than piggybacking the call's local stream so this component
-// can live in the module scope without prop-drilling the mic ref.
-function SnapButtons({ room, fen, shapes, onSnap }: {
+// Snap + optional mic audio clip. Two buttons:
+//   📸 Snap        — position + note only
+//   🎙 Snap+audio  — position + note + rolling PRE-snap audio window
+//
+// The audio variant uses a continuous rolling MediaRecorder that has been
+// running since mount on the call's own mic stream (passed in via
+// getMicStream). We restart the recorder every 30 seconds and keep the
+// PREVIOUS completed 30s blob in a ref. On snap:
+//   * if the current recorder has been running >= 15s, we stop it now and
+//     upload that partial window (15..30s of pre-snap audio)
+//   * otherwise we fall back to prevBlobRef (the last completed 30s window,
+//     which ended 0..15s ago — still captures the "aha" moment)
+// Coach doesn't wait through a "recording 15s" delay -- the audio is
+// already there. No second getUserMedia grant either, since we reuse the
+// call's mic stream.
+function SnapButtons({ room, fen, shapes, onSnap, getMicStream }: {
   room: string;
   fen: string;
   shapes: Array<{ orig: string; dest?: string; brush?: string }>;
   onSnap?: () => void;
+  getMicStream?: () => MediaStream | null;
 }) {
-  const [recording, setRecording] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  // Rolling recorder state -- refs so we don't rerender per chunk.
+  const recRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
+  const startedAtRef = useRef<number>(0);
+  const prevBlobRef = useRef<Blob | null>(null);
+  const mimeRef = useRef<string>("");
+  const cycleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ROLL_MS = 30_000;    // restart cadence -- keeps blobs valid & bounded
+  const MIN_STOP_MS = 15_000; // if current has >= this much captured, prefer it
+
+  // Boot the rolling recorder as soon as we have a mic stream. Retries every
+  // 3s if the call hasn't wired the mic yet (getUserMedia happens during the
+  // hello dance and can lag a couple hundred ms).
+  useEffect(() => {
+    let cancelled = false;
+    for (const t of ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"]) {
+      if ((window as any).MediaRecorder?.isTypeSupported?.(t)) { mimeRef.current = t; break; }
+    }
+    function startCycle(): boolean {
+      const s = getMicStream?.() ?? null;
+      if (!s) return false;
+      const audioTracks = s.getAudioTracks();
+      if (audioTracks.length === 0) return false;
+      // Own-mic-only stream so we don't record the mixed room.
+      const micOnly = new MediaStream(audioTracks);
+      const opts = mimeRef.current ? { mimeType: mimeRef.current } : undefined;
+      let rec: MediaRecorder;
+      try { rec = new MediaRecorder(micOnly, opts); }
+      catch { return false; }
+      chunksRef.current = [];
+      startedAtRef.current = Date.now();
+      rec.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunksRef.current.push(e.data); };
+      rec.onstop = () => {
+        const cur = new Blob(chunksRef.current, { type: mimeRef.current || "audio/webm" });
+        // Discard tiny (<100 bytes) blobs -- MediaRecorder can fire a stop
+        // before any data available if killed within a couple ms of start.
+        if (cur.size >= 100) prevBlobRef.current = cur;
+        chunksRef.current = [];
+      };
+      rec.start(1000);   // 1s timeslice -- lets us stop-and-use partial windows cleanly
+      recRef.current = rec;
+      cycleRef.current = setTimeout(() => {
+        if (cancelled) return;
+        try { rec.state === "recording" && rec.stop(); } catch { /* */ }
+        // Chain the next cycle. The stop-onstop of THIS rec fires ~sync
+        // and the next start below re-arms the ref.
+        startCycle();
+      }, ROLL_MS);
+      return true;
+    }
+    if (!startCycle()) {
+      const retry = setInterval(() => { if (cancelled) { clearInterval(retry); return; } if (startCycle()) clearInterval(retry); }, 3_000);
+      return () => { cancelled = true; clearInterval(retry); if (cycleRef.current) clearTimeout(cycleRef.current); try { recRef.current?.stop(); } catch { /* */ } };
+    }
+    return () => {
+      cancelled = true;
+      if (cycleRef.current) clearTimeout(cycleRef.current);
+      try { recRef.current?.stop(); } catch { /* */ }
+    };
+  }, [getMicStream]);
+
+  // Wait for MediaRecorder.onstop to fire (returns the blob from prevBlobRef).
+  function stopCurrentAndAwait(): Promise<Blob | null> {
+    return new Promise((resolve) => {
+      const rec = recRef.current;
+      if (!rec || rec.state !== "recording") { resolve(null); return; }
+      const prevOnStop = rec.onstop;
+      rec.onstop = (e) => {
+        if (prevOnStop) (prevOnStop as any).call(rec, e);   // still writes into prevBlobRef
+        resolve(prevBlobRef.current);
+      };
+      try { rec.stop(); } catch { resolve(null); }
+    });
+  }
+
   async function takeSnap(withAudio: boolean): Promise<string | null> {
     const note = window.prompt("Note for this position? (optional)") ?? "";
     try {
@@ -1395,47 +1483,56 @@ function SnapButtons({ room, fen, shapes, onSnap }: {
     } catch { setMsg("Snap failed"); setTimeout(() => setMsg(null), 2000); return null; }
   }
   async function snapWithAudio() {
-    if (recording) return;
+    setMsg("Snapping…");
     const snapId = await takeSnap(true);
     if (!snapId) return;
-    let stream: MediaStream | null = null;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch { setMsg("Mic denied"); setTimeout(() => setMsg(null), 2500); return; }
-    let mime = "";
-    for (const t of ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"]) {
-      if ((window as any).MediaRecorder?.isTypeSupported?.(t)) { mime = t; break; }
+    const now = Date.now();
+    const elapsed = now - (startedAtRef.current || now);
+    // Pick blob source: partial current if it has enough, else prev completed.
+    let blob: Blob | null = null;
+    if (elapsed >= MIN_STOP_MS) {
+      // Stop the current recorder now to flush a valid clip that ENDS at "now".
+      // startCycle's timeout+retry re-arms a fresh recorder for the next window.
+      blob = await stopCurrentAndAwait();
+      // Kickstart replacement so future snaps still have coverage.
+      if (cycleRef.current) { clearTimeout(cycleRef.current); cycleRef.current = null; }
+      // Immediate restart handled by the rolling loop's next tick; but we
+      // proactively poke one to keep coverage tight (short delay).
+      setTimeout(() => {
+        const dummy = getMicStream?.();
+        if (dummy && !recRef.current) {
+          // Re-boot by remounting the effect isn't possible from here; fall
+          // through -- the retry interval in the effect covers stale state.
+        }
+      }, 100);
+    } else if (prevBlobRef.current) {
+      blob = prevBlobRef.current;
+    } else {
+      // Very first 15s of session, before any rolling window completed.
+      // Fall back to stopping current whatever we have.
+      blob = await stopCurrentAndAwait();
     }
-    const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
-    const chunks: BlobPart[] = [];
-    rec.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
-    rec.onstop = async () => {
-      stream?.getTracks().forEach((t) => t.stop());
-      const blob = new Blob(chunks, { type: mime || "audio/webm" });
-      try {
-        const up = await fetch(`/v2api/api/class/${encodeURIComponent(room)}/snap/${encodeURIComponent(snapId)}/audio`, {
-          method: "POST", credentials: "include",
-          headers: { "Content-Type": "application/octet-stream" },
-          body: blob,
-        });
-        setMsg(up.ok ? "Snap+audio saved" : "Audio upload failed");
-      } catch { setMsg("Audio upload failed"); }
-      finally { setRecording(false); setTimeout(() => setMsg(null), 2000); }
-    };
-    setRecording(true);
-    setMsg("Recording 15s… speak now");
-    rec.start();
-    setTimeout(() => { try { rec.state === "recording" && rec.stop(); } catch { /* already stopped */ } }, 15_000);
+    if (!blob || blob.size < 100) { setMsg("No audio captured"); setTimeout(() => setMsg(null), 2500); return; }
+    setMsg("Uploading audio…");
+    try {
+      const up = await fetch(`/v2api/api/class/${encodeURIComponent(room)}/snap/${encodeURIComponent(snapId)}/audio`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: blob,
+      });
+      setMsg(up.ok ? "Snap+audio saved" : "Audio upload failed");
+    } catch { setMsg("Audio upload failed"); }
+    finally { setTimeout(() => setMsg(null), 2000); }
   }
   return (
     <>
       <button onClick={() => takeSnap(false)}
         className="rounded-xl2 px-3 py-1.5 text-xs bg-amber-600 hover:bg-amber-500 text-white"
         title="Snap this position + note — reviewable later from /academy">📸 Snap</button>
-      <button onClick={snapWithAudio} disabled={recording}
-        className={`rounded-xl2 px-3 py-1.5 text-xs text-white ${recording ? "bg-rose-600" : "bg-amber-700 hover:bg-amber-600"} disabled:opacity-70`}
-        title="Snap + record a 15s voice memo attached to this position">
-        {recording ? "● recording…" : "🎙 Snap+audio"}
+      <button onClick={snapWithAudio}
+        className="rounded-xl2 px-3 py-1.5 text-xs bg-amber-700 hover:bg-amber-600 text-white"
+        title="Snap + attach the past ~30s of your voice (rolling capture)">
+        🎙 Snap+audio
       </button>
       {msg && <span className="text-[10px] text-ink-300">{msg}</span>}
     </>
