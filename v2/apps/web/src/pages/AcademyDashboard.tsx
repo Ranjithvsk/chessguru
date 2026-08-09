@@ -1120,6 +1120,14 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
                   </div>
                 )}
                 {shapes.length > 0 && <div className="text-[11px] text-amber-300">✏️ {shapes.length} arrow{shapes.length === 1 ? "" : "s"} preserved</div>}
+                {s.transcript && (
+                  <details className="text-[12px] text-ink-300">
+                    <summary className="cursor-pointer text-[10px] uppercase tracking-wide text-violet-300 hover:text-violet-100">
+                      📝 Transcript (auto)
+                    </summary>
+                    <div className="mt-1 rounded border border-ink-700 bg-ink-800/40 p-2 italic whitespace-pre-wrap">{s.transcript}</div>
+                  </details>
+                )}
                 {/* Preload neighbour audio while the modal is open so ← / → to
                     an audio snap starts playing without a fetch hitch. Hidden
                     element, no controls, purely a network warmup. */}
@@ -1276,7 +1284,7 @@ function StarredDigestPreviewLink() {
 // scope the grid; click All to reset. The 12-card visible limit still
 // applies within the filtered view.
 type SnapShape = { orig: string; dest?: string; brush?: string };
-type SnapItem = { _id: string; classId: string; classTitle: string; fen: string; note: string; byName: string; byUserId?: string; at: string; shapes?: SnapShape[]; starred?: boolean; hasAudio?: boolean; audioBytes?: number };
+type SnapItem = { _id: string; classId: string; classTitle: string; fen: string; note: string; byName: string; byUserId?: string; at: string; shapes?: SnapShape[]; starred?: boolean; hasAudio?: boolean; audioBytes?: number; transcript?: string };
 // Nominal opus bitrate MediaRecorder uses by default (~48 kbps). Cheap
 // duration estimate for the card badge -- coach uses it to eyeball short
 // vs long clips without opening each modal. Off by a couple seconds if a

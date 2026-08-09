@@ -708,6 +708,7 @@ export class AcademyService {
       starred: !!r.starred,
       hasAudio: !!r.hasAudio,
       audioBytes: typeof r.audioBytes === "number" ? r.audioBytes : undefined,
+      transcript: typeof r.transcript === "string" ? r.transcript : undefined,
       byUserId: String(r.byUserId), byName: r.byName || r.byUserId,
       at: r.at,
     }));

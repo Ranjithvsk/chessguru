@@ -1396,6 +1396,12 @@ function SnapButtons({ room, fen, shapes, onSnap, getMicStream }: {
   // and Snap+audio will have coverage. Grey means the mic isn't wired yet
   // (getUserMedia hadn't resolved at mount, retrying every 3s).
   const [micReady, setMicReady] = useState(false);
+  // Rolling transcript buffer: SpeechRecognition-derived timestamped
+  // segments. On snap+audio we slice the last N seconds and include as
+  // `transcript` in a follow-up PATCH so the dashboard can show a text
+  // preview under the audio. Best-effort -- browsers without SR just leave
+  // transcriptRef empty and everything else still works.
+  const transcriptRef = useRef<Array<{ tMs: number; text: string }>>([]);
   // Rolling recorder state -- refs so we don't rerender per chunk.
   const recRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
@@ -1469,6 +1475,42 @@ function SnapButtons({ room, fen, shapes, onSnap, getMicStream }: {
     };
   }, [getMicStream, ROLL_MS]);
 
+  // SpeechRecognition (Web Speech API) rolling transcript. Fires only in
+  // Chrome/Edge; Firefox/Safari lack the API, in which case transcriptRef
+  // just stays empty and the snap PATCH skips the transcript field.
+  useEffect(() => {
+    const SR: any = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    let stopped = false;
+    let recog: any = null;
+    function start() {
+      try {
+        recog = new SR();
+        recog.continuous = true;
+        recog.interimResults = false;
+        recog.lang = navigator.language || "en-US";
+        recog.onresult = (e: any) => {
+          const now = Date.now();
+          for (let i = e.resultIndex; i < e.results.length; i++) {
+            const res = e.results[i];
+            if (!res.isFinal) continue;
+            const text = String(res[0]?.transcript || "").trim();
+            if (!text) continue;
+            transcriptRef.current.push({ tMs: now, text });
+            // Trim to last 5 min so the buffer doesn't grow unbounded.
+            const cutoff = now - 5 * 60_000;
+            while (transcriptRef.current.length > 0 && transcriptRef.current[0]!.tMs < cutoff) transcriptRef.current.shift();
+          }
+        };
+        recog.onerror = () => { /* auto-restarts via onend */ };
+        recog.onend = () => { if (!stopped) setTimeout(start, 400); };
+        recog.start();
+      } catch { /* SR may throw on autoplay policy -- silently skip */ }
+    }
+    start();
+    return () => { stopped = true; try { recog?.stop(); } catch { /* */ } };
+  }, []);
+
   // Wait for MediaRecorder.onstop to fire (returns the blob from prevBlobRef).
   function stopCurrentAndAwait(): Promise<Blob | null> {
     return new Promise((resolve) => {
@@ -1537,6 +1579,22 @@ function SnapButtons({ room, fen, shapes, onSnap, getMicStream }: {
         body: blob,
       });
       setMsg(up.ok ? "Snap+audio saved" : "Audio upload failed");
+      if (up.ok) {
+        // Attach the last N seconds of transcript as best-effort text.
+        // ROLL_MS lines up with the audio window; a slightly-larger fetch
+        // (+3s) captures phrases that started just before the audio window.
+        const cutoff = now - (ROLL_MS + 3_000);
+        const words = transcriptRef.current.filter((t) => t.tMs >= cutoff).map((t) => t.text).join(" ").trim();
+        if (words) {
+          try {
+            await fetch(`/v2api/api/class/${encodeURIComponent(room)}/snap/${encodeURIComponent(snapId)}`, {
+              method: "PATCH", credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ transcript: words.slice(0, 2000) }),
+            });
+          } catch { /* silent */ }
+        }
+      }
     } catch { setMsg("Audio upload failed"); }
     finally { setTimeout(() => setMsg(null), 2000); }
   }

@@ -80,6 +80,7 @@ export class ClassSnapController {
     const $set: Record<string, unknown> = {};
     if (typeof body?.note === "string") $set.note = body.note.slice(0, 500);
     if (typeof body?.starred === "boolean") $set.starred = body.starred;
+    if (typeof body?.transcript === "string") $set.transcript = body.transcript.slice(0, 2000);
     if (Object.keys($set).length === 0) return { ok: true, changed: false };
     await this.conn.db!.collection("classSnaps").updateOne({ _id: snapId as any }, { $set });
     return { ok: true, changed: true };
