@@ -301,6 +301,10 @@ function ClassLanding() {
     // cadence from startAt. Chips in the form let coach flip individual days on/off
     // (e.g. [1,3,5] for a Mon/Wed/Fri pattern).
     recurrenceWeekdays: [] as number[],
+    // Invitee emails — free-text (comma / newline / space separated). Server
+    // parses + dedupes + validates. Empty = no reminders sent (except to coach's
+    // own email, which the scheduler always emails when known).
+    invitees: "",
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -345,7 +349,7 @@ function ClassLanding() {
   // Edit-target state — when set, an EditOverlay renders over the landing. Saving
   // POSTs a PATCH and refreshes the list.
   const [editing, setEditing] = useState<ScheduledClass | null>(null);
-  const saveEdit = async (patch: { title: string; coach: string; notes: string; durationMin: number }, propagate: boolean) => {
+  const saveEdit = async (patch: { title: string; coach: string; notes: string; durationMin: number; invitees: string }, propagate: boolean) => {
     if (!editing) return;
     const url = new URL(`${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/schedule/${encodeURIComponent(editing._id)}`, window.location.origin);
     if (propagate && editing.seriesId) url.searchParams.set("scope", "series");
@@ -390,6 +394,7 @@ function ClassLanding() {
           recurrence: form.recurrence,
           recurrenceCount: form.recurrence === "weekly" ? Number(form.recurrenceCount) || 1 : 1,
           recurrenceWeekdays: form.recurrence === "weekly" ? form.recurrenceWeekdays : [],
+          invitees: form.invitees,
         }),
       });
       if (!res.ok) throw new Error(`create failed: ${res.status}`);
@@ -560,6 +565,15 @@ function ClassLanding() {
               placeholder="What you'll cover, any positions to study first…"
               className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500" />
           </label>
+          <label className="md:col-span-2">
+            <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">
+              Invite emails <span className="normal-case font-normal text-ink-500">(optional — one per line, or comma-separated. Reminder sent ~15 min before class.)</span>
+            </span>
+            <textarea value={form.invitees} onChange={(e) => setForm({ ...form, invitees: e.target.value })}
+              rows={2}
+              placeholder="alice@example.com, bob@example.com"
+              className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500" />
+          </label>
           <div className="md:col-span-2 flex items-center justify-between gap-2">
             {error && <span className="rounded bg-rose-500/15 px-2 py-1 text-xs text-rose-200">{error}</span>}
             <button type="submit" disabled={submitting || !form.title}
@@ -587,15 +601,20 @@ function ClassLanding() {
 // The propagate toggle appears only when the class is part of a series.
 function EditOverlay({ c, onClose, onSave }:
   { c: ScheduledClass; onClose: () => void;
-    onSave: (patch: { title: string; coach: string; notes: string; durationMin: number }, propagate: boolean) => void }) {
+    onSave: (patch: { title: string; coach: string; notes: string; durationMin: number; invitees: string }, propagate: boolean) => void }) {
   const [title, setTitle] = useState(c.title);
   const [coach, setCoach] = useState(c.coach);
   const [notes, setNotes] = useState(c.notes || "");
   const [durationMin, setDurationMin] = useState(c.durationMin);
+  // Invitees rendered as newline-joined text so the coach can paste-in a list;
+  // parseInvitees() on the server normalizes back to the {email} array shape.
+  const [invitees, setInvitees] = useState(
+    (c.invitees ?? []).map((i) => i.email).join("\n"),
+  );
   const [propagate, setPropagate] = useState(!!c.seriesId);
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({ title, coach, notes, durationMin: Number(durationMin) || 60 }, propagate && !!c.seriesId);
+    onSave({ title, coach, notes, durationMin: Number(durationMin) || 60, invitees }, propagate && !!c.seriesId);
   };
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4"
@@ -628,6 +647,14 @@ function EditOverlay({ c, onClose, onSave }:
         <label className="block">
           <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">Notes</span>
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} maxLength={2000}
+            className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">
+            Invite emails <span className="normal-case font-normal text-ink-500">(one per line — replaces existing list)</span>
+          </span>
+          <textarea value={invitees} onChange={(e) => setInvitees(e.target.value)} rows={3}
+            placeholder="alice@example.com"
             className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
         </label>
         {c.seriesId && (

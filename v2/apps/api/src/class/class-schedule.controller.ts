@@ -40,9 +40,43 @@ type ScheduleDoc = {
   seriesId?: string | null;
   seriesIndex?: number;    // 1-based position in the series
   seriesTotal?: number;    // total number of instances originally created
+  // Invitee emails (validated on the way in). The reminder scheduler emails
+  // each ~15 min before startAt. Small cap so a runaway paste can't spam.
+  invitees?: Array<{ email: string }>;
+  // Stamped by the reminder scheduler once the email batch has been queued;
+  // presence of this field means "don't send again for this class".
+  reminderSentAt?: Date | null;
 };
 
 const MAX_RECUR = 12;
+const MAX_INVITEES = 100;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Parse whatever the client sends into a validated invitees array. Accepts an
+// array of strings, an array of {email}, or a raw string with newline/comma
+// separators — real coaches paste however they've got their list.
+export function parseInvitees(raw: unknown): Array<{ email: string }> {
+  const out: string[] = [];
+  const push = (s: unknown) => { if (typeof s === "string") out.push(s); };
+  if (Array.isArray(raw)) {
+    for (const x of raw) {
+      if (typeof x === "string") push(x);
+      else if (x && typeof x === "object" && "email" in (x as any)) push((x as any).email);
+    }
+  } else if (typeof raw === "string") {
+    for (const s of raw.split(/[\s,;]+/)) push(s);
+  }
+  const uniq = new Set<string>();
+  const result: Array<{ email: string }> = [];
+  for (const s of out) {
+    const e = s.trim().toLowerCase();
+    if (!e || !EMAIL_RE.test(e) || uniq.has(e)) continue;
+    uniq.add(e);
+    result.push({ email: e });
+    if (result.length >= MAX_INVITEES) break;
+  }
+  return result;
+}
 
 @Controller("class/schedule")
 export class ClassScheduleController {
@@ -93,6 +127,10 @@ export class ClassScheduleController {
     const userId: string | null = req?.session?.userId ?? null;
     const username: string | null = req?.session?.username ?? null;
     const coachName = coach || username || "Coach";
+    // Invitees — optional, deduped + validated. Same list is stamped on every
+    // instance of a materialized series so the reminder scheduler doesn't have
+    // to walk seriesId to find the target list.
+    const invitees = parseInvitees(b.invitees);
     // Build the list of instance start times.
     // - No weekday mask: instances 7 days apart (existing behaviour).
     // - Mask given: start at startAt, then walk 1 day at a time, taking dates
@@ -131,6 +169,8 @@ export class ClassScheduleController {
         createdByUserId: userId,
         seriesId, seriesIndex: total > 1 ? i + 1 : undefined,
         seriesTotal: total > 1 ? total : undefined,
+        invitees: invitees.length ? invitees : undefined,
+        reminderSentAt: null,
       });
     }
     await this.col().insertMany(docs);
@@ -213,6 +253,12 @@ export class ClassScheduleController {
     }
     if (b.durationMin != null) {
       patch.durationMin = Math.max(5, Math.min(600, Math.floor(Number(b.durationMin) || 60)));
+    }
+    // Invitees can be replaced (send [] to clear). Only apply when the caller
+    // actually included the key — undefined means "leave the current list alone".
+    if (b.invitees !== undefined) {
+      const parsed = parseInvitees(b.invitees);
+      patch.invitees = parsed.length ? parsed : [];
     }
     if (Object.keys(patch).length === 0) return { ok: true, matched: 0 };
     if (scope === "series" && row.seriesId) {
