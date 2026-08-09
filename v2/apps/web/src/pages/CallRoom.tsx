@@ -211,6 +211,65 @@ export default function CallRoomPage() {
     setReactionOpen(false);
   };
 
+  // Live captions — browser SpeechRecognition (Chrome/Edge/Safari). Local
+  // transcript broadcast via the same `broadcast` primitive; recipients render
+  // the latest speaker+text in an overlay bar for CAPTION_TTL ms.
+  //
+  // Not "self-hosted" (Google's speech backend on Chrome). Whisper.cpp on
+  // Mumbai is the follow-up upgrade path; wire is identical, only the
+  // transcript source changes.
+  const CAPTION_TTL = 5000;
+  const [captionsOn, setCaptionsOn] = useState(false);
+  const [caption, setCaption] = useState<{ from: string; name: string; text: string; at: number } | null>(null);
+  const speechRecRef = useRef<any>(null);
+  const captionSupported = typeof window !== "undefined" && !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+
+  const startCaptions = () => {
+    if (captionsOn) return;
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    let rec: any;
+    try { rec = new SR(); } catch { return; }
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = navigator.language || "en-US";
+    rec.onresult = (ev: any) => {
+      // Grab the newest result (interim OR final) and broadcast it.
+      let latest = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        latest = ev.results[i][0].transcript;
+      }
+      if (!latest.trim()) return;
+      const payload = { text: latest.trim(), final: !!ev.results[ev.results.length - 1]?.isFinal };
+      // Local echo
+      setCaption({ from: selfIdRef.current || "self", name: selfNameRef.current || "You", text: payload.text, at: Date.now() });
+      send({ type: "broadcast", subtype: "caption", payload });
+    };
+    rec.onerror = () => { /* mic denied / no-speech — silent */ };
+    rec.onend = () => {
+      // Auto-restart while user still wants captions on (SpeechRecognition ends
+      // itself after silence or errors).
+      if (captionsOn && speechRecRef.current === rec) { try { rec.start(); } catch {} }
+    };
+    try { rec.start(); } catch { return; }
+    speechRecRef.current = rec;
+    setCaptionsOn(true);
+  };
+  const stopCaptions = () => {
+    const rec = speechRecRef.current;
+    speechRecRef.current = null;
+    if (rec) { try { rec.stop(); } catch {} }
+    setCaptionsOn(false);
+    setCaption(null);
+  };
+
+  // Auto-clear caption bar after CAPTION_TTL ms of no updates.
+  useEffect(() => {
+    if (!caption) return;
+    const iv = setTimeout(() => setCaption((c) => (c && Date.now() - c.at >= CAPTION_TTL ? null : c)), CAPTION_TTL + 100);
+    return () => clearTimeout(iv);
+  }, [caption]);
+
   // Auto-scroll the chat drawer whenever the list grows OR opens with content.
   useEffect(() => {
     if (!chatOpen) return;
@@ -377,6 +436,12 @@ export default function CallRoomPage() {
       spawnFloater(from, emoji);
       return;
     }
+    if (subtype === "caption") {
+      const text = typeof payload?.text === "string" ? payload.text : "";
+      if (!text) return;
+      setCaption({ from, name, text, at: Date.now() });
+      return;
+    }
     // Unknown subtypes: silently ignored — forward-compat with future features.
   };
 
@@ -402,6 +467,10 @@ export default function CallRoomPage() {
     if (audioCtxRef.current) {
       try { audioCtxRef.current.close(); } catch { /* already closed */ }
       audioCtxRef.current = null;
+    }
+    if (speechRecRef.current) {
+      try { speechRecRef.current.stop(); } catch { /* already stopped */ }
+      speechRecRef.current = null;
     }
     if (wsRef.current) { try { wsRef.current.close(); } catch { /* already closed */ } wsRef.current = null; }
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
@@ -545,7 +614,7 @@ export default function CallRoomPage() {
     for (const t of s.getVideoTracks()) t.enabled = next;
     setCamOn(next);
   };
-  const leave = () => { stopRecording(); teardown(); setStatus("left"); };
+  const leave = () => { stopRecording(); stopCaptions(); teardown(); setStatus("left"); };
 
   // Background blur: MediaPipe SelfieSegmenter → composite canvas → captureStream.
   // On enable, swap the outgoing video track on every PC + self-view srcObject
@@ -842,6 +911,15 @@ export default function CallRoomPage() {
         )}
       </div>
 
+      {/* Live-captions overlay — a single bar just above the footer with the
+       *  most recent speaker + text, auto-clears after CAPTION_TTL ms. */}
+      {caption && (
+        <div className="relative flex justify-center pointer-events-none">
+          <div className="absolute -top-1 -translate-y-full max-w-3xl mx-auto rounded-lg bg-black/75 px-4 py-2 text-white text-sm shadow-lg">
+            <span className="text-brand-300 font-semibold mr-2">{caption.name}:</span>{caption.text}
+          </div>
+        </div>
+      )}
       <footer className="relative flex items-center justify-center gap-3 py-4 border-t border-ink-700 bg-ink-900">
         <button
           onClick={toggleMic}
@@ -883,6 +961,16 @@ export default function CallRoomPage() {
           title={recording ? "Stop recording and download .webm" : "Record your camera + mic to a local .webm file"}
         >
           {recording ? `⏹ ${Math.floor(recordElapsed / 60)}:${String(recordElapsed % 60).padStart(2, "0")}` : "🔴 Record"}
+        </button>
+        <button
+          onClick={captionsOn ? stopCaptions : startCaptions}
+          disabled={!captionSupported}
+          className={`rounded-xl2 px-4 py-2 text-sm ${captionsOn ? "bg-brand-600 hover:bg-brand-500" : "bg-ink-800 hover:bg-ink-700"} text-white disabled:opacity-40`}
+          title={captionSupported
+            ? (captionsOn ? "Stop live captions" : "Turn on live captions (browser SpeechRecognition)")
+            : "Live captions need Chrome, Edge, or Safari"}
+        >
+          {captionsOn ? "CC ON" : "CC"}
         </button>
         {/* Reactions button + popover. Popover is absolutely positioned above
             the button so it doesn't shift the footer's flex layout. */}
