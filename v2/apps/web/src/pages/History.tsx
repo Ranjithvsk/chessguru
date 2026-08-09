@@ -357,8 +357,15 @@ export default function HistoryPage() {
       const t = it.sel && it.sel !== "mix" ? it.sel : primaryTheme(it.themes);
       if (t !== theme) return false;
     }
+    // Timeframe: `range="all"` short-circuits the date check. Otherwise drop
+    // anything older than the cutoff (RANGE_DAYS gives days-back for the pill).
+    const days = RANGE_DAYS[range];
+    if (days != null) {
+      const cutoff = Date.now() - days * 86_400_000;
+      if (new Date(it.date).getTime() < cutoff) return false;
+    }
     return true;
-  }), [allItems, result, theme]);
+  }), [allItems, result, theme, range]);
 
   // date + theme groups — precomputed ONCE per filtered set, not per render.
   // Must live ABOVE the early returns below so the hook count is stable across
@@ -459,6 +466,7 @@ export default function HistoryPage() {
 
       {allItems.length > 0 && (
         <FilterBar result={result} setResult={setResult} theme={theme} setTheme={setTheme}
+          range={range} setRange={setRange}
           themes={availableThemes} matched={filtered.length} total={allItems.length} />
       )}
 
