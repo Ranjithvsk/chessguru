@@ -262,6 +262,8 @@ export default function AcademyDashboardPage() {
         <p className="mt-1 text-sm text-ink-400">Welcome, <b className="text-white">{me.username}</b>.</p>
       </header>
 
+      {canManage && <TodayStrip schedule={schedule} snaps={snaps} recordings={recordings} />}
+
       {/* ── Invite forms ── */}
       {canManage && (
         <section className="space-y-4">
@@ -726,6 +728,38 @@ function InvoiceCard({ inv, config, isOwner, onMarkPaid, markPaidPending }: {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// At-a-glance "today" ribbon — 4 tiles derived from data already loaded
+// elsewhere on the page (no extra fetches). Filtering is by local calendar
+// day so an owner in Chennai sees "today" the way they'd say it verbally.
+type ScheduleForTodayStrip = { live?: ClassRow[]; upcoming?: ClassRow[] } | undefined;
+function TodayStrip({ schedule, snaps, recordings }: {
+  schedule: ScheduleForTodayStrip;
+  snaps: SnapItem[] | undefined;
+  recordings: Array<{ startAt: string; createdAt: string }> | undefined;
+}) {
+  const today = new Date();
+  const sameDay = (d: Date) => d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
+  const liveNow = schedule?.live?.length ?? 0;
+  const upcomingToday = (schedule?.upcoming ?? []).filter((c) => sameDay(new Date(c.startAt))).length;
+  const classesToday = liveNow + upcomingToday;
+  const snapsToday = (snaps ?? []).filter((s) => sameDay(new Date(s.at))).length;
+  const recordingsToday = (recordings ?? []).filter((r) => sameDay(new Date(r.createdAt || r.startAt))).length;
+  const Tile = ({ label, value, tone }: { label: string; value: number | string; tone: string }) => (
+    <div className={`rounded-xl2 border ${tone} p-3 text-center`}>
+      <div className="text-2xl font-semibold text-white tabular-nums">{value}</div>
+      <div className="mt-0.5 text-[11px] uppercase tracking-wide text-ink-400">{label}</div>
+    </div>
+  );
+  return (
+    <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+      <Tile label="Classes today" value={classesToday} tone="border-ink-700 bg-ink-900" />
+      <Tile label="Live now" value={liveNow} tone={liveNow > 0 ? "border-emerald-500/40 bg-emerald-500/5" : "border-ink-700 bg-ink-900"} />
+      <Tile label="Snaps today" value={snapsToday} tone="border-ink-700 bg-ink-900" />
+      <Tile label="Recordings today" value={recordingsToday} tone="border-ink-700 bg-ink-900" />
     </div>
   );
 }
