@@ -2,12 +2,25 @@
 // session.role === 'academy_owner' — the guard lives inside AcademyService
 // so no controller code needs to duplicate it.
 
-import { Body, Controller, Delete, Get, Param, Post, Put, Query, Req } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, Req, UnauthorizedException } from "@nestjs/common";
 import { AcademyService } from "./academy.service";
+import { CoachStarredDigestService } from "./coach-starred-digest.service";
 
 @Controller("academy")
 export class AcademyController {
-  constructor(private readonly svc: AcademyService) {}
+  constructor(
+    private readonly svc: AcademyService,
+    private readonly digest: CoachStarredDigestService,
+  ) {}
+
+  // GET /api/academy/starred-digest/preview — what next Sunday's coach-starred
+  // digest will contain for the current user (7d window). Signed-in-only.
+  @Get("starred-digest/preview")
+  async previewStarredDigest(@Req() req: any) {
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) throw new UnauthorizedException();
+    return this.digest.previewFor(userId);
+  }
 
   @Post("invites")
   createInvite(@Body() body: any, @Req() req: any) {

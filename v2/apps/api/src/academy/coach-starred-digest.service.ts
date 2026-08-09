@@ -68,6 +68,30 @@ export class CoachStarredDigestService implements OnModuleInit {
     }
   }
 
+  /** Read-only shape the dashboard preview shows so the coach knows what
+   *  next Sunday's digest will contain. Same 7d window + starred filter as
+   *  the send path. */
+  async previewFor(userId: string, sinceDaysBack = 7) {
+    const since = new Date(Date.now() - sinceDaysBack * 86_400_000);
+    const snaps: any[] = await this.conn.db!.collection("classSnaps").find({
+      byUserId: String(userId),
+      starred: true,
+      at: { $gte: since },
+    }).sort({ at: -1 }).limit(30).toArray();
+    return {
+      snapCount: snaps.length,
+      snaps: snaps.map((s) => ({
+        _id: s._id,
+        classId: s.classId,
+        at: s.at,
+        note: s.note || "",
+        hasAudio: !!s.hasAudio,
+        shapeCount: Array.isArray(s.shapes) ? s.shapes.length : 0,
+        link: snapLink(s),
+      })),
+    };
+  }
+
   private async sendFor(user: any): Promise<void> {
     const userId = String(user._id);
     const email = String(user.email).toLowerCase();

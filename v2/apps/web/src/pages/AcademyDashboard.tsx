@@ -284,6 +284,7 @@ export default function AcademyDashboardPage() {
       </header>
 
       {canManage && <TodayStrip schedule={schedule} snaps={snaps} recordings={recordings} />}
+      {canManage && <StarredDigestPreviewLink />}
 
       {/* ── Invite forms ── */}
       {canManage && (
@@ -1150,6 +1151,66 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
         </div>
       )}
     </div>
+  );
+}
+
+// Small link on the dashboard header that opens a preview of the coach's
+// upcoming Sunday-morning starred-snap digest email. Modal shows the raw
+// shortlist so the coach can eyeball what the digest will contain.
+function StarredDigestPreviewLink() {
+  const [open, setOpen] = useState(false);
+  type Row = { _id: string; classId: string; at: string; note: string; hasAudio: boolean; shapeCount: number; link: string };
+  const [data, setData] = useState<{ snapCount: number; snaps: Row[] } | null>(null);
+  async function load() {
+    setData(null); setOpen(true);
+    try {
+      const r = await fetch(`${BASE}/api/academy/starred-digest/preview`, { credentials: "include" }).then((res) => res.json());
+      setData(r);
+    } catch { /* modal shows loading forever -- coach can close */ }
+  }
+  return (
+    <>
+      <button onClick={load}
+        className="text-[11px] text-brand-300 hover:text-brand-100 underline">
+        📧 Preview my Sunday digest
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg rounded-xl2 border border-ink-700 bg-ink-900 p-5 shadow-2xl">
+            <div className="mb-3 flex items-baseline justify-between">
+              <h3 className="font-display text-lg text-white">📧 Sunday digest preview</h3>
+              <button onClick={() => setOpen(false)} className="text-ink-400 hover:text-white text-sm">Esc</button>
+            </div>
+            {!data ? (
+              <div className="text-sm text-ink-400">Loading…</div>
+            ) : data.snapCount === 0 ? (
+              <div className="text-sm text-ink-400">
+                No starred snaps in the last 7 days. Star a few positions during class and this preview will populate.
+              </div>
+            ) : (
+              <>
+                <div className="mb-2 text-sm text-ink-200">
+                  You'd receive <b>{data.snapCount}</b> starred position{data.snapCount === 1 ? "" : "s"} on Sunday morning.
+                </div>
+                <ol className="max-h-72 overflow-y-auto pr-1 space-y-1 text-sm">
+                  {data.snaps.map((s, i) => (
+                    <li key={s._id} className="flex items-baseline gap-2 rounded border border-ink-700 bg-ink-800/40 px-2 py-1.5">
+                      <span className="tabular-nums text-[10px] text-ink-500 w-6 text-right">{i + 1}.</span>
+                      <a href={s.link} target="_blank" rel="noreferrer" className="text-brand-300 hover:underline flex-1 truncate">
+                        {s.note || <span className="italic text-ink-500">(no note)</span>}
+                      </a>
+                      {s.shapeCount > 0 && <span className="text-[10px] text-amber-300">✏️{s.shapeCount}</span>}
+                      {s.hasAudio && <span className="text-[10px] text-violet-300">🎙</span>}
+                      <span className="text-[10px] text-ink-500 tabular-nums">{new Date(s.at).toLocaleDateString(undefined, { day: "2-digit", month: "short" })}</span>
+                    </li>
+                  ))}
+                </ol>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
