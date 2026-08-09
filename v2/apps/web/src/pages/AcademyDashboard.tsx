@@ -1399,6 +1399,42 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   // Reset the open snap when filters change so we don't end up pointing at a
   // row that just got filtered out.
   useEffect(() => { setOpenIdx(null); }, [classFilter, starredOnly, textFilter]);
+  // Deep-link to a specific snap via ?snap=<id>. On mount (and when snaps
+  // arrives from React Query) find the id in the shown-list and open its
+  // modal. When the user opens/closes a snap via the UI we push the id back
+  // to the URL so browser refresh preserves state.
+  const wantSnapId = sp.get("snap");
+  useEffect(() => {
+    if (!wantSnapId || openIdx != null) return;
+    // Best-effort: find in the (potentially filtered) 12-card slice.
+    const idx = (classFilter || starredOnly || textFilter ? snaps
+      .filter((s) => (classFilter ? s.classId === classFilter : true))
+      .filter((s) => (starredOnly ? !!s.starred : true))
+      .filter((s) => !textFilter || (String(s.note || "").toLowerCase().includes(textFilter.toLowerCase())
+        || String(s.transcript || "").toLowerCase().includes(textFilter.toLowerCase())
+        || String(s.classTitle || "").toLowerCase().includes(textFilter.toLowerCase()))) : snaps)
+      .slice(0, 12).findIndex((s) => s._id === wantSnapId);
+    if (idx >= 0) setOpenIdx(idx);
+  }, [wantSnapId, snaps, classFilter, starredOnly, textFilter, openIdx]);
+  // Push openIdx back to URL so a direct-share of the current view captures
+  // the modal state. Uses shownRef via a local slice computed below rather
+  // than the filtered chain to keep deps small.
+  const shownIds = (classFilter ? snaps.filter((s) => s.classId === classFilter) : snaps)
+    .filter((s) => (starredOnly ? !!s.starred : true))
+    .filter((s) => !textFilter || (String(s.note || "").toLowerCase().includes(textFilter.toLowerCase())
+      || String(s.transcript || "").toLowerCase().includes(textFilter.toLowerCase())
+      || String(s.classTitle || "").toLowerCase().includes(textFilter.toLowerCase())))
+    .slice()
+    .sort((a, b) => Number(!!b.starred) - Number(!!a.starred))
+    .slice(0, 12).map((s) => s._id);
+  useEffect(() => {
+    const next = new URLSearchParams(sp);
+    if (openIdx == null || !shownIds[openIdx]) next.delete("snap");
+    else next.set("snap", shownIds[openIdx]);
+    // Only write if changed to avoid a tight update loop.
+    if (next.toString() !== sp.toString()) setSp(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openIdx, shownIds.join(",")]);
   // Multi-select for bulk actions. Enter mode via "☐ Select" chip; clicking
   // cards toggles selection instead of opening the modal. Explicit mode is
   // friendlier than Ctrl+click magic for the coach audience.
