@@ -60,7 +60,7 @@ function AttendanceStrip({ days }: { days?: boolean[] }) {
     </div>
   );
 }
-interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; attendedCount?: number; academyId?: string|null; summarySentAt?: string|null; autoSummary?: boolean; autoSummaryNote?: string }
+interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; attendedCount?: number; academyId?: string|null; summarySentAt?: string|null; autoSummary?: boolean; autoSummaryNote?: string; seriesId?: string|null; seriesIndex?: number; seriesTotal?: number }
 interface FeesConfig { monthlyFeePaise: number; upiVpa: string; upiPayeeName: string; canEdit: boolean }
 interface Invoice { _id: string; academyId: string; studentId: string; studentUsername: string; period: string; amountPaise: number; status: "pending"|"paid"|"waived"; generatedAt: string; paidAt?: string; paymentMethod?: string }
 function rupees(paise: number) { return (paise / 100).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }); }
@@ -1283,17 +1283,20 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
   const [autoEditorOpen, setAutoEditorOpen] = useState(false);
   const [autoDraftOn, setAutoDraftOn] = useState(!!c.autoSummary);
   const [autoDraftNote, setAutoDraftNote] = useState(c.autoSummaryNote || "");
+  const [autoApplyToSeries, setAutoApplyToSeries] = useState(false);
   const [autoSaving, setAutoSaving] = useState(false);
   function openAutoEditor() {
     setAutoDraftOn(!!c.autoSummary);
     setAutoDraftNote(c.autoSummaryNote || "");
+    setAutoApplyToSeries(false);
     setAutoEditorOpen(true);
   }
   async function saveAuto() {
     if (autoSaving) return;
     setAutoSaving(true);
     try {
-      const r = await fetch(`${BASE}/api/class/schedule/${encodeURIComponent(c._id)}`, {
+      const url = `${BASE}/api/class/schedule/${encodeURIComponent(c._id)}${autoApplyToSeries && c.seriesId ? "?scope=series" : ""}`;
+      const r = await fetch(url, {
         method: "PATCH", credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ autoSummary: autoDraftOn, autoSummaryNote: autoDraftOn ? autoDraftNote : "" }),
@@ -1391,6 +1394,14 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
                   className="w-full resize-none rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
                 <div className="mt-1 text-right text-[10px] text-ink-500 tabular-nums">{autoDraftNote.length}/500</div>
               </div>
+            )}
+            {c.seriesId && (
+              <label className="mt-3 flex items-center gap-2 text-xs text-ink-300 cursor-pointer">
+                <input type="checkbox" checked={autoApplyToSeries} onChange={(e) => setAutoApplyToSeries(e.target.checked)}
+                  className="rounded border-ink-600 bg-ink-800 text-brand-500 focus:ring-brand-500/40" />
+                📅 Apply to every FUTURE class in this series
+                {typeof c.seriesTotal === "number" && <span className="ml-1 text-ink-500">({c.seriesIndex} / {c.seriesTotal})</span>}
+              </label>
             )}
             <div className="mt-4 flex items-center justify-end gap-2">
               <button onClick={() => !autoSaving && setAutoEditorOpen(false)}
