@@ -39,6 +39,7 @@ import AccountLinksPage from "./pages/AccountLinks";
 import ExternalGamePage from "./pages/ExternalGame";
 import AdminPage from "./pages/Admin";
 import AdminUsersPage from "./pages/AdminUsers";
+import AdminMailLogPage from "./pages/AdminMailLog";
 import PlayPage from "./pages/Play";
 import FeedbackUITestPage from "./pages/FeedbackUITest";
 import BookPage from "./pages/Book";
@@ -87,6 +88,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="board-editor" element={<BoardEditorPage />} />
             <Route path="admin" element={<AdminPage />} />
             <Route path="admin/users" element={<AdminUsersPage />} />
+            <Route path="admin/mail-log" element={<AdminMailLogPage />} />
             <Route path="login" element={<LoginPage />} />
             <Route path="reset-password" element={<ResetPasswordPage />} />
             <Route path="signup-academy" element={<SignupAcademyPage />} />

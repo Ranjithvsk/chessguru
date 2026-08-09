@@ -127,7 +127,7 @@ export default function Navbar({ rating, username, admin, onLogout }: Props) {
         {/* Desktop: grouped dropdowns */}
         <div className="hidden items-center gap-1 md:flex">
           {GROUPS.map((g) => <Dropdown key={g.label} group={g} />)}
-          {admin && <>{adminLink("/admin/users", "Admin")}{adminLink("/admin", "Factory")}</>}
+          {admin && <>{adminLink("/admin/users", "Admin")}{adminLink("/admin/mail-log", "Mail")}{adminLink("/admin", "Factory")}</>}
         </div>
 
         <div className="ml-auto flex items-center gap-3 pl-2">
@@ -186,7 +186,7 @@ export default function Navbar({ rating, username, admin, onLogout }: Props) {
                     <span className="text-ink-400">Rating </span><span className="font-semibold text-white">{rating}</span>
                   </span>
                 )}
-                {admin && <>{adminLink("/admin/users", "Admin")}{adminLink("/admin", "Factory")}</>}
+                {admin && <>{adminLink("/admin/users", "Admin")}{adminLink("/admin/mail-log", "Mail")}{adminLink("/admin", "Factory")}</>}
                 {username ? (
                   <div className="ml-auto flex items-center gap-2 sm:hidden">
                     <span className="text-sm font-medium text-white">{username}</span>

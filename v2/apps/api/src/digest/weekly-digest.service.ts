@@ -19,6 +19,7 @@ import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { sendMail } from "../lib/mail";
 import { emailOptOutToken } from "./email-optout.controller";
+import { logMail } from "./mail-log";
 
 const TICK_MS = 10 * 60_000;             // 10 min — fine enough to hit the send window
 const WINDOW_HOUR_START = 8;             // server-local hours [8..10) inclusive
@@ -155,7 +156,13 @@ export class WeeklyDigestService implements OnModuleInit {
           </p>
         </div>
       </div>`;
-    await sendMail({ to: email, subject, html, text });
+    const result = await sendMail({ to: email, subject, html, text });
+    await logMail(this.conn, {
+      userId, channel: "digest", email, subject,
+      status: result.ok ? "sent" : "failed",
+      messageId: result.id ?? null,
+      error: result.error ?? null,
+    });
     await this.conn.db!.collection("users").updateOne({ _id: userId as any }, { $set: { digestSentAt: new Date() } });
   }
 }

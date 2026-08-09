@@ -16,6 +16,7 @@ import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { sendMail } from "../lib/mail";
 import { emailOptOutToken } from "./email-optout.controller";
+import { logMail } from "./mail-log";
 
 const TICK_MS = 15 * 60_000;            // 15 min — narrower window than digest, still restart-tolerant
 const WINDOW_HOUR_START = 18;           // 18:00–20:00 server-local
@@ -150,6 +151,12 @@ export class StreakReminderService implements OnModuleInit {
           </p>
         </div>
       </div>`;
-    await sendMail({ to: email, subject, html, text });
+    const result = await sendMail({ to: email, subject, html, text });
+    await logMail(this.conn, {
+      userId, channel: "streak", email, subject,
+      status: result.ok ? "sent" : "failed",
+      messageId: result.id ?? null,
+      error: result.error ?? null,
+    });
   }
 }
