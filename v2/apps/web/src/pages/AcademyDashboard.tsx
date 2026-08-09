@@ -41,8 +41,20 @@ interface Student {
   puzzleRating?: number;
   // Attendance rollup from classAttendance (see AcademyService.listStudents)
   attendedTotal?: number; attendedThisWeek?: number; lastAttendedAt?: string|null;
+  attendance30d?: boolean[];   // 30 booleans, index 0 = 29 days ago, 29 = today
   // Fees rollup from feeInvoices
   pendingFeesPaise?: number; oldestPendingPeriod?: string|null;
+}
+// Mini 30-day attendance strip — 30 tiny cells, green when present.
+function AttendanceStrip({ days }: { days?: boolean[] }) {
+  const strip = (days && days.length === 30) ? days : new Array(30).fill(false);
+  return (
+    <div className="flex gap-[2px]" title="Last 30 days — green = attended a class">
+      {strip.map((on, i) => (
+        <div key={i} className={`w-[6px] h-[14px] rounded-[1px] ${on ? "bg-emerald-500" : "bg-ink-700"}`} />
+      ))}
+    </div>
+  );
 }
 interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; attendedCount?: number; academyId?: string|null }
 interface FeesConfig { monthlyFeePaise: number; upiVpa: string; upiPayeeName: string; canEdit: boolean }
@@ -418,14 +430,17 @@ export default function AcademyDashboardPage() {
                         {isOwner && <td className="px-3 py-2 text-ink-300">{s.coachId ? (coachById[s.coachId] ?? s.coachId) : "—"}</td>}
                         <td className="px-3 py-2 text-white tabular-nums">{s.puzzleRating ?? 1500}</td>
                         <td className="px-3 py-2 tabular-nums" title={`Last attended: ${s.lastAttendedAt ? new Date(s.lastAttendedAt).toLocaleString() : "never"}`}>
-                          {att === 0 ? (
-                            <span className="text-ink-500">—</span>
-                          ) : (
-                            <span className="text-white">
-                              {att}
-                              {wk > 0 && <span className="ml-1 text-[10px] text-emerald-300">· {wk} this wk</span>}
-                            </span>
-                          )}
+                          <div className="flex flex-col gap-1">
+                            {att === 0 ? (
+                              <span className="text-ink-500">—</span>
+                            ) : (
+                              <span className="text-white">
+                                {att}
+                                {wk > 0 && <span className="ml-1 text-[10px] text-emerald-300">· {wk} this wk</span>}
+                              </span>
+                            )}
+                            <AttendanceStrip days={s.attendance30d} />
+                          </div>
                         </td>
                         <td className="px-3 py-2 tabular-nums" title={s.oldestPendingPeriod ? `Oldest: ${s.oldestPendingPeriod}` : ""}>
                           {(s.pendingFeesPaise ?? 0) === 0 ? (

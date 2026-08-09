@@ -146,10 +146,13 @@ export class AcademyService {
     const rmap: Record<string, number> = {};
     for (const p of perfs as any[]) rmap[String(p._id)] = Math.round(p?.puzzle?.gl?.r ?? 1500);
 
-    // Attendance rollup — aggregate classAttendance rows keyed by userId, in a
-    // single aggregation. Windows use UTC boundaries; the client formats to local.
+    // Attendance rollup — one aggregation for count/lastAt/thisWeek + a small
+    // 30-day heatmap array per student (booleans for each of the last 30 days).
     const now = new Date();
     const weekStart = new Date(now); weekStart.setUTCDate(weekStart.getUTCDate() - 7);
+    const dayMs = 24 * 60 * 60 * 1000;
+    const heatStart = new Date(now.getTime() - 29 * dayMs);
+    heatStart.setUTCHours(0, 0, 0, 0);
     const attRows: any[] = await this.conn.db!.collection("classAttendance").aggregate([
       { $match: { userId: { $in: ids } } },
       { $group: {
@@ -157,13 +160,26 @@ export class AcademyService {
         attendedTotal: { $sum: 1 },
         lastAttendedAt: { $max: "$joinedAt" },
         attendedThisWeek: { $sum: { $cond: [{ $gte: ["$joinedAt", weekStart] }, 1, 0] } },
+        // Collect every joinedAt from the last 30 days — client bucketing per day.
+        recent: { $push: { $cond: [{ $gte: ["$joinedAt", heatStart] }, "$joinedAt", null] } },
       } },
     ]).toArray();
-    const amap: Record<string, { attendedTotal: number; attendedThisWeek: number; lastAttendedAt: Date | null }> = {};
+    const heatFor = (recent: any[]): boolean[] => {
+      const strip = new Array<boolean>(30).fill(false);
+      for (const d of recent || []) {
+        if (!d) continue;
+        const t = new Date(d).getTime();
+        const dayIdx = Math.floor((t - heatStart.getTime()) / dayMs);
+        if (dayIdx >= 0 && dayIdx < 30) strip[dayIdx] = true;
+      }
+      return strip;
+    };
+    const amap: Record<string, { attendedTotal: number; attendedThisWeek: number; lastAttendedAt: Date | null; attendance30d: boolean[] }> = {};
     for (const a of attRows) amap[String(a._id)] = {
       attendedTotal: a.attendedTotal ?? 0,
       attendedThisWeek: a.attendedThisWeek ?? 0,
       lastAttendedAt: a.lastAttendedAt ?? null,
+      attendance30d: heatFor(a.recent),
     };
 
     // Fees rollup — sum of pending invoice amounts + oldest pending period
@@ -181,6 +197,7 @@ export class AcademyService {
       attendedTotal:    amap[String(s._id)]?.attendedTotal    ?? 0,
       attendedThisWeek: amap[String(s._id)]?.attendedThisWeek ?? 0,
       lastAttendedAt:   amap[String(s._id)]?.lastAttendedAt   ?? null,
+      attendance30d:    amap[String(s._id)]?.attendance30d    ?? new Array<boolean>(30).fill(false),
       pendingFeesPaise:      fmap[String(s._id)]?.pendingFeesPaise      ?? 0,
       oldestPendingPeriod:   fmap[String(s._id)]?.oldestPendingPeriod   ?? null,
     }));
