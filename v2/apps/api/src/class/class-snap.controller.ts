@@ -5,7 +5,7 @@
 // Auth: session-cookie gated (any signed-in ChessGuru user in the room can
 // snap; academy-scoped listing/authz lives in AcademyService).
 
-import { BadRequestException, Body, Controller, Get, Param, Post, Req, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, Body, Controller, ForbiddenException, Get, NotFoundException, Param, Patch, Post, Req, UnauthorizedException } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { randomBytes } from "crypto";
@@ -57,5 +57,25 @@ export class ClassSnapController {
     const rows = await this.conn.db!.collection("classSnaps")
       .find({ classId: id }).sort({ at: -1 }).limit(200).toArray();
     return { snaps: rows };
+  }
+
+  // PATCH /api/class/:id/snap/:snapId { note?: string }
+  // Only the original author of the snap may edit the note. Owner/coach edit
+  // is a follow-up (would need academy resolution); this covers 90% of cases
+  // (coach typo fix on their own snap).
+  @Patch(":id/snap/:snapId")
+  async patch(@Param("id") id: string, @Param("snapId") snapId: string, @Req() req: any, @Body() body: any) {
+    if (!ROOM_RE.test(id)) throw new BadRequestException("bad room");
+    if (!/^sn_[A-Za-z0-9_-]{6,32}$/.test(snapId)) throw new BadRequestException("bad snap id");
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) throw new UnauthorizedException();
+    const cur = await this.conn.db!.collection("classSnaps").findOne({ _id: snapId as any, classId: id });
+    if (!cur) throw new NotFoundException("snap not found");
+    if (cur.byUserId !== userId) throw new ForbiddenException("not your snap");
+    const $set: Record<string, unknown> = {};
+    if (typeof body?.note === "string") $set.note = body.note.slice(0, 500);
+    if (Object.keys($set).length === 0) return { ok: true, changed: false };
+    await this.conn.db!.collection("classSnaps").updateOne({ _id: snapId as any }, { $set });
+    return { ok: true, changed: true };
   }
 }

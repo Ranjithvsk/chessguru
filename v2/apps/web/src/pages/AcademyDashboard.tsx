@@ -764,13 +764,94 @@ function TodayStrip({ schedule, snaps, recordings }: {
   );
 }
 
+// Individual snap card with inline note-edit. Only the original snap author
+// can edit (server enforces via PATCH /api/class/:id/snap/:snapId). Card is
+// a Link by default; edit mode swaps in a textarea + save/cancel so the
+// coach can fix a typo without re-opening the board.
+function SnapCard({ s }: { s: SnapItem }) {
+  const qc = useQueryClient();
+  const { data: me } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
+  const canEdit = !!me?.userId && s.byUserId === me.userId;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(s.note || "");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const shapes = Array.isArray(s.shapes) ? s.shapes : [];
+  const href = shapes.length > 0
+    ? `/board-editor?fen=${encodeURIComponent(s.fen)}&shapes=${encodeShapesForUrl(shapes)}`
+    : `/board-editor?fen=${encodeURIComponent(s.fen)}`;
+  async function saveNote() {
+    if (saving) return;
+    setSaving(true); setErr(null);
+    try {
+      const r = await fetch(`${BASE}/api/class/${encodeURIComponent(s.classId)}/snap/${encodeURIComponent(s._id)}`, {
+        method: "PATCH", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: draft }),
+      });
+      if (!r.ok) { setErr((await r.json().catch(() => ({}))).message || `HTTP ${r.status}`); return; }
+      setEditing(false);
+      qc.invalidateQueries({ queryKey: ["academy-snaps"] });
+    } catch (e) { setErr(String((e as Error).message || e)); }
+    finally { setSaving(false); }
+  }
+  const Wrapper: any = editing ? "div" : Link;
+  const wrapperProps: any = editing ? {} : { to: href };
+  return (
+    <Wrapper {...wrapperProps}
+      className={`group flex gap-3 rounded-lg border p-3 transition-colors ${editing
+        ? "border-brand-500/60 bg-ink-800"
+        : "border-ink-700 bg-ink-800/40 hover:border-brand-500/50 hover:bg-ink-800/60"}`}>
+      <div className="w-24 h-24 shrink-0">
+        <Board fen={s.fen} viewOnly coordinates={false} className="mini" shapes={shapes as any} />
+      </div>
+      <div className="flex-1 min-w-0 flex flex-col text-sm">
+        <div className="text-white truncate">
+          <b>{s.byName}</b>
+          {shapes.length > 0 && <span className="ml-1 text-[10px] text-amber-300">✏️{shapes.length}</span>}
+          {canEdit && !editing && (
+            <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDraft(s.note || ""); setEditing(true); }}
+              className="ml-2 text-[10px] text-ink-500 opacity-0 group-hover:opacity-100 transition-opacity hover:text-white"
+              title="Edit note">✎ edit</button>
+          )}
+        </div>
+        <div className="text-[11px] text-ink-400 truncate">{s.classTitle}</div>
+        <div className="mt-0.5 text-[10px] font-mono text-ink-500 truncate" title={s.fen}>{describeFen(s.fen)}</div>
+        {editing ? (
+          <div className="mt-1">
+            <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={2} maxLength={500}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full resize-none rounded border border-ink-600 bg-ink-900 px-2 py-1 text-[12px] text-white outline-none focus:border-brand-500" />
+            {err && <div className="mt-1 text-[10px] text-rose-300">{err}</div>}
+            <div className="mt-1 flex items-center gap-2">
+              <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); saveNote(); }} disabled={saving}
+                className="rounded bg-brand-600 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
+                {saving ? "Saving…" : "Save"}
+              </button>
+              <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditing(false); setErr(null); }}
+                className="rounded border border-ink-600 px-2 py-0.5 text-[11px] text-ink-300 hover:bg-ink-800">Cancel</button>
+              <span className="ml-auto text-[10px] text-ink-500 tabular-nums">{draft.length}/500</span>
+            </div>
+          </div>
+        ) : (
+          s.note && <div className="mt-1 text-[12px] text-ink-300 line-clamp-2">"{s.note}"</div>
+        )}
+        <div className="mt-auto text-[10px] text-ink-500">
+          {new Date(s.at).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+          {!editing && <span className="ml-2 text-brand-300 opacity-0 group-hover:opacity-100 transition-opacity">🔬 Open →</span>}
+        </div>
+      </div>
+    </Wrapper>
+  );
+}
+
 // Snaps grouped-by-class with a chip filter above the grid. Chips read like
 // "All (23) · Middlegame 6 · Endgame drill 4", auto-collapsed to the top 5
 // classes so a busy academy doesn't get a 30-chip wrap. Click a chip to
 // scope the grid; click All to reset. The 12-card visible limit still
 // applies within the filtered view.
 type SnapShape = { orig: string; dest?: string; brush?: string };
-type SnapItem = { _id: string; classId: string; classTitle: string; fen: string; note: string; byName: string; at: string; shapes?: SnapShape[] };
+type SnapItem = { _id: string; classId: string; classTitle: string; fen: string; note: string; byName: string; byUserId?: string; at: string; shapes?: SnapShape[] };
 // URL-safe base64 encoder for the shapes deep-link. Matches decoder in BoardEditor.tsx.
 function encodeShapesForUrl(shapes: SnapShape[]): string {
   return btoa(JSON.stringify(shapes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -833,30 +914,7 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
         <div className="text-sm text-ink-400">No snaps match this filter.</div>
       ) : (
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-          {filtered.slice(0, 12).map((s) => {
-            const shapes = Array.isArray(s.shapes) ? s.shapes : [];
-            const href = shapes.length > 0
-              ? `/board-editor?fen=${encodeURIComponent(s.fen)}&shapes=${encodeShapesForUrl(shapes)}`
-              : `/board-editor?fen=${encodeURIComponent(s.fen)}`;
-            return (
-            <Link key={s._id} to={href}
-              className="group flex gap-3 rounded-lg border border-ink-700 bg-ink-800/40 p-3 hover:border-brand-500/50 hover:bg-ink-800/60 transition-colors">
-              <div className="w-24 h-24 shrink-0">
-                <Board fen={s.fen} viewOnly coordinates={false} className="mini" shapes={shapes as any} />
-              </div>
-              <div className="flex-1 min-w-0 flex flex-col text-sm">
-                <div className="text-white truncate"><b>{s.byName}</b>{shapes.length > 0 && <span className="ml-1 text-[10px] text-amber-300">✏️{shapes.length}</span>}</div>
-                <div className="text-[11px] text-ink-400 truncate">{s.classTitle}</div>
-                <div className="mt-0.5 text-[10px] font-mono text-ink-500 truncate" title={s.fen}>{describeFen(s.fen)}</div>
-                {s.note && <div className="mt-1 text-[12px] text-ink-300 line-clamp-2">"{s.note}"</div>}
-                <div className="mt-auto text-[10px] text-ink-500">
-                  {new Date(s.at).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
-                  <span className="ml-2 text-brand-300 opacity-0 group-hover:opacity-100 transition-opacity">🔬 Open →</span>
-                </div>
-              </div>
-            </Link>
-            );
-          })}
+          {filtered.slice(0, 12).map((s) => <SnapCard key={s._id} s={s} />)}
         </div>
       )}
     </section>
