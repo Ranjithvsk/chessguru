@@ -613,6 +613,36 @@ export default function AcademyDashboardPage() {
               {(invoices?.length ?? 0) > 0 && feesConfig && (
                 <span className="text-xs text-ink-500">Parents scan the QR to pay via UPI. You mark it paid after seeing the bank credit.</span>
               )}
+              {(invoices?.length ?? 0) > 0 && (
+                <button onClick={() => {
+                  // CSV export -- coach hands to accountant / spouse / their
+                  // own accounting tool. AmountINR is human, Paise kept for
+                  // exact reconciliation with bank amounts.
+                  const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+                  const header = ["Generated", "Period", "Student", "AmountINR", "Paise", "Status"];
+                  const lines = [header.map(esc).join(",")];
+                  for (const inv of invoices!) {
+                    lines.push([
+                      new Date(inv.generatedAt).toISOString(),
+                      inv.period,
+                      inv.studentUsername,
+                      (inv.amountPaise / 100).toFixed(2),
+                      String(inv.amountPaise),
+                      inv.status,
+                    ].map((c) => esc(String(c))).join(","));
+                  }
+                  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url; a.download = `invoices-pending-${new Date().toISOString().slice(0, 10)}.csv`;
+                  document.body.appendChild(a); a.click(); a.remove();
+                  setTimeout(() => URL.revokeObjectURL(url), 1000);
+                }}
+                  title="Download pending invoices as CSV"
+                  className="ml-auto rounded-full border border-ink-700 bg-ink-900 px-2.5 py-0.5 text-[11px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-ink-100">
+                  ⬇ CSV <span className="ml-1 opacity-70">{invoices!.length}</span>
+                </button>
+              )}
             </div>
             {(invoices?.length ?? 0) === 0 && <p className="text-sm text-ink-400">No pending invoices.</p>}
             {(invoices?.length ?? 0) > 0 && (
