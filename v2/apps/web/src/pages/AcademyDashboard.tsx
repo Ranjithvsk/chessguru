@@ -1206,6 +1206,11 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
             </div>
             {previewErr && <div className="mt-3 rounded border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200">{previewErr}</div>}
             {!preview && !previewErr && <div className="mt-3 text-sm text-ink-400">Computing preview…</div>}
+            {c.summarySentAt && (
+              <div className="mt-3 rounded border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+                ⚠️ Already sent {fmtAgo(c.summarySentAt)} — sending again will land a duplicate in each student's inbox.
+              </div>
+            )}
             {preview && (
               <div className="mt-3 grid grid-cols-3 gap-2 text-center">
                 <div className="rounded-lg border border-ink-700 bg-ink-800/40 p-2">
@@ -1233,8 +1238,14 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
               <button onClick={() => !sending && setPreviewOpen(false)}
                 className="rounded-lg border border-ink-600 px-3 py-1.5 text-sm text-ink-300 hover:bg-ink-800">Cancel</button>
               <button onClick={reallySend} disabled={sending || !preview || preview.attendees === 0}
-                className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
-                {sending ? "Sending…" : preview ? `Send to ${preview.attendees}` : "Send"}
+                className={`rounded-lg px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50 ${c.summarySentAt
+                  ? "bg-amber-600 hover:bg-amber-500"
+                  : "bg-brand-600 hover:bg-brand-500"}`}>
+                {sending
+                  ? "Sending…"
+                  : preview
+                    ? (c.summarySentAt ? `Re-send to ${preview.attendees}` : `Send to ${preview.attendees}`)
+                    : "Send"}
               </button>
             </div>
           </div>
