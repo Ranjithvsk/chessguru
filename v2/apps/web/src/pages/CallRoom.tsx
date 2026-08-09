@@ -1305,7 +1305,11 @@ function BoardMainArea({
                 const r = await fetch(`/v2api/api/class/${encodeURIComponent(room)}/snap`, {
                   method: "POST", credentials: "include",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ fen, note }),
+                  // Include any live arrows/circles the coach has drawn -- these
+                  // are usually the whole point of the flag ("look at this
+                  // diagonal") so persisting them into the snap doc means the
+                  // replay/board-editor can restore them later.
+                  body: JSON.stringify({ fen, note, shapes: (shapes ?? []).slice(0, 64) }),
                 });
                 if (r.ok) { console.log("[snap] saved"); onSnap?.(); }
                 else console.warn("[snap] failed", r.status);

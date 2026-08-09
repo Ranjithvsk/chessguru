@@ -125,7 +125,7 @@ export default function AcademyDashboardPage() {
   });
   const { data: snaps } = useQuery({
     queryKey: ["academy-snaps"],
-    queryFn: () => get<Array<{ _id: string; classId: string; classTitle: string; fen: string; note: string; byName: string; at: string }>>("/api/academy/snaps"),
+    queryFn: () => get<SnapItem[]>("/api/academy/snaps"),
     enabled: canManage, refetchInterval: 60_000,
   });
   const { data: feesConfig } = useQuery({
@@ -769,7 +769,12 @@ function TodayStrip({ schedule, snaps, recordings }: {
 // classes so a busy academy doesn't get a 30-chip wrap. Click a chip to
 // scope the grid; click All to reset. The 12-card visible limit still
 // applies within the filtered view.
-type SnapItem = { _id: string; classId: string; classTitle: string; fen: string; note: string; byName: string; at: string };
+type SnapShape = { orig: string; dest?: string; brush?: string };
+type SnapItem = { _id: string; classId: string; classTitle: string; fen: string; note: string; byName: string; at: string; shapes?: SnapShape[] };
+// URL-safe base64 encoder for the shapes deep-link. Matches decoder in BoardEditor.tsx.
+function encodeShapesForUrl(shapes: SnapShape[]): string {
+  return btoa(JSON.stringify(shapes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
 // Quick position summary from a FEN — just enough to tell an endgame study
 // from a middlegame at a glance without opening the board editor. No chess.js
 // dependency; parses the piece-placement field with a regex.
@@ -828,14 +833,19 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
         <div className="text-sm text-ink-400">No snaps match this filter.</div>
       ) : (
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-          {filtered.slice(0, 12).map((s) => (
-            <Link key={s._id} to={`/board-editor?fen=${encodeURIComponent(s.fen)}`}
+          {filtered.slice(0, 12).map((s) => {
+            const shapes = Array.isArray(s.shapes) ? s.shapes : [];
+            const href = shapes.length > 0
+              ? `/board-editor?fen=${encodeURIComponent(s.fen)}&shapes=${encodeShapesForUrl(shapes)}`
+              : `/board-editor?fen=${encodeURIComponent(s.fen)}`;
+            return (
+            <Link key={s._id} to={href}
               className="group flex gap-3 rounded-lg border border-ink-700 bg-ink-800/40 p-3 hover:border-brand-500/50 hover:bg-ink-800/60 transition-colors">
               <div className="w-24 h-24 shrink-0">
-                <Board fen={s.fen} viewOnly coordinates={false} className="mini" />
+                <Board fen={s.fen} viewOnly coordinates={false} className="mini" shapes={shapes as any} />
               </div>
               <div className="flex-1 min-w-0 flex flex-col text-sm">
-                <div className="text-white truncate"><b>{s.byName}</b></div>
+                <div className="text-white truncate"><b>{s.byName}</b>{shapes.length > 0 && <span className="ml-1 text-[10px] text-amber-300">✏️{shapes.length}</span>}</div>
                 <div className="text-[11px] text-ink-400 truncate">{s.classTitle}</div>
                 <div className="mt-0.5 text-[10px] font-mono text-ink-500 truncate" title={s.fen}>{describeFen(s.fen)}</div>
                 {s.note && <div className="mt-1 text-[12px] text-ink-300 line-clamp-2">"{s.note}"</div>}
@@ -845,7 +855,8 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
                 </div>
               </div>
             </Link>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>

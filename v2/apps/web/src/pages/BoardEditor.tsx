@@ -17,6 +17,19 @@ export default function BoardEditorPage() {
   // can pick up an imported game at any ply and start exploring lines.
   const initialFen = sp.get("fen") || undefined;
   const initialOrientation = sp.get("orientation") === "black" ? "black" : "white";
+  // Deep-link: /board-editor?fen=...&shapes=<base64url({orig,dest?,brush?}[])>
+  // The snap cards in /academy pass persisted coach arrows through this so
+  // opening a snap re-renders the "look at this diagonal" hint the coach drew.
+  const initialShapes = (() => {
+    const raw = sp.get("shapes");
+    if (!raw) return undefined;
+    try {
+      const json = atob(raw.replace(/-/g, "+").replace(/_/g, "/"));
+      const arr = JSON.parse(json);
+      if (!Array.isArray(arr)) return undefined;
+      return arr as Array<{ orig: string; dest?: string; brush?: string }>;
+    } catch { return undefined; }
+  })();
   const fp = useFreePlay(initialFen);
   const loadedOnce = useRef(false);
   useEffect(() => {
@@ -40,7 +53,8 @@ export default function BoardEditorPage() {
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
       <section>
         <Board fen={fp.fen} orientation={fp.orientation} turnColor={fp.turnColor}
-          movableColor="both" dests={fp.dests} onMove={fp.onMove} />
+          movableColor="both" dests={fp.dests} onMove={fp.onMove}
+          shapes={initialShapes as any} />
         <div className="mt-3 flex flex-wrap gap-2">
           <button onClick={fp.undo} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">◀ Undo</button>
           <button onClick={fp.reset} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">Reset</button>

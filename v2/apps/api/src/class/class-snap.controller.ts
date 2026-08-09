@@ -26,9 +26,24 @@ export class ClassSnapController {
     const fen = String(body?.fen || "");
     const note = String(body?.note || "").slice(0, 500);
     if (!FEN_RE.test(fen)) throw new BadRequestException("bad fen");
+    // Sanitize shapes: coach's live arrows/circles from chessground. Each
+    // shape is { orig, dest?, brush? } with algebraic squares like "e4".
+    // Anything malformed is dropped; capped at 64 to bound the payload.
+    type SnapShape = { orig: string; dest?: string; brush?: string };
+    const rawShapes: any[] = Array.isArray(body?.shapes) ? body.shapes.slice(0, 64) : [];
+    const SQ_RE = /^[a-h][1-8]$/;
+    const BRUSH_RE = /^[a-zA-Z0-9_-]{1,16}$/;
+    const shapes: SnapShape[] = [];
+    for (const s of rawShapes) {
+      if (!s || typeof s.orig !== "string" || !SQ_RE.test(s.orig)) continue;
+      const out: SnapShape = { orig: s.orig };
+      if (typeof s.dest === "string" && SQ_RE.test(s.dest)) out.dest = s.dest;
+      if (typeof s.brush === "string" && BRUSH_RE.test(s.brush)) out.brush = s.brush;
+      shapes.push(out);
+    }
     const doc = {
       _id: "sn_" + randomBytes(8).toString("base64url"),
-      classId: id, fen, note,
+      classId: id, fen, note, shapes,
       byUserId: userId, byName: username,
       at: new Date(),
     };
