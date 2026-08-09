@@ -1001,6 +1001,17 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
     } catch (e) { setErr(String((e as Error).message || e)); }
     finally { setSaving(false); }
   }
+  async function toggleReviewed() {
+    try {
+      const r = await fetch(`${BASE}/api/class/${encodeURIComponent(s.classId)}/snap/${encodeURIComponent(s._id)}`, {
+        method: "PATCH", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewed: !s.reviewedAt }),
+      });
+      if (!r.ok) return;
+      qc.invalidateQueries({ queryKey: ["academy-snaps"] });
+    } catch { /* ignore */ }
+  }
   async function toggleStar() {
     try {
       const r = await fetch(`${BASE}/api/class/${encodeURIComponent(s.classId)}/snap/${encodeURIComponent(s._id)}`, {
@@ -1093,6 +1104,7 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
           <b>{s.byName}</b>
           {shapes.length > 0 && <span className="ml-1 text-[10px] text-amber-300">✏️{shapes.length}</span>}
           {(() => { const sec = estimateAudioSeconds(s.audioBytes); return s.hasAudio && sec != null ? <span className="ml-1 text-[10px] text-violet-300" title="Approximate clip length">🎙~{sec}s</span> : null; })()}
+          {s.reviewedAt && <span className="ml-1 text-[10px] text-emerald-300" title={`Reviewed ${new Date(s.reviewedAt).toLocaleDateString()}`}>✓</span>}
           {canEdit && !editing && (
             <>
               <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDraft(s.note || ""); setEditing(true); }}
@@ -1234,6 +1246,12 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
                         className="rounded-lg border border-ink-600 px-3 py-1.5 text-sm text-ink-200 hover:bg-ink-800">✎ Edit note</button>
                       <button onClick={() => { toggleStar(); }}
                         className="rounded-lg border border-ink-600 px-3 py-1.5 text-sm text-ink-200 hover:bg-ink-800">{s.starred ? "★ Un-star" : "☆ Star"}</button>
+                      <button onClick={() => { toggleReviewed(); }}
+                        className={`rounded-lg border px-3 py-1.5 text-sm ${s.reviewedAt
+                          ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20"
+                          : "border-ink-600 text-ink-200 hover:bg-ink-800"}`}>
+                        {s.reviewedAt ? "✓ Reviewed" : "☐ Mark reviewed"}
+                      </button>
                     </>
                   )}
                 </div>
@@ -1368,7 +1386,7 @@ function StarredDigestPreviewLink() {
 // scope the grid; click All to reset. The 12-card visible limit still
 // applies within the filtered view.
 type SnapShape = { orig: string; dest?: string; brush?: string };
-type SnapItem = { _id: string; classId: string; classTitle: string; fen: string; note: string; byName: string; byUserId?: string; at: string; shapes?: SnapShape[]; starred?: boolean; hasAudio?: boolean; audioBytes?: number; transcript?: string };
+type SnapItem = { _id: string; classId: string; classTitle: string; fen: string; note: string; byName: string; byUserId?: string; at: string; shapes?: SnapShape[]; starred?: boolean; hasAudio?: boolean; audioBytes?: number; transcript?: string; reviewedAt?: string | null };
 // Nominal opus bitrate MediaRecorder uses by default (~48 kbps). Cheap
 // duration estimate for the card badge -- coach uses it to eyeball short
 // vs long clips without opening each modal. Off by a couple seconds if a
@@ -1411,16 +1429,18 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   const [classFilter, setClassFilter] = useState<string>(sp.get("class") || "");
   const [starredOnly, setStarredOnly] = useState<boolean>(sp.get("starred") === "1");
   const [textFilter, setTextFilter] = useState<string>(sp.get("q") || "");
+  const [hideReviewed, setHideReviewed] = useState<boolean>(sp.get("hidedone") === "1");
   useEffect(() => {
     // Rebuild the URL query from state. Empty values drop out so links stay clean.
     const next = new URLSearchParams(sp);
     if (classFilter) next.set("class", classFilter); else next.delete("class");
     if (starredOnly) next.set("starred", "1"); else next.delete("starred");
     if (textFilter) next.set("q", textFilter); else next.delete("q");
+    if (hideReviewed) next.set("hidedone", "1"); else next.delete("hidedone");
     setSp(next, { replace: true });
     // Only depend on the filters -- sp change is already how we write, so skip
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [classFilter, starredOnly, textFilter]);
+  }, [classFilter, starredOnly, textFilter, hideReviewed]);
   const [openIdx, setOpenIdx] = useState<number | null>(null);
   // Reset the open snap when filters change so we don't end up pointing at a
   // row that just got filtered out.
@@ -1561,6 +1581,7 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   const q = textFilter.trim().toLowerCase();
   const filtered = (classFilter ? snaps.filter((s) => s.classId === classFilter) : snaps)
     .filter((s) => (starredOnly ? !!s.starred : true))
+    .filter((s) => (hideReviewed ? !s.reviewedAt : true))
     .filter((s) => !q || (String(s.note || "").toLowerCase().includes(q)
       || String(s.transcript || "").toLowerCase().includes(q)
       || String(s.classTitle || "").toLowerCase().includes(q)))
@@ -1610,6 +1631,13 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
               </button>
             </>
           )}
+          <button onClick={() => setHideReviewed((v) => !v)}
+            title="Hide snaps you've already marked reviewed"
+            className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${hideReviewed
+              ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-100"
+              : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>
+            {hideReviewed ? "✓ Hiding done" : "Hide done"}
+          </button>
           <button onClick={() => setSelectMode((v) => !v)}
             title={selectMode ? "Exit multi-select" : "Multi-select for bulk actions"}
             className={`ml-auto rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${selectMode

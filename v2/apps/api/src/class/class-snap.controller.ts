@@ -78,11 +78,19 @@ export class ClassSnapController {
     if (!cur) throw new NotFoundException("snap not found");
     if (cur.byUserId !== userId) throw new ForbiddenException("not your snap");
     const $set: Record<string, unknown> = {};
+    const $unset: Record<string, "" > = {};
     if (typeof body?.note === "string") $set.note = body.note.slice(0, 500);
     if (typeof body?.starred === "boolean") $set.starred = body.starred;
     if (typeof body?.transcript === "string") $set.transcript = body.transcript.slice(0, 2000);
-    if (Object.keys($set).length === 0) return { ok: true, changed: false };
-    await this.conn.db!.collection("classSnaps").updateOne({ _id: snapId as any }, { $set });
+    if (typeof body?.reviewed === "boolean") {
+      if (body.reviewed) $set.reviewedAt = new Date();
+      else $unset.reviewedAt = "";
+    }
+    if (Object.keys($set).length === 0 && Object.keys($unset).length === 0) return { ok: true, changed: false };
+    const update: any = {};
+    if (Object.keys($set).length) update.$set = $set;
+    if (Object.keys($unset).length) update.$unset = $unset;
+    await this.conn.db!.collection("classSnaps").updateOne({ _id: snapId as any }, update);
     return { ok: true, changed: true };
   }
 
