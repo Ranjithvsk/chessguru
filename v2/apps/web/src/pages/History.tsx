@@ -257,31 +257,9 @@ export default function HistoryPage() {
     return true;
   }), [allItems, result, theme]);
 
-  if (isLoading) return <div className="py-16 text-center text-ink-400">Loading your report…</div>;
-
-  if (!data?.loggedIn) {
-    return (
-      <div className="mx-auto max-w-md rounded-xl2 border border-ink-700 bg-ink-900 p-8 text-center">
-        <div className="mb-2 text-2xl">📊</div>
-        <h1 className="mb-2 font-display text-xl text-white">Your puzzle report</h1>
-        <p className="mb-5 text-sm text-ink-400">Sign in to track every puzzle you solve.</p>
-        <Link to="/login" className="inline-block rounded-lg bg-brand-600 px-5 py-2.5 font-semibold text-white hover:bg-brand-500">Sign in</Link>
-      </div>
-    );
-  }
-
-  const t = data.totals!;
-  const stats = [
-    { label: "Attempted", value: t.attempted },
-    { label: "Solved", value: t.solved, tone: "text-accent-400" },
-    { label: "Missed", value: t.failed, tone: "text-rose-400" },
-    { label: "Win rate", value: `${t.winRate}%` },
-    { label: "Rating", value: rating ?? "—" },
-  ];
-
   // date + theme groups — precomputed ONCE per filtered set, not per render.
-  // Prior code re-ran the O(N) grouping inside the JSX loop on every render
-  // (mouse move, scroll, hover), causing hundreds of chessground remounts.
+  // Must live ABOVE the early returns below so the hook count is stable across
+  // loading→loaded transitions (React #310 otherwise).
   const dateGroups = useMemo(() => {
     const groups: { label: string; items: HistoryItem[]; themeGroups: { label: string; items: HistoryItem[] }[] }[] = [];
     for (const it of filtered) {
@@ -303,6 +281,28 @@ export default function HistoryPage() {
     }
     return groups;
   }, [filtered]);
+
+  if (isLoading) return <div className="py-16 text-center text-ink-400">Loading your report…</div>;
+
+  if (!data?.loggedIn) {
+    return (
+      <div className="mx-auto max-w-md rounded-xl2 border border-ink-700 bg-ink-900 p-8 text-center">
+        <div className="mb-2 text-2xl">📊</div>
+        <h1 className="mb-2 font-display text-xl text-white">Your puzzle report</h1>
+        <p className="mb-5 text-sm text-ink-400">Sign in to track every puzzle you solve.</p>
+        <Link to="/login" className="inline-block rounded-lg bg-brand-600 px-5 py-2.5 font-semibold text-white hover:bg-brand-500">Sign in</Link>
+      </div>
+    );
+  }
+
+  const t = data.totals!;
+  const stats = [
+    { label: "Attempted", value: t.attempted },
+    { label: "Solved", value: t.solved, tone: "text-accent-400" },
+    { label: "Missed", value: t.failed, tone: "text-rose-400" },
+    { label: "Win rate", value: `${t.winRate}%` },
+    { label: "Rating", value: rating ?? "—" },
+  ];
 
   return (
     <div className="space-y-6">
