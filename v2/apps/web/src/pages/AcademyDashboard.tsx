@@ -964,6 +964,18 @@ function ReviewHeatmapStrip({ snaps }: { snaps?: SnapItem[] }) {
     if (b.count > 0) { run++; if (run > longest) longest = run; }
     else run = 0;
   }
+  // At-risk = today has 0 reviews AND yesterday had >=1 (and so on). Coach
+  // sees a small warning to review 1 snap and preserve the streak.
+  const todayBucket = buckets[buckets.length - 1];
+  const yesterdayBucket = buckets[buckets.length - 2];
+  const streakAtRisk = (todayBucket?.count ?? 0) === 0 && (yesterdayBucket?.count ?? 0) > 0;
+  let atRiskLen = 0;
+  if (streakAtRisk) {
+    for (let i = buckets.length - 2; i >= 0; i--) {
+      if ((buckets[i]?.count ?? 0) > 0) atRiskLen++;
+      else break;
+    }
+  }
   return (
     <div className="rounded-xl2 border border-ink-700 bg-ink-900 px-4 py-3 flex items-center gap-4">
       <div className="text-[11px] uppercase tracking-wide text-ink-400 shrink-0">
@@ -971,6 +983,9 @@ function ReviewHeatmapStrip({ snaps }: { snaps?: SnapItem[] }) {
         <div className="mt-0.5 text-[10px] normal-case tracking-normal text-ink-500 tabular-nums">
           {totalCount} snap{totalCount === 1 ? "" : "s"} · {daysActive} day{daysActive === 1 ? "" : "s"}
           {currentStreak > 0 && <> · <span className="text-emerald-300">🔥 {currentStreak}d streak</span></>}
+          {streakAtRisk && atRiskLen >= 2 && (
+            <> · <span className="text-amber-300" title={`Review at least one snap today to keep the ${atRiskLen}-day streak going`}>⚠ {atRiskLen}d streak at risk</span></>
+          )}
           {longest > currentStreak && <> · best {longest}d</>}
         </div>
       </div>
