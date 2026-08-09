@@ -402,9 +402,47 @@ export default function AcademyDashboardPage() {
       {/* ── Students (owner sees all, coach sees theirs) ── */}
       {canManage && (
         <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
-          <h2 className="mb-3 font-display text-lg text-white">
-            👦 {isCoach ? "My students" : "Students"} <span className="text-xs text-ink-500">({studentsShown.length})</span>
-          </h2>
+          <div className="mb-3 flex items-baseline justify-between gap-2">
+            <h2 className="font-display text-lg text-white">
+              👦 {isCoach ? "My students" : "Students"} <span className="text-xs text-ink-500">({studentsShown.length})</span>
+            </h2>
+            {studentsShown.length > 0 && (
+              <button onClick={() => {
+                // Roster snapshot: joined-when, contact, puzzle rating,
+                // attendance rollup, pending fees. Enough for a parent
+                // meeting or a report-card prep without opening the app.
+                const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+                const header = ["Username", "Email", "CoachId", "JoinedAt", "LastLogin", "PuzzleRating",
+                  "AttendedTotal", "AttendedThisWeek", "LastAttendedAt", "PendingFeesINR", "OldestPendingPeriod"];
+                const lines = [header.map(esc).join(",")];
+                for (const s of studentsShown) {
+                  lines.push([
+                    s.username,
+                    s.email || "",
+                    s.coachId || "",
+                    s.createdAt ? new Date(s.createdAt).toISOString() : "",
+                    s.lastLogin ? new Date(s.lastLogin).toISOString() : "",
+                    s.puzzleRating != null ? String(s.puzzleRating) : "",
+                    s.attendedTotal != null ? String(s.attendedTotal) : "",
+                    s.attendedThisWeek != null ? String(s.attendedThisWeek) : "",
+                    s.lastAttendedAt ? new Date(s.lastAttendedAt).toISOString() : "",
+                    s.pendingFeesPaise != null ? (s.pendingFeesPaise / 100).toFixed(2) : "",
+                    s.oldestPendingPeriod || "",
+                  ].map((c) => esc(String(c))).join(","));
+                }
+                const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url; a.download = `students-${new Date().toISOString().slice(0, 10)}.csv`;
+                document.body.appendChild(a); a.click(); a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+              }}
+                title="Download the student roster as CSV"
+                className="rounded-full border border-ink-700 bg-ink-900 px-2.5 py-0.5 text-[11px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-ink-100">
+                ⬇ CSV <span className="ml-1 opacity-70">{studentsShown.length}</span>
+              </button>
+            )}
+          </div>
           {studentsShown.length === 0 && (
             <p className="text-sm text-ink-400">
               No students yet. {isCoach ? "Invite one above." : "Owners invite students and pick which coach they join."}
