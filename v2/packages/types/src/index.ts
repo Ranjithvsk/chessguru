@@ -45,6 +45,8 @@ export interface CompleteResult {
   ratingDiff?: number;
   rating?: number;
   glicko?: Glicko;
+  /** Phase 7n: set when this solve crossed a round-number rating threshold. */
+  milestone?: { milestone: number; firstTime: boolean } | null;
 }
 
 export interface AuthMe {

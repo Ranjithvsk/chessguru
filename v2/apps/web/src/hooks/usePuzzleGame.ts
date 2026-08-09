@@ -84,6 +84,9 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   const [hintShapes, setHintShapes] = useState<DrawShape[]>([]);
   const [fb, setFb] = useState<FB>({ kind: "wait", title: "Your turn", sub: "Find the best move" });
   const [ratingDiff, setRatingDiff] = useState<number | null>(null);
+  // Phase 7n: milestone hit on this solve (null when none crossed). Cleared
+  // on the next puzzle load — the celebration overlay lives on the parent.
+  const [milestone, setMilestone] = useState<{ milestone: number; firstTime: boolean } | null>(null);
   const [displayRating, setDisplayRating] = useState(initialRating);
   const [, force] = useState(0);
   const [replayPly, setReplayPly] = useState<number | null>(null); // post-solve move replay (null = live)
@@ -113,6 +116,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
     setOrientation(pc);
     setHintShapes([]);
     setRatingDiff(null);
+    setMilestone(null);
     if (reviewIdRef.current && puzzle.id === reviewIdRef.current) {
       // Review a past solve: play out the whole line, show the final position,
       // enable replay (back/forward), and never submit (rating untouched).
@@ -173,6 +177,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
     }).then((r) => {
       if (typeof r.ratingDiff === "number") setRatingDiff(r.ratingDiff);
       if (r.glicko) setDisplayRating(Math.round(r.glicko.r));
+      if (r.milestone) setMilestone(r.milestone);
       qc.invalidateQueries({ queryKey: ["me-rating"] }); // refresh the navbar rating
       qc.invalidateQueries({ queryKey: ["me-history"] }); // refresh the solved strip
       qc.invalidateQueries({ queryKey: ["dashboard"] }); // refresh theme ratings (sidebar + /dashboard)
@@ -357,6 +362,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
     setReplayPly(null);
     setHintShapes([]);
     setRatingDiff(null);
+    setMilestone(null);
     setFb({ kind: "wait", title: "Practice run", sub: "You've seen the answer — now find it yourself" });
     force((n) => n + 1);
   }, [puzzle]);
@@ -371,7 +377,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
     dests: exploring ? exploreDests : dests,
     lastMove: exploring ? exploreLast : replayView ? replayView.lastMove : lastMove,
     hintShapes: exploring ? [] : hintShapes,
-    fb, ratingDiff, displayRating,
+    fb, ratingDiff, displayRating, milestone, clearMilestone: () => setMilestone(null),
     solveMs, elapsedMs, practice,
     solved: solved.current, hinted: hinted.current, failed: failed.current,
     onMove: exploring ? exploreMove : onMove, tryInput, showHint, viewSolution, next, review, retry,

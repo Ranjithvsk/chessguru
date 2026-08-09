@@ -3,6 +3,8 @@ import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { updatePuzzleRating, DEFAULT_VOLATILITY } from "../glicko/glicko";
 import { fmtPuzzle, applyLastMove } from "../lib/puzzle-format";
+import { recordAndCelebrate } from "./milestones";
+import { PushService } from "../push/push.service";
 
 // CL-9156c: "normal" = ~125 below the user's live rating (comfortable level the user
 // solves most of); ladder steps from there. Offsets apply to the LIVE rating (CL-9156b).
@@ -13,7 +15,10 @@ const MAX_PLAYED = 5000;
 
 @Injectable()
 export class PuzzlesService {
-  constructor(@InjectConnection() private readonly conn: Connection) {}
+  constructor(
+    @InjectConnection() private readonly conn: Connection,
+    private readonly push: PushService,
+  ) {}
   private col() { return this.conn.db!.collection("puzzles"); }
 
   /**
@@ -444,7 +449,13 @@ export class PuzzlesService {
         } },
         { upsert: true },
       );
-      return { win, ratingDiff: upd.ratingDiff, rating: upd.userPerf.gl.r, glicko: upd.userPerf.gl };
+      // Phase 7n: milestone crossings — only for regular puzzle mode. Blindfold's
+      // rating distribution is different enough that the round-100 thresholds
+      // wouldn't feel meaningful.
+      const milestone = key === "puzzle"
+        ? await recordAndCelebrate(this.conn, this.push, userId, perf.gl.r, upd.userPerf.gl.r).catch(() => null)
+        : null;
+      return { win, ratingDiff: upd.ratingDiff, rating: upd.userPerf.gl.r, glicko: upd.userPerf.gl, milestone };
     }
 
     // guest — one-off, non-persisted
