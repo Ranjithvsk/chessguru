@@ -143,6 +143,7 @@ export default function AcademyDashboardPage() {
   const [classStartAt, setClassStartAt] = useState(localDatetimeDefault);
   const [classDur, setClassDur] = useState(60);
   const [classAutoSummary, setClassAutoSummary] = useState(false);
+  const [classAutoSummaryNote, setClassAutoSummaryNote] = useState("");
   const [scheduleMsg, setScheduleMsg] = useState<{ tone: "ok"|"err"; text: string }|null>(null);
   // Fees form + actions
   const [feeRupees, setFeeRupees] = useState<string>("");
@@ -192,6 +193,7 @@ export default function AcademyDashboardPage() {
     mutationFn: () => post<{ _id: string; title: string }>("/api/class/schedule", {
       title: classTitle, coach: classCoach || (me?.username ?? ""), startAt: new Date(classStartAt).toISOString(), durationMin: classDur,
       autoSummary: classAutoSummary,
+      autoSummaryNote: classAutoSummary ? classAutoSummaryNote : "",
     }),
     onSuccess: (r: any) => {
       if (r && r._id) {
@@ -571,6 +573,16 @@ export default function AcademyDashboardPage() {
               🤖 Auto-email a class summary 15 minutes after this class ends
               <span className="ml-1 text-ink-500">(you can still preview / send earlier manually)</span>
             </label>
+            {classAutoSummary && (
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">Note baked into the auto-send (optional)</label>
+                <textarea value={classAutoSummaryNote} onChange={(e) => setClassAutoSummaryNote(e.target.value)}
+                  rows={2} maxLength={500}
+                  placeholder='e.g. "Practise today’s tactics 20 min tomorrow morning."'
+                  className="w-full resize-none rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
+                <div className="mt-1 text-right text-[10px] text-ink-500 tabular-nums">{classAutoSummaryNote.length}/500</div>
+              </div>
+            )}
             <button disabled={!classTitle || scheduleMut.isPending} onClick={() => scheduleMut.mutate()}
               className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50 md:col-span-2">
               {scheduleMut.isPending ? "Scheduling…" : "Schedule class"}

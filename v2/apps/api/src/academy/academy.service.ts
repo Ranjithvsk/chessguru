@@ -723,6 +723,7 @@ export class AcademyService {
       academyId: sched.academyId || null,
       role: "academy_owner" as const,   // owner passes every ensure check
     };
-    return this.sendClassSummary(session, classId, { note: "", _autoSummarySystem: true });
+    const note = typeof sched.autoSummaryNote === "string" ? sched.autoSummaryNote : "";
+    return this.sendClassSummary(session, classId, { note, _autoSummarySystem: true });
   }
 }

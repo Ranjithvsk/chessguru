@@ -61,6 +61,10 @@ type ScheduleDoc = {
   // email 15 min after endAt (if not already sent manually). Coach can flip
   // on the schedule form or via PATCH.
   autoSummary?: boolean;
+  // Optional evergreen note baked into the auto-sent summary. Coach writes
+  // this once at schedule time (e.g. "Practise the tactics from today's
+  // Italian for 20 minutes tomorrow morning."). Max 500 chars.
+  autoSummaryNote?: string;
   summarySentAt?: Date | null;
 };
 
@@ -202,6 +206,7 @@ export class ClassScheduleController {
         reminded24hAt: null,
         reminderStages: reminderStages as string[],
         autoSummary: !!b.autoSummary,
+        autoSummaryNote: typeof b.autoSummaryNote === "string" ? b.autoSummaryNote.slice(0, 500) : "",
       });
     }
     await this.col().insertMany(docs);
@@ -309,6 +314,9 @@ export class ClassScheduleController {
     }
     if (typeof b.autoSummary === "boolean") {
       patch.autoSummary = b.autoSummary;
+    }
+    if (typeof b.autoSummaryNote === "string") {
+      patch.autoSummaryNote = b.autoSummaryNote.slice(0, 500);
     }
     if (Object.keys(patch).length === 0) return { ok: true, matched: 0 };
     if (scope === "series" && row.seriesId) {
