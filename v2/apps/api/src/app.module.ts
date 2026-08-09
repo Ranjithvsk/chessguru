@@ -19,11 +19,12 @@ import { ClassRecordingController } from "./class/class-recording.controller";
 import { ClassScheduleController } from "./class/class-schedule.controller";
 import { ClassAttendanceController } from "./class/class-attendance.controller";
 import { IntegrationsModule } from "./integrations/integrations.module";
+import { LivekitModule } from "./livekit/livekit.module";
 
 const MONGO_URI = process.env.MONGO_URI ?? "mongodb://localhost:27017/chessguru";
 
 @Module({
-  imports: [MongooseModule.forRoot(MONGO_URI), IntegrationsModule],
+  imports: [MongooseModule.forRoot(MONGO_URI), IntegrationsModule, LivekitModule],
   controllers: [HealthController, MiscController, BroadcastsController, PuzzlesController, AuthController, AdminController, EngineController, ExplorerController, StudyController, ClassRecordingController, ClassScheduleController, ClassAttendanceController],
   providers: [PuzzlesService, AuthService, AdminService, EngineService, ExplorerService, StudyService],
 })

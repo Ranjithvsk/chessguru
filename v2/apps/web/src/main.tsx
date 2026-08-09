@@ -42,6 +42,7 @@ import FeedbackUITestPage from "./pages/FeedbackUITest";
 import BookPage from "./pages/Book";
 import ClassPage from "./pages/Class";
 import ClassReplayPage from "./pages/ClassReplay";
+import ClassV2Page from "./pages/ClassV2";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -95,6 +96,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="class" element={<ClassPage />} />
             <Route path="class/:id" element={<ClassPage />} />
             <Route path="class/:id/replay/:filename" element={<ClassReplayPage />} />
+            <Route path="class-v2/:room" element={<ClassV2Page />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
