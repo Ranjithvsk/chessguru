@@ -34,7 +34,10 @@ interface Client { ws: WebSocket; id: string; roomId: string; userId: string | n
 type ClientMap = Map<string, Client>;
 const rooms = new Map<string, ClientMap>();
 
-const MAX_PER_ROOM_P0 = 2;
+// P0 = 2 (direct P2P). P2a = 8 (mesh; each client holds N-1 peer connections
+// so beyond ~5 the per-client upload cost swamps consumer wifi -- SFU lands
+// in P2b to raise this).
+const MAX_PER_ROOM = 8;
 const ROOM_RE = /^[A-Za-z0-9_-]{4,64}$/;
 
 function send(ws: WebSocket, obj: unknown) {
@@ -94,7 +97,7 @@ async function writeLeave(conn: Connection | null, client: Client) {
 function joinRoom(roomId: string, client: Client): { ok: true; peers: string[] } | { ok: false; reason: string } {
   let room = rooms.get(roomId);
   if (!room) { room = new Map(); rooms.set(roomId, room); }
-  if (room.size >= MAX_PER_ROOM_P0) return { ok: false, reason: "full" };
+  if (room.size >= MAX_PER_ROOM) return { ok: false, reason: "full" };
   room.set(client.id, client);
   const peers = [...room.keys()].filter((k) => k !== client.id);
   return { ok: true, peers };

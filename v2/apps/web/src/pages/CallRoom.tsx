@@ -1,14 +1,16 @@
-// CallRoom — P0 of ChessGuru's "from-scratch Zoom" build.
+// CallRoom — P2a of ChessGuru's "from-scratch Zoom" build.
 //
-// A 1:1 video call page wired to the server-side WebSocket signaling relay at
-// /v2api/api/video-signal/:room. Uses vanilla browser WebRTC APIs, no libs.
+// Mesh video call page (up to 8 participants) wired to the server-side
+// WebSocket signaling relay at /v2api/api/video-signal/:room. Vanilla browser
+// WebRTC APIs, no libs.
 //
-// Role assignment is deterministic: the peer with the LEXICOGRAPHICALLY LOWER
-// peerId offers, the other answers. This avoids extra signaling round-trips
-// and glare (both sides offering at once).
+// Topology: full mesh. Each participant holds one RTCPeerConnection per other
+// participant (N-1 PCs when there are N people in the room). Role assignment
+// per-pair is deterministic: the peer with the LEXICOGRAPHICALLY LOWER peerId
+// offers, the other answers. This avoids glare.
 //
-// Buffers ICE candidates that arrive before setRemoteDescription — a common
-// race because ICE can start flowing before the SDP answer lands.
+// ICE candidates that arrive before setRemoteDescription are buffered per-peer
+// — ICE can start flowing before the SDP answer lands.
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
@@ -20,6 +22,12 @@ type ServerMsg =
   | { type: "offer"; from: string; sdp: RTCSessionDescriptionInit }
   | { type: "answer"; from: string; sdp: RTCSessionDescriptionInit }
   | { type: "ice"; from: string; candidate: RTCIceCandidateInit | null };
+
+type PeerState = {
+  pc: RTCPeerConnection;
+  remoteStream: MediaStream | null;
+  pendingIce: RTCIceCandidateInit[];
+};
 
 // STUN-only fallback used if the /api/video/ice-config fetch fails (e.g. guest
 // visitor). TURN URLs are fetched from the server per-session so credentials are
@@ -41,10 +49,10 @@ async function fetchIceConfig(): Promise<RTCConfiguration> {
 
 type Status =
   | "connecting"        // opening WS / getUserMedia
-  | "waiting"           // in room, no peer yet
-  | "negotiating"       // SDP handshake in progress
-  | "connected"         // peer connection live
-  | "full"              // server rejected: room already has 2
+  | "waiting"           // in room, no peers yet
+  | "negotiating"       // SDP handshake in progress with >=1 peer
+  | "connected"         // at least one peer connection live
+  | "full"              // server rejected: room already has 8
   | "denied"            // getUserMedia rejected
   | "error"             // catch-all
   | "left";             // user hit Leave
@@ -56,19 +64,20 @@ export default function CallRoomPage() {
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
-  const [hasRemote, setHasRemote] = useState(false);
+  // Ordered list of remote peer ids — drives the grid render. Kept in sync
+  // with peersRef's key set on every join/leave.
+  const [peerIds, setPeerIds] = useState<string[]>([]);
 
   // Refs — held outside React state because they never trigger re-renders
   // and we need stable identity across effect closures.
   const localVideoRef = useRef<HTMLVideoElement>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
-  const pcRef = useRef<RTCPeerConnection | null>(null);
+  // One entry per remote peer in the room. Map is stable across renders; the
+  // peerIds state array is what actually triggers re-renders when membership
+  // changes.
+  const peersRef = useRef<Map<string, PeerState>>(new Map());
   const wsRef = useRef<WebSocket | null>(null);
   const selfIdRef = useRef<string>("");
-  const peerIdRef = useRef<string>("");
-  // ICE candidates buffered while remoteDescription is still null.
-  const pendingIceRef = useRef<RTCIceCandidateInit[]>([]);
   // RTCConfiguration fetched from /api/video/ice-config (or fallback). Populated
   // before the WS opens so every createPc() gets the right servers.
   const iceConfigRef = useRef<RTCConfiguration>(FALLBACK_ICE_SERVERS);
@@ -79,9 +88,29 @@ export default function CallRoomPage() {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
   };
 
-  // Build a fresh RTCPeerConnection and wire the standard handlers.
-  const createPc = (peerId: string): RTCPeerConnection => {
+  // Sync the peerIds state array from the map. Called after any structural
+  // change to peersRef (join, leave, initial hello).
+  const syncPeerIds = () => setPeerIds([...peersRef.current.keys()]);
+
+  // Recompute call-level status from the current set of PCs. If any PC is
+  // connected → "connected"; else if any peers exist → "negotiating"; else
+  // "waiting".
+  const recomputeStatus = () => {
+    let anyConnected = false;
+    for (const p of peersRef.current.values()) {
+      if (p.pc.connectionState === "connected") { anyConnected = true; break; }
+    }
+    if (anyConnected) setStatus("connected");
+    else if (peersRef.current.size > 0) setStatus("negotiating");
+    else setStatus("waiting");
+  };
+
+  // Build a fresh RTCPeerConnection for one specific remote peer and wire the
+  // standard handlers. Stores the PeerState in peersRef and returns it.
+  const createPc = (peerId: string): PeerState => {
     const pc = new RTCPeerConnection(iceConfigRef.current);
+    const state: PeerState = { pc, remoteStream: null, pendingIce: [] };
+    peersRef.current.set(peerId, state);
 
     pc.onicecandidate = (e) => {
       // Send null too — signals end-of-candidates to the remote.
@@ -89,84 +118,99 @@ export default function CallRoomPage() {
     };
     pc.ontrack = (e) => {
       const [stream] = e.streams;
-      if (remoteVideoRef.current && stream) {
-        remoteVideoRef.current.srcObject = stream;
-        setHasRemote(true);
+      const cur = peersRef.current.get(peerId);
+      if (cur && stream) {
+        cur.remoteStream = stream;
+        // Nudge React so the RemoteTile picks up the new stream. syncPeerIds
+        // sets a fresh array reference even if membership hasn't changed.
+        syncPeerIds();
       }
     };
     pc.onconnectionstatechange = () => {
       const s = pc.connectionState;
-      if (s === "connected") setStatus("connected");
-      else if (s === "failed" || s === "disconnected") setStatus("negotiating");
+      if (s === "failed" || s === "closed") {
+        // Peer gone-bad: drop it so the grid updates. peer-leave from server
+        // will usually beat us here, but be defensive.
+        const existing = peersRef.current.get(peerId);
+        if (existing && existing.pc === pc) {
+          try { pc.close(); } catch { /* already closed */ }
+          peersRef.current.delete(peerId);
+          syncPeerIds();
+        }
+      }
+      recomputeStatus();
     };
 
     // Attach our local tracks so the remote receives us.
     const local = localStreamRef.current;
     if (local) for (const t of local.getTracks()) pc.addTrack(t, local);
 
-    return pc;
+    return state;
   };
 
-  // I offer if my id sorts before theirs. Deterministic, no glare.
+  // I offer if my id sorts before theirs. Deterministic, no glare. Applied
+  // pairwise, so every ordered pair has exactly one offerer.
   const shouldOffer = (self: string, other: string) => self < other;
 
   const startOffer = async (peerId: string) => {
-    const pc = pcRef.current;
-    if (!pc) return;
+    const state = peersRef.current.get(peerId);
+    if (!state) return;
     setStatus("negotiating");
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
+    const offer = await state.pc.createOffer();
+    await state.pc.setLocalDescription(offer);
     send({ type: "offer", to: peerId, sdp: offer });
   };
 
   const handleOffer = async (from: string, sdp: RTCSessionDescriptionInit) => {
-    if (!pcRef.current) pcRef.current = createPc(from);
-    peerIdRef.current = from;
-    const pc = pcRef.current;
+    let state = peersRef.current.get(from);
+    if (!state) { state = createPc(from); syncPeerIds(); }
     setStatus("negotiating");
-    await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+    await state.pc.setRemoteDescription(new RTCSessionDescription(sdp));
     // Drain any ICE that arrived before we had a remote description.
-    for (const c of pendingIceRef.current) {
-      try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {/* stale */}
+    for (const c of state.pendingIce) {
+      try { await state.pc.addIceCandidate(new RTCIceCandidate(c)); } catch {/* stale */}
     }
-    pendingIceRef.current = [];
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
+    state.pendingIce = [];
+    const answer = await state.pc.createAnswer();
+    await state.pc.setLocalDescription(answer);
     send({ type: "answer", to: from, sdp: answer });
   };
 
-  const handleAnswer = async (sdp: RTCSessionDescriptionInit) => {
-    const pc = pcRef.current;
-    if (!pc) return;
-    await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-    for (const c of pendingIceRef.current) {
-      try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {/* stale */}
+  const handleAnswer = async (from: string, sdp: RTCSessionDescriptionInit) => {
+    const state = peersRef.current.get(from);
+    if (!state) return;
+    await state.pc.setRemoteDescription(new RTCSessionDescription(sdp));
+    for (const c of state.pendingIce) {
+      try { await state.pc.addIceCandidate(new RTCIceCandidate(c)); } catch {/* stale */}
     }
-    pendingIceRef.current = [];
+    state.pendingIce = [];
   };
 
-  const handleIce = async (candidate: RTCIceCandidateInit | null) => {
+  const handleIce = async (from: string, candidate: RTCIceCandidateInit | null) => {
     if (!candidate) return; // end-of-candidates marker; nothing to add
-    const pc = pcRef.current;
-    if (!pc || !pc.remoteDescription) {
+    const state = peersRef.current.get(from);
+    if (!state) return; // ICE for a peer we never opened; drop.
+    if (!state.pc.remoteDescription) {
       // Race: candidate arrived before remote SDP. Buffer for later.
-      pendingIceRef.current.push(candidate);
+      state.pendingIce.push(candidate);
       return;
     }
-    try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {/* stale */}
+    try { await state.pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {/* stale */}
   };
 
-  // Full teardown — used by unmount + Leave button + peer-leave.
+  // Full teardown — used by unmount + Leave button.
   const teardown = () => {
-    if (pcRef.current) { try { pcRef.current.close(); } catch {} pcRef.current = null; }
+    for (const [, state] of peersRef.current) {
+      try { state.pc.close(); } catch { /* already closed */ }
+    }
+    peersRef.current.clear();
     if (localStreamRef.current) {
       for (const t of localStreamRef.current.getTracks()) t.stop();
       localStreamRef.current = null;
     }
-    if (wsRef.current) { try { wsRef.current.close(); } catch {} wsRef.current = null; }
-    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+    if (wsRef.current) { try { wsRef.current.close(); } catch { /* already closed */ } wsRef.current = null; }
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
-    setHasRemote(false);
+    setPeerIds([]);
   };
 
   useEffect(() => {
@@ -214,31 +258,34 @@ export default function CallRoomPage() {
         switch (msg.type) {
           case "hello": {
             selfIdRef.current = msg.self;
-            // If a peer is ALREADY here, decide role and maybe offer.
-            const other = msg.peers[0];
-            if (other) {
-              peerIdRef.current = other;
-              pcRef.current = createPc(other);
+            // For EACH peer already in the room, spin up a PC. If our id sorts
+            // before theirs, we offer; else we wait for their offer.
+            for (const other of msg.peers) {
+              if (peersRef.current.has(other)) continue;
+              createPc(other);
               if (shouldOffer(msg.self, other)) await startOffer(other);
-              else setStatus("negotiating"); // wait for their offer
             }
+            syncPeerIds();
+            if (msg.peers.length > 0) setStatus("negotiating");
             break;
           }
           case "peer-join": {
-            // We were alone; someone joined. Only one of us offers.
-            peerIdRef.current = msg.peer;
-            if (!pcRef.current) pcRef.current = createPc(msg.peer);
+            // A new participant arrived. Spin up a PC and apply the same
+            // pairwise offerer rule.
+            if (!peersRef.current.has(msg.peer)) createPc(msg.peer);
+            syncPeerIds();
             if (shouldOffer(selfIdRef.current, msg.peer)) await startOffer(msg.peer);
             else setStatus("negotiating");
             break;
           }
           case "peer-leave": {
-            if (pcRef.current) { try { pcRef.current.close(); } catch {} pcRef.current = null; }
-            if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
-            pendingIceRef.current = [];
-            peerIdRef.current = "";
-            setHasRemote(false);
-            setStatus("waiting");
+            const state = peersRef.current.get(msg.peer);
+            if (state) {
+              try { state.pc.close(); } catch { /* already closed */ }
+              peersRef.current.delete(msg.peer);
+              syncPeerIds();
+              recomputeStatus();
+            }
             break;
           }
           case "full": {
@@ -246,8 +293,8 @@ export default function CallRoomPage() {
             break;
           }
           case "offer":  await handleOffer(msg.from, msg.sdp); break;
-          case "answer": await handleAnswer(msg.sdp); break;
-          case "ice":    await handleIce(msg.candidate); break;
+          case "answer": await handleAnswer(msg.from, msg.sdp); break;
+          case "ice":    await handleIce(msg.from, msg.candidate); break;
         }
       };
     })();
@@ -275,11 +322,22 @@ export default function CallRoomPage() {
   if (status === "denied") return <Splash title="Camera & mic permission needed"
     body="Allow camera and microphone access in your browser, then reload this page." detail={errorMsg} />;
   if (status === "full")   return <Splash title="This room is full"
-    body="Only 2 people can be in a room at a time in P0." />;
+    body="Rooms are capped at 8 participants." />;
   if (status === "left")   return <Splash title="You left the call" />;
   if (status === "error")  return <Splash title="Something went wrong" body={errorMsg} />;
 
   // ---- Live call view ------------------------------------------------------
+
+  // Header count includes self.
+  const currentCount = peerIds.length + 1;
+
+  // Explicit grid columns tuned per participant count. auto-fit with a min
+  // width would also work; explicit keeps the cell aspect predictable.
+  let gridCols = "grid-cols-1";
+  if (peerIds.length === 2) gridCols = "grid-cols-2";
+  else if (peerIds.length >= 3 && peerIds.length <= 4) gridCols = "grid-cols-2";
+  else if (peerIds.length >= 5 && peerIds.length <= 6) gridCols = "grid-cols-3";
+  else if (peerIds.length >= 7) gridCols = "grid-cols-3";
 
   return (
     <div className="min-h-screen bg-ink-950 text-white flex flex-col">
@@ -288,28 +346,35 @@ export default function CallRoomPage() {
         <div className="text-xs text-ink-300">
           <span className="font-mono">{room}</span>
           <span className="mx-2 text-ink-500">·</span>
+          <span>{currentCount}/8 in room</span>
+          <span className="mx-2 text-ink-500">·</span>
           <span>{status}</span>
         </div>
       </header>
 
       <main className="relative flex-1 flex items-center justify-center p-4">
-        <div className="w-full max-w-4xl aspect-video rounded-xl2 border border-ink-700 bg-black overflow-hidden shadow-lg">
-          <video
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            className={`w-full h-full object-cover ${hasRemote ? "" : "hidden"}`}
-          />
-          {!hasRemote && (
+        {peerIds.length === 0 ? (
+          <div className="w-full max-w-4xl aspect-video rounded-xl2 border border-ink-700 bg-black overflow-hidden shadow-lg">
             <div className="w-full h-full flex flex-col items-center justify-center text-center px-6">
               <div className="h-12 w-12 rounded-full border-2 border-brand-600 border-t-transparent animate-spin mb-4" />
-              <p className="text-lg text-white">Waiting for the other person to join…</p>
+              <p className="text-lg text-white">Waiting for someone to join…</p>
               <p className="mt-2 text-sm text-ink-300">
-                Room <span className="font-mono">{room}</span>
+                Room <span className="font-mono">{room}</span> (0/8)
               </p>
             </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className={`grid ${gridCols} gap-3 w-full max-w-6xl`}>
+            {peerIds.map((id, idx) => (
+              <RemoteTile
+                key={id}
+                peerId={id}
+                index={idx}
+                getStream={() => peersRef.current.get(id)?.remoteStream ?? null}
+              />
+            ))}
+          </div>
+        )}
 
         {/* Self-view: always visible, bottom-right */}
         <div className="absolute bottom-6 right-6 w-40 h-28 rounded-lg overflow-hidden border border-white/20 shadow-lg bg-black">
@@ -348,6 +413,46 @@ export default function CallRoomPage() {
           ☎️ Leave
         </button>
       </footer>
+    </div>
+  );
+}
+
+// One remote peer's video cell. Reads its MediaStream via getStream() on each
+// render, which lets the parent keep the actual stream on peersRef (a ref) and
+// still get the srcObject attached every time React re-renders — including the
+// re-render triggered by ontrack via syncPeerIds().
+function RemoteTile({
+  peerId,
+  index,
+  getStream,
+}: {
+  peerId: string;
+  index: number;
+  getStream: () => MediaStream | null;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const stream = getStream();
+
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.srcObject = stream;
+  }, [stream]);
+
+  return (
+    <div className="relative aspect-video rounded-lg border border-ink-700 bg-ink-900 overflow-hidden">
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        className={`w-full h-full object-cover ${stream ? "" : "hidden"}`}
+      />
+      {!stream && (
+        <div className="w-full h-full flex items-center justify-center text-xs text-ink-400">
+          Connecting…
+        </div>
+      )}
+      <div className="absolute bottom-1 left-1 px-2 py-0.5 rounded bg-black/60 text-[10px] text-white font-mono">
+        Peer {index + 1} · {peerId.slice(0, 6)}
+      </div>
     </div>
   );
 }
