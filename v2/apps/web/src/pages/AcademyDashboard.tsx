@@ -914,13 +914,21 @@ function SnapCard({ s }: { s: SnapItem }) {
       qc.invalidateQueries({ queryKey: ["academy-snaps"] });
     } catch (e) { window.alert(String((e as Error).message || e)); }
   }
-  const Wrapper: any = editing ? "div" : Link;
-  const wrapperProps: any = editing ? {} : { to: href };
+  // Card click opens an inline detail modal (bigger board + audio + full note)
+  // instead of navigating away. The modal has its own "Open in board editor"
+  // button for the deep-dive flow, so the old navigation is still one click away.
+  const [detailOpen, setDetailOpen] = useState(false);
+  const cardOnClick = (e: React.MouseEvent) => {
+    if (editing) return;
+    e.preventDefault(); e.stopPropagation();
+    setDetailOpen(true);
+  };
   return (
-    <Wrapper {...wrapperProps}
+    <div onClick={cardOnClick} role={editing ? undefined : "button"} tabIndex={editing ? undefined : 0}
+      onKeyDown={(e) => { if (!editing && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setDetailOpen(true); } }}
       className={`group flex gap-3 rounded-lg border p-3 transition-colors ${editing
         ? "border-brand-500/60 bg-ink-800"
-        : "border-ink-700 bg-ink-800/40 hover:border-brand-500/50 hover:bg-ink-800/60"}`}>
+        : "border-ink-700 bg-ink-800/40 hover:border-brand-500/50 hover:bg-ink-800/60 cursor-pointer"}`}>
       <div className="w-24 h-24 shrink-0">
         <Board fen={s.fen} viewOnly coordinates={false} className="mini" shapes={shapes as any} />
       </div>
@@ -973,10 +981,59 @@ function SnapCard({ s }: { s: SnapItem }) {
         )}
         <div className="mt-auto text-[10px] text-ink-500">
           {new Date(s.at).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
-          {!editing && <span className="ml-2 text-brand-300 opacity-0 group-hover:opacity-100 transition-opacity">🔬 Open →</span>}
+          {!editing && <span className="ml-2 text-brand-300 opacity-0 group-hover:opacity-100 transition-opacity">🔍 Expand</span>}
         </div>
       </div>
-    </Wrapper>
+      {detailOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={(e) => { e.stopPropagation(); setDetailOpen(false); }}>
+          <div onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-2xl rounded-xl2 border border-ink-700 bg-ink-900 p-5 shadow-2xl">
+            <div className="mb-3 flex items-baseline justify-between gap-2">
+              <div className="min-w-0">
+                <div className="font-display text-lg text-white truncate">
+                  {s.starred && <span className="mr-1 text-amber-300">★</span>}
+                  {s.byName}
+                </div>
+                <div className="text-[11px] text-ink-400 truncate">{s.classTitle} · {new Date(s.at).toLocaleString()}</div>
+              </div>
+              <button onClick={() => setDetailOpen(false)}
+                className="text-ink-400 hover:text-white text-sm">Esc</button>
+            </div>
+            <div className="grid gap-4 md:grid-cols-[minmax(0,320px)_1fr]">
+              <div className="w-full">
+                <Board fen={s.fen} viewOnly shapes={shapes as any} />
+              </div>
+              <div className="min-w-0 flex flex-col gap-3 text-sm">
+                <div className="text-[10px] font-mono text-ink-500 break-all" title="FEN">{s.fen}</div>
+                <div className="text-[11px] text-ink-500">{describeFen(s.fen)}</div>
+                {s.note && <div className="rounded border border-ink-700 bg-ink-800/40 p-2 text-ink-200 whitespace-pre-wrap">"{s.note}"</div>}
+                {s.hasAudio && (
+                  <audio controls preload="none"
+                    src={`${BASE}/api/class/${encodeURIComponent(s.classId)}/snap/${encodeURIComponent(s._id)}/audio`}
+                    className="w-full" />
+                )}
+                {shapes.length > 0 && <div className="text-[11px] text-amber-300">✏️ {shapes.length} arrow{shapes.length === 1 ? "" : "s"} preserved</div>}
+                <div className="mt-auto flex flex-wrap items-center gap-2">
+                  <Link to={href} onClick={() => setDetailOpen(false)}
+                    className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500">
+                    🔬 Open in board editor
+                  </Link>
+                  {canEdit && (
+                    <>
+                      <button onClick={() => { setDraft(s.note || ""); setEditing(true); setDetailOpen(false); }}
+                        className="rounded-lg border border-ink-600 px-3 py-1.5 text-sm text-ink-200 hover:bg-ink-800">✎ Edit note</button>
+                      <button onClick={() => { toggleStar(); }}
+                        className="rounded-lg border border-ink-600 px-3 py-1.5 text-sm text-ink-200 hover:bg-ink-800">{s.starred ? "★ Un-star" : "☆ Star"}</button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
