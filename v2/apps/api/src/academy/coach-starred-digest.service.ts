@@ -216,6 +216,16 @@ export class CoachStarredDigestService implements OnModuleInit {
       reviewedAt: { $in: [null, undefined] as any },
       at: { $lt: new Date(Date.now() - 30 * 86_400_000) },
     });
+    // "Busiest class" this window: the class contributing the most snaps.
+    // Small stat in the email header so the coach sees which class dominated
+    // their prep list without opening the dashboard.
+    const classTally = new Map<string, { title: string; n: number }>();
+    for (const s of snaps) {
+      const cur = classTally.get(s.classId);
+      if (cur) cur.n++;
+      else classTally.set(s.classId, { title: s.classTitle, n: 1 });
+    }
+    const topClass = [...classTally.values()].sort((a, b) => b.n - a.n)[0];
     if (snaps.length === 0) {
       // Nothing to say -- mark sent so we don't re-check every 10 min all
       // Sunday morning. Doesn't burn the weekly cadence for real content
@@ -252,6 +262,7 @@ export class CoachStarredDigestService implements OnModuleInit {
       <div style="font-family:system-ui,sans-serif;max-width:520px">
         <h2 style="color:#111;margin-bottom:4px">★ Your review shortlist</h2>
         <p style="color:#666;margin-top:0">Hi ${esc(username)} — you starred ${snaps.length} position${snaps.length === 1 ? "" : "s"} in ${windowLabel}.</p>
+        ${topClass && classTally.size > 1 ? `<p style="margin:4px 0 0;color:#666;font-size:12px">🏫 Most from <b>${esc(topClass.title)}</b> (${topClass.n} snap${topClass.n === 1 ? "" : "s"}).</p>` : ""}
         ${reviewedCount > 0 ? `<p style="margin:8px 0;color:#059669;font-size:13px">✓ You reviewed ${reviewedCount} snap${reviewedCount === 1 ? "" : "s"} since the last digest — nice work.</p>` : ""}
         ${showStuckNudge ? `<div style="margin:12px 0;padding:10px 12px;border-left:3px solid #f59e0b;background:#fffbeb;color:#78350f;font-size:13px">💤 It's been a while — <b>${pendingBacklog}</b> starred position${pendingBacklog === 1 ? "" : "s"} ${pendingBacklog === 1 ? "is" : "are"} still waiting for review. Even one Sunday morning session can move the needle.</div>` : ""}
         ${staleCount > 0 ? `<p style="margin:8px 0;color:#9a3412;font-size:12px">⏰ <b>${staleCount}</b> starred position${staleCount === 1 ? "" : "s"} ${staleCount === 1 ? "is" : "are"} over 30 days old and still unreviewed — worth revisiting or clearing.</p>` : ""}
@@ -265,6 +276,7 @@ export class CoachStarredDigestService implements OnModuleInit {
     const text = [
       `★ Your review shortlist`, "",
       `Hi ${username} — you starred ${snaps.length} position(s) in ${windowLabel}:`,
+      (topClass && classTally.size > 1) ? `🏫 Most from ${topClass.title} (${topClass.n} snap${topClass.n === 1 ? "" : "s"}).\n` : "",
       reviewedCount > 0 ? `✓ You reviewed ${reviewedCount} snap(s) since the last digest — nice work.\n` : "",
       showStuckNudge ? `\n💤 It's been a while — ${pendingBacklog} starred position${pendingBacklog === 1 ? "" : "s"} still waiting for review.\n` : "",
       staleCount > 0 ? `⏰ ${staleCount} starred position(s) over 30 days old and still unreviewed.\n` : "",
