@@ -60,7 +60,7 @@ function AttendanceStrip({ days }: { days?: boolean[] }) {
     </div>
   );
 }
-interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; attendedCount?: number; academyId?: string|null; summarySentAt?: string|null; autoSummary?: boolean }
+interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; attendedCount?: number; academyId?: string|null; summarySentAt?: string|null; autoSummary?: boolean; autoSummaryNote?: string }
 interface FeesConfig { monthlyFeePaise: number; upiVpa: string; upiPayeeName: string; canEdit: boolean }
 interface Invoice { _id: string; academyId: string; studentId: string; studentUsername: string; period: string; amountPaise: number; status: "pending"|"paid"|"waived"; generatedAt: string; paidAt?: string; paymentMethod?: string }
 function rupees(paise: number) { return (paise / 100).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }); }
@@ -1279,6 +1279,29 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
       window.prompt("Copy this join link:", url);
     }
   }
+  // Auto-summary settings editor (small PATCH via /class/schedule/:id).
+  const [autoEditorOpen, setAutoEditorOpen] = useState(false);
+  const [autoDraftOn, setAutoDraftOn] = useState(!!c.autoSummary);
+  const [autoDraftNote, setAutoDraftNote] = useState(c.autoSummaryNote || "");
+  const [autoSaving, setAutoSaving] = useState(false);
+  function openAutoEditor() {
+    setAutoDraftOn(!!c.autoSummary);
+    setAutoDraftNote(c.autoSummaryNote || "");
+    setAutoEditorOpen(true);
+  }
+  async function saveAuto() {
+    if (autoSaving) return;
+    setAutoSaving(true);
+    try {
+      const r = await fetch(`${BASE}/api/class/schedule/${encodeURIComponent(c._id)}`, {
+        method: "PATCH", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ autoSummary: autoDraftOn, autoSummaryNote: autoDraftOn ? autoDraftNote : "" }),
+      });
+      if (r.ok) { qc.invalidateQueries({ queryKey: ["academy-schedule"] }); setAutoEditorOpen(false); }
+    } catch { /* silent — modal stays open, coach can retry */ }
+    finally { setAutoSaving(false); }
+  }
   const [previewOpen, setPreviewOpen] = useState(false);
   type SummaryPreview = { attendees: number; snapCount: number; hasRecording: boolean; recordingUrl: string | null };
   const [preview, setPreview] = useState<SummaryPreview | null>(null);
@@ -1327,6 +1350,13 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
           {c.mine && c.autoSummary && !c.summarySentAt && (
             <span className="ml-2 text-ink-500" title="Auto-email will fire 15 min after class ends">🤖 auto</span>
           )}
+          {c.mine && !c.summarySentAt && (
+            <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); openAutoEditor(); }}
+              className="ml-1 text-[10px] text-ink-500 hover:text-ink-100"
+              title={c.autoSummary ? "Edit auto-summary settings" : "Enable auto-summary"}>
+              ⚙︎
+            </button>
+          )}
           {sendMsg && <span className="ml-2 text-brand-300">· {sendMsg}</span>}
         </div>
       </div>
@@ -1336,6 +1366,42 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
           title="Preview + email per-student class recap via dw-otp">
           {sending ? "Sending…" : "📧 Summary"}
         </button>
+      )}
+      {autoEditorOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => !autoSaving && setAutoEditorOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-xl2 border border-ink-700 bg-ink-900 p-6 shadow-2xl">
+            <div className="mb-3 flex items-baseline justify-between">
+              <h3 className="font-display text-lg text-white">🤖 Auto-summary settings</h3>
+              <button onClick={() => !autoSaving && setAutoEditorOpen(false)} className="text-ink-400 hover:text-white text-sm">Esc</button>
+            </div>
+            <div className="text-[11px] text-ink-400 mb-3">{c.title} · {fmtStartAt(c.startAt)}</div>
+            <label className="flex items-center gap-2 text-sm text-ink-200 cursor-pointer">
+              <input type="checkbox" checked={autoDraftOn} onChange={(e) => setAutoDraftOn(e.target.checked)}
+                className="rounded border-ink-600 bg-ink-800 text-brand-500 focus:ring-brand-500/40" />
+              Auto-email a class summary 15 min after this class ends
+            </label>
+            {autoDraftOn && (
+              <div className="mt-3">
+                <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">Note baked into the auto-send (optional)</label>
+                <textarea value={autoDraftNote} onChange={(e) => setAutoDraftNote(e.target.value)}
+                  rows={3} maxLength={500}
+                  placeholder='e.g. "Practise today’s tactics 20 min tomorrow morning."'
+                  className="w-full resize-none rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
+                <div className="mt-1 text-right text-[10px] text-ink-500 tabular-nums">{autoDraftNote.length}/500</div>
+              </div>
+            )}
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button onClick={() => !autoSaving && setAutoEditorOpen(false)}
+                className="rounded-lg border border-ink-600 px-3 py-1.5 text-sm text-ink-300 hover:bg-ink-800">Cancel</button>
+              <button onClick={saveAuto} disabled={autoSaving}
+                className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
+                {autoSaving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       {previewOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
