@@ -285,6 +285,7 @@ export default function AcademyDashboardPage() {
 
       {canManage && <TodayStrip schedule={schedule} snaps={snaps} recordings={recordings} />}
       {canManage && <ReviewHeatmapStrip snaps={snaps} />}
+      {canManage && <SnapVolumeChart snaps={snaps} />}
       {canManage && <NextUpToReview snaps={snaps} />}
       {canManage && <StarredDigestPreviewLink />}
 
@@ -972,6 +973,61 @@ function ReviewHeatmapStrip({ snaps }: { snaps?: SnapItem[] }) {
             <div key={i}
               className={`h-4 w-[10px] rounded-sm ${tone}`}
               title={`${b.d.toLocaleDateString(undefined, { day: "2-digit", month: "short" })} · ${b.count} reviewed`} />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// 12-week snap-volume bar chart. Each bar = one calendar week (Sun start),
+// height scaled to the count of snaps taken that week. Coach sees "am I
+// still doing this consistently?" without opening the digest. Hidden when
+// the coach has fewer than 3 snaps total (nothing meaningful to trend).
+function SnapVolumeChart({ snaps }: { snaps?: SnapItem[] }) {
+  const all = snaps ?? [];
+  if (all.length < 3) return null;
+  const WEEKS = 12;
+  const now = new Date();
+  const startOfWeek = (d: Date) => {
+    const c = new Date(d);
+    c.setHours(0, 0, 0, 0);
+    c.setDate(c.getDate() - c.getDay()); // Sunday = 0
+    return c;
+  };
+  const thisSunday = startOfWeek(now);
+  const buckets: { start: Date; count: number }[] = [];
+  for (let i = WEEKS - 1; i >= 0; i--) {
+    const start = new Date(thisSunday);
+    start.setDate(start.getDate() - i * 7);
+    buckets.push({ start, count: 0 });
+  }
+  for (const s of all) {
+    const d = startOfWeek(new Date(s.at));
+    const weeksBack = Math.round((thisSunday.getTime() - d.getTime()) / (7 * 86_400_000));
+    if (weeksBack < 0 || weeksBack >= WEEKS) continue;
+    const bucket = buckets[WEEKS - 1 - weeksBack];
+    if (bucket) bucket.count++;
+  }
+  const max = Math.max(1, ...buckets.map((b) => b.count));
+  const totalRecent = buckets.reduce((n, b) => n + b.count, 0);
+  return (
+    <div className="rounded-xl2 border border-ink-700 bg-ink-900 px-4 py-3 flex items-center gap-4">
+      <div className="text-[11px] uppercase tracking-wide text-ink-400 shrink-0">
+        12wk snaps
+        <div className="mt-0.5 text-[10px] normal-case tracking-normal text-ink-500 tabular-nums">
+          {totalRecent} total · peak {max}
+        </div>
+      </div>
+      <div className="flex items-end gap-1 h-8 flex-1" title="Snaps per week">
+        {buckets.map((b, i) => {
+          const h = b.count === 0 ? 2 : Math.round(4 + (b.count / max) * 28);
+          const label = `${b.start.toLocaleDateString(undefined, { day: "2-digit", month: "short" })} · ${b.count} snap${b.count === 1 ? "" : "s"}`;
+          return (
+            <div key={i}
+              className={`flex-1 rounded-sm ${b.count === 0 ? "bg-ink-800" : "bg-brand-500/70 hover:bg-brand-400"}`}
+              style={{ height: `${h}px` }}
+              title={label} />
           );
         })}
       </div>
