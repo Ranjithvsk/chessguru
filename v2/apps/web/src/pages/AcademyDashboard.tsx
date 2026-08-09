@@ -1011,15 +1011,28 @@ function SnapVolumeChart({ snaps }: { snaps?: SnapItem[] }) {
   }
   const max = Math.max(1, ...buckets.map((b) => b.count));
   const totalRecent = buckets.reduce((n, b) => n + b.count, 0);
+  // Top-3 classes by snap volume across the 12-week window. Small chips
+  // beside the chart give "which class is filling the graph?" signal
+  // without opening the snap grid. Click any chip → jump to the snap
+  // grid filtered to that class.
+  const classTally = new Map<string, { title: string; n: number }>();
+  const cutoff = buckets[0]?.start ?? new Date(0);
+  for (const s of all) {
+    if (new Date(s.at) < cutoff) continue;
+    const cur = classTally.get(s.classId);
+    if (cur) cur.n++;
+    else classTally.set(s.classId, { title: s.classTitle, n: 1 });
+  }
+  const topClasses = [...classTally.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 3);
   return (
-    <div className="rounded-xl2 border border-ink-700 bg-ink-900 px-4 py-3 flex items-center gap-4">
+    <div className="rounded-xl2 border border-ink-700 bg-ink-900 px-4 py-3 flex items-center gap-4 flex-wrap">
       <div className="text-[11px] uppercase tracking-wide text-ink-400 shrink-0">
         12wk snaps
         <div className="mt-0.5 text-[10px] normal-case tracking-normal text-ink-500 tabular-nums">
           {totalRecent} total · peak {max}
         </div>
       </div>
-      <div className="flex items-end gap-1 h-8 flex-1" title="Snaps per week">
+      <div className="flex items-end gap-1 h-8 flex-1 min-w-[160px]" title="Snaps per week">
         {buckets.map((b, i) => {
           const h = b.count === 0 ? 2 : Math.round(4 + (b.count / max) * 28);
           const label = `${b.start.toLocaleDateString(undefined, { day: "2-digit", month: "short" })} · ${b.count} snap${b.count === 1 ? "" : "s"}`;
@@ -1031,6 +1044,18 @@ function SnapVolumeChart({ snaps }: { snaps?: SnapItem[] }) {
           );
         })}
       </div>
+      {topClasses.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          {topClasses.map(([id, meta]) => (
+            <Link key={id} to={`/academy?class=${encodeURIComponent(id)}`}
+              title={`${meta.n} snap${meta.n === 1 ? "" : "s"} from this class in the last 12 weeks`}
+              className="rounded-full border border-ink-700 bg-ink-800/60 px-2 py-0.5 text-[10px] font-semibold text-ink-200 hover:bg-ink-800 hover:text-white">
+              <span className="max-w-[14ch] inline-block truncate align-bottom">{meta.title}</span>
+              <span className="ml-1 opacity-70">{meta.n}</span>
+            </Link>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
