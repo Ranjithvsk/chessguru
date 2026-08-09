@@ -12,7 +12,7 @@
 //      kicks off the games import, and redirects the browser back to
 //      /settings/accounts?linked=lichess.
 
-import { Controller, Get, Post, Req, Res, UnauthorizedException } from "@nestjs/common";
+import { Controller, Get, Logger, Post, Req, Res, UnauthorizedException } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { randomBytes, createHash } from "crypto";
@@ -28,6 +28,7 @@ function b64url(buf: Buffer) {
 
 @Controller("link/lichess")
 export class LichessLinkController {
+  private readonly log = new Logger("LichessLink");
   constructor(
     @InjectConnection() private readonly conn: Connection,
     private readonly games: GamesFetchService,
@@ -61,7 +62,13 @@ export class LichessLinkController {
     const uid = req?.session?.userId;
     const stash = req?.session?.lichessOAuth;
     const back = (msg: string) => res.redirect(`/settings/accounts?${msg}`);
-    if (!uid || !stash) return back("linked=lichess&status=needsignin");
+    if (!uid || !stash) {
+      // Distinguish the two failure modes so we can debug from the URL param.
+      // (Also logged with cookie presence + session-store hit so we can trace.)
+      const reason = !uid ? "nouid" : "nostash";
+      this.log.warn(`callback ${reason}: cookie=${!!req.headers?.cookie} sid=${req.sessionID} uid=${uid} hasStash=${!!stash}`);
+      return back(`linked=lichess&status=${reason}`);
+    }
     if (error) return back(`linked=lichess&status=denied`);
     if (!code || state !== stash.state) return back("linked=lichess&status=state_mismatch");
     delete req.session.lichessOAuth;

@@ -46,7 +46,7 @@ function Rating({ label, value }: { label: string; value: number|null|undefined 
 }
 
 export default function AccountLinksPage() {
-  const [sp] = useSearchParams();
+  const [sp, setSp] = useSearchParams();
   const linkedStatus = sp.get("linked"), oauthStatus = sp.get("status"), handle = sp.get("handle");
   const qc = useQueryClient();
   const { data: me, isLoading: authLoading } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
@@ -96,6 +96,18 @@ export default function AccountLinksPage() {
   }
 
   useEffect(() => { if (linkedStatus) refetch(); /* refresh after OAuth callback */ }, [linkedStatus, refetch]);
+  // Strip the ?linked=&status=&handle= params off the URL once we've read them
+  // (with a small delay so the banner has time to render). Prevents a stale
+  // "failed" banner from sticking around after a subsequent successful retry.
+  useEffect(() => {
+    if (!linkedStatus) return;
+    const t = setTimeout(() => {
+      const next = new URLSearchParams(sp);
+      next.delete("linked"); next.delete("status"); next.delete("handle");
+      setSp(next, { replace: true });
+    }, 6000);
+    return () => clearTimeout(t);
+  }, [linkedStatus, sp, setSp]);
 
   if (authLoading) return <div className="py-16 text-center text-ink-400">Loading…</div>;
   if (!me?.loggedIn) return <Navigate to="/login?back=/settings/accounts" replace />;
@@ -104,6 +116,9 @@ export default function AccountLinksPage() {
   const c = data?.chesscom ?? null;
   const cLinked = c && !("pending" in c) ? c : null;
   const cPending = c && "pending" in c ? c : null;
+  // If the account is currently linked, real state beats the URL — don't show
+  // a failure banner from an earlier attempt when the retry clearly worked.
+  const showLichessError = linkedStatus === "lichess" && oauthStatus && oauthStatus !== "ok" && !l;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 py-6">
@@ -117,9 +132,9 @@ export default function AccountLinksPage() {
           ✅ Lichess linked as <b className="text-white">{handle}</b>. Games are importing in the background.
         </div>
       )}
-      {linkedStatus === "lichess" && oauthStatus && oauthStatus !== "ok" && (
+      {showLichessError && (
         <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200">
-          Lichess link failed: <code>{oauthStatus}</code>
+          Lichess link failed: <code>{oauthStatus}</code>. Try again — this usually clears itself on retry.
         </div>
       )}
 
