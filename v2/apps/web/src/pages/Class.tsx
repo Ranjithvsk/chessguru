@@ -338,6 +338,25 @@ function ClassLanding() {
       refresh();
     } catch (e: any) { alert(e?.message || "Couldn't cancel"); }
   };
+  // Edit-target state — when set, an EditOverlay renders over the landing. Saving
+  // POSTs a PATCH and refreshes the list.
+  const [editing, setEditing] = useState<ScheduledClass | null>(null);
+  const saveEdit = async (patch: { title: string; coach: string; notes: string; durationMin: number }, propagate: boolean) => {
+    if (!editing) return;
+    const url = new URL(`${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/schedule/${encodeURIComponent(editing._id)}`, window.location.origin);
+    if (propagate && editing.seriesId) url.searchParams.set("scope", "series");
+    try {
+      const res = await fetch(url.toString().replace(window.location.origin, ""), {
+        method: "PATCH", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error(`edit failed: ${res.status}`);
+      setEditing(null);
+      refresh();
+    } catch (e: any) { alert(e?.message || "Couldn't save edit"); }
+  };
+
   const cancelSeries = async (c: ScheduledClass) => {
     if (!c.mine || !c.seriesId) return;
     if (!confirm(`Cancel every FUTURE class in "${c.title}" series? Past classes and their recordings stay.`)) return;
@@ -414,7 +433,7 @@ function ClassLanding() {
             Live now
           </h2>
           <div className="grid gap-3 md:grid-cols-2">
-            {visLive.map((c) => <ClassCard key={c._id} c={c} tone="live" onCancel={c.mine ? () => cancel(c) : undefined} onCancelSeries={c.mine && c.seriesId ? () => cancelSeries(c) : undefined} />)}
+            {visLive.map((c) => <ClassCard key={c._id} c={c} tone="live" onCancel={c.mine ? () => cancel(c) : undefined} onCancelSeries={c.mine && c.seriesId ? () => cancelSeries(c) : undefined} onEdit={c.mine ? () => setEditing(c) : undefined} />)}
           </div>
         </section>
       )}
@@ -434,7 +453,7 @@ function ClassLanding() {
           </div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
-            {visUpcoming.map((c) => <ClassCard key={c._id} c={c} tone="upcoming" onCancel={c.mine ? () => cancel(c) : undefined} onCancelSeries={c.mine && c.seriesId ? () => cancelSeries(c) : undefined} />)}
+            {visUpcoming.map((c) => <ClassCard key={c._id} c={c} tone="upcoming" onCancel={c.mine ? () => cancel(c) : undefined} onCancelSeries={c.mine && c.seriesId ? () => cancelSeries(c) : undefined} onEdit={c.mine ? () => setEditing(c) : undefined} />)}
           </div>
         )}
       </section>
@@ -504,6 +523,79 @@ function ClassLanding() {
       <p className="text-center text-[11px] text-ink-500">
         Powered by Jitsi Meet (open source video) · ChessGuru (board sync + recording + replay)
       </p>
+
+      {editing && (
+        <EditOverlay c={editing} onClose={() => setEditing(null)} onSave={saveEdit} />
+      )}
+    </div>
+  );
+}
+
+// Small modal for editing a scheduled class. Reuses the same field shape as the
+// create form (title / coach / duration / notes) — startAt intentionally omitted
+// because moving a class time is a "cancel + reschedule" concern, not an edit.
+// The propagate toggle appears only when the class is part of a series.
+function EditOverlay({ c, onClose, onSave }:
+  { c: ScheduledClass; onClose: () => void;
+    onSave: (patch: { title: string; coach: string; notes: string; durationMin: number }, propagate: boolean) => void }) {
+  const [title, setTitle] = useState(c.title);
+  const [coach, setCoach] = useState(c.coach);
+  const [notes, setNotes] = useState(c.notes || "");
+  const [durationMin, setDurationMin] = useState(c.durationMin);
+  const [propagate, setPropagate] = useState(!!c.seriesId);
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSave({ title, coach, notes, durationMin: Number(durationMin) || 60 }, propagate && !!c.seriesId);
+  };
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4"
+         onClick={onClose}>
+      <form onSubmit={submit} onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg space-y-3 rounded-xl2 border border-brand-500/40 bg-gradient-to-br from-brand-500/10 via-ink-900 to-ink-900 p-5 shadow-2xl">
+        <div className="flex items-baseline justify-between">
+          <h3 className="font-display text-lg text-white">✏️ Edit class</h3>
+          <button type="button" onClick={onClose}
+            className="rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-ink-300 hover:bg-ink-800">Close</button>
+        </div>
+        <label className="block">
+          <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">Title</span>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={120}
+            className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">Coach name</span>
+            <input value={coach} onChange={(e) => setCoach(e.target.value)} maxLength={80}
+              className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">Duration (min)</span>
+            <input type="number" min={5} max={600} step={5} value={durationMin}
+              onChange={(e) => setDurationMin(Number(e.target.value))}
+              className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
+          </label>
+        </div>
+        <label className="block">
+          <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">Notes</span>
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} maxLength={2000}
+            className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
+        </label>
+        {c.seriesId && (
+          <label className="flex items-center gap-2 rounded-lg border border-brand-500/30 bg-brand-500/10 px-3 py-2 text-xs text-brand-100">
+            <input type="checkbox" checked={propagate} onChange={(e) => setPropagate(e.target.checked)}
+              className="h-4 w-4 accent-brand-500" />
+            <span>Apply to every FUTURE class in this series (🔁 {c.seriesIndex}/{c.seriesTotal}). Past classes stay as-is.</span>
+          </label>
+        )}
+        <div className="flex justify-end gap-2 pt-1">
+          <button type="button" onClick={onClose}
+            className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-200 hover:bg-ink-700">Cancel</button>
+          <button type="submit"
+            className="rounded-lg bg-gradient-to-r from-brand-600 to-accent-500 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:from-brand-500 hover:to-accent-400">
+            Save changes
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -511,8 +603,8 @@ function ClassLanding() {
 // Single card in the live/upcoming list. Clicking the card body jumps straight
 // into the room. Cancel buttons are coach-only (undefined otherwise) and stop
 // the click from propagating so they don't also open the class.
-function ClassCard({ c, tone, onCancel, onCancelSeries }:
-  { c: ScheduledClass; tone: "live" | "upcoming"; onCancel?: () => void; onCancelSeries?: () => void }) {
+function ClassCard({ c, tone, onCancel, onCancelSeries, onEdit }:
+  { c: ScheduledClass; tone: "live" | "upcoming"; onCancel?: () => void; onCancelSeries?: () => void; onEdit?: () => void }) {
   const border = tone === "live"
     ? "border-rose-500/40 bg-gradient-to-br from-rose-500/10 via-ink-900 to-ink-900"
     : c.mine
@@ -558,6 +650,13 @@ function ClassCard({ c, tone, onCancel, onCancelSeries }:
           {absTime(c.startAt)} <span className="text-ink-500">· {relTime(c.startAt)}</span>
         </span>
         <div className="flex items-center gap-2">
+          {onEdit && (
+            <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); onEdit(); }}
+              className="rounded-lg border border-brand-500/40 bg-brand-500/10 px-2.5 py-1 text-[11px] font-semibold text-brand-200 hover:bg-brand-500/20"
+              title="Edit title / coach / notes / duration">
+              Edit
+            </button>
+          )}
           {onCancel && (
             <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCancel(); }}
               className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-2.5 py-1 text-[11px] font-semibold text-rose-200 hover:bg-rose-500/20"

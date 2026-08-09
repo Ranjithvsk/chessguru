@@ -13,7 +13,7 @@
 // link IS the shared secret. Coach's display name is captured in the form so
 // students can see who's teaching.
 
-import { Body, Controller, Delete, Get, Param, Post, Req, HttpException, HttpStatus } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, HttpException, HttpStatus } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 
@@ -138,6 +138,53 @@ export class ClassScheduleController {
       }
     }
     return { live, upcoming };
+  }
+
+  // PATCH /api/class/schedule/:id  — coach-only edit. Body may include any subset
+  // of { title, coach, notes, durationMin }. startAt is intentionally NOT editable
+  // here — moving the class time requires re-materializing series positions and
+  // is safer as cancel + re-create. Query ?scope=series applies the same change
+  // to every FUTURE instance of the series (past instances are historical record
+  // and stay untouched).
+  @Patch(":id")
+  async edit(@Param("id") id: string, @Body() body: unknown, @Query("scope") scope: string, @Req() req: any) {
+    if (!ROOM_RE.test(id)) throw new HttpException("bad room", HttpStatus.BAD_REQUEST);
+    const me: string | null = req?.session?.userId ?? null;
+    if (!me) throw new HttpException("sign in required", HttpStatus.UNAUTHORIZED);
+    const row = await this.col().findOne({ _id: id as any });
+    if (!row) throw new HttpException("not found", HttpStatus.NOT_FOUND);
+    if (row.createdByUserId !== me) throw new HttpException("only the creator can edit", HttpStatus.FORBIDDEN);
+    const b: any = body ?? {};
+    const patch: Partial<ScheduleDoc> = {};
+    if (typeof b.title === "string") {
+      const v = b.title.trim();
+      if (!v) throw new HttpException("title required", HttpStatus.BAD_REQUEST);
+      if (v.length > MAX_TITLE) throw new HttpException("title too long", HttpStatus.BAD_REQUEST);
+      patch.title = v;
+    }
+    if (typeof b.coach === "string") {
+      const v = b.coach.trim();
+      if (v.length > MAX_COACH) throw new HttpException("coach name too long", HttpStatus.BAD_REQUEST);
+      patch.coach = v || "Coach";
+    }
+    if (typeof b.notes === "string") {
+      const v = b.notes.trim();
+      if (v.length > MAX_NOTES) throw new HttpException("notes too long", HttpStatus.BAD_REQUEST);
+      patch.notes = v;
+    }
+    if (b.durationMin != null) {
+      patch.durationMin = Math.max(5, Math.min(600, Math.floor(Number(b.durationMin) || 60)));
+    }
+    if (Object.keys(patch).length === 0) return { ok: true, matched: 0 };
+    if (scope === "series" && row.seriesId) {
+      // Cascade to every FUTURE instance in the series (past instances stay as-is
+      // so old attendance / recordings retain the title they were held under).
+      const now = new Date();
+      const r = await this.col().updateMany({ seriesId: row.seriesId, startAt: { $gte: now } }, { $set: patch });
+      return { ok: true, matched: r.matchedCount ?? 0 };
+    }
+    await this.col().updateOne({ _id: id as any }, { $set: patch });
+    return { ok: true, matched: 1 };
   }
 
   // DELETE /api/class/schedule/:id — coach-only cancel. Deletes the schedule row;
