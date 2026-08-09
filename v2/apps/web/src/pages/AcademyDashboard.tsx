@@ -866,13 +866,14 @@ function TodayStrip({ schedule, snaps, recordings }: {
 // can edit (server enforces via PATCH /api/class/:id/snap/:snapId). Card is
 // a Link by default; edit mode swaps in a textarea + save/cancel so the
 // coach can fix a typo without re-opening the board.
-function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours }: {
+function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos }: {
   s: SnapItem;
   isOpen: boolean;
   onOpen: () => void;
   onClose: () => void;
   onNav: (delta: 1 | -1) => void;
   neighbours?: { prev?: SnapItem; next?: SnapItem };
+  pos?: { i: number; n: number };
 }) {
   const qc = useQueryClient();
   const { data: me } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
@@ -1023,6 +1024,11 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours }: {
                 <div className="text-[11px] text-ink-400 truncate">{s.classTitle} · {new Date(s.at).toLocaleString()}</div>
               </div>
               <div className="flex items-center gap-2 text-[10px] text-ink-500 shrink-0">
+                {pos && (
+                  <span className="rounded-full border border-ink-700 bg-ink-800 px-2 py-0.5 tabular-nums text-ink-300">
+                    {pos.i + 1} / {pos.n}
+                  </span>
+                )}
                 <span className="hidden sm:inline" title="← / → step through snaps">← →</span>
                 <button onClick={() => onClose()}
                   className="text-ink-400 hover:text-white text-sm">Esc</button>
@@ -1224,6 +1230,7 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
                   return next;
                 })}
                 neighbours={{ prev: shown[i - 1], next: shown[i + 1] }}
+                pos={{ i, n: shown.length }}
               />
             ));
           })()}
