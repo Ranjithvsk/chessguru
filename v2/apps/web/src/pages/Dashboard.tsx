@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { get } from "../lib/api";
 import { prettify } from "../lib/format";
 
@@ -296,7 +296,12 @@ function ThemeBar({ t, max, min, onTrain }: { t: ThemeRow; max: number; min: num
 
 export default function DashboardPage() {
   const nav = useNavigate();
-  const { data, isLoading } = useQuery({ queryKey: ["dashboard"], queryFn: () => get<Dash>("/api/puzzles/dashboard") });
+  const [sp] = useSearchParams();
+  const as = sp.get("as") || null;   // admin-only: view another user's dashboard
+  const { data, isLoading } = useQuery({
+    queryKey: ["dashboard", as],
+    queryFn: () => get<Dash>(`/api/puzzles/dashboard${as ? `?as=${encodeURIComponent(as)}` : ""}`),
+  });
 
   const train = (theme: string) => {
     try { localStorage.setItem("cg_theme", theme); localStorage.removeItem("cg_puzzle"); } catch { /* */ }
@@ -317,6 +322,7 @@ export default function DashboardPage() {
 
   const themes = data.themes ?? [];
   const rated = themes.filter((t) => t.games >= PROVISIONAL_GAMES);
+  const viewedAs = as;   // admin "view as" comes from ?as=<u>; ignored by backend for non-admins
   const strengths = rated.slice(0, 5);
   const weaknesses = rated.slice(-5).reverse();
   const max = themes.length ? Math.max(...themes.map((t) => t.rating)) : 1500;
@@ -332,7 +338,14 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-5">
-      <h1 className="font-display text-2xl text-white">📊 My performance</h1>
+      {viewedAs && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl2 border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-100">
+          <span>👑 Admin — viewing <b>{viewedAs}</b>'s performance</span>
+          <Link to={`/history?as=${encodeURIComponent(viewedAs)}`} className="underline hover:text-white">full history →</Link>
+          <Link to="/dashboard" className="ml-auto underline hover:text-white">← view mine</Link>
+        </div>
+      )}
+      <h1 className="font-display text-2xl text-white">{viewedAs ? `${viewedAs}'s performance` : "📊 My performance"}</h1>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-5">
         {cards.map((c) => (

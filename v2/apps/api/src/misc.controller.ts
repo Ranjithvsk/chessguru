@@ -4,6 +4,8 @@ import { Connection } from "mongoose";
 import { THEMES } from "./themes";
 import { AuthService } from "./auth/auth.service";
 import { applyLastMove } from "./lib/puzzle-format";
+import { resolveViewedUser } from "./admin/view-as";
+import { isAdmin } from "./admin/admins";
 
 @Controller()
 export class MiscController {
@@ -16,7 +18,17 @@ export class MiscController {
   themes() { return { themes: THEMES }; }
 
   @Get("me/rating")
-  myRating(@Req() req: any) { return this.auth.myRating(req.session); }
+  async myRating(@Req() req: any, @Query("as") asRaw?: string) {
+    // Admin "view as" — read the target user's rating snapshot directly.
+    // Non-admins or missing ?as= fall through to the session's own rating.
+    const uid = await resolveViewedUser(this.conn, req.session, asRaw);
+    const selfUid: string | null = req?.session?.userId ?? null;
+    if (uid && uid !== selfUid && isAdmin(selfUid)) {
+      const perf: any = await this.conn.db!.collection("userperfs").findOne({ _id: uid as any });
+      return { rating: Math.round(perf?.puzzle?.gl?.r ?? 1500), loggedIn: true, userId: uid, asAdmin: true };
+    }
+    return this.auth.myRating(req.session);
+  }
 
   /** The signed-in user's round for a specific puzzle — used by the review view to
    *  show what wrong move they played and what the best move was. Returns
@@ -38,10 +50,11 @@ export class MiscController {
     } };
   }
 
-  /** Solved-puzzle history + categorised summary for the signed-in user. */
+  /** Solved-puzzle history + categorised summary for the signed-in user.
+   *  Admins may pass ?as=<username> to view another user's history. */
   @Get("me/history")
-  async myHistory(@Req() req: any, @Query("offset") offsetRaw?: string) {
-    const userId: string | null = req?.session?.userId ?? null;
+  async myHistory(@Req() req: any, @Query("offset") offsetRaw?: string, @Query("as") asRaw?: string) {
+    const userId: string | null = await resolveViewedUser(this.conn, req.session, asRaw);
     if (!userId) return { loggedIn: false };
     const offset = Math.max(0, parseInt(String(offsetRaw ?? "0"), 10) || 0);
 
@@ -121,8 +134,11 @@ export class MiscController {
       byBand[label].total++; if (r.w) byBand[label].wins++;
     }
 
+    const selfUid: string | null = req?.session?.userId ?? null;
+    const viewedAs = userId !== selfUid ? userId : null;
     return {
       loggedIn: true,
+      viewedAs,   // set only when an admin is viewing another user's data
       totals: { attempted: total, solved, failed: total - solved, winRate: total ? Math.round((solved / total) * 100) : 0 },
       byTheme: Object.values(byTheme).sort((a, b) => b.total - a.total),
       byBand: Object.values(byBand).sort((a, b) => a.lo - b.lo),

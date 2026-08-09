@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Navigate } from "react-router-dom";
+import { Navigate, Link } from "react-router-dom";
 import { api, adminUsers, adminUserDetail, adminOverview } from "../lib/api";
 
 function fmtDate(d?: string | null) {
@@ -142,12 +142,22 @@ export default function AdminUsersPage() {
       {/* ── User detail ── */}
       {sel && detail && (
         <div className="rounded-xl border border-ink-700 bg-ink-900 p-5">
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-display text-lg text-white">
               {detail.username}{" "}
               <span className="text-sm text-ink-400">· joined {fmtDate(detail.createdAt)} · last login {fmtAgo(detail.lastLogin)}{detail.email ? " · " + detail.email : ""}</span>
             </h2>
-            <button onClick={() => setSel(null)} className="text-sm text-ink-400 hover:text-white">close</button>
+            <div className="flex items-center gap-2">
+              <Link to={`/dashboard?as=${encodeURIComponent(detail.username)}`}
+                className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-3 py-1 text-xs font-semibold text-brand-100 hover:bg-brand-500/20">
+                📊 Performance
+              </Link>
+              <Link to={`/history?as=${encodeURIComponent(detail.username)}`}
+                className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-3 py-1 text-xs font-semibold text-brand-100 hover:bg-brand-500/20">
+                📜 Full history
+              </Link>
+              <button onClick={() => setSel(null)} className="text-sm text-ink-400 hover:text-white">close</button>
+            </div>
           </div>
 
           <div className="mb-3 flex flex-wrap gap-2 text-xs">

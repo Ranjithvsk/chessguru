@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useOutletContext, Link, useNavigate } from "react-router-dom";
+import { useOutletContext, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { Key } from "chessground/types";
 import Board from "../components/Board";
@@ -205,7 +205,9 @@ const LazyMini = React.memo(function LazyMini({ it, onOpen }: { it: HistoryItem;
 
 export default function HistoryPage() {
   const { rating } = useOutletContext<Ctx>();
-  const { data, isLoading } = useQuery({ queryKey: ["me-history"], queryFn: () => api.history(0) });
+  const [sp] = useSearchParams();
+  const as = sp.get("as") || null;   // admin-only: view another user's history
+  const { data, isLoading } = useQuery({ queryKey: ["me-history", as], queryFn: () => api.history(0, as) });
   const [pages, setPages] = useState<HistoryItem[]>([]);   // appended pages beyond the first
   const [off, setOff] = useState<number | null>(null);      // next offset to fetch (null = none)
   const [more, setMore] = useState(false);
@@ -223,7 +225,7 @@ export default function HistoryPage() {
     if (off == null || loadingMore) return;
     setLoadingMore(true);
     try {
-      const r = await api.history(off);
+      const r = await api.history(off, as);
       setPages((p) => [...p, ...(r.items ?? [])]);
       setMore(!!r.hasMore); setOff(r.nextOffset ?? null);
     } finally { setLoadingMore(false); }
@@ -306,6 +308,12 @@ export default function HistoryPage() {
 
   return (
     <div className="space-y-6">
+      {data.viewedAs && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl2 border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-100">
+          <span>👑 Admin — viewing <b>{data.viewedAs}</b>'s history</span>
+          <Link to="/history" className="ml-auto underline hover:text-white">← view mine</Link>
+        </div>
+      )}
       <div>
         <h1 className="font-display text-2xl text-white">Puzzle report</h1>
         <p className="text-sm text-ink-400">Green = solved, red = missed. Grouped by day and theme.</p>

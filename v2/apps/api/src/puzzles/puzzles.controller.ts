@@ -1,9 +1,15 @@
 import { Body, Controller, Get, NotFoundException, Param, Post, Query, Req } from "@nestjs/common";
+import { InjectConnection } from "@nestjs/mongoose";
+import { Connection } from "mongoose";
 import { PuzzlesService } from "./puzzles.service";
+import { resolveViewedUser } from "../admin/view-as";
 
 @Controller("puzzles")
 export class PuzzlesController {
-  constructor(private readonly svc: PuzzlesService) {}
+  constructor(
+    private readonly svc: PuzzlesService,
+    @InjectConnection() private readonly conn: Connection,
+  ) {}
 
   @Get("random")
   async random(
@@ -22,9 +28,11 @@ export class PuzzlesController {
   }
 
   @Get("dashboard")
-  dashboard(@Req() req: any) {
-    // Session is the identity source; guests get { loggedIn: false }.
-    return this.svc.dashboard(req?.session?.userId ?? null);
+  async dashboard(@Req() req: any, @Query("as") asRaw?: string) {
+    // Session is the identity source; admins may pass ?as=<username> to view
+    // another user's dashboard. Guests get { loggedIn: false }.
+    const uid = await resolveViewedUser(this.conn, req.session, asRaw);
+    return this.svc.dashboard(uid);
   }
 
   @Get("master-players")

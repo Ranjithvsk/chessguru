@@ -39,6 +39,7 @@ export interface HistoryItem {
 }
 export interface HistoryReport {
   loggedIn: boolean;
+  viewedAs?: string | null;   // set when an admin views another user's history via ?as=<u>
   totals?: { attempted: number; solved: number; failed: number; winRate: number };
   byTheme?: { theme: string; total: number; wins: number }[];
   byBand?: { band: string; lo: number; total: number; wins: number }[];
@@ -51,7 +52,8 @@ export interface MyRound { win: boolean; date: string; ratingDiff: number | null
 export const api = {
   me: () => get<AuthMe>("/auth/me"),
   myRating: () => get<MeRating>("/api/me/rating"),
-  history: (offset = 0) => get<HistoryReport>(`/api/me/history?offset=${offset}`),
+  history: (offset = 0, as?: string | null) =>
+    get<HistoryReport>(`/api/me/history?offset=${offset}${as ? `&as=${encodeURIComponent(as)}` : ""}`),
   myRound: (pid: string) => get<{ round: MyRound | null }>(`/api/me/round/${encodeURIComponent(pid)}`),
   themes: () => get<{ themes: string[] }>("/api/themes"),
   randomPuzzle: (opts: RandomPuzzleOpts) => {
