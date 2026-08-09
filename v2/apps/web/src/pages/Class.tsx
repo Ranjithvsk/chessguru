@@ -263,7 +263,22 @@ function keyOf(s: { userId: string | null; name: string }): string {
 }
 
 type StudentEntry = { classId: string; title: string; startAt: string; joinedAt: string; lastSeenAt?: string };
-type StudentMail  = { at: string; subject: string; kind: string; classId: string | null; body?: string | null };
+type StudentMail  = { at: string; subject: string; kind: string; classId: string | null; body?: string | null; status?: string };
+
+// Compact "delivered / bounced / …" pill, coloured for the eye. Falls back to
+// a neutral "sent" tag for older rows that pre-date the delivery-status webhook.
+function statusPill(status?: string): { label: string; className: string } {
+  switch (status) {
+    case "delivered":   return { label: "✓ delivered",  className: "bg-emerald-500/15 text-emerald-200 border-emerald-500/30" };
+    case "opened":      return { label: "👁 opened",     className: "bg-cyan-500/15 text-cyan-200 border-cyan-500/30" };
+    case "clicked":     return { label: "🖱 clicked",    className: "bg-cyan-500/15 text-cyan-200 border-cyan-500/30" };
+    case "bounced":     return { label: "⚠ bounced",    className: "bg-rose-500/15 text-rose-200 border-rose-500/30" };
+    case "complained":  return { label: "🚫 spam",      className: "bg-rose-500/20 text-rose-100 border-rose-500/40" };
+    case "delayed":     return { label: "⏳ delayed",    className: "bg-amber-500/15 text-amber-200 border-amber-500/30" };
+    case "send-failed": return { label: "✕ failed",     className: "bg-rose-500/15 text-rose-200 border-rose-500/30" };
+    default:            return { label: "sent",         className: "bg-ink-700/50 text-ink-300 border-ink-600" };
+  }
+}
 
 // Modal: per-student attendance history + recent mail log. Fetched on open —
 // classes the student joined + emails coach has sent them (ad-hoc + reminders).
@@ -353,6 +368,7 @@ function StudentHistoryModal({ student, onClose }: { student: CoachStudent; onCl
                   {mail.map((m, i) => {
                     const isAdhoc = m.kind === "adhoc";
                     const clickable = isAdhoc && canEmail && !!m.body;
+                    const pill = statusPill(m.status);
                     const row = (
                       <div className="flex items-center justify-between gap-2 rounded-lg bg-ink-800/60 px-3 py-1.5 text-xs">
                         <div className="min-w-0">
@@ -365,6 +381,10 @@ function StudentHistoryModal({ student, onClose }: { student: CoachStudent; onCl
                             {clickable && <span className="ml-2 text-ink-500">— tap to resend</span>}
                           </div>
                         </div>
+                        <span className={`shrink-0 rounded border ${pill.className} px-1.5 py-0.5 text-[10px] font-semibold`}
+                              title={m.status ? `Delivery status: ${m.status}` : "Queued via Resend"}>
+                          {pill.label}
+                        </span>
                       </div>
                     );
                     return (

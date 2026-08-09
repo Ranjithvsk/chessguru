@@ -138,6 +138,11 @@ export class ClassAttendanceController {
       // auto-generated boilerplate the coach never wrote, so surfacing them
       // for "resend" would be more confusing than useful.
       body: (m.kind === "adhoc" && typeof m.body === "string") ? m.body : null,
+      // Delivery status from the Resend webhook (sent / delivered / bounced /
+      // complained / delayed / opened / clicked / send-failed). Older rows
+      // predate this — treat missing as "sent" so the client can show a
+      // neutral pill.
+      status: typeof m.status === "string" ? m.status : "sent",
     })) };
   }
 
@@ -206,18 +211,26 @@ export class ClassAttendanceController {
           <p style="font-size:12px;color:#6b7280;margin:20px 0 0">— ${escapeHtml(coachName)} (via ChessGuru)</p>
         </div>
       </div>`;
-    await Promise.all(toSend.map((to) => sendMail({ to, subject, html: bodyHtml, text: bodyText })));
-    // Compliance / recall log — one row per successful queued send. classId is
-    // null for ad-hoc (not tied to a specific class), kind = "adhoc". Failures
-    // aren't logged: we log intent-to-send, and sendMail's own retry semantics
-    // handle transient carrier hiccups. Fire-and-forget so a Mongo hiccup
-    // never breaks the send response.
+    // Send + capture per-recipient Resend id so the webhook can later match
+    // delivered/bounced events back to the right log row. We wait for the
+    // sends here (parallel) rather than fire-and-forget so we HAVE the ids
+    // to persist — a bit more latency in the response, worth it for the
+    // compliance log the coach relies on.
+    const sendResults = await Promise.all(
+      toSend.map((to) => sendMail({ to, subject, html: bodyHtml, text: bodyText })
+        .then((r) => ({ to, id: r.ok ? r.id : undefined }))),
+    );
     const now = new Date();
     // Adhoc rows carry the body so the coach can click a past message and
     // resend a tweaked copy. Reminder rows don't need this (auto-generated).
     // Body is capped upstream at 5000 chars, so persisting is a bounded cost.
     this.conn.db!.collection("classMailLog").insertMany(
-      toSend.map((to) => ({ at: now, coachId: me, to, subject, body: message, kind: "adhoc", classId: null })),
+      sendResults.map((r) => ({
+        at: now, coachId: me, to: r.to, subject, body: message,
+        kind: "adhoc", classId: null,
+        resendId: r.id ?? null,
+        status: r.id ? "sent" : "send-failed",
+      })),
     ).catch(() => { /* silent */ });
     return { ok: true, sent: toSend.length, skipped: skipped.length, invalid: invalid.length };
   }

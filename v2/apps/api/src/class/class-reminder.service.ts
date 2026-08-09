@@ -201,20 +201,10 @@ export class ClassReminderService implements OnModuleInit {
         </div>
       </div>
     `;
-    // Compliance log — one row per recipient at send-intent time. classId +
-    // kind lets a later "did Alice get the reminder?" query filter cleanly.
-    // Fire-and-forget so a Mongo hiccup never blocks the send batch.
+    // Send + capture per-recipient Resend id so the webhook can later match
+    // delivered/bounced events back to the right log row.
     const now = new Date();
-    this.conn.db!.collection("classMailLog").insertMany(
-      [...recipients].map((to) => ({
-        at: now, coachId: row.createdByUserId ?? null, classId: row._id,
-        to, subject, kind: `reminder:${stage.key}`,
-      })),
-    ).catch(() => { /* silent */ });
-    // Fire in parallel. Each recipient gets their own unsubscribe link (HMAC
-    // over classId+email) appended to both the plain-text and HTML footers.
-    // Coach is skipped — no point unsubscribing them from their own class.
-    await Promise.all([...recipients].map((to) => {
+    const sendResults = await Promise.all([...recipients].map((to) => {
       const isCoach = to === coachEmail;
       const unsubUrl = isCoach ? null
         : `${PUBLIC_ORIGIN}/v2api/api/class/${encodeURIComponent(row._id)}/unsubscribe?email=${encodeURIComponent(to)}&t=${optOutToken(row._id, to)}`;
@@ -227,8 +217,18 @@ export class ClassReminderService implements OnModuleInit {
                <a href="${escapeAttr(unsubUrl)}" style="color:#9ca3af;text-decoration:underline">Stop reminders for this class</a>
              </p>$1`)
         : html;
-      return sendMail({ to, subject, html: finalHtml, text: finalText });
+      return sendMail({ to, subject, html: finalHtml, text: finalText })
+        .then((r) => ({ to, id: r.ok ? r.id : undefined }));
     }));
+    // Fire-and-forget log write — Mongo hiccup never blocks or unwinds a send.
+    this.conn.db!.collection("classMailLog").insertMany(
+      sendResults.map((r) => ({
+        at: now, coachId: row.createdByUserId ?? null, classId: row._id,
+        to: r.to, subject, kind: `reminder:${stage.key}`,
+        resendId: r.id ?? null,
+        status: r.id ? "sent" : "send-failed",
+      })),
+    ).catch(() => { /* silent */ });
   }
 }
 
