@@ -95,6 +95,16 @@ export default function ExternalGamePage() {
           {data.timeControl && <span>· {data.timeControl}</span>}
           {data.url && <a href={data.url} target="_blank" rel="noreferrer" className="ml-auto text-brand-300 underline">view original ↗</a>}
         </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Link
+            to={`/board-editor?fen=${encodeURIComponent(positions[cur]!)}`}
+            className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-500">
+            🔬 Analyze this position in Board editor
+          </Link>
+          <span className="text-[10px] text-ink-500">
+            {cur === 0 ? "starts from the initial position" : `carries the position after ply ${cur} — you can move both sides in the editor`}
+          </span>
+        </div>
         <div className="mt-1 flex flex-wrap items-baseline gap-3">
           <span className="text-lg font-bold text-white">{data.white}</span>
           <span className="text-xs tabular-nums text-ink-400">{data.whiteRating ?? "—"}</span>

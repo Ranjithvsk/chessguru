@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import Board from "../components/Board";
 import { useFreePlay } from "../hooks/useFreePlay";
 
@@ -10,7 +11,21 @@ const PRESETS: { label: string; fen: string }[] = [
 ];
 
 export default function BoardEditorPage() {
-  const fp = useFreePlay();
+  const [sp] = useSearchParams();
+  // Optional deep-link: /board-editor?fen=<encoded>&orientation=black
+  // Used by the External-game viewer ("Analyze in board editor") so a user
+  // can pick up an imported game at any ply and start exploring lines.
+  const initialFen = sp.get("fen") || undefined;
+  const initialOrientation = sp.get("orientation") === "black" ? "black" : "white";
+  const fp = useFreePlay(initialFen);
+  const loadedOnce = useRef(false);
+  useEffect(() => {
+    if (loadedOnce.current) return;
+    if (initialFen && fp.fen !== initialFen) fp.load(initialFen);
+    if (initialOrientation === "black" && fp.orientation !== "black") fp.flip();
+    loadedOnce.current = true;
+  }, [initialFen, initialOrientation, fp]);
+
   const [fenInput, setFenInput] = useState("");
   const [msg, setMsg] = useState("");
 
