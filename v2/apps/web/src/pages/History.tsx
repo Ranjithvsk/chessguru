@@ -204,6 +204,72 @@ const LazyMini = React.memo(function LazyMini({ it, onOpen }: { it: HistoryItem;
   );
 });
 
+// Puzzle classification summary — top themes by volume + rating-band spread.
+// Themes are filtered to the "meaningful" ones (skip broad tags like "endgame"
+// or "short" which appear on almost every puzzle). Clicking a theme applies it
+// as the filter so the mini-board grid narrows to just that theme.
+function ClassificationPanel({ byTheme, byBand, onPickTheme, activeTheme }:
+  { byTheme: { theme: string; total: number; wins: number }[];
+    byBand:  { band: string; lo: number; total: number; wins: number }[];
+    onPickTheme: (t: string) => void; activeTheme: string; }) {
+  const meaningful = byTheme.filter((t) => !GENERIC.has(t.theme)).slice(0, 12);
+  const bandMax = Math.max(1, ...byBand.map((b) => b.total));
+  return (
+    <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-4">
+      <div className="mb-3 flex items-baseline gap-3">
+        <h2 className="font-display text-lg text-white">🎯 Puzzle classification</h2>
+        <span className="text-xs text-ink-500">{byTheme.length} themes · {byBand.length} rating bands</span>
+      </div>
+
+      {meaningful.length > 0 && (
+        <div className="mb-4">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-400">Top themes</div>
+          <div className="flex flex-wrap gap-1.5">
+            {meaningful.map((t) => {
+              const wr = t.total ? Math.round((t.wins / t.total) * 100) : 0;
+              const on = activeTheme === t.theme;
+              return (
+                <button key={t.theme}
+                  onClick={() => onPickTheme(on ? "" : t.theme)}
+                  className={`group flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
+                    on ? "border-brand-500 bg-brand-500/25 text-white"
+                       : "border-ink-700 bg-ink-800/60 text-ink-200 hover:bg-ink-800"}`}
+                  title={`${t.wins} solved / ${t.total} attempted (${wr}%)`}>
+                  <span>{prettify(t.theme)}</span>
+                  <span className="tabular-nums text-ink-400 group-hover:text-ink-300">· {t.total}</span>
+                  <span className={`tabular-nums ${wr >= 70 ? "text-emerald-300" : wr >= 50 ? "text-amber-300" : "text-rose-300"}`}>· {wr}%</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {byBand.length > 0 && (
+        <div>
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-400">Rating bands</div>
+          <div className="space-y-1.5">
+            {byBand.map((b) => {
+              const wr = b.total ? Math.round((b.wins / b.total) * 100) : 0;
+              const width = Math.max(4, (b.total / bandMax) * 100);
+              return (
+                <div key={b.band} className="grid grid-cols-[100px_1fr_60px] items-center gap-2">
+                  <span className="text-xs tabular-nums text-ink-300">{b.band}</span>
+                  <div className="relative h-4 rounded bg-ink-800">
+                    <div className="absolute inset-y-0 left-0 rounded bg-brand-500/40" style={{ width: `${width}%` }} />
+                    <span className="absolute inset-0 flex items-center justify-end pr-1.5 text-[10px] tabular-nums text-white">{b.total}</span>
+                  </div>
+                  <span className={`text-[11px] tabular-nums ${wr >= 70 ? "text-emerald-300" : wr >= 50 ? "text-amber-300" : "text-rose-300"}`}>{wr}%</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TabBar({ active, onSwitch }: { active: "puzzles"|"external"; onSwitch: (t: "puzzles"|"external") => void }) {
   const tab = (id: "puzzles"|"external", label: string) => (
     <button onClick={() => onSwitch(id)}
@@ -263,13 +329,25 @@ export default function HistoryPage() {
     [data, pages],
   );
 
-  // Theme dropdown options — the union of every "primary" theme actually seen in
-  // the loaded pages. Keeps the picker honest (never surfaces a theme with 0 matches).
+  // Theme dropdown options — prefer the FULL byTheme classification the server
+  // computes over the whole (capped) history, so someone whose first page is
+  // dominated by one theme (e.g. 191 smothered-mates in a single session)
+  // still gets every theme they've ever solved in the picker. Falls back to
+  // deriving from the loaded pages when the response hasn't landed yet.
   const availableThemes = useMemo(() => {
+    if (data?.byTheme?.length) {
+      const s = new Set<string>();
+      // byTheme contains ALL themes (including GENERIC ones like "short", "endgame")
+      // — filter to the ones that also survive our primaryTheme() pick so the
+      // dropdown doesn't offer buckets the mini-boards never group under.
+      for (const it of allItems) s.add(it.sel && it.sel !== "mix" ? it.sel : primaryTheme(it.themes));
+      for (const t of data.byTheme) if (!GENERIC.has(t.theme)) s.add(t.theme);
+      return [...s].sort((a, b) => prettify(a).localeCompare(prettify(b)));
+    }
     const s = new Set<string>();
     for (const it of allItems) s.add(it.sel && it.sel !== "mix" ? it.sel : primaryTheme(it.themes));
     return [...s].sort((a, b) => prettify(a).localeCompare(prettify(b)));
-  }, [allItems]);
+  }, [allItems, data?.byTheme]);
 
   // Filter applied to the flat items list BEFORE re-grouping by day/theme.
   const filtered = useMemo(() => allItems.filter((it) => {
@@ -334,12 +412,15 @@ export default function HistoryPage() {
   }
 
   const t = data.totals!;
+  // When admin views another user via ?as=<u>, show THAT user's rating (from
+  // the server's viewedRating snapshot), not the admin's own rating.
+  const shownRating = data.viewedAs ? (data.viewedRating ?? "—") : (rating ?? "—");
   const stats = [
     { label: "Attempted", value: t.attempted },
     { label: "Solved", value: t.solved, tone: "text-accent-400" },
     { label: "Missed", value: t.failed, tone: "text-rose-400" },
     { label: "Win rate", value: `${t.winRate}%` },
-    { label: "Rating", value: rating ?? "—" },
+    { label: "Rating", value: shownRating },
   ];
 
   return (
@@ -366,6 +447,15 @@ export default function HistoryPage() {
       </div>
 
       {allItems.length > 0 && <WeekStrip items={allItems} />}
+
+      {(data.byTheme?.length ?? 0) > 0 && (
+        <ClassificationPanel
+          byTheme={data.byTheme!}
+          byBand={data.byBand ?? []}
+          onPickTheme={setTheme}
+          activeTheme={theme}
+        />
+      )}
 
       {allItems.length > 0 && (
         <FilterBar result={result} setResult={setResult} theme={theme} setTheme={setTheme}

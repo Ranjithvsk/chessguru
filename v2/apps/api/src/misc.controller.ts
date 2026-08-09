@@ -136,9 +136,17 @@ export class MiscController {
 
     const selfUid: string | null = req?.session?.userId ?? null;
     const viewedAs = userId !== selfUid ? userId : null;
+    // For admin ?as= views, snapshot the VIEWED user's puzzle rating so the
+    // client shows their number (not the admin's) in the stats grid.
+    let viewedRating: number | null = null;
+    if (viewedAs) {
+      const perf: any = await this.conn.db!.collection("userperfs").findOne({ _id: userId as any });
+      viewedRating = Math.round(perf?.puzzle?.gl?.r ?? 1500);
+    }
     return {
       loggedIn: true,
       viewedAs,   // set only when an admin is viewing another user's data
+      viewedRating,  // ditto — viewed user's puzzle rating for the stats grid
       totals: { attempted: total, solved, failed: total - solved, winRate: total ? Math.round((solved / total) * 100) : 0 },
       byTheme: Object.values(byTheme).sort((a, b) => b.total - a.total),
       byBand: Object.values(byBand).sort((a, b) => a.lo - b.lo),

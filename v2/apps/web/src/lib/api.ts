@@ -39,7 +39,8 @@ export interface HistoryItem {
 }
 export interface HistoryReport {
   loggedIn: boolean;
-  viewedAs?: string | null;   // set when an admin views another user's history via ?as=<u>
+  viewedAs?: string | null;      // set when an admin views another user's history via ?as=<u>
+  viewedRating?: number | null;  // ditto — the viewed user's own puzzle rating
   totals?: { attempted: number; solved: number; failed: number; winRate: number };
   byTheme?: { theme: string; total: number; wins: number }[];
   byBand?: { band: string; lo: number; total: number; wins: number }[];
