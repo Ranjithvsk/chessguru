@@ -134,7 +134,7 @@ export class AcademyService {
     const filter: any = { academyId: g.academyId, role: "student" };
     if (g.role === "coach") filter.coachId = g.userId;
     const rows = await this.users()
-      .find(filter, { projection: { _id: 1, username: 1, email: 1, coachId: 1, createdAt: 1, lastLogin: 1 } })
+      .find(filter, { projection: { _id: 1, username: 1, email: 1, coachId: 1, createdAt: 1, lastLogin: 1, dailyPuzzleStreak: 1 } })
       .sort({ createdAt: -1 })
       .toArray();
     if (rows.length === 0) return [];
@@ -182,6 +182,24 @@ export class AcademyService {
       attendance30d: heatFor(a.recent),
     };
 
+    // Phase 8e: puzzle activity per student — solves in the last 7d + most
+    // recent solve timestamp. One aggregation for the whole roster: split the
+    // rounds._id prefix (userId:puzzleId) and group by userId. This scans
+    // rounds by the compound (d, _id) predicate; at academy scale (dozens of
+    // students) it's cheap even without a per-user index.
+    const weekAgo = new Date(now.getTime() - 7 * dayMs);
+    const puzzleRows: any[] = await this.conn.db!.collection("rounds").aggregate([
+      { $match: { d: { $gte: weekAgo } } },
+      { $project: {
+          u: { $arrayElemAt: [{ $split: ["$_id", ":"] }, 0] },
+          d: 1,
+      } },
+      { $match: { u: { $in: ids } } },
+      { $group: { _id: "$u", solves7d: { $sum: 1 }, lastPuzzleAt: { $max: "$d" } } },
+    ]).toArray();
+    const pmap: Record<string, { solves7d: number; lastPuzzleAt: Date | null }> = {};
+    for (const p of puzzleRows) pmap[String(p._id)] = { solves7d: p.solves7d ?? 0, lastPuzzleAt: p.lastPuzzleAt ?? null };
+
     // Fees rollup — sum of pending invoice amounts + oldest pending period
     // per student. One aggregation for all students in this response.
     const feeRows: any[] = await this.conn.db!.collection("feeInvoices").aggregate([
@@ -191,16 +209,36 @@ export class AcademyService {
     const fmap: Record<string, { pendingFeesPaise: number; oldestPendingPeriod: string }> = {};
     for (const f of feeRows) fmap[String(f._id)] = { pendingFeesPaise: f.pendingFeesPaise ?? 0, oldestPendingPeriod: f.oldestPendingPeriod ?? "" };
 
-    return rows.map((s: any) => ({
-      ...s,
-      puzzleRating: rmap[String(s._id)] ?? 1500,
-      attendedTotal:    amap[String(s._id)]?.attendedTotal    ?? 0,
-      attendedThisWeek: amap[String(s._id)]?.attendedThisWeek ?? 0,
-      lastAttendedAt:   amap[String(s._id)]?.lastAttendedAt   ?? null,
-      attendance30d:    amap[String(s._id)]?.attendance30d    ?? new Array<boolean>(30).fill(false),
-      pendingFeesPaise:      fmap[String(s._id)]?.pendingFeesPaise      ?? 0,
-      oldestPendingPeriod:   fmap[String(s._id)]?.oldestPendingPeriod   ?? null,
-    }));
+    // Compute "alive" daily streak the same way the puzzles service does —
+    // current is 0 when lastDate is older than yesterday, so the coach sees a
+    // truthful "how consistent is this student RIGHT NOW" number.
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = new Date(Date.now() - dayMs).toISOString().slice(0, 10);
+    const aliveStreak = (s: any): { current: number; longest: number } => {
+      const st = s?.dailyPuzzleStreak;
+      if (!st) return { current: 0, longest: 0 };
+      const alive = st.lastDate === today || st.lastDate === yesterday;
+      return { current: alive ? (st.current || 0) : 0, longest: st.longest || 0 };
+    };
+
+    return rows.map((s: any) => {
+      const streak = aliveStreak(s);
+      return {
+        ...s,
+        puzzleRating: rmap[String(s._id)] ?? 1500,
+        attendedTotal:    amap[String(s._id)]?.attendedTotal    ?? 0,
+        attendedThisWeek: amap[String(s._id)]?.attendedThisWeek ?? 0,
+        lastAttendedAt:   amap[String(s._id)]?.lastAttendedAt   ?? null,
+        attendance30d:    amap[String(s._id)]?.attendance30d    ?? new Array<boolean>(30).fill(false),
+        pendingFeesPaise:      fmap[String(s._id)]?.pendingFeesPaise      ?? 0,
+        oldestPendingPeriod:   fmap[String(s._id)]?.oldestPendingPeriod   ?? null,
+        // Phase 8e: puzzle-engagement snapshot for the coach view.
+        puzzleSolves7d: pmap[String(s._id)]?.solves7d ?? 0,
+        lastPuzzleAt:   pmap[String(s._id)]?.lastPuzzleAt ?? null,
+        dailyStreakCurrent: streak.current,
+        dailyStreakLongest: streak.longest,
+      };
+    });
   }
 
   /** Pending invites (not consumed, not expired). Owner sees ALL; coach sees theirs only. */

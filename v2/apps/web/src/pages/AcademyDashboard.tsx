@@ -45,6 +45,9 @@ interface Student {
   attendance30d?: boolean[];   // 30 booleans, index 0 = 29 days ago, 29 = today
   // Fees rollup from feeInvoices
   pendingFeesPaise?: number; oldestPendingPeriod?: string|null;
+  // Phase 8e: puzzle activity snapshot
+  puzzleSolves7d?: number; lastPuzzleAt?: string|null;
+  dailyStreakCurrent?: number; dailyStreakLongest?: number;
 }
 // Mini 30-day attendance strip — 30 tiny cells, green when present.
 function AttendanceStrip({ days }: { days?: boolean[] }) {
@@ -414,6 +417,7 @@ export default function AcademyDashboardPage() {
                     <th className="px-3 py-2 text-left">Email</th>
                     {isOwner && <th className="px-3 py-2 text-left">Coach</th>}
                     <th className="px-3 py-2 text-left">Rating</th>
+                    <th className="px-3 py-2 text-left" title="Solves in last 7d · daily-puzzle streak">Puzzle activity</th>
                     <th className="px-3 py-2 text-left" title="Classes attended (all-time · this week)">Attendance</th>
                     <th className="px-3 py-2 text-left">Fees pending</th>
                     <th className="px-3 py-2 text-left">Last active</th>
@@ -430,6 +434,23 @@ export default function AcademyDashboardPage() {
                         <td className="px-3 py-2 text-ink-300">{s.email || "—"}</td>
                         {isOwner && <td className="px-3 py-2 text-ink-300">{s.coachId ? (coachById[s.coachId] ?? s.coachId) : "—"}</td>}
                         <td className="px-3 py-2 text-white tabular-nums">{s.puzzleRating ?? 1500}</td>
+                        <td className="px-3 py-2 tabular-nums" title={`Last solve: ${s.lastPuzzleAt ? new Date(s.lastPuzzleAt).toLocaleString() : "never"}`}>
+                          <div className="flex flex-col gap-0.5">
+                            {(s.puzzleSolves7d ?? 0) === 0 ? (
+                              <span className="text-ink-500">—</span>
+                            ) : (
+                              <span className="text-white">
+                                {s.puzzleSolves7d}
+                                <span className="ml-1 text-[10px] text-ink-400">/ 7d</span>
+                              </span>
+                            )}
+                            {(s.dailyStreakCurrent ?? 0) > 0 ? (
+                              <span className="text-[10px] text-orange-300">🔥 {s.dailyStreakCurrent}-day daily</span>
+                            ) : (s.dailyStreakLongest ?? 0) > 0 ? (
+                              <span className="text-[10px] text-ink-500">🔥 best {s.dailyStreakLongest}</span>
+                            ) : null}
+                          </div>
+                        </td>
                         <td className="px-3 py-2 tabular-nums" title={`Last attended: ${s.lastAttendedAt ? new Date(s.lastAttendedAt).toLocaleString() : "never"}`}>
                           <div className="flex flex-col gap-1">
                             {att === 0 ? (
