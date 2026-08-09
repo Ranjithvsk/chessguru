@@ -13,6 +13,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Chess } from "chess.js";
 import type { Key } from "chessground/types";
 import Board, { destsFromChess } from "../components/Board";
+import { startBackgroundBlur } from "../lib/backgroundBlur";
 
 type PeerSummary = { id: string; name: string; userId: string | null };
 type ServerMsg =
@@ -98,6 +99,11 @@ export default function CallRoomPage() {
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
   const [sharing, setSharing] = useState(false);
+  // Background-blur toggle (MediaPipe SelfieSegmenter → canvas.captureStream).
+  const [blur, setBlur] = useState(false);
+  // Set while startBackgroundBlur is loading WASM+model — disables the button
+  // to avoid double-clicks that would spawn two segmenter pipelines.
+  const [blurLoading, setBlurLoading] = useState(false);
   // Drives grid render; mirrors peersRef.keys() on every join/leave.
   const [peerIds, setPeerIds] = useState<string[]>([]);
 
@@ -125,6 +131,8 @@ export default function CallRoomPage() {
   const iceConfigRef = useRef<RTCConfiguration>(FALLBACK_ICE_SERVERS);
   // Screen-share display stream — kept so we can stop its tracks + restore cam.
   const displayStreamRef = useRef<MediaStream | null>(null);
+  // Background-blur pipeline handle. Non-null while blur is active.
+  const blurControlRef = useRef<{ output: MediaStream; stop: () => void } | null>(null);
   // Shared AudioContext for active-speaker detection (one per page, reused).
   const audioCtxRef = useRef<AudioContext | null>(null);
   // Peer id of the current loudest speaker (or null). Drives tile spotlight.
@@ -387,6 +395,10 @@ export default function CallRoomPage() {
       for (const t of displayStreamRef.current.getTracks()) t.stop();
       displayStreamRef.current = null;
     }
+    if (blurControlRef.current) {
+      try { blurControlRef.current.stop(); } catch { /* already stopped */ }
+      blurControlRef.current = null;
+    }
     if (audioCtxRef.current) {
       try { audioCtxRef.current.close(); } catch { /* already closed */ }
       audioCtxRef.current = null;
@@ -535,6 +547,58 @@ export default function CallRoomPage() {
   };
   const leave = () => { stopRecording(); teardown(); setStatus("left"); };
 
+  // Background blur: MediaPipe SelfieSegmenter → composite canvas → captureStream.
+  // On enable, swap the outgoing video track on every PC + self-view srcObject
+  // to the processed track. On disable, restore the raw camera track.
+  // Sharing takes precedence: turning on share while blur is up will disable
+  // blur first (see toggleShare); starting blur while sharing is a no-op.
+  const toggleBlur = async () => {
+    if (blurLoading) return;
+    if (blur) {
+      // Turn OFF — restore raw camera track everywhere.
+      const cam = localStreamRef.current;
+      const camTrack = cam?.getVideoTracks()[0];
+      if (blurControlRef.current) {
+        try { blurControlRef.current.stop(); } catch { /* */ }
+        blurControlRef.current = null;
+      }
+      if (camTrack) {
+        for (const state of peersRef.current.values()) {
+          const sender = state.pc.getSenders().find((s) => s.track?.kind === "video");
+          try { await sender?.replaceTrack(camTrack); } catch { /* peer gone */ }
+        }
+      }
+      if (localVideoRef.current && cam) localVideoRef.current.srcObject = cam;
+      setBlur(false);
+      return;
+    }
+    // Turn ON.
+    if (sharing) return; // display track owns the video sender right now
+    const cam = localStreamRef.current;
+    if (!cam) return;
+    setBlurLoading(true);
+    let handle: { output: MediaStream; stop: () => void };
+    try {
+      handle = await startBackgroundBlur(cam);
+    } catch (err) {
+      console.warn("[blur] failed to start MediaPipe pipeline:", err);
+      setBlur(false);
+      setBlurLoading(false);
+      return;
+    }
+    blurControlRef.current = handle;
+    const blurredTrack = handle.output.getVideoTracks()[0];
+    if (blurredTrack) {
+      for (const state of peersRef.current.values()) {
+        const sender = state.pc.getSenders().find((s) => s.track?.kind === "video");
+        try { await sender?.replaceTrack(blurredTrack); } catch { /* peer gone */ }
+      }
+    }
+    if (localVideoRef.current) localVideoRef.current.srcObject = handle.output;
+    setBlur(true);
+    setBlurLoading(false);
+  };
+
   // Client-side recording — captures whatever the LOCAL user is broadcasting
   // (camera+mic or, when sharing, the display surface). Not a full "record
   // the whole call" — capturing remote streams too requires canvas compositing
@@ -570,7 +634,7 @@ export default function CallRoomPage() {
     rec.onstop = () => {
       const blob = new Blob(recordChunksRef.current, { type: mime || "video/webm" });
       recordChunksRef.current = [];
-      // Trigger a browser download — no server upload in P0.
+      // 1) Trigger the local download for immediate access.
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -579,7 +643,19 @@ export default function CallRoomPage() {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);   // free memory after DL is safely in disk
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      // 2) Fire-and-forget upload to /api/class/<room>/recording so students
+      //    can rewatch later. Same endpoint the legacy in-app viewer already
+      //    supports (raw application/octet-stream). Silent on failure so a
+      //    dropped upload doesn't undo the local download.
+      fetch(`/v2api/api/class/${encodeURIComponent(room)}/recording`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: blob,
+      }).then((r) => {
+        if (r.ok) console.log(`[recording] uploaded to server (${blob.size} bytes)`);
+        else console.warn(`[recording] server upload failed HTTP ${r.status}`);
+      }).catch((e) => console.warn(`[recording] upload error`, e));
     };
     rec.start(2000);   // 2s chunks — safety against a mid-recording crash losing everything
     recorderRef.current = rec;
@@ -621,7 +697,16 @@ export default function CallRoomPage() {
       setSharing(false);
       return;
     }
-    // Start sharing
+    // Start sharing — screen capture replaces the video sender wholesale, so
+    // any active background blur is redundant. Tear it down BEFORE prompting
+    // for getDisplayMedia so a user-cancel leaves us in a clean state.
+    if (blur) {
+      if (blurControlRef.current) {
+        try { blurControlRef.current.stop(); } catch { /* */ }
+        blurControlRef.current = null;
+      }
+      setBlur(false);
+    }
     let display: MediaStream;
     try {
       display = await (navigator.mediaDevices as any).getDisplayMedia({ video: true, audio: false });
@@ -782,6 +867,15 @@ export default function CallRoomPage() {
           className={`rounded-xl2 px-4 py-2 text-sm ${sharing ? "bg-emerald-600 hover:bg-emerald-500" : "bg-ink-800 hover:bg-ink-700"} text-white`}
         >
           {sharing ? "🛑 Stop sharing" : "🖥️ Share screen"}
+        </button>
+        <button
+          onClick={toggleBlur}
+          disabled={blurLoading || sharing}
+          title={sharing ? "Stop screen share to enable blur" : (blur ? "Turn off background blur" : "Blur your background (MediaPipe, on-device)")}
+          className={`rounded-xl2 px-4 py-2 text-sm ${blur ? "bg-emerald-600 hover:bg-emerald-500" : "bg-ink-800 hover:bg-ink-700"} text-white disabled:opacity-40 disabled:cursor-not-allowed`}
+          aria-pressed={blur}
+        >
+          {blurLoading ? "🌫️ Loading…" : (blur ? "🌫️ Blur on" : "🌫️ Blur off")}
         </button>
         <button
           onClick={recording ? stopRecording : startRecording}
