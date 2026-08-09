@@ -1403,8 +1403,18 @@ function SnapButtons({ room, fen, shapes, onSnap, getMicStream }: {
   const prevBlobRef = useRef<Blob | null>(null);
   const mimeRef = useRef<string>("");
   const cycleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const ROLL_MS = 30_000;    // restart cadence -- keeps blobs valid & bounded
-  const MIN_STOP_MS = 15_000; // if current has >= this much captured, prefer it
+  // Coach-configurable rolling window. Persisted so pick sticks across
+  // sessions. Effect below re-runs on change and reboots the recorder.
+  const [rollSec, setRollSec] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem("cg_snap_roll_seconds");
+      const n = raw ? Math.round(Number(raw)) : 30;
+      return n === 15 || n === 30 || n === 60 ? n : 30;
+    } catch { return 30; }
+  });
+  useEffect(() => { try { localStorage.setItem("cg_snap_roll_seconds", String(rollSec)); } catch { /* */ } }, [rollSec]);
+  const ROLL_MS = rollSec * 1000;         // restart cadence -- keeps blobs valid & bounded
+  const MIN_STOP_MS = Math.round(ROLL_MS / 2); // if current has >= half a window, prefer it
 
   // Boot the rolling recorder as soon as we have a mic stream. Retries every
   // 3s if the call hasn't wired the mic yet (getUserMedia happens during the
@@ -1457,7 +1467,7 @@ function SnapButtons({ room, fen, shapes, onSnap, getMicStream }: {
       try { recRef.current?.stop(); } catch { /* */ }
       setMicReady(false);
     };
-  }, [getMicStream]);
+  }, [getMicStream, ROLL_MS]);
 
   // Wait for MediaRecorder.onstop to fire (returns the blob from prevBlobRef).
   function stopCurrentAndAwait(): Promise<Blob | null> {
@@ -1537,11 +1547,20 @@ function SnapButtons({ room, fen, shapes, onSnap, getMicStream }: {
         title="Snap this position + note — reviewable later from /academy">📸 Snap</button>
       <button onClick={snapWithAudio}
         className="rounded-xl2 px-3 py-1.5 text-xs bg-amber-700 hover:bg-amber-600 text-white inline-flex items-center gap-1.5"
-        title={micReady ? "Snap + attach the past ~30s of your voice (rolling capture)" : "Waiting for mic — click will still snap the position; audio will attach as soon as the recorder is ready."}>
+        title={micReady ? `Snap + attach the past ~${rollSec}s of your voice (rolling capture)` : "Waiting for mic — click will still snap the position; audio will attach as soon as the recorder is ready."}>
         {/* Ready dot: green when the rolling recorder is running, grey otherwise. */}
         <span className={`h-1.5 w-1.5 rounded-full ${micReady ? "bg-emerald-400 animate-pulse" : "bg-ink-500"}`} />
         🎙 Snap+audio
       </button>
+      {/* Rolling-window selector -- 3 pills. Change reboots the recorder. */}
+      <div className="inline-flex items-center gap-0.5 text-[10px]" title="Length of the rolling audio window">
+        {[15, 30, 60].map((s) => (
+          <button key={s} onClick={() => setRollSec(s)}
+            className={`rounded-full border px-1.5 py-0.5 font-semibold tabular-nums ${rollSec === s
+              ? "border-amber-500/60 bg-amber-500/15 text-amber-100"
+              : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>{s}s</button>
+        ))}
+      </div>
       {msg && <span className="text-[10px] text-ink-300">{msg}</span>}
     </>
   );
