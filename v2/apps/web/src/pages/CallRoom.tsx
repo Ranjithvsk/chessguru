@@ -133,6 +133,15 @@ export default function CallRoomPage() {
   const chatListRef = useRef<HTMLDivElement>(null);
   // Track timers so unmount can clear them (avoids setState-on-unmount warnings).
   const floaterTimersRef = useRef<Set<number>>(new Set());
+  // Client-side recording: MediaRecorder holds the encoder; recordChunks holds
+  // the incoming webm blobs; recordStartedAt drives the mm:ss counter. On stop
+  // we assemble one Blob and trigger a browser download — no server upload in
+  // P0 (would need a chunked-upload backend + storage decisions).
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordChunksRef = useRef<Blob[]>([]);
+  const [recording, setRecording] = useState(false);
+  const [recordStartedAt, setRecordStartedAt] = useState<number | null>(null);
+  const [recordElapsed, setRecordElapsed] = useState(0);
 
   // Guarded send to signaling — WS may be gone.
   const send = (msg: unknown) => {
@@ -524,7 +533,74 @@ export default function CallRoomPage() {
     for (const t of s.getVideoTracks()) t.enabled = next;
     setCamOn(next);
   };
-  const leave = () => { teardown(); setStatus("left"); };
+  const leave = () => { stopRecording(); teardown(); setStatus("left"); };
+
+  // Client-side recording — captures whatever the LOCAL user is broadcasting
+  // (camera+mic or, when sharing, the display surface). Not a full "record
+  // the whole call" — capturing remote streams too requires canvas compositing
+  // via canvas.captureStream, planned for the next slice.
+  const startRecording = () => {
+    if (recording) return;
+    const primary = displayStreamRef.current || localStreamRef.current;
+    if (!primary) return;
+    // Mux: video from primary (camera or display), audio from the ACTUAL mic
+    // (display capture won't grab our voice on most browsers).
+    const tracks: MediaStreamTrack[] = [];
+    for (const t of primary.getVideoTracks()) tracks.push(t);
+    const localAudio = localStreamRef.current?.getAudioTracks() || [];
+    for (const t of localAudio) tracks.push(t);
+    if (tracks.length === 0) return;
+    const mix = new MediaStream(tracks);
+    // Pick the best codec MediaRecorder actually supports today. VP9 is a good
+    // default; falls back to VP8 or the browser's default if not available.
+    const mimeCandidates = [
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp8,opus",
+      "video/webm",
+    ];
+    let mime = "";
+    for (const c of mimeCandidates) {
+      if ((window.MediaRecorder as any)?.isTypeSupported?.(c)) { mime = c; break; }
+    }
+    let rec: MediaRecorder;
+    try { rec = mime ? new MediaRecorder(mix, { mimeType: mime, videoBitsPerSecond: 2_500_000 }) : new MediaRecorder(mix); }
+    catch { return; }
+    recordChunksRef.current = [];
+    rec.ondataavailable = (e) => { if (e.data && e.data.size) recordChunksRef.current.push(e.data); };
+    rec.onstop = () => {
+      const blob = new Blob(recordChunksRef.current, { type: mime || "video/webm" });
+      recordChunksRef.current = [];
+      // Trigger a browser download — no server upload in P0.
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      a.download = `chessguru-${room}-${stamp}.webm`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);   // free memory after DL is safely in disk
+    };
+    rec.start(2000);   // 2s chunks — safety against a mid-recording crash losing everything
+    recorderRef.current = rec;
+    setRecording(true);
+    setRecordStartedAt(Date.now());
+  };
+  const stopRecording = () => {
+    const rec = recorderRef.current;
+    if (!rec || rec.state === "inactive") { setRecording(false); setRecordStartedAt(null); return; }
+    try { rec.stop(); } catch { /* ignore */ }
+    recorderRef.current = null;
+    setRecording(false);
+    setRecordStartedAt(null);
+  };
+
+  // Tick the mm:ss elapsed counter while recording is live.
+  useEffect(() => {
+    if (!recording || !recordStartedAt) { setRecordElapsed(0); return; }
+    const iv = setInterval(() => setRecordElapsed(Math.floor((Date.now() - recordStartedAt) / 1000)), 1000);
+    return () => clearInterval(iv);
+  }, [recording, recordStartedAt]);
 
   // Screen share: replaceTrack the outgoing video sender on every PC (no SDP re-neg,
   // <200ms). Restore on stop / displayTrack.onended. Self-view mirrors the display.
@@ -706,6 +782,13 @@ export default function CallRoomPage() {
           className={`rounded-xl2 px-4 py-2 text-sm ${sharing ? "bg-emerald-600 hover:bg-emerald-500" : "bg-ink-800 hover:bg-ink-700"} text-white`}
         >
           {sharing ? "🛑 Stop sharing" : "🖥️ Share screen"}
+        </button>
+        <button
+          onClick={recording ? stopRecording : startRecording}
+          className={`rounded-xl2 px-4 py-2 text-sm ${recording ? "bg-rose-600 hover:bg-rose-500" : "bg-ink-800 hover:bg-ink-700"} text-white`}
+          title={recording ? "Stop recording and download .webm" : "Record your camera + mic to a local .webm file"}
+        >
+          {recording ? `⏹ ${Math.floor(recordElapsed / 60)}:${String(recordElapsed % 60).padStart(2, "0")}` : "🔴 Record"}
         </button>
         {/* Reactions button + popover. Popover is absolutely positioned above
             the button so it doesn't shift the footer's flex layout. */}
