@@ -179,7 +179,7 @@ export default function PuzzlesPage() {
     <div className="grid gap-6 lg:h-[calc(100dvh-6.5rem)] lg:grid-cols-[minmax(0,1fr)_360px] lg:overflow-hidden">
       {/* Phase 7n: milestone celebration — only shown for first-time crossings. */}
       {g.milestone?.firstTime && (
-        <MilestoneOverlay milestone={g.milestone.milestone} onClose={g.clearMilestone} />
+        <MilestoneOverlay milestone={g.milestone.milestone} type={g.milestone.type} onClose={g.clearMilestone} />
       )}
       {/* Floating keyboard-shortcut help chip. Fixed bottom-right so it's
           always reachable without stealing valuable sidebar space. */}

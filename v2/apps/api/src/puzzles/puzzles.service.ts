@@ -449,11 +449,13 @@ export class PuzzlesService {
         } },
         { upsert: true },
       );
-      // Phase 7n: milestone crossings — only for regular puzzle mode. Blindfold's
-      // rating distribution is different enough that the round-100 thresholds
-      // wouldn't feel meaningful.
+      // Phase 7n + 7o: milestone crossings on both rating AND solve-count.
+      // Only for regular puzzle mode — blindfold's rating distribution is
+      // different enough that the round-100 thresholds wouldn't feel meaningful.
+      const beforeNb = perf.nb || 0;
+      const afterNb  = upd.userPerf.nb || 0;
       const milestone = key === "puzzle"
-        ? await recordAndCelebrate(this.conn, this.push, userId, perf.gl.r, upd.userPerf.gl.r).catch(() => null)
+        ? await recordAndCelebrate(this.conn, this.push, userId, perf.gl.r, upd.userPerf.gl.r, beforeNb, afterNb).catch(() => null)
         : null;
       return { win, ratingDiff: upd.ratingDiff, rating: upd.userPerf.gl.r, glicko: upd.userPerf.gl, milestone };
     }

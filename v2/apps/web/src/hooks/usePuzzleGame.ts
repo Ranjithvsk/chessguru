@@ -84,9 +84,9 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   const [hintShapes, setHintShapes] = useState<DrawShape[]>([]);
   const [fb, setFb] = useState<FB>({ kind: "wait", title: "Your turn", sub: "Find the best move" });
   const [ratingDiff, setRatingDiff] = useState<number | null>(null);
-  // Phase 7n: milestone hit on this solve (null when none crossed). Cleared
-  // on the next puzzle load — the celebration overlay lives on the parent.
-  const [milestone, setMilestone] = useState<{ milestone: number; firstTime: boolean } | null>(null);
+  // Phase 7n + 7o: milestone hit on this solve (null when none crossed).
+  // Cleared on the next puzzle load — the celebration overlay lives on the parent.
+  const [milestone, setMilestone] = useState<{ type: "rating" | "count"; milestone: number; firstTime: boolean } | null>(null);
   const [displayRating, setDisplayRating] = useState(initialRating);
   const [, force] = useState(0);
   const [replayPly, setReplayPly] = useState<number | null>(null); // post-solve move replay (null = live)

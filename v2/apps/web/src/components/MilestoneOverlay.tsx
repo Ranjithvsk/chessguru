@@ -8,11 +8,17 @@
 
 import { useEffect } from "react";
 
-interface Props { milestone: number; onClose: () => void; }
+interface Props { milestone: number; type?: "rating" | "count"; onClose: () => void; }
 
 const COLORS = ["#f97316", "#fbbf24", "#a855f7", "#22d3ee", "#34d399", "#f472b6", "#60a5fa"];
 
-export default function MilestoneOverlay({ milestone, onClose }: Props) {
+export default function MilestoneOverlay({ milestone, type = "rating", onClose }: Props) {
+  const isCount = type === "count";
+  const emoji = isCount ? "🏅" : "🎉";
+  const kicker = isCount ? "Puzzles solved" : "Milestone unlocked";
+  const sub = isCount
+    ? <>You've solved <b>{milestone}</b> puzzles. That's real practice — keep it up.</>
+    : <>Your puzzle rating just crossed <b>{milestone}</b>. Nicely done.</>;
   useEffect(() => {
     // Auto-dismiss after 6s so the overlay doesn't block interaction forever.
     const id = setTimeout(onClose, 6000);
@@ -69,12 +75,10 @@ export default function MilestoneOverlay({ milestone, onClose }: Props) {
         className="relative mx-4 max-w-md rounded-2xl border border-brand-500/40 bg-gradient-to-br from-brand-600/20 via-purple-600/10 to-amber-500/10 p-8 text-center shadow-2xl"
         style={{ animation: "cg-pop 0.5s cubic-bezier(.2,.9,.3,1.2) forwards" }}
       >
-        <div className="text-5xl">🎉</div>
-        <div className="mt-3 text-sm font-semibold uppercase tracking-wide text-brand-300">Milestone unlocked</div>
+        <div className="text-5xl">{emoji}</div>
+        <div className="mt-3 text-sm font-semibold uppercase tracking-wide text-brand-300">{kicker}</div>
         <div className="mt-2 font-display text-6xl font-bold tabular-nums text-white">{milestone}</div>
-        <div className="mt-2 text-sm text-ink-200">
-          Your puzzle rating just crossed <b>{milestone}</b>. Nicely done.
-        </div>
+        <div className="mt-2 text-sm text-ink-200">{sub}</div>
         <button
           onClick={onClose}
           className="mt-6 rounded-lg bg-gradient-to-r from-brand-600 to-purple-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg hover:brightness-110"

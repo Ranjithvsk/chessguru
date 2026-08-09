@@ -45,8 +45,10 @@ export interface CompleteResult {
   ratingDiff?: number;
   rating?: number;
   glicko?: Glicko;
-  /** Phase 7n: set when this solve crossed a round-number rating threshold. */
-  milestone?: { milestone: number; firstTime: boolean } | null;
+  /** Phase 7n + 7o: set when this solve crossed a round-number threshold on
+   *  either rating OR solve-count. If both fire on the same solve, the client
+   *  gets the rating one — the count one still gets recorded + push-notified. */
+  milestone?: { type: "rating" | "count"; milestone: number; firstTime: boolean } | null;
 }
 
 export interface AuthMe {
