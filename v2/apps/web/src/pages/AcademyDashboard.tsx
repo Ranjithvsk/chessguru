@@ -60,7 +60,7 @@ function AttendanceStrip({ days }: { days?: boolean[] }) {
     </div>
   );
 }
-interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; attendedCount?: number; academyId?: string|null }
+interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; attendedCount?: number; academyId?: string|null; summarySentAt?: string|null }
 interface FeesConfig { monthlyFeePaise: number; upiVpa: string; upiPayeeName: string; canEdit: boolean }
 interface Invoice { _id: string; academyId: string; studentId: string; studentUsername: string; period: string; amountPaise: number; status: "pending"|"paid"|"waived"; generatedAt: string; paidAt?: string; paymentMethod?: string }
 function rupees(paise: number) { return (paise / 100).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }); }
@@ -1120,6 +1120,7 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
 // Single-row renderer for a scheduled class. Live rows get a green ring and
 // a Join button; upcoming rows just show the start time and a Copy-link.
 function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
+  const qc = useQueryClient();
   const [sending, setSending] = useState(false);
   const [sendMsg, setSendMsg] = useState<string | null>(null);
   // Copy-link: 1500ms "Copied!" flash then reverts. Falls back to a manual
@@ -1163,6 +1164,7 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
       else {
         setSendMsg(`Sent to ${r.sent} student${r.sent === 1 ? "" : "s"}${r.failed ? ` (${r.failed} failed)` : ""}`);
         setPreviewOpen(false);
+        qc.invalidateQueries({ queryKey: ["academy-schedule"] });
       }
     } catch { setSendMsg("Network error"); }
     finally { setSending(false); }
@@ -1174,6 +1176,11 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
         <div className="text-[11px] text-ink-400">
           {c.coach}{" · "}{fmtStartAt(c.startAt)}{" · "}{c.durationMin}m
           {typeof c.attendedCount === "number" && c.mine && <span className="ml-2 text-emerald-300">✓ {c.attendedCount} attended</span>}
+          {c.mine && c.summarySentAt && (
+            <span className="ml-2 text-brand-300" title={`Summary emailed ${new Date(c.summarySentAt).toLocaleString()}`}>
+              📧 sent {fmtAgo(c.summarySentAt)}
+            </span>
+          )}
           {sendMsg && <span className="ml-2 text-brand-300">· {sendMsg}</span>}
         </div>
       </div>

@@ -622,6 +622,14 @@ export class AcademyService {
       const r = await sendMail({ to: u.email, subject, html, text });
       if (r.ok) sent++; else failed++;
     }
+    // On a real send with at least one email out, timestamp the class so the
+    // dashboard can show a "📧 sent Xh ago" chip. Failed-only runs don't stamp
+    // (coach can retry cleanly).
+    if (!dryRun && sent > 0) {
+      await this.conn.db!.collection("classSchedules").updateOne(
+        { _id: classId as any }, { $set: { summarySentAt: new Date() } }
+      );
+    }
     return {
       ok: true, dryRun, sent, failed, attendees: attendees.length,
       // Extras used by the coach's preview modal.
