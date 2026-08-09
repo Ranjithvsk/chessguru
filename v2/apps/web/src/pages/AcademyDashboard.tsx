@@ -913,7 +913,7 @@ function TodayStrip({ schedule, snaps, recordings }: {
 // can edit (server enforces via PATCH /api/class/:id/snap/:snapId). Card is
 // a Link by default; edit mode swaps in a textarea + save/cancel so the
 // coach can fix a typo without re-opening the board.
-function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos }: {
+function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMode, isSelected, onToggleSelect }: {
   s: SnapItem;
   isOpen: boolean;
   onOpen: () => void;
@@ -921,6 +921,9 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos }: {
   onNav: (delta: 1 | -1) => void;
   neighbours?: { prev?: SnapItem; next?: SnapItem };
   pos?: { i: number; n: number };
+  selectMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: () => void;
 }) {
   const qc = useQueryClient();
   const { data: me } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
@@ -980,6 +983,7 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos }: {
   const cardOnClick = (e: React.MouseEvent) => {
     if (editing) return;
     e.preventDefault(); e.stopPropagation();
+    if (selectMode && onToggleSelect) { onToggleSelect(); return; }
     onOpen();
   };
   // ← / → walk the filtered snap list; Esc closes. Bail if the user is typing
@@ -1005,7 +1009,9 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos }: {
       onKeyDown={(e) => { if (!editing && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onOpen(); } }}
       className={`group flex gap-3 rounded-lg border p-3 transition-colors ${editing
         ? "border-brand-500/60 bg-ink-800"
-        : "border-ink-700 bg-ink-800/40 hover:border-brand-500/50 hover:bg-ink-800/60 cursor-pointer"}`}>
+        : selectMode && isSelected
+          ? "border-brand-500 bg-brand-500/10 cursor-pointer ring-2 ring-brand-500/40"
+          : "border-ink-700 bg-ink-800/40 hover:border-brand-500/50 hover:bg-ink-800/60 cursor-pointer"}`}>
       <div className="w-24 h-24 shrink-0">
         <Board fen={s.fen} viewOnly coordinates={false} className="mini" shapes={shapes as any} />
       </div>
@@ -1191,6 +1197,35 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   // Reset the open snap when filters change so we don't end up pointing at a
   // row that just got filtered out.
   useEffect(() => { setOpenIdx(null); }, [classFilter, starredOnly]);
+  // Multi-select for bulk actions. Enter mode via "☐ Select" chip; clicking
+  // cards toggles selection instead of opening the modal. Explicit mode is
+  // friendlier than Ctrl+click magic for the coach audience.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  useEffect(() => { if (!selectMode) setSelectedIds(new Set()); }, [selectMode]);
+  const qcSnap = useQueryClient();
+  async function bulkDelete() {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    if (!window.confirm(`Delete ${ids.length} snap${ids.length === 1 ? "" : "s"}? This can't be undone.`)) return;
+    // Need classId per snap for the URL. Look up from the source snaps list.
+    const byId: Record<string, SnapItem> = {};
+    for (const s of snaps) byId[s._id] = s;
+    let failed = 0;
+    for (const id of ids) {
+      const s = byId[id];
+      if (!s) { failed++; continue; }
+      try {
+        const r = await fetch(`${BASE}/api/class/${encodeURIComponent(s.classId)}/snap/${encodeURIComponent(id)}`, {
+          method: "DELETE", credentials: "include",
+        });
+        if (!r.ok) failed++;
+      } catch { failed++; }
+    }
+    if (failed > 0) window.alert(`${failed} of ${ids.length} deletes failed (likely not your snap).`);
+    setSelectMode(false);
+    qcSnap.invalidateQueries({ queryKey: ["academy-snaps"] });
+  }
   const starredCount = snaps.reduce((n, s) => n + (s.starred ? 1 : 0), 0);
   // CSV export of the currently filtered snap set. Client-side blob download,
   // one row per snap. FEN + shapes JSON on the end so a coach can paste any
@@ -1281,9 +1316,23 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
               </button>
             </>
           )}
+          <button onClick={() => setSelectMode((v) => !v)}
+            title={selectMode ? "Exit multi-select" : "Multi-select for bulk actions"}
+            className={`ml-auto rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${selectMode
+              ? "border-brand-500/60 bg-brand-500/15 text-brand-100"
+              : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800 hover:text-ink-100"}`}>
+            {selectMode ? "✕ Cancel" : "☐ Select"}
+          </button>
+          {selectMode && (
+            <button onClick={bulkDelete} disabled={selectedIds.size === 0}
+              title="Delete selected snaps (author-only per snap; failures reported)"
+              className="rounded-full border border-rose-500/40 bg-rose-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-rose-200 hover:bg-rose-500/20 disabled:opacity-40">
+              🗑 Delete <span className="ml-1 opacity-70">{selectedIds.size}</span>
+            </button>
+          )}
           <button onClick={() => exportCsv(filtered)}
             title="Download the currently filtered snaps as a CSV (openable in Excel/Sheets)"
-            className="ml-auto rounded-full border border-ink-700 bg-ink-900 px-2.5 py-0.5 text-[11px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-ink-100">
+            className="rounded-full border border-ink-700 bg-ink-900 px-2.5 py-0.5 text-[11px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-ink-100">
             ⬇ CSV <span className="ml-1 opacity-70">{filtered.length}</span>
           </button>
         </div>
@@ -1307,6 +1356,13 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
                 })}
                 neighbours={{ prev: shown[i - 1], next: shown[i + 1] }}
                 pos={{ i, n: shown.length }}
+                selectMode={selectMode}
+                isSelected={selectedIds.has(s._id)}
+                onToggleSelect={() => setSelectedIds((cur) => {
+                  const nxt = new Set(cur);
+                  if (nxt.has(s._id)) nxt.delete(s._id); else nxt.add(s._id);
+                  return nxt;
+                })}
               />
             ));
           })()}
