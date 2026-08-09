@@ -140,11 +140,18 @@ export class AuthService {
 
     const hash = await bcrypt.hash(password, 10);
     const now = new Date();
+    // 90-day free trial → then ₹1000/month unlimited. Stored so the app can
+    // decide when to nag / lock down; enforcement is a separate follow-up.
+    const trialEndsAt = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
     const academyDoc = {
       _id: slug,
       name: academyName,
       ownerId: uid,
       plan: "trial",
+      trialStartsAt: now,
+      trialEndsAt,
+      monthlyPricePaise: 100000,    // ₹1000 = 100000 paise
+      subscriptionStatus: "trialing",
       createdAt: now,
     };
     const userDoc = {
