@@ -17,10 +17,12 @@ import { startBackgroundBlur } from "../lib/backgroundBlur";
 
 type PeerSummary = { id: string; name: string; userId: string | null };
 type ServerMsg =
-  | { type: "hello"; self: string; peers: PeerSummary[]; as?: { userId: string | null; name: string } }
+  | { type: "hello"; self: string; peers: PeerSummary[]; moderator?: string | null; as?: { userId: string | null; name: string } }
   | { type: "peer-join"; peer: string; name?: string; userId?: string | null }
   | { type: "peer-leave"; peer: string }
   | { type: "full" }
+  | { type: "moderator-change"; moderator: string | null }
+  | { type: "mod"; action: "force-mute" | "kicked" | "spotlight"; from?: string; name?: string; target?: string | null }
   | { type: "offer"; from: string; sdp: RTCSessionDescriptionInit }
   | { type: "answer"; from: string; sdp: RTCSessionDescriptionInit }
   | { type: "ice"; from: string; candidate: RTCIceCandidateInit | null }
@@ -137,6 +139,13 @@ export default function CallRoomPage() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   // Peer id of the current loudest speaker (or null). Drives tile spotlight.
   const [activeSpeaker, setActiveSpeaker] = useState<string | null>(null);
+  // Moderator = first joiner in the room. Auto-updates on moderator-change
+  // (i.e. current moderator left). Drives 👑 badge + gate on mute-all button.
+  const [moderatorId, setModeratorId] = useState<string | null>(null);
+  // Server-relayed spotlight (moderator's pick). Not yet rendered as a bigger
+  // tile — the state is here so we can wire the UI in the next slice. For
+  // now it just powers a subtle "spotlighted" ring on the picked tile.
+  const [spotlightId, setSpotlightId] = useState<string | null>(null);
   // Auto-scroll the chat list to bottom on new message OR on open.
   const chatListRef = useRef<HTMLDivElement>(null);
   // Track timers so unmount can clear them (avoids setState-on-unmount warnings).
@@ -201,6 +210,18 @@ export default function CallRoomPage() {
       return [...s];
     });
     send({ type: "broadcast", subtype: "hand-toggle", payload: { up: next } });
+  };
+
+  // Moderator-only room controls. Server silently drops mod commands from
+  // non-moderator peers, so these are safe to expose UI-side too (defence in depth
+  // is via the isMod gate below hiding the buttons).
+  const iAmMod = !!moderatorId && moderatorId === selfIdRef.current;
+  const muteAll = () => { if (!iAmMod) return; send({ type: "mod", action: "mute-all" }); };
+  const kickPeer = (peerId: string) => { if (!iAmMod) return; send({ type: "mod", action: "kick", target: peerId }); };
+  const spotlightPeer = (peerId: string | null) => {
+    if (!iAmMod) return;
+    setSpotlightId(peerId);   // local echo (server also broadcasts back to sender)
+    send({ type: "mod", action: "spotlight", target: peerId });
   };
 
   const sendReaction = (emoji: string) => {
@@ -524,6 +545,7 @@ export default function CallRoomPage() {
           case "hello": {
             selfIdRef.current = msg.self;
             if (msg.as?.name) selfNameRef.current = msg.as.name;
+            if (msg.moderator !== undefined) setModeratorId(msg.moderator ?? null);
             // If we raised our hand before hello landed, the local mirror was
             // keyed to "" — migrate it to the real self id so tiles line up.
             setRaisedHands((cur) => {
@@ -566,6 +588,21 @@ export default function CallRoomPage() {
             break;
           }
           case "full": setStatus("full"); break;
+          case "moderator-change": setModeratorId(msg.moderator ?? null); break;
+          case "mod": {
+            // Server-side auth check already ran; act on the action.
+            if (msg.action === "force-mute") {
+              const s = localStreamRef.current;
+              if (s) for (const t of s.getAudioTracks()) t.enabled = false;
+              setMicOn(false);
+            } else if (msg.action === "kicked") {
+              // Server closes the ws immediately after; anticipate that.
+              stopRecording(); stopCaptions(); teardown(); setStatus("left");
+            } else if (msg.action === "spotlight") {
+              setSpotlightId(msg.target ?? null);
+            }
+            break;
+          }
           case "offer":  await handleOffer(msg.from, msg.sdp); break;
           case "answer": await handleAnswer(msg.from, msg.sdp); break;
           case "ice":    await handleIce(msg.from, msg.candidate); break;
@@ -845,10 +882,14 @@ export default function CallRoomPage() {
           {boardMode
             ? <BoardMainArea room={room} peerIds={peerIds} peersRef={peersRef} localVideoRef={localVideoRef}
                 camOn={camOn} handSet={handSet} selfHandUp={selfHandUp} selfId={selfIdRef.current}
-                floaters={floaters} activeSpeaker={activeSpeaker} />
+                floaters={floaters} activeSpeaker={activeSpeaker}
+                moderatorId={moderatorId} spotlightId={spotlightId} iAmMod={iAmMod}
+                onKick={kickPeer} onSpotlight={spotlightPeer} />
             : <ClassicMainArea room={room} peerIds={peerIds} peersRef={peersRef} localVideoRef={localVideoRef}
                 camOn={camOn} handSet={handSet} selfHandUp={selfHandUp} selfId={selfIdRef.current}
-                floaters={floaters} activeSpeaker={activeSpeaker} />}
+                floaters={floaters} activeSpeaker={activeSpeaker}
+                moderatorId={moderatorId} spotlightId={spotlightId} iAmMod={iAmMod}
+                onKick={kickPeer} onSpotlight={spotlightPeer} />}
         </main>
 
         {chatOpen && (
@@ -972,6 +1013,15 @@ export default function CallRoomPage() {
         >
           {captionsOn ? "CC ON" : "CC"}
         </button>
+        {iAmMod && (
+          <button
+            onClick={muteAll}
+            className="rounded-xl2 px-4 py-2 text-sm bg-amber-600 hover:bg-amber-500 text-white"
+            title="Mute everyone else (moderator only)"
+          >
+            🔇 Mute all
+          </button>
+        )}
         {/* Reactions button + popover. Popover is absolutely positioned above
             the button so it doesn't shift the footer's flex layout. */}
         <div className="relative">
@@ -1037,11 +1087,17 @@ type MainAreaProps = {
   selfId: string;
   floaters: FloatingReaction[];
   activeSpeaker: string | null;
+  moderatorId: string | null;
+  spotlightId: string | null;
+  iAmMod: boolean;
+  onKick: (peerId: string) => void;
+  onSpotlight: (peerId: string | null) => void;
 };
 
 function ClassicMainArea({
   room, peerIds, peersRef, localVideoRef, camOn,
   handSet, selfHandUp, selfId, floaters, activeSpeaker,
+  moderatorId, spotlightId, iAmMod, onKick, onSpotlight,
 }: MainAreaProps) {
   // Explicit cols per count — keeps cell aspect predictable vs auto-fit.
   let gridCols = "grid-cols-1";
@@ -1078,6 +1134,11 @@ function ClassicMainArea({
               isActive={activeSpeaker === id}
               handUp={handSet.has(id)}
               floaters={floaters.filter((f) => f.peerId === id)}
+              isModerator={moderatorId === id}
+              isSpotlighted={spotlightId === id}
+              showModControls={iAmMod}
+              onKick={kickPeer}
+              onSpotlight={spotlightPeer}
             />
           ))}
         </div>
@@ -1118,6 +1179,7 @@ function ClassicMainArea({
 function BoardMainArea({
   room, peerIds, peersRef, localVideoRef, camOn,
   handSet, selfHandUp, selfId, floaters, activeSpeaker,
+  moderatorId, spotlightId, iAmMod, onKick, onSpotlight,
 }: MainAreaProps) {
   const { fen, lastMove, dests, sendMove, sendReset, connected } = useSharedBoard(room);
 
@@ -1202,6 +1264,11 @@ function BoardMainArea({
               isActive={activeSpeaker === id}
               handUp={handSet.has(id)}
               floaters={floaters.filter((f) => f.peerId === id)}
+              isModerator={moderatorId === id}
+              isSpotlighted={spotlightId === id}
+              showModControls={iAmMod}
+              onKick={onKick}
+              onSpotlight={onSpotlight}
             />
           </div>
         ))}
@@ -1298,6 +1365,11 @@ function RemoteTile({
   isActive,
   handUp,
   floaters,
+  isModerator,
+  isSpotlighted,
+  showModControls,
+  onKick,
+  onSpotlight,
 }: {
   peerId: string;
   index: number;
@@ -1306,6 +1378,11 @@ function RemoteTile({
   isActive?: boolean;
   handUp?: boolean;
   floaters?: FloatingReaction[];
+  isModerator?: boolean;
+  isSpotlighted?: boolean;
+  showModControls?: boolean;
+  onKick?: (peerId: string) => void;
+  onSpotlight?: (peerId: string | null) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const stream = getStream();
@@ -1315,9 +1392,12 @@ function RemoteTile({
     if (videoRef.current) videoRef.current.srcObject = stream;
   }, [stream]);
 
-  // Active-speaker: emerald ring + subtle glow. Kept subtle so the tile doesn't
-  // jump around visually every time someone breathes near their mic.
-  const ring = isActive ? "ring-2 ring-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.35)]" : "border border-ink-700";
+  // Ring precedence: spotlight (amber) > active-speaker (emerald) > default border.
+  const ring = isSpotlighted
+    ? "ring-2 ring-amber-400 shadow-[0_0_16px_rgba(251,191,36,0.4)]"
+    : isActive
+      ? "ring-2 ring-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.35)]"
+      : "border border-ink-700";
   return (
     <div className={`relative aspect-video rounded-lg bg-ink-900 overflow-hidden ${ring}`}>
       <video
@@ -1332,11 +1412,26 @@ function RemoteTile({
         </div>
       )}
       <div className="absolute bottom-1 left-1 flex items-center gap-1 px-2 py-0.5 rounded bg-black/60 text-[11px] text-white">
+        {isModerator && <span title="Moderator">👑</span>}
         {isActive && <span className="text-emerald-300">🎤</span>}
         <span className="truncate max-w-[140px]">{name}</span>
       </div>
       {handUp && (
         <div className="absolute top-1 right-1 text-2xl bg-black/50 rounded-full px-2 py-1 leading-none">✋</div>
+      )}
+      {showModControls && (
+        <div className="absolute top-1 left-1 flex gap-1 opacity-0 hover:opacity-100 transition-opacity">
+          <button onClick={() => onSpotlight?.(isSpotlighted ? null : peerId)}
+            className="text-[10px] rounded bg-amber-600/90 hover:bg-amber-500 text-white px-1.5 py-0.5"
+            title={isSpotlighted ? "Un-spotlight this peer" : "Spotlight this peer for everyone"}>
+            {isSpotlighted ? "★" : "☆"}
+          </button>
+          <button onClick={() => onKick?.(peerId)}
+            className="text-[10px] rounded bg-rose-600/90 hover:bg-rose-500 text-white px-1.5 py-0.5"
+            title="Remove from call">
+            ✕
+          </button>
+        </div>
       )}
       {floaters && floaters.length > 0 && floaters.map((f) => (
         <div

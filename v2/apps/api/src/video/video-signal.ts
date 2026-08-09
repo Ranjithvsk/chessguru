@@ -32,7 +32,8 @@ import { randomBytes } from "crypto";
 
 interface Client { ws: WebSocket; id: string; roomId: string; userId: string | null; name: string; key: string }
 type ClientMap = Map<string, Client>;
-const rooms = new Map<string, ClientMap>();
+interface Room { clients: ClientMap; moderator: string | null }
+const rooms = new Map<string, Room>();
 
 // P0 = 2 (direct P2P). P2a = 8 (mesh; each client holds N-1 peer connections
 // so beyond ~5 the per-client upload cost swamps consumer wifi -- SFU lands
@@ -95,27 +96,35 @@ async function writeLeave(conn: Connection | null, client: Client) {
 }
 
 type PeerSummary = { id: string; name: string; userId: string | null };
-function joinRoom(roomId: string, client: Client): { ok: true; peers: PeerSummary[] } | { ok: false; reason: string } {
+function joinRoom(roomId: string, client: Client): { ok: true; peers: PeerSummary[]; moderator: string } | { ok: false; reason: string } {
   let room = rooms.get(roomId);
-  if (!room) { room = new Map(); rooms.set(roomId, room); }
-  if (room.size >= MAX_PER_ROOM) return { ok: false, reason: "full" };
-  room.set(client.id, client);
-  // Return name + userId so joiners can render real names on tiles immediately.
+  if (!room) { room = { clients: new Map(), moderator: null }; rooms.set(roomId, room); }
+  if (room.clients.size >= MAX_PER_ROOM) return { ok: false, reason: "full" };
+  room.clients.set(client.id, client);
+  // First joiner = moderator (the "coach" convention). Persists until they leave.
+  if (!room.moderator) room.moderator = client.id;
   const peers: PeerSummary[] = [];
-  for (const c of room.values()) if (c.id !== client.id) peers.push({ id: c.id, name: c.name, userId: c.userId });
-  return { ok: true, peers };
+  for (const c of room.clients.values()) if (c.id !== client.id) peers.push({ id: c.id, name: c.name, userId: c.userId });
+  return { ok: true, peers, moderator: room.moderator };
 }
 function leaveRoom(client: Client) {
   const room = rooms.get(client.roomId);
   if (!room) return;
-  room.delete(client.id);
-  if (room.size === 0) rooms.delete(client.roomId);
-  else for (const c of room.values()) send(c.ws, { type: "peer-leave", peer: client.id });
+  room.clients.delete(client.id);
+  if (room.clients.size === 0) { rooms.delete(client.roomId); return; }
+  // Moderator left: hand the crown to the next longest-in-room (Map preserves
+  // insertion order). Broadcast moderator-change so all clients update the 👑.
+  if (room.moderator === client.id) {
+    const next = room.clients.values().next().value;
+    room.moderator = next ? next.id : null;
+    for (const c of room.clients.values()) send(c.ws, { type: "moderator-change", moderator: room.moderator });
+  }
+  for (const c of room.clients.values()) send(c.ws, { type: "peer-leave", peer: client.id });
 }
 function forwardToPeer(client: Client, targetId: string, payload: any) {
   const room = rooms.get(client.roomId);
   if (!room) return;
-  const target = room.get(targetId);
+  const target = room.clients.get(targetId);
   if (!target) return;
   send(target.ws, { ...payload, from: client.id });
 }
@@ -141,14 +150,16 @@ export function attachVideoSignalWs(httpServer: HttpServer, conn: Connection | n
       const r = joinRoom(roomId, client);
       if (!r.ok) { send(ws, { type: r.reason }); ws.close(); return; }
 
-      send(ws, { type: "hello", self: client.id, peers: r.peers, as: { userId: client.userId, name: client.name } });
+      send(ws, { type: "hello", self: client.id, peers: r.peers, moderator: r.moderator, as: { userId: client.userId, name: client.name } });
       const room = rooms.get(roomId)!;
-      for (const c of room.values()) if (c.id !== client.id) send(c.ws, { type: "peer-join", peer: client.id, name: client.name, userId: client.userId });
+      for (const c of room.clients.values()) if (c.id !== client.id) send(c.ws, { type: "peer-join", peer: client.id, name: client.name, userId: client.userId });
       writeJoin(conn, client);
 
       ws.on("message", (raw) => {
         let msg: any; try { msg = JSON.parse(String(raw)); } catch { return; }
         if (!msg || typeof msg !== "object") return;
+        const room = rooms.get(client.roomId);
+        const isMod = !!room && room.moderator === client.id;
         switch (msg.type) {
           case "offer":
           case "answer":
@@ -156,14 +167,28 @@ export function attachVideoSignalWs(httpServer: HttpServer, conn: Connection | n
             if (typeof msg.to === "string") forwardToPeer(client, msg.to, msg);
             break;
           case "broadcast": {
-            // Generic room-wide relay for chat / raise-hand / reactions / any
-            // client-driven ephemeral event. Server adds `from` + `name` so
-            // recipients can render "who said what" without a lookup, and
-            // never trusts the client's own identity claim.
-            const room = rooms.get(client.roomId);
+            // Generic room-wide relay for chat / raise-hand / reactions /
+            // captions / any client-driven ephemeral event.
             if (!room) break;
             const outbound = { type: "broadcast", from: client.id, name: client.name, subtype: msg.subtype, payload: msg.payload };
-            for (const c of room.values()) if (c.id !== client.id) send(c.ws, outbound);
+            for (const c of room.clients.values()) if (c.id !== client.id) send(c.ws, outbound);
+            break;
+          }
+          case "mod": {
+            // Moderator-only commands: mute-all, kick, spotlight. Rejected
+            // silently for non-mods (no error surface = no info-leak on
+            // whether the target exists).
+            if (!isMod || !room) break;
+            const action = String(msg.action || "");
+            if (action === "mute-all") {
+              for (const c of room.clients.values()) if (c.id !== client.id) send(c.ws, { type: "mod", action: "force-mute", from: client.id, name: client.name });
+            } else if (action === "kick" && typeof msg.target === "string") {
+              const target = room.clients.get(msg.target);
+              if (target) { send(target.ws, { type: "mod", action: "kicked", from: client.id, name: client.name }); try { target.ws.close(); } catch {} }
+            } else if (action === "spotlight" && (typeof msg.target === "string" || msg.target === null)) {
+              const spot = msg.target;
+              for (const c of room.clients.values()) send(c.ws, { type: "mod", action: "spotlight", target: spot, from: client.id });
+            }
             break;
           }
           case "leave":
