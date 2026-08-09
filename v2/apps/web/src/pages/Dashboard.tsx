@@ -7,11 +7,19 @@ import * as push from "../lib/push";
 
 // Phase 8a: Puzzle of the Day card. Sits at the very top of the dashboard so
 // it's the first thing you see when you log in — the daily anchor for a habit.
-type DailyPreview = { date: string; puzzle: { rating: number; themes: string[] }; solvedByMe: boolean };
+type DailyPreview = {
+  date: string;
+  puzzle: { rating: number; themes: string[] };
+  solvedByMe: boolean;
+  stats?: { attempted: number; solved: number; medianMs: number | null };
+};
 function DailyCard() {
   const { data } = useQuery({ queryKey: ["daily-preview"], queryFn: () => get<DailyPreview>("/api/puzzles/daily") });
   if (!data) return null;
   const done = data.solvedByMe;
+  const solvePct = data.stats && data.stats.attempted > 0
+    ? Math.round((data.stats.solved / data.stats.attempted) * 100)
+    : null;
   return (
     <Link to="/daily" className={`block rounded-2xl border p-4 transition hover:brightness-110 ${done ? "border-emerald-500/30 bg-emerald-500/5" : "border-brand-500/40 bg-gradient-to-r from-brand-600/20 via-purple-500/10 to-amber-500/5"}`}>
       <div className="flex items-center justify-between gap-3">
@@ -25,6 +33,11 @@ function DailyCard() {
             {data.puzzle.themes.slice(0, 2).map((t) => (
               <span key={t} className="rounded bg-ink-800/70 px-1.5 py-0.5">{t}</span>
             ))}
+            {solvePct != null && (
+              <span className="rounded bg-ink-800/70 px-1.5 py-0.5 text-emerald-300">
+                {solvePct}% solved today
+              </span>
+            )}
           </div>
         </div>
         <div className="shrink-0 text-3xl">{done ? "🌟" : "🎯"}</div>

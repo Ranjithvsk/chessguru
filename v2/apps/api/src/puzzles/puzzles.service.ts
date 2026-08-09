@@ -197,11 +197,29 @@ export class PuzzlesService {
       myRound = await this.conn.db!.collection("rounds").findOne({ _id: `${userId}:${doc.puzzleId}` as any });
       solvedByMe = !!myRound?.w;
     }
+    // Phase 8b: today-so-far stats. Scan today's rounds (few hundred rows
+    // typically) and filter to this puzzleId suffix — the rounds _id is
+    // "userId:puzzleId" so a straight range-by-day query catches everyone,
+    // and we bucket by ID suffix client-side. Cap at 2000 in case a daily
+    // ever goes viral.
+    const dayStart = new Date(today + "T00:00:00.000Z");
+    const dayEnd = new Date(dayStart.getTime() + 86_400_000);
+    const roundsToday: any[] = await this.conn.db!.collection("rounds").find(
+      { d: { $gte: dayStart, $lt: dayEnd } },
+      { projection: { _id: 1, w: 1, ms: 1 } as any },
+    ).limit(2000).toArray();
+    const pid = String(doc.puzzleId);
+    const forThis = roundsToday.filter((r) => String(r._id).endsWith(":" + pid));
+    const attempted = forThis.length;
+    const solved = forThis.filter((r) => r.w).length;
+    const solveMs = forThis.filter((r) => r.w && typeof r.ms === "number" && r.ms > 0).map((r) => r.ms).sort((a, b) => a - b);
+    const medianMs = solveMs.length ? solveMs[Math.floor(solveMs.length / 2)] : null;
     return {
       date: today,
       puzzle: applyLastMove(fmtPuzzle(puzzle)),
       solvedByMe,
       myRound: myRound ? { win: !!myRound.w, ms: myRound.ms ?? null, ratingDiff: myRound.rd ?? null } : null,
+      stats: { attempted, solved, medianMs },
     };
   }
 

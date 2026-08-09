@@ -26,6 +26,7 @@ type DailyPayload = {
   };
   solvedByMe: boolean;
   myRound: { win: boolean; ms: number | null; ratingDiff: number | null } | null;
+  stats?: { attempted: number; solved: number; medianMs: number | null };
 };
 
 const fmt = (iso: string) => new Date(iso + "T00:00:00Z").toLocaleDateString(undefined, {
@@ -167,13 +168,35 @@ export default function DailyPage() {
       )}
 
       <div className="rounded-2xl border border-brand-500/30 bg-gradient-to-br from-brand-600/15 via-purple-500/10 to-amber-500/5 p-5">
-        <div className="text-xs font-semibold uppercase tracking-wide text-brand-300">Puzzle of the day</div>
-        <div className="mt-1 font-display text-2xl text-white">{fmt(data.date)}</div>
-        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-300">
-          <span className="rounded-md bg-ink-800 px-2 py-0.5">Rating {data.puzzle.rating}</span>
-          {data.puzzle.themes.slice(0, 3).map((t) => (
-            <span key={t} className="rounded-md bg-ink-800/60 px-2 py-0.5">{t}</span>
-          ))}
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-300">Puzzle of the day</div>
+            <div className="mt-1 font-display text-2xl text-white">{fmt(data.date)}</div>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-300">
+              <span className="rounded-md bg-ink-800 px-2 py-0.5">Rating {data.puzzle.rating}</span>
+              {data.puzzle.themes.slice(0, 3).map((t) => (
+                <span key={t} className="rounded-md bg-ink-800/60 px-2 py-0.5">{t}</span>
+              ))}
+            </div>
+          </div>
+          {data.stats && data.stats.attempted > 0 && (
+            <div className="flex gap-3 text-center">
+              <div className="rounded-lg bg-ink-900/60 px-3 py-2">
+                <div className="text-[10px] uppercase tracking-wide text-ink-400">Solved</div>
+                <div className="mt-0.5 text-lg font-bold tabular-nums text-white">
+                  {Math.round((data.stats.solved / data.stats.attempted) * 100)}%
+                </div>
+                <div className="text-[10px] text-ink-500">{data.stats.solved} / {data.stats.attempted}</div>
+              </div>
+              {data.stats.medianMs != null && (
+                <div className="rounded-lg bg-ink-900/60 px-3 py-2">
+                  <div className="text-[10px] uppercase tracking-wide text-ink-400">Median</div>
+                  <div className="mt-0.5 text-lg font-bold tabular-nums text-white">{fmtSec(data.stats.medianMs)}</div>
+                  <div className="text-[10px] text-ink-500">of winners</div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
