@@ -144,6 +144,18 @@ export default function AcademyDashboardPage() {
   const [classDur, setClassDur] = useState(60);
   const [classAutoSummary, setClassAutoSummary] = useState(false);
   const [classAutoSummaryNote, setClassAutoSummaryNote] = useState("");
+  // "Last used" auto-summary defaults for the current user, persisted in
+  // localStorage so scheduling a similar class next time is a one-tap
+  // pre-fill. Keyed by userId so a shared browser doesn't cross-contaminate.
+  const lastAutoKey = me?.userId ? `cg_last_autosummary_${me.userId}` : null;
+  const [lastAutoDefault, setLastAutoDefault] = useState<{ note: string } | null>(null);
+  useEffect(() => {
+    if (!lastAutoKey) return;
+    try {
+      const raw = localStorage.getItem(lastAutoKey);
+      if (raw) { const j = JSON.parse(raw); if (j && typeof j.note === "string") setLastAutoDefault({ note: j.note }); }
+    } catch { /* private mode */ }
+  }, [lastAutoKey]);
   const [scheduleMsg, setScheduleMsg] = useState<{ tone: "ok"|"err"; text: string }|null>(null);
   // Fees form + actions
   const [feeRupees, setFeeRupees] = useState<string>("");
@@ -199,6 +211,11 @@ export default function AcademyDashboardPage() {
       if (r && r._id) {
         setScheduleMsg({ tone: "ok", text: `"${r.title}" scheduled — join link ready.` });
         setClassTitle(""); setClassCoach(""); setClassStartAt(localDatetimeDefault()); setClassDur(60);
+        // Persist autoSummary settings for next-time one-click restore.
+        if (classAutoSummary && lastAutoKey) {
+          try { localStorage.setItem(lastAutoKey, JSON.stringify({ note: classAutoSummaryNote })); setLastAutoDefault({ note: classAutoSummaryNote }); }
+          catch { /* private mode */ }
+        }
       } else {
         setScheduleMsg({ tone: "err", text: (r as any)?.message || "Schedule failed." });
       }
@@ -567,12 +584,22 @@ export default function AcademyDashboardPage() {
                 className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white focus:border-brand-500 focus:outline-none"
                 title="Duration (minutes)" />
             </div>
-            <label className="md:col-span-2 flex items-center gap-2 text-xs text-ink-300 cursor-pointer">
-              <input type="checkbox" checked={classAutoSummary} onChange={(e) => setClassAutoSummary(e.target.checked)}
-                className="rounded border-ink-600 bg-ink-800 text-brand-500 focus:ring-brand-500/40" />
-              🤖 Auto-email a class summary 15 minutes after this class ends
-              <span className="ml-1 text-ink-500">(you can still preview / send earlier manually)</span>
-            </label>
+            <div className="md:col-span-2 flex items-center gap-2">
+              <label className="flex items-center gap-2 text-xs text-ink-300 cursor-pointer">
+                <input type="checkbox" checked={classAutoSummary} onChange={(e) => setClassAutoSummary(e.target.checked)}
+                  className="rounded border-ink-600 bg-ink-800 text-brand-500 focus:ring-brand-500/40" />
+                🤖 Auto-email a class summary 15 minutes after this class ends
+                <span className="ml-1 text-ink-500">(you can still preview / send earlier manually)</span>
+              </label>
+              {lastAutoDefault && !classAutoSummary && (
+                <button type="button"
+                  onClick={() => { setClassAutoSummary(true); setClassAutoSummaryNote(lastAutoDefault.note); }}
+                  className="ml-auto rounded-full border border-ink-700 bg-ink-900 px-2 py-0.5 text-[10px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-ink-100"
+                  title={lastAutoDefault.note ? `Note: "${lastAutoDefault.note.slice(0, 60)}"` : "Use your last auto-summary settings"}>
+                  ↺ Use last settings
+                </button>
+              )}
+            </div>
             {classAutoSummary && (
               <div className="md:col-span-2">
                 <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">Note baked into the auto-send (optional)</label>
