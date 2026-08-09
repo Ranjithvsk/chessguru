@@ -60,7 +60,7 @@ function AttendanceStrip({ days }: { days?: boolean[] }) {
     </div>
   );
 }
-interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; attendedCount?: number; academyId?: string|null; summarySentAt?: string|null; autoSummary?: boolean; autoSummaryNote?: string; seriesId?: string|null; seriesIndex?: number; seriesTotal?: number }
+interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; attendedCount?: number; academyId?: string|null; summarySentAt?: string|null; autoSummary?: boolean; autoSummaryNote?: string; seriesId?: string|null; seriesIndex?: number; seriesTotal?: number; autoSummaryFailedAt?: string|null; autoSummaryFailedCount?: number; autoSummaryFailedError?: string }
 interface FeesConfig { monthlyFeePaise: number; upiVpa: string; upiPayeeName: string; canEdit: boolean }
 interface Invoice { _id: string; academyId: string; studentId: string; studentUsername: string; period: string; amountPaise: number; status: "pending"|"paid"|"waived"; generatedAt: string; paidAt?: string; paymentMethod?: string }
 function rupees(paise: number) { return (paise / 100).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }); }
@@ -1391,8 +1391,14 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
               📧 sent {fmtAgo(c.summarySentAt)}
             </span>
           )}
-          {c.mine && c.autoSummary && !c.summarySentAt && (
+          {c.mine && c.autoSummary && !c.summarySentAt && !c.autoSummaryFailedAt && (
             <span className="ml-2 text-ink-500" title="Auto-email will fire 15 min after class ends">🤖 auto</span>
+          )}
+          {c.mine && c.autoSummaryFailedAt && !c.summarySentAt && (
+            <span className="ml-2 text-rose-300"
+              title={`Auto-send failed ${fmtAgo(c.autoSummaryFailedAt)}${c.autoSummaryFailedCount ? ` — all ${c.autoSummaryFailedCount} email(s) bounced` : ""}${c.autoSummaryFailedError ? `\n${c.autoSummaryFailedError}` : ""}. Use 📧 Summary to retry manually.`}>
+              ⚠️ auto failed
+            </span>
           )}
           {c.mine && !c.summarySentAt && (
             <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); openAutoEditor(); }}

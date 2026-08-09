@@ -56,12 +56,23 @@ export class ClassAutoSummaryService implements OnModuleInit {
       if (now < endMs + GRACE_MS) continue;               // not yet
       if (now > endMs + MAX_LOOKBACK_MS) continue;        // too old
       try {
-        const r = await this.academy.runAutoSummaryFor(String(c._id));
+        const r: any = await this.academy.runAutoSummaryFor(String(c._id));
         // eslint-disable-next-line no-console
         console.log(`[auto-summary] ${c._id}:`, JSON.stringify(r));
+        // Surface failure to the coach: attempted to send at least one email
+        // but every one failed (dw-otp down at that moment, etc.). Stamp so
+        // the dashboard can render a "⚠️ auto-send failed" chip.
+        if (r?.ok && r?.dryRun !== true && r?.failed > 0 && r?.sent === 0) {
+          await schedules.updateOne({ _id: c._id }, {
+            $set: { autoSummaryFailedAt: new Date(), autoSummaryFailedCount: r.failed }
+          });
+        }
       } catch (e) {
         // eslint-disable-next-line no-console
         console.warn(`[auto-summary] ${c._id} failed:`, e);
+        await schedules.updateOne({ _id: c._id }, {
+          $set: { autoSummaryFailedAt: new Date(), autoSummaryFailedError: String((e as Error)?.message || e).slice(0, 500) }
+        }).catch(() => {});
       }
     }
   }
