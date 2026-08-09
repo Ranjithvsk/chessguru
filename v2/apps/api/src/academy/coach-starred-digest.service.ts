@@ -170,6 +170,20 @@ export class CoachStarredDigestService implements OnModuleInit {
       byUserId: userId,
       reviewedAt: { $gte: reviewSince },
     });
+    // Sticky-nudge signal: coach has pending starred snaps but hasn't reviewed
+    // anything in 21+ days. Count the pending backlog so the nudge text can be
+    // specific ("4 positions still waiting"). Two cheap count queries only run
+    // when the digest has snaps to send.
+    const pendingBacklog = snaps.length > 0
+      ? await this.conn.db!.collection("classSnaps").countDocuments({
+          byUserId: userId, starred: true, reviewedAt: { $in: [null, undefined] as any },
+        })
+      : 0;
+    const anyRecentReview = await this.conn.db!.collection("classSnaps").countDocuments({
+      byUserId: userId,
+      reviewedAt: { $gte: new Date(Date.now() - 21 * 86_400_000) },
+    });
+    const showStuckNudge = pendingBacklog >= 3 && anyRecentReview === 0;
     if (snaps.length === 0) {
       // Nothing to say -- mark sent so we don't re-check every 10 min all
       // Sunday morning. Doesn't burn the weekly cadence for real content
@@ -207,6 +221,7 @@ export class CoachStarredDigestService implements OnModuleInit {
         <h2 style="color:#111;margin-bottom:4px">★ Your review shortlist</h2>
         <p style="color:#666;margin-top:0">Hi ${esc(username)} — you starred ${snaps.length} position${snaps.length === 1 ? "" : "s"} in ${windowLabel}.</p>
         ${reviewedCount > 0 ? `<p style="margin:8px 0;color:#059669;font-size:13px">✓ You reviewed ${reviewedCount} snap${reviewedCount === 1 ? "" : "s"} since the last digest — nice work.</p>` : ""}
+        ${showStuckNudge ? `<div style="margin:12px 0;padding:10px 12px;border-left:3px solid #f59e0b;background:#fffbeb;color:#78350f;font-size:13px">💤 It's been a while — <b>${pendingBacklog}</b> starred position${pendingBacklog === 1 ? "" : "s"} ${pendingBacklog === 1 ? "is" : "are"} still waiting for review. Even one Sunday morning session can move the needle.</div>` : ""}
         <ol style="line-height:1.6;padding-left:20px;color:#333">${rows}</ol>
         <p style="color:#666;font-size:13px">Every link opens the board editor with your arrows preserved. Pick a few for next week's lessons.</p>
         <p style="color:#9ca3af;font-size:11px;margin-top:24px">
@@ -218,6 +233,7 @@ export class CoachStarredDigestService implements OnModuleInit {
       `★ Your review shortlist`, "",
       `Hi ${username} — you starred ${snaps.length} position(s) in ${windowLabel}:`,
       reviewedCount > 0 ? `✓ You reviewed ${reviewedCount} snap(s) since the last digest — nice work.\n` : "",
+      showStuckNudge ? `\n💤 It's been a while — ${pendingBacklog} starred position${pendingBacklog === 1 ? "" : "s"} still waiting for review.\n` : "",
       rowsText, "",
       `Manage on ${PUBLIC_ORIGIN}/academy`,
       `Stop these emails: ${unsubUrl}`,
