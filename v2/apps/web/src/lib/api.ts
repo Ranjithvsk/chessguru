@@ -70,6 +70,10 @@ export const api = {
   signin: (username: string, password: string, keep: boolean) => post<AuthResult>("/auth/signin", { username, password, keep }),
   register: (username: string, password: string, email: string) => post<AuthResult>("/auth/register", { username, password, email }),
   logout: () => post<{ ok: boolean }>("/auth/logout", {}),
+  requestReset:  (email: string) => post<{ ok: boolean; error?: string }>("/auth/request-reset", { email }),
+  resetPassword: (token: string, newPassword: string) => post<AuthResult & { username?: string }>("/auth/reset-password", { token, newPassword }),
+  requestOtp:    (email: string) => post<{ ok: boolean; error?: string }>("/auth/request-otp", { email }),
+  otpSignin:     (email: string, code: string) => post<AuthResult>("/auth/otp-signin", { email, code }),
 
   adminOverview: () => get<Overview>("/api/status/overview"),
   adminDistribution: () => get<Distribution>("/api/status/distribution"),

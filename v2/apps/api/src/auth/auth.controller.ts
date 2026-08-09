@@ -1,11 +1,8 @@
 import { Body, Controller, Get, Post, Req, Res } from "@nestjs/common";
 import { AuthService } from "./auth.service";
 
-// Kill any HOST-ONLY "cgsid" twin (no Domain attribute). Sessions are issued with
-// Domain=.harinitharanjith.com; browsers that still carry an older host-only cgsid
-// send BOTH cookies and the stale one shadows the fresh session — sign-in succeeded
-// server-side but the user stayed logged out (owner-hit 2026-07-08). Clearing the
-// host-only variant on every auth touchpoint lets affected browsers self-heal.
+// See auth.service.ts for context on the hostonly-cookie twin — this helper
+// clears any stale host-only cgsid cookie so returning browsers self-heal.
 function clearHostOnlyTwin(req: any, res: any) {
   const raw: string = req.headers?.cookie || "";
   const twins = (raw.match(/(?:^|;\s*)cgsid=/g) || []).length;
@@ -36,4 +33,19 @@ export class AuthController {
 
   @Post("logout")
   logout(@Req() req: any) { return this.auth.logout(req.session); }
+
+  // Password reset via emailed link
+  @Post("request-reset")
+  requestReset(@Body() body: any) { return this.auth.requestReset(body); }
+  @Post("reset-password")
+  resetPassword(@Body() body: any) { return this.auth.resetPassword(body); }
+
+  // OTP sign-in via email
+  @Post("request-otp")
+  requestOtp(@Body() body: any) { return this.auth.requestOtp(body); }
+  @Post("otp-signin")
+  otpSignin(@Body() body: any, @Req() req: any, @Res({ passthrough: true }) res: any) {
+    clearHostOnlyTwin(req, res);
+    return this.auth.otpSignin(body, req.session);
+  }
 }

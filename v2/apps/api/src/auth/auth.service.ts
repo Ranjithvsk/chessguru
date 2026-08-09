@@ -3,8 +3,15 @@ import { isAdmin } from "../admin/admins";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import bcrypt from "bcryptjs";
+import { randomBytes, createHash } from "crypto";
+import { sendMail } from "../lib/mail";
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+
+const RESET_TTL_MIN = 60;   // password-reset link is valid 1h
+const OTP_TTL_MIN   = 10;   // OTP sign-in code is valid 10 min
+const OTP_MAX_TRIES = 5;    // wrong-code attempts per issued OTP
 
 @Injectable()
 export class AuthService {
@@ -68,4 +75,117 @@ export class AuthService {
     const doc: any = await this.conn.db!.collection("userperfs").findOne({ _id: session.userId });
     return { rating: Math.round(doc?.puzzle?.gl?.r ?? 1500), loggedIn: true, userId: session.userId };
   }
+
+  /* ================================================================
+   * Password reset via email link.
+   * requestReset: any email → generate token, store hash+expiry, mail link.
+   *   Always returns ok:true (don't leak which emails are registered).
+   * resetPassword: token + newPassword → verify, rotate bpass, kill token.
+   * ================================================================ */
+  async requestReset(body: any) {
+    const email = String(body?.email || "").trim().toLowerCase();
+    if (!email || !email.includes("@")) return { ok: true };  // silently no-op on bad input
+    const user: any = await this.users().findOne({ email });
+    if (!user) return { ok: true };                            // don't disclose account existence
+
+    const token = randomBytes(24).toString("base64url");       // ~192-bit URL-safe token
+    const expiresAt = new Date(Date.now() + RESET_TTL_MIN * 60_000);
+    await this.users().updateOne(
+      { _id: user._id },
+      { $set: { resetTokenHash: sha256(token), resetExpiresAt: expiresAt } },
+    );
+
+    const base = process.env.PUBLIC_URL || "https://harinitharanjith.com";
+    const link = `${base}/reset-password?token=${encodeURIComponent(token)}`;
+    await sendMail({
+      to: email,
+      subject: "Reset your ChessGuru password",
+      html:
+        `<p>Hi ${escapeHtml(user.username)},</p>` +
+        `<p>Someone (hopefully you) asked to reset the password for your ChessGuru account.</p>` +
+        `<p><a href="${link}" style="background:#4f46e5;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:600">Reset password</a></p>` +
+        `<p style="color:#666;font-size:12px">Or paste this into your browser: ${link}<br>The link is valid for ${RESET_TTL_MIN} minutes.<br>If you didn't ask for this, you can safely ignore this email.</p>`,
+      text: `Reset your ChessGuru password: ${link}\nValid for ${RESET_TTL_MIN} minutes.`,
+    });
+    return { ok: true };
+  }
+
+  async resetPassword(body: any) {
+    const token = String(body?.token || "");
+    const newPassword = String(body?.newPassword || "");
+    if (!token || !newPassword) return { ok: false, error: "Missing token or password." };
+    if (newPassword.length < 6)  return { ok: false, error: "Password too short (min 6 chars)." };
+    const user: any = await this.users().findOne({ resetTokenHash: sha256(token) });
+    if (!user) return { ok: false, error: "This reset link is invalid or already used." };
+    if (!user.resetExpiresAt || new Date(user.resetExpiresAt) < new Date()) {
+      return { ok: false, error: "This reset link has expired — request a new one." };
+    }
+    const hash = await bcrypt.hash(newPassword, 10);
+    await this.users().updateOne(
+      { _id: user._id },
+      { $set: { bpass: hash }, $unset: { resetTokenHash: "", resetExpiresAt: "" } },
+    );
+    return { ok: true, username: user.username };
+  }
+
+  /* ================================================================
+   * OTP sign-in via email.
+   * requestOtp: email → issue 6-digit code, mail it, store hash+expiry.
+   * otpSignin:  email + code → verify (constant-time-ish), sign in.
+   * ================================================================ */
+  async requestOtp(body: any) {
+    const email = String(body?.email || "").trim().toLowerCase();
+    if (!email || !email.includes("@")) return { ok: true };
+    const user: any = await this.users().findOne({ email });
+    if (!user) return { ok: true };
+    const code = String(Math.floor(100_000 + Math.random() * 900_000));
+    const expiresAt = new Date(Date.now() + OTP_TTL_MIN * 60_000);
+    await this.users().updateOne(
+      { _id: user._id },
+      { $set: { otpHash: sha256(code), otpExpiresAt: expiresAt, otpTries: 0 } },
+    );
+    await sendMail({
+      to: email,
+      subject: `Your ChessGuru sign-in code: ${code}`,
+      html:
+        `<p>Hi ${escapeHtml(user.username)},</p>` +
+        `<p>Your one-time sign-in code:</p>` +
+        `<p style="font-family:monospace;font-size:32px;letter-spacing:4px;background:#f4f4f5;padding:14px;border-radius:8px;text-align:center;font-weight:bold">${code}</p>` +
+        `<p style="color:#666;font-size:12px">Enter this on the ChessGuru sign-in page. Valid for ${OTP_TTL_MIN} minutes.<br>If you didn't ask for this, ignore this email.</p>`,
+      text: `Your ChessGuru sign-in code: ${code}\nValid for ${OTP_TTL_MIN} minutes.`,
+    });
+    return { ok: true };
+  }
+
+  async otpSignin(body: any, session: any) {
+    const email = String(body?.email || "").trim().toLowerCase();
+    const code  = String(body?.code || "").trim();
+    if (!email || !code) return { ok: false, error: "Please enter your email and code." };
+    if (!/^\d{6}$/.test(code)) return { ok: false, error: "The code should be 6 digits." };
+    const user: any = await this.users().findOne({ email });
+    // Give a uniform error to avoid disclosing account existence / code correctness.
+    const genericErr = { ok: false as const, error: "That code is invalid or has expired." };
+    if (!user || !user.otpHash) return genericErr;
+    if (!user.otpExpiresAt || new Date(user.otpExpiresAt) < new Date()) return genericErr;
+    const tries = Number(user.otpTries ?? 0);
+    if (tries >= OTP_MAX_TRIES) return { ok: false, error: "Too many tries — please request a new code." };
+
+    if (sha256(code) !== user.otpHash) {
+      await this.users().updateOne({ _id: user._id }, { $inc: { otpTries: 1 } });
+      return genericErr;
+    }
+    // Success — burn the OTP and sign in.
+    await this.users().updateOne(
+      { _id: user._id },
+      { $set: { lastLogin: new Date() }, $unset: { otpHash: "", otpExpiresAt: "", otpTries: "" } },
+    );
+    session.userId = user._id;
+    session.username = user.username;
+    if (session.cookie) session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000; // OTP flow = keep me signed in
+    return { ok: true };
+  }
+}
+
+function escapeHtml(s: string): string {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
 }

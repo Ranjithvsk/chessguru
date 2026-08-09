@@ -30,6 +30,7 @@ import OpeningPage from "./pages/Opening";
 import EngineBattlePage from "./pages/EngineBattle";
 import BoardEditorPage from "./pages/BoardEditor";
 import LoginPage from "./pages/Login";
+import ResetPasswordPage from "./pages/ResetPassword";
 import AdminPage from "./pages/Admin";
 import AdminUsersPage from "./pages/AdminUsers";
 import PlayPage from "./pages/Play";
@@ -80,6 +81,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="admin" element={<AdminPage />} />
             <Route path="admin/users" element={<AdminUsersPage />} />
             <Route path="login" element={<LoginPage />} />
+            <Route path="reset-password" element={<ResetPasswordPage />} />
             <Route path="test/feedback-ui" element={<FeedbackUITestPage />} />
             <Route path="book" element={<BookPage />} />
             <Route path="class" element={<ClassPage />} />
