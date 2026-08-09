@@ -1122,6 +1122,48 @@ function ClassicMainArea({
             </p>
           </div>
         </div>
+      ) : spotlightId && peerIds.includes(spotlightId) ? (
+        // Spotlight layout — hero tile for the picked peer, thumbnail strip
+        // for everyone else along the bottom. Amber ring already lives inside
+        // RemoteTile so the visual accent carries into the hero automatically.
+        <div className="flex flex-col gap-3 w-full max-w-6xl">
+          <div className="w-full">
+            <RemoteTile
+              peerId={spotlightId}
+              index={peerIds.indexOf(spotlightId)}
+              getStream={() => peersRef.current.get(spotlightId)?.remoteStream ?? null}
+              getName={() => peersRef.current.get(spotlightId)?.name || spotlightId}
+              isActive={activeSpeaker === spotlightId}
+              handUp={handSet.has(spotlightId)}
+              floaters={floaters.filter((f) => f.peerId === spotlightId)}
+              isModerator={moderatorId === spotlightId}
+              isSpotlighted={true}
+              showModControls={iAmMod}
+              onKick={onKick}
+              onSpotlight={onSpotlight}
+            />
+          </div>
+          {peerIds.filter((id) => id !== spotlightId).length > 0 && (
+            <div className="grid grid-cols-4 gap-2">
+              {peerIds.filter((id) => id !== spotlightId).map((id, idx) => (
+                <RemoteTile
+                  key={id}
+                  peerId={id}
+                  index={idx}
+                  getStream={() => peersRef.current.get(id)?.remoteStream ?? null}
+                  getName={() => peersRef.current.get(id)?.name || id}
+                  isActive={activeSpeaker === id}
+                  handUp={handSet.has(id)}
+                  floaters={floaters.filter((f) => f.peerId === id)}
+                  isModerator={moderatorId === id}
+                  showModControls={iAmMod}
+                  onKick={onKick}
+                  onSpotlight={onSpotlight}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       ) : (
         <div className={`grid ${gridCols} gap-3 w-full max-w-6xl`}>
           {peerIds.map((id, idx) => (
@@ -1137,8 +1179,8 @@ function ClassicMainArea({
               isModerator={moderatorId === id}
               isSpotlighted={spotlightId === id}
               showModControls={iAmMod}
-              onKick={kickPeer}
-              onSpotlight={spotlightPeer}
+              onKick={onKick}
+              onSpotlight={onSpotlight}
             />
           ))}
         </div>
