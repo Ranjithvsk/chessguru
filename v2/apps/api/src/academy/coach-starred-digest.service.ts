@@ -229,6 +229,23 @@ export class CoachStarredDigestService implements OnModuleInit {
       reviewedAt: { $in: [null, undefined] as any },
       at: { $lt: new Date(Date.now() - 30 * 86_400_000) },
     });
+    // Review streak: consecutive days ending TODAY where the coach reviewed
+    // >=1 snap. Mirrors the dashboard heatmap 🔥 badge so the email carries
+    // the same motivator.
+    const reviewedIn30d: any[] = await this.conn.db!.collection("classSnaps").find({
+      byUserId: userId,
+      reviewedAt: { $gte: new Date(Date.now() - 30 * 86_400_000) },
+    }, { projection: { reviewedAt: 1 } as any }).limit(500).toArray();
+    let streakDays = 0;
+    if (reviewedIn30d.length > 0) {
+      const dayMs = (d: Date) => { const c = new Date(d); c.setHours(0, 0, 0, 0); return c.getTime(); };
+      const today = dayMs(new Date());
+      const days = new Set(reviewedIn30d.map((r) => dayMs(new Date(r.reviewedAt))));
+      for (let i = 0; i < 30; i++) {
+        if (days.has(today - i * 86_400_000)) streakDays++;
+        else break;
+      }
+    }
     // "Busiest class" this window: the class contributing the most snaps.
     // Small stat in the email header so the coach sees which class dominated
     // their prep list without opening the dashboard.
@@ -276,7 +293,7 @@ export class CoachStarredDigestService implements OnModuleInit {
         <h2 style="color:#111;margin-bottom:4px">★ Your review shortlist</h2>
         <p style="color:#666;margin-top:0">Hi ${esc(username)} — you starred ${snaps.length} position${snaps.length === 1 ? "" : "s"} in ${windowLabel}.</p>
         ${topClass && classTally.size > 1 ? `<p style="margin:4px 0 0;color:#666;font-size:12px">🏫 Most from <b>${esc(topClass.title)}</b> (${topClass.n} snap${topClass.n === 1 ? "" : "s"}).</p>` : ""}
-        ${reviewedCount > 0 ? `<p style="margin:8px 0;color:#059669;font-size:13px">✓ You reviewed ${reviewedCount} snap${reviewedCount === 1 ? "" : "s"} since the last digest — nice work.</p>` : ""}
+        ${reviewedCount > 0 ? `<p style="margin:8px 0;color:#059669;font-size:13px">✓ You reviewed ${reviewedCount} snap${reviewedCount === 1 ? "" : "s"} since the last digest — nice work.${streakDays >= 3 ? ` <span style="color:#f97316">🔥 ${streakDays}-day streak</span>` : ""}</p>` : ""}
         ${showStuckNudge ? `<div style="margin:12px 0;padding:10px 12px;border-left:3px solid #f59e0b;background:#fffbeb;color:#78350f;font-size:13px">💤 It's been a while — <b>${pendingBacklog}</b> starred position${pendingBacklog === 1 ? "" : "s"} ${pendingBacklog === 1 ? "is" : "are"} still waiting for review. Even one Sunday morning session can move the needle.</div>` : ""}
         ${staleCount > 0 ? `<p style="margin:8px 0;color:#9a3412;font-size:12px">⏰ <b>${staleCount}</b> starred position${staleCount === 1 ? "" : "s"} ${staleCount === 1 ? "is" : "are"} over 30 days old and still unreviewed — worth revisiting or clearing.</p>` : ""}
         <ol style="line-height:1.6;padding-left:20px;color:#333">${rows}</ol>
@@ -290,7 +307,7 @@ export class CoachStarredDigestService implements OnModuleInit {
       `★ Your review shortlist`, "",
       `Hi ${username} — you starred ${snaps.length} position(s) in ${windowLabel}:`,
       (topClass && classTally.size > 1) ? `🏫 Most from ${topClass.title} (${topClass.n} snap${topClass.n === 1 ? "" : "s"}).\n` : "",
-      reviewedCount > 0 ? `✓ You reviewed ${reviewedCount} snap(s) since the last digest — nice work.\n` : "",
+      reviewedCount > 0 ? `✓ You reviewed ${reviewedCount} snap(s) since the last digest — nice work.${streakDays >= 3 ? ` 🔥 ${streakDays}-day streak` : ""}\n` : "",
       showStuckNudge ? `\n💤 It's been a while — ${pendingBacklog} starred position${pendingBacklog === 1 ? "" : "s"} still waiting for review.\n` : "",
       staleCount > 0 ? `⏰ ${staleCount} starred position(s) over 30 days old and still unreviewed.\n` : "",
       rowsText, "",
