@@ -73,12 +73,23 @@ export default function ClassReplayPage() {
   const [snaps, setSnaps] = useState<Snap[]>([]);
   const [durationMs, setDurationMs] = useState(0);
   // Playback speed pill. Applied to the video element via useEffect so any
-  // future re-mount (e.g. source change) picks it up.
-  const [speed, setSpeed] = useState(1);
+  // future re-mount (e.g. source change) picks it up. Persisted so a coach
+  // who always reviews at 1.5x doesn't have to re-click every session.
+  const [speed, setSpeed] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem("cg_replay_speed");
+      const n = raw ? Number(raw) : 1;
+      return Number.isFinite(n) && n >= 0.25 && n <= 4 ? n : 1;
+    } catch { return 1; }
+  });
   useEffect(() => {
     const v = videoRef.current;
     if (v) v.playbackRate = speed;
+    try { localStorage.setItem("cg_replay_speed", String(speed)); } catch { /* private mode */ }
   }, [speed]);
+  // Snap the arbitrary <> keystrokes back onto sane values so the pills
+  // stay coherent with the actual playback rate.
+  const clampSpeed = (n: number) => Math.max(0.25, Math.min(4, Math.round(n * 4) / 4));
 
   // Fetch the sidecar timeline. Missing sidecar (recording from before Phase 4) is
   // fine — the video still plays, board just stays at starting position.
@@ -212,6 +223,13 @@ export default function ClassReplayPage() {
       } else if (e.key === "l" || e.key === "L") {
         e.preventDefault();
         seekBy(10_000);
+      } else if (e.key === ">" || e.key === ".") {
+        // YouTube convention: Shift+. speeds up, . also works so no-shift users benefit.
+        e.preventDefault();
+        setSpeed((s) => clampSpeed(s + 0.25));
+      } else if (e.key === "<" || e.key === ",") {
+        e.preventDefault();
+        setSpeed((s) => clampSpeed(s - 0.25));
       }
     };
     window.addEventListener("keydown", onKey);
@@ -245,7 +263,7 @@ export default function ClassReplayPage() {
               {loadingTimeline ? "loading…" : `${events.length} move${events.length === 1 ? "" : "s"}`}
               {snapMarkers.length > 0 && <span className="ml-2 text-amber-300">📸 {snapMarkers.length} snap{snapMarkers.length === 1 ? "" : "s"}</span>}
               <span className="ml-2 hidden sm:inline text-ink-600"
-                title="← / →  step one move · Space or K  play/pause · J / L  ±10s">⌨️ ← → ␣ J L K</span>
+                title="← / →  step one move · Space or K  play/pause · J / L  ±10s · , / .  slower/faster">⌨️ ← → ␣ J L K , .</span>
             </span>
           </div>
           {!loadingTimeline && events.length === 0 ? (
@@ -286,6 +304,9 @@ export default function ClassReplayPage() {
                 ? "border-brand-500/60 bg-brand-500/15 text-brand-100"
                 : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>{s}×</button>
           ))}
+          {![0.75, 1, 1.5, 2].includes(speed) && (
+            <span className="ml-1 rounded-full border border-brand-500/60 bg-brand-500/15 px-2 py-0.5 font-semibold tabular-nums text-brand-100">{speed}×</span>
+          )}
         </div>
         <div className="flex-1 overflow-hidden rounded-xl2 border border-ink-700 bg-black">
           <video ref={videoRef} controls playsInline preload="metadata"
