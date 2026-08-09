@@ -632,7 +632,37 @@ export default function AcademyDashboardPage() {
       {/* ── Recent recordings (owner + coach) ── */}
       {canManage && recordings && recordings.length > 0 && (
         <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
-          <h2 className="mb-3 font-display text-lg text-white">🎬 Recent recordings <span className="text-xs text-ink-500">({recordings.length})</span></h2>
+          <div className="mb-3 flex items-baseline justify-between gap-2">
+            <h2 className="font-display text-lg text-white">🎬 Recent recordings <span className="text-xs text-ink-500">({recordings.length})</span></h2>
+            <button onClick={() => {
+              // CSV export of every recording — same idea as the snap CSV
+              // export. Openable columns first (title/date/size/duration),
+              // then the play URL + raw download URL so the row round-trips.
+              const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+              const header = ["At", "Class", "Filename", "SizeMB", "PlayUrl", "DownloadUrl"];
+              const lines = [header.map(esc).join(",")];
+              for (const r of recordings) {
+                lines.push([
+                  new Date(r.createdAt).toISOString(),
+                  r.title || r.classId,
+                  r.filename,
+                  (r.bytes / (1024 * 1024)).toFixed(1),
+                  `${location.origin}/class/${encodeURIComponent(r.classId)}/replay/${encodeURIComponent(r.filename)}`,
+                  `${location.origin}/v2api/api/class/${encodeURIComponent(r.classId)}/recording/${encodeURIComponent(r.filename)}`,
+                ].map((c) => esc(String(c))).join(","));
+              }
+              const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url; a.download = `recordings-${new Date().toISOString().slice(0, 10)}.csv`;
+              document.body.appendChild(a); a.click(); a.remove();
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
+            }}
+              title="Download the recording list as a CSV"
+              className="rounded-full border border-ink-700 bg-ink-900 px-2.5 py-0.5 text-[11px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-ink-100">
+              ⬇ CSV <span className="ml-1 opacity-70">{recordings.length}</span>
+            </button>
+          </div>
           <div className="grid gap-2">
             {recordings.slice(0, 20).map((r) => (
               <div key={`${r.classId}/${r.filename}`} className="flex flex-wrap items-center gap-3 rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2 text-sm">
