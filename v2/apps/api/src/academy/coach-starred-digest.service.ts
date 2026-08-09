@@ -124,6 +124,18 @@ export class CoachStarredDigestService implements OnModuleInit {
       }),
     ]);
     const stuck = pendingBacklog >= 3 && recentReviewCount === 0;
+    // Busiest class this window -- mirrors the digest-email stat so the
+    // preview shows the same signal.
+    const classTallyPreview = new Map<string, { title: string; n: number }>();
+    for (const s of snaps) {
+      const cur = classTallyPreview.get(s.classId);
+      if (cur) cur.n++;
+      else classTallyPreview.set(s.classId, { title: s.classTitle, n: 1 });
+    }
+    const topClassPreview = [...classTallyPreview.values()].sort((a, b) => b.n - a.n)[0];
+    const busiestClass = (classTallyPreview.size > 1 && topClassPreview)
+      ? { title: topClassPreview.title, n: topClassPreview.n }
+      : null;
     return {
       snapCount: snaps.length,
       cadence,
@@ -135,6 +147,7 @@ export class CoachStarredDigestService implements OnModuleInit {
       pendingBacklog,
       stuck,
       staleCount,
+      busiestClass,
       history: Array.isArray(user?.coachStarredDigestHistory)
         ? user.coachStarredDigestHistory.slice(-12).reverse().map((h: any) => ({
             sentAt: h.sentAt, snapCount: h.snapCount ?? 0, windowDays: h.windowDays ?? 7,

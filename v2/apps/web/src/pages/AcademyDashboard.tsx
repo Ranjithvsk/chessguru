@@ -1470,7 +1470,7 @@ function StarredDigestPreviewLink() {
   const [open, setOpen] = useState(false);
   type Row = { _id: string; classId: string; at: string; note: string; hasAudio: boolean; shapeCount: number; link: string };
   type HistoryRow = { sentAt: string; snapCount: number; windowDays: number };
-  type PreviewData = { snapCount: number; snaps: Row[]; cadence: "weekly" | "biweekly" | "monthly"; windowDays: number; optedOut: boolean; sentCount: number; lastSentAt: string | null; reviewedSinceLast: number; pendingBacklog: number; stuck: boolean; staleCount: number; history: HistoryRow[] };
+  type PreviewData = { snapCount: number; snaps: Row[]; cadence: "weekly" | "biweekly" | "monthly"; windowDays: number; optedOut: boolean; sentCount: number; lastSentAt: string | null; reviewedSinceLast: number; pendingBacklog: number; stuck: boolean; staleCount: number; busiestClass: { title: string; n: number } | null; history: HistoryRow[] };
   const [data, setData] = useState<PreviewData | null>(null);
   // Ambient stats fetched on mount so the link line shows current cadence +
   // last-sent + backlog before the coach opens the modal. Same endpoint.
@@ -1550,6 +1550,11 @@ function StarredDigestPreviewLink() {
                 <div className="mb-2 text-sm text-ink-200">
                   You'd receive <b>{data.snapCount}</b> starred position{data.snapCount === 1 ? "" : "s"} — covering the last <b>{data.windowDays}</b> days.
                 </div>
+                {data.busiestClass && (
+                  <div className="mb-2 text-[11px] text-ink-400">
+                    🏫 Most from <b className="text-ink-200">{data.busiestClass.title}</b> ({data.busiestClass.n} snap{data.busiestClass.n === 1 ? "" : "s"}).
+                  </div>
+                )}
                 {data.reviewedSinceLast > 0 && (
                   <div className="mb-2 text-[11px] text-emerald-300">
                     ✓ You've reviewed {data.reviewedSinceLast} snap{data.reviewedSinceLast === 1 ? "" : "s"} since the last digest{data.lastSentAt ? "" : " (or in the last 30 days)"} — this'll be called out in the email.
