@@ -159,16 +159,26 @@ export class CoachStarredDigestService implements OnModuleInit {
       );
       return;
     }
-    const rows = snaps.map((s) => `
+    const truncate = (s: string, n: number) => s.length > n ? s.slice(0, n).trimEnd() + "…" : s;
+    const rows = snaps.map((s) => {
+      const transPreview = typeof s.transcript === "string" && s.transcript.trim()
+        ? truncate(String(s.transcript).trim(), 200)
+        : "";
+      return `
       <li style="margin-bottom:6px">
         <a href="${snapLink(s)}" style="color:#2563eb;text-decoration:none;font-weight:600">Open position</a>
         ${s.note ? ` — ${esc(String(s.note))}` : ""}
         ${Array.isArray(s.shapes) && s.shapes.length > 0 ? ` <span style="color:#b45309;font-size:12px">(${s.shapes.length} arrow${s.shapes.length === 1 ? "" : "s"})</span>` : ""}
         ${s.hasAudio ? ` <span style="color:#7c3aed;font-size:12px">(🎙 voice note)</span>` : ""}
-      </li>`).join("");
-    const rowsText = snaps.map((s, i) =>
-      `${i + 1}. ${snapLink(s)}${s.note ? ` — ${String(s.note)}` : ""}`
-    ).join("\n");
+        ${transPreview ? `<div style="color:#6b7280;font-size:12px;font-style:italic;margin-top:4px;padding-left:12px;border-left:2px solid #e5e7eb">"${esc(transPreview)}"</div>` : ""}
+      </li>`;
+    }).join("");
+    const rowsText = snaps.map((s, i) => {
+      const transPreview = typeof s.transcript === "string" && s.transcript.trim()
+        ? truncate(String(s.transcript).trim(), 200)
+        : "";
+      return `${i + 1}. ${snapLink(s)}${s.note ? ` — ${String(s.note)}` : ""}${transPreview ? `\n   "${transPreview}"` : ""}`;
+    }).join("\n");
     const windowLabel = days === 7 ? "this week" : days === 14 ? "the last 2 weeks" : days === 28 ? "this month" : `the last ${days} days`;
     const subject = `Your starred positions ${windowLabel} (${snaps.length})`;
     const unsubUrl = `${PUBLIC_ORIGIN}/v2api/api/me/email/unsubscribe?u=${encodeURIComponent(userId)}&c=coachStarred&t=${emailOptOutToken(userId, "coachStarred")}`;
