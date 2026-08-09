@@ -1305,7 +1305,7 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
 function StarredDigestPreviewLink() {
   const [open, setOpen] = useState(false);
   type Row = { _id: string; classId: string; at: string; note: string; hasAudio: boolean; shapeCount: number; link: string };
-  type PreviewData = { snapCount: number; snaps: Row[]; cadence: "weekly" | "biweekly" | "monthly"; windowDays: number; optedOut: boolean; sentCount: number; lastSentAt: string | null; reviewedSinceLast: number };
+  type PreviewData = { snapCount: number; snaps: Row[]; cadence: "weekly" | "biweekly" | "monthly"; windowDays: number; optedOut: boolean; sentCount: number; lastSentAt: string | null; reviewedSinceLast: number; pendingBacklog: number; stuck: boolean };
   const [data, setData] = useState<PreviewData | null>(null);
   const [savingCadence, setSavingCadence] = useState(false);
   async function setCadence(c: "weekly" | "biweekly" | "monthly") {
@@ -1368,6 +1368,11 @@ function StarredDigestPreviewLink() {
                 {data.reviewedSinceLast > 0 && (
                   <div className="mb-2 text-[11px] text-emerald-300">
                     ✓ You've reviewed {data.reviewedSinceLast} snap{data.reviewedSinceLast === 1 ? "" : "s"} since the last digest{data.lastSentAt ? "" : " (or in the last 30 days)"} — this'll be called out in the email.
+                  </div>
+                )}
+                {data.stuck && (
+                  <div className="mb-2 rounded border-l-4 border-amber-500 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
+                    💤 It's been a while — <b>{data.pendingBacklog}</b> starred position{data.pendingBacklog === 1 ? "" : "s"} still waiting for review. Sunday's email will include a friendly nudge line.
                   </div>
                 )}
                 {(() => {
