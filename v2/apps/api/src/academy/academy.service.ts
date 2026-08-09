@@ -626,8 +626,15 @@ export class AcademyService {
     // dashboard can show a "📧 sent Xh ago" chip. Failed-only runs don't stamp
     // (coach can retry cleanly).
     if (!dryRun && sent > 0) {
+      // Clear any prior auto-failure stamp so the coach's dashboard drops
+      // the "⚠️ auto failed" chip -- the manual send (or later successful
+      // auto retry) is now the source of truth.
       await this.conn.db!.collection("classSchedules").updateOne(
-        { _id: classId as any }, { $set: { summarySentAt: new Date() } }
+        { _id: classId as any },
+        {
+          $set: { summarySentAt: new Date() },
+          $unset: { autoSummaryFailedAt: "", autoSummaryFailedCount: "", autoSummaryFailedError: "" },
+        }
       );
     }
     if (!dryRun && body?._autoSummarySystem) {

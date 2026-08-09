@@ -1395,10 +1395,11 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
             <span className="ml-2 text-ink-500" title="Auto-email will fire 15 min after class ends">🤖 auto</span>
           )}
           {c.mine && c.autoSummaryFailedAt && !c.summarySentAt && (
-            <span className="ml-2 text-rose-300"
-              title={`Auto-send failed ${fmtAgo(c.autoSummaryFailedAt)}${c.autoSummaryFailedCount ? ` — all ${c.autoSummaryFailedCount} email(s) bounced` : ""}${c.autoSummaryFailedError ? `\n${c.autoSummaryFailedError}` : ""}. Use 📧 Summary to retry manually.`}>
-              ⚠️ auto failed
-            </span>
+            <button onClick={openPreview}
+              className="ml-2 rounded-full border border-rose-500/40 bg-rose-500/10 px-2 py-0.5 text-[11px] font-semibold text-rose-200 hover:bg-rose-500/20"
+              title={`Auto-send failed ${fmtAgo(c.autoSummaryFailedAt)}${c.autoSummaryFailedCount ? ` — all ${c.autoSummaryFailedCount} email(s) bounced` : ""}${c.autoSummaryFailedError ? `\n${c.autoSummaryFailedError}` : ""}. Click to preview + retry.`}>
+              ⚠️ auto failed — retry
+            </button>
           )}
           {c.mine && !c.summarySentAt && (
             <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); openAutoEditor(); }}
