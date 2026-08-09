@@ -1,7 +1,7 @@
 // Signed-in user's linked-account status + imported-games list + manual refresh.
 // Everything here reads/writes only the caller's own data — no admin bypass.
 
-import { Controller, Get, Post, Query, Req, UnauthorizedException } from "@nestjs/common";
+import { Controller, Get, NotFoundException, Param, Post, Query, Req, UnauthorizedException } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { GamesFetchService } from "./games-fetch.service";
@@ -75,5 +75,16 @@ export class MeLinksController {
       col.countDocuments(q),
     ]);
     return { items, total, offset, pageSize: PAGE, hasMore: offset + PAGE < total };
+  }
+
+  // Full game (with PGN) for the viewer. Scoped to the caller — you can only
+  // fetch games you own. `id` is the full `_id` (e.g. "lichess:AbCd1234").
+  @Get("external-games/:id")
+  async one(@Req() req: any, @Param("id") id: string) {
+    const uid = req?.session?.userId;
+    if (!uid) throw new UnauthorizedException();
+    const g: any = await this.conn.db!.collection("externalGames").findOne({ _id: id as any, userId: uid });
+    if (!g) throw new NotFoundException();
+    return g;
   }
 }

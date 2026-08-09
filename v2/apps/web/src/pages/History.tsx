@@ -5,6 +5,7 @@ import type { Key } from "chessground/types";
 import Board from "../components/Board";
 import { api, type HistoryItem } from "../lib/api";
 import { prettify } from "../lib/format";
+import ExternalGamesList from "./ExternalGamesList";
 
 type Ctx = { userId: string | null; rating: number };
 type Result = "all" | "solved" | "missed";
@@ -203,11 +204,33 @@ const LazyMini = React.memo(function LazyMini({ it, onOpen }: { it: HistoryItem;
   );
 });
 
+function TabBar({ active, onSwitch }: { active: "puzzles"|"external"; onSwitch: (t: "puzzles"|"external") => void }) {
+  const tab = (id: "puzzles"|"external", label: string) => (
+    <button onClick={() => onSwitch(id)}
+      className={`border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${
+        active === id ? "border-brand-500 text-white" : "border-transparent text-ink-400 hover:text-white"}`}>
+      {label}
+    </button>
+  );
+  return (
+    <div className="flex items-center gap-1 border-b border-ink-700">
+      {tab("puzzles", "🧩 My puzzles")}
+      {tab("external", "🌐 External games")}
+    </div>
+  );
+}
+
 export default function HistoryPage() {
   const { rating } = useOutletContext<Ctx>();
-  const [sp] = useSearchParams();
+  const [sp, setSp] = useSearchParams();
   const as = sp.get("as") || null;   // admin-only: view another user's history
-  const { data, isLoading } = useQuery({ queryKey: ["me-history", as], queryFn: () => api.history(0, as) });
+  const tab = (sp.get("tab") === "external" ? "external" : "puzzles") as "puzzles"|"external";
+  const switchTab = (t: "puzzles"|"external") => {
+    const next = new URLSearchParams(sp);
+    if (t === "external") next.set("tab", "external"); else next.delete("tab");
+    setSp(next, { replace: true });
+  };
+  const { data, isLoading } = useQuery({ queryKey: ["me-history", as], queryFn: () => api.history(0, as), enabled: tab === "puzzles" });
   const [pages, setPages] = useState<HistoryItem[]>([]);   // appended pages beyond the first
   const [off, setOff] = useState<number | null>(null);      // next offset to fetch (null = none)
   const [more, setMore] = useState(false);
@@ -284,6 +307,19 @@ export default function HistoryPage() {
     return groups;
   }, [filtered]);
 
+  if (tab === "external") {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="font-display text-2xl text-white">Puzzle report</h1>
+          <p className="text-sm text-ink-400">Puzzles + imported games from Lichess & Chess.com.</p>
+        </div>
+        <TabBar active="external" onSwitch={switchTab} />
+        <ExternalGamesList />
+      </div>
+    );
+  }
+
   if (isLoading) return <div className="py-16 text-center text-ink-400">Loading your report…</div>;
 
   if (!data?.loggedIn) {
@@ -318,6 +354,7 @@ export default function HistoryPage() {
         <h1 className="font-display text-2xl text-white">Puzzle report</h1>
         <p className="text-sm text-ink-400">Green = solved, red = missed. Grouped by day and theme.</p>
       </div>
+      <TabBar active="puzzles" onSwitch={switchTab} />
 
       <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
         {stats.map((s) => (
