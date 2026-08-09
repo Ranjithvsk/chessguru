@@ -43,13 +43,20 @@ type ScheduleDoc = {
   // Invitee emails (validated on the way in). The reminder scheduler emails
   // each ~15 min before startAt. Small cap so a runaway paste can't spam.
   invitees?: Array<{ email: string }>;
-  // Reminder-stage stamps. reminderSentAt = the 15-min-before nudge;
-  // reminded24hAt = the day-before nudge. Each is stamped by the scheduler
-  // when it starts sending that stage's batch (belt-and-braces against a
-  // mid-batch crash resending to everyone on restart).
-  reminderSentAt?: Date | null;
-  reminded24hAt?: Date | null;
+  // Reminder-stage stamps. Each stage stamps its own field when it starts
+  // sending that stage's batch (belt-and-braces against a mid-batch crash
+  // resending to everyone on restart).
+  reminderSentAt?: Date | null;    // 15-min-before
+  reminded1hAt?: Date | null;      // 1-hour-before
+  reminded24hAt?: Date | null;     // day-before
+  // Coach-picked stages that should fire for this class. Legacy / missing =
+  // treat as ["h24","m15"] in the scheduler so unpatched classes keep
+  // yesterday's behaviour. Set to [] to disable all reminders.
+  reminderStages?: string[];
 };
+
+const ALLOWED_STAGES = new Set(["m15", "h1", "h24"]);
+const DEFAULT_STAGES = ["h24", "m15"];
 
 const MAX_RECUR = 12;
 const MAX_INVITEES = 100;
@@ -134,6 +141,12 @@ export class ClassScheduleController {
     // instance of a materialized series so the reminder scheduler doesn't have
     // to walk seriesId to find the target list.
     const invitees = parseInvitees(b.invitees);
+    // Reminder stages. Client sends an array of allowed keys; unknown keys
+    // dropped, order deduped. If the field is absent, default to today's
+    // behaviour (24h + 15min). An explicit [] disables all reminders.
+    const reminderStages = Array.isArray(b.reminderStages)
+      ? Array.from(new Set(b.reminderStages.filter((s: unknown) => typeof s === "string" && ALLOWED_STAGES.has(s))))
+      : DEFAULT_STAGES.slice();
     // Build the list of instance start times.
     // - No weekday mask: instances 7 days apart (existing behaviour).
     // - Mask given: start at startAt, then walk 1 day at a time, taking dates
@@ -174,7 +187,9 @@ export class ClassScheduleController {
         seriesTotal: total > 1 ? total : undefined,
         invitees: invitees.length ? invitees : undefined,
         reminderSentAt: null,
+        reminded1hAt: null,
         reminded24hAt: null,
+        reminderStages: reminderStages as string[],
       });
     }
     await this.col().insertMany(docs);
@@ -263,6 +278,15 @@ export class ClassScheduleController {
     if (b.invitees !== undefined) {
       const parsed = parseInvitees(b.invitees);
       patch.invitees = parsed.length ? parsed : [];
+    }
+    // reminderStages likewise — [] valid (disables all reminders), undefined =
+    // leave alone. Unknown keys silently dropped so a client-side typo can't
+    // wedge the row into an unrecognisable state.
+    if (b.reminderStages !== undefined) {
+      const arr = Array.isArray(b.reminderStages)
+        ? Array.from(new Set(b.reminderStages.filter((s: unknown) => typeof s === "string" && ALLOWED_STAGES.has(s))))
+        : DEFAULT_STAGES.slice();
+      patch.reminderStages = arr as string[];
     }
     if (Object.keys(patch).length === 0) return { ok: true, matched: 0 };
     if (scope === "series" && row.seriesId) {

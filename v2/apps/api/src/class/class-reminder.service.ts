@@ -31,14 +31,20 @@ const TICK_MS = 60_000;                    // scan cadence
 // Stages: { stamp field, near-boundary, far-boundary } — startAt must fall in
 // (near, far] to be a candidate. Wider than the "true" firing point on the
 // far side so a missed tick still gets caught by the next one.
-type Stage = { key: "m15" | "h24"; stampField: "reminderSentAt" | "reminded24hAt";
+type Stage = { key: "m15" | "h1" | "h24"; stampField: "reminderSentAt" | "reminded1hAt" | "reminded24hAt";
                nearMs: number; farMs: number; label: string };
 const STAGES: Stage[] = [
   // 15-min stage: fire from just-starting (nearMs=0) up to 15 min ahead.
   { key: "m15", stampField: "reminderSentAt", nearMs: 0, farMs: 15 * 60_000, label: "starts soon" },
+  // 1h stage: 40..80 min ahead (20 min grace either side of exactly-1h before).
+  { key: "h1",  stampField: "reminded1hAt",   nearMs: 40 * 60_000, farMs: 80 * 60_000, label: "in an hour" },
   // 24h stage: 22h..26h window (2h grace either side of exactly-24h before).
   { key: "h24", stampField: "reminded24hAt",  nearMs: 22 * 3_600_000, farMs: 26 * 3_600_000, label: "tomorrow" },
 ];
+// Default stage set when a schedule row has no reminderStages field (legacy /
+// pre-6f rows). Matches the effective behaviour before this change so upgrading
+// doesn't silently start firing 1h reminders on classes coaches didn't opt into.
+const DEFAULT_STAGE_KEYS = new Set(["h24", "m15"]);
 
 // Public origin used in email join links. Falls back to the DNS name we know
 // this API is behind; overridable in prod via env.
@@ -76,6 +82,12 @@ export class ClassReminderService implements OnModuleInit {
     }).limit(50).toArray();
     if (candidates.length === 0) return;
     for (const row of candidates) {
+      // Skip when this stage is opted-out for this class. Missing field falls
+      // back to the pre-6f default set so legacy rows behave unchanged.
+      const stages: string[] = Array.isArray(row.reminderStages)
+        ? row.reminderStages
+        : Array.from(DEFAULT_STAGE_KEYS);
+      if (!stages.includes(stage.key)) continue;
       // Atomic claim so a peer tick can't re-fire this stage for this class.
       const claimed: any = await schedules.findOneAndUpdate(
         { _id: row._id, $or: [{ [stamp]: null }, { [stamp]: { $exists: false } }] },
@@ -115,15 +127,29 @@ export class ClassReminderService implements OnModuleInit {
     // Human "in X" tag — differs by stage so the email reads correctly.
     // 15-min stage: "in 12 min" / "starting now" (if <1 min)
     // 24h stage:    "tomorrow at 6:30 PM" style
-    const inTag = stage.key === "m15"
-      ? (msAway < 60_000 ? "starting now" : `in ${Math.round(msAway / 60_000)} min`)
-      : (msAway < 36 * 3_600_000
-          ? `tomorrow · ${start.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
-          : `on ${when}`);
-    const subject = stage.key === "m15"
-      ? `⏰ ${row.title} — ${inTag}`
-      : `📅 Tomorrow: ${row.title} at ${start.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
-    const kicker = stage.key === "m15" ? "Class reminder" : "Class tomorrow";
+    // Copy differs per stage — "in 12 min" for m15, "in about an hour" for h1,
+    // "tomorrow · 6:30 PM" for h24. Each also gets its own subject prefix so
+    // an inbox that already has one reminder for the class doesn't collapse the
+    // second one under the same subject line.
+    const time = start.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    let inTag: string;
+    let subject: string;
+    let kicker: string;
+    if (stage.key === "m15") {
+      inTag = msAway < 60_000 ? "starting now" : `in ${Math.round(msAway / 60_000)} min`;
+      subject = `⏰ ${row.title} — ${inTag}`;
+      kicker = "Class reminder";
+    } else if (stage.key === "h1") {
+      inTag = `in about an hour · ${time}`;
+      subject = `⌛ ${row.title} — in about an hour`;
+      kicker = "Class in an hour";
+    } else {
+      inTag = msAway < 36 * 3_600_000
+        ? `tomorrow · ${time}`
+        : `on ${when}`;
+      subject = `📅 Tomorrow: ${row.title} at ${time}`;
+      kicker = "Class tomorrow";
+    }
     const text = [
       `${row.title}`,
       ``,

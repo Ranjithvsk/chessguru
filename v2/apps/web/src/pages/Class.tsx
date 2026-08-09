@@ -251,7 +251,45 @@ type ScheduledClass = {
   seriesId?: string | null; // set on every doc in a materialized recurring series
   seriesIndex?: number;     // 1-based position, "2 of 8"
   seriesTotal?: number;
+  invitees?: Array<{ email: string }>;
+  reminderStages?: string[]; // ["h24","h1","m15"] subset; missing = default (h24+m15)
 };
+
+// Chip trio for picking which reminder emails fire. Ordered far→near so the
+// mental model reads "day-before / hour-before / just-before". Active chips get
+// a brand→accent gradient; inactive stay neutral. Toggling is order-preserving
+// so the value stays comparable when clicked back and forth.
+function StagePicker({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const stages: Array<{ key: string; label: string; hint: string }> = [
+    { key: "h24", label: "📅 1 day before",  hint: "sent ~24h ahead" },
+    { key: "h1",  label: "⌛ 1 hour before", hint: "sent ~1h ahead" },
+    { key: "m15", label: "⏰ 15 min before", hint: "sent ~15 min ahead" },
+  ];
+  const toggle = (k: string) => {
+    if (value.includes(k)) onChange(value.filter((x) => x !== k));
+    else onChange([...stages.map((s) => s.key).filter((s) => value.includes(s) || s === k)]);
+  };
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {stages.map((s) => {
+        const active = value.includes(s.key);
+        return (
+          <button key={s.key} type="button" onClick={() => toggle(s.key)} title={s.hint}
+            className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${active
+              ? "border-brand-500/60 bg-gradient-to-r from-brand-500/30 to-accent-500/20 text-brand-100"
+              : "border-ink-700 bg-ink-800 text-ink-400 hover:bg-ink-700"}`}>
+            {s.label}
+          </button>
+        );
+      })}
+      {value.length === 0 && (
+        <span className="ml-1 self-center rounded bg-ink-800 px-2 py-0.5 text-[10px] text-ink-400">
+          Silent — no reminders will be sent
+        </span>
+      )}
+    </div>
+  );
+}
 
 // Human-friendly "in 2h 15m" / "started 4 min ago" / "3d ago" delta for a startAt.
 function relTime(iso: string): string {
@@ -305,6 +343,9 @@ function ClassLanding() {
     // parses + dedupes + validates. Empty = no reminders sent (except to coach's
     // own email, which the scheduler always emails when known).
     invitees: "",
+    // Which reminder stages should fire. Default = 24h + 15min (matches the
+    // pre-6f behaviour). ["m15"] = only the last-minute nudge; [] = no reminders.
+    reminderStages: ["h24", "m15"] as string[],
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -349,7 +390,7 @@ function ClassLanding() {
   // Edit-target state — when set, an EditOverlay renders over the landing. Saving
   // POSTs a PATCH and refreshes the list.
   const [editing, setEditing] = useState<ScheduledClass | null>(null);
-  const saveEdit = async (patch: { title: string; coach: string; notes: string; durationMin: number; invitees: string }, propagate: boolean) => {
+  const saveEdit = async (patch: { title: string; coach: string; notes: string; durationMin: number; invitees: string; reminderStages: string[] }, propagate: boolean) => {
     if (!editing) return;
     const url = new URL(`${(import.meta.env.VITE_API_BASE ?? "").toString()}/api/class/schedule/${encodeURIComponent(editing._id)}`, window.location.origin);
     if (propagate && editing.seriesId) url.searchParams.set("scope", "series");
@@ -395,6 +436,7 @@ function ClassLanding() {
           recurrenceCount: form.recurrence === "weekly" ? Number(form.recurrenceCount) || 1 : 1,
           recurrenceWeekdays: form.recurrence === "weekly" ? form.recurrenceWeekdays : [],
           invitees: form.invitees,
+          reminderStages: form.reminderStages,
         }),
       });
       if (!res.ok) throw new Error(`create failed: ${res.status}`);
@@ -567,13 +609,25 @@ function ClassLanding() {
           </label>
           <label className="md:col-span-2">
             <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">
-              Invite emails <span className="normal-case font-normal text-ink-500">(optional — one per line, or comma-separated. Reminder sent ~15 min before class.)</span>
+              Invite emails <span className="normal-case font-normal text-ink-500">(optional — one per line, or comma-separated)</span>
             </span>
             <textarea value={form.invitees} onChange={(e) => setForm({ ...form, invitees: e.target.value })}
               rows={2}
               placeholder="alice@example.com, bob@example.com"
               className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500" />
           </label>
+          <div className="md:col-span-2">
+            <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">
+              Reminder emails
+              <span className="ml-2 font-normal normal-case text-ink-500">
+                pick which nudges get sent (turn all off for silent classes)
+              </span>
+            </span>
+            <StagePicker
+              value={form.reminderStages}
+              onChange={(next) => setForm({ ...form, reminderStages: next })}
+            />
+          </div>
           <div className="md:col-span-2 flex items-center justify-between gap-2">
             {error && <span className="rounded bg-rose-500/15 px-2 py-1 text-xs text-rose-200">{error}</span>}
             <button type="submit" disabled={submitting || !form.title}
@@ -601,7 +655,7 @@ function ClassLanding() {
 // The propagate toggle appears only when the class is part of a series.
 function EditOverlay({ c, onClose, onSave }:
   { c: ScheduledClass; onClose: () => void;
-    onSave: (patch: { title: string; coach: string; notes: string; durationMin: number; invitees: string }, propagate: boolean) => void }) {
+    onSave: (patch: { title: string; coach: string; notes: string; durationMin: number; invitees: string; reminderStages: string[] }, propagate: boolean) => void }) {
   const [title, setTitle] = useState(c.title);
   const [coach, setCoach] = useState(c.coach);
   const [notes, setNotes] = useState(c.notes || "");
@@ -611,10 +665,13 @@ function EditOverlay({ c, onClose, onSave }:
   const [invitees, setInvitees] = useState(
     (c.invitees ?? []).map((i) => i.email).join("\n"),
   );
+  const [reminderStages, setReminderStages] = useState<string[]>(
+    Array.isArray(c.reminderStages) ? c.reminderStages : ["h24", "m15"],
+  );
   const [propagate, setPropagate] = useState(!!c.seriesId);
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({ title, coach, notes, durationMin: Number(durationMin) || 60, invitees }, propagate && !!c.seriesId);
+    onSave({ title, coach, notes, durationMin: Number(durationMin) || 60, invitees, reminderStages }, propagate && !!c.seriesId);
   };
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4"
@@ -657,6 +714,13 @@ function EditOverlay({ c, onClose, onSave }:
             placeholder="alice@example.com"
             className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
         </label>
+        <div>
+          <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">
+            Reminder emails
+            <span className="ml-2 font-normal normal-case text-ink-500">turn all off for silent classes</span>
+          </span>
+          <StagePicker value={reminderStages} onChange={setReminderStages} />
+        </div>
         {c.seriesId && (
           <label className="flex items-center gap-2 rounded-lg border border-brand-500/30 bg-brand-500/10 px-3 py-2 text-xs text-brand-100">
             <input type="checkbox" checked={propagate} onChange={(e) => setPropagate(e.target.checked)}
