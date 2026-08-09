@@ -64,6 +64,7 @@ export default function CallRoomPage() {
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
+  const [sharing, setSharing] = useState(false);
   // Ordered list of remote peer ids — drives the grid render. Kept in sync
   // with peersRef's key set on every join/leave.
   const [peerIds, setPeerIds] = useState<string[]>([]);
@@ -81,6 +82,9 @@ export default function CallRoomPage() {
   // RTCConfiguration fetched from /api/video/ice-config (or fallback). Populated
   // before the WS opens so every createPc() gets the right servers.
   const iceConfigRef = useRef<RTCConfiguration>(FALLBACK_ICE_SERVERS);
+  // While screen-sharing: the display stream, so we can restore camera cleanly.
+  // Video RTCRtpSender's track gets replaced via replaceTrack() — no SDP re-neg.
+  const displayStreamRef = useRef<MediaStream | null>(null);
 
   // Send a JSON message to the signaling server (guarded — WS may be gone).
   const send = (msg: unknown) => {
@@ -145,6 +149,26 @@ export default function CallRoomPage() {
     const local = localStreamRef.current;
     if (local) for (const t of local.getTracks()) pc.addTrack(t, local);
 
+    // Prefer AV1 → VP9 → H264 for video: ~30% less bandwidth at the same
+    // quality vs H264 (Zoom's default). setCodecPreferences is best-effort;
+    // browsers without AV1 hardware fall through the list cleanly.
+    try {
+      const videoTx = pc.getTransceivers().find((t) => t.receiver.track?.kind === "video" || t.sender.track?.kind === "video");
+      const caps = (RTCRtpSender as any).getCapabilities?.("video");
+      if (videoTx && caps?.codecs?.length) {
+        const rank = (c: any) => {
+          const m = String(c.mimeType || "").toLowerCase();
+          if (m.includes("av1")) return 0;
+          if (m.includes("vp9")) return 1;
+          if (m.includes("vp8")) return 2;
+          if (m.includes("h264")) return 3;
+          return 4;
+        };
+        const preferred = [...caps.codecs].sort((a, b) => rank(a) - rank(b));
+        (videoTx as any).setCodecPreferences?.(preferred);
+      }
+    } catch { /* older browsers — fall back to browser default */ }
+
     return state;
   };
 
@@ -207,6 +231,10 @@ export default function CallRoomPage() {
     if (localStreamRef.current) {
       for (const t of localStreamRef.current.getTracks()) t.stop();
       localStreamRef.current = null;
+    }
+    if (displayStreamRef.current) {
+      for (const t of displayStreamRef.current.getTracks()) t.stop();
+      displayStreamRef.current = null;
     }
     if (wsRef.current) { try { wsRef.current.close(); } catch { /* already closed */ } wsRef.current = null; }
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
@@ -318,6 +346,44 @@ export default function CallRoomPage() {
   };
   const leave = () => { teardown(); setStatus("left"); };
 
+  // Screen share: swap the outgoing video track on every peer connection to
+  // the display-media track via RTCRtpSender.replaceTrack (no SDP re-neg,
+  // hot swap in <200ms). On stop or displayTrack.onended, swap back to the
+  // camera track. Self-view also switches to the display for feedback.
+  const toggleShare = async () => {
+    if (sharing) {
+      // Stop sharing → put camera back.
+      const display = displayStreamRef.current;
+      if (display) for (const t of display.getTracks()) t.stop();
+      displayStreamRef.current = null;
+      const camTrack = localStreamRef.current?.getVideoTracks()[0];
+      if (camTrack) {
+        for (const state of peersRef.current.values()) {
+          const sender = state.pc.getSenders().find((s) => s.track?.kind === "video");
+          try { await sender?.replaceTrack(camTrack); } catch { /* peer gone */ }
+        }
+        if (localVideoRef.current && localStreamRef.current) localVideoRef.current.srcObject = localStreamRef.current;
+      }
+      setSharing(false);
+      return;
+    }
+    // Start sharing
+    let display: MediaStream;
+    try {
+      display = await (navigator.mediaDevices as any).getDisplayMedia({ video: true, audio: false });
+    } catch { return; /* user cancelled */ }
+    displayStreamRef.current = display;
+    const shareTrack = display.getVideoTracks()[0];
+    if (!shareTrack) return;
+    shareTrack.onended = () => { void toggleShare(); };   // browser "Stop sharing" button
+    for (const state of peersRef.current.values()) {
+      const sender = state.pc.getSenders().find((s) => s.track?.kind === "video");
+      try { await sender?.replaceTrack(shareTrack); } catch { /* peer gone */ }
+    }
+    if (localVideoRef.current) localVideoRef.current.srcObject = display;
+    setSharing(true);
+  };
+
   // ---- Splash screens ------------------------------------------------------
   if (status === "denied") return <Splash title="Camera & mic permission needed"
     body="Allow camera and microphone access in your browser, then reload this page." detail={errorMsg} />;
@@ -405,6 +471,12 @@ export default function CallRoomPage() {
           className={`rounded-xl2 px-4 py-2 text-sm ${camOn ? "bg-ink-800 hover:bg-ink-700" : "bg-rose-600 hover:bg-rose-500"} text-white`}
         >
           {camOn ? "📷 Cam off" : "📷 Cam on"}
+        </button>
+        <button
+          onClick={toggleShare}
+          className={`rounded-xl2 px-4 py-2 text-sm ${sharing ? "bg-emerald-600 hover:bg-emerald-500" : "bg-ink-800 hover:bg-ink-700"} text-white`}
+        >
+          {sharing ? "🛑 Stop sharing" : "🖥️ Share screen"}
         </button>
         <button
           onClick={leave}
