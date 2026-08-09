@@ -1911,7 +1911,13 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   // non-starred snaps are dropped entirely. Text filter greps note + transcript
   // case-insensitive so "diagonal" surfaces every position where the coach
   // said the word during class or wrote it in the note.
-  const q = textFilter.trim().toLowerCase();
+  // Split the query on whitespace so "endgame diag" matches text containing
+  // BOTH words in any order (across note / transcript / class title). A row
+  // matches only when every token appears in the same field OR spans them
+  // combined -- keeps the greedy "endgame class + coach said diagonal" case
+  // working. Empty query short-circuits below.
+  const qTokens = textFilter.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const q = qTokens.join(" ");
   // Week filter (from volume-chart bar click) narrows snaps to a specific
   // 7-day window. weekFilter holds an ISO date string of Sunday-midnight.
   const weekStartMs = weekFilter ? new Date(weekFilter).getTime() : 0;
@@ -1924,9 +1930,11 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
       const at = new Date(s.at).getTime();
       return at >= weekStartMs && at < weekEndMs;
     })
-    .filter((s) => !q || (String(s.note || "").toLowerCase().includes(q)
-      || String(s.transcript || "").toLowerCase().includes(q)
-      || String(s.classTitle || "").toLowerCase().includes(q)))
+    .filter((s) => {
+      if (qTokens.length === 0) return true;
+      const hay = `${s.note || ""}\n${s.transcript || ""}\n${s.classTitle || ""}`.toLowerCase();
+      return qTokens.every((t) => hay.includes(t));
+    })
     .slice()
     .sort((a, b) => {
       // Sort key drives the primary order; starred always floats above non-
