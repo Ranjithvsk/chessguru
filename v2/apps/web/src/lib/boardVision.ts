@@ -79,13 +79,73 @@ function cropToSquare(img: HTMLImageElement): HTMLCanvasElement {
  *  Returns null when confidence is too low -- caller falls back to
  *  cropToSquare (whole image assumed to be the board) with a UI nudge for
  *  the user to crop manually. Sub-second on a 400×400 work canvas. */
+/** Projection-based board finder for small images (chess-book PDF
+ *  extractions, ~200-300px). The sliding-window scorer of autoDetectBoard
+ *  is imprecise on them and mis-aligns the 8x8 grid. This variant
+ *  computes per-row + per-col ink density and picks the LONGEST
+ *  contiguous band above a density threshold -- the actual board region,
+ *  with coord labels excluded because they're only 1-2 rows thick.
+ *  Returns a square (widen the shorter axis to match the longer) so the
+ *  downstream classifyGrid gets even cells. Null when nothing obvious. */
+function detectBoardByProjection(img: HTMLImageElement): { x: number; y: number; side: number; score: number } | null {
+  const c = document.createElement("canvas");
+  c.width = img.naturalWidth; c.height = img.naturalHeight;
+  const ctx = c.getContext("2d")!;
+  ctx.drawImage(img, 0, 0);
+  const data = ctx.getImageData(0, 0, c.width, c.height).data;
+  const w = c.width, h = c.height;
+  const rowInk = new Array(h).fill(0);
+  const colInk = new Array(w).fill(0);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const off = (y * w + x) * 4;
+      const l = 0.299 * data[off]! + 0.587 * data[off + 1]! + 0.114 * data[off + 2]!;
+      if (l < 100) { rowInk[y]++; colInk[x]++; }
+    }
+  }
+  // A row/col is "board content" when >=3% of its pixels are ink. Coord
+  // labels have >=1% but usually far less than pieces + board frame do.
+  const rowThresh = Math.max(3, Math.floor(w * 0.03));
+  const colThresh = Math.max(3, Math.floor(h * 0.03));
+  // Find longest contiguous run of above-threshold rows.
+  const longestRun = (arr: number[], thr: number): { start: number; end: number } | null => {
+    let bestStart = -1, bestLen = 0, curStart = -1, curLen = 0;
+    for (let i = 0; i < arr.length; i++) {
+      if (arr[i]! >= thr) {
+        if (curLen === 0) curStart = i;
+        curLen++;
+      } else {
+        // Allow ONE-row gaps (thin paper strip between two piece rows).
+        // Longer gaps end the run.
+        const nextAbove = i + 1 < arr.length && arr[i + 1]! >= thr;
+        if (!nextAbove && curLen > 0) {
+          if (curLen > bestLen) { bestStart = curStart; bestLen = curLen; }
+          curLen = 0;
+        }
+      }
+    }
+    if (curLen > bestLen) { bestStart = curStart; bestLen = curLen; }
+    if (bestLen < 20) return null;
+    return { start: bestStart, end: bestStart + bestLen - 1 };
+  };
+  const rows = longestRun(rowInk, rowThresh);
+  const cols = longestRun(colInk, colThresh);
+  if (!rows || !cols) return null;
+  // Square up: use max span, centred on the union bbox.
+  const cx = (cols.start + cols.end) / 2, cy = (rows.start + rows.end) / 2;
+  const side = Math.max(cols.end - cols.start + 1, rows.end - rows.start + 1);
+  const x = Math.max(0, Math.round(cx - side / 2));
+  const y = Math.max(0, Math.round(cy - side / 2));
+  const clampedSide = Math.min(side, w - x, h - y);
+  return { x, y, side: clampedSide, score: clampedSide };
+}
+
 function autoDetectBoard(img: HTMLImageElement): { x: number; y: number; side: number; score: number } | null {
-  // Small images (chess-book PDF extractions, ~200-300px) are already
-  // ~90% board with just coord-label borders. The sliding-window scorer
-  // is imprecise on them and picks slightly-offset regions that mis-align
-  // the 8x8 grid. Skip auto-detect for small images and let cropToSquare
-  // handle the centred crop -- users can pre-trim if labels leak in.
-  if (Math.max(img.naturalWidth, img.naturalHeight) < 320) return null;
+  // Small images (chess-book PDF extractions, ~200-300px) use projection
+  // profiling instead of the sliding-window scorer -- much tighter crop.
+  if (Math.max(img.naturalWidth, img.naturalHeight) < 320) {
+    return detectBoardByProjection(img);
+  }
   const scale = 400 / Math.max(img.naturalWidth, img.naturalHeight, 1);
   const workW = Math.round(img.naturalWidth * scale);
   const workH = Math.round(img.naturalHeight * scale);
@@ -252,6 +312,39 @@ function classifyGrid(canvas: HTMLCanvasElement): { grid: SquareState[][]; confi
   const bgDark = darkN > 0 ? darkSum / darkN : (renderMode === "print" ? 210 : 90);
   const bgLight = lightN > 0 ? lightSum / lightN : (renderMode === "print" ? 245 : 200);
 
+  // --- Adaptive hollow/solid threshold (print mode) ---------------------
+  // Fixed thresholds mis-classify thick-outline kings/queens as solid
+  // (black). Instead, collect ink% values from all clearly-occupied cells
+  // (ink% >= 2%), sort them, and split at the LARGEST GAP -- the natural
+  // boundary between hollow (white) and solid (black) populations.
+  // Falls back to 25% when we don't have enough occupied cells to trust
+  // the histogram (single-piece endgame diagrams, etc.).
+  let printThreshold = 0.25;
+  if (renderMode === "print") {
+    const inks: number[] = [];
+    for (const row of cellExtra) for (const s of row) {
+      if (s.inkPct >= 0.02) inks.push(s.inkPct);
+    }
+    if (inks.length >= 8) {
+      inks.sort((a, b) => a - b);
+      // Find the biggest gap between consecutive values. Bimodal
+      // distribution puts a wide gap between the hollow cluster's max and
+      // the solid cluster's min.
+      let bestGap = 0, bestMid = 0.25;
+      for (let i = 1; i < inks.length; i++) {
+        const gap = inks[i]! - inks[i - 1]!;
+        // Only consider gaps in a plausible range (5% to 35%) so freak
+        // outliers don't shift the threshold to the edges.
+        const mid = (inks[i]! + inks[i - 1]!) / 2;
+        if (gap > bestGap && mid >= 0.08 && mid <= 0.40) {
+          bestGap = gap; bestMid = mid;
+        }
+      }
+      // Require a meaningful gap (>=4%). If nothing significant, keep default.
+      if (bestGap >= 0.04) printThreshold = bestMid;
+    }
+  }
+
   // Second pass: classify each square.
   const grid: SquareState[][] = [];
   const conf: number[][] = [];
@@ -272,12 +365,12 @@ function classifyGrid(canvas: HTMLCanvasElement): { grid: SquareState[][]; confi
         // ink; solid (filled black) pieces have much more.
         const e = cellExtra[r]![c]!;
         if (e.inkPct < 0.02) { gRow.push("empty"); cRow.push(0.95); continue; }
-        // Colour by ink fraction: hollow (outline only) = white piece;
-        // solid ink = black piece. Threshold ~25% empirically separates
-        // king/queen (thick strokes ~20%) from solid black pieces (~40%).
-        const isWhite = e.inkPct < 0.25;
+        // Colour by ink fraction using the ADAPTIVE per-image threshold
+        // learned above from the histogram's biggest gap. Way more robust
+        // to font variation than a fixed cut-off.
+        const isWhite = e.inkPct < printThreshold;
         gRow.push(isWhite ? "white" : "black");
-        const c01 = Math.min(1, Math.max(0.3, Math.abs(e.inkPct - 0.25) / 0.15));
+        const c01 = Math.min(1, Math.max(0.3, Math.abs(e.inkPct - printThreshold) / 0.15));
         cRow.push(c01);
         continue;
       }
