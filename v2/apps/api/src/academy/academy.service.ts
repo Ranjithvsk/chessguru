@@ -125,6 +125,90 @@ export class AcademyService {
     return { ok: true, invite: { token, email, displayName, role: wantRole, coachId, expiresAt, mail: mailRes.ok ? "sent" : "failed" } };
   }
 
+  /** Return the caller's academy row (name, plan, trial dates). Coach/owner only. */
+  async getMeta(session: any) {
+    const g = this.ensureCoachOrOwner(session);
+    const acad: any = await this.academies().findOne({ _id: g.academyId as any });
+    if (!acad) return { name: g.academyId };
+    return {
+      _id: acad._id,
+      name: acad.name || acad._id,
+      plan: acad.plan || null,
+      subscriptionStatus: acad.subscriptionStatus || null,
+      trialStartsAt: acad.trialStartsAt || null,
+      trialEndsAt: acad.trialEndsAt || null,
+      monthlyPricePaise: acad.monthlyPricePaise ?? null,
+    };
+  }
+
+  /** Direct-add a student — creates the user immediately with an
+   *  auto-generated password. Returns the credentials so the coach can hand
+   *  them to the student in person / print out. Coach-invited students
+   *  auto-attach to the coach; owner-invited require a coachId.
+   *
+   *  Username generation:
+   *    - Sanitize the displayName
+   *    - If blank / too short, derive from email local-part
+   *    - If still blank, generate "student-<random>"
+   *  Collision-append -2, -3 up to 999 if the base already exists.
+   *  Email is optional (young students often don't have one). */
+  async quickAddStudent(session: any, body: any): Promise<any> {
+    const g = this.ensureCoachOrOwner(session);
+    const displayName = String(body?.displayName || "").trim().slice(0, 60);
+    const emailIn = String(body?.email || "").trim().toLowerCase();
+    const requestedCoachId = String(body?.coachId || "").trim().toLowerCase();
+
+    let coachId: string;
+    if (g.role === "coach") {
+      coachId = g.userId;
+    } else {
+      if (!requestedCoachId) return { ok: false, error: "Pick a coach for this student." };
+      const coach = await this.users().findOne({ _id: requestedCoachId as any, academyId: g.academyId, role: "coach" });
+      if (!coach) return { ok: false, error: "That coach isn't in this academy." };
+      coachId = requestedCoachId;
+    }
+
+    if (emailIn) {
+      if (!emailIn.includes("@")) return { ok: false, error: "Email doesn't look right." };
+      const existing = await this.users().findOne({ email: emailIn });
+      if (existing) return { ok: false, error: "That email already has an account." };
+    }
+
+    const sanitize = (s: string) => s.toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 24);
+    let baseUid = sanitize(displayName);
+    if (baseUid.length < 2 && emailIn) baseUid = sanitize(emailIn.split("@")[0] || "");
+    if (baseUid.length < 2) baseUid = "student-" + randomBytes(3).toString("hex");
+    let uid = baseUid, k = 2;
+    while (await this.users().findOne({ _id: uid as any })) {
+      uid = `${baseUid}-${k++}`;
+      if (k > 999) return { ok: false, error: "Couldn't pick a free username — try a different name." };
+    }
+
+    const password = randomBytes(9).toString("base64url").slice(0, 12);
+    const bcrypt = await import("bcryptjs");
+    const hash = await bcrypt.default.hash(password, 10);
+
+    const now = new Date();
+    const userDoc: any = {
+      _id: uid,
+      username: displayName || uid,
+      bpass: hash,
+      email: emailIn || null,
+      academyId: g.academyId,
+      role: "student",
+      coachId,
+      createdAt: now,
+      lastLogin: null,
+      createdBy: g.userId,
+    };
+    await this.users().insertOne(userDoc);
+    return {
+      ok: true,
+      student: { _id: uid, username: userDoc.username, email: userDoc.email, coachId, createdAt: now },
+      credentials: { username: uid, password },
+    };
+  }
+
   /** Owner OR coach: list students in this academy. Owner sees ALL; coach sees theirs.
    *  Enriches each row with:
    *    - puzzleRating (from userperfs.puzzle.gl.r)

@@ -14,6 +14,68 @@ type DailyPreview = {
   stats?: { attempted: number; solved: number; medianMs: number | null };
   streak?: { current: number; longest: number; lastDate: string | null } | null;
 };
+// Student-facing homework card. Loads /api/me/homework and lists open items
+// with a progress bar. Clicking an item takes them to the puzzle trainer with
+// the right theme pre-filtered so the solve counts against the task.
+type StudentHomework = {
+  _id: string; title: string;
+  tasks: Array<{ kind: "puzzle_pack"|"study_revision"|"opening_revision"; theme?: string; targetCount?: number; studyType?: string; openingSlug?: string }>;
+  dueAt: string; assignedAt: string;
+  status: "assigned"|"in_progress"|"completed";
+  progress: Record<string, number>;
+};
+function HomeworkCard() {
+  const { data } = useQuery({ queryKey: ["me-homework"], queryFn: () => get<StudentHomework[]>("/api/me/homework") });
+  const open = (data ?? []).filter((h) => h.status !== "completed");
+  if (open.length === 0) return null;
+  return (
+    <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-600/15 via-fuchsia-500/10 to-pink-500/5 p-4">
+      <div className="mb-3 flex items-baseline justify-between">
+        <h3 className="font-display text-lg text-white">📝 My homework</h3>
+        <span className="text-xs text-purple-200">{open.length} open</span>
+      </div>
+      <div className="space-y-2">
+        {open.slice(0, 5).map((h) => {
+          const dueMs = new Date(h.dueAt).getTime() - Date.now();
+          const dueLabel = dueMs < 0 ? "OVERDUE" : `due in ${Math.ceil(dueMs / 86_400_000)}d`;
+          const dueColor = dueMs < 0 ? "text-rose-300" : dueMs < 3 * 86_400_000 ? "text-amber-200" : "text-ink-300";
+          const totalTargets = h.tasks.reduce((s, t) => s + (t.kind === "puzzle_pack" ? (t.targetCount || 1) : 1), 0);
+          const totalDone = h.tasks.reduce((s, t, i) => s + Math.min((h.progress?.[String(i)] ?? 0), t.kind === "puzzle_pack" ? (t.targetCount || 1) : 1), 0);
+          const pct = totalTargets ? Math.round((totalDone / totalTargets) * 100) : 0;
+          const firstOpen = h.tasks.findIndex((t, i) => (h.progress?.[String(i)] ?? 0) < (t.kind === "puzzle_pack" ? (t.targetCount || 1) : 1));
+          const nextTask = h.tasks[firstOpen] ?? h.tasks[0];
+          const cta = nextTask?.kind === "puzzle_pack" && nextTask.theme
+            ? { label: `Solve ${nextTask.theme} puzzle`, to: `/?theme=${nextTask.theme}` }
+            : nextTask?.kind === "opening_revision" && nextTask.openingSlug
+              ? { label: "Revise opening", to: `/study/openings/${nextTask.openingSlug}` }
+              : { label: "Continue", to: "/study" };
+          return (
+            <div key={h._id} className="rounded-xl border border-ink-700 bg-ink-900/70 p-3">
+              <div className="flex items-baseline justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium text-white">{h.title}</div>
+                  <div className="mt-0.5 text-[11px] text-ink-500">
+                    {totalDone}/{totalTargets} · {h.tasks.length} section{h.tasks.length === 1 ? "" : "s"}
+                  </div>
+                </div>
+                <div className={`shrink-0 text-xs font-semibold ${dueColor}`}>{dueLabel}</div>
+              </div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-ink-800">
+                <div className="h-full bg-gradient-to-r from-purple-500 to-fuchsia-500 transition-[width] duration-500" style={{ width: `${pct}%` }} />
+              </div>
+              <div className="mt-2 flex justify-end">
+                <Link to={cta.to} className="rounded-md bg-purple-500/25 px-3 py-1 text-xs font-semibold text-purple-100 hover:bg-purple-500/40">
+                  {cta.label} →
+                </Link>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function DailyCard() {
   const { data } = useQuery({ queryKey: ["daily-preview"], queryFn: () => get<DailyPreview>("/api/puzzles/daily") });
   if (!data) return null;
@@ -734,6 +796,7 @@ export default function DashboardPage() {
       )}
       <h1 className="font-display text-2xl text-white">{viewedAs ? `${viewedAs}'s performance` : "📊 My performance"}</h1>
 
+      {!viewedAs && <HomeworkCard />}
       {!viewedAs && <DailyCard />}
       {data.lastSession && <LastSessionStrip s={data.lastSession} />}
 

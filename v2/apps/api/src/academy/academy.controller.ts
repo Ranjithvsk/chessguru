@@ -93,9 +93,20 @@ export class AcademyController {
     return this.svc.listCoaches(req.session);
   }
 
+  /** Owner+coach: metadata about their academy — name, plan, trial dates. */
+  @Get("meta")
+  meta(@Req() req: any) { return this.svc.getMeta(req.session); }
+
   @Get("students")
   listStudents(@Req() req: any) {
     return this.svc.listStudents(req.session);
+  }
+
+  /** Direct-add a student — no email round-trip. Returns the credentials the
+   *  coach hands to the student in person / paper. */
+  @Post("students/quick-add")
+  quickAddStudent(@Req() req: any, @Body() body: any) {
+    return this.svc.quickAddStudent(req.session, body);
   }
 
   // ── Fees + billing ──────────────────────────────────────────────

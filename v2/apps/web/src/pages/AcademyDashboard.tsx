@@ -94,6 +94,355 @@ function fmtAgo(d?: string|null) {
   return `${Math.round(s/86400)}d ago`;
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Colorful, featureful UI additions (2026-08-10). Sit above the existing
+// panels; do not replace them. All owner+coach-only.
+// ─────────────────────────────────────────────────────────────────────
+
+function AcademyHero({ name, roleLabel, username, trialEndsAt }: {
+  name: string; roleLabel: string; username: string; trialEndsAt?: string;
+}) {
+  const daysLeft = trialEndsAt ? Math.max(0, Math.ceil((new Date(trialEndsAt).getTime() - Date.now()) / 86_400_000)) : null;
+  return (
+    <header className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-brand-600/25 via-purple-600/15 to-amber-500/10 p-7 shadow-2xl backdrop-blur">
+      <div className="absolute -top-10 -right-10 h-40 w-40 rounded-full bg-brand-500/30 blur-3xl" />
+      <div className="relative flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-widest text-brand-200">🏛️ Academy · {roleLabel}</div>
+          <h1 className="mt-2 font-display text-4xl font-bold text-white">{name}</h1>
+          <p className="mt-1 text-sm text-ink-200">Welcome back, <b className="text-white">{username}</b>.</p>
+        </div>
+        {daysLeft != null && (
+          <div className={`rounded-2xl border px-4 py-3 text-right ${daysLeft > 14 ? "border-emerald-400/40 bg-emerald-500/10" : daysLeft > 3 ? "border-amber-400/40 bg-amber-500/10" : "border-rose-400/40 bg-rose-500/10"}`}>
+            <div className="text-xs uppercase tracking-wide text-ink-300">Free trial</div>
+            <div className={`font-display text-2xl font-bold ${daysLeft > 14 ? "text-emerald-200" : daysLeft > 3 ? "text-amber-200" : "text-rose-200"}`}>
+              {daysLeft} <span className="text-sm font-normal">days left</span>
+            </div>
+          </div>
+        )}
+      </div>
+    </header>
+  );
+}
+
+function StatTile({ emoji, label, value, hint, gradient }: { emoji: string; label: string; value: React.ReactNode; hint?: string; gradient: string; }) {
+  return (
+    <div className={`relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br ${gradient} p-4 shadow`}>
+      <div className="text-2xl">{emoji}</div>
+      <div className="mt-1 font-display text-2xl font-bold tabular-nums text-white">{value}</div>
+      <div className="text-xs text-ink-300">{label}</div>
+      {hint && <div className="mt-0.5 text-[11px] text-ink-400">{hint}</div>}
+    </div>
+  );
+}
+
+function StatsRow({ students, coaches, schedule, snaps, homework }: {
+  students: any[]; coaches: any[]; schedule: any; snaps: any[] | undefined; homework: any[];
+}) {
+  const active7d = students.filter((s) => (s.puzzleSolves7d ?? 0) > 0).length;
+  const withStreak = students.filter((s) => (s.dailyStreakCurrent ?? 0) > 0).length;
+  const openHw = homework.filter((h) => h.status !== "completed").length;
+  const upcoming = schedule?.upcoming?.length ?? 0;
+  const live = schedule?.live?.length ?? 0;
+  const snapsThisWeek = (snaps ?? []).filter((s) => (Date.now() - new Date(s.at).getTime()) < 7 * 86_400_000).length;
+  return (
+    <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      <StatTile emoji="👦" label="Students" value={students.length} hint={`${active7d} active · 7d`} gradient="from-brand-600/30 to-brand-800/20" />
+      <StatTile emoji="👨‍🏫" label="Coaches" value={coaches.length} gradient="from-amber-500/25 to-orange-600/15" />
+      <StatTile emoji="🎥" label="Classes" value={upcoming} hint={live > 0 ? `${live} LIVE now` : "upcoming"} gradient="from-rose-500/25 to-pink-600/15" />
+      <StatTile emoji="📝" label="Homework" value={openHw} hint={openHw ? "open" : "all done"} gradient="from-purple-500/25 to-fuchsia-600/15" />
+      <StatTile emoji="🔥" label="On streak" value={withStreak} hint="daily puzzle" gradient="from-orange-500/25 to-red-600/15" />
+      <StatTile emoji="📸" label="Snaps" value={snapsThisWeek} hint="this week" gradient="from-cyan-500/25 to-teal-600/15" />
+    </section>
+  );
+}
+
+function QuickActionsBar({ onAddStudent, onAssignHomework, onOneClick, oneClickBusy, studentCount }: {
+  onAddStudent: () => void; onAssignHomework: () => void; onOneClick: () => void;
+  oneClickBusy: boolean; studentCount: number;
+}) {
+  return (
+    <section className="rounded-3xl border border-white/10 bg-ink-900/60 p-5 shadow backdrop-blur">
+      <div className="mb-3 flex items-baseline justify-between">
+        <h2 className="font-display text-lg text-white">⚡ Quick actions</h2>
+        <span className="text-xs text-ink-500">One tap, real work done</span>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <button onClick={onAddStudent}
+          className="group rounded-2xl border border-emerald-400/30 bg-gradient-to-br from-emerald-500/15 to-teal-500/10 p-4 text-left transition hover:-translate-y-0.5 hover:border-emerald-400/60 hover:shadow-lg">
+          <div className="flex items-center gap-2 text-2xl">👦 <span className="text-emerald-200">+</span></div>
+          <div className="mt-1 font-display text-base font-semibold text-white">Add student</div>
+          <div className="text-xs text-ink-400">Instant — no email round-trip. Get a username + password to share.</div>
+        </button>
+        <button onClick={onAssignHomework} disabled={studentCount === 0}
+          className="group rounded-2xl border border-purple-400/30 bg-gradient-to-br from-purple-500/15 to-fuchsia-500/10 p-4 text-left transition hover:-translate-y-0.5 hover:border-purple-400/60 hover:shadow-lg disabled:opacity-50">
+          <div className="flex items-center gap-2 text-2xl">📝</div>
+          <div className="mt-1 font-display text-base font-semibold text-white">Assign homework</div>
+          <div className="text-xs text-ink-400">Pick students, themes, puzzles per theme, opening revision, due date.</div>
+        </button>
+        <button onClick={onOneClick} disabled={oneClickBusy || studentCount === 0}
+          className="group relative overflow-hidden rounded-2xl border border-amber-400/40 bg-gradient-to-br from-amber-500/20 via-orange-500/15 to-rose-500/10 p-4 text-left transition hover:-translate-y-0.5 hover:border-amber-400/70 hover:shadow-xl disabled:opacity-50">
+          <div className="absolute -top-6 -right-6 h-24 w-24 rounded-full bg-amber-400/20 blur-2xl" />
+          <div className="relative">
+            <div className="flex items-center gap-2 text-2xl">✨🎯</div>
+            <div className="mt-1 font-display text-base font-semibold text-white">One-click homework</div>
+            <div className="text-xs text-ink-300">
+              {oneClickBusy ? "Assigning…" : "5 weakest themes × 5 puzzles + opening revision, due in 7 days. Whole roster."}
+            </div>
+          </div>
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function AddStudentModal({ open, onClose, coaches, isOwner }: {
+  open: boolean; onClose: () => void; coaches: any[]; isOwner: boolean;
+}) {
+  const qc = useQueryClient();
+  const [displayName, setDisplayName] = useState("");
+  const [email, setEmail] = useState("");
+  const [coachId, setCoachId] = useState("");
+  const [creds, setCreds] = useState<{ username: string; password: string }|null>(null);
+  const [err, setErr] = useState<string|null>(null);
+  const addMut = useMutation({
+    mutationFn: () => post<any>("/api/academy/students/quick-add", { displayName, email, coachId: isOwner ? coachId : undefined }),
+    onSuccess: (r: any) => {
+      if (!r.ok) { setErr(r.error || "Failed."); return; }
+      setCreds(r.credentials);
+      qc.invalidateQueries({ queryKey: ["academy-students"] });
+    },
+    onError: (e: any) => setErr(String(e?.message ?? e)),
+  });
+  const reset = () => { setDisplayName(""); setEmail(""); setCoachId(""); setCreds(null); setErr(null); };
+  const close = () => { reset(); onClose(); };
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur" onClick={close}>
+      <div onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md rounded-2xl border border-emerald-400/40 bg-gradient-to-br from-ink-900 to-emerald-950/40 p-6 shadow-2xl">
+        <div className="text-2xl">👦 <span className="text-emerald-300">+</span></div>
+        <h2 className="mt-2 font-display text-xl text-white">Add a student</h2>
+        <p className="text-xs text-ink-400">Creates the account instantly. Copy the password and hand it to the student.</p>
+        {creds ? (
+          <div className="mt-5 space-y-3">
+            <div className="rounded-xl border border-emerald-400/40 bg-emerald-500/10 p-4">
+              <div className="text-xs uppercase text-emerald-300">✅ Created</div>
+              <div className="mt-2 font-mono text-sm text-white">
+                <div>username: <b className="select-all">{creds.username}</b></div>
+                <div>password: <b className="select-all">{creds.password}</b></div>
+              </div>
+              <button onClick={() => navigator.clipboard?.writeText(`ChessGuru\nusername: ${creds.username}\npassword: ${creds.password}\nlogin: https://harinitharanjith.com/login`)}
+                className="mt-3 rounded-md border border-emerald-400/40 bg-emerald-500/20 px-3 py-1.5 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/30">
+                📋 Copy credentials
+              </button>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={reset} className="flex-1 rounded-lg border border-ink-700 py-2 text-sm text-white hover:bg-ink-800">Add another</button>
+              <button onClick={close} className="flex-1 rounded-lg bg-brand-600 py-2 text-sm font-semibold text-white hover:bg-brand-500">Done</button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-5 space-y-3">
+            {err && <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-2.5 text-xs text-rose-200">{err}</div>}
+            <div>
+              <label className="mb-1 block text-xs uppercase text-ink-400">Student name</label>
+              <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} autoFocus placeholder="Aarav K"
+                className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-emerald-500 focus:outline-none" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs uppercase text-ink-400">Email <span className="text-ink-500">(optional)</span></label>
+              <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="parent@example.com"
+                className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-emerald-500 focus:outline-none" />
+            </div>
+            {isOwner && (
+              <div>
+                <label className="mb-1 block text-xs uppercase text-ink-400">Assign to coach</label>
+                <select value={coachId} onChange={(e) => setCoachId(e.target.value)}
+                  className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white focus:border-emerald-500 focus:outline-none">
+                  <option value="">— pick a coach —</option>
+                  {coaches.map((c) => <option key={c._id} value={c._id}>{c.username}</option>)}
+                </select>
+              </div>
+            )}
+            <div className="flex gap-2 pt-2">
+              <button onClick={close} className="flex-1 rounded-lg border border-ink-700 py-2 text-sm text-white hover:bg-ink-800">Cancel</button>
+              <button disabled={addMut.isPending || !displayName || (isOwner && !coachId)}
+                onClick={() => addMut.mutate()}
+                className="flex-1 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 py-2 text-sm font-semibold text-white shadow hover:brightness-110 disabled:opacity-50">
+                {addMut.isPending ? "Creating…" : "Create student"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const THEME_CHOICES = ["pin", "fork", "skewer", "discoveredAttack", "sacrifice", "deflection", "attraction", "clearance", "trappedPiece", "hangingPiece"];
+
+function AssignHomeworkModal({ open, onClose, students, isOwner }: {
+  open: boolean; onClose: () => void; students: any[]; isOwner: boolean;
+}) {
+  const qc = useQueryClient();
+  const [pickedStudents, setPickedStudents] = useState<Set<string>>(new Set());
+  const [pickedThemes, setPickedThemes] = useState<Set<string>>(new Set(["pin", "fork", "skewer"]));
+  const [perTheme, setPerTheme] = useState(5);
+  const [dueDays, setDueDays] = useState(7);
+  const [includeOpening, setIncludeOpening] = useState(true);
+  const [err, setErr] = useState<string|null>(null);
+  const [ok, setOk] = useState<string|null>(null);
+  const assignMut = useMutation({
+    mutationFn: () => {
+      const tasks: any[] = [...pickedThemes].map((t) => ({ kind: "puzzle_pack", theme: t, targetCount: perTheme }));
+      if (includeOpening) tasks.push({ kind: "opening_revision", openingSlug: "sicilian" });
+      const dueAt = new Date(Date.now() + dueDays * 86_400_000).toISOString();
+      return post<any>("/api/academy/homework", { studentIds: [...pickedStudents], tasks, dueAt });
+    },
+    onSuccess: (r: any) => {
+      if (!r.ok) { setErr(r.error || "Failed."); return; }
+      setOk(`Assigned to ${r.assigned} student${r.assigned === 1 ? "" : "s"}.`);
+      qc.invalidateQueries({ queryKey: ["academy-homework"] });
+      setTimeout(() => { onClose(); setOk(null); }, 1200);
+    },
+  });
+  const toggleSet = (s: Set<string>, v: string, setter: (n: Set<string>) => void) => {
+    const n = new Set(s); if (n.has(v)) n.delete(v); else n.add(v); setter(n);
+  };
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur overflow-y-auto" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-2xl rounded-2xl border border-purple-400/40 bg-gradient-to-br from-ink-900 to-purple-950/40 p-6 shadow-2xl my-8">
+        <div className="text-2xl">📝</div>
+        <h2 className="mt-2 font-display text-xl text-white">Assign homework</h2>
+        <p className="text-xs text-ink-400">Pick students, themes, and a due date.</p>
+        {err && <div className="mt-3 rounded-lg border border-rose-500/40 bg-rose-500/10 p-2.5 text-xs text-rose-200">{err}</div>}
+        {ok && <div className="mt-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-2.5 text-xs text-emerald-200">{ok}</div>}
+        <div className="mt-5 space-y-4">
+          <div>
+            <label className="mb-1 block text-xs uppercase text-ink-400">Students ({pickedStudents.size}/{students.length})</label>
+            <div className="flex max-h-32 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-ink-700 bg-ink-800/40 p-2">
+              <button onClick={() => setPickedStudents(new Set(students.map((s) => s._id)))} className="rounded-full bg-brand-600/30 px-2.5 py-0.5 text-[10px] text-brand-100">select all</button>
+              <button onClick={() => setPickedStudents(new Set())} className="rounded-full bg-ink-700 px-2.5 py-0.5 text-[10px] text-ink-300">clear</button>
+              {students.map((s) => (
+                <button key={s._id} onClick={() => toggleSet(pickedStudents, s._id, setPickedStudents)}
+                  className={`rounded-full px-2.5 py-0.5 text-xs transition ${
+                    pickedStudents.has(s._id)
+                      ? "bg-purple-500 text-white"
+                      : "bg-ink-800 text-ink-300 hover:bg-ink-700"
+                  }`}>
+                  {s.username || s._id}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs uppercase text-ink-400">Themes ({pickedThemes.size} picked)</label>
+            <div className="flex flex-wrap gap-1.5">
+              {THEME_CHOICES.map((t) => (
+                <button key={t} onClick={() => toggleSet(pickedThemes, t, setPickedThemes)}
+                  className={`rounded-full px-3 py-1 text-xs transition ${
+                    pickedThemes.has(t)
+                      ? "bg-brand-500 text-white"
+                      : "bg-ink-800 text-ink-300 hover:bg-ink-700"
+                  }`}>
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <label className="mb-1 block text-xs uppercase text-ink-400">Puzzles / theme</label>
+              <input type="number" min={1} max={20} value={perTheme} onChange={(e) => setPerTheme(Math.max(1, Math.min(20, parseInt(e.target.value) || 5)))}
+                className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs uppercase text-ink-400">Due in (days)</label>
+              <input type="number" min={1} max={30} value={dueDays} onChange={(e) => setDueDays(Math.max(1, Math.min(30, parseInt(e.target.value) || 7)))}
+                className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none" />
+            </div>
+            <div className="flex items-end">
+              <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-ink-700 bg-ink-800 px-3 py-2">
+                <input type="checkbox" checked={includeOpening} onChange={(e) => setIncludeOpening(e.target.checked)} />
+                <span className="text-xs text-white">+ opening revision</span>
+              </label>
+            </div>
+          </div>
+          <div className="rounded-xl border border-purple-500/30 bg-purple-500/10 p-3 text-xs text-purple-100">
+            Total per student: <b>{pickedThemes.size * perTheme}</b> puzzles{includeOpening ? " + 1 opening revision" : ""} · due in {dueDays}d
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button onClick={onClose} className="flex-1 rounded-lg border border-ink-700 py-2 text-sm text-white hover:bg-ink-800">Cancel</button>
+            <button disabled={assignMut.isPending || pickedStudents.size === 0 || pickedThemes.size === 0}
+              onClick={() => assignMut.mutate()}
+              className="flex-1 rounded-lg bg-gradient-to-r from-purple-500 to-fuchsia-500 py-2 text-sm font-semibold text-white shadow hover:brightness-110 disabled:opacity-50">
+              {assignMut.isPending ? "Assigning…" : `Assign to ${pickedStudents.size} student${pickedStudents.size === 1 ? "" : "s"}`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HomeworkPanel({ homework }: { homework: any[] }) {
+  const qc = useQueryClient();
+  const delMut = useMutation({
+    mutationFn: (id: string) => del<any>(`/api/academy/homework/${encodeURIComponent(id)}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["academy-homework"] }),
+  });
+  if (!homework.length) {
+    return (
+      <section className="rounded-2xl border border-white/10 bg-ink-900/60 p-6 text-center">
+        <div className="text-3xl">📝</div>
+        <div className="mt-1 font-display text-lg text-white">No homework yet</div>
+        <div className="text-xs text-ink-400">Use ✨ One-click homework above to assign a starter pack in one tap.</div>
+      </section>
+    );
+  }
+  const now = Date.now();
+  return (
+    <section className="rounded-2xl border border-purple-500/25 bg-gradient-to-br from-ink-900 to-purple-950/20 p-5 shadow">
+      <div className="mb-3 flex items-baseline justify-between">
+        <h2 className="font-display text-lg text-white">📝 Recent homework <span className="text-xs text-ink-500">({homework.length})</span></h2>
+        <span className="text-xs text-ink-500">last 500 assignments</span>
+      </div>
+      <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1">
+        {homework.slice(0, 40).map((h) => {
+          const dueMs = new Date(h.dueAt).getTime() - now;
+          const dueLabel = h.status === "completed" ? "✓ done" : dueMs < 0 ? "OVERDUE" : `due ${Math.ceil(dueMs / 86_400_000)}d`;
+          const dueColor = h.status === "completed" ? "text-emerald-300" : dueMs < 0 ? "text-rose-300" : "text-amber-200";
+          const totalTargets = h.tasks.reduce((s: number, t: any) => s + (t.kind === "puzzle_pack" ? t.targetCount : 1), 0);
+          const totalDone = h.tasks.reduce((s: number, t: any, i: number) => s + Math.min((h.progress?.[String(i)] ?? 0), t.kind === "puzzle_pack" ? t.targetCount : 1), 0);
+          const pct = totalTargets ? Math.round((totalDone / totalTargets) * 100) : 0;
+          return (
+            <div key={h._id} className="rounded-xl border border-ink-700 bg-ink-900 p-3 transition hover:border-purple-400/40">
+              <div className="flex items-baseline justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="truncate text-sm font-medium text-white">{h.title}</div>
+                  <div className="mt-0.5 text-xs text-ink-400">→ {h.studentName}</div>
+                </div>
+                <div className={`shrink-0 text-xs font-semibold ${dueColor}`}>{dueLabel}</div>
+              </div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-ink-800">
+                <div className={`h-full ${h.status === "completed" ? "bg-emerald-500" : "bg-gradient-to-r from-purple-500 to-fuchsia-500"}`} style={{ width: `${pct}%` }} />
+              </div>
+              <div className="mt-1 flex items-center justify-between text-[10px] text-ink-500">
+                <span>{totalDone}/{totalTargets} tasks · {h.tasks.length} sections</span>
+                <button onClick={() => confirm(`Delete "${h.title}"?`) && delMut.mutate(h._id)}
+                  className="text-rose-400 hover:underline">delete</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export default function AcademyDashboardPage() {
   const { data: me, isLoading } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
   const isOwner = me?.role === "academy_owner";
@@ -223,6 +572,27 @@ export default function AcademyDashboardPage() {
     },
   });
 
+  // Homework + quick-add-student state (new — sits alongside invites, doesn't replace them)
+  const [showAddStudent, setShowAddStudent] = useState(false);
+  const [showAssignHw, setShowAssignHw] = useState(false);
+  const [oneClickMsg, setOneClickMsg] = useState<{ tone: "ok"|"err"; text: string }|null>(null);
+  const { data: homework } = useQuery({
+    queryKey: ["academy-homework"], queryFn: () => get<any[]>("/api/academy/homework"),
+    enabled: canManage, refetchInterval: 30_000,
+  });
+  const { data: academyMeta } = useQuery({
+    queryKey: ["academy-meta"], queryFn: () => get<{ name?: string; trialEndsAt?: string }>("/api/academy/meta").catch(() => ({} as any)),
+    enabled: canManage,
+  });
+  const oneClickHwMut = useMutation({
+    mutationFn: () => post<{ ok: boolean; assigned?: number; skipped?: number; total?: number; error?: string }>("/api/academy/homework/one-click", {}),
+    onSuccess: (r) => {
+      if (!r.ok) setOneClickMsg({ tone: "err", text: r.error || "Couldn't assign." });
+      else setOneClickMsg({ tone: "ok", text: `Assigned to ${r.assigned}/${r.total} students${r.skipped ? ` (${r.skipped} already had one this week)` : ""}.` });
+      qc.invalidateQueries({ queryKey: ["academy-homework"] });
+    },
+  });
+
   // Invite forms
   const [coachEmail, setCoachEmail] = useState("");
   const [coachName, setCoachName] = useState("");
@@ -276,12 +646,32 @@ export default function AcademyDashboardPage() {
   const coachById = Object.fromEntries((coaches ?? []).map((c) => [c._id, c.username]));
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 py-6">
-      <header className="rounded-xl2 border border-brand-500/30 bg-gradient-to-br from-brand-500/10 via-ink-900 to-ink-900 p-6">
-        <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-brand-300">🏛️ Academy · {roleLabel}</div>
-        <h1 className="font-display text-2xl text-white">{me.academyId}</h1>
-        <p className="mt-1 text-sm text-ink-400">Welcome, <b className="text-white">{me.username}</b>.</p>
-      </header>
+    <div className="relative mx-auto max-w-6xl space-y-6 py-6">
+      {/* Soft aurora accents behind the page */}
+      <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+        <div className="absolute -top-32 left-10 h-96 w-96 rounded-full bg-brand-500/10 blur-[120px]" />
+        <div className="absolute top-20 -right-20 h-96 w-96 rounded-full bg-amber-500/10 blur-[120px]" />
+      </div>
+
+      <AcademyHero name={academyMeta?.name || me.academyId} roleLabel={roleLabel} username={me.username || ""} trialEndsAt={academyMeta?.trialEndsAt} />
+
+      {canManage && <StatsRow students={studentsShown} coaches={coaches ?? []} schedule={schedule} snaps={snaps} homework={homework ?? []} />}
+      {canManage && <QuickActionsBar
+        onAddStudent={() => setShowAddStudent(true)}
+        onAssignHomework={() => setShowAssignHw(true)}
+        onOneClick={() => oneClickHwMut.mutate()}
+        oneClickBusy={oneClickHwMut.isPending}
+        studentCount={studentsShown.length}
+      />}
+      {canManage && oneClickMsg && (
+        <div className={`rounded-xl border px-4 py-2.5 text-sm ${oneClickMsg.tone === "ok" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100" : "border-rose-500/40 bg-rose-500/10 text-rose-100"}`}>
+          {oneClickMsg.text}
+          <button onClick={() => setOneClickMsg(null)} className="float-right text-xs text-ink-400 hover:text-white">×</button>
+        </div>
+      )}
+      {canManage && <HomeworkPanel homework={homework ?? []} />}
+      <AddStudentModal open={showAddStudent} onClose={() => setShowAddStudent(false)} coaches={coaches ?? []} isOwner={isOwner} />
+      <AssignHomeworkModal open={showAssignHw} onClose={() => setShowAssignHw(false)} students={studentsShown} isOwner={isOwner} />
 
       {canManage && <TodayStrip schedule={schedule} snaps={snaps} recordings={recordings} />}
       {canManage && <ReviewHeatmapStrip snaps={snaps} />}
