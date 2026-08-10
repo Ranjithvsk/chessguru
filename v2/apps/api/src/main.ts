@@ -31,6 +31,11 @@ async function bootstrap() {
     res.setHeader("Cache-Control", "no-store");
     next();
   });
+  // Path-scoped raw body parsers must be mounted BEFORE the global json parser so
+  // they win the multi-content-type route match; the global json parser catches
+  // everything else. (Prior to explicit mount, /auth/signin was seeing empty
+  // bodies after the vision json middleware landed — every login failed with
+  // "Please fill in all fields." Fixed 2026-08-10.)
   // Class-recording upload is an application/octet-stream body up to 500MB (~2h of
   // browser MediaRecorder at typical bitrates). Scoped to that ONE endpoint so the
   // default JSON body-parser limits still protect every other route.
@@ -42,6 +47,14 @@ async function bootstrap() {
   // that easily exceed express-json's 100KB default (a 480x480 board PNG
   // is ~300-600KB base64). Cap at 4MB so a coach can't OOM us.
   app.use("/api/vision", expressLib.json({ limit: "4mb" }));
+  // Global JSON + urlencoded parsers for every other route. Explicit — do NOT
+  // rely on Nest's built-in default alone; when the /api/vision json mount
+  // above was added, Nest's default silently stopped parsing (Express only
+  // runs one json parser per request, whichever registered first "wins" the
+  // content-type match). Result was every /auth/* login returning "Please
+  // fill in all fields." Regression 2026-08-10, fixed same day.
+  app.use(expressLib.json({ limit: "1mb" }));
+  app.use(expressLib.urlencoded({ extended: true, limit: "1mb" }));
   app.use(
     session({
       // Unique name so it can't collide with the v1 app's connect.sid on this domain
