@@ -1181,7 +1181,7 @@ function markText(text: string, query: string): React.ReactNode {
   }
   return <>{out}</>;
 }
-function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMode, isSelected, onToggleSelect, query, slideshow, onSlideshowToggle }: {
+function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMode, isSelected, onToggleSelect, query, slideshow, onSlideshowToggle, slideshowSec, onSlideshowSec }: {
   s: SnapItem;
   isOpen: boolean;
   onOpen: () => void;
@@ -1195,6 +1195,8 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
   query?: string;
   slideshow?: boolean;
   onSlideshowToggle?: () => void;
+  slideshowSec?: number;
+  onSlideshowSec?: (n: number) => void;
 }) {
   const qc = useQueryClient();
   const { data: me } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
@@ -1402,9 +1404,19 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
                     className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold transition-colors ${slideshow
                       ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-100"
                       : "border-ink-700 bg-ink-900 text-ink-300 hover:bg-ink-800"}`}
-                    title="Auto-advance every 6s through all snaps in view">
+                    title={`Auto-advance every ${slideshowSec ?? 6}s through all snaps in view`}>
                     {slideshow ? "⏸ Pause" : "▶ Play"}
                   </button>
+                )}
+                {slideshow && onSlideshowSec && (
+                  <div className="flex items-center gap-0.5">
+                    {[3, 6, 12].map((s) => (
+                      <button key={s} onClick={() => onSlideshowSec(s)}
+                        className={`rounded-full border px-1.5 py-0.5 text-[9px] font-semibold tabular-nums ${slideshowSec === s
+                          ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-100"
+                          : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>{s}s</button>
+                    ))}
+                  </div>
                 )}
                 <ShareLinkButton />
                 <span className="hidden sm:inline" title="← / → step through snaps">← →</span>
@@ -1796,9 +1808,19 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classFilter, starredOnly, textFilter, hideReviewed, sortKey, weekFilter]);
   const [openIdx, setOpenIdx] = useState<number | null>(null);
-  // Slideshow: auto-advance every 6s while a modal is open. Wired below
-  // once shownIds is in scope so we can wrap at the actual visible count.
+  // Slideshow: auto-advance every N seconds while a modal is open. Wired
+  // below once shownIds is in scope so we can wrap at the actual count.
+  // Interval persists in localStorage so a coach who likes slow pacing
+  // (12s) keeps it across sessions.
   const [slideshow, setSlideshow] = useState(false);
+  const [slideshowSec, setSlideshowSec] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem("cg_slideshow_sec");
+      const n = raw ? Number(raw) : 6;
+      return n === 3 || n === 6 || n === 12 ? n : 6;
+    } catch { return 6; }
+  });
+  useEffect(() => { try { localStorage.setItem("cg_slideshow_sec", String(slideshowSec)); } catch { /* */ } }, [slideshowSec]);
   // Reset the open snap when filters change so we don't end up pointing at a
   // row that just got filtered out.
   useEffect(() => { setOpenIdx(null); }, [classFilter, starredOnly, textFilter]);
@@ -1838,17 +1860,18 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
     if (next.toString() !== sp.toString()) setSp(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openIdx, shownIds.join(",")]);
-  // Slideshow ticker: advance every 6s, wrap at shown count. Only runs while
-  // a modal is open AND slideshow is on. Turning slideshow off or closing the
-  // modal clears the interval via the cleanup.
+  // Slideshow ticker: advance every slideshowSec seconds, wrap at shown
+  // count. Only runs while a modal is open AND slideshow is on. Turning
+  // slideshow off, closing the modal, or changing the interval clears the
+  // ticker via the cleanup and rearms with the new period.
   useEffect(() => {
     if (!slideshow || openIdx == null || shownIds.length === 0) return;
     const t = setInterval(() => {
       setOpenIdx((cur) => cur == null ? cur : (cur + 1) % shownIds.length);
-    }, 6_000);
+    }, slideshowSec * 1000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slideshow, openIdx == null, shownIds.length]);
+  }, [slideshow, openIdx == null, shownIds.length, slideshowSec]);
   // Multi-select for bulk actions. Enter mode via "☐ Select" chip; clicking
   // cards toggles selection instead of opening the modal. Explicit mode is
   // friendlier than Ctrl+click magic for the coach audience.
@@ -2172,6 +2195,8 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
                 query={textFilter}
                 slideshow={slideshow}
                 onSlideshowToggle={() => setSlideshow((v) => !v)}
+                slideshowSec={slideshowSec}
+                onSlideshowSec={setSlideshowSec}
               />
             ));
           })()}
