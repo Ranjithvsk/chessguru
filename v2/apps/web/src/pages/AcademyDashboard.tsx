@@ -912,7 +912,19 @@ function TodayStrip({ schedule, snaps, recordings }: {
     <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:grid-cols-7">
       <Tile label="Classes today" value={classesToday} tone="border-ink-700 bg-ink-900" />
       <Tile label="Live now" value={liveNow} tone={liveNow > 0 ? "border-emerald-500/40 bg-emerald-500/5" : "border-ink-700 bg-ink-900"} />
-      <Tile label="Snaps today" value={snapsToday} tone="border-ink-700 bg-ink-900" />
+      {(() => {
+        // Deep-link to the volume-chart bar's week filter (Sunday-anchored)
+        // for the current week. Closest we can get to "just today" without
+        // introducing a day-scoped filter that only the ribbon would use.
+        const sun = new Date();
+        sun.setDate(sun.getDate() - sun.getDay());
+        sun.setHours(0, 0, 0, 0);
+        return (
+          <Link to={`/academy?week=${encodeURIComponent(sun.toISOString())}`} title="Open the snap grid filtered to this week's snaps">
+            <Tile label="Snaps today" value={snapsToday} tone={snapsToday > 0 ? "border-ink-700 bg-ink-900 hover:bg-ink-800" : "border-ink-700 bg-ink-900"} />
+          </Link>
+        );
+      })()}
       <Tile label="Recordings today" value={recordingsToday} tone="border-ink-700 bg-ink-900" />
       <Link to="/academy?starred=1" title="Open the snap grid filtered to every starred snap">
         <Tile label="★ Starred (all)" value={starredTotal} tone={starredTotal > 0 ? "border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/10" : "border-ink-700 bg-ink-900"} />
