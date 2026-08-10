@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import Board from "../components/Board";
 import { useFreePlay } from "../hooks/useFreePlay";
+import { detectPositionFromImage } from "../lib/boardVision";
 
 const PRESETS: { label: string; fen: string }[] = [
   { label: "Start", fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" },
@@ -41,6 +42,53 @@ export default function BoardEditorPage() {
 
   const [fenInput, setFenInput] = useState("");
   const [msg, setMsg] = useState("");
+  // Screenshot → FEN pipeline. User uploads or pastes a cropped board image;
+  // client-side detection (see lib/boardVision.ts) classifies each square as
+  // empty / white / black. Piece TYPE is a placeholder (P/N/K/k) that the
+  // coach edits via drag on the board.
+  const [visionBusy, setVisionBusy] = useState(false);
+  const [visionMsg, setVisionMsg] = useState<{ tone: "ok" | "err" | "info"; text: string } | null>(null);
+  const [visionPreview, setVisionPreview] = useState<string | null>(null);
+  const [visionMeta, setVisionMeta] = useState<{ w: number; b: number; uncertain: number } | null>(null);
+  async function runVision(src: string | Blob) {
+    if (visionBusy) return;
+    setVisionBusy(true); setVisionMsg({ tone: "info", text: "Analysing image…" });
+    try {
+      const res = await detectPositionFromImage(src);
+      const uncertain = res.confidence.reduce((n, row) => n + row.reduce((m, c) => m + (c < 0.6 ? 1 : 0), 0), 0);
+      setVisionPreview(res.imageDataUrl);
+      setVisionMeta({ w: res.meta.whiteCount, b: res.meta.blackCount, uncertain });
+      const ok = fp.load(res.fen);
+      if (ok) setVisionMsg({ tone: "ok", text: `Loaded ${res.meta.whiteCount}W + ${res.meta.blackCount}B. Placeholders are pawns / knights — drag to fix piece types.` });
+      else setVisionMsg({ tone: "err", text: "Detected but couldn't load (illegal position). Try a cleaner screenshot." });
+    } catch (e) {
+      setVisionMsg({ tone: "err", text: String((e as Error).message || e) });
+    } finally { setVisionBusy(false); }
+  }
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]; if (!f) return;
+    void runVision(f);
+    // Clear so re-uploading the same file re-triggers.
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+  // Clipboard-paste anywhere on the page: grabs the first image on the
+  // clipboard and pipes it through the same detection flow.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const it of items) {
+        if (it.type.startsWith("image/")) {
+          const blob = it.getAsFile();
+          if (blob) { e.preventDefault(); void runVision(blob); return; }
+        }
+      }
+    };
+    window.addEventListener("paste", onPaste as any);
+    return () => window.removeEventListener("paste", onPaste as any);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const loadFen = () => {
     if (fp.load(fenInput.trim())) setMsg("Loaded.");
@@ -73,6 +121,37 @@ export default function BoardEditorPage() {
           <button onClick={loadFen} className="mt-2 w-full rounded-lg bg-brand-600 px-3 py-2 font-semibold text-white hover:bg-brand-500">Load position</button>
           {msg && <p className="mt-2 text-sm text-accent-400">{msg}</p>}
           <div className="mt-3 break-all rounded-lg bg-ink-950 p-2 font-mono text-xs text-ink-400">{fp.fen}</div>
+        </div>
+
+        <div className="rounded-xl2 border border-brand-500/30 bg-brand-500/5 p-5">
+          <div className="mb-2 flex items-baseline justify-between">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-brand-200">📷 Load from image</h2>
+            <span className="text-[10px] text-ink-500">Ctrl-V paste works too</span>
+          </div>
+          <p className="mb-2 text-[11px] text-ink-400 leading-snug">
+            Upload a cropped chess screenshot (Lichess / Chess.com / any diagram). Detection is naive right now — colours + occupancy only; piece TYPE comes back as a pawn placeholder. Drag pieces around to fix the position, then Copy FEN.
+          </p>
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={onPickFile}
+            className="block w-full text-[11px] text-ink-300 file:mr-2 file:rounded-lg file:border-0 file:bg-brand-600 file:px-3 file:py-1 file:text-white file:hover:bg-brand-500" />
+          {visionMsg && (
+            <div className={`mt-2 rounded border px-2 py-1 text-[11px] ${visionMsg.tone === "ok" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"
+              : visionMsg.tone === "err" ? "border-rose-500/40 bg-rose-500/10 text-rose-100"
+              : "border-ink-700 bg-ink-800 text-ink-300"}`}>
+              {visionBusy && "⏳ "}
+              {visionMsg.text}
+            </div>
+          )}
+          {visionPreview && (
+            <div className="mt-2 flex items-start gap-2">
+              <img src={visionPreview} alt="Cropped board" className="h-24 w-24 rounded border border-ink-700" />
+              {visionMeta && (
+                <div className="text-[11px] text-ink-400 leading-snug">
+                  <div><b className="text-ink-200">{visionMeta.w}</b> white · <b className="text-ink-200">{visionMeta.b}</b> black</div>
+                  {visionMeta.uncertain > 0 && <div className="text-amber-300 mt-0.5">{visionMeta.uncertain} uncertain square{visionMeta.uncertain === 1 ? "" : "s"}</div>}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
