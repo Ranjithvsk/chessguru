@@ -515,6 +515,58 @@ function CalendarPanel({ classes }: { classes: ClassRow[] }) {
   );
 }
 
+// Renders the live-attendee list for one currently-LIVE class. Polls every
+// 10s so the coach's dashboard reflects the room without a refresh. Cheap
+// endpoint — reads the in-memory WS rooms map, no DB.
+type LiveAttendance = {
+  inRoom: Array<{ userId: string | null; name: string }>;
+  allTime: Array<{ userId: string | null; name: string; joinedAt: string; lastSeenAt: string }>;
+  missing: string[];
+  counts: { inRoom: number; allTime: number; missing: number };
+};
+function LiveAttendeesBadge({ classId }: { classId: string }) {
+  const { data } = useQuery({
+    queryKey: ["live-attendance", classId],
+    queryFn: () => get<LiveAttendance>(`/api/class/${encodeURIComponent(classId)}/live-attendance`),
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+  });
+  if (!data) return null;
+  const inRoom = data.inRoom;
+  const missing = data.missing.length;
+  return (
+    <div className="mt-2 rounded-lg bg-ink-900/50 p-2">
+      <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wide">
+        <span className="rounded-full bg-emerald-500/25 px-2 py-0.5 text-emerald-200">🟢 in room</span>
+        <span className="font-mono text-white">{inRoom.length}</span>
+        {data.counts.allTime > inRoom.length && (
+          <span className="text-ink-500">· {data.counts.allTime} total joined</span>
+        )}
+        {missing > 0 && (
+          <span className="ml-auto rounded-full bg-amber-500/20 px-2 py-0.5 text-amber-200" title={data.missing.join("\n")}>
+            {missing} not joined
+          </span>
+        )}
+      </div>
+      {inRoom.length === 0 ? (
+        <div className="text-[11px] italic text-ink-500">nobody connected yet</div>
+      ) : (
+        <div className="flex flex-wrap gap-1">
+          {inRoom.slice(0, 20).map((p, i) => (
+            <span key={i} className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] text-emerald-100 ring-1 ring-emerald-400/30">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              {p.name}
+            </span>
+          ))}
+          {inRoom.length > 20 && (
+            <span className="text-[10px] text-ink-500">+{inRoom.length - 20} more</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function UpcomingClassesPanel({ classes, live }: { classes: ClassRow[]; live: ClassRow[] }) {
   const nextFew = classes.slice(0, 6);
   if (nextFew.length === 0 && live.length === 0) {
@@ -530,18 +582,21 @@ function UpcomingClassesPanel({ classes, live }: { classes: ClassRow[]; live: Cl
     <section className="rounded-2xl border border-rose-500/25 bg-gradient-to-br from-ink-900 to-rose-950/20 p-5 shadow">
       <h2 className="mb-3 font-display text-lg text-white">🎥 Coming up</h2>
       {live.length > 0 && (
-        <div className="mb-3 space-y-2">
+        <div className="mb-3 space-y-3">
           {live.map((c) => (
-            <div key={c._id} className="flex items-center gap-3 rounded-xl border border-rose-400/50 bg-gradient-to-r from-rose-500/20 to-pink-500/10 p-3 shadow-lg">
-              <span className="grid h-8 w-8 place-items-center rounded-full bg-rose-500 text-white shadow-lg animate-pulse">●</span>
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-bold uppercase text-rose-200">LIVE now</div>
-                <div className="truncate text-sm font-semibold text-white">{c.title}</div>
-                <div className="text-[11px] text-ink-300">Coach {c.coach} · {c.durationMin}min</div>
+            <div key={c._id} className="rounded-xl border border-rose-400/50 bg-gradient-to-r from-rose-500/20 to-pink-500/10 p-3 shadow-lg">
+              <div className="flex items-center gap-3">
+                <span className="grid h-8 w-8 place-items-center rounded-full bg-rose-500 text-white shadow-lg animate-pulse">●</span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-bold uppercase text-rose-200">LIVE now</div>
+                  <div className="truncate text-sm font-semibold text-white">{c.title}</div>
+                  <div className="text-[11px] text-ink-300">Coach {c.coach} · {c.durationMin}min</div>
+                </div>
+                <Link to={`/class/${c._id}`} className="shrink-0 rounded-lg bg-rose-500 px-3 py-1.5 text-xs font-bold text-white shadow hover:brightness-110">
+                  Join →
+                </Link>
               </div>
-              <Link to={`/class/${c._id}`} className="shrink-0 rounded-lg bg-rose-500 px-3 py-1.5 text-xs font-bold text-white shadow hover:brightness-110">
-                Join →
-              </Link>
+              <LiveAttendeesBadge classId={c._id} />
             </div>
           ))}
         </div>

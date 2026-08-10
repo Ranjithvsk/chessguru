@@ -265,6 +265,28 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
   });
 });
 
+// Live-attendance snapshot — who is currently connected to this class right
+// now (in-memory, no mongo round-trip). Returns [] when nobody has joined
+// this process's room; the class may still have a stored attendance history.
+// De-duplicated on userId (or on the anon guest name) so a rejoined tab
+// doesn't inflate the count.
+export function getLiveAttendees(classId: string): Array<{ userId: string | null; name: string }> {
+  const room = rooms.get(classId);
+  if (!room) return [];
+  const seen = new Set<string>();
+  const out: Array<{ userId: string | null; name: string }> = [];
+  for (const client of room.clients) {
+    if (client.readyState !== WebSocket.OPEN) continue;
+    const who = socketWho.get(client);
+    if (!who) continue;
+    const key = who.userId ? `u:${who.userId}` : `g:${who.name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ userId: who.userId, name: who.name });
+  }
+  return out;
+}
+
 // Wire the upgrade handshake into Nest's http server. Only handles class-ws paths;
 // any other upgrade attempt is destroyed so we don't accidentally answer for another
 // (future) WebSocket path. Conn is Nest's mongoose Connection — used for attendance
