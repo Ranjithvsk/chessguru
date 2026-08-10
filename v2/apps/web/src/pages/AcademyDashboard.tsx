@@ -718,6 +718,223 @@ function ClassNotesPanel() {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Study Materials — coach uploads PDF/PGN/image/text and picks who sees
+// it (whole academy / their students / specific). Student card is on
+// /dashboard; this is the coach + owner side.
+// ─────────────────────────────────────────────────────────────────────
+type Material = {
+  _id: string; coachId: string; coachName: string;
+  title: string; description: string; filename: string; mime: string; bytes: number;
+  uploadedAt: string; scope: "academy"|"coach-students"|"specific-students";
+  targetStudentIds: string[]; tags: string[]; hasFile: boolean;
+};
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+function fileEmoji(mime: string): string {
+  if (mime === "application/pdf") return "📕";
+  if (mime.startsWith("image/")) return "🖼️";
+  if (mime === "application/x-chess-pgn") return "♟️";
+  return "📄";
+}
+
+function StudyMaterialsPanel({ students }: { students: any[] }) {
+  const qc = useQueryClient();
+  const { data: materials } = useQuery({
+    queryKey: ["academy-materials"], queryFn: () => get<Material[]>("/api/academy/materials"),
+    refetchInterval: 30_000,
+  });
+  const [showUpload, setShowUpload] = useState(false);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [scope, setScope] = useState<"academy"|"coach-students"|"specific-students">("coach-students");
+  const [targetIds, setTargetIds] = useState<Set<string>>(new Set());
+  const [tags, setTags] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const reset = () => {
+    setTitle(""); setDescription(""); setScope("coach-students");
+    setTargetIds(new Set()); setTags(""); setFile(null); setErr(null);
+  };
+  const close = () => { reset(); setShowUpload(false); };
+
+  const upload = async () => {
+    if (!file) { setErr("Pick a file"); return; }
+    if (!title.trim()) { setErr("Title required"); return; }
+    if (scope === "specific-students" && targetIds.size === 0) { setErr("Pick at least one student"); return; }
+    setBusy(true); setErr(null);
+    try {
+      const body: any = {
+        title, description, filename: file.name, scope,
+        tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+      };
+      if (scope === "specific-students") body.targetStudentIds = [...targetIds];
+      const r = await fetch("/api/academy/materials", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then((r) => r.json());
+      if (!r.ok) throw new Error(r.error || "Create failed");
+      const upl = await fetch(`/api/academy/materials/${r.materialId}/file`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: file,
+      });
+      if (!upl.ok) throw new Error(`Upload failed (${upl.status})`);
+      qc.invalidateQueries({ queryKey: ["academy-materials"] });
+      close();
+    } catch (e: any) { setErr(String(e?.message ?? e)); }
+    finally { setBusy(false); }
+  };
+
+  const delMut = useMutation({
+    mutationFn: (id: string) => del<any>(`/api/academy/materials/${encodeURIComponent(id)}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["academy-materials"] }),
+  });
+
+  const toggleTarget = (id: string) => {
+    const n = new Set(targetIds);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    setTargetIds(n);
+  };
+
+  return (
+    <section className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-ink-900 to-indigo-950/25 p-5 shadow">
+      <div className="mb-3 flex items-baseline justify-between">
+        <h2 className="font-display text-lg text-white">
+          📚 Study materials
+          {materials && materials.length > 0 && <span className="ml-2 text-xs text-ink-500">({materials.length})</span>}
+        </h2>
+        <button onClick={() => setShowUpload(true)}
+          className="rounded-lg bg-gradient-to-r from-indigo-500 to-purple-500 px-3 py-1.5 text-xs font-semibold text-white shadow hover:brightness-110">
+          + Upload
+        </button>
+      </div>
+      {(!materials || materials.length === 0) ? (
+        <div className="rounded-xl border border-ink-800 bg-ink-900/50 p-6 text-center">
+          <div className="text-3xl">📚</div>
+          <div className="mt-1 font-display text-sm text-white">No materials shared yet</div>
+          <div className="text-xs text-ink-400">Share a PDF, PGN, image, or note with your students in one upload.</div>
+        </div>
+      ) : (
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {materials.map((m) => (
+            <div key={m._id} className="group flex flex-col rounded-xl border border-ink-700 bg-ink-900 p-3 transition hover:border-indigo-400/40 hover:shadow-lg">
+              <div className="flex items-start gap-2">
+                <span className="text-2xl">{fileEmoji(m.mime)}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold text-white">{m.title}</div>
+                  <div className="truncate text-[11px] text-ink-500">{m.filename} · {fmtBytes(m.bytes)}</div>
+                </div>
+              </div>
+              {m.description && <p className="mt-2 line-clamp-2 text-xs text-ink-300">{m.description}</p>}
+              <div className="mt-2 flex flex-wrap gap-1">
+                <span className={`rounded-full px-2 py-0.5 text-[10px] ring-1 ${
+                  m.scope === "academy" ? "bg-amber-500/15 text-amber-200 ring-amber-400/30"
+                  : m.scope === "coach-students" ? "bg-brand-500/15 text-brand-200 ring-brand-400/30"
+                  : "bg-purple-500/15 text-purple-200 ring-purple-400/30"
+                }`}>
+                  {m.scope === "academy" ? "🏛️ whole academy"
+                    : m.scope === "coach-students" ? "👦 my students"
+                    : `🎯 ${m.targetStudentIds.length} student${m.targetStudentIds.length === 1 ? "" : "s"}`}
+                </span>
+                {m.tags.slice(0, 2).map((t) => (
+                  <span key={t} className="rounded-full bg-ink-800 px-2 py-0.5 text-[10px] text-ink-300">{t}</span>
+                ))}
+              </div>
+              <div className="mt-3 flex items-center justify-between text-[11px]">
+                <a href={`/api/materials/${m._id}/file`} target="_blank" rel="noopener"
+                  className="rounded-md bg-indigo-500/25 px-2.5 py-1 font-semibold text-indigo-100 hover:bg-indigo-500/40">
+                  ⬇ Download
+                </a>
+                <button onClick={() => confirm(`Delete "${m.title}"?`) && delMut.mutate(m._id)}
+                  className="text-rose-400 hover:underline">delete</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {showUpload && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur overflow-y-auto" onClick={() => !busy && close()}>
+          <div onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg rounded-2xl border border-indigo-400/40 bg-ink-900 p-5 my-8 shadow-2xl">
+            <div className="text-2xl">📚</div>
+            <h3 className="mt-1 font-display text-lg text-white">Upload study material</h3>
+            <p className="text-xs text-ink-400">PDF / PGN / image / text (up to 25 MB).</p>
+            {err && <div className="mt-3 rounded-lg border border-rose-500/40 bg-rose-500/10 p-2 text-xs text-rose-200">{err}</div>}
+            <div className="mt-4 space-y-3">
+              <div>
+                <label className="mb-1 block text-xs uppercase text-ink-400">Title</label>
+                <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus placeholder="Endgame primer — pawns"
+                  className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-indigo-500 focus:outline-none" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs uppercase text-ink-400">File</label>
+                <input type="file" accept=".pdf,.pgn,.png,.jpg,.jpeg,.webp,.txt,.md"
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                  className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-300 file:mr-3 file:rounded file:border-0 file:bg-indigo-500/25 file:px-3 file:py-1 file:text-indigo-100" />
+                {file && <div className="mt-1 text-[10px] text-ink-500">{fmtBytes(file.size)} · {file.type || "unknown mime"}</div>}
+              </div>
+              <div>
+                <label className="mb-1 block text-xs uppercase text-ink-400">Description <span className="text-ink-500">(optional)</span></label>
+                <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} maxLength={2000}
+                  placeholder="What is this? When should students read it?"
+                  className="w-full resize-none rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500 focus:border-indigo-500 focus:outline-none" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs uppercase text-ink-400">Share with</label>
+                <div className="grid grid-cols-3 gap-1">
+                  {(["academy","coach-students","specific-students"] as const).map((s) => (
+                    <button key={s} onClick={() => setScope(s)}
+                      className={`rounded-lg border px-2 py-2 text-xs transition ${
+                        scope === s ? "border-indigo-400 bg-indigo-500/20 text-white" : "border-ink-700 bg-ink-800 text-ink-300 hover:bg-ink-700"
+                      }`}>
+                      {s === "academy" ? "🏛️ Academy" : s === "coach-students" ? "👦 My students" : "🎯 Specific"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {scope === "specific-students" && (
+                <div>
+                  <label className="mb-1 block text-xs uppercase text-ink-400">Pick students ({targetIds.size})</label>
+                  <div className="flex max-h-32 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-ink-700 bg-ink-800/40 p-2">
+                    {students.map((s) => (
+                      <button key={s._id} onClick={() => toggleTarget(s._id)}
+                        className={`rounded-full px-2.5 py-0.5 text-xs transition ${
+                          targetIds.has(s._id) ? "bg-purple-500 text-white" : "bg-ink-800 text-ink-300 hover:bg-ink-700"
+                        }`}>
+                        {s.username || s._id}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div>
+                <label className="mb-1 block text-xs uppercase text-ink-400">Tags <span className="text-ink-500">(comma-separated)</span></label>
+                <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="endgame, week 3, homework"
+                  className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-indigo-500 focus:outline-none" />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button onClick={close} disabled={busy} className="flex-1 rounded-lg border border-ink-700 py-2 text-sm text-white hover:bg-ink-800">Cancel</button>
+                <button onClick={upload} disabled={busy || !file || !title.trim()}
+                  className="flex-1 rounded-lg bg-gradient-to-r from-indigo-500 to-purple-500 py-2 text-sm font-semibold text-white shadow hover:brightness-110 disabled:opacity-50">
+                  {busy ? "Uploading…" : "Share"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function HomeworkPanel({ homework }: { homework: any[] }) {
   const qc = useQueryClient();
   const delMut = useMutation({
@@ -1010,6 +1227,7 @@ export default function AcademyDashboardPage() {
       )}
       {canManage && <CalendarPanel classes={[...(schedule?.upcoming ?? []), ...(schedule?.live ?? [])]} />}
       {canManage && <ClassNotesPanel />}
+      {canManage && <StudyMaterialsPanel students={studentsShown} />}
       <AddStudentModal open={showAddStudent} onClose={() => setShowAddStudent(false)} coaches={coaches ?? []} isOwner={isOwner} />
       <AssignHomeworkModal open={showAssignHw} onClose={() => setShowAssignHw(false)} students={studentsShown} isOwner={isOwner} />
 

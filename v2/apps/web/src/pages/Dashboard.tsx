@@ -181,6 +181,59 @@ function StudentClassNotesCard() {
   );
 }
 
+// Student-facing "materials shared with me" card.
+type StudentMaterial = {
+  _id: string; coachName: string; title: string; description: string;
+  filename: string; mime: string; bytes: number; uploadedAt: string;
+  tags: string[]; scope: "academy"|"coach-students"|"specific-students";
+};
+function _mkFileEmoji(m: string): string {
+  if (m === "application/pdf") return "📕";
+  if (m.startsWith("image/")) return "🖼️";
+  if (m === "application/x-chess-pgn") return "♟️";
+  return "📄";
+}
+function _fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+function StudentMaterialsCard() {
+  const { data } = useQuery({ queryKey: ["me-materials"], queryFn: () => get<StudentMaterial[]>("/api/me/materials") });
+  if (!data || data.length === 0) return null;
+  return (
+    <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-500/15 via-purple-500/10 to-blue-500/5 p-4">
+      <div className="mb-3 flex items-baseline justify-between">
+        <h3 className="font-display text-lg text-white">📚 Study materials from your coach</h3>
+        <span className="text-xs text-ink-500">{data.length}</span>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {data.slice(0, 6).map((m) => (
+          <a key={m._id} href={`/api/materials/${m._id}/file`} target="_blank" rel="noopener"
+            className="group flex items-start gap-3 rounded-xl border border-ink-700 bg-ink-900/70 p-3 transition hover:-translate-y-0.5 hover:border-indigo-400/40 hover:shadow-lg">
+            <span className="text-2xl">{_mkFileEmoji(m.mime)}</span>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold text-white">{m.title}</div>
+              <div className="mt-0.5 truncate text-[11px] text-ink-500">
+                {m.coachName} · {_fmtBytes(m.bytes)} · {m.filename}
+              </div>
+              {m.description && <div className="mt-1 line-clamp-2 text-xs text-ink-300">{m.description}</div>}
+              {m.tags.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {m.tags.slice(0, 3).map((t) => (
+                    <span key={t} className="rounded-full bg-indigo-500/15 px-1.5 py-0.5 text-[10px] text-indigo-100">{t}</span>
+                  ))}
+                </div>
+              )}
+              <div className="mt-1.5 text-[10px] text-indigo-300 group-hover:text-indigo-100">⬇ Open</div>
+            </div>
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Student-facing homework card. Loads /api/me/homework and lists open items
 // with a progress bar. Clicking an item takes them to the puzzle trainer with
 // the right theme pre-filtered so the solve counts against the task.
@@ -964,6 +1017,7 @@ export default function DashboardPage() {
       <h1 className="font-display text-2xl text-white">{viewedAs ? `${viewedAs}'s performance` : "📊 My performance"}</h1>
 
       {!viewedAs && <HomeworkCard />}
+      {!viewedAs && <StudentMaterialsCard />}
       {!viewedAs && <StudentClassNotesCard />}
       {!viewedAs && <DailyCard />}
       {data.lastSession && <LastSessionStrip s={data.lastSession} />}
