@@ -133,14 +133,47 @@ export class MaterialsController {
     return { ok: true, bytes: body.byteLength };
   }
 
-  /** Coach view — materials THEY uploaded. Owner sees all in the academy. */
+  /** Coach view — materials THEY uploaded. Owner sees all in the academy.
+   *  Each row is enriched with unique-reader count (read receipts) so the
+   *  coach sees "👁 N read" on the card without opening a per-material drawer. */
   @Get()
   async list(@Req() req: any) {
     const g = this.ensureCoachOrOwner(req.session);
     const filter: any = { academyId: g.academyId };
     if (g.role !== "academy_owner") filter.coachId = g.userId;
     const rows = await this.col().find(filter).sort({ uploadedAt: -1 }).limit(200).toArray();
-    return rows.map(scrub);
+    if (rows.length === 0) return [];
+    // Batch read-count aggregation: one round-trip regardless of list size.
+    const ids = rows.map((r: any) => String(r._id));
+    const counts = await this.conn.db!.collection("materialReads").aggregate([
+      { $match: { materialId: { $in: ids } } },
+      { $group: { _id: "$materialId", readers: { $sum: 1 }, totalReads: { $sum: "$reads" }, lastReadAt: { $max: "$lastReadAt" } } },
+    ]).toArray();
+    const rcMap: Record<string, { readers: number; totalReads: number; lastReadAt: Date | null }> = {};
+    for (const c of counts as any[]) rcMap[String(c._id)] = { readers: c.readers ?? 0, totalReads: c.totalReads ?? 0, lastReadAt: c.lastReadAt ?? null };
+    return rows.map((r: any) => {
+      const s = scrub(r);
+      const rc = rcMap[s._id];
+      return { ...s, readCount: rc?.readers ?? 0, totalReads: rc?.totalReads ?? 0, lastReadAt: rc?.lastReadAt ?? null };
+    });
+  }
+
+  /** Coach drills into one material's read receipts. Ordered most-recent-read
+   *  first so the coach immediately sees who's still catching up. */
+  @Get(":id/reads")
+  async reads(@Param("id") id: string, @Req() req: any) {
+    if (!MAT_ID_RE.test(id)) throw new BadRequestException("bad material id");
+    const g = this.ensureCoachOrOwner(req.session);
+    const row: any = await this.col().findOne({ _id: id as any, academyId: g.academyId });
+    if (!row) throw new NotFoundException();
+    if (row.coachId !== g.userId && g.role !== "academy_owner") throw new ForbiddenException();
+    const reads = await this.conn.db!.collection("materialReads")
+      .find({ materialId: id }).sort({ lastReadAt: -1 }).limit(500).toArray();
+    return reads.map((r: any) => ({
+      userId: r.userId, userName: r.userName || r.userId,
+      firstReadAt: r.firstReadAt, lastReadAt: r.lastReadAt,
+      reads: r.reads ?? 1,
+    }));
   }
 
   @Delete(":id")
@@ -231,6 +264,32 @@ export class MaterialsFileController {
     res.setHeader("Content-Disposition", `inline; filename="${row.filename.replace(/[^\w.-]/g, "_")}"`);
     res.setHeader("Cache-Control", "private, max-age=3600");
     createReadStream(full).pipe(res);
+
+    // Read receipt — fire-and-forget so we don't block the stream. Skip when
+    // the coach who OWNS the material is fetching it (opening your own upload
+    // to verify shouldn't spam your own "who's read this" drawer). Owner
+    // opening academy-wide items DOES count — they're consuming the same as
+    // any other reader. Composite _id (materialId:userId) keeps this
+    // idempotent: N-th open bumps `reads` + `lastReadAt` in place.
+    if (!isCoachOwner) {
+      (async () => {
+        try {
+          const now = new Date();
+          const user: any = await this.conn.db!.collection("users").findOne(
+            { _id: userId as any }, { projection: { username: 1 } },
+          );
+          await this.conn.db!.collection("materialReads").updateOne(
+            { _id: `${id}:${userId}` as any },
+            {
+              $setOnInsert: { materialId: id, userId, userName: user?.username || userId, firstReadAt: now },
+              $set: { lastReadAt: now },
+              $inc: { reads: 1 },
+            },
+            { upsert: true },
+          );
+        } catch { /* logging noise only */ }
+      })();
+    }
   }
 }
 

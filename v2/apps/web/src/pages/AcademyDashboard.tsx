@@ -728,7 +728,9 @@ type Material = {
   title: string; description: string; filename: string; mime: string; bytes: number;
   uploadedAt: string; scope: "academy"|"coach-students"|"specific-students";
   targetStudentIds: string[]; tags: string[]; hasFile: boolean;
+  readCount?: number; totalReads?: number; lastReadAt?: string | null;
 };
+type MaterialRead = { userId: string; userName: string; firstReadAt: string; lastReadAt: string; reads: number };
 
 function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -798,6 +800,13 @@ function StudyMaterialsPanel({ students }: { students: any[] }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["academy-materials"] }),
   });
 
+  const [readsFor, setReadsFor] = useState<Material | null>(null);
+  const { data: reads } = useQuery({
+    queryKey: ["material-reads", readsFor?._id],
+    queryFn: () => get<MaterialRead[]>(`/api/academy/materials/${readsFor!._id}/reads`),
+    enabled: !!readsFor,
+  });
+
   const toggleTarget = (id: string) => {
     const n = new Set(targetIds);
     if (n.has(id)) n.delete(id); else n.add(id);
@@ -853,11 +862,64 @@ function StudyMaterialsPanel({ students }: { students: any[] }) {
                   className="rounded-md bg-indigo-500/25 px-2.5 py-1 font-semibold text-indigo-100 hover:bg-indigo-500/40">
                   ⬇ Download
                 </a>
+                <button onClick={() => setReadsFor(m)}
+                  title={m.lastReadAt ? `Last read ${new Date(m.lastReadAt).toLocaleString()}` : "No one has opened this yet"}
+                  className={`rounded-md px-2 py-1 font-semibold transition ${
+                    (m.readCount ?? 0) > 0
+                      ? "bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/35"
+                      : "bg-ink-800 text-ink-500 hover:bg-ink-700 hover:text-ink-300"
+                  }`}>
+                  👁 {m.readCount ?? 0}
+                </button>
                 <button onClick={() => confirm(`Delete "${m.title}"?`) && delMut.mutate(m._id)}
                   className="text-rose-400 hover:underline">delete</button>
               </div>
             </div>
           ))}
+        </div>
+      )}
+      {readsFor && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur overflow-y-auto" onClick={() => setReadsFor(null)}>
+          <div onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-2xl border border-emerald-400/40 bg-ink-900 p-5 my-8 shadow-2xl">
+            <div className="mb-3 flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="truncate font-display text-lg text-white">👁 Read receipts</div>
+                <div className="truncate text-xs text-ink-400">{readsFor.title}</div>
+              </div>
+              <button onClick={() => setReadsFor(null)} className="text-xl text-ink-400 hover:text-white">×</button>
+            </div>
+            {!reads ? (
+              <div className="py-8 text-center text-sm text-ink-400">Loading…</div>
+            ) : reads.length === 0 ? (
+              <div className="rounded-xl border border-ink-800 bg-ink-800/40 p-6 text-center">
+                <div className="text-3xl">📭</div>
+                <div className="mt-1 text-sm text-white">No one has opened this yet</div>
+                <div className="text-xs text-ink-500">Reads are recorded when a student clicks download.</div>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <div className="mb-2 flex items-center justify-between text-[11px] text-ink-500">
+                  <span>{reads.length} reader{reads.length === 1 ? "" : "s"}</span>
+                  <span>{reads.reduce((s, r) => s + (r.reads || 1), 0)} total opens</span>
+                </div>
+                {reads.map((r) => (
+                  <div key={r.userId} className="flex items-center justify-between rounded-lg border border-ink-700 bg-ink-800/60 px-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-white">{r.userName}</div>
+                      <div className="text-[10px] text-ink-500">
+                        first {new Date(r.firstReadAt).toLocaleDateString(undefined, { day: "2-digit", month: "short" })}
+                        {r.reads > 1 && ` · ${r.reads}× reads`}
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-[11px] text-emerald-300 tabular-nums">
+                      {new Date(r.lastReadAt).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
       {showUpload && (
