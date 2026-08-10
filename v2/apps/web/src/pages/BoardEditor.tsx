@@ -50,16 +50,37 @@ export default function BoardEditorPage() {
   const [visionMsg, setVisionMsg] = useState<{ tone: "ok" | "err" | "info"; text: string } | null>(null);
   const [visionPreview, setVisionPreview] = useState<string | null>(null);
   const [visionMeta, setVisionMeta] = useState<{ w: number; b: number; uncertain: number } | null>(null);
+  // Confidence overlay: after detection we surface every square that came in
+  // below 0.6 confidence as a yellow circle on the board so the coach knows
+  // exactly which cells to double-check. Cleared on "Dismiss overlay".
+  const [uncertainShapes, setUncertainShapes] = useState<Array<{ orig: string; brush: string }>>([]);
   async function runVision(src: string | Blob) {
     if (visionBusy) return;
     setVisionBusy(true); setVisionMsg({ tone: "info", text: "Analysing image…" });
     try {
       const res = await detectPositionFromImage(src);
-      const uncertain = res.confidence.reduce((n, row) => n + row.reduce((m, c) => m + (c < 0.6 ? 1 : 0), 0), 0);
+      const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
+      const shapes: Array<{ orig: string; brush: string }> = [];
+      let uncertain = 0;
+      for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+          const conf = res.confidence[r]?.[c] ?? 1;
+          if (conf < 0.6) {
+            uncertain++;
+            shapes.push({ orig: `${files[c]}${8 - r}`, brush: "yellow" });
+          }
+        }
+      }
+      setUncertainShapes(shapes);
       setVisionPreview(res.imageDataUrl);
       setVisionMeta({ w: res.meta.whiteCount, b: res.meta.blackCount, uncertain });
       const ok = fp.load(res.fen);
-      if (ok) setVisionMsg({ tone: "ok", text: `Loaded ${res.meta.whiteCount}W + ${res.meta.blackCount}B. Placeholders are pawns / knights — drag to fix piece types.` });
+      if (ok) {
+        const nudge = uncertain > 0
+          ? ` ⚠ ${uncertain} yellow-ringed square${uncertain === 1 ? "" : "s"} need a second look.`
+          : "";
+        setVisionMsg({ tone: "ok", text: `Loaded ${res.meta.whiteCount}W + ${res.meta.blackCount}B. Placeholders are pawns / knights — drag to fix types.${nudge}` });
+      }
       else setVisionMsg({ tone: "err", text: "Detected but couldn't load (illegal position). Try a cleaner screenshot." });
     } catch (e) {
       setVisionMsg({ tone: "err", text: String((e as Error).message || e) });
@@ -102,12 +123,19 @@ export default function BoardEditorPage() {
       <section>
         <Board fen={fp.fen} orientation={fp.orientation} turnColor={fp.turnColor}
           movableColor="both" dests={fp.dests} onMove={fp.onMove}
-          shapes={initialShapes as any} />
+          shapes={(uncertainShapes.length > 0 ? uncertainShapes : initialShapes) as any} />
         <div className="mt-3 flex flex-wrap gap-2">
           <button onClick={fp.undo} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">◀ Undo</button>
           <button onClick={fp.reset} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">Reset</button>
           <button onClick={fp.flip} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">⇅ Flip</button>
           <button onClick={copyFen} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">Copy FEN</button>
+          {uncertainShapes.length > 0 && (
+            <button onClick={() => setUncertainShapes([])}
+              className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100 hover:bg-amber-500/20"
+              title="Hide the yellow uncertain-square rings">
+              ⚠ Dismiss {uncertainShapes.length} ring{uncertainShapes.length === 1 ? "" : "s"}
+            </button>
+          )}
         </div>
       </section>
 
