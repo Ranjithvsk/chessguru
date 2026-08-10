@@ -132,7 +132,10 @@ export default function BoardEditorPage() {
         const nudge = uncertain > 0
           ? ` ⚠ ${uncertain} yellow-ringed square${uncertain === 1 ? "" : "s"} need a second look.`
           : "";
-        setVisionMsg({ tone: "ok", text: `Loaded ${res.meta.whiteCount}W + ${res.meta.blackCount}B. Placeholders are pawns / knights — drag to fix types.${nudge}` });
+        const cropTag = res.autoDetected
+          ? `✓ Auto-found board (score ${res.autoScore}/64).`
+          : `⚠ Couldn't find a board — used the whole image. Crop tighter and re-upload for better results.`;
+        setVisionMsg({ tone: res.autoDetected ? "ok" : "info", text: `${cropTag} Loaded ${res.meta.whiteCount}W + ${res.meta.blackCount}B.${nudge}` });
       }
       else setVisionMsg({ tone: "err", text: "Detected but couldn't load (illegal position). Try a cleaner screenshot." });
     } catch (e) {

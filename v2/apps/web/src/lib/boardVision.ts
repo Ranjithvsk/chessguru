@@ -46,18 +46,111 @@ async function loadImage(src: string | Blob): Promise<HTMLImageElement> {
 }
 
 /** Downscale + crop to square. Screenshots often include a tiny margin; we
- *  trim symmetrically to the largest square that fits. */
+ *  trim symmetrically to the largest square that fits. Used as the fallback
+ *  when auto-detect can't find a confident board. */
 function cropToSquare(img: HTMLImageElement): HTMLCanvasElement {
   const side = Math.min(img.naturalWidth, img.naturalHeight);
   const dx = Math.floor((img.naturalWidth - side) / 2);
   const dy = Math.floor((img.naturalHeight - side) / 2);
-  // Target 480px so each square is 60x60 -- plenty for the naive sampling.
   const canvas = document.createElement("canvas");
   canvas.width = 480; canvas.height = 480;
   const ctx = canvas.getContext("2d")!;
   ctx.imageSmoothingEnabled = true;
   ctx.drawImage(img, dx, dy, side, side, 0, 0, 480, 480);
   return canvas;
+}
+
+/** Auto-detect the chess board's bounding square inside a larger screenshot
+ *  (browser chrome, side panels, captions, etc.). Approach: downscale to a
+ *  work canvas capped at 400px, slide a square window at multiple sizes,
+ *  score each by how strongly its 8×8 sub-grid alternates in luminance
+ *  the way a chess board should. Best-scoring window is the board.
+ *
+ *  Returns null when confidence is too low -- caller falls back to
+ *  cropToSquare (whole image assumed to be the board) with a UI nudge for
+ *  the user to crop manually. Sub-second on a 400×400 work canvas. */
+function autoDetectBoard(img: HTMLImageElement): { x: number; y: number; side: number; score: number } | null {
+  const scale = 400 / Math.max(img.naturalWidth, img.naturalHeight, 1);
+  const workW = Math.round(img.naturalWidth * scale);
+  const workH = Math.round(img.naturalHeight * scale);
+  const c = document.createElement("canvas");
+  c.width = workW; c.height = workH;
+  const ctx = c.getContext("2d")!;
+  ctx.drawImage(img, 0, 0, workW, workH);
+  const full = ctx.getImageData(0, 0, workW, workH).data;
+  const lumAt = (px: number, py: number): number => {
+    if (px < 0 || py < 0 || px >= workW || py >= workH) return 0;
+    const off = (py * workW + px) * 4;
+    return 0.299 * full[off]! + 0.587 * full[off + 1]! + 0.114 * full[off + 2]!;
+  };
+  const maxSide = Math.min(workW, workH);
+  const minSide = Math.max(80, Math.floor(maxSide * 0.3));
+  let best: { x: number; y: number; side: number; score: number } | null = null;
+  // Scale candidates at 12% steps; positional stride 6% of size. ~1000
+  // windows total for a 400×300 image -- runs well under a second.
+  for (let side = maxSide; side >= minSide; side = Math.floor(side * 0.88)) {
+    const cell = side / 8;
+    const step = Math.max(4, Math.floor(side * 0.06));
+    for (let y = 0; y <= workH - side; y += step) {
+      for (let x = 0; x <= workW - side; x += step) {
+        // Sample the CENTRE of each of the 64 sub-cells. Learn dark/light
+        // means from the alternating positions, then score how many samples
+        // land on the correct side of the midpoint. 64 = perfect chessboard;
+        // 32 = random noise.
+        let darkSum = 0, darkN = 0, lightSum = 0, lightN = 0;
+        const samples: number[] = new Array(64);
+        for (let r = 0; r < 8; r++) {
+          for (let cx = 0; cx < 8; cx++) {
+            const sx = Math.round(x + cx * cell + cell / 2);
+            const sy = Math.round(y + r * cell + cell / 2);
+            const l = lumAt(sx, sy);
+            samples[r * 8 + cx] = l;
+            if ((r + cx) % 2 === 0) { lightSum += l; lightN++; }
+            else { darkSum += l; darkN++; }
+          }
+        }
+        const lightMean = lightSum / Math.max(1, lightN);
+        const darkMean = darkSum / Math.max(1, darkN);
+        // Reject candidates where the two square-classes aren't clearly
+        // separated (not a board). 25 luminance units ≈ ~10% contrast.
+        if (Math.abs(lightMean - darkMean) < 25) continue;
+        const mid = (lightMean + darkMean) / 2;
+        let correct = 0;
+        for (let i = 0; i < 64; i++) {
+          const r = Math.floor(i / 8), cx = i % 8;
+          const expectLight = (r + cx) % 2 === 0;
+          const isLight = samples[i]! >= mid;
+          if (isLight === expectLight) correct++;
+        }
+        if (!best || correct > best.score) {
+          best = { x, y, side, score: correct };
+        }
+      }
+    }
+  }
+  // Demand at least 52/64 correct (81%). Below that the "board" is probably
+  // a false positive; caller should nudge the user to crop manually.
+  if (!best || best.score < 52) return null;
+  return {
+    x: Math.round(best.x / scale),
+    y: Math.round(best.y / scale),
+    side: Math.round(best.side / scale),
+    score: best.score,
+  };
+}
+
+/** Preferred crop: auto-detect the board first, fall back to cropToSquare
+ *  when detection is unconfident. Returns the crop canvas + whether the
+ *  auto-detector fired (so the UI can nudge the user for a manual crop). */
+function detectAndCrop(img: HTMLImageElement): { canvas: HTMLCanvasElement; auto: boolean; score: number | null } {
+  const found = autoDetectBoard(img);
+  if (!found) return { canvas: cropToSquare(img), auto: false, score: null };
+  const c = document.createElement("canvas");
+  c.width = 480; c.height = 480;
+  const ctx = c.getContext("2d")!;
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(img, found.x, found.y, found.side, found.side, 0, 0, 480, 480);
+  return { canvas: c, auto: true, score: found.score };
 }
 
 /** Mean + stddev of luminance over a rectangular sample. */
@@ -208,9 +301,9 @@ export function gridToFen(grid: SquareState[][], types?: (PieceType | null)[][])
 /** Full pipeline: image (blob or data URL) → detected FEN + per-square
  *  confidence + inferred piece TYPES via template-matching against the
  *  bundled Lichess-default (cburnett) SVGs. */
-export async function detectPositionFromImage(src: string | Blob): Promise<DetectResult> {
+export async function detectPositionFromImage(src: string | Blob): Promise<DetectResult & { autoDetected: boolean; autoScore: number | null }> {
   const img = await loadImage(src);
-  const canvas = cropToSquare(img);
+  const { canvas, auto, score } = detectAndCrop(img);
   const { grid, confidence } = classifyGrid(canvas);
   // Classify piece TYPES for every occupied square. Multiply the two
   // confidences (occupancy × type) so downstream UI can flag squares
@@ -246,5 +339,7 @@ export async function detectPositionFromImage(src: string | Blob): Promise<Detec
     fen, grid, confidence, types,
     imageDataUrl: canvas.toDataURL("image/png"),
     meta: { whiteCount, blackCount },
+    autoDetected: auto,
+    autoScore: score,
   };
 }
