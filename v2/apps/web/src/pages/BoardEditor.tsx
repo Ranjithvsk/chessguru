@@ -101,6 +101,10 @@ export default function BoardEditorPage() {
   // (vision-detected type) vs (coach-corrected type) on Apply and upload the
   // deltas as new templates for future detections.
   const [visionSnapshot, setVisionSnapshot] = useState<{ types: (PieceType | null)[][]; canvas: HTMLCanvasElement; renderMode: "screen" | "print" } | null>(null);
+  // v3 Server AI ("DINOv2 nearest-neighbour"). Sends the cropped board to
+  // the backend classifier; ~3-6s per board.
+  const [serverBusy, setServerBusy] = useState(false);
+  const [serverMsg, setServerMsg] = useState<{ tone: "ok" | "err" | "info"; text: string } | null>(null);
   // Fetch the crowd-sourced reference bank on first mount. See loadServerRefsOnce.
   useEffect(() => { void loadServerRefsOnce(); }, []);
   // Position-editor mode: when on, board clicks PLACE a piece (from palette)
@@ -164,12 +168,18 @@ export default function BoardEditorPage() {
             try {
               const sig = extractSilhouetteFromSquare(ctx, c * cell, r * cell, cell, cell, cell88.color as any, visionSnapshot.renderMode);
               const png = silhouetteToPngDataUrl(sig);
-              // Fire-and-forget. Failure (offline / not logged in) is silent —
-              // it doesn't affect the Apply flow the coach cares about.
+              // Also grab the raw natural-pixel square crop so the server
+              // can embed it via DINOv2 -- that feeds the v3 server-side
+              // classifier's reference bank so future boards from this
+              // book/screenshot style classify better.
+              const rawC = document.createElement("canvas");
+              rawC.width = cell; rawC.height = cell;
+              rawC.getContext("2d")!.drawImage(visionSnapshot.canvas, c * cell, r * cell, cell, cell, 0, 0, cell, cell);
+              const rawCropPng = rawC.toDataURL("image/png");
               void fetch(`${API_BASE}/api/vision/feedback`, {
                 method: "POST", credentials: "include",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ piece: coachType, color: cell88.color, silhouettePng: png }),
+                body: JSON.stringify({ piece: coachType, color: cell88.color, silhouettePng: png, rawCropPng }),
               }).catch(() => {});
               sent++;
               void files;
@@ -231,6 +241,36 @@ export default function BoardEditorPage() {
     } catch (e) {
       setVisionMsg({ tone: "err", text: String((e as Error).message || e) });
     } finally { setVisionBusy(false); }
+  }
+  /** Run the server-side v3 classifier on the last vision preview. The
+   *  server splits the cropped 480x480 board into 64 squares, embeds each
+   *  via DINOv2, nearest-neighbours against the visionRefs bank, returns
+   *  FEN + per-square confidence. Reference bank starts with 12 cburnett
+   *  seeds and grows via coach corrections. */
+  async function runServerClassify() {
+    if (serverBusy) return;
+    if (!visionSnapshot) { setServerMsg({ tone: "err", text: "Upload a board image first." }); return; }
+    setServerBusy(true); setServerMsg({ tone: "info", text: "🚀 Server AI classifying (3-6s)…" });
+    try {
+      const boardPngBase64 = visionSnapshot.canvas.toDataURL("image/png");
+      const r = await fetch(`${API_BASE}/api/vision/classify-board`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ boardPngBase64 }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      const j = await r.json();
+      const ok = fp.load(j.fen);
+      const avgConf = (j.squares.flat().reduce((s: number, sq: any) => s + sq.confidence, 0) / 64 * 100).toFixed(0);
+      setServerMsg({
+        tone: ok ? "ok" : "err",
+        text: ok
+          ? `✓ Server AI loaded ${j.fen.split(" ")[0].replace(/[^KQRBNPkqrbnp]/g, "").length} pieces (avg conf ${avgConf}%, ${j.meta.latencyMs}ms).`
+          : `Server FEN was illegal. Best guess: ${j.fen}`,
+      });
+    } catch (e) {
+      setServerMsg({ tone: "err", text: `Server AI failed: ${(e as Error).message.slice(0, 120)}` });
+    } finally { setServerBusy(false); }
   }
   const fileInputRef = useRef<HTMLInputElement>(null);
   function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -379,6 +419,22 @@ export default function BoardEditorPage() {
                 <div className="text-[11px] text-ink-400 leading-snug">
                   <div><b className="text-ink-200">{visionMeta.w}</b> white · <b className="text-ink-200">{visionMeta.b}</b> black</div>
                   {visionMeta.uncertain > 0 && <div className="text-amber-300 mt-0.5">{visionMeta.uncertain} uncertain square{visionMeta.uncertain === 1 ? "" : "s"}</div>}
+                </div>
+              )}
+            </div>
+          )}
+          {visionSnapshot && (
+            <div className="mt-3 border-t border-brand-500/20 pt-2">
+              <button onClick={runServerClassify} disabled={serverBusy}
+                className="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-500 disabled:cursor-wait disabled:bg-brand-800">
+                {serverBusy ? "🚀 Classifying…" : "🚀 Try Server AI (DINOv2)"}
+              </button>
+              <span className="ml-2 text-[10px] text-ink-500">Slower (3-6s) but improves with coach corrections. Try when client detection is off.</span>
+              {serverMsg && (
+                <div className={`mt-2 rounded border px-2 py-1 text-[11px] ${serverMsg.tone === "ok" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"
+                  : serverMsg.tone === "err" ? "border-rose-500/40 bg-rose-500/10 text-rose-100"
+                  : "border-ink-700 bg-ink-800 text-ink-300"}`}>
+                  {serverMsg.text}
                 </div>
               )}
             </div>

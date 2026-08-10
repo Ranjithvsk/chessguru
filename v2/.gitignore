@@ -11,3 +11,5 @@ coverage/
 .turbo/
 .vite/
 *.tsbuildinfo
+# Large ML models -- copied via scp on each deploy from Mumbai backend
+apps/api/models/
