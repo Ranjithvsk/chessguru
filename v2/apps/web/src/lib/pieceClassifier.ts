@@ -32,9 +32,11 @@ const TYPE_TO_CSS: Record<PieceType, string> = {
 const TMPL_SIZE = 40;
 
 interface TemplateBank {
-  // 12 entries: keys like "K:w", "P:b". Each Uint8ClampedArray is 40*40
-  // grayscale (0..255) after silhouette extraction.
-  templates: Map<string, Uint8ClampedArray>;
+  // Keys like "K:w", "P:b". Each entry is a list of 40*40 grayscale
+  // silhouettes (0..255) for that (type,color). The bank starts with 1
+  // per key (cburnett) and grows as the server serves coach-corrections +
+  // pre-seeded alt piece sets.
+  templates: Map<string, Uint8ClampedArray[]>;
 }
 
 let bankPromise: Promise<TemplateBank> | null = null;
@@ -42,7 +44,7 @@ let bankPromise: Promise<TemplateBank> | null = null;
 /** Fetch the cburnett CSS from the chessground package, extract each piece's
  *  base64 SVG data URI, and rasterize to a 40×40 grayscale silhouette. */
 async function loadTemplates(): Promise<TemplateBank> {
-  const templates = new Map<string, Uint8ClampedArray>();
+  const templates = new Map<string, Uint8ClampedArray[]>();
   // vite: chessground ships the CSS as a package export. We fetch it via a
   // module ?url import so vite bundles + fingerprints correctly.
   const cssHref = (await import("chessground/assets/chessground.cburnett.css?url")).default;
@@ -56,7 +58,7 @@ async function loadTemplates(): Promise<TemplateBank> {
     const color: PieceColor = m[2] === "white" ? "w" : "b";
     const dataUri = m[3]!;
     const patch = await rasterize(dataUri);
-    templates.set(`${type}:${color}`, patch);
+    templates.set(`${type}:${color}`, [patch]);
   }
   return { templates };
 }
@@ -64,6 +66,49 @@ async function loadTemplates(): Promise<TemplateBank> {
 function getBank(): Promise<TemplateBank> {
   if (!bankPromise) bankPromise = loadTemplates();
   return bankPromise;
+}
+
+/** Merge server-provided references into the in-memory bank. Called once
+ *  at page load with the payload from GET /api/vision/references. Each
+ *  reference is a 40×40 grayscale PNG (base64); we rasterize on merge. */
+export async function addServerReferences(refs: Array<{ piece: PieceType; color: PieceColor; silhouettePng: string }>): Promise<void> {
+  if (!refs?.length) return;
+  const bank = await getBank();
+  for (const r of refs) {
+    try {
+      const dataUri = r.silhouettePng.startsWith("data:") ? r.silhouettePng : `data:image/png;base64,${r.silhouettePng}`;
+      const patch = await rasterize(dataUri);
+      const key = `${r.piece}:${r.color}`;
+      const list = bank.templates.get(key);
+      if (list) list.push(patch);
+      else bank.templates.set(key, [patch]);
+    } catch { /* one bad reference shouldn't nuke the batch */ }
+  }
+}
+
+/** Public wrapper around extractSilhouette so BoardEditor can turn a
+ *  coach's freshly-corrected square into a silhouette for upload. */
+export function extractSilhouetteFromSquare(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number, w: number, h: number,
+  color: PieceColor,
+): Uint8ClampedArray {
+  return extractSilhouette(ctx, x, y, w, h, color);
+}
+
+/** Convert a 40×40 grayscale silhouette back to a PNG data URL. Used to
+ *  upload coach-corrections in the feedback endpoint payload. */
+export function silhouetteToPngDataUrl(sig: Uint8ClampedArray): string {
+  const c = document.createElement("canvas");
+  c.width = TMPL_SIZE; c.height = TMPL_SIZE;
+  const ctx = c.getContext("2d")!;
+  const img = ctx.createImageData(TMPL_SIZE, TMPL_SIZE);
+  for (let i = 0, j = 0; i < sig.length; i++, j += 4) {
+    const v = sig[i]!;
+    img.data[j] = v; img.data[j + 1] = v; img.data[j + 2] = v; img.data[j + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return c.toDataURL("image/png");
 }
 
 /** Render a data-URI SVG to a 40×40 grayscale silhouette (0 = background,
@@ -172,10 +217,19 @@ export async function classifyPiece(
 ): Promise<{ type: PieceType; confidence: number }> {
   const bank = await getBank();
   const sig = extractSilhouette(ctx, x, y, w, h, color);
+  // For each piece type, score AGAINST EVERY template we have for that
+  // (type, color) and take the best (lowest error). More templates = more
+  // shots at recognising an unfamiliar piece set; the winner still has to
+  // beat the winning shots of every OTHER type to earn the classification.
   const scored = TYPES.map((t) => {
-    const tmpl = bank.templates.get(`${t}:${color}`);
-    if (!tmpl) return { type: t, err: Infinity };
-    return { type: t, err: meanSquaredError(sig, tmpl) };
+    const tmpls = bank.templates.get(`${t}:${color}`);
+    if (!tmpls || tmpls.length === 0) return { type: t, err: Infinity };
+    let best = Infinity;
+    for (const tmpl of tmpls) {
+      const e = meanSquaredError(sig, tmpl);
+      if (e < best) best = e;
+    }
+    return { type: t, err: best };
   }).sort((a, b) => a.err - b.err);
   const winner = scored[0]!;
   const second = scored[1]!;

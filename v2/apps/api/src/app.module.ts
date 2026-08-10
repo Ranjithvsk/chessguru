@@ -34,12 +34,14 @@ import { PushService } from "./push/push.service";
 import { PushController } from "./push/push.controller";
 import { AnnouncementsService } from "./announcements/announcements.service";
 import { AnnouncementsController } from "./announcements/announcements.controller";
+import { VisionService } from "./vision/vision.service";
+import { VisionController } from "./vision/vision.controller";
 
 const MONGO_URI = process.env.MONGO_URI ?? "mongodb://localhost:27017/chessguru";
 
 @Module({
   imports: [MongooseModule.forRoot(MONGO_URI), IntegrationsModule, LivekitModule, AcademyModule],
-  controllers: [HealthController, MiscController, BroadcastsController, PuzzlesController, AuthController, AdminController, EngineController, ExplorerController, StudyController, ClassRecordingController, ClassScheduleController, ClassAttendanceController, ClassSnapController, ClassOptOutController, MailWebhookController, IceConfigController, DigestOptOutController, EmailOptOutController, PushController, AnnouncementsController],
-  providers: [PuzzlesService, AuthService, AdminService, EngineService, ExplorerService, StudyService, ClassReminderService, WeeklyDigestService, StreakReminderService, PushService, AnnouncementsService],
+  controllers: [HealthController, MiscController, BroadcastsController, PuzzlesController, AuthController, AdminController, EngineController, ExplorerController, StudyController, ClassRecordingController, ClassScheduleController, ClassAttendanceController, ClassSnapController, ClassOptOutController, MailWebhookController, IceConfigController, DigestOptOutController, EmailOptOutController, PushController, AnnouncementsController, VisionController],
+  providers: [PuzzlesService, AuthService, AdminService, EngineService, ExplorerService, StudyService, ClassReminderService, WeeklyDigestService, StreakReminderService, PushService, AnnouncementsService, VisionService],
 })
 export class AppModule {}

@@ -5,6 +5,47 @@ import Board from "../components/Board";
 import type { Key } from "chessground/types";
 import { useFreePlay } from "../hooks/useFreePlay";
 import { detectPositionFromImage } from "../lib/boardVision";
+import {
+  addServerReferences,
+  extractSilhouetteFromSquare,
+  silhouetteToPngDataUrl,
+  type PieceType,
+} from "../lib/pieceClassifier";
+
+const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
+
+/** One-time (page-load-scoped) fetch of the server-side reference bank so
+ *  coach-corrections from other coaches boost the detector before the user
+ *  opens the vision panel. Fails silently -- offline / API down still
+ *  gives us the built-in cburnett templates. */
+let refsLoaded = false;
+async function loadServerRefsOnce(): Promise<void> {
+  if (refsLoaded) return;
+  refsLoaded = true;
+  try {
+    const r = await fetch(`${API_BASE}/api/vision/references`, { credentials: "include" });
+    if (!r.ok) return;
+    const j = await r.json();
+    if (Array.isArray(j?.references)) await addServerReferences(j.references);
+  } catch { /* silent -- bank still has cburnett defaults */ }
+}
+
+/** Decode a data URL back to a canvas so we can crop per-square patches on
+ *  Apply. detectPositionFromImage returns the cropped 480x480 board as a
+ *  PNG data URL; we reconstitute it here for correction capture. */
+function dataUrlToCanvas(dataUrl: string): Promise<HTMLCanvasElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = img.width; c.height = img.height;
+      c.getContext("2d")!.drawImage(img, 0, 0);
+      resolve(c);
+    };
+    img.onerror = () => reject(new Error("failed to decode vision preview"));
+    img.src = dataUrl;
+  });
+}
 
 const PRESETS: { label: string; fen: string }[] = [
   { label: "Start", fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" },
@@ -56,6 +97,12 @@ export default function BoardEditorPage() {
   // below 0.6 confidence as a yellow circle on the board so the coach knows
   // exactly which cells to double-check. Cleared on "Dismiss overlay".
   const [uncertainShapes, setUncertainShapes] = useState<Array<{ orig: string; brush: string }>>([]);
+  // Frozen from the last successful vision run so we can compute a diff of
+  // (vision-detected type) vs (coach-corrected type) on Apply and upload the
+  // deltas as new templates for future detections.
+  const [visionSnapshot, setVisionSnapshot] = useState<{ types: (PieceType | null)[][]; canvas: HTMLCanvasElement } | null>(null);
+  // Fetch the crowd-sourced reference bank on first mount. See loadServerRefsOnce.
+  useEffect(() => { void loadServerRefsOnce(); }, []);
   // Position-editor mode: when on, board clicks PLACE a piece (from palette)
   // or CLEAR the square. Uses a private Chess() so we can put/remove without
   // chess.js's move-legality guard rejecting arbitrary edits. Applying the
@@ -96,12 +143,48 @@ export default function BoardEditorPage() {
     const board = g.fen().split(" ")[0]!;
     const next = `${board} ${editSide} - - 0 1`;
     if (fp.load(next)) {
-      setMsg("Position applied.");
+      // Diff coach edits vs the last vision run. Any square where coach
+      // set a piece of the DETECTED colour but a DIFFERENT type is a
+      // template win -- send it to /api/vision/feedback for future use.
+      // We deliberately skip color flips (very rare vision failure) and
+      // empty->piece / piece->empty edits (occupancy detector is separate).
+      let sent = 0;
+      if (visionSnapshot) {
+        const cell = visionSnapshot.canvas.width / 8;
+        const ctx = visionSnapshot.canvas.getContext("2d")!;
+        const files = "abcdefgh";
+        const boardArr = g.board();       // 8x8 (rank 8 top → rank 1 bottom, file a → h)
+        for (let r = 0; r < 8; r++) {
+          for (let c = 0; c < 8; c++) {
+            const cell88 = boardArr[r]?.[c];
+            const visionType = visionSnapshot.types[r]?.[c];
+            if (!cell88 || !visionType) continue;
+            const coachType = cell88.type.toUpperCase() as PieceType;
+            if (coachType === visionType) continue;   // no correction
+            try {
+              const sig = extractSilhouetteFromSquare(ctx, c * cell, r * cell, cell, cell, cell88.color as any);
+              const png = silhouetteToPngDataUrl(sig);
+              // Fire-and-forget. Failure (offline / not logged in) is silent —
+              // it doesn't affect the Apply flow the coach cares about.
+              void fetch(`${API_BASE}/api/vision/feedback`, {
+                method: "POST", credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ piece: coachType, color: cell88.color, silhouettePng: png }),
+              }).catch(() => {});
+              sent++;
+              void files;
+            } catch { /* silent */ }
+          }
+        }
+      }
+      setMsg(sent > 0
+        ? `Position applied. Shared ${sent} correction${sent === 1 ? "" : "s"} to improve future detection.`
+        : "Position applied.");
       setEditMode(false);
     } else {
       setMsg("Illegal position (need one K and one k, kings not adjacent, no pawns on ranks 1/8).");
     }
-    setTimeout(() => setMsg(""), 3000);
+    setTimeout(() => setMsg(""), 3500);
   }
   // Preview FEN of the in-flight editor buffer (drives the board while edit
   // mode is active so clicks appear immediately).
@@ -127,6 +210,12 @@ export default function BoardEditorPage() {
       setUncertainShapes(shapes);
       setVisionPreview(res.imageDataUrl);
       setVisionMeta({ w: res.meta.whiteCount, b: res.meta.blackCount, uncertain });
+      // Freeze the cropped board + per-square types so applyEditor can
+      // capture coach corrections against them for feedback upload.
+      try {
+        const cvs = await dataUrlToCanvas(res.imageDataUrl);
+        setVisionSnapshot({ types: res.types, canvas: cvs });
+      } catch { /* corrections just won't be captured this run */ }
       const ok = fp.load(res.fen);
       if (ok) {
         const nudge = uncertain > 0
