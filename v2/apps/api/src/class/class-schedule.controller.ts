@@ -29,6 +29,10 @@ function newRoomId(): string {
 type ScheduleDoc = {
   _id: string; title: string; coach: string;
   startAt: Date; durationMin: number; notes: string;
+  // Topics to be covered — coach lists as short pills on the schedule form
+  // ("Ruy López · Bg5 pin · endgame drills"). Rendered as chips on the class
+  // card + calendar day cell. Max 8 items, each ≤ 40 chars.
+  topics?: string[];
   createdAt: Date;
   // Coach identity — set from the session at create time. Anonymous coaches
   // (not signed in) get null and simply lose the ability to cancel/edit later.
@@ -114,6 +118,12 @@ export class ClassScheduleController {
     const title = String(b.title ?? "").trim();
     const coach = String(b.coach ?? "").trim();
     const notes = String(b.notes ?? "").trim();
+    // Topics: accept an array of short strings, sanitize + clamp.
+    const topicsIn = Array.isArray(b.topics) ? b.topics : [];
+    const topics = topicsIn
+      .map((t: unknown) => String(t ?? "").trim().slice(0, 40))
+      .filter((t: string) => t.length > 0)
+      .slice(0, 8);
     const durationMin = Math.max(5, Math.min(600, Math.floor(Number(b.durationMin) || 60)));
     const startAtNum = Number(new Date(b.startAt || "").getTime());
     if (!title) throw new HttpException("title required", HttpStatus.BAD_REQUEST);
@@ -195,7 +205,7 @@ export class ClassScheduleController {
       docs.push({
         _id: id, title, coach: coachName,
         startAt: new Date(startTimes[i]!),
-        durationMin, notes, createdAt: new Date(),
+        durationMin, notes, topics, createdAt: new Date(),
         createdByUserId: userId,
         academyId,
         seriesId, seriesIndex: total > 1 ? i + 1 : undefined,
@@ -293,6 +303,13 @@ export class ClassScheduleController {
       const v = b.notes.trim();
       if (v.length > MAX_NOTES) throw new HttpException("notes too long", HttpStatus.BAD_REQUEST);
       patch.notes = v;
+    }
+    if (b.topics !== undefined) {
+      const arr = Array.isArray(b.topics) ? b.topics : [];
+      patch.topics = arr
+        .map((t: unknown) => String(t ?? "").trim().slice(0, 40))
+        .filter((t: string) => t.length > 0)
+        .slice(0, 8);
     }
     if (b.durationMin != null) {
       patch.durationMin = Math.max(5, Math.min(600, Math.floor(Number(b.durationMin) || 60)));

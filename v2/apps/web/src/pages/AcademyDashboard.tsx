@@ -60,7 +60,7 @@ function AttendanceStrip({ days }: { days?: boolean[] }) {
     </div>
   );
 }
-interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; attendedCount?: number; academyId?: string|null; summarySentAt?: string|null; autoSummary?: boolean; autoSummaryNote?: string; seriesId?: string|null; seriesIndex?: number; seriesTotal?: number; autoSummaryFailedAt?: string|null; autoSummaryFailedCount?: number; autoSummaryFailedError?: string }
+interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; attendedCount?: number; academyId?: string|null; summarySentAt?: string|null; autoSummary?: boolean; autoSummaryNote?: string; seriesId?: string|null; seriesIndex?: number; seriesTotal?: number; autoSummaryFailedAt?: string|null; autoSummaryFailedCount?: number; autoSummaryFailedError?: string; topics?: string[]; notes?: string }
 interface FeesConfig { monthlyFeePaise: number; upiVpa: string; upiPayeeName: string; canEdit: boolean }
 interface Invoice { _id: string; academyId: string; studentId: string; studentUsername: string; period: string; amountPaise: number; status: "pending"|"paid"|"waived"; generatedAt: string; paidAt?: string; paymentMethod?: string }
 function rupees(paise: number) { return (paise / 100).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }); }
@@ -388,6 +388,198 @@ function AssignHomeworkModal({ open, onClose, students, isOwner }: {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Calendar + upcoming classes panels — sit next to the homework panel on
+// the academy home. Owner+coach only. Renders a monthly grid with class
+// pills on each day, click a day to open a details drawer.
+// ─────────────────────────────────────────────────────────────────────
+
+function fmtHM(d: Date) {
+  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+function fmtDayShort(d: Date) {
+  return d.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short" });
+}
+
+/** Build a 6-week grid for the given month (Sunday-first columns). */
+function monthGridDays(anchor: Date): Date[] {
+  const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+  const gridStart = new Date(first);
+  gridStart.setDate(1 - first.getDay());  // step back to the Sunday of week 1
+  const out: Date[] = [];
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(gridStart);
+    d.setDate(gridStart.getDate() + i);
+    out.push(d);
+  }
+  return out;
+}
+
+function CalendarPanel({ classes }: { classes: ClassRow[] }) {
+  const [anchor, setAnchor] = useState(() => { const d = new Date(); d.setDate(1); return d; });
+  const [pickedDay, setPickedDay] = useState<string | null>(null);
+  const monthLabel = anchor.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const grid = monthGridDays(anchor);
+  const todayKey = new Date().toDateString();
+
+  // Bucket classes by their local date-string for O(1) lookup per cell.
+  const byDay = new Map<string, ClassRow[]>();
+  for (const c of classes) {
+    const dk = new Date(c.startAt).toDateString();
+    if (!byDay.has(dk)) byDay.set(dk, []);
+    byDay.get(dk)!.push(c);
+  }
+  for (const [, arr] of byDay) arr.sort((a, b) => +new Date(a.startAt) - +new Date(b.startAt));
+
+  const nav = (n: number) => setAnchor(new Date(anchor.getFullYear(), anchor.getMonth() + n, 1));
+  const dayItems = pickedDay ? (byDay.get(pickedDay) ?? []) : [];
+
+  return (
+    <section className="rounded-2xl border border-cyan-500/25 bg-gradient-to-br from-ink-900 to-cyan-950/20 p-5 shadow">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="font-display text-lg text-white">📅 {monthLabel}</h2>
+        <div className="flex items-center gap-1">
+          <button onClick={() => nav(-1)} className="rounded-md px-2 py-1 text-sm text-ink-300 hover:bg-ink-800">←</button>
+          <button onClick={() => setAnchor(() => { const d = new Date(); d.setDate(1); return d; })}
+            className="rounded-md border border-ink-700 px-2 py-0.5 text-[11px] text-ink-300 hover:bg-ink-800">Today</button>
+          <button onClick={() => nav(1)} className="rounded-md px-2 py-1 text-sm text-ink-300 hover:bg-ink-800">→</button>
+        </div>
+      </div>
+      <div className="grid grid-cols-7 gap-1 text-[10px] uppercase tracking-wide text-ink-500">
+        {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d) => <div key={d} className="text-center py-1">{d}</div>)}
+      </div>
+      <div className="mt-1 grid grid-cols-7 gap-1">
+        {grid.map((d) => {
+          const key = d.toDateString();
+          const inMonth = d.getMonth() === anchor.getMonth();
+          const items = byDay.get(key) ?? [];
+          const isToday = key === todayKey;
+          const isPicked = key === pickedDay;
+          return (
+            <button key={key} onClick={() => setPickedDay(isPicked ? null : key)}
+              className={`min-h-[68px] rounded-lg border p-1.5 text-left text-[11px] transition ${
+                isPicked ? "border-cyan-400 bg-cyan-500/15" :
+                items.length ? "border-cyan-500/30 bg-cyan-500/5 hover:bg-cyan-500/10" :
+                inMonth ? "border-ink-800 bg-ink-900/40 hover:bg-ink-800/60" :
+                "border-ink-900 bg-ink-950 opacity-40"
+              }`}>
+              <div className={`flex items-center justify-between ${isToday ? "font-bold text-cyan-300" : inMonth ? "text-white" : "text-ink-500"}`}>
+                <span>{d.getDate()}</span>
+                {items.length > 0 && <span className="rounded-full bg-cyan-500/25 px-1.5 text-[9px] text-cyan-200">{items.length}</span>}
+              </div>
+              <div className="mt-0.5 space-y-0.5">
+                {items.slice(0, 2).map((c) => (
+                  <div key={c._id} className="truncate rounded bg-cyan-500/20 px-1 py-0.5 text-[10px] text-cyan-100">
+                    {fmtHM(new Date(c.startAt))} · {c.title}
+                  </div>
+                ))}
+                {items.length > 2 && <div className="text-[9px] text-cyan-300">+{items.length - 2} more</div>}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      {pickedDay && dayItems.length > 0 && (
+        <div className="mt-4 rounded-xl border border-cyan-500/30 bg-ink-900/60 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="font-display text-sm font-semibold text-white">{fmtDayShort(new Date(pickedDay))}</div>
+            <button onClick={() => setPickedDay(null)} className="text-xs text-ink-400 hover:text-white">Close</button>
+          </div>
+          <div className="space-y-2">
+            {dayItems.map((c) => (
+              <div key={c._id} className="rounded-lg border border-ink-700 bg-ink-800/60 p-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-semibold text-white">{c.title}</div>
+                    <div className="mt-0.5 text-[11px] text-ink-400">
+                      {fmtHM(new Date(c.startAt))} · {c.durationMin}min · Coach {c.coach}
+                    </div>
+                  </div>
+                  <Link to={`/class/${c._id}`} className="shrink-0 rounded-md bg-cyan-500/25 px-2.5 py-1 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/40">
+                    Open →
+                  </Link>
+                </div>
+                {c.topics && c.topics.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {c.topics.map((t, i) => (
+                      <span key={i} className="rounded-full bg-brand-500/15 px-2 py-0.5 text-[10px] text-brand-100 ring-1 ring-brand-400/25">{t}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function UpcomingClassesPanel({ classes, live }: { classes: ClassRow[]; live: ClassRow[] }) {
+  const nextFew = classes.slice(0, 6);
+  if (nextFew.length === 0 && live.length === 0) {
+    return (
+      <section className="rounded-2xl border border-white/10 bg-ink-900/60 p-6 text-center">
+        <div className="text-3xl">🎥</div>
+        <div className="mt-1 font-display text-lg text-white">No classes scheduled</div>
+        <div className="text-xs text-ink-400">Add topics + a start time below to schedule your first one.</div>
+      </section>
+    );
+  }
+  return (
+    <section className="rounded-2xl border border-rose-500/25 bg-gradient-to-br from-ink-900 to-rose-950/20 p-5 shadow">
+      <h2 className="mb-3 font-display text-lg text-white">🎥 Coming up</h2>
+      {live.length > 0 && (
+        <div className="mb-3 space-y-2">
+          {live.map((c) => (
+            <div key={c._id} className="flex items-center gap-3 rounded-xl border border-rose-400/50 bg-gradient-to-r from-rose-500/20 to-pink-500/10 p-3 shadow-lg">
+              <span className="grid h-8 w-8 place-items-center rounded-full bg-rose-500 text-white shadow-lg animate-pulse">●</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-bold uppercase text-rose-200">LIVE now</div>
+                <div className="truncate text-sm font-semibold text-white">{c.title}</div>
+                <div className="text-[11px] text-ink-300">Coach {c.coach} · {c.durationMin}min</div>
+              </div>
+              <Link to={`/class/${c._id}`} className="shrink-0 rounded-lg bg-rose-500 px-3 py-1.5 text-xs font-bold text-white shadow hover:brightness-110">
+                Join →
+              </Link>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="space-y-2">
+        {nextFew.map((c) => {
+          const starts = new Date(c.startAt);
+          const inMs = starts.getTime() - Date.now();
+          const inLabel = inMs < 60 * 60_000 ? `in ${Math.max(1, Math.round(inMs / 60_000))}m`
+            : inMs < 24 * 60 * 60_000 ? `in ${Math.round(inMs / 3600_000)}h`
+            : `in ${Math.round(inMs / 86_400_000)}d`;
+          return (
+            <div key={c._id} className="rounded-xl border border-ink-700 bg-ink-900/60 p-3 transition hover:border-rose-400/40">
+              <div className="flex items-baseline justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium text-white">{c.title}</div>
+                  <div className="mt-0.5 text-[11px] text-ink-400">
+                    {fmtDayShort(starts)} · {fmtHM(starts)} · Coach {c.coach}
+                  </div>
+                </div>
+                <div className="shrink-0 text-xs font-semibold text-rose-200">{inLabel}</div>
+              </div>
+              {c.topics && c.topics.length > 0 && (
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {c.topics.slice(0, 4).map((t, i) => (
+                    <span key={i} className="rounded-full bg-brand-500/15 px-2 py-0.5 text-[10px] text-brand-100 ring-1 ring-brand-400/25">{t}</span>
+                  ))}
+                  {c.topics.length > 4 && <span className="text-[10px] text-ink-400">+{c.topics.length - 4}</span>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function HomeworkPanel({ homework }: { homework: any[] }) {
   const qc = useQueryClient();
   const delMut = useMutation({
@@ -493,6 +685,8 @@ export default function AcademyDashboardPage() {
   const [classDur, setClassDur] = useState(60);
   const [classAutoSummary, setClassAutoSummary] = useState(false);
   const [classAutoSummaryNote, setClassAutoSummaryNote] = useState("");
+  // Topics to be covered — comma-separated in the form, serialized as an array.
+  const [classTopics, setClassTopics] = useState("");
   // "Last used" auto-summary defaults for the current user, persisted in
   // localStorage so scheduling a similar class next time is a one-tap
   // pre-fill. Keyed by userId so a shared browser doesn't cross-contaminate.
@@ -553,13 +747,14 @@ export default function AcademyDashboardPage() {
   const scheduleMut = useMutation({
     mutationFn: () => post<{ _id: string; title: string }>("/api/class/schedule", {
       title: classTitle, coach: classCoach || (me?.username ?? ""), startAt: new Date(classStartAt).toISOString(), durationMin: classDur,
+      topics: classTopics.split(",").map((s) => s.trim()).filter(Boolean),
       autoSummary: classAutoSummary,
       autoSummaryNote: classAutoSummary ? classAutoSummaryNote : "",
     }),
     onSuccess: (r: any) => {
       if (r && r._id) {
         setScheduleMsg({ tone: "ok", text: `"${r.title}" scheduled — join link ready.` });
-        setClassTitle(""); setClassCoach(""); setClassStartAt(localDatetimeDefault()); setClassDur(60);
+        setClassTitle(""); setClassCoach(""); setClassStartAt(localDatetimeDefault()); setClassDur(60); setClassTopics("");
         // Persist autoSummary settings for next-time one-click restore.
         if (classAutoSummary && lastAutoKey) {
           try { localStorage.setItem(lastAutoKey, JSON.stringify({ note: classAutoSummaryNote })); setLastAutoDefault({ note: classAutoSummaryNote }); }
@@ -669,7 +864,13 @@ export default function AcademyDashboardPage() {
           <button onClick={() => setOneClickMsg(null)} className="float-right text-xs text-ink-400 hover:text-white">×</button>
         </div>
       )}
-      {canManage && <HomeworkPanel homework={homework ?? []} />}
+      {canManage && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <UpcomingClassesPanel classes={schedule?.upcoming ?? []} live={schedule?.live ?? []} />
+          <HomeworkPanel homework={homework ?? []} />
+        </div>
+      )}
+      {canManage && <CalendarPanel classes={[...(schedule?.upcoming ?? []), ...(schedule?.live ?? [])]} />}
       <AddStudentModal open={showAddStudent} onClose={() => setShowAddStudent(false)} coaches={coaches ?? []} isOwner={isOwner} />
       <AssignHomeworkModal open={showAssignHw} onClose={() => setShowAssignHw(false)} students={studentsShown} isOwner={isOwner} />
 
@@ -977,6 +1178,19 @@ export default function AcademyDashboardPage() {
                 onChange={(e) => setClassDur(Math.max(5, Math.min(600, Number(e.target.value) || 60)))}
                 className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white focus:border-brand-500 focus:outline-none"
                 title="Duration (minutes)" />
+            </div>
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">📚 Topics to cover <span className="text-ink-500">(comma-separated · shown as pills)</span></label>
+              <input type="text" placeholder="Ruy Lopez, pin tactics, endgame drills" value={classTopics}
+                onChange={(e) => setClassTopics(e.target.value)}
+                className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
+              {classTopics.trim() && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {classTopics.split(",").map((t) => t.trim()).filter(Boolean).slice(0, 8).map((t, i) => (
+                    <span key={i} className="rounded-full bg-brand-500/20 px-2 py-0.5 text-[11px] text-brand-100 ring-1 ring-brand-400/30">{t}</span>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="md:col-span-2 flex items-center gap-2">
               <label className="flex items-center gap-2 text-xs text-ink-300 cursor-pointer">
