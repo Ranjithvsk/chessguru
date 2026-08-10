@@ -1854,20 +1854,6 @@ export default function AcademyDashboardPage() {
 
       {/* ── Recent snaps (owner + coach) — coach-flagged mid-class positions ── */}
       {canManage && snaps && snaps.length > 0 && <RecentSnapsSection snaps={snaps} />}
-
-      <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
-        <h2 className="mb-1 font-display text-lg text-white">🚀 Q1 shipping list</h2>
-        <ul className="grid gap-2 text-sm text-ink-200 md:grid-cols-2">
-          <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">✅ Multi-tenant signup</li>
-          <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">✅ Coach invitations</li>
-          <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">✅ Student enrollment (coach rosters)</li>
-          <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">✅ Owner/coach view student performance</li>
-          <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">✅ Attendance rollup per student</li>
-          <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">✅ Per-academy class scheduling</li>
-          <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">✅ Fees + UPI QR payments</li>
-          <li className="rounded-lg border border-ink-700 bg-ink-800/40 px-3 py-2">🚀 Q1 complete — Q2 next</li>
-        </ul>
-      </section>
     </div>
   );
 }
