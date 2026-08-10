@@ -1932,10 +1932,10 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
     window.addEventListener(SNAP_WEEK_EVENT, handler as EventListener);
     return () => window.removeEventListener(SNAP_WEEK_EVENT, handler as EventListener);
   }, []);
-  type SortKey = "recent" | "oldest" | "arrows" | "stale";
+  type SortKey = "recent" | "oldest" | "arrows" | "stale" | "shared";
   const [sortKey, setSortKey] = useState<SortKey>(() => {
     const v = sp.get("sort");
-    return (v === "oldest" || v === "arrows" || v === "stale") ? (v as SortKey) : "recent";
+    return (v === "oldest" || v === "arrows" || v === "stale" || v === "shared") ? (v as SortKey) : "recent";
   });
   useEffect(() => {
     // Rebuild the URL query from state. Empty values drop out so links stay clean.
@@ -2198,6 +2198,7 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
         if (!!b.reviewedAt !== !!a.reviewedAt) return Number(!!a.reviewedAt) - Number(!!b.reviewedAt);
         return new Date(a.at).getTime() - new Date(b.at).getTime();
       }
+      if (sortKey === "shared") return (shareTally?.[b._id] ?? 0) - (shareTally?.[a._id] ?? 0);
       return 0; // "recent" -- API order (already reverse-chronological)
     });
   return (
@@ -2260,6 +2261,7 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
             <option value="oldest">Sort: oldest</option>
             <option value="arrows">Sort: most arrows</option>
             <option value="stale">Sort: most stale</option>
+            <option value="shared">Sort: most shared</option>
           </select>
           {weekFilter && (
             <span className="rounded-full border border-brand-500/40 bg-brand-500/10 px-2 py-0.5 text-[11px] font-semibold text-brand-100 inline-flex items-center gap-1">
