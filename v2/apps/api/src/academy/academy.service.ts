@@ -840,4 +840,21 @@ export class AcademyService {
     for (const r of rows) out[String(r._id)] = Number(r.n);
     return out;
   }
+
+  /** Flat list of the coach's outbound snap-shares for CSV export. Newest
+   *  first, capped at 500 rows so the response stays lean. */
+  async snapShareListFor(userId: string) {
+    const rows: any[] = await this.conn.db!.collection("coachSnapSends").find(
+      { byUserId: String(userId) },
+      { projection: { snapId: 1, toUserId: 1, toUsername: 1, toEmail: 1, note: 1, at: 1 } as any },
+    ).sort({ at: -1 }).limit(500).toArray();
+    return rows.map((r) => ({
+      snapId: r.snapId,
+      toUserId: r.toUserId,
+      toUsername: r.toUsername || "",
+      toEmail: r.toEmail || "",
+      note: r.note || "",
+      at: r.at,
+    }));
+  }
 }

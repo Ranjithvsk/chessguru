@@ -964,8 +964,40 @@ function SnapSharesTile({ Tile }: { Tile: React.ComponentType<{ label: string; v
               <h3 className="font-display text-lg text-white">📤 Recent snap-shares</h3>
               <button onClick={() => setOpen(false)} className="text-ink-400 hover:text-white text-sm">Esc</button>
             </div>
-            <div className="text-[11px] text-ink-400 mb-2">
-              This week: <b className="text-ink-200">{week}</b> · all-time: <b className="text-ink-200">{total}</b>
+            <div className="mb-2 flex items-center gap-3 flex-wrap">
+              <div className="text-[11px] text-ink-400">
+                This week: <b className="text-ink-200">{week}</b> · all-time: <b className="text-ink-200">{total}</b>
+              </div>
+              {total > 0 && (
+                <button onClick={async () => {
+                  try {
+                    const rows = await fetch(`${BASE}/api/academy/snap-shares`, { credentials: "include" }).then((r) => r.json()) as Array<{ snapId: string; toUsername: string; toEmail: string; note: string; at: string }>;
+                    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+                    const lines = [["At", "To", "Email", "SnapId", "SnapLink", "Note"].map(esc).join(",")];
+                    for (const r of rows) {
+                      const link = `${location.origin}/academy?snap=${encodeURIComponent(r.snapId)}`;
+                      lines.push([
+                        new Date(r.at).toISOString(),
+                        r.toUsername || "",
+                        r.toEmail || "",
+                        r.snapId,
+                        link,
+                        r.note || "",
+                      ].map((c) => esc(String(c))).join(","));
+                    }
+                    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url; a.download = `snap-shares-${new Date().toISOString().slice(0, 10)}.csv`;
+                    document.body.appendChild(a); a.click(); a.remove();
+                    setTimeout(() => URL.revokeObjectURL(url), 1000);
+                  } catch { /* silent */ }
+                }}
+                  className="rounded-full border border-ink-700 bg-ink-900 px-2.5 py-0.5 text-[11px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-ink-100"
+                  title="Download the full share history as CSV">
+                  ⬇ CSV
+                </button>
+              )}
             </div>
             {(!data?.recent || data.recent.length === 0) ? (
               <div className="text-sm text-ink-400">No shares yet. Open any snap → 📤 Send to student to start.</div>

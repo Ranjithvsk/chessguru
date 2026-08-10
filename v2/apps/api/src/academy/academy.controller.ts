@@ -64,6 +64,15 @@ export class AcademyController {
     return this.svc.snapShareTallyFor(userId);
   }
 
+  // GET /api/academy/snap-shares — flat list of the coach's outbound shares
+  // (up to 500 rows, newest first) for CSV export.
+  @Get("snap-shares")
+  async snapShareList(@Req() req: any) {
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) throw new UnauthorizedException();
+    return this.svc.snapShareListFor(userId);
+  }
+
   @Post("invites")
   createInvite(@Body() body: any, @Req() req: any) {
     return this.svc.createInvite(req.session, body);
