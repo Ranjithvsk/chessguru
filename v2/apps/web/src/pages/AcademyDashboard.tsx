@@ -1240,6 +1240,33 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
     } catch (e) { setErr(String((e as Error).message || e)); }
     finally { setSaving(false); }
   }
+  // Share flow -- author-only. Small in-modal panel to pick a student and
+  // add an optional note; POSTs /academy/snap-share.
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareTo, setShareTo] = useState<string>("");
+  const [shareMsg, setShareMsg] = useState("");
+  const [shareSending, setShareSending] = useState(false);
+  const [shareResult, setShareResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  useEffect(() => { setShareOpen(false); setShareResult(null); setShareMsg(""); setShareTo(""); }, [s._id, isOpen]);
+  const shareStudentsQ = useQuery({
+    queryKey: ["academy-students"],
+    queryFn: () => get<Student[]>("/api/academy/students"),
+    enabled: shareOpen,
+  });
+  async function sendShare() {
+    if (!shareTo || shareSending) return;
+    setShareSending(true); setShareResult(null);
+    try {
+      const r = await fetch(`${BASE}/api/academy/snap-share`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ snapId: s._id, studentId: shareTo, message: shareMsg }),
+      }).then((res) => res.json());
+      if (r?.ok) setShareResult({ ok: true, msg: `Sent to ${r.to || "student"}` });
+      else setShareResult({ ok: false, msg: r?.error || "Send failed" });
+    } catch { setShareResult({ ok: false, msg: "Network error" }); }
+    finally { setShareSending(false); }
+  }
   async function toggleReviewed() {
     try {
       const r = await fetch(`${BASE}/api/class/${encodeURIComponent(s.classId)}/snap/${encodeURIComponent(s._id)}`, {
@@ -1522,9 +1549,44 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
                           : "border-ink-600 text-ink-200 hover:bg-ink-800"}`}>
                         {s.reviewedAt ? "✓ Reviewed" : "☐ Mark reviewed"}
                       </button>
+                      <button onClick={() => setShareOpen((v) => !v)}
+                        className={`rounded-lg border px-3 py-1.5 text-sm ${shareOpen
+                          ? "border-brand-500/60 bg-brand-500/10 text-brand-100"
+                          : "border-ink-600 text-ink-200 hover:bg-ink-800"}`}>
+                        📤 Send to student
+                      </button>
                     </>
                   )}
                 </div>
+                {shareOpen && (
+                  <div className="mt-3 rounded-lg border border-brand-500/40 bg-brand-500/5 p-3 space-y-2">
+                    <label className="block text-[11px] uppercase tracking-wide text-ink-400">Pick a student</label>
+                    <select value={shareTo} onChange={(e) => setShareTo(e.target.value)}
+                      className="w-full rounded-lg border border-ink-700 bg-ink-800 px-2 py-1.5 text-sm text-white outline-none focus:border-brand-500">
+                      <option value="">— Select a student —</option>
+                      {(shareStudentsQ.data ?? []).map((st) => (
+                        <option key={st._id} value={st._id}>
+                          {st.username}{st.email ? ` · ${st.email}` : " · (no email)"}
+                        </option>
+                      ))}
+                    </select>
+                    <label className="block text-[11px] uppercase tracking-wide text-ink-400">Optional note</label>
+                    <textarea value={shareMsg} onChange={(e) => setShareMsg(e.target.value)} rows={2} maxLength={500}
+                      placeholder='e.g. "Try to find the winning tactic before checking the analysis."'
+                      className="w-full resize-none rounded-lg border border-ink-700 bg-ink-800 px-2 py-1.5 text-sm text-white placeholder:text-ink-500 outline-none focus:border-brand-500" />
+                    <div className="flex items-center gap-2">
+                      <button onClick={sendShare} disabled={!shareTo || shareSending}
+                        className="rounded-lg bg-brand-600 px-3 py-1 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
+                        {shareSending ? "Sending…" : "Send email"}
+                      </button>
+                      {shareResult && (
+                        <span className={`text-[11px] ${shareResult.ok ? "text-emerald-300" : "text-rose-300"}`}>
+                          {shareResult.ok ? "✓ " : "⚠️ "}{shareResult.msg}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
