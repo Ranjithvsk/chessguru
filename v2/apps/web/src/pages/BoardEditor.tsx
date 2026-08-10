@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { Chess } from "chess.js";
 import Board from "../components/Board";
+import type { Key } from "chessground/types";
 import { useFreePlay } from "../hooks/useFreePlay";
 import { detectPositionFromImage } from "../lib/boardVision";
 
@@ -54,6 +56,57 @@ export default function BoardEditorPage() {
   // below 0.6 confidence as a yellow circle on the board so the coach knows
   // exactly which cells to double-check. Cleared on "Dismiss overlay".
   const [uncertainShapes, setUncertainShapes] = useState<Array<{ orig: string; brush: string }>>([]);
+  // Position-editor mode: when on, board clicks PLACE a piece (from palette)
+  // or CLEAR the square. Uses a private Chess() so we can put/remove without
+  // chess.js's move-legality guard rejecting arbitrary edits. Applying the
+  // edit calls fp.load() which routes it back through the standard board
+  // state and re-validates.
+  const [editMode, setEditMode] = useState(false);
+  const [palettePick, setPalettePick] = useState<string | null>(null); // e.g. "K", "p", or "-" (erase)
+  const [editSide, setEditSide] = useState<"w" | "b">("w");
+  const editorRef = useRef<Chess>(new Chess());
+  const [editorTick, setEditorTick] = useState(0); // force re-render on editor mutations
+  useEffect(() => {
+    // Sync editor buffer from current board state whenever the user enters
+    // edit mode. Prevents a stale buffer from wiping recent moves.
+    if (editMode) {
+      try { editorRef.current.load(fp.fen); } catch { /* fall back to empty */ editorRef.current.clear(); }
+      setEditorTick((n) => n + 1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editMode]);
+  function onSquareClick(sq: Key) {
+    if (!editMode) return;
+    const g = editorRef.current;
+    if (palettePick === "-") { g.remove(sq as any); setEditorTick((n) => n + 1); return; }
+    if (!palettePick) return;
+    const color: "w" | "b" = palettePick === palettePick.toUpperCase() ? "w" : "b";
+    const type = palettePick.toLowerCase() as "k" | "q" | "r" | "b" | "n" | "p";
+    try {
+      g.remove(sq as any);
+      g.put({ type, color }, sq as any);
+      setEditorTick((n) => n + 1);
+    } catch { /* invalid square */ }
+  }
+  function applyEditor() {
+    // Rebuild FEN with the currently-picked side-to-move + no castling
+    // rights (safest default; coach can hand-edit the FEN if they need
+    // castling later). Full FEN needed so chess.js accepts it back.
+    const g = editorRef.current;
+    const board = g.fen().split(" ")[0]!;
+    const next = `${board} ${editSide} - - 0 1`;
+    if (fp.load(next)) {
+      setMsg("Position applied.");
+      setEditMode(false);
+    } else {
+      setMsg("Illegal position (need one K and one k, kings not adjacent, no pawns on ranks 1/8).");
+    }
+    setTimeout(() => setMsg(""), 3000);
+  }
+  // Preview FEN of the in-flight editor buffer (drives the board while edit
+  // mode is active so clicks appear immediately).
+  const editorFen = editMode ? `${editorRef.current.fen().split(" ")[0]} ${editSide} - - 0 1` : null;
+  void editorTick; // include in render deps
   async function runVision(src: string | Blob) {
     if (visionBusy) return;
     setVisionBusy(true); setVisionMsg({ tone: "info", text: "Analysing image…" });
@@ -121,8 +174,10 @@ export default function BoardEditorPage() {
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
       <section>
-        <Board fen={fp.fen} orientation={fp.orientation} turnColor={fp.turnColor}
-          movableColor="both" dests={fp.dests} onMove={fp.onMove}
+        <Board fen={editorFen ?? fp.fen} orientation={fp.orientation} turnColor={fp.turnColor}
+          movableColor={editMode ? undefined : "both"} dests={editMode ? new Map() : fp.dests}
+          onMove={editMode ? undefined : fp.onMove}
+          onSelect={editMode ? onSquareClick : undefined}
           shapes={(uncertainShapes.length > 0 ? uncertainShapes : initialShapes) as any} />
         <div className="mt-3 flex flex-wrap gap-2">
           <button onClick={fp.undo} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">◀ Undo</button>
@@ -136,7 +191,62 @@ export default function BoardEditorPage() {
               ⚠ Dismiss {uncertainShapes.length} ring{uncertainShapes.length === 1 ? "" : "s"}
             </button>
           )}
+          <button onClick={() => setEditMode((v) => !v)}
+            className={`rounded-lg border px-3 py-2 text-sm ${editMode
+              ? "border-brand-500/60 bg-brand-500/15 text-brand-100 hover:bg-brand-500/25"
+              : "border-ink-600 text-ink-300 hover:bg-ink-800"}`}
+            title="Toggle position-editor mode. Click a palette piece then click a square to place. Click 🗑 then a square to erase.">
+            {editMode ? "✕ Exit edit" : "✎ Edit position"}
+          </button>
         </div>
+        {editMode && (
+          <div className="mt-3 rounded-xl2 border border-brand-500/40 bg-brand-500/5 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2 text-[11px]">
+              <span className="uppercase tracking-wide text-brand-200">✎ Position editor</span>
+              <div className="flex items-center gap-2">
+                <span className="text-ink-400">Side to move</span>
+                <button onClick={() => setEditSide("w")}
+                  className={`rounded-full border px-2 py-0.5 font-semibold ${editSide === "w" ? "border-brand-500/60 bg-brand-500/15 text-brand-100" : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>White</button>
+                <button onClick={() => setEditSide("b")}
+                  className={`rounded-full border px-2 py-0.5 font-semibold ${editSide === "b" ? "border-brand-500/60 bg-brand-500/15 text-brand-100" : "border-ink-700 bg-ink-900 text-ink-400 hover:bg-ink-800"}`}>Black</button>
+              </div>
+            </div>
+            <div className="grid grid-cols-7 gap-1">
+              {["K", "Q", "R", "B", "N", "P", "-", "k", "q", "r", "b", "n", "p"].map((sym) => {
+                const label = sym === "-" ? "🗑" : sym;
+                const isSelected = palettePick === sym;
+                const isWhite = sym !== "-" && sym === sym.toUpperCase();
+                const isErase = sym === "-";
+                return (
+                  <button key={sym} onClick={() => setPalettePick((p) => (p === sym ? null : sym))}
+                    title={isErase ? "Erase mode: click a square to empty it" : `${isWhite ? "White" : "Black"} ${{ k: "king", q: "queen", r: "rook", b: "bishop", n: "knight", p: "pawn" }[sym.toLowerCase()]}`}
+                    className={`aspect-square rounded font-bold text-lg leading-none ${isSelected
+                      ? "border-2 border-brand-400 bg-brand-500/25 text-brand-50"
+                      : isErase
+                        ? "border border-rose-500/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20"
+                        : isWhite
+                          ? "border border-ink-600 bg-ink-100 text-ink-950 hover:bg-white"
+                          : "border border-ink-600 bg-ink-950 text-ink-100 hover:bg-ink-800"}`}>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-2 flex items-center gap-2 text-[11px] text-ink-400">
+              <span>{palettePick === "-" ? "Erasing" : palettePick ? `Selected: ${palettePick} — click a square to place` : "Click a piece above, then a square"}</span>
+              <button onClick={() => { editorRef.current.clear(); setEditorTick((n) => n + 1); }}
+                className="ml-auto rounded-full border border-ink-600 px-2 py-0.5 text-ink-300 hover:bg-ink-800"
+                title="Empty the board">
+                Clear board
+              </button>
+              <button onClick={applyEditor}
+                className="rounded-lg bg-brand-600 px-3 py-1 text-xs font-semibold text-white hover:bg-brand-500"
+                title="Apply the edited position back to the analysis board">
+                Apply
+              </button>
+            </div>
+          </div>
+        )}
       </section>
 
       <aside className="flex flex-col gap-4">
