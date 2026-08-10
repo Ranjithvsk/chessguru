@@ -253,6 +253,9 @@ export class CoachStarredDigestService implements OnModuleInit {
       reviewedAt: { $gte: new Date(Date.now() - 30 * 86_400_000) },
     }, { projection: { reviewedAt: 1 } as any }).limit(500).toArray();
     let streakDays = 0;
+    // 30-day count-per-day array for the ASCII/HTML heatmap. Index 0 = 29
+    // days ago, 29 = today.
+    const daysBuckets: number[] = new Array(30).fill(0);
     if (reviewedIn30d.length > 0) {
       const dayMs = (d: Date) => { const c = new Date(d); c.setHours(0, 0, 0, 0); return c.getTime(); };
       const today = dayMs(new Date());
@@ -261,7 +264,23 @@ export class CoachStarredDigestService implements OnModuleInit {
         if (days.has(today - i * 86_400_000)) streakDays++;
         else break;
       }
+      for (const r of reviewedIn30d) {
+        const idx = 29 - Math.round((today - dayMs(new Date(r.reviewedAt))) / 86_400_000);
+        if (idx >= 0 && idx < 30) daysBuckets[idx]!++;
+      }
     }
+    const heatmapHtml = daysBuckets.some((n) => n > 0)
+      ? `<div style="display:inline-block;margin:8px 0;line-height:0">${daysBuckets.map((n) => {
+          const bg = n === 0 ? "#e5e7eb"
+            : n === 1 ? "#a7f3d0"
+            : n <= 3 ? "#34d399"
+            : "#059669";
+          return `<span style="display:inline-block;width:8px;height:12px;background:${bg};border-radius:1px;margin-right:1px"></span>`;
+        }).join("")}</div>`
+      : "";
+    const heatmapText = daysBuckets.some((n) => n > 0)
+      ? "30d review cadence: " + daysBuckets.map((n) => n === 0 ? "·" : n === 1 ? "▂" : n <= 3 ? "▄" : "█").join("") + "\n"
+      : "";
     // "Busiest class" this window: the class contributing the most snaps.
     // Small stat in the email header so the coach sees which class dominated
     // their prep list without opening the dashboard.
@@ -310,6 +329,7 @@ export class CoachStarredDigestService implements OnModuleInit {
         <p style="color:#666;margin-top:0">Hi ${esc(username)} — you starred ${snaps.length} position${snaps.length === 1 ? "" : "s"} in ${windowLabel}.</p>
         ${topClass && classTally.size > 1 ? `<p style="margin:4px 0 0;color:#666;font-size:12px">🏫 Most from <b>${esc(topClass.title)}</b> (${topClass.n} snap${topClass.n === 1 ? "" : "s"}).</p>` : ""}
         ${reviewedCount > 0 ? `<p style="margin:8px 0;color:#059669;font-size:13px">✓ You reviewed ${reviewedCount} snap${reviewedCount === 1 ? "" : "s"} since the last digest — nice work.${streakDays >= 3 ? ` <span style="color:#f97316">🔥 ${streakDays}-day streak</span>` : ""}</p>` : ""}
+        ${heatmapHtml}
         ${showStuckNudge ? `<div style="margin:12px 0;padding:10px 12px;border-left:3px solid #f59e0b;background:#fffbeb;color:#78350f;font-size:13px">💤 It's been a while — <b>${pendingBacklog}</b> starred position${pendingBacklog === 1 ? "" : "s"} ${pendingBacklog === 1 ? "is" : "are"} still waiting for review. Even one Sunday morning session can move the needle.</div>` : ""}
         ${staleCount > 0 ? `<p style="margin:8px 0;color:#9a3412;font-size:12px">⏰ <b>${staleCount}</b> starred position${staleCount === 1 ? "" : "s"} ${staleCount === 1 ? "is" : "are"} over 30 days old and still unreviewed — worth revisiting or clearing.</p>` : ""}
         <ol style="line-height:1.6;padding-left:20px;color:#333">${rows}</ol>
@@ -324,6 +344,7 @@ export class CoachStarredDigestService implements OnModuleInit {
       `Hi ${username} — you starred ${snaps.length} position(s) in ${windowLabel}:`,
       (topClass && classTally.size > 1) ? `🏫 Most from ${topClass.title} (${topClass.n} snap${topClass.n === 1 ? "" : "s"}).\n` : "",
       reviewedCount > 0 ? `✓ You reviewed ${reviewedCount} snap(s) since the last digest — nice work.${streakDays >= 3 ? ` 🔥 ${streakDays}-day streak` : ""}\n` : "",
+      heatmapText,
       showStuckNudge ? `\n💤 It's been a while — ${pendingBacklog} starred position${pendingBacklog === 1 ? "" : "s"} still waiting for review.\n` : "",
       staleCount > 0 ? `⏰ ${staleCount} starred position(s) over 30 days old and still unreviewed.\n` : "",
       rowsText, "",
