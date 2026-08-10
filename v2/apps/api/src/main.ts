@@ -43,6 +43,8 @@ async function bootstrap() {
   // Snap audio clip is a short (<=30s) coach mic recording uploaded alongside
   // the snap FEN. 5MB cap comfortably covers webm/opus at 128kbps for 30s.
   app.use("/api/class/:id/snap/:snapId/audio", expressLib.raw({ type: "application/octet-stream", limit: "5mb" }));
+  // Class notes: student's photo of paper reflection. 8 MB cap.
+  app.use("/api/class/:id/notes/:noteId/image", expressLib.raw({ type: "application/octet-stream", limit: "8mb" }));
   // Vision endpoints carry base64-encoded PNG board/silhouette payloads
   // that easily exceed express-json's 100KB default (a 480x480 board PNG
   // is ~300-600KB base64). Cap at 4MB so a coach can't OOM us.

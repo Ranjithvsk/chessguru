@@ -14,6 +14,173 @@ type DailyPreview = {
   stats?: { attempted: number; solved: number; medianMs: number | null };
   streak?: { current: number; longest: number; lastDate: string | null } | null;
 };
+// ─────────────────────────────────────────────────────────────────────
+// Student class-notes card. Lists the student's recent classes and their
+// note submissions (with the coach's review + rating shown when set).
+// The "Submit notes" button opens a modal with a photo input + textarea.
+// ─────────────────────────────────────────────────────────────────────
+type MyClassNote = {
+  _id: string; classId: string; classTitle: string;
+  submittedAt: string; text: string;
+  hasImage: boolean; imageMime: string | null;
+  review: { rating: number; comment: string; reviewedAt: string } | null;
+};
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const r = await fetch(path, {
+    method: "POST", credentials: "include",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`${path} → ${r.status}`);
+  return r.json() as Promise<T>;
+}
+async function uploadBinary(path: string, blob: Blob): Promise<void> {
+  const r = await fetch(path, {
+    method: "POST", credentials: "include",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: blob,
+  });
+  if (!r.ok) throw new Error(`${path} → ${r.status}`);
+}
+
+function StudentClassNotesCard() {
+  const qc = useQueryClient();
+  const { data: notes } = useQuery({
+    queryKey: ["me-class-notes"], queryFn: () => get<MyClassNote[]>("/api/me/class-notes"),
+    staleTime: 30_000,
+  });
+  // Fetch the student's recent classes (from the general schedule endpoint —
+  // it's public and shows academy classes; we filter to ones the caller has
+  // actually attended). Simpler: just show a "Pick from your recent classes"
+  // dropdown populated from the schedule endpoint.
+  type Sched = { live: any[]; upcoming: any[] };
+  const { data: sched } = useQuery({ queryKey: ["schedule-for-notes"], queryFn: () => get<Sched>("/api/class/schedule") });
+  const notedClassIds = new Set((notes ?? []).map((n) => n.classId));
+  const attendableClasses: any[] = (sched?.live ?? []).concat(sched?.upcoming ?? []);
+  // Show classes ending within the last 7 days that don't have a note yet.
+  // For MVP we'll let the student submit to any past-or-live class in the list.
+  const [showSubmit, setShowSubmit] = useState(false);
+  const [chosenClassId, setChosenClassId] = useState<string>("");
+  const [text, setText] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const submit = async () => {
+    if (!chosenClassId) { setErr("Pick a class"); return; }
+    if (!text.trim() && !file) { setErr("Add a photo or type your reflection"); return; }
+    setBusy(true); setErr(null);
+    try {
+      const { noteId } = await postJson<{ noteId: string }>(`/api/class/${encodeURIComponent(chosenClassId)}/notes`, { text });
+      if (file) {
+        await uploadBinary(`/api/class/${encodeURIComponent(chosenClassId)}/notes/${noteId}/image`, file);
+      }
+      qc.invalidateQueries({ queryKey: ["me-class-notes"] });
+      setShowSubmit(false); setText(""); setFile(null); setChosenClassId("");
+    } catch (e: any) {
+      setErr(String(e?.message ?? e));
+    } finally { setBusy(false); }
+  };
+
+  const canSubmit = attendableClasses.length > 0;
+  const recentNotes = (notes ?? []).slice(0, 4);
+
+  if (recentNotes.length === 0 && !canSubmit) return null;   // nothing to show
+
+  return (
+    <div className="rounded-2xl border border-teal-500/30 bg-gradient-to-br from-teal-500/15 via-emerald-500/10 to-cyan-500/5 p-4">
+      <div className="mb-3 flex items-baseline justify-between">
+        <h3 className="font-display text-lg text-white">📝 Class notes</h3>
+        {canSubmit && (
+          <button onClick={() => setShowSubmit(true)}
+            className="rounded-lg bg-gradient-to-r from-teal-500 to-emerald-500 px-3 py-1.5 text-xs font-semibold text-white shadow hover:brightness-110">
+            + Submit notes
+          </button>
+        )}
+      </div>
+      {recentNotes.length === 0 ? (
+        <div className="rounded-xl border border-ink-700 bg-ink-900/60 p-4 text-center text-xs text-ink-400">
+          Attended a class? Write your reflection on paper, snap a photo, and submit it here — your coach will review it.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {recentNotes.map((n) => (
+            <div key={n._id} className="flex items-start gap-3 rounded-xl border border-ink-700 bg-ink-900/60 p-3">
+              {n.hasImage ? (
+                <img src={`/api/class/${n.classId}/notes/${n._id}/image`} alt="notes"
+                  className="h-14 w-14 shrink-0 rounded-md object-cover" loading="lazy" />
+              ) : (
+                <div className="grid h-14 w-14 shrink-0 place-items-center rounded-md bg-ink-800 text-lg text-ink-500">📄</div>
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-white">{n.classTitle}</div>
+                <div className="text-[11px] text-ink-500">
+                  submitted {new Date(n.submittedAt).toLocaleDateString(undefined, { day: "2-digit", month: "short" })}
+                </div>
+                {n.review ? (
+                  <div className="mt-1 rounded-md bg-emerald-500/10 px-2 py-1 text-[11px]">
+                    <span className="text-amber-400">{"★".repeat(n.review.rating)}</span>
+                    <span className="text-ink-600">{"★".repeat(5 - n.review.rating)}</span>
+                    {n.review.comment && <div className="mt-0.5 text-emerald-100">"{n.review.comment}"</div>}
+                  </div>
+                ) : (
+                  <div className="mt-1 text-[11px] text-amber-300">awaiting coach review</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {showSubmit && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur overflow-y-auto" onClick={() => !busy && setShowSubmit(false)}>
+          <div onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-2xl border border-teal-400/40 bg-ink-900 p-5 my-8 shadow-2xl">
+            <div className="text-2xl">📝</div>
+            <h3 className="mt-1 font-display text-lg text-white">Submit class notes</h3>
+            <p className="text-xs text-ink-400">Take a photo of your paper notes, or type a short reflection.</p>
+            {err && <div className="mt-3 rounded-lg border border-rose-500/40 bg-rose-500/10 p-2 text-xs text-rose-200">{err}</div>}
+            <div className="mt-4 space-y-3">
+              <div>
+                <label className="mb-1 block text-xs uppercase text-ink-400">Which class?</label>
+                <select value={chosenClassId} onChange={(e) => setChosenClassId(e.target.value)}
+                  className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white focus:border-teal-500 focus:outline-none">
+                  <option value="">— pick a class —</option>
+                  {attendableClasses.filter((c) => !notedClassIds.has(c._id)).map((c) => (
+                    <option key={c._id} value={c._id}>
+                      {c.title} · {new Date(c.startAt).toLocaleDateString(undefined, { day: "2-digit", month: "short" })}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs uppercase text-ink-400">Photo of your paper notes</label>
+                <input type="file" accept="image/*" capture="environment"
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                  className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-300 file:mr-3 file:rounded file:border-0 file:bg-teal-500/25 file:px-3 file:py-1 file:text-teal-100" />
+                {file && <div className="mt-1 text-[10px] text-ink-500">{Math.round(file.size / 1024)} KB · {file.type}</div>}
+              </div>
+              <div>
+                <label className="mb-1 block text-xs uppercase text-ink-400">Reflection <span className="text-ink-500">(optional)</span></label>
+                <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} maxLength={4000}
+                  placeholder="What did you understand from today's class?"
+                  className="w-full resize-none rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500 focus:border-teal-500 focus:outline-none" />
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setShowSubmit(false)} disabled={busy}
+                  className="flex-1 rounded-lg border border-ink-700 py-2 text-sm text-white hover:bg-ink-800">Cancel</button>
+                <button onClick={submit} disabled={busy || !chosenClassId}
+                  className="flex-1 rounded-lg bg-gradient-to-r from-teal-500 to-emerald-500 py-2 text-sm font-semibold text-white shadow hover:brightness-110 disabled:opacity-50">
+                  {busy ? "Submitting…" : "Submit"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Student-facing homework card. Loads /api/me/homework and lists open items
 // with a progress bar. Clicking an item takes them to the puzzle trainer with
 // the right theme pre-filtered so the solve counts against the task.
@@ -797,6 +964,7 @@ export default function DashboardPage() {
       <h1 className="font-display text-2xl text-white">{viewedAs ? `${viewedAs}'s performance` : "📊 My performance"}</h1>
 
       {!viewedAs && <HomeworkCard />}
+      {!viewedAs && <StudentClassNotesCard />}
       {!viewedAs && <DailyCard />}
       {data.lastSession && <LastSessionStrip s={data.lastSession} />}
 

@@ -580,6 +580,144 @@ function UpcomingClassesPanel({ classes, live }: { classes: ClassRow[]; live: Cl
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Class Notes review panel (coach-side). Students upload paper-note
+// photos after class; coach opens the drawer to view + rate + comment.
+// ─────────────────────────────────────────────────────────────────────
+type ClassNote = {
+  _id: string; classId: string; classTitle: string;
+  studentId: string; studentName: string;
+  submittedAt: string; text: string;
+  hasImage: boolean; imageMime: string | null;
+  review: { rating: number; comment: string; reviewedAt: string; reviewedBy: string } | null;
+};
+
+function ClassNotesPanel() {
+  const qc = useQueryClient();
+  const { data: notes } = useQuery({
+    queryKey: ["academy-class-notes"],
+    queryFn: () => get<ClassNote[]>("/api/academy/class-notes"),
+    refetchInterval: 30_000,
+  });
+  const [picked, setPicked] = useState<ClassNote | null>(null);
+  const [rating, setRating] = useState(4);
+  const [comment, setComment] = useState("");
+  const reviewMut = useMutation({
+    mutationFn: () => post<any>(`/api/class/${picked!.classId}/notes/${picked!._id}/review`, { rating, comment }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["academy-class-notes"] });
+      setPicked(null); setComment(""); setRating(4);
+    },
+  });
+
+  const openReview = (n: ClassNote) => {
+    setPicked(n);
+    setRating(n.review?.rating ?? 4);
+    setComment(n.review?.comment ?? "");
+  };
+
+  const pending = (notes ?? []).filter((n) => !n.review).length;
+
+  return (
+    <section className="rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-ink-900 to-emerald-950/20 p-5 shadow">
+      <div className="mb-3 flex items-baseline justify-between">
+        <h2 className="font-display text-lg text-white">
+          📝 Class notes to review
+          {pending > 0 && <span className="ml-2 rounded-full bg-amber-500/25 px-2 py-0.5 text-xs text-amber-200">{pending} pending</span>}
+        </h2>
+        <span className="text-xs text-ink-500">Student paper reflections</span>
+      </div>
+      {(!notes || notes.length === 0) ? (
+        <div className="rounded-xl border border-ink-800 bg-ink-900/50 p-6 text-center">
+          <div className="text-3xl">📝</div>
+          <div className="mt-1 font-display text-sm text-white">No notes yet</div>
+          <div className="text-xs text-ink-400">Students submit notes from their /dashboard after attending a class.</div>
+        </div>
+      ) : (
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {notes.slice(0, 12).map((n) => (
+            <button key={n._id} onClick={() => openReview(n)}
+              className={`overflow-hidden rounded-xl border p-2 text-left transition hover:-translate-y-0.5 hover:shadow-lg ${
+                n.review ? "border-emerald-500/25 bg-emerald-500/5" : "border-amber-500/40 bg-amber-500/5 hover:border-amber-400/70"
+              }`}>
+              {n.hasImage ? (
+                <img src={`/api/class/${n.classId}/notes/${n._id}/image`} alt="notes"
+                  loading="lazy"
+                  className="mb-2 h-32 w-full rounded-md object-cover" />
+              ) : (
+                <div className="mb-2 grid h-32 w-full place-items-center rounded-md bg-ink-800 text-3xl text-ink-500">📄</div>
+              )}
+              <div className="truncate text-sm font-medium text-white">{n.studentName}</div>
+              <div className="mt-0.5 truncate text-[11px] text-ink-400">{n.classTitle}</div>
+              <div className="mt-1 flex items-center justify-between text-[10px]">
+                <span className="text-ink-500">{new Date(n.submittedAt).toLocaleDateString(undefined, { day: "2-digit", month: "short" })}</span>
+                {n.review ? (
+                  <span className="text-emerald-300">{"★".repeat(n.review.rating)}{"☆".repeat(5 - n.review.rating)}</span>
+                ) : (
+                  <span className="rounded-full bg-amber-500/25 px-1.5 text-amber-200">review</span>
+                )}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+      {picked && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur overflow-y-auto" onClick={() => setPicked(null)}>
+          <div onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-2xl rounded-2xl border border-emerald-400/40 bg-ink-900 p-5 my-8 shadow-2xl">
+            <div className="mb-2 flex items-baseline justify-between">
+              <div>
+                <div className="text-xs text-ink-400">{picked.classTitle}</div>
+                <div className="font-display text-lg text-white">{picked.studentName}'s notes</div>
+                <div className="text-[11px] text-ink-500">
+                  Submitted {new Date(picked.submittedAt).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                </div>
+              </div>
+              <button onClick={() => setPicked(null)} className="text-xl text-ink-400 hover:text-white">×</button>
+            </div>
+            {picked.hasImage && (
+              <img src={`/api/class/${picked.classId}/notes/${picked._id}/image`} alt="notes"
+                className="mx-auto max-h-[400px] w-auto rounded-xl border border-ink-700" />
+            )}
+            {picked.text && (
+              <div className="mt-3 rounded-xl border border-ink-700 bg-ink-800 p-3 text-sm text-ink-100 whitespace-pre-wrap">
+                {picked.text}
+              </div>
+            )}
+            <div className="mt-4">
+              <label className="mb-1 block text-xs uppercase text-emerald-300">Your rating (understanding)</label>
+              <div className="flex gap-1 text-2xl">
+                {[1,2,3,4,5].map((n) => (
+                  <button key={n} onClick={() => setRating(n)}
+                    className={`transition ${n <= rating ? "text-amber-400" : "text-ink-700 hover:text-amber-300/60"}`}>
+                    ★
+                  </button>
+                ))}
+                <span className="ml-2 self-center text-sm text-ink-300">{rating}/5</span>
+              </div>
+            </div>
+            <div className="mt-3">
+              <label className="mb-1 block text-xs uppercase text-emerald-300">Comment for the student <span className="text-ink-500">(optional)</span></label>
+              <textarea value={comment} onChange={(e) => setComment(e.target.value)}
+                rows={3} maxLength={800}
+                placeholder='e.g. "Great capture of the pin motif. Try to note the response too."'
+                className="w-full resize-none rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-emerald-500 focus:outline-none" />
+              <div className="mt-1 text-right text-[10px] text-ink-500">{comment.length}/800</div>
+            </div>
+            <div className="mt-4 flex gap-2">
+              <button onClick={() => setPicked(null)} className="flex-1 rounded-lg border border-ink-700 py-2 text-sm text-white hover:bg-ink-800">Close</button>
+              <button onClick={() => reviewMut.mutate()} disabled={reviewMut.isPending}
+                className="flex-1 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 py-2 text-sm font-semibold text-white shadow hover:brightness-110 disabled:opacity-50">
+                {reviewMut.isPending ? "Saving…" : picked.review ? "Update review" : "Post review"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function HomeworkPanel({ homework }: { homework: any[] }) {
   const qc = useQueryClient();
   const delMut = useMutation({
@@ -871,6 +1009,7 @@ export default function AcademyDashboardPage() {
         </div>
       )}
       {canManage && <CalendarPanel classes={[...(schedule?.upcoming ?? []), ...(schedule?.live ?? [])]} />}
+      {canManage && <ClassNotesPanel />}
       <AddStudentModal open={showAddStudent} onClose={() => setShowAddStudent(false)} coaches={coaches ?? []} isOwner={isOwner} />
       <AssignHomeworkModal open={showAssignHw} onClose={() => setShowAssignHw(false)} students={studentsShown} isOwner={isOwner} />
 
