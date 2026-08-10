@@ -111,14 +111,19 @@ export class AuthService {
    * ================================================================ */
   async signupAcademy(body: any, session: any) {
     const academyName = String(body?.academyName || "").trim();
-    const ownerName   = String(body?.ownerName || "").trim();
     const ownerEmail  = String(body?.ownerEmail || "").trim().toLowerCase();
     const password    = String(body?.password || "");
+    // Owner username is optional now (email-only signup). If provided we validate;
+    // otherwise we derive it from the email local-part so login by username still
+    // works (the user can also always sign in via email + password).
+    const providedName = String(body?.ownerName || "").trim();
 
     if (!academyName || academyName.length < 2) return { ok: false, error: "Academy name is required." };
-    if (!ownerName   || !/^[a-zA-Z0-9_-]{2,30}$/.test(ownerName)) return { ok: false, error: "Owner username must be 2-30 chars (letters, numbers, _ or -)." };
     if (!ownerEmail  || !ownerEmail.includes("@")) return { ok: false, error: "Valid email is required." };
     if (password.length < 6) return { ok: false, error: "Password too short (min 6 chars)." };
+    if (providedName && !/^[a-zA-Z0-9_-]{2,30}$/.test(providedName)) {
+      return { ok: false, error: "Username must be 2-30 chars (letters, numbers, _ or -)." };
+    }
 
     const academies = this.conn.db!.collection("academies");
     const users = this.users();
@@ -128,11 +133,16 @@ export class AuthService {
     let slug = base; let n = 2;
     while (await academies.findOne({ _id: slug as any })) { slug = `${base}-${n++}`; if (n > 999) break; }
 
-    // Username collision check (users._id is username.toLowerCase())
-    const uid = ownerName.toLowerCase();
-    if (await users.findOne({ _id: uid as any })) {
-      return { ok: false, error: "Owner username already taken — pick another." };
-    }
+    // Username auto-derivation: prefer provided, else sanitize email local-part.
+    // Sanitize keeps [a-z0-9_-]; strips dots and other chars. Enforce 2-30 length.
+    // On collision, append -2, -3, ...
+    const sanitize = (s: string) => s.toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 30) || "user";
+    const rawUid = providedName ? providedName.toLowerCase() : sanitize(ownerEmail.split("@")[0]!);
+    const baseUid = rawUid.length >= 2 ? rawUid : (rawUid + "1");
+    let uid = baseUid, k = 2;
+    while (await users.findOne({ _id: uid as any })) { uid = `${baseUid}-${k++}`; if (k > 999) break; }
+    const ownerName = providedName || uid;
+
     // Email collision — one email = one account (prevents double-signup)
     if (await users.findOne({ email: ownerEmail })) {
       return { ok: false, error: "This email already has an account — sign in first." };

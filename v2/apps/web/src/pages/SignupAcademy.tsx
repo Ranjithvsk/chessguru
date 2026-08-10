@@ -566,7 +566,6 @@ export default function SignupAcademyPage() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const [academyName, setAcademyName] = useState("");
-  const [ownerName,   setOwnerName]   = useState("");
   const [ownerEmail,  setOwnerEmail]  = useState("");
   const [password,    setPassword]    = useState("");
   const [busy, setBusy] = useState(false);
@@ -594,8 +593,9 @@ export default function SignupAcademyPage() {
     e.preventDefault();
     setBusy(true); setErr(null);
     try {
+      // Username auto-derived from email server-side — see AuthService.signupAcademy.
       const r = await post<{ ok: boolean; error?: string; academyName?: string }>("/auth/signup-academy",
-        { academyName, ownerName, ownerEmail, password });
+        { academyName, ownerEmail, password });
       if (!r.ok) { setErr(r.error || "Signup failed."); return; }
       qc.removeQueries();
       window.location.href = "/academy";
@@ -729,18 +729,11 @@ export default function SignupAcademyPage() {
                 className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2.5 text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30" />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-400">Your username</label>
-              <input required value={ownerName} onChange={(e) => setOwnerName(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ""))}
-                minLength={2} maxLength={30} title="2-30 chars, letters/numbers/_/-"
-                placeholder="john_stephens"
-                className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2.5 text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30" />
-            </div>
-            <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-400">Your email</label>
               <input required type="email" value={ownerEmail} onChange={(e) => setOwnerEmail(e.target.value)}
                 placeholder="you@yourschool.com"
                 className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2.5 text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30" />
-              <p className="mt-1 text-[11px] text-ink-500">For password reset + trial expiry + feature updates.</p>
+              <p className="mt-1 text-[11px] text-ink-500">You'll sign in with this. Also used for password reset + trial + feature updates.</p>
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-400">Password</label>
