@@ -1435,7 +1435,10 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
                   </div>
                 )}
                 <ShareLinkButton />
-                <span className="hidden sm:inline" title="← / → step through snaps">← →</span>
+                <span className="hidden sm:inline text-ink-500"
+                  title="← / →  prev/next snap · Esc  close · Ctrl/⌘-click card to select without opening">
+                  ← → · Esc
+                </span>
                 <button onClick={() => onClose()}
                   className="text-ink-400 hover:text-white text-sm">Esc</button>
               </div>
