@@ -16,6 +16,7 @@ import {
 } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
+import { MaterialReminderService } from "./material-reminder.service";
 import { promises as fs, createReadStream, statSync } from "fs";
 import { join } from "path";
 import { randomBytes } from "crypto";
@@ -51,7 +52,10 @@ function extOf(filename: string): string {
 /** Coach + owner ops: upload, list, delete. */
 @Controller("academy/materials")
 export class MaterialsController {
-  constructor(@InjectConnection() private readonly conn: Connection) {}
+  constructor(
+    @InjectConnection() private readonly conn: Connection,
+    private readonly reminders: MaterialReminderService,
+  ) {}
   private col() { return this.conn.db!.collection("studyMaterials"); }
   private users() { return this.conn.db!.collection("users"); }
 
@@ -174,6 +178,19 @@ export class MaterialsController {
       firstReadAt: r.firstReadAt, lastReadAt: r.lastReadAt,
       reads: r.reads ?? 1,
     }));
+  }
+
+  /** Coach on-demand "Remind unread now" — respects cooldown + opt-outs so
+   *  a coach can't spam. Returns how many reminders actually went out. */
+  @Post(":id/remind-unread")
+  async remindUnread(@Param("id") id: string, @Req() req: any) {
+    if (!MAT_ID_RE.test(id)) throw new BadRequestException("bad material id");
+    const g = this.ensureCoachOrOwner(req.session);
+    const row: any = await this.col().findOne({ _id: id as any, academyId: g.academyId });
+    if (!row) throw new NotFoundException();
+    if (row.coachId !== g.userId && g.role !== "academy_owner") throw new ForbiddenException();
+    const result = await this.reminders.remindNow(id);
+    return { ok: true, ...result };
   }
 
   @Delete(":id")

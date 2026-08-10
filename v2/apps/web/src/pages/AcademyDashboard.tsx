@@ -801,10 +801,17 @@ function StudyMaterialsPanel({ students }: { students: any[] }) {
   });
 
   const [readsFor, setReadsFor] = useState<Material | null>(null);
+  const [remindMsg, setRemindMsg] = useState<string | null>(null);
   const { data: reads } = useQuery({
     queryKey: ["material-reads", readsFor?._id],
     queryFn: () => get<MaterialRead[]>(`/api/academy/materials/${readsFor!._id}/reads`),
     enabled: !!readsFor,
+  });
+  const remindMut = useMutation({
+    mutationFn: (id: string) => post<{ ok: boolean; sent: number }>(`/api/academy/materials/${encodeURIComponent(id)}/remind-unread`, {}),
+    onSuccess: (r) => setRemindMsg(r.sent > 0
+      ? `✓ Reminded ${r.sent} student${r.sent === 1 ? "" : "s"}.`
+      : "No one to remind right now — everyone's read it, or on cooldown."),
   });
 
   const toggleTarget = (id: string) => {
@@ -879,7 +886,7 @@ function StudyMaterialsPanel({ students }: { students: any[] }) {
         </div>
       )}
       {readsFor && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur overflow-y-auto" onClick={() => setReadsFor(null)}>
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur overflow-y-auto" onClick={() => { setReadsFor(null); setRemindMsg(null); }}>
           <div onClick={(e) => e.stopPropagation()}
             className="w-full max-w-md rounded-2xl border border-emerald-400/40 bg-ink-900 p-5 my-8 shadow-2xl">
             <div className="mb-3 flex items-start justify-between gap-2">
@@ -887,8 +894,23 @@ function StudyMaterialsPanel({ students }: { students: any[] }) {
                 <div className="truncate font-display text-lg text-white">👁 Read receipts</div>
                 <div className="truncate text-xs text-ink-400">{readsFor.title}</div>
               </div>
-              <button onClick={() => setReadsFor(null)} className="text-xl text-ink-400 hover:text-white">×</button>
+              <button onClick={() => { setReadsFor(null); setRemindMsg(null); }} className="text-xl text-ink-400 hover:text-white">×</button>
             </div>
+            <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2">
+              <div className="text-xs text-amber-100">
+                🔔 Nudge students who haven't opened it yet
+                <div className="text-[10px] text-ink-500">Push + email · 3-day cooldown per student · respects opt-outs</div>
+              </div>
+              <button onClick={() => remindMut.mutate(readsFor._id)} disabled={remindMut.isPending}
+                className="shrink-0 rounded-md bg-gradient-to-r from-amber-500 to-orange-500 px-3 py-1.5 text-xs font-semibold text-white shadow hover:brightness-110 disabled:opacity-50">
+                {remindMut.isPending ? "Sending…" : "Remind unread"}
+              </button>
+            </div>
+            {remindMsg && (
+              <div className="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2 text-xs text-emerald-100">
+                {remindMsg}
+              </div>
+            )}
             {!reads ? (
               <div className="py-8 text-center text-sm text-ink-400">Loading…</div>
             ) : reads.length === 0 ? (

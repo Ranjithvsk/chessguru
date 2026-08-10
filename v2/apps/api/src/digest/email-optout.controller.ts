@@ -16,16 +16,18 @@ import { Connection } from "mongoose";
 import { createHmac, timingSafeEqual } from "crypto";
 type Response = any;
 
-type Channel = "digest" | "streak" | "coachStarred";
+type Channel = "digest" | "streak" | "coachStarred" | "materials";
 const CHANNEL_FIELD: Record<Channel, string> = {
   digest: "weeklyDigestOptedOut",
   streak: "streakReminderOptedOut",
   coachStarred: "coachStarredDigestOptedOut",
+  materials: "materialRemindersOptedOut",
 };
 const CHANNEL_LABEL: Record<Channel, string> = {
   digest: "weekly progress digest",
   streak: "streak reminders",
   coachStarred: "weekly starred-snap digest for coaches",
+  materials: "study material reminders",
 };
 
 function secret(): string {
