@@ -914,7 +914,9 @@ function TodayStrip({ schedule, snaps, recordings }: {
       <Tile label="Live now" value={liveNow} tone={liveNow > 0 ? "border-emerald-500/40 bg-emerald-500/5" : "border-ink-700 bg-ink-900"} />
       <Tile label="Snaps today" value={snapsToday} tone="border-ink-700 bg-ink-900" />
       <Tile label="Recordings today" value={recordingsToday} tone="border-ink-700 bg-ink-900" />
-      <Tile label="★ Starred (all)" value={starredTotal} tone={starredTotal > 0 ? "border-amber-500/40 bg-amber-500/5" : "border-ink-700 bg-ink-900"} />
+      <Link to="/academy?starred=1" title="Open the snap grid filtered to every starred snap">
+        <Tile label="★ Starred (all)" value={starredTotal} tone={starredTotal > 0 ? "border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/10" : "border-ink-700 bg-ink-900"} />
+      </Link>
       <Tile label="✓ Reviewed (all)" value={reviewedTotal} tone={reviewedTotal > 0 ? "border-emerald-500/40 bg-emerald-500/5" : "border-ink-700 bg-ink-900"} />
       <Link to="/academy?starred=1&hidedone=1&sort=stale" title="Open the snap grid filtered to your review shortlist (starred + not done, most-stale first)">
         <Tile label="🎯 To review" value={toReview} tone={toReview > 0 ? "border-brand-500/40 bg-brand-500/5 hover:bg-brand-500/10" : "border-ink-700 bg-ink-900"} />
