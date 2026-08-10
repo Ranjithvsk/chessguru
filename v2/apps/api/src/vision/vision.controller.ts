@@ -62,4 +62,17 @@ export class VisionController {
       throw new BadRequestException((e as Error).message);
     }
   }
+
+  /** v3.5 direct chess-piece classifier (trained on Vinayaka RTX 3080).
+   *  Same request shape as classify-board; response uses the same
+   *  ClassifiedSquare structure so the client can consume either. */
+  @Post("classify-board-v2")
+  async classifyBoardV2(@Body() body: ClassifyBoardBody) {
+    if (!body?.boardPngBase64) throw new BadRequestException("boardPngBase64 required");
+    try {
+      return await this.svc.classifyBoardV2(body.boardPngBase64);
+    } catch (e) {
+      throw new BadRequestException((e as Error).message);
+    }
+  }
 }

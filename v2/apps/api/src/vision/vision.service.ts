@@ -44,6 +44,7 @@ import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import sharp from "sharp";
 import { embedImageDinov2, DINOV2_EMBEDDING_DIM } from "../lib/dinovImage";
+import { classifyBatch as chessClassifyBatch, CHESS_CLASSIFIER_VERSION } from "../lib/chessClassifier";
 
 export type PieceLetter = "P" | "N" | "B" | "R" | "Q" | "K";
 export type PieceColor = "w" | "b";
@@ -98,6 +99,16 @@ export interface ClassifyBoardResult {
     refsMatched: number;
     refsSkipped: number;
     latencyMs: number;
+  };
+}
+
+export interface ClassifyBoardV2Result {
+  fen: string;
+  squares: ClassifiedSquare[][];
+  meta: {
+    modelVersion: string;
+    latencyMs: number;
+    avgConfidence: number;
   };
 }
 
@@ -229,6 +240,65 @@ export class VisionService {
     return {
       fen, squares,
       meta: { refsMatched: matched, refsSkipped: skipped, latencyMs: Date.now() - started },
+    };
+  }
+
+  /** v3.5 direct chess-piece classifier -- one softmax per square, no
+   *  reference bank lookup. Trained on Vinayaka RTX 3080 with DINOv2-base
+   *  frozen backbone + 256->13 MLP head, exported to ONNX for CPU inference
+   *  here. Batches all 64 squares into a single ort.session.run() call so
+   *  latency is a single forward pass, not 64 sequential ones. Typical
+   *  cold-start ~10s (model load), warm ~2-3s per board. */
+  async classifyBoardV2(boardPngBase64: string): Promise<ClassifyBoardV2Result> {
+    const started = Date.now();
+    const boardB64 = boardPngBase64.replace(/^data:image\/[a-z]+;base64,/, "");
+    if (boardB64.length < 500 || boardB64.length > 2_000_000) {
+      throw new Error("board png out of range (need 500-2MB base64)");
+    }
+    const boardBuf = Buffer.from(boardB64, "base64");
+    const meta = await sharp(boardBuf).metadata();
+    if (!meta.width || !meta.height) throw new Error("unreadable board image");
+    const canonical = await sharp(boardBuf).resize(480, 480, { fit: "fill" }).png().toBuffer();
+
+    // Extract all 64 squares first (sequential IO is negligible vs one
+    // batched inference call).
+    const squares: Buffer[] = [];
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        squares.push(await sharp(canonical)
+          .extract({ left: c * 60, top: r * 60, width: 60, height: 60 })
+          .png().toBuffer());
+      }
+    }
+    const results = await chessClassifyBatch(squares);
+
+    // Map 64 flat results back to 8x8 grid + build FEN.
+    const grid: ClassifiedSquare[][] = [];
+    let confSum = 0;
+    for (let r = 0; r < 8; r++) {
+      const row: ClassifiedSquare[] = [];
+      for (let c = 0; c < 8; c++) {
+        const res = results[r * 8 + c]!;
+        confSum += res.confidence;
+        // className is "empty" or "<piece><color>" like "Kw", "Pb".
+        if (res.className === "empty") {
+          row.push({ piece: null, color: null, confidence: res.confidence, matchedSetName: CHESS_CLASSIFIER_VERSION });
+        } else {
+          const piece = res.className[0] as PieceLetter;
+          const color = res.className[1] as PieceColor;
+          row.push({ piece, color, confidence: res.confidence, matchedSetName: CHESS_CLASSIFIER_VERSION });
+        }
+      }
+      grid.push(row);
+    }
+    const fen = squaresToFen(grid);
+    return {
+      fen, squares: grid,
+      meta: {
+        modelVersion: CHESS_CLASSIFIER_VERSION,
+        latencyMs: Date.now() - started,
+        avgConfidence: confSum / 64,
+      },
     };
   }
 }
