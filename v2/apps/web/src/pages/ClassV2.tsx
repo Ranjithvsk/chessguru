@@ -83,10 +83,10 @@ export default function ClassV2Page() {
     return (
       <div className="mx-auto max-w-lg space-y-4 rounded-xl2 border border-amber-500/40 bg-amber-500/10 p-6 text-amber-100">
         <div className="text-2xl">⚙️</div>
-        <h1 className="font-display text-xl text-white">ChessGuru Live isn't turned on yet</h1>
+        <h1 className="font-display text-xl text-white">Dream Meet isn't turned on yet</h1>
         <p className="text-sm">
-          The video server (LiveKit) hasn't been configured on the API. This is the P0 of
-          the <b>ChessGuru Live</b> rollout — see
+          The video server hasn't been configured on the API. This is the P0 of
+          the <b>Dream Meet</b> rollout — see
           <code className="mx-1">PROJECT_MASTER/plans/CHESSGURU-LIVE-VIDEO-PLATFORM.md</code>
           for the plan.
         </p>
@@ -138,7 +138,7 @@ export default function ClassV2Page() {
         </LiveKitRoom>
       </div>
       <p className="mt-2 text-[10px] text-ink-500">
-        ChessGuru Live · P0 shell. Coach controls, screen share, chat, breakouts and recording ship in P1
+        Dream Meet · P0 shell. Coach controls, screen share, chat, breakouts and recording ship in P1
         (see PROJECT_MASTER/plans/CHESSGURU-LIVE-VIDEO-PLATFORM.md).
       </p>
     </div>

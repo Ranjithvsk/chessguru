@@ -26,7 +26,7 @@ const GROUPS: Group[] = [
       { to: "/play", label: "♟️ Play", desc: "Pass & play on one screen" },
       { to: "/engine-battle", label: "⚔️ Engine battle", desc: "Watch engines fight it out" },
       { to: "/class", label: "🎥 Live class", desc: "Video coaching + shared board" },
-      { to: "/class-v2/demo", label: "🚀 ChessGuru Live", desc: "New LiveKit-based video (P0)" },
+      { to: "/class-v2/demo", label: "🚀 Dream Meet", desc: "Live video meetings" },
     ],
   },
   {
