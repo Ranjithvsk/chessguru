@@ -51,11 +51,14 @@ export type PieceColor = "w" | "b";
 const VALID_PIECES: PieceLetter[] = ["P", "N", "B", "R", "Q", "K"];
 
 export interface FeedbackInput {
-  piece: PieceLetter;
-  color: PieceColor;
-  silhouettePng: string;   // base64 40x40 grayscale PNG (data URL prefix optional)
-  rawCropPng?: string;     // optional base64 raw square crop (for DINOv2 embedding — RGB natural pixels, not silhouette)
-  setHint?: string;        // free-form hint from the client, e.g. "lichess-neo"
+  /** For piece squares: one of "P"|"N"|"B"|"R"|"Q"|"K". For an empty
+   *  square correction, pass "empty" (client marks a square as empty
+   *  when vision falsely detected a piece there). */
+  piece: PieceLetter | "empty";
+  color: PieceColor;               // ignored when piece==="empty"
+  silhouettePng: string;
+  rawCropPng?: string;
+  setHint?: string;
 }
 
 export interface VisionRefDoc {
@@ -69,6 +72,13 @@ export interface VisionRefDoc {
    *  time (or when the seed script embedded a synthetic reference). Used
    *  by classifyBoard for nearest-neighbour piece classification. */
   embeddingDinov2?: number[];
+  /** True when this ref represents an EMPTY square. Nearest-neighbour
+   *  match against an isEmpty ref means the classifier should output
+   *  "empty" (piece=null) for that board square. Piece / color fields
+   *  are set to arbitrary placeholders when isEmpty is true (Mongo
+   *  doesn't allow missing required fields), and callers should ignore
+   *  them. */
+  isEmpty?: boolean;
   createdBy: string | null;
   createdAt: Date;
   approved: boolean;
@@ -115,8 +125,9 @@ export class VisionService {
    *  this reference. Silhouettes stay in place so client-side legacy
    *  matching still works. Returns the inserted id. */
   async recordCorrection(userId: string | null, input: FeedbackInput): Promise<{ ok: true; id: string; embedded: boolean }> {
-    if (!VALID_PIECES.includes(input.piece)) throw new Error("invalid piece");
-    if (input.color !== "w" && input.color !== "b") throw new Error("invalid color");
+    const isEmpty = input.piece === "empty";
+    if (!isEmpty && !VALID_PIECES.includes(input.piece as PieceLetter)) throw new Error("invalid piece");
+    if (!isEmpty && input.color !== "w" && input.color !== "b") throw new Error("invalid color");
     const raw = String(input.silhouettePng || "");
     // Strip data-URL prefix if present. We keep just the base64.
     const base64 = raw.replace(/^data:image\/[a-z]+;base64,/, "");
@@ -141,12 +152,16 @@ export class VisionService {
 
     const setName = (input.setHint && String(input.setHint).slice(0, 40)) || "coach-correction";
     const doc: VisionRefDoc = {
-      piece: input.piece,
-      color: input.color,
+      // For "empty" corrections we still need to satisfy the schema's
+      // required piece/color -- use a sentinel that the classifier
+      // ignores because isEmpty takes precedence.
+      piece: isEmpty ? ("P" as PieceLetter) : (input.piece as PieceLetter),
+      color: isEmpty ? ("w" as PieceColor) : input.color,
       setName,
       source: "correction",
       silhouettePng: base64,
       ...(embedding ? { embeddingDinov2: embedding } : {}),
+      ...(isEmpty ? { isEmpty: true } : {}),
       createdBy: userId,
       createdAt: new Date(),
       approved: true,
@@ -180,7 +195,7 @@ export class VisionService {
     // the request -- typical bank is < 500 rows at 3KB each = ~1.5MB.
     const refs = await this.col().find(
       { approved: true, embeddingDinov2: { $exists: true } },
-      { projection: { _id: 0, piece: 1, color: 1, setName: 1, embeddingDinov2: 1 } as any },
+      { projection: { _id: 0, piece: 1, color: 1, setName: 1, embeddingDinov2: 1, isEmpty: 1 } as any },
     ).limit(2000).toArray();
     if (refs.length === 0) {
       throw new Error("reference bank has no DINOv2 embeddings — run seed-cburnett first");
@@ -219,11 +234,13 @@ export class VisionService {
 }
 
 /** Cosine similarity nearest-neighbour against L2-normed refs.
- *  Below a confidence floor (0.35), returns empty -- means "no piece
- *  looks close enough; assume this square is blank." Higher = better. */
+ *  A winning ref with isEmpty=true is interpreted as "this square is
+ *  empty" (piece=null, color=null). A winning piece ref returns its
+ *  piece/color. Below a global confidence floor (0.35), we bail to
+ *  empty rather than surface a low-confidence guess. */
 function nearestNeighbour(
   query: number[],
-  refs: Array<{ piece: PieceLetter; color: PieceColor; setName: string; embeddingDinov2: number[] }>,
+  refs: Array<{ piece: PieceLetter; color: PieceColor; setName: string; embeddingDinov2: number[]; isEmpty?: boolean }>,
 ): ClassifiedSquare {
   if (query.length !== DINOV2_EMBEDDING_DIM) {
     return { piece: null, color: null, confidence: 0, matchedSetName: null };
@@ -241,6 +258,9 @@ function nearestNeighbour(
     return { piece: null, color: null, confidence: Math.max(0, best), matchedSetName: null };
   }
   const w = refs[bestIdx]!;
+  if (w.isEmpty) {
+    return { piece: null, color: null, confidence: best, matchedSetName: w.setName };
+  }
   return { piece: w.piece, color: w.color, confidence: best, matchedSetName: w.setName };
 }
 

@@ -147,42 +147,58 @@ export default function BoardEditorPage() {
     const board = g.fen().split(" ")[0]!;
     const next = `${board} ${editSide} - - 0 1`;
     if (fp.load(next)) {
-      // Diff coach edits vs the last vision run. Any square where coach
-      // set a piece of the DETECTED colour but a DIFFERENT type is a
-      // template win -- send it to /api/vision/feedback for future use.
-      // We deliberately skip color flips (very rare vision failure) and
-      // empty->piece / piece->empty edits (occupancy detector is separate).
+      // Diff coach edits vs the last vision run. Three kinds of correction
+      // are uploaded to the server-side reference bank:
+      //   1. WRONG TYPE: vision detected a piece of the same colour but a
+      //      different type -- upload as a labelled ref for that (piece,color).
+      //   2. FALSE POSITIVE (empty→piece in vision, empty in editor): vision
+      //      hallucinated a piece on an empty square -- upload as an "empty"
+      //      ref so future classifications learn "this cell content == blank."
+      //   3. FALSE NEGATIVE (piece in vision detected as absent): rarely
+      //      catchable here (occupancy detector is separate) -- skipped.
       let sent = 0;
       if (visionSnapshot) {
         const cell = visionSnapshot.canvas.width / 8;
         const ctx = visionSnapshot.canvas.getContext("2d")!;
-        const files = "abcdefgh";
         const boardArr = g.board();       // 8x8 (rank 8 top → rank 1 bottom, file a → h)
         for (let r = 0; r < 8; r++) {
           for (let c = 0; c < 8; c++) {
             const cell88 = boardArr[r]?.[c];
             const visionType = visionSnapshot.types[r]?.[c];
+            // Prepare the raw crop once (used by both correction paths).
+            const buildRawCrop = () => {
+              const rawC = document.createElement("canvas");
+              rawC.width = cell; rawC.height = cell;
+              rawC.getContext("2d")!.drawImage(visionSnapshot.canvas, c * cell, r * cell, cell, cell, 0, 0, cell, cell);
+              return rawC.toDataURL("image/png");
+            };
+            const buildSilhouette = (color: "w" | "b") => {
+              const sig = extractSilhouetteFromSquare(ctx, c * cell, r * cell, cell, cell, color, visionSnapshot.renderMode);
+              return silhouetteToPngDataUrl(sig);
+            };
+            // CASE 2: vision said this cell had a piece, coach cleared it.
+            if (visionType && !cell88) {
+              try {
+                void fetch(`${API_BASE}/api/vision/feedback`, {
+                  method: "POST", credentials: "include",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ piece: "empty", color: "w", silhouettePng: buildSilhouette("w"), rawCropPng: buildRawCrop() }),
+                }).catch(() => {});
+                sent++;
+              } catch { /* silent */ }
+              continue;
+            }
+            // CASE 1: wrong type at the same square.
             if (!cell88 || !visionType) continue;
             const coachType = cell88.type.toUpperCase() as PieceType;
             if (coachType === visionType) continue;   // no correction
             try {
-              const sig = extractSilhouetteFromSquare(ctx, c * cell, r * cell, cell, cell, cell88.color as any, visionSnapshot.renderMode);
-              const png = silhouetteToPngDataUrl(sig);
-              // Also grab the raw natural-pixel square crop so the server
-              // can embed it via DINOv2 -- that feeds the v3 server-side
-              // classifier's reference bank so future boards from this
-              // book/screenshot style classify better.
-              const rawC = document.createElement("canvas");
-              rawC.width = cell; rawC.height = cell;
-              rawC.getContext("2d")!.drawImage(visionSnapshot.canvas, c * cell, r * cell, cell, cell, 0, 0, cell, cell);
-              const rawCropPng = rawC.toDataURL("image/png");
               void fetch(`${API_BASE}/api/vision/feedback`, {
                 method: "POST", credentials: "include",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ piece: coachType, color: cell88.color, silhouettePng: png, rawCropPng }),
+                body: JSON.stringify({ piece: coachType, color: cell88.color, silhouettePng: buildSilhouette(cell88.color as "w" | "b"), rawCropPng: buildRawCrop() }),
               }).catch(() => {});
               sent++;
-              void files;
             } catch { /* silent */ }
           }
         }
