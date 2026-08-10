@@ -1254,7 +1254,7 @@ function markText(text: string, query: string): React.ReactNode {
   }
   return <>{out}</>;
 }
-function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMode, isSelected, onToggleSelect, query, slideshow, onSlideshowToggle, slideshowSec, onSlideshowSec }: {
+function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMode, isSelected, onToggleSelect, query, slideshow, onSlideshowToggle, slideshowSec, onSlideshowSec, shareCount }: {
   s: SnapItem;
   isOpen: boolean;
   onOpen: () => void;
@@ -1270,6 +1270,7 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
   onSlideshowToggle?: () => void;
   slideshowSec?: number;
   onSlideshowSec?: (n: number) => void;
+  shareCount?: number;
 }) {
   const qc = useQueryClient();
   const { data: me } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
@@ -1319,8 +1320,11 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ snapId: s._id, studentId: shareTo, message: shareMsg }),
       }).then((res) => res.json());
-      if (r?.ok) setShareResult({ ok: true, msg: `Sent to ${r.to || "student"}` });
-      else setShareResult({ ok: false, msg: r?.error || "Send failed" });
+      if (r?.ok) {
+        setShareResult({ ok: true, msg: `Sent to ${r.to || "student"}` });
+        qc.invalidateQueries({ queryKey: ["academy-snap-share-stats"] });
+        qc.invalidateQueries({ queryKey: ["academy-snap-share-tally"] });
+      } else setShareResult({ ok: false, msg: r?.error || "Send failed" });
     } catch { setShareResult({ ok: false, msg: "Network error" }); }
     finally { setShareSending(false); }
   }
@@ -1428,6 +1432,7 @@ function SnapCard({ s, isOpen, onOpen, onClose, onNav, neighbours, pos, selectMo
           {shapes.length > 0 && <span className="ml-1 text-[10px] text-amber-300">✏️{shapes.length}</span>}
           {(() => { const sec = estimateAudioSeconds(s.audioBytes); return s.hasAudio && sec != null ? <span className="ml-1 text-[10px] text-violet-300" title="Approximate clip length">🎙~{sec}s</span> : null; })()}
           {s.reviewedAt && <span className="ml-1 text-[10px] text-emerald-300" title={`Reviewed ${new Date(s.reviewedAt).toLocaleDateString()}`}>✓</span>}
+          {shareCount && shareCount > 0 ? <span className="ml-1 text-[10px] text-violet-300" title={`Sent to a student ${shareCount} time${shareCount === 1 ? "" : "s"}`}>📤{shareCount}</span> : null}
           {(() => {
             // Stale badge: starred + unreviewed + taken > 30 days ago. Nudges
             // the coach to either review or delete forgotten backlog items.
@@ -1946,6 +1951,15 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classFilter, starredOnly, textFilter, hideReviewed, sortKey, weekFilter]);
   const [openIdx, setOpenIdx] = useState<number | null>(null);
+  // Per-snap outbound share count; feeds the 📤N card badge. Fetched
+  // once at section mount; refetched when a new share lands via the same
+  // query invalidation the shares-tile uses.
+  const shareTallyQ = useQuery({
+    queryKey: ["academy-snap-share-tally"],
+    queryFn: () => get<Record<string, number>>("/api/academy/snap-shares/tally"),
+    staleTime: 60_000,
+  });
+  const shareTally = shareTallyQ.data ?? undefined;
   // Slideshow: auto-advance every N seconds while a modal is open. Wired
   // below once shownIds is in scope so we can wrap at the actual count.
   // Interval persists in localStorage so a coach who likes slow pacing
@@ -2064,6 +2078,7 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
     }), "shares");
     setBulkShareOpen(false); setBulkShareMsg(""); setBulkShareTo("");
     qcSnap.invalidateQueries({ queryKey: ["academy-snap-share-stats"] });
+    qcSnap.invalidateQueries({ queryKey: ["academy-snap-share-tally"] });
   }
   async function runPerSnap(ids: string[], call: (s: SnapItem, id: string) => Promise<Response>, label: string) {
     const byId: Record<string, SnapItem> = {};
@@ -2397,6 +2412,7 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
                 onSlideshowToggle={() => setSlideshow((v) => !v)}
                 slideshowSec={slideshowSec}
                 onSlideshowSec={setSlideshowSec}
+                shareCount={shareTally?.[s._id]}
               />
             ));
           })()}
