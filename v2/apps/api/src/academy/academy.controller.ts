@@ -40,6 +40,13 @@ export class AcademyController {
     return this.svc.setCoachStarredDigestCadence(userId, body?.cadence);
   }
 
+  // POST /api/academy/snap-share { snapId, studentId, message }
+  // Coach shares a specific snap with a specific student by email.
+  @Post("snap-share")
+  async shareSnap(@Req() req: any, @Body() body: any) {
+    return this.svc.sendSnapToStudent(req.session, String(body?.snapId || ""), String(body?.studentId || ""), String(body?.message || ""));
+  }
+
   @Post("invites")
   createInvite(@Body() body: any, @Req() req: any) {
     return this.svc.createInvite(req.session, body);

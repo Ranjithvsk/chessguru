@@ -747,4 +747,58 @@ export class AcademyService {
     await this.users().updateOne({ _id: userId as any }, { $set: { coachStarredDigestCadence: cadence } });
     return { ok: true, cadence };
   }
+
+  /** Coach sends a single snap to one of their students via email. Authz:
+   *  the caller must be the snap author AND the target must be a member of
+   *  the same academy (owner) or attached to the caller as coach (coachId).
+   *  Records the send in coachSnapSends for audit. */
+  async sendSnapToStudent(session: any, snapId: string, targetUserId: string, message: string) {
+    const g = this.ensureCoachOrOwner(session);
+    if (!/^sn_[A-Za-z0-9_-]{6,32}$/.test(snapId)) return { ok: false, error: "bad snap id" };
+    const snap: any = await this.conn.db!.collection("classSnaps").findOne({ _id: snapId as any });
+    if (!snap) return { ok: false, error: "snap not found" };
+    if (String(snap.byUserId) !== g.userId) return { ok: false, error: "you can only send your own snaps" };
+    const student: any = await this.users().findOne({ _id: targetUserId as any },
+      { projection: { _id: 1, username: 1, email: 1, academyId: 1, coachId: 1 } });
+    if (!student) return { ok: false, error: "student not found" };
+    if (!student.email) return { ok: false, error: "no email on file for this student" };
+    if (g.role === "coach" && student.coachId !== g.userId) return { ok: false, error: "student is not attached to you" };
+    if (g.role === "academy_owner" && student.academyId !== g.academyId) return { ok: false, error: "student is not in your academy" };
+    // Build the board-editor link with arrows preserved.
+    const shapes = Array.isArray(snap.shapes) ? snap.shapes : [];
+    const fenParam = encodeURIComponent(String(snap.fen));
+    const shapesParam = shapes.length > 0
+      ? "&shapes=" + Buffer.from(JSON.stringify(shapes)).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+      : "";
+    const link = `https://harinitharanjith.com/board-editor?fen=${fenParam}${shapesParam}`;
+    const noteTrim = String(message || "").slice(0, 500);
+    const subject = `Coach ${g.username || "your coach"} shared a position with you`;
+    const html = `
+      <div style="font-family:system-ui,sans-serif;max-width:520px">
+        <h2 style="color:#111;margin-bottom:4px">A position to study</h2>
+        <p style="color:#666;margin-top:0">Hi ${escHtml(student.username || targetUserId)} — your coach shared this position from a recent class.</p>
+        ${noteTrim ? `<div style="border-left:3px solid #2563eb;padding:8px 12px;background:#f0f7ff;margin:16px 0"><b>Coach:</b><br/>${escHtml(noteTrim)}</div>` : ""}
+        ${snap.note ? `<p style="color:#374151;margin:8px 0"><i>Original note:</i> ${escHtml(String(snap.note))}</p>` : ""}
+        <p style="margin:16px 0"><a href="${link}" style="display:inline-block;background:#2563eb;color:white;text-decoration:none;padding:8px 16px;border-radius:8px;font-weight:600">▶ Open the position</a></p>
+        ${shapes.length > 0 ? `<p style="color:#b45309;font-size:12px">Your coach drew ${shapes.length} arrow${shapes.length === 1 ? "" : "s"} — they'll show up when you open the board.</p>` : ""}
+        <p style="color:#9ca3af;font-size:11px;margin-top:24px">Sent via ChessGuru academy dashboard.</p>
+      </div>`;
+    const text = [
+      `A position to study`, "",
+      `Hi ${student.username || targetUserId} — your coach shared this position from a recent class.`, "",
+      noteTrim ? `Coach: ${noteTrim}\n` : "",
+      snap.note ? `Original note: ${snap.note}\n` : "",
+      `Open the position: ${link}`,
+      shapes.length > 0 ? `(${shapes.length} coach arrows will show)` : "",
+    ].filter(Boolean).join("\n");
+    const r = await sendMail({ to: student.email, subject, html, text });
+    if (!r.ok) return { ok: false, error: "email transport failed" };
+    // Audit log for coach → student sends. Cheap append-only doc.
+    await this.conn.db!.collection("coachSnapSends").insertOne({
+      snapId, byUserId: g.userId, byName: g.username,
+      toUserId: targetUserId, toUsername: student.username, toEmail: student.email,
+      note: noteTrim, at: new Date(),
+    } as any);
+    return { ok: true, to: student.username, email: student.email };
+  }
 }
