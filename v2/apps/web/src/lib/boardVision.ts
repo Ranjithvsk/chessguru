@@ -18,13 +18,23 @@
 import { classifyPiece, type PieceType } from "./pieceClassifier";
 
 export type SquareState = "empty" | "white" | "black";
+/** Two rendering conventions the detector handles:
+ *   - "screen":  chessground / chess.com / lichess screenshots. White pieces
+ *                are BRIGHTER than the square they sit on; black pieces
+ *                are DARKER. Colour = mean-vs-bg comparison.
+ *   - "print":   chess-book diagrams. Both colours are dark ink on paper.
+ *                White pieces are OUTLINED (hollow, sparse ink); black
+ *                pieces are FILLED (solid ink). Colour = ink-fill-fraction
+ *                per bounding box. Auto-detected by observing that no
+ *                occupied square is brighter than its background. */
+export type RenderMode = "screen" | "print";
 export type DetectResult = {
   fen: string;
   grid: SquareState[][];    // 8x8, index 0 = top rank (rank 8), index 0 col = a
   confidence: number[][];   // 8x8, 0..1 — lower means "please verify this square"
   types: (PieceType | null)[][];    // per-square piece type when occupied
   imageDataUrl: string;     // for the UI to preview alongside the board
-  meta: { whiteCount: number; blackCount: number };
+  meta: { whiteCount: number; blackCount: number; renderMode: RenderMode };
 };
 
 /** Load an image file / blob / data-URL into an HTMLImageElement. */
@@ -70,6 +80,12 @@ function cropToSquare(img: HTMLImageElement): HTMLCanvasElement {
  *  cropToSquare (whole image assumed to be the board) with a UI nudge for
  *  the user to crop manually. Sub-second on a 400×400 work canvas. */
 function autoDetectBoard(img: HTMLImageElement): { x: number; y: number; side: number; score: number } | null {
+  // Small images (chess-book PDF extractions, ~200-300px) are already
+  // ~90% board with just coord-label borders. The sliding-window scorer
+  // is imprecise on them and picks slightly-offset regions that mis-align
+  // the 8x8 grid. Skip auto-detect for small images and let cropToSquare
+  // handle the centred crop -- users can pre-trim if labels leak in.
+  if (Math.max(img.naturalWidth, img.naturalHeight) < 320) return null;
   const scale = 400 / Math.max(img.naturalWidth, img.naturalHeight, 1);
   const workW = Math.round(img.naturalWidth * scale);
   const workH = Math.round(img.naturalHeight * scale);
@@ -153,49 +169,89 @@ function detectAndCrop(img: HTMLImageElement): { canvas: HTMLCanvasElement; auto
   return { canvas: c, auto: true, score: found.score };
 }
 
-/** Mean + stddev of luminance over a rectangular sample. */
-function stats(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): { mean: number; std: number } {
+/** Mean + stddev of luminance over a rectangular sample, plus the raw
+ *  luminance samples (so callers can compute ink-fill percentages once
+ *  they know what "ink" means for this image). */
+function stats(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): { mean: number; std: number; lum: number[] } {
   const data = ctx.getImageData(x, y, w, h).data;
   let sum = 0, sumSq = 0;
   const n = w * h;
-  for (let i = 0; i < data.length; i += 4) {
+  const lum: number[] = new Array(n);
+  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
     // Perceived luminance (Rec. 601): cheap and enough for grayscale-ish
     // classification here.
     const l = 0.299 * data[i]! + 0.587 * data[i + 1]! + 0.114 * data[i + 2]!;
     sum += l; sumSq += l * l;
+    lum[j] = l;
   }
   const mean = sum / n;
   const variance = Math.max(0, sumSq / n - mean * mean);
-  return { mean, std: Math.sqrt(variance) };
+  return { mean, std: Math.sqrt(variance), lum };
 }
 
-/** Detect the FEN placeholder from a canvas already cropped to the board. */
-function classifyGrid(canvas: HTMLCanvasElement): { grid: SquareState[][]; confidence: number[][] } {
+/** Detect the FEN placeholder from a canvas already cropped to the board.
+ *  Returns the piece grid + a per-square confidence + the render mode
+ *  ("screen" for chessground/chess.com/lichess screenshots; "print" for
+ *  chess-book diagrams). See RenderMode. */
+function classifyGrid(canvas: HTMLCanvasElement): { grid: SquareState[][]; confidence: number[][]; renderMode: RenderMode } {
   const ctx = canvas.getContext("2d")!;
   const cell = canvas.width / 8;                // 60 for our 480px canvas
   const sample = Math.floor(cell * 0.5);        // sample the middle 50%
   const off = Math.floor((cell - sample) / 2);
   // First pass: read every square's stats to learn dark/light square averages.
-  const cellStats: { mean: number; std: number; isDarkSquare: boolean }[][] = [];
+  const cellStats: { mean: number; std: number; lum: number[]; isDarkSquare: boolean }[][] = [];
   for (let r = 0; r < 8; r++) {
-    const row: { mean: number; std: number; isDarkSquare: boolean }[] = [];
+    const row: { mean: number; std: number; lum: number[]; isDarkSquare: boolean }[] = [];
     for (let c = 0; c < 8; c++) {
       const s = stats(ctx, c * cell + off, r * cell + off, sample, sample);
       row.push({ ...s, isDarkSquare: (r + c) % 2 === 1 });
     }
     cellStats.push(row);
   }
-  // Learn the two square-background luminances by averaging over LOW-variance
-  // cells only (those are most likely empty).
-  let darkSum = 0, darkN = 0, lightSum = 0, lightN = 0;
-  for (const row of cellStats) for (const s of row) {
-    if (s.std < 15) {   // "flat" = probably empty
-      if (s.isDarkSquare) { darkSum += s.mean; darkN++; }
-      else { lightSum += s.mean; lightN++; }
+  // Add MIN and INK-COUNT to each cell's stats. Book diagrams have high
+  // pixel-value variance even in empty cells (dark-square shading), so
+  // std-based empty detection is unreliable. Using each cell's MIN
+  // luminance and count of "ink-dark" pixels (<100) is far more robust:
+  //   empty cell -> min > 150 (no true ink present)
+  //   piece cell -> min < 80  (ink strokes always dip that low)
+  const cellExtra: { min: number; inkPct: number }[][] = [];
+  for (let r = 0; r < 8; r++) {
+    const row: { min: number; inkPct: number }[] = [];
+    for (let c = 0; c < 8; c++) {
+      const lum = cellStats[r]![c]!.lum;
+      let mn = 999, ink = 0;
+      for (const v of lum) { if (v < mn) mn = v; if (v < 100) ink++; }
+      row.push({ min: mn, inkPct: ink / lum.length });
     }
+    cellExtra.push(row);
   }
-  const bgDark = darkN > 0 ? darkSum / darkN : 90;    // reasonable defaults
-  const bgLight = lightN > 0 ? lightSum / lightN : 200;
+
+  // --- Render-mode detection --------------------------------------------
+  // Print mode: at least 8 occupied cells all containing ink pixels (min
+  // < 100), AND paper-bright pixels dominate empty cells. Screen mode:
+  // otherwise (chessground white pieces are bright, no ink dips that low).
+  let inkCells = 0;
+  for (const row of cellExtra) for (const s of row) if (s.min < 100) inkCells++;
+  const renderMode: RenderMode = inkCells >= 8 ? "print" : "screen";
+
+  // Learn bg values. In screen mode, use the original std<15 filter. In
+  // print mode, relax std to <45 (dark-square shading has high variance)
+  // and additionally require min > 150 (no ink present) so cells with
+  // pieces aren't mis-counted as bg samples.
+  let darkSum = 0, darkN = 0, lightSum = 0, lightN = 0;
+  const stdLimit = renderMode === "print" ? 45 : 15;
+  for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+    const s = cellStats[r]![c]!;
+    const e = cellExtra[r]![c]!;
+    const flat = s.std < stdLimit;
+    const emptyPrint = renderMode === "print" ? e.min > 150 : true;
+    if (!flat || !emptyPrint) continue;
+    if (s.isDarkSquare) { darkSum += s.mean; darkN++; }
+    else { lightSum += s.mean; lightN++; }
+  }
+  const bgDark = darkN > 0 ? darkSum / darkN : (renderMode === "print" ? 210 : 90);
+  const bgLight = lightN > 0 ? lightSum / lightN : (renderMode === "print" ? 245 : 200);
+
   // Second pass: classify each square.
   const grid: SquareState[][] = [];
   const conf: number[][] = [];
@@ -206,26 +262,41 @@ function classifyGrid(canvas: HTMLCanvasElement): { grid: SquareState[][]; confi
       const s = cellStats[r]![c]!;
       const bg = s.isDarkSquare ? bgDark : bgLight;
       const delta = Math.abs(s.mean - bg);
-      // Empty: low variance AND close to background luminance.
+      // Empty: low variance AND close to background luminance. In print
+      // mode, dark-square shading has middling variance so we relax std;
+      // rely on delta-from-bg (paper) as the strong signal.
+      if (renderMode === "print") {
+        // Ink pixels = < 100 luminance (measured earlier during cellExtra).
+        // Empty cells have very few (usually zero) ink pixels regardless
+        // of square colour. Hollow (outlined white) pieces have moderate
+        // ink; solid (filled black) pieces have much more.
+        const e = cellExtra[r]![c]!;
+        if (e.inkPct < 0.02) { gRow.push("empty"); cRow.push(0.95); continue; }
+        // Colour by ink fraction: hollow (outline only) = white piece;
+        // solid ink = black piece. Threshold ~25% empirically separates
+        // king/queen (thick strokes ~20%) from solid black pieces (~40%).
+        const isWhite = e.inkPct < 0.25;
+        gRow.push(isWhite ? "white" : "black");
+        const c01 = Math.min(1, Math.max(0.3, Math.abs(e.inkPct - 0.25) / 0.15));
+        cRow.push(c01);
+        continue;
+      }
+      // --- Screen mode (original heuristic) ---
       if (s.std < 12 && delta < 20) {
         gRow.push("empty");
         cRow.push(0.95);
         continue;
       }
-      // Occupied. Decide colour by comparing sampled mean to background:
-      // - Piece brighter than bg → white piece
-      // - Piece darker than bg  → black piece
+      // Occupied. Piece brighter than bg = white; darker = black.
       const isWhite = s.mean > bg;
       gRow.push(isWhite ? "white" : "black");
-      // Confidence: proportional to how far the piece pulled the mean from bg,
-      // capped at 1.0. Very small deltas are ambiguous.
       const c01 = Math.min(1, Math.max(0.3, delta / 60));
       cRow.push(c01);
     }
     grid.push(gRow);
     conf.push(cRow);
   }
-  return { grid, confidence: conf };
+  return { grid, confidence: conf, renderMode };
 }
 
 /** Grid → FEN with placeholder piece types. chess.js validates on load, so
@@ -304,7 +375,7 @@ export function gridToFen(grid: SquareState[][], types?: (PieceType | null)[][])
 export async function detectPositionFromImage(src: string | Blob): Promise<DetectResult & { autoDetected: boolean; autoScore: number | null }> {
   const img = await loadImage(src);
   const { canvas, auto, score } = detectAndCrop(img);
-  const { grid, confidence } = classifyGrid(canvas);
+  const { grid, confidence, renderMode } = classifyGrid(canvas);
   // Classify piece TYPES for every occupied square. Multiply the two
   // confidences (occupancy × type) so downstream UI can flag squares
   // that are wobbly in either dimension.
@@ -318,7 +389,7 @@ export async function detectPositionFromImage(src: string | Blob): Promise<Detec
       if (sq === "empty") { row.push(null); continue; }
       const color = sq === "white" ? "w" : "b";
       try {
-        const res = await classifyPiece(ctx, c * cell, r * cell, cell, cell, color);
+        const res = await classifyPiece(ctx, c * cell, r * cell, cell, cell, color, renderMode);
         row.push(res.type);
         // Combine occupancy conf with type conf: min-of-two so a bad
         // classification pulls the overall square below the 0.6 alert bar.
@@ -338,7 +409,7 @@ export async function detectPositionFromImage(src: string | Blob): Promise<Detec
   return {
     fen, grid, confidence, types,
     imageDataUrl: canvas.toDataURL("image/png"),
-    meta: { whiteCount, blackCount },
+    meta: { whiteCount, blackCount, renderMode },
     autoDetected: auto,
     autoScore: score,
   };

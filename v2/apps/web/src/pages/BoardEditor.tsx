@@ -100,7 +100,7 @@ export default function BoardEditorPage() {
   // Frozen from the last successful vision run so we can compute a diff of
   // (vision-detected type) vs (coach-corrected type) on Apply and upload the
   // deltas as new templates for future detections.
-  const [visionSnapshot, setVisionSnapshot] = useState<{ types: (PieceType | null)[][]; canvas: HTMLCanvasElement } | null>(null);
+  const [visionSnapshot, setVisionSnapshot] = useState<{ types: (PieceType | null)[][]; canvas: HTMLCanvasElement; renderMode: "screen" | "print" } | null>(null);
   // Fetch the crowd-sourced reference bank on first mount. See loadServerRefsOnce.
   useEffect(() => { void loadServerRefsOnce(); }, []);
   // Position-editor mode: when on, board clicks PLACE a piece (from palette)
@@ -162,7 +162,7 @@ export default function BoardEditorPage() {
             const coachType = cell88.type.toUpperCase() as PieceType;
             if (coachType === visionType) continue;   // no correction
             try {
-              const sig = extractSilhouetteFromSquare(ctx, c * cell, r * cell, cell, cell, cell88.color as any);
+              const sig = extractSilhouetteFromSquare(ctx, c * cell, r * cell, cell, cell, cell88.color as any, visionSnapshot.renderMode);
               const png = silhouetteToPngDataUrl(sig);
               // Fire-and-forget. Failure (offline / not logged in) is silent —
               // it doesn't affect the Apply flow the coach cares about.
@@ -214,7 +214,7 @@ export default function BoardEditorPage() {
       // capture coach corrections against them for feedback upload.
       try {
         const cvs = await dataUrlToCanvas(res.imageDataUrl);
-        setVisionSnapshot({ types: res.types, canvas: cvs });
+        setVisionSnapshot({ types: res.types, canvas: cvs, renderMode: res.meta.renderMode });
       } catch { /* corrections just won't be captured this run */ }
       const ok = fp.load(res.fen);
       if (ok) {
@@ -224,7 +224,8 @@ export default function BoardEditorPage() {
         const cropTag = res.autoDetected
           ? `✓ Auto-found board (score ${res.autoScore}/64).`
           : `⚠ Couldn't find a board — used the whole image. Crop tighter and re-upload for better results.`;
-        setVisionMsg({ tone: res.autoDetected ? "ok" : "info", text: `${cropTag} Loaded ${res.meta.whiteCount}W + ${res.meta.blackCount}B.${nudge}` });
+        const modeTag = res.meta.renderMode === "print" ? " · book/print mode" : "";
+        setVisionMsg({ tone: res.autoDetected ? "ok" : "info", text: `${cropTag} Loaded ${res.meta.whiteCount}W + ${res.meta.blackCount}B${modeTag}.${nudge}` });
       }
       else setVisionMsg({ tone: "err", text: "Detected but couldn't load (illegal position). Try a cleaner screenshot." });
     } catch (e) {

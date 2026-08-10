@@ -87,13 +87,16 @@ export async function addServerReferences(refs: Array<{ piece: PieceType; color:
 }
 
 /** Public wrapper around extractSilhouette so BoardEditor can turn a
- *  coach's freshly-corrected square into a silhouette for upload. */
+ *  coach's freshly-corrected square into a silhouette for upload.
+ *  Pass renderMode so book-page silhouettes get extracted with the
+ *  ink-detection heuristic instead of the on-screen brightness one. */
 export function extractSilhouetteFromSquare(
   ctx: CanvasRenderingContext2D,
   x: number, y: number, w: number, h: number,
   color: PieceColor,
+  renderMode: "screen" | "print" = "screen",
 ): Uint8ClampedArray {
-  return extractSilhouette(ctx, x, y, w, h, color);
+  return extractSilhouette(ctx, x, y, w, h, color, renderMode);
 }
 
 /** Convert a 40×40 grayscale silhouette back to a PNG data URL. Used to
@@ -138,10 +141,18 @@ async function rasterize(dataUri: string): Promise<Uint8ClampedArray> {
   return out;
 }
 
-/** Extract a 40×40 grayscale silhouette from a live board patch. The vision
- *  pipeline gives us the square's pixels (already background-normalized);
- *  we crop to the piece bounding box for scale invariance. */
-function extractSilhouette(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: PieceColor): Uint8ClampedArray {
+/** Extract a 40×40 grayscale silhouette from a live board patch. Two modes:
+ *   - "screen" (default): white piece brighter than bg, black piece darker.
+ *   - "print":  both piece colours are dark ink on paper, so ALWAYS look
+ *               for pixels darker than bg. Silhouette shape differs
+ *               between hollow (white outline) and filled (black solid)
+ *               so template matching still discriminates the two colours. */
+function extractSilhouette(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number, w: number, h: number,
+  color: PieceColor,
+  renderMode: "screen" | "print" = "screen",
+): Uint8ClampedArray {
   const src = ctx.getImageData(x, y, w, h).data;
   // Estimate background luminance from the corners (usually pure square colour).
   const corners = [
@@ -152,15 +163,17 @@ function extractSilhouette(ctx: CanvasRenderingContext2D, x: number, y: number, 
   ].sort((a, b) => a - b);
   const bg = (corners[1]! + corners[2]!) / 2;   // median of the 4 corners
   // Build a binary mask: pixel is "piece" if it deviates from bg by > 30
-  // AND the deviation direction matches the piece colour (white piece =
-  // brighter than dark square; black piece = darker than light square).
+  // in the correct direction (colour-dependent in screen mode; always
+  // darker in print mode).
   const mask = new Uint8ClampedArray(w * h);
   for (let py = 0, i = 0; py < h; py++) {
     for (let px = 0; px < w; px++, i++) {
       const off = (py * w + px) * 4;
       const l = 0.299 * src[off]! + 0.587 * src[off + 1]! + 0.114 * src[off + 2]!;
       const delta = l - bg;
-      const isPiece = color === "w" ? delta > 30 : delta < -30;
+      const isPiece = renderMode === "print"
+        ? delta < -25          // ink is always darker than paper
+        : (color === "w" ? delta > 30 : delta < -30);
       mask[i] = isPiece ? 255 : 0;
     }
   }
@@ -214,9 +227,10 @@ export async function classifyPiece(
   ctx: CanvasRenderingContext2D,
   x: number, y: number, w: number, h: number,
   color: PieceColor,
+  renderMode: "screen" | "print" = "screen",
 ): Promise<{ type: PieceType; confidence: number }> {
   const bank = await getBank();
-  const sig = extractSilhouette(ctx, x, y, w, h, color);
+  const sig = extractSilhouette(ctx, x, y, w, h, color, renderMode);
   // For each piece type, score AGAINST EVERY template we have for that
   // (type, color) and take the best (lowest error). More templates = more
   // shots at recognising an unfamiliar piece set; the winner still has to
