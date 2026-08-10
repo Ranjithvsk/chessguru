@@ -15,11 +15,14 @@
 // Board orientation: assumed white-at-bottom (standard screenshot). A flip
 // button in the UI re-runs the FEN build with rows reversed.
 
+import { classifyPiece, type PieceType } from "./pieceClassifier";
+
 export type SquareState = "empty" | "white" | "black";
 export type DetectResult = {
   fen: string;
   grid: SquareState[][];    // 8x8, index 0 = top rank (rank 8), index 0 col = a
   confidence: number[][];   // 8x8, 0..1 — lower means "please verify this square"
+  types: (PieceType | null)[][];    // per-square piece type when occupied
   imageDataUrl: string;     // for the UI to preview alongside the board
   meta: { whiteCount: number; blackCount: number };
 };
@@ -139,16 +142,26 @@ function classifyGrid(canvas: HTMLCanvasElement): { grid: SquareState[][]; confi
  *   - Ensure exactly one K and one k so the position loads. If no white
  *     piece was detected, drop K on e1; if none was on rank 1 or 8, pick
  *     the highest-index W square. Symmetric for black. */
-export function gridToFen(grid: SquareState[][]): string {
-  // Start with placeholder pieces per square.
+export function gridToFen(grid: SquareState[][], types?: (PieceType | null)[][]): string {
+  // Start from classified types when provided, else fall back to a pawn/
+  // knight placeholder. In either case ensureKing runs after to guarantee
+  // a legal FEN.
   const pieces: (string | "")[][] = grid.map((row, r) =>
-    row.map((sq) => {
+    row.map((sq, c) => {
       if (sq === "empty") return "";
       const white = sq === "white";
-      // Ranks are flipped in the grid (index 0 = rank 8 = top).
       const rank = 8 - r;
       const pawnAllowed = rank !== 1 && rank !== 8;
-      const p = white ? (pawnAllowed ? "P" : "N") : (pawnAllowed ? "p" : "n");
+      const inferred = types?.[r]?.[c] ?? null;
+      let p: string;
+      if (inferred) {
+        // Respect the classifier's guess, but demote a pawn on rank 1/8 to
+        // knight since chess.js will reject it otherwise.
+        if (inferred === "P" && !pawnAllowed) p = white ? "N" : "n";
+        else p = white ? inferred : inferred.toLowerCase();
+      } else {
+        p = white ? (pawnAllowed ? "P" : "N") : (pawnAllowed ? "p" : "n");
+      }
       return p;
     })
   );
@@ -192,19 +205,45 @@ export function gridToFen(grid: SquareState[][]): string {
   return `${ranks.join("/")} w - - 0 1`;
 }
 
-/** Full pipeline: image (blob or data URL) → detected FEN + per-square confidence. */
+/** Full pipeline: image (blob or data URL) → detected FEN + per-square
+ *  confidence + inferred piece TYPES via template-matching against the
+ *  bundled Lichess-default (cburnett) SVGs. */
 export async function detectPositionFromImage(src: string | Blob): Promise<DetectResult> {
   const img = await loadImage(src);
   const canvas = cropToSquare(img);
   const { grid, confidence } = classifyGrid(canvas);
-  const fen = gridToFen(grid);
+  // Classify piece TYPES for every occupied square. Multiply the two
+  // confidences (occupancy × type) so downstream UI can flag squares
+  // that are wobbly in either dimension.
+  const ctx = canvas.getContext("2d")!;
+  const cell = canvas.width / 8;
+  const types: (PieceType | null)[][] = [];
+  for (let r = 0; r < 8; r++) {
+    const row: (PieceType | null)[] = [];
+    for (let c = 0; c < 8; c++) {
+      const sq = grid[r]![c]!;
+      if (sq === "empty") { row.push(null); continue; }
+      const color = sq === "white" ? "w" : "b";
+      try {
+        const res = await classifyPiece(ctx, c * cell, r * cell, cell, cell, color);
+        row.push(res.type);
+        // Combine occupancy conf with type conf: min-of-two so a bad
+        // classification pulls the overall square below the 0.6 alert bar.
+        confidence[r]![c] = Math.min(confidence[r]![c]!, res.confidence);
+      } catch {
+        row.push(null);   // classifier failed → placeholder from gridToFen
+      }
+    }
+    types.push(row);
+  }
+  const fen = gridToFen(grid, types);
   let whiteCount = 0, blackCount = 0;
   for (const row of grid) for (const sq of row) {
     if (sq === "white") whiteCount++;
     else if (sq === "black") blackCount++;
   }
   return {
-    fen, grid, confidence,
+    fen, grid, confidence, types,
     imageDataUrl: canvas.toDataURL("image/png"),
     meta: { whiteCount, blackCount },
   };
