@@ -2086,9 +2086,16 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
   // one row per snap. FEN + shapes JSON on the end so a coach can paste any
   // row back into /board-editor?fen=...&shapes=... to reconstruct the
   // position with annotations. Excel-safe: commas quoted, quotes escaped.
-  function exportCsv(rows: SnapItem[]) {
+  async function exportCsv(rows: SnapItem[]) {
     const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
-    const header = ["At", "Class", "Author", "Starred", "ReviewedAt", "Shapes", "AudioSec", "AudioBytes", "AudioUrl", "Transcript", "Note", "FEN", "OpenLink"];
+    // Best-effort share-count tally so CSV can carry ShareCount per row.
+    // Fails-open: an empty map just leaves every ShareCount as 0.
+    let tally: Record<string, number> = {};
+    try {
+      const t = await fetch(`${BASE}/api/academy/snap-shares/tally`, { credentials: "include" }).then((r) => r.json());
+      if (t && typeof t === "object" && !Array.isArray(t)) tally = t as Record<string, number>;
+    } catch { /* silent */ }
+    const header = ["At", "Class", "Author", "Starred", "ReviewedAt", "ShareCount", "Shapes", "AudioSec", "AudioBytes", "AudioUrl", "Transcript", "Note", "FEN", "OpenLink"];
     const lines = [header.map(esc).join(",")];
     for (const s of rows) {
       const shapes = Array.isArray(s.shapes) ? s.shapes : [];
@@ -2105,6 +2112,7 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
         s.byName || s.byUserId || "",
         s.starred ? "yes" : "",
         s.reviewedAt ? new Date(s.reviewedAt).toISOString() : "",
+        String(tally[s._id] ?? 0),
         shapes.length > 0 ? JSON.stringify(shapes) : "",
         estSec != null ? String(estSec) : "",
         typeof s.audioBytes === "number" ? String(s.audioBytes) : "",

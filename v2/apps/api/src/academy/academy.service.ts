@@ -827,4 +827,17 @@ export class AcademyService {
       })),
     };
   }
+
+  /** Aggregation of the coach's outbound shares grouped by snapId, so the
+   *  client can add a ShareCount column to CSV exports and (later) badge
+   *  cards with a "sent 3×" chip. Returns a plain { snapId: count } map. */
+  async snapShareTallyFor(userId: string): Promise<Record<string, number>> {
+    const rows = await this.conn.db!.collection("coachSnapSends").aggregate([
+      { $match: { byUserId: String(userId) } },
+      { $group: { _id: "$snapId", n: { $sum: 1 } } },
+    ]).toArray();
+    const out: Record<string, number> = {};
+    for (const r of rows) out[String(r._id)] = Number(r.n);
+    return out;
+  }
 }

@@ -56,6 +56,14 @@ export class AcademyController {
     return this.svc.snapShareStatsFor(userId);
   }
 
+  // GET /api/academy/snap-shares/tally — { snapId: count } for CSV enrichment.
+  @Get("snap-shares/tally")
+  async snapShareTally(@Req() req: any) {
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) throw new UnauthorizedException();
+    return this.svc.snapShareTallyFor(userId);
+  }
+
   @Post("invites")
   createInvite(@Body() body: any, @Req() req: any) {
     return this.svc.createInvite(req.session, body);
