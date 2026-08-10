@@ -943,17 +943,54 @@ function TodayStrip({ schedule, snaps, recordings }: {
 // data arrives. Only counts THIS week for the primary value; total in
 // tooltip so the coach sees momentum.
 function SnapSharesTile({ Tile }: { Tile: React.ComponentType<{ label: string; value: number | string; tone: string }> }) {
+  type Row = { snapId: string; toUsername: string; toEmail: string; note: string; at: string };
   const { data } = useQuery({
     queryKey: ["academy-snap-share-stats"],
-    queryFn: () => get<{ total: number; thisWeek: number }>("/api/academy/snap-shares/stats"),
+    queryFn: () => get<{ total: number; thisWeek: number; recent: Row[] }>("/api/academy/snap-shares/stats"),
     staleTime: 60_000,
   });
   const week = data?.thisWeek ?? 0;
   const total = data?.total ?? 0;
+  const [open, setOpen] = useState(false);
   return (
-    <div title={`Total snap-shares ever: ${total}`}>
-      <Tile label="📤 Shares this week" value={week} tone={week > 0 ? "border-violet-500/40 bg-violet-500/5" : "border-ink-700 bg-ink-900"} />
-    </div>
+    <>
+      <button onClick={() => setOpen(true)} title={`Click to see your recent snap-shares (${total} ever)`} className="text-left">
+        <Tile label="📤 Shares this week" value={week} tone={week > 0 ? "border-violet-500/40 bg-violet-500/5 hover:bg-violet-500/10" : "border-ink-700 bg-ink-900"} />
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg rounded-xl2 border border-ink-700 bg-ink-900 p-5 shadow-2xl">
+            <div className="mb-3 flex items-baseline justify-between">
+              <h3 className="font-display text-lg text-white">📤 Recent snap-shares</h3>
+              <button onClick={() => setOpen(false)} className="text-ink-400 hover:text-white text-sm">Esc</button>
+            </div>
+            <div className="text-[11px] text-ink-400 mb-2">
+              This week: <b className="text-ink-200">{week}</b> · all-time: <b className="text-ink-200">{total}</b>
+            </div>
+            {(!data?.recent || data.recent.length === 0) ? (
+              <div className="text-sm text-ink-400">No shares yet. Open any snap → 📤 Send to student to start.</div>
+            ) : (
+              <ol className="max-h-72 overflow-y-auto pr-1 space-y-1 text-sm">
+                {data.recent.map((r, i) => (
+                  <li key={`${r.snapId}-${i}`} className="rounded border border-ink-700 bg-ink-800/40 px-2 py-1.5">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <Link to={`/academy?snap=${encodeURIComponent(r.snapId)}`} onClick={() => setOpen(false)}
+                        className="text-brand-300 hover:underline truncate">
+                        → {r.toUsername}
+                      </Link>
+                      <span className="text-[10px] text-ink-500 tabular-nums shrink-0">
+                        {new Date(r.at).toLocaleDateString(undefined, { day: "2-digit", month: "short" })}
+                      </span>
+                    </div>
+                    {r.note && <div className="mt-0.5 text-[11px] text-ink-300 italic line-clamp-2">"{r.note}"</div>}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

@@ -808,10 +808,23 @@ export class AcademyService {
   async snapShareStatsFor(userId: string) {
     const sends = this.conn.db!.collection("coachSnapSends");
     const weekAgo = new Date(Date.now() - 7 * 86_400_000);
-    const [total, thisWeek] = await Promise.all([
+    const [total, thisWeek, recent]: [number, number, any[]] = await Promise.all([
       sends.countDocuments({ byUserId: String(userId) }),
       sends.countDocuments({ byUserId: String(userId), at: { $gte: weekAgo } }),
+      sends.find({ byUserId: String(userId) },
+        { projection: { snapId: 1, toUsername: 1, toEmail: 1, note: 1, at: 1 } as any })
+        .sort({ at: -1 }).limit(20).toArray(),
     ]);
-    return { total, thisWeek };
+    return {
+      total,
+      thisWeek,
+      recent: recent.map((r) => ({
+        snapId: r.snapId,
+        toUsername: r.toUsername || "",
+        toEmail: r.toEmail || "",
+        note: r.note || "",
+        at: r.at,
+      })),
+    };
   }
 }
