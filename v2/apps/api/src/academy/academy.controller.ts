@@ -47,6 +47,15 @@ export class AcademyController {
     return this.svc.sendSnapToStudent(req.session, String(body?.snapId || ""), String(body?.studentId || ""), String(body?.message || ""));
   }
 
+  // GET /api/academy/snap-shares/stats — { total, thisWeek } for the
+  // current user's coachSnapSends audit log. Used by the today ribbon.
+  @Get("snap-shares/stats")
+  async snapShareStats(@Req() req: any) {
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) throw new UnauthorizedException();
+    return this.svc.snapShareStatsFor(userId);
+  }
+
   @Post("invites")
   createInvite(@Body() body: any, @Req() req: any) {
     return this.svc.createInvite(req.session, body);

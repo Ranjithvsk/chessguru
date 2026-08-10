@@ -909,7 +909,7 @@ function TodayStrip({ schedule, snaps, recordings }: {
     </div>
   );
   return (
-    <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:grid-cols-7">
+    <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:grid-cols-8">
       <Tile label="Classes today" value={classesToday} tone="border-ink-700 bg-ink-900" />
       <Tile label="Live now" value={liveNow} tone={liveNow > 0 ? "border-emerald-500/40 bg-emerald-500/5" : "border-ink-700 bg-ink-900"} />
       {(() => {
@@ -933,6 +933,26 @@ function TodayStrip({ schedule, snaps, recordings }: {
       <Link to="/academy?starred=1&hidedone=1&sort=stale" title="Open the snap grid filtered to your review shortlist (starred + not done, most-stale first)">
         <Tile label="🎯 To review" value={toReview} tone={toReview > 0 ? "border-brand-500/40 bg-brand-500/5 hover:bg-brand-500/10" : "border-ink-700 bg-ink-900"} />
       </Link>
+      <SnapSharesTile Tile={Tile} />
+    </div>
+  );
+}
+
+// Coach's outbound snap-share count. Fetched lazily so the today ribbon
+// doesn't block on a network round-trip; renders as a neutral tile until
+// data arrives. Only counts THIS week for the primary value; total in
+// tooltip so the coach sees momentum.
+function SnapSharesTile({ Tile }: { Tile: React.ComponentType<{ label: string; value: number | string; tone: string }> }) {
+  const { data } = useQuery({
+    queryKey: ["academy-snap-share-stats"],
+    queryFn: () => get<{ total: number; thisWeek: number }>("/api/academy/snap-shares/stats"),
+    staleTime: 60_000,
+  });
+  const week = data?.thisWeek ?? 0;
+  const total = data?.total ?? 0;
+  return (
+    <div title={`Total snap-shares ever: ${total}`}>
+      <Tile label="📤 Shares this week" value={week} tone={week > 0 ? "border-violet-500/40 bg-violet-500/5" : "border-ink-700 bg-ink-900"} />
     </div>
   );
 }

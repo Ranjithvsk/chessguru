@@ -801,4 +801,17 @@ export class AcademyService {
     } as any);
     return { ok: true, to: student.username, email: student.email };
   }
+
+  /** Aggregate counts of the coach's outbound snap shares. Powers the
+   *  today-ribbon "📤 Shares" tile so the coach sees at a glance how
+   *  many positions they've sent out this week. */
+  async snapShareStatsFor(userId: string) {
+    const sends = this.conn.db!.collection("coachSnapSends");
+    const weekAgo = new Date(Date.now() - 7 * 86_400_000);
+    const [total, thisWeek] = await Promise.all([
+      sends.countDocuments({ byUserId: String(userId) }),
+      sends.countDocuments({ byUserId: String(userId), at: { $gte: weekAgo } }),
+    ]);
+    return { total, thisWeek };
+  }
 }
