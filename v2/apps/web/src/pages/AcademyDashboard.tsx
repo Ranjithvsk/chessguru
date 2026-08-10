@@ -2043,6 +2043,28 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
       body: JSON.stringify({ reviewed }),
     }), "review updates");
   }
+  // Bulk share flow: pick a student + optional note, fire one POST per
+  // selected snap. Only the coach's own snaps land (server rejects the
+  // rest); mixed selections just report the failure count via runPerSnap.
+  const [bulkShareOpen, setBulkShareOpen] = useState(false);
+  const [bulkShareTo, setBulkShareTo] = useState<string>("");
+  const [bulkShareMsg, setBulkShareMsg] = useState("");
+  const bulkStudentsQ = useQuery({
+    queryKey: ["academy-students"],
+    queryFn: () => get<Student[]>("/api/academy/students"),
+    enabled: bulkShareOpen,
+  });
+  async function bulkShareSend() {
+    const ids = [...selectedIds];
+    if (ids.length === 0 || !bulkShareTo) return;
+    await runPerSnap(ids, (_s, id) => fetch(`${BASE}/api/academy/snap-share`, {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ snapId: id, studentId: bulkShareTo, message: bulkShareMsg }),
+    }), "shares");
+    setBulkShareOpen(false); setBulkShareMsg(""); setBulkShareTo("");
+    qcSnap.invalidateQueries({ queryKey: ["academy-snap-share-stats"] });
+  }
   async function runPerSnap(ids: string[], call: (s: SnapItem, id: string) => Promise<Response>, label: string) {
     const byId: Record<string, SnapItem> = {};
     for (const s of snaps) byId[s._id] = s;
@@ -2290,6 +2312,13 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
                 className="rounded-full border border-ink-700 bg-ink-900 px-2.5 py-0.5 text-[11px] font-semibold text-ink-300 hover:bg-ink-800 disabled:opacity-40">
                 ☐ Un-review
               </button>
+              <button onClick={() => setBulkShareOpen((v) => !v)} disabled={selectedIds.size === 0}
+                title="Send selected snaps to one student in a single sitting"
+                className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${bulkShareOpen
+                  ? "border-violet-500/60 bg-violet-500/15 text-violet-100"
+                  : "border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20"} disabled:opacity-40`}>
+                📤 Share {selectedIds.size}
+              </button>
               <button onClick={bulkDelete} disabled={selectedIds.size === 0}
                 title="Delete selected snaps (author-only per snap; failures reported)"
                 className="rounded-full border border-rose-500/40 bg-rose-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-rose-200 hover:bg-rose-500/20 disabled:opacity-40">
@@ -2302,6 +2331,31 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
             className="rounded-full border border-ink-700 bg-ink-900 px-2.5 py-0.5 text-[11px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-ink-100">
             ⬇ CSV <span className="ml-1 opacity-70">{filtered.length}</span>
           </button>
+        </div>
+      )}
+      {selectMode && bulkShareOpen && selectedIds.size > 0 && (
+        <div className="mb-3 rounded-lg border border-violet-500/40 bg-violet-500/5 p-3 space-y-2">
+          <div className="text-[11px] uppercase tracking-wide text-violet-200">📤 Bulk share {selectedIds.size} snap{selectedIds.size === 1 ? "" : "s"}</div>
+          <select value={bulkShareTo} onChange={(e) => setBulkShareTo(e.target.value)}
+            className="w-full rounded-lg border border-ink-700 bg-ink-800 px-2 py-1.5 text-sm text-white outline-none focus:border-violet-500">
+            <option value="">— Select a student —</option>
+            {(bulkStudentsQ.data ?? []).map((st) => (
+              <option key={st._id} value={st._id}>
+                {st.username}{st.email ? ` · ${st.email}` : " · (no email)"}
+              </option>
+            ))}
+          </select>
+          <textarea value={bulkShareMsg} onChange={(e) => setBulkShareMsg(e.target.value)} rows={2} maxLength={500}
+            placeholder='Optional note attached to every share'
+            className="w-full resize-none rounded-lg border border-ink-700 bg-ink-800 px-2 py-1.5 text-sm text-white placeholder:text-ink-500 outline-none focus:border-violet-500" />
+          <div className="flex items-center gap-2">
+            <button onClick={bulkShareSend} disabled={!bulkShareTo}
+              className="rounded-lg bg-violet-600 px-3 py-1 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-50">
+              Send {selectedIds.size}
+            </button>
+            <button onClick={() => setBulkShareOpen(false)}
+              className="rounded-lg border border-ink-600 px-3 py-1 text-sm text-ink-300 hover:bg-ink-800">Cancel</button>
+          </div>
         </div>
       )}
       {filtered.length === 0 ? (
