@@ -74,7 +74,7 @@ export class AcademyService {
         // owner-invite must specify a coach in this academy
         const requestedCoach = String(body?.coachId || "").trim().toLowerCase();
         if (!requestedCoach) return { ok: false, error: "Pick a coach for this student." };
-        const coach = await this.users().findOne({ _id: requestedCoach as any, academyId, role: "coach" });
+        const coach = await this.users().findOne({ _id: requestedCoach as any, academyId, role: { $in: ["coach", "academy_owner"] } });
         if (!coach) return { ok: false, error: "That coach isn't in this academy." };
         coachId = requestedCoach;
       }
@@ -163,7 +163,7 @@ export class AcademyService {
       coachId = g.userId;
     } else {
       if (!requestedCoachId) return { ok: false, error: "Pick a coach for this student." };
-      const coach = await this.users().findOne({ _id: requestedCoachId as any, academyId: g.academyId, role: "coach" });
+      const coach = await this.users().findOne({ _id: requestedCoachId as any, academyId: g.academyId, role: { $in: ["coach", "academy_owner"] } });
       if (!coach) return { ok: false, error: "That coach isn't in this academy." };
       coachId = requestedCoachId;
     }
@@ -354,10 +354,14 @@ export class AcademyService {
   async listCoaches(session: any) {
     const { academyId } = this.ensureOwner(session);
     const rows = await this.users()
-      .find({ academyId, role: "coach" }, { projection: { _id: 1, username: 1, email: 1, createdAt: 1, lastLogin: 1 } })
+      .find({ academyId, role: { $in: ["academy_owner", "coach"] } }, { projection: { _id: 1, username: 1, email: 1, role: 1, createdAt: 1, lastLogin: 1 } })
       .sort({ createdAt: -1 })
       .toArray();
-    return rows;
+    // The academy owner also coaches — include them in the roster (flagged isOwner so the UI
+    // can label "You · Owner") and float them to the top. Owner is assignable like any coach.
+    return rows
+      .map((r: any) => ({ ...r, isOwner: r.role === "academy_owner" }))
+      .sort((a: any, b: any) => (b.isOwner ? 1 : 0) - (a.isOwner ? 1 : 0));
   }
 
   /** PUBLIC — fetch invite metadata for the accept page (validate token, expiry).

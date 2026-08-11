@@ -35,7 +35,7 @@ async function del<T>(path: string): Promise<T> {
 }
 
 interface Invite { token: string; email: string; displayName?: string; role: "coach"|"student"; coachId?: string|null; createdAt: string; expiresAt: string; invitedByName?: string }
-interface Coach   { _id: string; username: string; email?: string|null; createdAt?: string; lastLogin?: string|null }
+interface Coach   { _id: string; username: string; email?: string|null; createdAt?: string; lastLogin?: string|null; isOwner?: boolean }
 interface Student {
   _id: string; username: string; email?: string|null; coachId?: string|null;
   createdAt?: string; lastLogin?: string|null;
@@ -261,7 +261,7 @@ function AddStudentModal({ open, onClose, coaches, isOwner }: {
                 <select value={coachId} onChange={(e) => setCoachId(e.target.value)}
                   className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white focus:border-emerald-500 focus:outline-none">
                   <option value="">— pick a coach —</option>
-                  {coaches.map((c) => <option key={c._id} value={c._id}>{c.username}</option>)}
+                  {coaches.map((c) => <option key={c._id} value={c._id}>{c.username}{c.isOwner ? " · You (Owner)" : ""}</option>)}
                 </select>
               </div>
             )}
@@ -1418,7 +1418,7 @@ export default function AcademyDashboardPage() {
                 <select value={studCoachId} onChange={(e) => setStudCoachId(e.target.value)}
                   className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white focus:border-brand-500 focus:outline-none md:col-span-2">
                   <option value="">— pick a coach for this student —</option>
-                  {(coaches ?? []).map((c) => <option key={c._id} value={c._id}>{c.username}{c.email ? ` (${c.email})` : ""}</option>)}
+                  {(coaches ?? []).map((c) => <option key={c._id} value={c._id}>{c.username}{c.isOwner ? " · You (Owner)" : c.email ? ` (${c.email})` : ""}</option>)}
                 </select>
               )}
               <button disabled={!studEmail || (isOwner && !studCoachId) || inviteStudentMut.isPending}
@@ -1496,7 +1496,7 @@ export default function AcademyDashboardPage() {
                     const n = studentsShown.filter((s) => s.coachId === c._id).length;
                     return (
                       <tr key={c._id} className="border-t border-ink-800">
-                        <td className="px-3 py-2 text-white">{c.username}</td>
+                        <td className="px-3 py-2 text-white">{c.username}{c.isOwner && <span className="ml-2 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300">You · Owner</span>}</td>
                         <td className="px-3 py-2 text-ink-300">{c.email || "—"}</td>
                         <td className="px-3 py-2 text-ink-400">{fmtDate(c.createdAt)}</td>
                         <td className="px-3 py-2 text-ink-400">{fmtAgo(c.lastLogin)}</td>
