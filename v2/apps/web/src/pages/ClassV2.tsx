@@ -9,9 +9,10 @@ import { useEffect, useState } from "react";
 import { Navigate, useParams, useSearchParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
-  LiveKitRoom, VideoConference,
-  RoomAudioRenderer, ControlBar,
+  LiveKitRoom, RoomAudioRenderer, ControlBar,
+  GridLayout, ParticipantTile, useTracks, useParticipants,
 } from "@livekit/components-react";
+import { Track } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
 import SharedClassBoard from "../components/SharedClassBoard";
@@ -34,6 +35,45 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
 
 interface LKStatus { configured: boolean; url: string | null }
 interface LKTokenResp { ok: boolean; token: string; url: string; role: "coach"|"student"; room: string }
+
+// Compact participant grid — camera + screen-share tiles, filling the rail.
+function VideoRail() {
+  const tracks = useTracks(
+    [
+      { source: Track.Source.Camera, withPlaceholder: true },
+      { source: Track.Source.ScreenShare, withPlaceholder: false },
+    ],
+    { onlySubscribed: false },
+  );
+  return (
+    <GridLayout tracks={tracks} style={{ height: "100%" }}>
+      <ParticipantTile />
+    </GridLayout>
+  );
+}
+
+// Live participant count + one-tap "copy student invite" — lives inside the
+// LiveKitRoom so useParticipants has room context.
+function LiveHeaderBits({ room }: { room: string }) {
+  const participants = useParticipants();
+  const [copied, setCopied] = useState(false);
+  const inviteUrl = `${location.origin}${import.meta.env.BASE_URL}class-v2/${encodeURIComponent(room)}?role=student`;
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(inviteUrl); setCopied(true); setTimeout(() => setCopied(false), 1500); }
+    catch { window.prompt("Copy the student invite link:", inviteUrl); }
+  };
+  return (
+    <>
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-ink-800 px-2.5 py-1 text-xs text-ink-200" title="In the room now">
+        👤 {participants.length}
+      </span>
+      <button onClick={copy}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-800 px-2.5 py-1 text-xs font-semibold text-ink-100 hover:bg-ink-700">
+        {copied ? "✓ Copied" : "🔗 Invite"}
+      </button>
+    </>
+  );
+}
 
 export default function ClassV2Page() {
   const { room = "" } = useParams();
@@ -122,34 +162,51 @@ export default function ClassV2Page() {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-ink-400">
-        <span>🎥 <b className="text-white">{room}</b> · you're joining as <b className="text-brand-300">{role}</b></span>
-        <Link to="/class" className="hover:text-white">← All classes</Link>
+      <div className="flex h-[82vh] min-h-[540px] flex-col overflow-hidden rounded-2xl border border-ink-700 bg-ink-900/60 shadow-xl" data-lk-theme="default">
+        <LiveKitRoom
+          serverUrl={tokenData.url}
+          token={tokenData.token}
+          connect
+          video
+          audio
+          onError={(e) => setErrMsg(e.message)}
+          className="flex h-full min-h-0 flex-col"
+        >
+          {/* Top bar */}
+          <div className="flex items-center justify-between gap-2 border-b border-ink-800 bg-ink-900/80 px-4 py-2.5">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-500/15 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-rose-300">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-rose-500" /> Live
+              </span>
+              <span className="truncate font-display text-sm text-white">Dream Meet</span>
+              <span className="hidden truncate text-xs text-ink-500 sm:inline">· you're {role}</span>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <LiveHeaderBits room={room} />
+              <Link to="/class" className="rounded-lg bg-ink-800 px-2.5 py-1 text-xs font-semibold text-ink-200 hover:bg-ink-700">← Leave</Link>
+            </div>
+          </div>
+
+          {/* Body: board (primary) + video rail */}
+          <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 lg:flex-row">
+            <div className="flex min-h-0 min-w-0 flex-col rounded-xl border border-ink-800 bg-ink-950/40 p-3 lg:flex-[3]">
+              <div className="mb-2 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-ink-400">♟ Shared board</div>
+              <div className="flex min-h-0 flex-1 items-center justify-center">
+                <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} />
+              </div>
+            </div>
+            <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-ink-800 bg-black/40 lg:flex-[2]">
+              <div className="min-h-[220px] flex-1">
+                <VideoRail />
+              </div>
+              <div className="border-t border-ink-800 bg-ink-900/70">
+                <ControlBar variation="minimal" controls={{ microphone: true, camera: true, screenShare: true, chat: false, leave: false }} />
+              </div>
+            </div>
+          </div>
+          <RoomAudioRenderer />
+        </LiveKitRoom>
       </div>
-      <div className="flex flex-col gap-3 lg:flex-row">
-        <div className="rounded-xl2 border border-ink-700 bg-ink-900/60 p-3 lg:flex-1">
-          <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} />
-        </div>
-        <div className="rounded-xl2 border border-ink-700 bg-ink-900 lg:flex-1" style={{ height: "78vh" }} data-lk-theme="default">
-          <LiveKitRoom
-            serverUrl={tokenData.url}
-            token={tokenData.token}
-            connect
-            video
-            audio
-            onError={(e) => setErrMsg(e.message)}
-            style={{ height: "100%" }}
-          >
-            <VideoConference />
-            <ControlBar />
-            <RoomAudioRenderer />
-          </LiveKitRoom>
-        </div>
-      </div>
-      <p className="mt-2 text-[10px] text-ink-500">
-        Dream Meet · P0 shell. Coach controls, screen share, chat, breakouts and recording ship in P1
-        (see PROJECT_MASTER/plans/CHESSGURU-LIVE-VIDEO-PLATFORM.md).
-      </p>
     </div>
   );
 }
