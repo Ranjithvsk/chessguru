@@ -175,19 +175,26 @@ export class AcademyService {
     }
 
     const sanitize = (s: string) => s.toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 24);
-    let baseUid = sanitize(displayName);
-    if (baseUid.length < 2 && emailIn) baseUid = sanitize(emailIn.split("@")[0] || "");
-    if (baseUid.length < 2) baseUid = "student-" + randomBytes(3).toString("hex");
-    let uid = baseUid, k = 2;
-    while (await this.users().findOne({ _id: uid as any })) {
-      uid = `${baseUid}-${k++}`;
-      if (k > 999) return { ok: false, error: "Couldn't pick a free username — try a different name." };
-    }
+    let uid = sanitize(displayName);
+    if (uid.length < 2 && emailIn) uid = sanitize(emailIn.split("@")[0] || "");
+    if (uid.length < 2) return { ok: false, error: "Enter the student's name (at least 2 letters)." };
+
+    // The username IS the name (sanitized) — no auto "-2/-3" suffixing. A duplicate
+    // is REJECTED so every student keeps a unique login. We check the _id AND the
+    // display `username` (sign-in matches case-insensitively on `username`), so two
+    // students can never end up sharing a login handle.
+    const clash = await this.users().findOne({
+      $or: [
+        { _id: uid as any },
+        { username: { $regex: new RegExp("^" + uid + "$", "i") } },
+      ],
+    } as any);
+    if (clash) return { ok: false, error: `The username "${uid}" is already taken — pick a different name.` };
 
     // Student passwords are a simple, memorable "<firstname>@123" (e.g. ragul@123)
     // so a coach can read it out to a young student in person. Temporary — the
     // student (or coach) can change it later.
-    const pwBase = ((displayName.split(/\s+/)[0] || baseUid).toLowerCase().replace(/[^a-z0-9]/g, "")) || baseUid.replace(/[^a-z0-9]/g, "") || "student";
+    const pwBase = ((displayName.split(/\s+/)[0] || uid).toLowerCase().replace(/[^a-z0-9]/g, "")) || uid.replace(/[^a-z0-9]/g, "") || "student";
     const password = `${pwBase}@123`;
     const bcrypt = await import("bcryptjs");
     const hash = await bcrypt.default.hash(password, 10);
@@ -195,7 +202,7 @@ export class AcademyService {
     const now = new Date();
     const userDoc: any = {
       _id: uid,
-      username: displayName || uid,
+      username: uid,
       bpass: hash,
       email: emailIn || null,
       academyId: g.academyId,
