@@ -44,7 +44,7 @@ import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import sharp from "sharp";
 import { embedImageDinov2, DINOV2_EMBEDDING_DIM } from "../lib/dinovImage";
-import { classifyBatch as chessClassifyBatch, CHESS_CLASSIFIER_VERSION } from "../lib/chessClassifier";
+import { classifyBatch as chessClassifyBatch, classifyBatchFromCHW as chessClassifyBatchFromCHW, CHESS_CLASSIFIER_VERSION } from "../lib/chessClassifier";
 import { classifyBatchV4, classifyBatchV4FromCHW, tilesFromBoardPixels, repairForLegalFen, CHESS_CLASSIFIER_V4_VERSION } from "../lib/chessClassifierV4";
 
 export type PieceLetter = "P" | "N" | "B" | "R" | "Q" | "K";
@@ -281,21 +281,24 @@ export class VisionService {
       throw new Error("board png out of range (need 500-2MB base64)");
     }
     const boardBuf = Buffer.from(boardB64, "base64");
-    const meta = await sharp(boardBuf).metadata();
-    if (!meta.width || !meta.height) throw new Error("unreadable board image");
-    const canonical = await sharp(boardBuf).resize(480, 480, { fit: "fill" }).png().toBuffer();
-
-    // Extract all 64 squares first (sequential IO is negligible vs one
-    // batched inference call).
-    const squares: Buffer[] = [];
-    for (let r = 0; r < 8; r++) {
-      for (let c = 0; c < 8; c++) {
-        squares.push(await sharp(canonical)
-          .extract({ left: c * 60, top: r * 60, width: 60, height: 60 })
-          .png().toBuffer());
-      }
-    }
-    const results = await chessClassifyBatch(squares);
+    // FAST-PATH preprocessing: single sharp() call decodes + resizes the
+    // whole board to 1792x1792 raw RGB, then tilesFromBoardPixels shuffles
+    // bytes into 64 pre-normalized CHW tensors in pure JS. Cheaper than
+    // the legacy 128 sharp subprocess calls, especially when the box is
+    // under load.
+    // NB: inference itself is the ceiling on this model (DINOv2-base CPU
+    // forward ~400ms/square × 64 = ~26s on a loaded box). Sub-second
+    // latency needs GPU or distillation to a smaller model. See Option C
+    // post-mortem for details.
+    const megaBoard = 8 * 224;
+    const rawRGB = await sharp(boardBuf)
+      .removeAlpha()
+      .resize(megaBoard, megaBoard, { fit: "fill", kernel: "cubic" })
+      .raw()
+      .toBuffer();
+    const chwTiles = tilesFromBoardPixels(rawRGB, megaBoard);
+    const results = await chessClassifyBatchFromCHW(chwTiles);
+    void chessClassifyBatch;   // legacy path kept for callers with per-square PNGs
 
     // Map 64 flat results back to 8x8 grid + build FEN.
     const grid: ClassifiedSquare[][] = [];

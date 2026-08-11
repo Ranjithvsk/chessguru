@@ -34,6 +34,21 @@ export default function App() {
         <StreakAtRiskBanner />
         <Outlet context={{ userId, rating: rating?.rating ?? 1500 }} />
       </main>
+      {/* Global "📷 Scan chess position" FAB. Fixed bottom-left so it's
+          always one tap away on phone (coach snaps a photo of a book
+          diagram or screenshot → goes straight to /board-editor which
+          hosts the vision pipeline). Hidden on /board-editor itself to
+          avoid redundancy. */}
+      {loc.pathname !== "/board-editor" && (
+        <Link
+          to="/board-editor"
+          title="Scan chess position from image (camera or file)"
+          className="fixed bottom-4 left-4 z-30 flex items-center gap-2 rounded-full border border-brand-400/50 bg-gradient-to-br from-brand-500 to-accent-500 px-4 py-2.5 text-sm font-semibold text-white shadow-lg hover:from-brand-400 hover:to-accent-400"
+        >
+          <span className="text-lg leading-none">📷</span>
+          <span className="hidden sm:inline">Scan position</span>
+        </Link>
+      )}
     </div>
   );
 }

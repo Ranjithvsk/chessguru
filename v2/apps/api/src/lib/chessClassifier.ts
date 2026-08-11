@@ -93,9 +93,51 @@ export interface ClassifierResult {
   topK: Array<{ className: string; prob: number }>;
 }
 
-/** Classify a batch of squares at once. Each item = raw PNG buffer of one
- *  60x60 (or any) chess square. Returns per-square top-1 + top-3. Batching
- *  keeps ONNX Runtime happy and amortises per-call overhead. */
+/** Fast path: caller pre-decodes the full board via a SINGLE sharp() call
+ *  (see classifyBoardV2 in vision.service.ts) and passes 64 pre-normalized
+ *  224x224 CHW Float32Arrays here.
+ *
+ *  DINOv2-base at batch=64 on CPU is MEMORY-BANDWIDTH-BOUND (~20s per call
+ *  vs 2.5s for 64 sequential batch-1 calls), so we split into micro-batches
+ *  and run them sequentially. Micro-batch of 8 keeps activation memory
+ *  cache-friendly and beats both extremes (measured on France CPU). */
+export async function classifyBatchFromCHW(cargo: Float32Array[]): Promise<ClassifierResult[]> {
+  if (cargo.length === 0) return [];
+  const session = await getSession();
+  const plane = CROP * CROP;
+  const numClasses = classNames.length;
+  const results: ClassifierResult[] = [];
+  // Empirically batch=1 is ~40ms per DINOv2-base forward on France CPU;
+  // batch=8 is ~3s; batch=64 is ~20s. Memory-bandwidth bound. Sequential
+  // batch-1 wins by a wide margin.
+  const MICRO = 1;
+  for (let start = 0; start < cargo.length; start += MICRO) {
+    const end = Math.min(start + MICRO, cargo.length);
+    const bs = end - start;
+    const batchCHW = new Float32Array(bs * 3 * plane);
+    for (let i = 0; i < bs; i++) batchCHW.set(cargo[start + i]!, i * 3 * plane);
+    const input = new ort.Tensor('float32', batchCHW, [bs, 3, CROP, CROP]);
+    const out = await session.run({ [inputName]: input });
+    const logits = out[outputName]!.data as Float32Array;
+    for (let i = 0; i < bs; i++) {
+      const row = logits.subarray(i * numClasses, (i + 1) * numClasses);
+      const probs = softmax(row);
+      const ranked = probs
+        .map((p, idx) => ({ className: classNames[idx]!, prob: p }))
+        .sort((a, b) => b.prob - a.prob);
+      results.push({
+        className: ranked[0]!.className,
+        confidence: ranked[0]!.prob,
+        topK: ranked.slice(0, 3),
+      });
+    }
+  }
+  return results;
+}
+
+/** Legacy path: each item = raw PNG buffer of one 60x60 chess square. Kept
+ *  for callers that don't have a pre-decoded pixel buffer. Slower because
+ *  of 64 sharp subprocess calls. */
 export async function classifyBatch(squares: Buffer[]): Promise<ClassifierResult[]> {
   if (squares.length === 0) return [];
   const session = await getSession();
