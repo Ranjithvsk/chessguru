@@ -258,18 +258,19 @@ export default function BoardEditorPage() {
       setVisionMsg({ tone: "err", text: String((e as Error).message || e) });
     } finally { setVisionBusy(false); }
   }
-  /** Run the server-side v3 classifier on the last vision preview. The
-   *  server splits the cropped 480x480 board into 64 squares, embeds each
-   *  via DINOv2, nearest-neighbours against the visionRefs bank, returns
-   *  FEN + per-square confidence. Reference bank starts with 12 cburnett
-   *  seeds and grows via coach corrections. */
+  /** Run the server-side v3.6 trained chess classifier on the last vision
+   *  preview. Server splits the cropped 480x480 board into 64 squares and
+   *  runs them through a fine-tuned DINOv2 head (13-class softmax) in a
+   *  single batched ORT call. Model was trained on Vinayaka RTX 3080
+   *  against both synthetic cburnett variants AND real coach-corrected
+   *  book pixels — retrains nightly with fresh corrections. */
   async function runServerClassify() {
     if (serverBusy) return;
     if (!visionSnapshot) { setServerMsg({ tone: "err", text: "Upload a board image first." }); return; }
     setServerBusy(true); setServerMsg({ tone: "info", text: "🚀 Server AI classifying (3-6s)…" });
     try {
       const boardPngBase64 = visionSnapshot.canvas.toDataURL("image/png");
-      const r = await fetch(`${API_BASE}/api/vision/classify-board`, {
+      const r = await fetch(`${API_BASE}/api/vision/classify-board-v2`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ boardPngBase64 }),
