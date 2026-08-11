@@ -100,34 +100,31 @@ export default function SharedClassBoard(
 
   const lastMoveTuple: [Key, Key] | undefined = lastMove ? [lastMove.from as Key, lastMove.to as Key] : undefined;
 
+  // Root width matches the board's own cap (min(100% width, viewport-minus-chrome))
+  // so the self-sizing square Board fills it exactly and the overlays align to it.
   return (
-    <div className="flex h-full min-h-0 w-full flex-col items-center justify-center gap-2">
-      <div className="grid min-h-0 w-full flex-1 place-items-center">
-      <div className="aspect-square h-full max-h-full max-w-full">
-        <Board
-          fen={fen}
-          movableColor="both"
-          dests={dests as any}
-          lastMove={lastMoveTuple}
-          onMove={(f, t) => sendMove(String(f), String(t))}
-          coordinates
-          shapes={shapes as any}
-          onShapesChange={(s) => sendAnnot(s as any)}
-        />
-      </div>
-      </div>
-      <div className="shrink-0 flex items-center gap-2">
-        <button
-          onClick={sendReset}
-          className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-1.5 text-xs text-white hover:bg-ink-700"
-          title="Only the coach can reset — server-enforced"
-        >
-          ↺ Reset board
-        </button>
-        <span className={`text-[10px] ${connected ? "text-emerald-400" : "text-ink-500"}`}>
-          {connected ? "board synced" : "board offline"}
-        </span>
-      </div>
+    <div className="relative mx-auto" style={{ width: "min(100%, calc(100dvh - 10.5rem))" }}>
+      <Board
+        fen={fen}
+        movableColor="both"
+        dests={dests as any}
+        lastMove={lastMoveTuple}
+        onMove={(f, t) => sendMove(String(f), String(t))}
+        coordinates
+        shapes={shapes as any}
+        onShapesChange={(s) => sendAnnot(s as any)}
+      />
+      <button
+        onClick={sendReset}
+        title="Reset board — coach only"
+        className="absolute left-1.5 top-1.5 rounded-md bg-black/55 px-2 py-1 text-xs text-white/90 backdrop-blur hover:bg-black/75"
+      >
+        ↺
+      </button>
+      <span
+        className={`absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full ${connected ? "bg-emerald-400" : "bg-ink-500"}`}
+        title={connected ? "Board synced" : "Board offline"}
+      />
     </div>
   );
 }

@@ -187,20 +187,23 @@ export default function ClassV2Page() {
             </div>
           </div>
 
-          {/* Body: board (primary) + video rail */}
-          <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 lg:flex-row">
-            <div className="flex min-h-0 min-w-0 flex-col rounded-xl border border-ink-800 bg-ink-950/40 p-2 lg:flex-1">
-              <div className="min-h-0 flex-1">
-                <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} />
-              </div>
+          {/* Body: board fills the whole stage; camera + controls float over it. */}
+          <div className="relative min-h-0 flex-1 bg-ink-950/40 p-2">
+            {/* Board centered; it self-sizes to the largest square that fits. */}
+            <div className="flex h-full w-full items-center justify-center">
+              <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} />
             </div>
-            <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-ink-800 bg-black/40 lg:w-[220px] lg:flex-none">
-              <div className="min-h-[150px] flex-1">
+
+            {/* Floating camera PIP — small coach cam in the top-right corner. */}
+            <div className="absolute right-3 top-3 w-[190px] overflow-hidden rounded-xl border border-ink-700 bg-black/70 shadow-xl">
+              <div className="h-[120px]">
                 <VideoRail />
               </div>
-              <div className="border-t border-ink-800 bg-ink-900/70">
-                <ControlBar variation="minimal" controls={{ microphone: true, camera: true, screenShare: true, chat: false, leave: false }} />
-              </div>
+            </div>
+
+            {/* Floating minimal controls — mic / cam / screen, bottom-center. */}
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-xl border border-ink-800 bg-ink-900/85 shadow-xl backdrop-blur">
+              <ControlBar variation="minimal" controls={{ microphone: true, camera: true, screenShare: true, chat: false, leave: false }} />
             </div>
           </div>
           <RoomAudioRenderer />
