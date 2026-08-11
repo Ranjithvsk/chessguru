@@ -101,8 +101,9 @@ export default function SharedClassBoard(
   const lastMoveTuple: [Key, Key] | undefined = lastMove ? [lastMove.from as Key, lastMove.to as Key] : undefined;
 
   return (
-    <div className="flex flex-col items-center">
-      <div className="w-full max-w-[560px] aspect-square">
+    <div className="flex h-full min-h-0 w-full flex-col items-center justify-center gap-2">
+      <div className="grid min-h-0 w-full flex-1 place-items-center">
+      <div className="aspect-square h-full max-h-full max-w-full">
         <Board
           fen={fen}
           movableColor="both"
@@ -114,7 +115,8 @@ export default function SharedClassBoard(
           onShapesChange={(s) => sendAnnot(s as any)}
         />
       </div>
-      <div className="mt-2 flex items-center gap-2">
+      </div>
+      <div className="shrink-0 flex items-center gap-2">
         <button
           onClick={sendReset}
           className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-1.5 text-xs text-white hover:bg-ink-700"

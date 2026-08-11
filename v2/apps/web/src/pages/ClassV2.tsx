@@ -162,7 +162,7 @@ export default function ClassV2Page() {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <div className="flex h-[82vh] min-h-[540px] flex-col overflow-hidden rounded-2xl border border-ink-700 bg-ink-900/60 shadow-xl" data-lk-theme="default">
+      <div className="flex h-[90vh] min-h-[560px] flex-col overflow-hidden rounded-2xl border border-ink-700 bg-ink-900/60 shadow-xl" data-lk-theme="default">
         <LiveKitRoom
           serverUrl={tokenData.url}
           token={tokenData.token}
@@ -189,9 +189,8 @@ export default function ClassV2Page() {
 
           {/* Body: board (primary) + video rail */}
           <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 lg:flex-row">
-            <div className="flex min-h-0 min-w-0 flex-col rounded-xl border border-ink-800 bg-ink-950/40 p-3 lg:flex-1">
-              <div className="mb-2 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-ink-400">♟ Shared board</div>
-              <div className="flex min-h-0 flex-1 items-center justify-center">
+            <div className="flex min-h-0 min-w-0 flex-col rounded-xl border border-ink-800 bg-ink-950/40 p-2 lg:flex-1">
+              <div className="min-h-0 flex-1">
                 <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} />
               </div>
             </div>
