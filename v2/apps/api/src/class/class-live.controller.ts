@@ -16,8 +16,10 @@ import { PushService } from "../push/push.service";
 
 const ROOM_RE = /^[a-zA-Z0-9_-]{3,32}$/;
 // Whitelist the room routes a "join" push may point at — defends the
-// notification's deep-link against an open-redirect via a spoofed joinPath.
-const JOIN_PATH_RE = /^\/(call|class-v2)\/[A-Za-z0-9_-]{1,64}(\?[A-Za-z0-9_=&%-]*)?$/;
+// notification's deep-link against an open-redirect via a spoofed joinPath, and
+// carries the /v2 app base so the service worker resolves it under the SPA
+// (a bare /call/... would drop the base and miss the router).
+const JOIN_PATH_RE = /^\/v2\/(call|class-v2)\/[A-Za-z0-9_-]{1,64}(\?[A-Za-z0-9_=&%-]*)?$/;
 
 @Controller("class")
 export class ClassLiveController {
@@ -43,7 +45,7 @@ export class ClassLiveController {
     if (!me || !academyId || (role !== "coach" && role !== "academy_owner")) return { ok: false };
 
     let joinPath = typeof body?.joinPath === "string" ? body.joinPath : "";
-    if (!JOIN_PATH_RE.test(joinPath)) joinPath = `/call/${id}?board=1`;
+    if (!JOIN_PATH_RE.test(joinPath)) joinPath = `/v2/call/${id}?board=1`;
 
     // Idempotent per room for 3h.
     const prev: any = await this.conn.db!.collection("classLiveAnnouncements").findOne(

@@ -61,7 +61,7 @@ export default function ClassV2Page() {
           await post("/api/livekit/room", { roomName: room, title: `Class ${room}` });
           // Coach is live → push the academy's OFFLINE students, deep-linking to
           // THIS Dream Meet room (server is session-authed + coach-gated + idempotent).
-          void announceGoingLive(room, `/class-v2/${room}?role=student`);
+          void announceGoingLive(room, `${import.meta.env.BASE_URL}class-v2/${room}?role=student`);
         }
         const t = await get<LKTokenResp>(`/api/livekit/token?room=${encodeURIComponent(room)}&role=${role}`);
         if (!cancelled) setTokenData(t);

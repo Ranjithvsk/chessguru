@@ -101,7 +101,7 @@ export default function CallRoomPage() {
   // Coach entering this /call room = class is live → push the academy's OFFLINE
   // students (server session-authed + coach-gated + idempotent; students no-op).
   useEffect(() => {
-    if (room) void announceGoingLive(room, `/call/${room}?board=1`);
+    if (room) void announceGoingLive(room, `${import.meta.env.BASE_URL}call/${room}?board=1`);
   }, [room]);
 
   const [status, setStatus] = useState<Status>("connecting");

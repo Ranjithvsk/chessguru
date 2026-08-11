@@ -3574,7 +3574,7 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
   // prompt on the (rare) old browsers where navigator.clipboard is missing.
   const [copied, setCopied] = useState(false);
   async function copyJoinLink() {
-    const url = `${location.origin}/call/${encodeURIComponent(c._id)}?board=1`;
+    const url = `${location.origin}${import.meta.env.BASE_URL}call/${encodeURIComponent(c._id)}?board=1`;
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
@@ -3838,7 +3838,7 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
        *  join via the same collection the /academy roster reads. Jitsi fallback
        *  at meet.harinitharanjith.com still works if a user types it directly. */}
       <a
-        href={`https://wa.me/?text=${encodeURIComponent((live ? `🔴 Chess class "${c.title}" is LIVE now! Join here: ` : `♟️ Chess class "${c.title}" — ${fmtStartAt(c.startAt)}. Join here: `) + `${location.origin}/call/${encodeURIComponent(c._id)}?board=1`)}`}
+        href={`https://wa.me/?text=${encodeURIComponent((live ? `🔴 Chess class "${c.title}" is LIVE now! Join here: ` : `♟️ Chess class "${c.title}" — ${fmtStartAt(c.startAt)}. Join here: `) + `${location.origin}${import.meta.env.BASE_URL}call/${encodeURIComponent(c._id)}?board=1`)}`}
         target="_blank" rel="noopener noreferrer"
         className="rounded-lg border border-emerald-600/50 bg-emerald-600/10 px-2 py-1 text-[11px] font-semibold text-emerald-200 hover:bg-emerald-600/20"
         title="Share the join link on WhatsApp">
