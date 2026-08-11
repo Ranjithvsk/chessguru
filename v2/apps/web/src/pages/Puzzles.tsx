@@ -32,6 +32,15 @@ const NOISE_THEMES = new Set<string>([
   "master", "masterVsMaster", "superGM",
 ]);
 
+// Pick the puzzle's OWN representative theme (skip broad/length tags) — used to label the
+// header while reviewing so it reflects the opened puzzle, not the leftover theme selector.
+const REVIEW_GENERIC = new Set(["short", "long", "veryLong", "oneMove", "middlegame", "opening", "endgame", "master", "masterVsMaster", "superGM", "crushing", "advantage", "equality", "mate"]);
+function primaryTheme(themes: string[] = []) {
+  const m = themes.find((t) => /^mateIn\d/.test(t)); if (m) return m;
+  const t = themes.find((x) => !REVIEW_GENERIC.has(x)); if (t) return t;
+  return themes[0] ?? "Other";
+}
+
 // Formats ms as a compact string ("8.4s", "1m 12s") for the timer chip.
 function fmtSolveTime(ms: number): string {
   const s = ms / 1000;
@@ -304,7 +313,7 @@ export default function PuzzlesPage() {
             <div className="flex min-w-0 items-center gap-3">
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-brand-gradient text-white">♞</span>
               <div className="min-w-0">
-                <h1 className="font-display text-xl text-white">{section === "masters" ? "\u{1F451} Master Games" : theme === "mix" ? "Mixed puzzles" : prettify(theme)}</h1>
+                <h1 className="font-display text-xl text-white">{section === "masters" ? "\u{1F451} Master Games" : g.reviewing && g.puzzle?.themes?.length ? prettify(primaryTheme(g.puzzle?.themes)) : theme === "mix" ? "Mixed puzzles" : prettify(theme)}</h1>
                 <p className="truncate text-sm text-ink-400">
                   {g.puzzle ? <>#{g.puzzle.id} · Rating {g.puzzle.rating} · Played {g.puzzle.plays ?? 0}</> : "Loading…"}
                 </p>
