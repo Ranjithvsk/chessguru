@@ -97,7 +97,11 @@ async function bootstrap() {
   // Nest's http server is created lazily inside listen(), so this must run AFTER.
   // Pass the mongoose connection so the ws handler can persist attendance writes.
   const dbConn = app.get<Connection>(getConnectionToken());
-  attachClassWs(app.getHttpServer(), dbConn as any);
+  // Also thread PushService into class-ws so the late-join alert can push
+  // the coach's registered devices, not just fire an in-room WS frame.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const pushSvc = app.get(require("./push/push.service").PushService, { strict: false });
+  attachClassWs(app.getHttpServer(), dbConn as any, pushSvc);
   // From-scratch video (CHESSGURU-VIDEO-FROM-SCRATCH.md P0/P1): relays WebRTC
   // signaling between exactly 2 peers per room. No SFU. P1 adds session-cookie
   // auth via mongo lookup + writes to classAttendance on join/leave, so the

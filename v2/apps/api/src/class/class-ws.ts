@@ -32,6 +32,9 @@ import { Chess } from "chess.js";
 // persist attendance events without pulling this file into a Nest module.
 type Connection = { db?: { collection: (name: string) => any } };
 let dbConn: Connection | null = null;
+// PushService is optional — WS still runs without it (silent no-op for pushes).
+type PushSvcLike = { sendToUser: (userId: string, payload: { title: string; body: string; url?: string; tag?: string }) => Promise<any> };
+let pushSvc: PushSvcLike | null = null;
 
 type Move = { from: string; to: string; promotion?: string };
 // Chessground DrawShape subset — we serialize only the fields we care about
@@ -84,22 +87,80 @@ function mintCoachToken(): string {
 
 // Fire-and-forget attendance writes. Silent on error — attendance is a nice-to-have
 // stat; a Mongo hiccup must never disrupt a live class.
-async function recordAttendance(classId: string, userId: string | null, name: string, kind: "join" | "leave"): Promise<void> {
-  if (!dbConn?.db) return;
+// Returns { firstJoin } so the caller can trigger a one-time late-alert on
+// the very first insert (rejoins don't re-alert).
+async function recordAttendance(classId: string, userId: string | null, name: string, kind: "join" | "leave"): Promise<{ firstJoin: boolean }> {
+  if (!dbConn?.db) return { firstJoin: false };
   try {
     const col = dbConn.db.collection("classAttendance");
-    // Key: classId + userId (or the socket-scoped id via 'guest:'+name for anon).
-    // Same user rejoining updates lastSeenAt but preserves the original joinedAt.
     const key = userId ? userId : `guest:${name}`;
     if (kind === "join") {
-      await col.updateOne(
+      const res = await col.updateOne(
         { classId, key },
         { $set: { classId, key, userId, name, lastSeenAt: new Date() },
           $setOnInsert: { joinedAt: new Date() } },
         { upsert: true },
       );
+      return { firstJoin: !!res.upsertedId };
     } else {
       await col.updateOne({ classId, key }, { $set: { lastSeenAt: new Date() } });
+      return { firstJoin: false };
+    }
+  } catch { return { firstJoin: false }; }
+}
+
+const LATE_THRESHOLD_MS = 5 * 60_000;   // 5 min after startAt → "late"
+
+/** After a first-time join, if the class started > 5 min ago AND the joiner
+ *  isn't the class's own coach, alert the coach. In-room WS frame goes to
+ *  any coach socket in the same room; a push notification hits the coach's
+ *  registered devices too so they get told even if their tab is closed. */
+async function maybeAlertLate(room: Room, classId: string, userId: string | null, name: string): Promise<void> {
+  if (!dbConn?.db) return;
+  try {
+    const klass: any = await dbConn.db.collection("classSchedules").findOne(
+      { _id: classId as any },
+      { projection: { title: 1, startAt: 1, createdByUserId: 1 } },
+    );
+    if (!klass || !klass.startAt) return;
+    const startedMs = new Date(klass.startAt).getTime();
+    const lateMs = Date.now() - startedMs;
+    if (lateMs < LATE_THRESHOLD_MS) return;
+    // The class's own coach is never "late" — they might join first.
+    if (userId && klass.createdByUserId && userId === klass.createdByUserId) return;
+
+    const lateMinutes = Math.round(lateMs / 60_000);
+    // Persist for the weekly digest / audit (composite _id keeps it idempotent).
+    const rowId = `${classId}:${userId ?? `guest:${name}`}`;
+    await dbConn.db.collection("lateJoins").updateOne(
+      { _id: rowId as any },
+      { $setOnInsert: {
+          classId, classTitle: klass.title || "", coachId: klass.createdByUserId ?? null,
+          userId, name, lateMinutes, joinedAt: new Date(),
+      } },
+      { upsert: true },
+    );
+
+    // Broadcast a "lateJoin" frame to any coach socket connected to THIS
+    // room so a coach who's already inside gets a real-time toast.
+    const payload = JSON.stringify({ type: "lateJoin", name, userId, lateMinutes });
+    for (const c of room.clients) {
+      if (c.readyState !== WebSocket.OPEN) continue;
+      const who = socketWho.get(c);
+      if (who?.userId && klass.createdByUserId && who.userId === klass.createdByUserId) {
+        try { c.send(payload); } catch { /* ignore */ }
+      }
+    }
+
+    // Push to the coach's devices via the injected PushService (may be null
+    // in dev — the WS still runs, just without push).
+    if (pushSvc && klass.createdByUserId) {
+      pushSvc.sendToUser(String(klass.createdByUserId), {
+        title: `🕐 ${name} joined ${lateMinutes} min late`,
+        body: klass.title || "Class in progress",
+        url: `/class/${classId}`,
+        tag: `cg-late-${classId}-${userId ?? name}`,
+      }).catch(() => { /* per-service logged */ });
     }
   } catch { /* silent */ }
 }
@@ -175,7 +236,10 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       const userId = typeof frame.userId === "string" && frame.userId.length ? frame.userId.slice(0, 64) : null;
       const name = typeof frame.displayName === "string" && frame.displayName.trim() ? frame.displayName.trim().slice(0, 80) : "Guest";
       socketWho.set(ws, { userId, name, classId: roomId });
-      void recordAttendance(roomId, userId, name, "join");
+      void (async () => {
+        const { firstJoin } = await recordAttendance(roomId, userId, name, "join");
+        if (firstJoin) await maybeAlertLate(room, roomId, userId, name);
+      })();
       return;
     }
 
@@ -291,8 +355,9 @@ export function getLiveAttendees(classId: string): Array<{ userId: string | null
 // any other upgrade attempt is destroyed so we don't accidentally answer for another
 // (future) WebSocket path. Conn is Nest's mongoose Connection — used for attendance
 // writes (fire-and-forget so a Mongo hiccup never disrupts the live class).
-export function attachClassWs(server: HttpServer, conn?: Connection): void {
+export function attachClassWs(server: HttpServer, conn?: Connection, push?: PushSvcLike): void {
   if (conn) dbConn = conn;
+  if (push) pushSvc = push;
   server.on("upgrade", (req, socket, head) => {
     if (parseRoomId(req.url) == null) return; // let another handler (or default) close it
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
