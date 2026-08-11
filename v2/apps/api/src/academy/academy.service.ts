@@ -175,21 +175,24 @@ export class AcademyService {
     }
 
     const sanitize = (s: string) => s.toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 24);
-    let uid = sanitize(displayName);
-    if (uid.length < 2 && emailIn) uid = sanitize(emailIn.split("@")[0] || "");
-    if (uid.length < 2) return { ok: false, error: "Enter the student's name (at least 2 letters)." };
+    let baseUid = sanitize(displayName);
+    if (baseUid.length < 2 && emailIn) baseUid = sanitize(emailIn.split("@")[0] || "");
+    if (baseUid.length < 2) return { ok: false, error: "Enter the student's name (at least 2 letters)." };
 
-    // The username IS the name (sanitized) — no auto "-2/-3" suffixing. A duplicate
-    // is REJECTED so every student keeps a unique login. We check the _id AND the
-    // display `username` (sign-in matches case-insensitively on `username`), so two
-    // students can never end up sharing a login handle.
-    const clash = await this.users().findOne({
+    // The display NAME may repeat (two students really can both be "Ragul"), but the
+    // login USERNAME must stay unique. Auto-suffix -2/-3 until free, checking BOTH the
+    // _id and the username field (sign-in matches case-insensitively on `username`),
+    // so no two students ever share a login handle.
+    let uid = baseUid, k = 2;
+    while (await this.users().findOne({
       $or: [
         { _id: uid as any },
         { username: { $regex: new RegExp("^" + uid + "$", "i") } },
       ],
-    } as any);
-    if (clash) return { ok: false, error: `The username "${uid}" is already taken — pick a different name.` };
+    } as any)) {
+      uid = `${baseUid}-${k++}`;
+      if (k > 999) return { ok: false, error: "Couldn't pick a free username — try a different name." };
+    }
 
     // Student passwords are a simple, memorable "<firstname>@123" (e.g. ragul@123)
     // so a coach can read it out to a young student in person. Temporary — the
@@ -203,6 +206,7 @@ export class AcademyService {
     const userDoc: any = {
       _id: uid,
       username: uid,
+      name: displayName || uid,
       bpass: hash,
       email: emailIn || null,
       academyId: g.academyId,
@@ -229,7 +233,7 @@ export class AcademyService {
     const filter: any = { academyId: g.academyId, role: "student" };
     if (g.role === "coach") filter.coachId = g.userId;
     const rows = await this.users()
-      .find(filter, { projection: { _id: 1, username: 1, email: 1, coachId: 1, createdAt: 1, lastLogin: 1, dailyPuzzleStreak: 1 } })
+      .find(filter, { projection: { _id: 1, username: 1, name: 1, email: 1, coachId: 1, createdAt: 1, lastLogin: 1, dailyPuzzleStreak: 1 } })
       .sort({ createdAt: -1 })
       .toArray();
     if (rows.length === 0) return [];

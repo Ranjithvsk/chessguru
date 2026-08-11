@@ -37,7 +37,7 @@ async function del<T>(path: string): Promise<T> {
 interface Invite { token: string; email: string; displayName?: string; role: "coach"|"student"; coachId?: string|null; createdAt: string; expiresAt: string; invitedByName?: string }
 interface Coach   { _id: string; username: string; email?: string|null; createdAt?: string; lastLogin?: string|null; isOwner?: boolean }
 interface Student {
-  _id: string; username: string; email?: string|null; coachId?: string|null;
+  _id: string; username: string; name?: string|null; email?: string|null; coachId?: string|null;
   createdAt?: string; lastLogin?: string|null;
   puzzleRating?: number;
   // Attendance rollup from classAttendance (see AcademyService.listStudents)
@@ -333,7 +333,7 @@ function AssignHomeworkModal({ open, onClose, students, isOwner }: {
                       ? "bg-purple-500 text-white"
                       : "bg-ink-800 text-ink-300 hover:bg-ink-700"
                   }`}>
-                  {s.username || s._id}
+                  {s.name || s.username || s._id}
                 </button>
               ))}
             </div>
@@ -1048,7 +1048,7 @@ function StudyMaterialsPanel({ students }: { students: any[] }) {
                         className={`rounded-full px-2.5 py-0.5 text-xs transition ${
                           targetIds.has(s._id) ? "bg-purple-500 text-white" : "bg-ink-800 text-ink-300 hover:bg-ink-700"
                         }`}>
-                        {s.username || s._id}
+                        {s.name || s.username || s._id}
                       </button>
                     ))}
                   </div>
@@ -1565,7 +1565,7 @@ export default function AcademyDashboardPage() {
               <table className="w-full text-sm">
                 <thead className="bg-ink-800 text-xs uppercase tracking-wide text-ink-400">
                   <tr>
-                    <th className="px-3 py-2 text-left">Username</th>
+                    <th className="px-3 py-2 text-left">Name</th>
                     <th className="px-3 py-2 text-left">Email</th>
                     {isOwner && <th className="px-3 py-2 text-left">Coach</th>}
                     <th className="px-3 py-2 text-left">Rating</th>
@@ -1582,7 +1582,7 @@ export default function AcademyDashboardPage() {
                     const wk  = s.attendedThisWeek ?? 0;
                     return (
                       <tr key={s._id} className="border-t border-ink-800">
-                        <td className="px-3 py-2 text-white">{s.username}</td>
+                        <td className="px-3 py-2 text-white">{s.name || s.username}{s.name && s.username && s.name !== s.username ? <span className="ml-2 text-[11px] font-normal text-ink-500">@{s.username}</span> : null}</td>
                         <td className="px-3 py-2 text-ink-300">{s.email || "—"}</td>
                         {isOwner && <td className="px-3 py-2 text-ink-300">{s.coachId ? (coachById[s.coachId] ?? s.coachId) : "—"}</td>}
                         <td className="px-3 py-2 text-white tabular-nums">{s.puzzleRating ?? 1500}</td>
