@@ -39,12 +39,14 @@ async function main(): Promise<void> {
       if (GRID[r]?.[c]) continue;   // skip pieces — already seeded elsewhere
       const sq = await sharp(canonical).extract({ left: c*60, top: r*60, width: 60, height: 60 }).png().toBuffer();
       const emb = await embedImageDinov2(sq);
+      const rawCropPng = sq.toString("base64");
       const silhouette = (await sharp({create:{width:40,height:40,channels:3,background:{r:0,g:0,b:0}}}).png().toBuffer()).toString("base64");
       await col.insertOne({
         piece: "P", color: "w",                      // sentinel, ignored when isEmpty=true
         setName: "final-theory-2008-empty",
         source: "correction",
         silhouettePng: silhouette,
+        rawCropPng,
         embeddingDinov2: emb,
         isEmpty: true,
         createdBy: "simulated-coach",

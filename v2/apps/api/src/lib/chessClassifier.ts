@@ -15,7 +15,7 @@ import sharp from 'sharp';
 import { readFileSync, existsSync } from 'fs';
 import path from 'path';
 
-export const CHESS_CLASSIFIER_VERSION = 'v3.5-dinov2-linear';
+export const CHESS_CLASSIFIER_VERSION = 'v3.6-dinov2-linear-with-book-pixels';
 const RESIZE = 256;
 const CROP = 224;
 const MEAN = [0.485, 0.456, 0.406];

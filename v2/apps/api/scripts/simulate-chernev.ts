@@ -60,6 +60,7 @@ async function main(): Promise<void> {
         .extract({ left: c * 60, top: r * 60, width: 60, height: 60 })
         .png().toBuffer();
       const emb = await embedImageDinov2(sq);
+      const rawCropPng = sq.toString("base64");
       const silhouette = (await sharp({ create: { width: 40, height: 40, channels: 3, background: { r: 0, g: 0, b: 0 } } }).png().toBuffer()).toString("base64");
       if (cell) {
         await col.insertOne({
@@ -67,6 +68,7 @@ async function main(): Promise<void> {
           setName: "chernev-capa-1970s",
           source: "correction",
           silhouettePng: silhouette,
+          rawCropPng,
           embeddingDinov2: emb,
           createdBy: "simulated-coach",
           createdAt: new Date(),
@@ -79,6 +81,7 @@ async function main(): Promise<void> {
           setName: "chernev-capa-1970s-empty",
           source: "correction",
           silhouettePng: silhouette,
+          rawCropPng,
           embeddingDinov2: emb,
           isEmpty: true,
           createdBy: "simulated-coach",

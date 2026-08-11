@@ -68,6 +68,12 @@ export interface VisionRefDoc {
   setName: string;
   source: "seed" | "correction";
   silhouettePng: string;
+  /** Base64 PNG of the raw natural-pixel square crop that produced this
+   *  ref. Populated whenever the client sent rawCropPng at feedback time
+   *  (or when a seed script inserted one). This is what the retraining
+   *  pipeline mines to build per-book training data -- without it we'd
+   *  only ever train on synthetic cburnett variants. */
+  rawCropPng?: string;
   /** 768-dim L2-normed DINOv2 embedding of the original raw square crop.
    *  Optional -- present only when a rawCropPng was supplied at record
    *  time (or when the seed script embedded a synthetic reference). Used
@@ -162,6 +168,11 @@ export class VisionService {
     }
 
     const setName = (input.setHint && String(input.setHint).slice(0, 40)) || "coach-correction";
+    // Trim data-URL prefix off rawCropPng for storage (server accepts both
+    // forms; we canonicalize to bare base64).
+    const rawCropBase64 = input.rawCropPng
+      ? input.rawCropPng.replace(/^data:image\/[a-z]+;base64,/, "")
+      : undefined;
     const doc: VisionRefDoc = {
       // For "empty" corrections we still need to satisfy the schema's
       // required piece/color -- use a sentinel that the classifier
@@ -171,6 +182,7 @@ export class VisionService {
       setName,
       source: "correction",
       silhouettePng: base64,
+      ...(rawCropBase64 ? { rawCropPng: rawCropBase64 } : {}),
       ...(embedding ? { embeddingDinov2: embedding } : {}),
       ...(isEmpty ? { isEmpty: true } : {}),
       createdBy: userId,
