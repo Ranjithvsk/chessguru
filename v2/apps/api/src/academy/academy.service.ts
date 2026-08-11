@@ -184,7 +184,11 @@ export class AcademyService {
       if (k > 999) return { ok: false, error: "Couldn't pick a free username — try a different name." };
     }
 
-    const password = randomBytes(9).toString("base64url").slice(0, 12);
+    // Student passwords are a simple, memorable "<firstname>@123" (e.g. ragul@123)
+    // so a coach can read it out to a young student in person. Temporary — the
+    // student (or coach) can change it later.
+    const pwBase = ((displayName.split(/\s+/)[0] || baseUid).toLowerCase().replace(/[^a-z0-9]/g, "")) || baseUid.replace(/[^a-z0-9]/g, "") || "student";
+    const password = `${pwBase}@123`;
     const bcrypt = await import("bcryptjs");
     const hash = await bcrypt.default.hash(password, 10);
 
