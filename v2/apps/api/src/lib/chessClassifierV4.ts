@@ -22,6 +22,38 @@ const CROP = 224;
 const MEAN = [0.485, 0.456, 0.406];
 const STD = [0.229, 0.224, 0.225];
 
+/** Split a HUGE raw RGB buffer (8*CROP × 8*CROP × 3 bytes = 3.0 MB) into
+ *  64 CHW Float32 tiles, ImageNet-normalised. This is what makes v4 fast:
+ *  the whole board goes through sharp ONCE (single subprocess call to
+ *  resize the 480x480 crop to 1792x1792 raw pixels), then we shuffle
+ *  bytes in-memory into per-square tensors. ~50ms end-to-end for the
+ *  whole 3MB buffer vs ~2s for 64 individual sharp calls. */
+export function tilesFromBoardPixels(rawRGB: Buffer, boardSize: number): Float32Array[] {
+  if (boardSize !== 8 * CROP) throw new Error(`expected boardSize=${8 * CROP}, got ${boardSize}`);
+  const stride = boardSize * 3;   // bytes per row of the mega-image
+  const plane = CROP * CROP;
+  const out: Float32Array[] = [];
+  for (let tr = 0; tr < 8; tr++) {
+    for (let tc = 0; tc < 8; tc++) {
+      const chw = new Float32Array(3 * plane);
+      const xOff = tc * CROP * 3;
+      const yOff = tr * CROP;
+      for (let py = 0; py < CROP; py++) {
+        const rowStart = (yOff + py) * stride + xOff;
+        for (let px = 0; px < CROP; px++) {
+          const off = rowStart + px * 3;
+          const p = py * CROP + px;
+          chw[p]             = (rawRGB[off]!     / 255 - MEAN[0]!) / STD[0]!;
+          chw[plane + p]     = (rawRGB[off + 1]! / 255 - MEAN[1]!) / STD[1]!;
+          chw[2 * plane + p] = (rawRGB[off + 2]! / 255 - MEAN[2]!) / STD[2]!;
+        }
+      }
+      out.push(chw);
+    }
+  }
+  return out;
+}
+
 function resolvePaths(): { model: string; classes: string } {
   const modelCandidates = [
     process.env.CHESS_CLASSIFIER_V4_PATH,
@@ -64,6 +96,44 @@ function softmax(row: Float32Array | number[]): number[] {
   return exp.map((v) => v / sum);
 }
 
+export interface V4ClassifierRow {
+  className: string;
+  confidence: number;
+  topK: Array<{ className: string; prob: number }>;
+}
+
+/** Fast path: caller pre-decodes the full board via a SINGLE sharp() call
+ *  (see classifyBoardV4 in vision.service.ts) and passes 64 pre-normalized
+ *  CHW Float32Arrays here. This bypasses the ~2s bottleneck of 64
+ *  sequential sharp subprocess calls -- the model itself is only ~100ms
+ *  even on CPU. Kept the old classifyBatchV4(Buffer[]) signature separately
+ *  for callers that already have per-square PNG buffers. */
+export async function classifyBatchV4FromCHW(cargo: Float32Array[]): Promise<V4ClassifierRow[]> {
+  if (cargo.length === 0) return [];
+  const session = await getSession();
+  const plane = CROP * CROP;
+  const batchCHW = new Float32Array(cargo.length * 3 * plane);
+  for (let i = 0; i < cargo.length; i++) batchCHW.set(cargo[i]!, i * 3 * plane);
+  const input = new ort.Tensor('float32', batchCHW, [cargo.length, 3, CROP, CROP]);
+  const out = await session.run({ [inputName]: input });
+  const logits = out[outputName]!.data as Float32Array;
+  const numClasses = classNames.length;
+  const results: V4ClassifierRow[] = [];
+  for (let i = 0; i < cargo.length; i++) {
+    const row = logits.subarray(i * numClasses, (i + 1) * numClasses);
+    const probs = softmax(row);
+    const ranked = probs
+      .map((p, idx) => ({ className: classNames[idx]!, prob: p }))
+      .sort((a, b) => b.prob - a.prob);
+    results.push({
+      className: ranked[0]!.className,
+      confidence: ranked[0]!.prob,
+      topK: ranked.slice(0, 3),
+    });
+  }
+  return results;
+}
+
 async function preprocessSquare(buf: Buffer): Promise<Float32Array> {
   const meta = await sharp(buf).metadata();
   if (!meta.width || !meta.height) throw new Error('unreadable square image');
@@ -84,12 +154,6 @@ async function preprocessSquare(buf: Buffer): Promise<Float32Array> {
     for (let c = 0; c < 3; c++) chw[c * plane + p] = (pixels[p * 3 + c]! / 255 - MEAN[c]!) / STD[c]!;
   }
   return chw;
-}
-
-export interface V4ClassifierRow {
-  className: string;
-  confidence: number;
-  topK: Array<{ className: string; prob: number }>;
 }
 
 export async function classifyBatchV4(squares: Buffer[]): Promise<V4ClassifierRow[]> {
