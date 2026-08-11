@@ -13,9 +13,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { get, api } from "../lib/api";
+import { get, api, classRoomPath } from "../lib/api";
 
-type SchedRow = { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean };
+type SchedRow = { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; roomKind?: "call"|"meet" };
 type Sched = { live: SchedRow[]; upcoming: SchedRow[] };
 const DISMISS_KEY = "cg_live_class_dismissed";
 
@@ -32,6 +32,15 @@ export default function LiveClassBanner() {
     refetchOnWindowFocus: true,   // and instantly when the student flips back to the tab
     staleTime: 30_000,
   });
+  // Ad-hoc "Start now" rooms have no schedule row — this surfaces them too.
+  const { data: liveNow } = useQuery({
+    queryKey: ["class-live-now"],
+    queryFn: () => get<{ live: SchedRow[] }>("/api/class/live-now"),
+    enabled: loggedIn,
+    refetchInterval: 45_000,
+    refetchOnWindowFocus: true,
+    staleTime: 30_000,
+  });
 
   const [dismissed, setDismissed] = useState<string | null>(() => {
     try { return sessionStorage.getItem(DISMISS_KEY); } catch { return null; }
@@ -41,7 +50,10 @@ export default function LiveClassBanner() {
   // Already in a room / on the class hub — the banner would just be noise there.
   if (loc.pathname.startsWith("/call/") || loc.pathname.startsWith("/class")) return null;
 
-  const live = data?.live?.[0];
+  // Scheduled-live first, then ad-hoc announcements; dedup by room id.
+  const seen = new Set<string>();
+  const live = [...(data?.live ?? []), ...(liveNow?.live ?? [])]
+    .filter((c) => (seen.has(c._id) ? false : (seen.add(c._id), true)))[0];
   if (!live) return null;
   if (dismissed === live._id) return null;
 
@@ -68,7 +80,7 @@ export default function LiveClassBanner() {
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <Link
-          to={`/call/${encodeURIComponent(live._id)}?board=1`}
+          to={classRoomPath(live.roomKind, live._id, "student")}
           className="rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 px-3 py-1.5 text-xs font-semibold text-white hover:brightness-110"
         >
           Join now →

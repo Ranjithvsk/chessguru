@@ -13,7 +13,7 @@ import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
 import Board from "../components/Board";
-import { api } from "../lib/api";
+import { api, classRoomPath } from "../lib/api";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -60,7 +60,7 @@ function AttendanceStrip({ days }: { days?: boolean[] }) {
     </div>
   );
 }
-interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; attendedCount?: number; academyId?: string|null; summarySentAt?: string|null; autoSummary?: boolean; autoSummaryNote?: string; seriesId?: string|null; seriesIndex?: number; seriesTotal?: number; autoSummaryFailedAt?: string|null; autoSummaryFailedCount?: number; autoSummaryFailedError?: string; topics?: string[]; notes?: string }
+interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; attendedCount?: number; academyId?: string|null; summarySentAt?: string|null; autoSummary?: boolean; autoSummaryNote?: string; seriesId?: string|null; seriesIndex?: number; seriesTotal?: number; autoSummaryFailedAt?: string|null; autoSummaryFailedCount?: number; autoSummaryFailedError?: string; topics?: string[]; notes?: string; roomKind?: "call"|"meet" }
 interface FeesConfig { monthlyFeePaise: number; upiVpa: string; upiPayeeName: string; canEdit: boolean }
 interface Invoice { _id: string; academyId: string; studentId: string; studentUsername: string; period: string; amountPaise: number; status: "pending"|"paid"|"waived"; generatedAt: string; paidAt?: string; paymentMethod?: string }
 function rupees(paise: number) { return (paise / 100).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }); }
@@ -495,7 +495,7 @@ function CalendarPanel({ classes }: { classes: ClassRow[] }) {
                       {fmtHM(new Date(c.startAt))} · {c.durationMin}min · Coach {c.coach}
                     </div>
                   </div>
-                  <Link to={`/call/${c._id}?board=1`} className="shrink-0 rounded-md bg-cyan-500/25 px-2.5 py-1 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/40">
+                  <Link to={classRoomPath(c.roomKind, c._id, "coach")} className="shrink-0 rounded-md bg-cyan-500/25 px-2.5 py-1 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/40">
                     Open →
                   </Link>
                 </div>
@@ -614,7 +614,7 @@ function UpcomingClassesPanel({ classes, live }: { classes: ClassRow[]; live: Cl
                   <div className="truncate text-sm font-semibold text-white">{c.title}</div>
                   <div className="text-[11px] text-ink-300">Coach {c.coach} · {c.durationMin}min</div>
                 </div>
-                <Link to={`/call/${c._id}?board=1`} className="shrink-0 rounded-lg bg-rose-500 px-3 py-1.5 text-xs font-bold text-white shadow hover:brightness-110">
+                <Link to={classRoomPath(c.roomKind, c._id, "coach")} className="shrink-0 rounded-lg bg-rose-500 px-3 py-1.5 text-xs font-bold text-white shadow hover:brightness-110">
                   Join →
                 </Link>
               </div>
@@ -1203,6 +1203,7 @@ export default function AcademyDashboardPage() {
   const [classAutoSummaryNote, setClassAutoSummaryNote] = useState("");
   // Topics to be covered — comma-separated in the form, serialized as an array.
   const [classTopics, setClassTopics] = useState("");
+  const [classRoom, setClassRoom] = useState<"call" | "meet">("call");
   // "Last used" auto-summary defaults for the current user, persisted in
   // localStorage so scheduling a similar class next time is a one-tap
   // pre-fill. Keyed by userId so a shared browser doesn't cross-contaminate.
@@ -1262,7 +1263,7 @@ export default function AcademyDashboardPage() {
 
   const scheduleMut = useMutation({
     mutationFn: () => post<{ _id: string; title: string }>("/api/class/schedule", {
-      title: classTitle, coach: classCoach || (me?.username ?? ""), startAt: new Date(classStartAt).toISOString(), durationMin: classDur,
+      title: classTitle, coach: classCoach || (me?.username ?? ""), startAt: new Date(classStartAt).toISOString(), durationMin: classDur, roomKind: classRoom,
       topics: classTopics.split(",").map((s) => s.trim()).filter(Boolean),
       autoSummary: classAutoSummary,
       autoSummaryNote: classAutoSummary ? classAutoSummaryNote : "",
@@ -1270,7 +1271,7 @@ export default function AcademyDashboardPage() {
     onSuccess: (r: any) => {
       if (r && r._id) {
         setScheduleMsg({ tone: "ok", text: `"${r.title}" scheduled — join link ready.` });
-        setClassTitle(""); setClassCoach(""); setClassStartAt(localDatetimeDefault()); setClassDur(60); setClassTopics("");
+        setClassTitle(""); setClassCoach(""); setClassStartAt(localDatetimeDefault()); setClassDur(60); setClassTopics(""); setClassRoom("call");
         // Persist autoSummary settings for next-time one-click restore.
         if (classAutoSummary && lastAutoKey) {
           try { localStorage.setItem(lastAutoKey, JSON.stringify({ note: classAutoSummaryNote })); setLastAutoDefault({ note: classAutoSummaryNote }); }
@@ -1709,6 +1710,19 @@ export default function AcademyDashboardPage() {
                   ))}
                 </div>
               )}
+            </div>
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">🎥 Video room</label>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setClassRoom("call")}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-xs font-semibold ${classRoom === "call" ? "border-brand-400 bg-brand-500/20 text-brand-100" : "border-ink-700 bg-ink-800 text-ink-300 hover:bg-ink-700"}`}>
+                  ♟ Board call <span className="block text-[10px] font-normal text-ink-400">Mesh video + board · up to ~8</span>
+                </button>
+                <button type="button" onClick={() => setClassRoom("meet")}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-xs font-semibold ${classRoom === "meet" ? "border-emerald-400 bg-emerald-500/20 text-emerald-100" : "border-ink-700 bg-ink-800 text-ink-300 hover:bg-ink-700"}`}>
+                  🎥 Dream Meet <span className="block text-[10px] font-normal text-ink-400">LiveKit video + board · scales larger</span>
+                </button>
+              </div>
             </div>
             <div className="md:col-span-2 flex items-center gap-2">
               <label className="flex items-center gap-2 text-xs text-ink-300 cursor-pointer">
@@ -3574,7 +3588,7 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
   // prompt on the (rare) old browsers where navigator.clipboard is missing.
   const [copied, setCopied] = useState(false);
   async function copyJoinLink() {
-    const url = `${location.origin}${import.meta.env.BASE_URL}call/${encodeURIComponent(c._id)}?board=1`;
+    const url = `${location.origin}${import.meta.env.BASE_URL}${classRoomPath(c.roomKind, c._id, "student").slice(1)}`;
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
@@ -3838,7 +3852,7 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
        *  join via the same collection the /academy roster reads. Jitsi fallback
        *  at meet.harinitharanjith.com still works if a user types it directly. */}
       <a
-        href={`https://wa.me/?text=${encodeURIComponent((live ? `🔴 Chess class "${c.title}" is LIVE now! Join here: ` : `♟️ Chess class "${c.title}" — ${fmtStartAt(c.startAt)}. Join here: `) + `${location.origin}${import.meta.env.BASE_URL}call/${encodeURIComponent(c._id)}?board=1`)}`}
+        href={`https://wa.me/?text=${encodeURIComponent((live ? `🔴 Chess class "${c.title}" is LIVE now! Join here: ` : `♟️ Chess class "${c.title}" — ${fmtStartAt(c.startAt)}. Join here: `) + `${location.origin}${import.meta.env.BASE_URL}${classRoomPath(c.roomKind, c._id, "student").slice(1)}`)}`}
         target="_blank" rel="noopener noreferrer"
         className="rounded-lg border border-emerald-600/50 bg-emerald-600/10 px-2 py-1 text-[11px] font-semibold text-emerald-200 hover:bg-emerald-600/20"
         title="Share the join link on WhatsApp">
@@ -3849,7 +3863,7 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
         title="Copy the join link to share with a student or parent">
         {copied ? "✓ Copied" : "🔗 Copy link"}
       </button>
-      <Link to={`/call/${encodeURIComponent(c._id)}?board=1`}
+      <Link to={classRoomPath(c.roomKind, c._id, "coach")}
         className={`rounded-lg px-3 py-1 text-xs font-semibold ${live ? "bg-emerald-600 text-white hover:bg-emerald-500" : "bg-brand-600 text-white hover:bg-brand-500"}`}>
         {live ? "Join now" : "Open class"}
       </Link>

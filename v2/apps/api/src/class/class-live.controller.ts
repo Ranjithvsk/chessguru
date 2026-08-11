@@ -84,6 +84,41 @@ export class ClassLiveController {
    *  compact all-time-joins list + inferred "missing" (invitees who haven't
    *  joined yet). Auth-lenient: exposing live count during a class is a
    *  discovery aid, not sensitive. */
+  /** GET /api/class/live-now — active classes in the caller's academy right now,
+   *  including AD-HOC "Start now" rooms (which have no classSchedules row and so
+   *  never appear in /class/schedule). Reads classLiveAnnouncements written by
+   *  going-live (a coach entering a room) within the last 2h. Powers the in-site
+   *  "class live" banner so an ONLINE student sees an ad-hoc class even without
+   *  push. Returns the room system as roomKind so the client links correctly. */
+  @Get("live-now")
+  async liveNow(@Req() req: any) {
+    const academyId: string | null = req?.session?.academyId ?? null;
+    if (!academyId) return { live: [] };
+    const since = new Date(Date.now() - 2 * 3_600_000);
+    const rows = await this.conn.db!.collection("classLiveAnnouncements")
+      .find({ academyId, at: { $gte: since } }, { projection: { _id: 1, at: 1, coachUserId: 1, joinPath: 1 } })
+      .sort({ at: -1 }).limit(10).toArray();
+    if (!rows.length) return { live: [] };
+    const coachIds = [...new Set(rows.map((r: any) => r.coachUserId).filter(Boolean))];
+    const roomIds = rows.map((r: any) => r._id);
+    const [coaches, klasses] = await Promise.all([
+      this.conn.db!.collection("users").find({ _id: { $in: coachIds } }, { projection: { name: 1, username: 1 } }).toArray(),
+      this.conn.db!.collection("classSchedules").find({ _id: { $in: roomIds } }, { projection: { title: 1 } }).toArray(),
+    ]);
+    const coachName = new Map(coaches.map((u: any) => [String(u._id), u.name || u.username]));
+    const titleById = new Map(klasses.map((k: any) => [String(k._id), k.title]));
+    return {
+      live: rows.map((r: any) => ({
+        _id: r._id,
+        title: titleById.get(String(r._id)) || "Class",
+        coach: coachName.get(String(r.coachUserId)) || "Your coach",
+        roomKind: (typeof r.joinPath === "string" && /\/class-v2\//.test(r.joinPath)) ? "meet" : "call",
+        startAt: r.at,
+        durationMin: 60,
+      })),
+    };
+  }
+
   @Get(":id/live-attendance")
   async live(@Param("id") id: string, @Req() req: any) {
     if (!ROOM_RE.test(id)) throw new BadRequestException("bad room id");

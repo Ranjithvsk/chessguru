@@ -41,6 +41,9 @@ type ScheduleDoc = {
   // legacy / non-tenant users; non-null rows are scoped to that academy and
   // only surfaced to its members in list()/detail().
   academyId?: string | null;
+  // Which video room this class runs in: "call" = from-scratch mesh room
+  // (/call, default), "meet" = self-hosted LiveKit "Dream Meet" (/class-v2).
+  roomKind?: "call" | "meet";
   // Recurrence — materialized at create time. Every doc in a series shares
   // the same seriesId (= the FIRST doc's _id). seriesIndex/seriesTotal drive
   // the "3 of 12" badge on the client. Standalone one-off classes leave
@@ -125,6 +128,7 @@ export class ClassScheduleController {
       .filter((t: string) => t.length > 0)
       .slice(0, 8);
     const durationMin = Math.max(5, Math.min(600, Math.floor(Number(b.durationMin) || 60)));
+    const roomKind: "call" | "meet" = (b as any).roomKind === "meet" ? "meet" : "call";
     const startAtNum = Number(new Date(b.startAt || "").getTime());
     if (!title) throw new HttpException("title required", HttpStatus.BAD_REQUEST);
     if (title.length > MAX_TITLE) throw new HttpException("title too long", HttpStatus.BAD_REQUEST);
@@ -208,6 +212,7 @@ export class ClassScheduleController {
         durationMin, notes, topics, createdAt: new Date(),
         createdByUserId: userId,
         academyId,
+        roomKind,
         seriesId, seriesIndex: total > 1 ? i + 1 : undefined,
         seriesTotal: total > 1 ? total : undefined,
         invitees: invitees.length ? invitees : undefined,
