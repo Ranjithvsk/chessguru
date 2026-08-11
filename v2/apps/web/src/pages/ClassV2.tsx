@@ -189,14 +189,14 @@ export default function ClassV2Page() {
 
           {/* Body: board (primary) + video rail */}
           <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 lg:flex-row">
-            <div className="flex min-h-0 min-w-0 flex-col rounded-xl border border-ink-800 bg-ink-950/40 p-3 lg:flex-[3]">
+            <div className="flex min-h-0 min-w-0 flex-col rounded-xl border border-ink-800 bg-ink-950/40 p-3 lg:flex-1">
               <div className="mb-2 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-ink-400">♟ Shared board</div>
               <div className="flex min-h-0 flex-1 items-center justify-center">
                 <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} />
               </div>
             </div>
-            <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-ink-800 bg-black/40 lg:flex-[2]">
-              <div className="min-h-[220px] flex-1">
+            <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-ink-800 bg-black/40 lg:w-[220px] lg:flex-none">
+              <div className="min-h-[150px] flex-1">
                 <VideoRail />
               </div>
               <div className="border-t border-ink-800 bg-ink-900/70">

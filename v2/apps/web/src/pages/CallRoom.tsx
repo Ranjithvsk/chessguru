@@ -1004,52 +1004,56 @@ export default function CallRoomPage() {
           </div>
         </div>
       )}
-      <footer className="relative flex items-center justify-center gap-3 py-4 border-t border-ink-700 bg-ink-900">
+      <footer className="relative flex flex-wrap items-center justify-center gap-2 px-3 py-3 border-t border-ink-700 bg-ink-900">
         <button
           onClick={toggleMic}
-          className={`rounded-xl2 px-4 py-2 text-sm ${micOn ? "bg-ink-800 hover:bg-ink-700" : "bg-rose-600 hover:bg-rose-500"} text-white`}
+          title={micOn ? "Mute mic" : "Unmute"}
+          className={`grid h-11 w-11 place-items-center rounded-xl text-lg transition ${micOn ? "bg-ink-800 hover:bg-ink-700" : "bg-rose-600 hover:bg-rose-500"} text-white`}
         >
-          {micOn ? "🎤 Mute mic" : "🎤 Unmute"}
+          {micOn ? "🎤" : "🔇"}
         </button>
         <button
           onClick={toggleCam}
-          className={`rounded-xl2 px-4 py-2 text-sm ${camOn ? "bg-ink-800 hover:bg-ink-700" : "bg-rose-600 hover:bg-rose-500"} text-white`}
+          title={camOn ? "Turn camera off" : "Turn camera on"}
+          className={`grid h-11 w-11 place-items-center rounded-xl text-lg transition ${camOn ? "bg-ink-800 hover:bg-ink-700" : "bg-rose-600 hover:bg-rose-500"} text-white`}
         >
-          {camOn ? "📷 Cam off" : "📷 Cam on"}
+          {camOn ? "📷" : "📷"}
         </button>
         <button
           onClick={toggleHand}
-          className={`rounded-xl2 px-4 py-2 text-sm ${ownHandUp ? "bg-amber-500 hover:bg-amber-400 text-white" : "bg-ink-800 hover:bg-ink-700 text-white"}`}
+          title={ownHandUp ? "Lower hand" : "Raise hand"}
+          className={`grid h-11 w-11 place-items-center rounded-xl text-lg transition ${ownHandUp ? "bg-amber-500 hover:bg-amber-400 text-white" : "bg-ink-800 hover:bg-ink-700 text-white"}`}
           aria-pressed={ownHandUp}
         >
-          {ownHandUp ? "✋ Lower hand" : "✋ Raise hand"}
+          {"✋"}
         </button>
         <button
           onClick={toggleShare}
-          className={`rounded-xl2 px-4 py-2 text-sm ${sharing ? "bg-emerald-600 hover:bg-emerald-500" : "bg-ink-800 hover:bg-ink-700"} text-white`}
+          title={sharing ? "Stop sharing" : "Share screen"}
+          className={`grid h-11 w-11 place-items-center rounded-xl text-lg transition ${sharing ? "bg-emerald-600 hover:bg-emerald-500" : "bg-ink-800 hover:bg-ink-700"} text-white`}
         >
-          {sharing ? "🛑 Stop sharing" : "🖥️ Share screen"}
+          {sharing ? "🛑" : "🖥️"}
         </button>
         <button
           onClick={toggleBlur}
           disabled={blurLoading || sharing}
           title={sharing ? "Stop screen share to enable blur" : (blur ? "Turn off background blur" : "Blur your background (MediaPipe, on-device)")}
-          className={`rounded-xl2 px-4 py-2 text-sm ${blur ? "bg-emerald-600 hover:bg-emerald-500" : "bg-ink-800 hover:bg-ink-700"} text-white disabled:opacity-40 disabled:cursor-not-allowed`}
+          className={`grid h-11 w-11 place-items-center rounded-xl text-lg transition ${blur ? "bg-emerald-600 hover:bg-emerald-500" : "bg-ink-800 hover:bg-ink-700"} text-white disabled:opacity-40 disabled:cursor-not-allowed`}
           aria-pressed={blur}
         >
-          {blurLoading ? "🌫️ Loading…" : (blur ? "🌫️ Blur on" : "🌫️ Blur off")}
+          {blurLoading ? "⏳" : "🌫️"}
         </button>
         <button
           onClick={recording ? stopRecording : startRecording}
-          className={`rounded-xl2 px-4 py-2 text-sm ${recording ? "bg-rose-600 hover:bg-rose-500" : "bg-ink-800 hover:bg-ink-700"} text-white`}
+          className={`inline-flex h-11 min-w-[44px] items-center justify-center gap-1 rounded-xl px-3 text-sm transition ${recording ? "bg-rose-600 hover:bg-rose-500" : "bg-ink-800 hover:bg-ink-700"} text-white`}
           title={recording ? "Stop recording and download .webm" : "Record your camera + mic to a local .webm file"}
         >
-          {recording ? `⏹ ${Math.floor(recordElapsed / 60)}:${String(recordElapsed % 60).padStart(2, "0")}` : "🔴 Record"}
+          {recording ? `⏹ ${Math.floor(recordElapsed / 60)}:${String(recordElapsed % 60).padStart(2, "0")}` : "🔴"}
         </button>
         <button
           onClick={captionsOn ? stopCaptions : startCaptions}
           disabled={!captionSupported}
-          className={`rounded-xl2 px-4 py-2 text-sm ${captionsOn ? "bg-brand-600 hover:bg-brand-500" : "bg-ink-800 hover:bg-ink-700"} text-white disabled:opacity-40`}
+          className={`grid h-11 min-w-[44px] place-items-center rounded-xl px-2 text-xs font-bold transition ${captionsOn ? "bg-brand-600 hover:bg-brand-500" : "bg-ink-800 hover:bg-ink-700"} text-white disabled:opacity-40`}
           title={captionSupported
             ? (captionsOn ? "Stop live captions" : "Turn on live captions (browser SpeechRecognition)")
             : "Live captions need Chrome, Edge, or Safari"}
@@ -1059,10 +1063,10 @@ export default function CallRoomPage() {
         {iAmMod && (
           <button
             onClick={muteAll}
-            className="rounded-xl2 px-4 py-2 text-sm bg-amber-600 hover:bg-amber-500 text-white"
+            className="grid h-11 w-11 place-items-center rounded-xl text-lg transition bg-amber-600 hover:bg-amber-500 text-white"
             title="Mute everyone else (moderator only)"
           >
-            🔇 Mute all
+            🔕
           </button>
         )}
         {/* Reactions button + popover. Popover is absolutely positioned above
@@ -1070,11 +1074,12 @@ export default function CallRoomPage() {
         <div className="relative">
           <button
             onClick={() => setReactionOpen((v) => !v)}
-            className={`rounded-xl2 px-4 py-2 text-sm ${reactionOpen ? "bg-brand-600 hover:bg-brand-500" : "bg-ink-800 hover:bg-ink-700"} text-white`}
+          title="React"
+            className={`grid h-11 w-11 place-items-center rounded-xl text-lg transition ${reactionOpen ? "bg-brand-600 hover:bg-brand-500" : "bg-ink-800 hover:bg-ink-700"} text-white`}
             aria-haspopup="true"
             aria-expanded={reactionOpen}
           >
-            😀 React
+            😀
           </button>
           {reactionOpen && (
             <div
@@ -1096,19 +1101,21 @@ export default function CallRoomPage() {
         </div>
         <button
           onClick={() => setChatOpen((v) => !v)}
-          className={`relative rounded-xl2 px-4 py-2 text-sm ${chatOpen ? "bg-brand-600 hover:bg-brand-500" : "bg-ink-800 hover:bg-ink-700"} text-white`}
+          title={chatOpen ? "Hide chat" : "Show chat"}
+          className={`relative grid h-11 w-11 place-items-center rounded-xl text-lg transition ${chatOpen ? "bg-brand-600 hover:bg-brand-500" : "bg-ink-800 hover:bg-ink-700"} text-white`}
           aria-pressed={chatOpen}
         >
-          💬 Chat
+          💬
           {!chatOpen && chatUnread > 0 && (
             <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] leading-[18px] font-semibold text-center">
               {chatUnread > 99 ? "99+" : chatUnread}
             </span>
           )}
         </button>
+        <span className="mx-1 hidden h-7 w-px bg-ink-700 sm:block" aria-hidden />
         <button
           onClick={leave}
-          className="rounded-xl2 px-4 py-2 text-sm bg-rose-600 hover:bg-rose-500 text-white"
+          className="inline-flex h-11 items-center gap-1.5 rounded-xl px-4 text-sm font-semibold transition bg-rose-600 hover:bg-rose-500 text-white"
         >
           ☎️ Leave
         </button>
