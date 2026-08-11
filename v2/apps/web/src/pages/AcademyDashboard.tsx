@@ -3815,6 +3815,13 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
        *  chess-native board mode. Attendance auto-writes to classAttendance on
        *  join via the same collection the /academy roster reads. Jitsi fallback
        *  at meet.harinitharanjith.com still works if a user types it directly. */}
+      <a
+        href={`https://wa.me/?text=${encodeURIComponent((live ? `🔴 Chess class "${c.title}" is LIVE now! Join here: ` : `♟️ Chess class "${c.title}" — ${fmtStartAt(c.startAt)}. Join here: `) + `${location.origin}/call/${encodeURIComponent(c._id)}?board=1`)}`}
+        target="_blank" rel="noopener noreferrer"
+        className="rounded-lg border border-emerald-600/50 bg-emerald-600/10 px-2 py-1 text-[11px] font-semibold text-emerald-200 hover:bg-emerald-600/20"
+        title="Share the join link on WhatsApp">
+        🟢 WhatsApp
+      </a>
       <button onClick={copyJoinLink}
         className="rounded-lg border border-ink-600 bg-ink-800 px-2 py-1 text-[11px] font-semibold text-ink-100 hover:bg-ink-700"
         title="Copy the join link to share with a student or parent">
