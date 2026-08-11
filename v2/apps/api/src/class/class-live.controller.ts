@@ -8,16 +8,75 @@
 // the dashboard can poll it every 10s while a class is live without breaking
 // a sweat.
 
-import { BadRequestException, Controller, Get, Param, Req } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Param, Post, Req } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { getLiveAttendees } from "./class-ws";
+import { PushService } from "../push/push.service";
 
 const ROOM_RE = /^[a-zA-Z0-9_-]{3,32}$/;
+// Whitelist the room routes a "join" push may point at — defends the
+// notification's deep-link against an open-redirect via a spoofed joinPath.
+const JOIN_PATH_RE = /^\/(call|class-v2)\/[A-Za-z0-9_-]{1,64}(\?[A-Za-z0-9_=&%-]*)?$/;
 
 @Controller("class")
 export class ClassLiveController {
-  constructor(@InjectConnection() private readonly conn: Connection) {}
+  constructor(
+    @InjectConnection() private readonly conn: Connection,
+    private readonly push: PushService,
+  ) {}
+
+  /** POST /api/class/:id/going-live — the coach just entered a class room (any
+   *  room system: /call or Dream Meet). Fan a Web Push out to every student in
+   *  the coach's academy so OFFLINE learners get pulled in, deep-linking to the
+   *  exact room the coach is in. Session-authenticated (we trust req.session,
+   *  not the URL role), coach/owner only, and idempotent per room for 3h so a
+   *  reconnect / double-mount can't re-spam. Students calling it are a silent
+   *  no-op. Covers BOTH scheduled classes and ad-hoc "Start class now" rooms. */
+  @Post(":id/going-live")
+  async goingLive(@Param("id") id: string, @Body() body: any, @Req() req: any) {
+    if (!ROOM_RE.test(id)) throw new BadRequestException("bad room id");
+    const me: string | null = req?.session?.userId ?? null;
+    const role: string | null = req?.session?.role ?? null;
+    const academyId: string | null = req?.session?.academyId ?? null;
+    // Only an academy coach/owner can summon students — everyone else no-ops.
+    if (!me || !academyId || (role !== "coach" && role !== "academy_owner")) return { ok: false };
+
+    let joinPath = typeof body?.joinPath === "string" ? body.joinPath : "";
+    if (!JOIN_PATH_RE.test(joinPath)) joinPath = `/call/${id}?board=1`;
+
+    // Idempotent per room for 3h.
+    const prev: any = await this.conn.db!.collection("classLiveAnnouncements").findOne(
+      { _id: id as any }, { projection: { at: 1 } });
+    if (prev && Date.now() - new Date(prev.at).getTime() < 3 * 3_600_000) return { ok: true, already: true };
+    await this.conn.db!.collection("classLiveAnnouncements").updateOne(
+      { _id: id as any },
+      { $set: { at: new Date(), academyId, coachUserId: me, joinPath } },
+      { upsert: true },
+    );
+
+    const klass: any = await this.conn.db!.collection("classSchedules").findOne(
+      { _id: id as any }, { projection: { title: 1 } });
+    const coachDoc: any = await this.conn.db!.collection("users").findOne(
+      { _id: me as any }, { projection: { name: 1, username: 1 } });
+    const title = (body?.title && String(body.title).slice(0, 80)) || klass?.title || "Class";
+    const coach = coachDoc?.name || coachDoc?.username || "Your coach";
+
+    const students = await this.conn.db!.collection("users")
+      .find({ academyId, role: "student" }, { projection: { _id: 1 } }).toArray();
+    let notified = 0;
+    await Promise.all(students.map(async (st: any) => {
+      if (String(st._id) === String(me)) return;
+      const r = await this.push.sendToUser(String(st._id), {
+        title: `\u{1F534} ${coach} is live now`,
+        body: `${title} has started — tap to join.`,
+        url: joinPath,
+        tag: `cg-classlive-${id}`,
+      });
+      if (r.sent > 0) notified++;
+    }));
+    return { ok: true, notified };
+  }
 
   /** GET /api/class/:id/live-attendance — who's connected right now, plus a
    *  compact all-time-joins list + inferred "missing" (invitees who haven't

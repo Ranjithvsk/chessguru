@@ -495,7 +495,7 @@ function CalendarPanel({ classes }: { classes: ClassRow[] }) {
                       {fmtHM(new Date(c.startAt))} · {c.durationMin}min · Coach {c.coach}
                     </div>
                   </div>
-                  <Link to={`/class/${c._id}`} className="shrink-0 rounded-md bg-cyan-500/25 px-2.5 py-1 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/40">
+                  <Link to={`/call/${c._id}?board=1`} className="shrink-0 rounded-md bg-cyan-500/25 px-2.5 py-1 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/40">
                     Open →
                   </Link>
                 </div>
@@ -568,6 +568,24 @@ function LiveAttendeesBadge({ classId }: { classId: string }) {
 }
 
 function UpcomingClassesPanel({ classes, live }: { classes: ClassRow[]; live: ClassRow[] }) {
+  // Stable ad-hoc room id for "Start now" — generated once per mount so every
+  // click this session lands in the SAME room. Above the early return (rules of hooks).
+  const [adhocRoom] = useState(() => `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`);
+  const startNow = (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[10px] uppercase tracking-wide text-ink-500">Start now</span>
+      <Link to={`/class-v2/${adhocRoom}?role=coach`}
+        className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-500"
+        title="Start an instant class on Dream Meet — LiveKit video + shared board">
+        🎥 Dream Meet
+      </Link>
+      <Link to={`/call/${adhocRoom}?board=1`}
+        className="rounded-lg bg-brand-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-brand-500"
+        title="Start an instant class on the board-call room — mesh video + shared board">
+        ♟ Board call
+      </Link>
+    </div>
+  );
   const nextFew = classes.slice(0, 6);
   if (nextFew.length === 0 && live.length === 0) {
     return (
@@ -575,12 +593,16 @@ function UpcomingClassesPanel({ classes, live }: { classes: ClassRow[]; live: Cl
         <div className="text-3xl">🎥</div>
         <div className="mt-1 font-display text-lg text-white">No classes scheduled</div>
         <div className="text-xs text-ink-400">Add topics + a start time below to schedule your first one.</div>
+        <div className="mt-4 flex justify-center">{startNow}</div>
       </section>
     );
   }
   return (
     <section className="rounded-2xl border border-rose-500/25 bg-gradient-to-br from-ink-900 to-rose-950/20 p-5 shadow">
-      <h2 className="mb-3 font-display text-lg text-white">🎥 Coming up</h2>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-display text-lg text-white">🎥 Coming up</h2>
+        {startNow}
+      </div>
       {live.length > 0 && (
         <div className="mb-3 space-y-3">
           {live.map((c) => (
@@ -592,7 +614,7 @@ function UpcomingClassesPanel({ classes, live }: { classes: ClassRow[]; live: Cl
                   <div className="truncate text-sm font-semibold text-white">{c.title}</div>
                   <div className="text-[11px] text-ink-300">Coach {c.coach} · {c.durationMin}min</div>
                 </div>
-                <Link to={`/class/${c._id}`} className="shrink-0 rounded-lg bg-rose-500 px-3 py-1.5 text-xs font-bold text-white shadow hover:brightness-110">
+                <Link to={`/call/${c._id}?board=1`} className="shrink-0 rounded-lg bg-rose-500 px-3 py-1.5 text-xs font-bold text-white shadow hover:brightness-110">
                   Join →
                 </Link>
               </div>

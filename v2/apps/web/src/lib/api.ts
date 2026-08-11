@@ -18,6 +18,15 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// Best-effort: tell the API the coach just entered a class room, so it can push
+// the academy's OFFLINE students a "class is live" notification deep-linking to
+// this exact room. Server is session-authenticated + coach-gated + idempotent,
+// so calling it from any room mount is safe (students are a silent no-op).
+export async function announceGoingLive(room: string, joinPath: string): Promise<void> {
+  try { await post<{ ok: boolean }>(`/api/class/${encodeURIComponent(room)}/going-live`, { joinPath }); }
+  catch { /* never block the room from loading */ }
+}
+
 export interface RandomPuzzleOpts { theme: string; rating: number; difficulty: Difficulty; maxPc?: number; userId?: string | null; section?: string; player?: string;   mode?: string;
 }
 export interface MasterPlayer { name: string; count: number; }

@@ -14,6 +14,7 @@ import { Chess } from "chess.js";
 import type { Key } from "chessground/types";
 import Board, { destsFromChess } from "../components/Board";
 import { startBackgroundBlur } from "../lib/backgroundBlur";
+import { announceGoingLive } from "../lib/api";
 
 type PeerSummary = { id: string; name: string; userId: string | null };
 type ServerMsg =
@@ -96,6 +97,12 @@ export default function CallRoomPage() {
   const { room = "" } = useParams<{ room: string }>();
   const [searchParams] = useSearchParams();
   const boardMode = searchParams.get("board") === "1";
+
+  // Coach entering this /call room = class is live → push the academy's OFFLINE
+  // students (server session-authed + coach-gated + idempotent; students no-op).
+  useEffect(() => {
+    if (room) void announceGoingLive(room, `/call/${room}?board=1`);
+  }, [room]);
 
   const [status, setStatus] = useState<Status>("connecting");
   // Per-session tallies for the header ribbon. Snap count bumps each time the

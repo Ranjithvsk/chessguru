@@ -13,7 +13,8 @@ import {
   RoomAudioRenderer, ControlBar,
 } from "@livekit/components-react";
 import "@livekit/components-styles";
-import { api } from "../lib/api";
+import { api, announceGoingLive } from "../lib/api";
+import SharedClassBoard from "../components/SharedClassBoard";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -58,6 +59,9 @@ export default function ClassV2Page() {
         // ensure was skipped for any reason.
         if (role === "coach") {
           await post("/api/livekit/room", { roomName: room, title: `Class ${room}` });
+          // Coach is live → push the academy's OFFLINE students, deep-linking to
+          // THIS Dream Meet room (server is session-authed + coach-gated + idempotent).
+          void announceGoingLive(room, `/class-v2/${room}?role=student`);
         }
         const t = await get<LKTokenResp>(`/api/livekit/token?room=${encodeURIComponent(room)}&role=${role}`);
         if (!cancelled) setTokenData(t);
@@ -122,20 +126,25 @@ export default function ClassV2Page() {
         <span>🎥 <b className="text-white">{room}</b> · you're joining as <b className="text-brand-300">{role}</b></span>
         <Link to="/class" className="hover:text-white">← All classes</Link>
       </div>
-      <div className="rounded-xl2 border border-ink-700 bg-ink-900" style={{ height: "78vh" }} data-lk-theme="default">
-        <LiveKitRoom
-          serverUrl={tokenData.url}
-          token={tokenData.token}
-          connect
-          video
-          audio
-          onError={(e) => setErrMsg(e.message)}
-          style={{ height: "100%" }}
-        >
-          <VideoConference />
-          <ControlBar />
-          <RoomAudioRenderer />
-        </LiveKitRoom>
+      <div className="flex flex-col gap-3 lg:flex-row">
+        <div className="rounded-xl2 border border-ink-700 bg-ink-900/60 p-3 lg:flex-1">
+          <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} />
+        </div>
+        <div className="rounded-xl2 border border-ink-700 bg-ink-900 lg:flex-1" style={{ height: "78vh" }} data-lk-theme="default">
+          <LiveKitRoom
+            serverUrl={tokenData.url}
+            token={tokenData.token}
+            connect
+            video
+            audio
+            onError={(e) => setErrMsg(e.message)}
+            style={{ height: "100%" }}
+          >
+            <VideoConference />
+            <ControlBar />
+            <RoomAudioRenderer />
+          </LiveKitRoom>
+        </div>
       </div>
       <p className="mt-2 text-[10px] text-ink-500">
         Dream Meet · P0 shell. Coach controls, screen share, chat, breakouts and recording ship in P1
