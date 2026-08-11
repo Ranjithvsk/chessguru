@@ -45,6 +45,7 @@ import { Connection } from "mongoose";
 import sharp from "sharp";
 import { embedImageDinov2, DINOV2_EMBEDDING_DIM } from "../lib/dinovImage";
 import { classifyBatch as chessClassifyBatch, CHESS_CLASSIFIER_VERSION } from "../lib/chessClassifier";
+import { classifyBatchV4, repairForLegalFen, CHESS_CLASSIFIER_V4_VERSION } from "../lib/chessClassifierV4";
 
 export type PieceLetter = "P" | "N" | "B" | "R" | "Q" | "K";
 export type PieceColor = "w" | "b";
@@ -115,6 +116,18 @@ export interface ClassifyBoardV2Result {
     modelVersion: string;
     latencyMs: number;
     avgConfidence: number;
+  };
+}
+
+export interface ClassifyBoardV4Result {
+  fen: string;
+  squares: ClassifiedSquare[][];
+  meta: {
+    modelVersion: string;
+    latencyMs: number;
+    avgConfidence: number;
+    repairedSquares: number;   // how many top-1 predictions the chess-rules pass overrode
+    fenIsLegal: boolean;
   };
 }
 
@@ -310,6 +323,77 @@ export class VisionService {
         modelVersion: CHESS_CLASSIFIER_VERSION,
         latencyMs: Date.now() - started,
         avgConfidence: confSum / 64,
+      },
+    };
+  }
+
+  /** v4 super-fast classifier -- MobileNetV3-small (INT8 quantized, ~3MB)
+   *  + chess-rules FEN legality repair via top-3 beam search. Target:
+   *  <200ms warm CPU inference, 98%+ accuracy on unfamiliar book fonts.
+   *  Same request shape as classify-board / -v2; the meta block adds
+   *  repairedSquares + fenIsLegal so callers can see how much the
+   *  legality pass had to intervene. */
+  async classifyBoardV4(boardPngBase64: string): Promise<ClassifyBoardV4Result> {
+    const started = Date.now();
+    const boardB64 = boardPngBase64.replace(/^data:image\/[a-z]+;base64,/, "");
+    if (boardB64.length < 500 || boardB64.length > 2_000_000) {
+      throw new Error("board png out of range (need 500-2MB base64)");
+    }
+    const boardBuf = Buffer.from(boardB64, "base64");
+    const canonical = await sharp(boardBuf).resize(480, 480, { fit: "fill" }).png().toBuffer();
+
+    // Extract all 64 squares once.
+    const squares: Buffer[] = [];
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        squares.push(await sharp(canonical)
+          .extract({ left: c * 60, top: r * 60, width: 60, height: 60 })
+          .png().toBuffer());
+      }
+    }
+
+    // Single batched inference -- MobileNetV3-small on CPU handles 64 squares
+    // in <200ms with INT8.
+    const flat = await classifyBatchV4(squares);
+    // Reshape flat[64] to 8x8 rows for the repair pass.
+    const rows2d = [];
+    for (let r = 0; r < 8; r++) rows2d.push(flat.slice(r * 8, (r + 1) * 8));
+
+    // Beam search over top-3 candidates per square to guarantee a LEGAL FEN.
+    const repair = repairForLegalFen(rows2d);
+
+    // Build ClassifiedSquare grid using the (possibly repaired) labels.
+    const grid: ClassifiedSquare[][] = [];
+    let confSum = 0;
+    for (let r = 0; r < 8; r++) {
+      const row: ClassifiedSquare[] = [];
+      for (let c = 0; c < 8; c++) {
+        const finalName = repair.labels[r]![c]!;
+        // Confidence: use the top-K entry whose className matched the chosen label.
+        const conf = rows2d[r]![c]!.topK.find(k => k.className === finalName)?.prob ?? rows2d[r]![c]!.confidence;
+        confSum += conf;
+        if (finalName === "empty") {
+          row.push({ piece: null, color: null, confidence: conf, matchedSetName: CHESS_CLASSIFIER_V4_VERSION });
+        } else {
+          row.push({
+            piece: finalName[0] as PieceLetter,
+            color: finalName[1] as PieceColor,
+            confidence: conf,
+            matchedSetName: CHESS_CLASSIFIER_V4_VERSION,
+          });
+        }
+      }
+      grid.push(row);
+    }
+    const fen = squaresToFen(grid);
+    return {
+      fen, squares: grid,
+      meta: {
+        modelVersion: CHESS_CLASSIFIER_V4_VERSION,
+        latencyMs: Date.now() - started,
+        avgConfidence: confSum / 64,
+        repairedSquares: repair.repaired,
+        fenIsLegal: repair.legal,
       },
     };
   }

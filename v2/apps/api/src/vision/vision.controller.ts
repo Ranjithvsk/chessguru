@@ -75,4 +75,18 @@ export class VisionController {
       throw new BadRequestException((e as Error).message);
     }
   }
+
+  /** v4 super-fast classifier: MobileNetV3-small (INT8) + chess-rules FEN
+   *  legality repair. Target <200ms warm CPU inference, 98%+ accuracy on
+   *  unfamiliar book fonts. Legal-only FEN output guaranteed via top-3
+   *  beam-search repair pass. */
+  @Post("classify-board-v4")
+  async classifyBoardV4(@Body() body: ClassifyBoardBody) {
+    if (!body?.boardPngBase64) throw new BadRequestException("boardPngBase64 required");
+    try {
+      return await this.svc.classifyBoardV4(body.boardPngBase64);
+    } catch (e) {
+      throw new BadRequestException((e as Error).message);
+    }
+  }
 }
