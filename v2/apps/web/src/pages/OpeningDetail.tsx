@@ -490,3 +490,213 @@ function StoryPanel({ opening }: { opening: Opening }) {
     </div>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Move-note UI — per-ply "why?" explanations, coach-authored on demand.
+// ─────────────────────────────────────────────────────────────────────
+
+function useOpeningNotes(slug: string | undefined) {
+  return useQuery({
+    queryKey: ["opening-notes", slug],
+    queryFn: () => get<MoveNoteMap>(`/api/openings/${encodeURIComponent(slug!)}/notes`),
+    enabled: !!slug,
+    staleTime: 30_000,
+  });
+}
+
+function MoveListWithNotes({ opening, moves, cur, setPly }: {
+  opening: Opening;
+  moves: string[];
+  cur: number;
+  setPly: (n: number) => void;
+}) {
+  const { data: notesData, refetch } = useOpeningNotes(opening.slug);
+  const notes = notesData?.notes ?? {};
+  const pending = notesData?.pendingRequests ?? {};
+  const [openPly, setOpenPly] = useState<number | null>(null);
+  return (
+    <>
+      <div className="mt-3 rounded-lg border border-gray-100 bg-white p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Mainline</div>
+          <div className="text-[10px] text-gray-500">Tap <span className="font-mono">?</span> beside a move to see or request its explanation</div>
+        </div>
+        <div className="flex flex-wrap gap-x-2 gap-y-1 font-mono text-xs">
+          {moves.map((san, i) => {
+            const moveNo = Math.floor(i / 2) + 1;
+            const isWhite = i % 2 === 0;
+            const isCritical = opening.criticalMoveNo != null && moveNo === opening.criticalMoveNo && isWhite;
+            const ply = i + 1;
+            const hasNote = !!notes[String(ply)];
+            const pendingCount = pending[String(ply)] ?? 0;
+            return (
+              <span key={i} className="inline-flex items-center">
+                <button
+                  onClick={() => setPly(ply)}
+                  className={`rounded px-1 py-0.5 ${cur === ply ? "bg-yellow-100 font-bold" : "hover:bg-gray-100"} ${isCritical ? "ring-1 ring-amber-400" : ""}`}
+                >
+                  {isWhite ? `${moveNo}.` : ""}{san}
+                </button>
+                <button
+                  onClick={() => { setPly(ply); setOpenPly(ply); }}
+                  title={hasNote ? "See explanation" : pendingCount > 0 ? `Explanation requested (${pendingCount})` : "Request an explanation for this move"}
+                  className={`ml-0.5 grid h-4 w-4 place-items-center rounded-full text-[9px] font-bold transition ${
+                    hasNote
+                      ? "bg-emerald-500 text-white hover:bg-emerald-400"
+                      : pendingCount > 0
+                        ? "bg-amber-400 text-gray-900 hover:bg-amber-300"
+                        : "bg-gray-200 text-gray-600 hover:bg-gray-300"
+                  }`}
+                >
+                  ?
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      </div>
+      {openPly != null && (
+        <MoveNoteModal
+          slug={opening.slug}
+          ply={openPly}
+          san={moves[openPly - 1] ?? ""}
+          openingName={opening.name}
+          note={notes[String(openPly)]}
+          pendingCount={pending[String(openPly)] ?? 0}
+          onClose={() => setOpenPly(null)}
+          onChange={() => refetch()}
+        />
+      )}
+    </>
+  );
+}
+
+function MoveNoteModal(props: {
+  slug: string; ply: number; san: string; openingName: string;
+  note?: { note: string; authorName: string; updatedAt: string };
+  pendingCount: number;
+  onClose: () => void; onChange: () => void;
+}) {
+  const { slug, ply, san, openingName, note, pendingCount, onClose, onChange } = props;
+  const { data: auth } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
+  const isCoach = !!(auth?.loggedIn && ((auth as any).role === "coach" || (auth as any).role === "academy_owner" || (auth as any).admin));
+  const [editing, setEditing] = useState<boolean>(!note && !!isCoach);
+  const [draft, setDraft] = useState<string>(note?.note ?? "");
+  const [saving, setSaving] = useState(false);
+  const [requested, setRequested] = useState(false);
+
+  useEffect(() => { setDraft(note?.note ?? ""); setEditing(!note && !!isCoach); }, [note, isCoach]);
+
+  const save = async () => {
+    if (!draft.trim()) return;
+    setSaving(true);
+    try { await postJSON(`/api/openings/${encodeURIComponent(slug)}/notes/${ply}`, { note: draft }); onChange(); setEditing(false); }
+    catch { alert("Save failed — try again"); }
+    setSaving(false);
+  };
+  const request = async () => {
+    try { await postJSON(`/api/openings/${encodeURIComponent(slug)}/notes/${ply}/request`, {}); setRequested(true); onChange(); }
+    catch { /* ignore */ }
+  };
+  const moveNo = Math.floor((ply - 1) / 2) + 1;
+  const side = ply % 2 === 1 ? "White" : "Black";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 sm:items-center" onClick={onClose}>
+      <div className="my-auto w-full max-w-xl max-h-[92vh] overflow-y-auto rounded-2xl border border-gray-200 bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+          <div className="min-w-0">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-gray-500">Move explanation</div>
+            <div className="mt-0.5 truncate font-display text-base font-bold text-gray-900">
+              {openingName}
+              <span className="mx-2 text-gray-400">·</span>
+              <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-sm">{moveNo}.{ply % 2 === 0 ? ".." : ""}{san}</span>
+              <span className="ml-1.5 text-xs font-normal text-gray-500">({side}'s move)</span>
+            </div>
+          </div>
+          <button onClick={onClose} className="rounded-md p-1 text-xl leading-none text-gray-400 hover:bg-gray-100 hover:text-gray-800">×</button>
+        </div>
+
+        <div className="space-y-3 p-4">
+          {!editing && note && (
+            <>
+              <div className="whitespace-pre-wrap rounded-lg border border-gray-100 bg-gray-50 p-3 text-sm leading-relaxed text-gray-800">
+                {note.note}
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-gray-500">
+                <span>By <b className="text-gray-700">{note.authorName}</b> · {new Date(note.updatedAt).toLocaleDateString()}</span>
+                {isCoach && (
+                  <button onClick={() => setEditing(true)} className="rounded-md border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50">Edit</button>
+                )}
+              </div>
+            </>
+          )}
+
+          {!editing && !note && (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 text-center">
+                <div className="text-3xl">📝</div>
+                <div className="mt-1 text-sm text-gray-600">No explanation yet for this move.</div>
+                {pendingCount > 0 && (
+                  <div className="mt-1 text-[11px] text-amber-700">
+                    {pendingCount} {pendingCount === 1 ? "student has" : "students have"} requested one.
+                  </div>
+                )}
+              </div>
+              {isCoach ? (
+                <button onClick={() => setEditing(true)} className="w-full rounded-lg bg-indigo-600 py-2.5 text-sm font-bold text-white hover:bg-indigo-500">✍️ Write an explanation</button>
+              ) : (
+                <button
+                  onClick={request}
+                  disabled={requested}
+                  className={`w-full rounded-lg py-2.5 text-sm font-bold transition ${requested ? "bg-emerald-100 text-emerald-700" : "bg-indigo-600 text-white hover:bg-indigo-500"}`}
+                >
+                  {requested ? "✓ Requested — your coach will be notified" : "Ask my coach to explain this move"}
+                </button>
+              )}
+            </div>
+          )}
+
+          {editing && (
+            <div className="space-y-2">
+              <label className="block text-[11px] font-bold uppercase tracking-wide text-gray-500">Explanation (up to 5000 chars)</label>
+              <textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                rows={10}
+                maxLength={5000}
+                autoFocus
+                placeholder={`Why ${san} here? Explain the idea, common responses, traps to avoid…`}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-indigo-500 focus:outline-none"
+              />
+              <div className="flex items-center justify-between">
+                <div className="text-[11px] text-gray-500">{draft.length}/5000</div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => { setEditing(false); setDraft(note?.note ?? ""); }} className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">Cancel</button>
+                  <button onClick={save} disabled={saving || !draft.trim()} className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NotesSummary({ slug }: { slug: string }) {
+  const { data } = useOpeningNotes(slug);
+  if (!data) return null;
+  const noteCount = Object.keys(data.notes || {}).length;
+  const pendingCount = Object.values(data.pendingRequests || {}).reduce((s: number, n: any) => s + Number(n || 0), 0);
+  if (noteCount === 0 && pendingCount === 0) return null;
+  return (
+    <div className="mt-2 flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-1.5 text-[11px] text-gray-600">
+      <span>
+        {noteCount > 0 && <>📝 {noteCount} move{noteCount === 1 ? "" : "s"} explained</>}
+        {noteCount > 0 && pendingCount > 0 && <span className="mx-1.5 text-gray-400">·</span>}
+        {pendingCount > 0 && <span className="text-amber-700">🙋 {pendingCount} pending request{pendingCount === 1 ? "" : "s"}</span>}
+      </span>
+    </div>
+  );
+}
