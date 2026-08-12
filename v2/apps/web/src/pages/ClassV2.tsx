@@ -271,8 +271,10 @@ export default function ClassV2Page() {
           }}
           className="flex h-full min-h-0 flex-col"
         >
-          {/* Top bar */}
-          <div className="flex items-center justify-between gap-2 border-b border-ink-800 bg-ink-900/80 px-4 py-2.5">
+          {/* Top bar — shrink-0 so it always owns its full height and never
+           *  gets squeezed by the board flex-1 below (was overlapping the
+           *  top rank of the board). */}
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-ink-800 bg-ink-900/80 px-4 py-2.5">
             <div className="flex min-w-0 items-center gap-2">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-500/15 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-rose-300">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-rose-500" /> Live
@@ -289,9 +291,12 @@ export default function ClassV2Page() {
           {/* Body: board on top, controls stacked BELOW it (not overlapping).
            *  Camera PIP still floats over the board — it self-hides when
            *  nobody is publishing (CameraPIPMaybe). */}
-          <div className="relative flex min-h-0 flex-1 flex-col bg-ink-950/40">
-            {/* Board area — self-sizes to the largest square that fits. */}
-            <div className="relative flex min-h-0 flex-1 items-center justify-center p-2">
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-ink-950/40">
+            {/* Board area — self-sizes to the largest square that fits.
+             *  overflow-hidden clips any board that tries to grow past the
+             *  container (chessground boards can over-flow vertically if the
+             *  parent has no explicit min-height:0). */}
+            <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-2">
               <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} />
               <CameraPIPMaybe />
             </div>
