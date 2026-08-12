@@ -267,7 +267,11 @@ export default function SharedClassBoard(
   // Who can move a piece: default LOCKED so students never scramble the board.
   // Coach can always move (the server enforces this too by dropping student
   // moves when locked). "both" = any color; "none" = no drag/drop at all.
-  const boardMovable: "both" | "none" = role === "coach" ? "both" : (_lockedState ? "none" : "both");
+  // Subscribe to lock state so the board re-renders when the coach toggles —
+  // without the hook, changing `_lockedState` at module scope wouldn't wake
+  // the student's board up until an unrelated re-render.
+  const locked = useClassLocked();
+  const boardMovable: "both" | "none" = role === "coach" ? "both" : (locked ? "none" : "both");
   // Setup modal state now lives in the module (see setClassSetupOpen at top
   // of file) so ClassV2's footer button can open it. Local FEN/error still
   // in state because they're modal-local.
