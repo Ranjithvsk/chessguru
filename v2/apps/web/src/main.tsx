@@ -47,7 +47,6 @@ import FeedbackUITestPage from "./pages/FeedbackUITest";
 import BookPage from "./pages/Book";
 import ClassReplayPage from "./pages/ClassReplay";
 import ClassV2Page from "./pages/ClassV2";
-import ClassSnapsPage from "./pages/ClassSnaps";
 
 // Jitsi is retired (owner 2026-08-12) — every live-class URL now funnels into
 // Dream Meet (/class-v2/). These tiny redirect shims preserve old bookmarks +
@@ -120,7 +119,6 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="class/:id" element={<ClassIdRedirect />} />
             <Route path="class/:id/replay/:filename" element={<ClassReplayPage />} />
             <Route path="class-v2/:room" element={<ClassV2Page />} />
-            <Route path="class-v2/:room/snaps" element={<ClassSnapsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
