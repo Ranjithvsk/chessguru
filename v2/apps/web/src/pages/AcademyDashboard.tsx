@@ -576,12 +576,12 @@ function UpcomingClassesPanel({ classes, live }: { classes: ClassRow[]; live: Cl
       <span className="text-[10px] uppercase tracking-wide text-ink-500">Start now</span>
       <Link to={`/class-v2/${adhocRoom}?role=coach`}
         className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-500"
-        title="Start an instant class on Dream Meet — LiveKit video + shared board">
+        title="Start an instant class — video + shared board, scales to any class size">
         🎥 Dream Meet
       </Link>
       <Link to={`/call/${adhocRoom}?board=1`}
         className="rounded-lg bg-brand-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-brand-500"
-        title="Start an instant class on the board-call room — mesh video + shared board">
+        title="Start an instant class on the board-call room — peer video + shared board (best for ≤8 students)">
         ♟ Board call
       </Link>
     </div>
@@ -1716,11 +1716,11 @@ export default function AcademyDashboardPage() {
               <div className="flex gap-2">
                 <button type="button" onClick={() => setClassRoom("call")}
                   className={`flex-1 rounded-lg border px-3 py-2 text-xs font-semibold ${classRoom === "call" ? "border-brand-400 bg-brand-500/20 text-brand-100" : "border-ink-700 bg-ink-800 text-ink-300 hover:bg-ink-700"}`}>
-                  ♟ Board call <span className="block text-[10px] font-normal text-ink-400">Mesh video + board · up to ~8</span>
+                  ♟ Board call <span className="block text-[10px] font-normal text-ink-400">Peer video + board · up to ~8 students</span>
                 </button>
                 <button type="button" onClick={() => setClassRoom("meet")}
                   className={`flex-1 rounded-lg border px-3 py-2 text-xs font-semibold ${classRoom === "meet" ? "border-emerald-400 bg-emerald-500/20 text-emerald-100" : "border-ink-700 bg-ink-800 text-ink-300 hover:bg-ink-700"}`}>
-                  🎥 Dream Meet <span className="block text-[10px] font-normal text-ink-400">LiveKit video + board · scales larger</span>
+                  🎥 Dream Meet <span className="block text-[10px] font-normal text-ink-400">Video + board · scales to any class size</span>
                 </button>
               </div>
             </div>

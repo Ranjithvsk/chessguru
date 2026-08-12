@@ -186,21 +186,9 @@ export default function ClassV2Page() {
         <div className="text-2xl">⚙️</div>
         <h1 className="font-display text-xl text-white">Dream Meet isn't turned on yet</h1>
         <p className="text-sm">
-          The video server hasn't been configured on the API. This is the P0 of
-          the <b>Dream Meet</b> rollout — see
-          <code className="mx-1">PROJECT_MASTER/plans/CHESSGURU-LIVE-VIDEO-PLATFORM.md</code>
-          for the plan.
-        </p>
-        <div className="rounded-lg bg-black/30 p-3 font-mono text-xs">
-          Set these env vars on the API and restart:<br/>
-          <span className="text-amber-200">LIVEKIT_URL=wss://your-livekit-host</span><br/>
-          <span className="text-amber-200">LIVEKIT_API_KEY=…</span><br/>
-          <span className="text-amber-200">LIVEKIT_API_SECRET=…</span>
-        </div>
-        <p className="text-xs">
-          For a 100-hour/mo free trial, sign up at{" "}
-          <a href="https://cloud.livekit.io/" target="_blank" rel="noreferrer" className="underline">cloud.livekit.io</a> and
-          copy the URL + API key + secret into pm2 env.
+          The video server hasn't been configured on this deployment. Ask your
+          admin to enable Dream Meet — students can still use the ♟ Board call
+          room in the meantime.
         </p>
       </div>
     );
