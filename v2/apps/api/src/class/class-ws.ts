@@ -45,7 +45,7 @@ type Shape = { orig: string; dest?: string; brush?: string };
 //     saved (reconnect), server verifies + resumes coach role. Otherwise the
 //     first hello with no token claims the coach role for that room.
 type ClientFrame =
-  | { type: "hello"; coachToken?: string; userId?: string; displayName?: string }
+  | { type: "hello"; coachToken?: string; userId?: string; displayName?: string; intendedRole?: "coach" | "student" }
   | { type: "move"; move: Move }
   | { type: "reset" }
   | { type: "loadFen"; fen: string }        // coach only — set the board to an arbitrary position
@@ -240,14 +240,25 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     if (frame.type === "ping") { send({ type: "pong" }); return; }
 
     if (frame.type === "hello") {
-      // Coach resolution:
-      //   * client has token that matches the room's -> resume as coach
-      //   * room has no coach token yet -> mint one, promote this client to coach
+      // Coach resolution (owner tightened 2026-08-12 after the "Setup button
+      // disappeared after reload" bug — client hadn't been persisting the
+      // coachToken between reconnects, so a reload demoted the coach to a
+      // student for the rest of the class):
+      //   * client has a token that matches the room's -> resume as coach
+      //   * room has no coach token yet -> mint one, promote this client
+      //   * room HAS a coach token but NO live coach socket AND client asked
+      //     for role=coach in the URL -> honour the fresh claim, mint a new
+      //     token (the old one gets orphaned — reload from a stale tab will
+      //     fail its match and land as student, which is correct)
       //   * otherwise -> student
       if (frame.coachToken && room.coachToken && frame.coachToken === room.coachToken) {
         socketRole.set(ws, "coach"); room.coach = ws;
         send({ type: "role", role: "coach", coachToken: room.coachToken });
       } else if (!room.coachToken) {
+        room.coachToken = mintCoachToken();
+        socketRole.set(ws, "coach"); room.coach = ws;
+        send({ type: "role", role: "coach", coachToken: room.coachToken });
+      } else if (frame.intendedRole === "coach" && !room.coach) {
         room.coachToken = mintCoachToken();
         socketRole.set(ws, "coach"); room.coach = ws;
         send({ type: "role", role: "coach", coachToken: room.coachToken });

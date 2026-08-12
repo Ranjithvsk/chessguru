@@ -25,12 +25,18 @@ function destsFromChess(game: Chess): Map<Key, Key[]> {
 }
 
 export default function SharedClassBoard(
-  { room, userId, displayName, onClassEnded }: {
+  { room, userId, displayName, onClassEnded, intendedRole }: {
     room: string; userId?: string | null; displayName?: string | null;
     /** Coach explicitly ended the class — parent should navigate away / show a toast. */
     onClassEnded?: (reason: string) => void;
+    /** Role signalled by the URL (?role=coach|student). Passed to class-ws
+     *  hello so the server can honour a fresh coach claim when the room has
+     *  no live coach socket — without this a reload would land as student
+     *  and the "📋 Setup" / cursor-broadcast privileges would silently go away. */
+    intendedRole?: "coach" | "student";
   },
 ) {
+  const COACH_TOKEN_KEY = `cg-coachtoken-${room}`;
   const [fen, setFen] = useState<string>(() => new Chess().fen());
   const [lastMove, setLastMove] = useState<BoardMove | null>(null);
   const [dests, setDests] = useState<Map<Key, Key[]>>(() => destsFromChess(new Chess()));
@@ -76,10 +82,16 @@ export default function SharedClassBoard(
       if (cancelled) return;
       setConnected(true);
       try {
+        // Reuse a saved coachToken so a reload / brief drop resumes coach role
+        // instead of demoting the coach to a student for the rest of the class.
+        let savedCoachToken: string | undefined;
+        try { savedCoachToken = localStorage.getItem(COACH_TOKEN_KEY) || undefined; } catch { /* */ }
         ws.send(JSON.stringify({
           type: "hello",
           userId: userId ?? undefined,
           displayName: displayName ?? undefined,
+          coachToken: savedCoachToken,
+          intendedRole,
         }));
       } catch { /* */ }
     };
@@ -93,7 +105,16 @@ export default function SharedClassBoard(
       else if (msg.type === "move") applyFen(msg.fen, msg.move);
       else if (msg.type === "reset") applyFen(msg.fen, null);
       else if (msg.type === "annot") setShapes(Array.isArray(msg.shapes) ? msg.shapes : []);
-      else if (msg.type === "role") setRole(msg.role === "coach" ? "coach" : "student");
+      else if (msg.type === "role") {
+        setRole(msg.role === "coach" ? "coach" : "student");
+        // Persist the coach token so a reconnect resumes the seat instead of
+        // demoting to student (which would hide the Setup button + cursor
+        // broadcast). Clear on student role in case it's stale.
+        try {
+          if (msg.role === "coach" && msg.coachToken) localStorage.setItem(COACH_TOKEN_KEY, String(msg.coachToken));
+          else if (msg.role === "student") { /* keep any prior token — server will fail-open on mismatch */ }
+        } catch { /* */ }
+      }
       else if (msg.type === "pointer") setRemotePointer({ x: Number(msg.x) || 0, y: Number(msg.y) || 0 });
       else if (msg.type === "pointer-off") setRemotePointer(null);
       else if (msg.type === "classEnded") { onClassEnded?.(String(msg.reason || "coach_left")); }
