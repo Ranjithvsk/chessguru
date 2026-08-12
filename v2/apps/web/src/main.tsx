@@ -34,7 +34,8 @@ import ResetPasswordPage from "./pages/ResetPassword";
 import SignupAcademyPage from "./pages/SignupAcademy";
 import AcademyDashboardPage from "./pages/AcademyDashboard";
 import AcceptInvitePage from "./pages/AcceptInvite";
-import CallRoomPage from "./pages/CallRoom";
+// CallRoomPage + ClassPage removed 2026-08-12 (Jitsi + WebRTC mesh retired).
+// Every live class URL funnels through /class-v2/ (Dream Meet).
 import AccountLinksPage from "./pages/AccountLinks";
 import ExternalGamePage from "./pages/ExternalGame";
 import AdminPage from "./pages/Admin";
@@ -44,7 +45,6 @@ import DailyPage from "./pages/Daily";
 import PlayPage from "./pages/Play";
 import FeedbackUITestPage from "./pages/FeedbackUITest";
 import BookPage from "./pages/Book";
-import ClassPage from "./pages/Class";
 import ClassReplayPage from "./pages/ClassReplay";
 import ClassV2Page from "./pages/ClassV2";
 
@@ -115,7 +115,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="history/external/:id" element={<ExternalGamePage />} />
             <Route path="test/feedback-ui" element={<FeedbackUITestPage />} />
             <Route path="book" element={<BookPage />} />
-            <Route path="class" element={<ClassPage />} />
+            <Route path="class" element={<Navigate to="/dashboard" replace />} />
             <Route path="class/:id" element={<ClassIdRedirect />} />
             <Route path="class/:id/replay/:filename" element={<ClassReplayPage />} />
             <Route path="class-v2/:room" element={<ClassV2Page />} />

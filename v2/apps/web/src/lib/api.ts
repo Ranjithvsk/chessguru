@@ -27,14 +27,12 @@ export async function announceGoingLive(room: string, joinPath: string): Promise
   catch { /* never block the room from loading */ }
 }
 
-// Router path for a class room by room system. "meet" = self-hosted LiveKit
-// "Dream Meet" (needs a role so the coach ensures the LiveKit room); anything
-// else = the from-scratch /call board room. Use with <Link to> (basename adds
-// /v2); for a raw shareable URL prepend `location.origin + import.meta.env.BASE_URL`
-// and drop the leading slash.
-export function classRoomPath(kind: string | null | undefined, id: string, role: "coach" | "student"): string {
-  if (kind === "meet") return `/class-v2/${encodeURIComponent(id)}?role=${role}`;
-  return `/call/${encodeURIComponent(id)}?board=1`;
+// Router path for a class room. Historically switched between Jitsi (/class/)
+// and a from-scratch WebRTC mesh (/call/); both were retired (owner 2026-08-12)
+// and every live class runs on Dream Meet now. `kind` and `role` are kept in
+// the signature so existing callers compile; the `kind` value is ignored.
+export function classRoomPath(_kind: string | null | undefined, id: string, role: "coach" | "student"): string {
+  return `/class-v2/${encodeURIComponent(id)}?role=${role}`;
 }
 
 export interface RandomPuzzleOpts { theme: string; rating: number; difficulty: Difficulty; maxPc?: number; userId?: string | null; section?: string; player?: string;   mode?: string;

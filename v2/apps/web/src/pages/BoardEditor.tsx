@@ -294,7 +294,10 @@ export default function BoardEditorPage() {
         // "just upload and wait" experience.
         void runServerClassifyOnCanvas(cvs);
       } catch { /* corrections just won't be captured this run */ }
-      const ok = fp.load(res.fen);
+      // Always populate: even an illegal FEN has many correct pieces the coach
+      // can keep and only fix the wrong squares. Never discard partial finds.
+      const ok = fp.loadPermissive(res.fen);
+      const legal = fp.load(res.fen); // for reporting; may fail while ok stays true
       if (ok) {
         const nudge = uncertain > 0
           ? ` ⚠ ${uncertain} yellow-ringed square${uncertain === 1 ? "" : "s"} need a second look.`
@@ -303,9 +306,10 @@ export default function BoardEditorPage() {
           ? `✓ Auto-found board (score ${res.autoScore}/64).`
           : `⚠ Couldn't find a board — used the whole image. Crop tighter and re-upload for better results.`;
         const modeTag = res.meta.renderMode === "print" ? " · book/print mode" : "";
-        setVisionMsg({ tone: res.autoDetected ? "ok" : "info", text: `${cropTag} Loaded ${res.meta.whiteCount}W + ${res.meta.blackCount}B${modeTag}.${nudge}` });
+        const legalTag = legal ? "" : " · position illegal — fix the misread squares";
+        setVisionMsg({ tone: res.autoDetected ? "ok" : "info", text: `${cropTag} Loaded ${res.meta.whiteCount}W + ${res.meta.blackCount}B${modeTag}${legalTag}.${nudge}` });
       }
-      else setVisionMsg({ tone: "err", text: "Detected but couldn't load (illegal position). Try a cleaner screenshot." });
+      else setVisionMsg({ tone: "err", text: "Couldn't parse FEN at all. Try a cleaner photo." });
     } catch (e) {
       setVisionMsg({ tone: "err", text: String((e as Error).message || e) });
     } finally { setVisionBusy(false); }
@@ -326,13 +330,19 @@ export default function BoardEditorPage() {
       });
       if (!r.ok) throw new Error(await r.text());
       const j = await r.json();
-      const ok = fp.load(j.fen);
+      // Always populate. Even an illegal position preserves the correct pieces
+      // so the coach only fixes the wrong squares instead of starting empty.
+      const placed = fp.loadPermissive(j.fen);
+      const legal = fp.load(j.fen);
       const avgConf = (j.squares.flat().reduce((s: number, sq: any) => s + sq.confidence, 0) / 64 * 100).toFixed(0);
+      const pieceCount = j.fen.split(" ")[0].replace(/[^KQRBNPkqrbnp]/g, "").length;
       setServerMsg({
-        tone: ok ? "ok" : "err",
-        text: ok
-          ? `✓ Server AI loaded ${j.fen.split(" ")[0].replace(/[^KQRBNPkqrbnp]/g, "").length} pieces (avg conf ${avgConf}%, ${j.meta.latencyMs}ms).`
-          : `Server FEN was illegal. Best guess: ${j.fen}`,
+        tone: placed ? "ok" : "err",
+        text: placed
+          ? (legal
+              ? `✓ Server AI loaded ${pieceCount} pieces (avg conf ${avgConf}%, ${j.meta.latencyMs}ms).`
+              : `Server AI placed ${pieceCount} pieces (avg conf ${avgConf}%). Position illegal — fix the misread squares.`)
+          : `Server FEN unparseable: ${j.fen}`,
       });
     } catch (e) {
       setServerMsg({ tone: "err", text: `Server AI failed: ${(e as Error).message.slice(0, 120)}` });
@@ -345,6 +355,40 @@ export default function BoardEditorPage() {
   async function runServerClassify() {
     if (!visionSnapshot) { setServerMsg({ tone: "err", text: "Upload a board image first." }); return; }
     await runServerClassifyOnCanvas(visionSnapshot.canvas);
+  }
+  /** "Ultra AI" — sends the ORIGINAL phone photo (uncropped) to the server's
+   *  Tandberg YOLO extractor, then classifies via v3.6 DINOv2. Better than
+   *  the client-side warp on hard photos (book pages with text, angled
+   *  shots). Latency ~1-3s. */
+  async function runUltraScan() {
+    if (!rawUploadDataUrl) { setServerMsg({ tone: "err", text: "Upload an image first." }); return; }
+    if (serverBusy) return;
+    setServerBusy(true); setServerMsg({ tone: "info", text: "✨ Ultra AI: YOLO extract + DINOv2 classify (1-3s)…" });
+    try {
+      const rawB64 = rawUploadDataUrl.replace(/^data:image\/[a-z]+;base64,/, "");
+      const r = await fetch(`${API_BASE}/api/vision/classify-board-ultra`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rawImagePngBase64: rawB64 }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      const j = await r.json();
+      const placed = fp.loadPermissive(j.fen);
+      const legal = fp.load(j.fen);
+      const avgConf = (j.squares.flat().reduce((s: number, sq: any) => s + sq.confidence, 0) / 64 * 100).toFixed(0);
+      const pieceCount = j.fen.split(" ")[0].replace(/[^KQRBNPkqrbnp]/g, "").length;
+      const timing = `extract ${j.extractLatencyMs}ms + classify ${j.meta.latencyMs}ms`;
+      setServerMsg({
+        tone: placed ? "ok" : "err",
+        text: placed
+          ? (legal
+              ? `✨ Ultra AI: ${pieceCount} pieces, avg conf ${avgConf}% (${timing}).`
+              : `✨ Ultra AI placed ${pieceCount} pieces (conf ${avgConf}%). Position illegal — fix the misread squares.`)
+          : `Ultra AI unparseable FEN: ${j.fen}`,
+      });
+    } catch (e) {
+      setServerMsg({ tone: "err", text: `Ultra AI failed: ${(e as Error).message.slice(0, 160)}` });
+    } finally { setServerBusy(false); }
   }
   const fileInputRef = useRef<HTMLInputElement>(null);
   function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -507,6 +551,13 @@ export default function BoardEditorPage() {
                 {serverBusy ? "🚀 Classifying…" : "🚀 Try Server AI (DINOv2)"}
               </button>
               {rawUploadDataUrl && (
+                <button onClick={runUltraScan} disabled={serverBusy}
+                  className="inline-flex items-center gap-1 rounded-lg bg-gradient-to-br from-fuchsia-600 to-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:from-fuchsia-500 hover:to-brand-500 disabled:cursor-wait disabled:opacity-60"
+                  title="Ultra AI: YOLO segmentation extractor + DINOv2 classifier. Best for phone photos of book pages.">
+                  {serverBusy ? "✨ Working…" : "✨ Ultra AI"}
+                </button>
+              )}
+              {rawUploadDataUrl && (
                 <button onClick={() => setAdjusterOpen(true)}
                   className="inline-flex items-center gap-1 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-500/20">
                   ✂ Adjust corners
@@ -543,13 +594,22 @@ export default function BoardEditorPage() {
                 if (!warped) throw new Error("warp failed (opencv unavailable?)");
                 setVisionSnapshot((prev) => prev ? { ...prev, canvas: warped.canvas } : prev);
                 setVisionPreview(warped.canvas.toDataURL("image/png"));
-                // Log the manually-warped result + auto-run server classify.
+                // Log the manually-warped result + save the 4 hand-placed
+                // corners as a YOLO training sample (fire-and-forget).
                 try {
                   const b64 = warped.canvas.toDataURL("image/png").replace(/^data:image\/[a-z]+;base64,/, "");
                   void fetch(`${API_BASE}/api/vision/log-scan`, {
                     method: "POST", credentials: "include",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ boardPngBase64: b64, source: "manual-warp" }),
+                  }).catch(() => {});
+                } catch { /* silent */ }
+                try {
+                  const rawB64 = rawUploadDataUrl.replace(/^data:image\/[a-z]+;base64,/, "");
+                  void fetch(`${API_BASE}/api/vision/save-corner-labels`, {
+                    method: "POST", credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ rawImagePngBase64: rawB64, corners, sourceRef: "board-editor-adjust" }),
                   }).catch(() => {});
                 } catch { /* silent */ }
                 await runServerClassifyOnCanvas(warped.canvas);

@@ -95,8 +95,9 @@ export default function LiveClassBanner() {
   }, [loggedIn]);
 
   if (!loggedIn) return null;
-  // Already in a room / on the class hub — the banner would just be noise there.
-  if (loc.pathname.startsWith("/call/") || loc.pathname.startsWith("/class")) return null;
+  // Already in a room / on the class hub / on the student dashboard — the
+  // banner would double-up with the prominent red LIVE-NOW card there.
+  if (loc.pathname.startsWith("/call/") || loc.pathname.startsWith("/class") || loc.pathname.startsWith("/dashboard")) return null;
 
   // Scheduled-live first, then ad-hoc announcements; dedup by room id.
   const seen = new Set<string>();
