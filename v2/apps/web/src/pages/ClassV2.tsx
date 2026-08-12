@@ -332,8 +332,13 @@ function LiveHeaderBits({ room }: { room: string }) {
 function CoachWaitingOverlay({ room, role }: { room: string; role: "coach" | "student" }) {
   const participants = useParticipants();
   const [copied, setCopied] = useState(false);
+  // Session-dismiss per room — user can hide it and keep teaching alone.
+  const [dismissed, setDismissed] = useState<boolean>(() => {
+    try { return sessionStorage.getItem("cg-waiting-dismiss-" + room) === "1"; } catch { return false; }
+  });
   if (role !== "coach") return null;
   if (participants.length > 1) return null;   // hide once anyone else joins
+  if (dismissed) return null;
   const inviteUrl = `${location.origin}${import.meta.env.BASE_URL}class-v2/${encodeURIComponent(room)}?role=student`;
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(inviteUrl)}`;
   const copy = async () => {
@@ -342,8 +347,12 @@ function CoachWaitingOverlay({ room, role }: { room: string; role: "coach" | "st
   };
   return (
     <div className="absolute right-3 top-3 z-20 w-[280px] rounded-xl border border-amber-400/40 bg-ink-900/95 p-3 shadow-2xl backdrop-blur">
-      <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-300">
-        ⏳ Waiting for students
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-300">
+          ⏳ Waiting for students
+        </div>
+        <button onClick={() => { try { sessionStorage.setItem("cg-waiting-dismiss-" + room, "1"); } catch { /* */ } setDismissed(true); }}
+          className="text-sm text-ink-400 hover:text-white" title="Hide this panel">×</button>
       </div>
       <div className="mb-2 text-[11px] text-ink-300">
         Send this exact link to every student — otherwise they'll land in a different room and moves won't sync.

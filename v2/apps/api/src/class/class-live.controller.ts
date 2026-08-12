@@ -47,15 +47,26 @@ export class ClassLiveController {
     let joinPath = typeof body?.joinPath === "string" ? body.joinPath : "";
     if (!JOIN_PATH_RE.test(joinPath)) joinPath = `/v2/call/${id}?board=1`;
 
-    // Idempotent per room for 3h.
+    // Idempotent per room for 3h (skips push re-spam on reconnect).
     const prev: any = await this.conn.db!.collection("classLiveAnnouncements").findOne(
       { _id: id as any }, { projection: { at: 1 } });
-    if (prev && Date.now() - new Date(prev.at).getTime() < 3 * 3_600_000) return { ok: true, already: true };
+    const alreadyRecent = !!(prev && Date.now() - new Date(prev.at).getTime() < 3 * 3_600_000);
+    // ALWAYS upsert the current row (updates `at` even if already recent, so
+    // the live-now feed reflects the LATEST activity in this room).
     await this.conn.db!.collection("classLiveAnnouncements").updateOne(
       { _id: id as any },
       { $set: { at: new Date(), academyId, coachUserId: me, joinPath } },
       { upsert: true },
     );
+    // Wipe any OTHER older announcements from THIS coach in THIS academy —
+    // otherwise students see a stale room link at the top of live-now and land
+    // in an abandoned room where the coach isn't (owner-reported 2026-08-12).
+    // One live class per coach at any moment is a safe assumption.
+    await this.conn.db!.collection("classLiveAnnouncements").deleteMany({
+      _id: { $ne: id as any },
+      academyId, coachUserId: me,
+    });
+    if (alreadyRecent) return { ok: true, already: true };
 
     const klass: any = await this.conn.db!.collection("classSchedules").findOne(
       { _id: id as any }, { projection: { title: 1 } });
