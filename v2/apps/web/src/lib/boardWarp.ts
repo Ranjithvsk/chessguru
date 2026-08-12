@@ -162,10 +162,78 @@ function checkerScore(cv: any, sourceMat: any, corners: Array<{ x: number; y: nu
   }
 }
 
+/** Hough-line-based chess board finder. Chess boards have 9 dominant
+ *  horizontal + 9 vertical lines (bounding the 8x8 grid). Detect all
+ *  line segments via HoughLinesP, cluster by orientation, take the
+ *  extremes of the dominant orientation → 4 corners.
+ *
+ *  More reliable than contour-based detection when the board frame is
+ *  broken/incomplete (typical for phone photos of book pages) but the
+ *  interior grid lines are still visible. */
+async function findBoardViaHough(cv: any, src: any, workW: number, workH: number): Promise<Array<{x:number;y:number}> | null> {
+  const gray = new cv.Mat();
+  const edges = new cv.Mat();
+  const lines = new cv.Mat();
+  try {
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    cv.Canny(gray, edges, 50, 150);
+    // HoughLinesP: rho=1, theta=pi/180, threshold=80, minLineLen=W/8, maxGap=W/40
+    const minLen = Math.max(20, Math.floor(Math.min(workW, workH) / 8));
+    const maxGap = Math.max(5, Math.floor(Math.min(workW, workH) / 40));
+    cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 80, minLen, maxGap);
+    if (lines.rows === 0) return null;
+    // Classify each line as horizontal (angle within 15° of 0/180) or
+    // vertical (within 15° of 90/270). Ignore diagonals.
+    const horiz: Array<{x1:number;y1:number;x2:number;y2:number;mid:number}> = [];
+    const vert:  Array<{x1:number;y1:number;x2:number;y2:number;mid:number}> = [];
+    for (let i = 0; i < lines.rows; i++) {
+      const x1 = lines.data32S[i * 4]!;
+      const y1 = lines.data32S[i * 4 + 1]!;
+      const x2 = lines.data32S[i * 4 + 2]!;
+      const y2 = lines.data32S[i * 4 + 3]!;
+      const dx = x2 - x1, dy = y2 - y1;
+      const angDeg = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
+      const normalized = angDeg > 90 ? 180 - angDeg : angDeg;
+      if (normalized < 15) horiz.push({ x1, y1, x2, y2, mid: (y1 + y2) / 2 });
+      else if (normalized > 75) vert.push({ x1, y1, x2, y2, mid: (x1 + x2) / 2 });
+    }
+    if (horiz.length < 6 || vert.length < 6) return null;
+    // Take the extremes: topmost + bottommost horizontal lines, leftmost
+    // + rightmost vertical lines. These outline the board bounding box.
+    horiz.sort((a, b) => a.mid - b.mid);
+    vert.sort((a, b) => a.mid - b.mid);
+    const top = horiz[0]!, bot = horiz[horiz.length - 1]!;
+    const left = vert[0]!, right = vert[vert.length - 1]!;
+    // Compute the 4 corner intersections. Line-line intersection formula.
+    const intersect = (l1: typeof top, l2: typeof left): {x:number;y:number} | null => {
+      const x1=l1.x1,y1=l1.y1,x2=l1.x2,y2=l1.y2;
+      const x3=l2.x1,y3=l2.y1,x4=l2.x2,y4=l2.y2;
+      const den = (x1-x2)*(y3-y4) - (y1-y2)*(x3-x4);
+      if (Math.abs(den) < 1e-6) return null;
+      const t = ((x1-x3)*(y3-y4) - (y1-y3)*(x3-x4)) / den;
+      return { x: x1 + t*(x2-x1), y: y1 + t*(y2-y1) };
+    };
+    const tl = intersect(top, left);
+    const tr = intersect(top, right);
+    const br = intersect(bot, right);
+    const bl = intersect(bot, left);
+    if (!tl || !tr || !br || !bl) return null;
+    // Sanity: corners should form a plausibly-square shape.
+    const w = Math.abs(tr.x - tl.x);
+    const h = Math.abs(bl.y - tl.y);
+    if (w < workW * 0.15 || h < workH * 0.15) return null;
+    return [tl, tr, br, bl];
+  } finally {
+    gray.delete(); edges.delete(); lines.delete();
+  }
+}
+
 /** Find the chess board in the image and warp it to a canonical 480x480
- *  square. Selects among 4-corner candidates by CHECKER-PATTERN score
- *  (via checkerScore) so page-sized or text-block false positives don't
- *  win over the real board. Returns null when nothing scores well enough. */
+ *  square. Two-pass strategy:
+ *   1. Contour-based (works on clean screenshots)
+ *   2. Hough-line-based (works on phone photos with visible grid lines)
+ *  Pick whichever produces a higher checker-pattern score. Returns null
+ *  when both fail. */
 export async function warpToCanonicalBoard(source: HTMLImageElement | HTMLCanvasElement): Promise<BoardWarpResult | null> {
   let cv: any;
   try {
@@ -244,8 +312,6 @@ export async function warpToCanonicalBoard(source: HTMLImageElement | HTMLCanvas
     // second chance -- important for phone photos with soft board edges.
     // (skipped for now -- kept simple; the 0.02 pass usually catches boards)
 
-    if (candidates.length === 0) return null;
-
     let bestCorners: Array<{ x: number; y: number }> | null = null;
     let bestScore = 0;
     for (const cand of candidates) {
@@ -255,7 +321,20 @@ export async function warpToCanonicalBoard(source: HTMLImageElement | HTMLCanvas
         bestCorners = cand.corners;
       }
     }
-    // Reject if even the best candidate doesn't look chess-board-like.
+
+    // Also try Hough-line-based detection -- often nails phone photos of
+    // book pages where the outer frame is broken but interior grid lines
+    // are visible.
+    const houghCorners = await findBoardViaHough(cv, src, workW, workH).catch(() => null);
+    if (houghCorners) {
+      const houghScore = checkerScore(cv, src, orderCorners(houghCorners));
+      if (houghScore > bestScore) {
+        bestScore = houghScore;
+        bestCorners = houghCorners;
+      }
+    }
+
+    // Reject if neither approach found something chess-board-like.
     if (!bestCorners || bestScore < 45) return null;
 
     // Bump corners back to source-image coordinates.

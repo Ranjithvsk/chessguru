@@ -35,10 +35,8 @@ export default function App() {
         <Outlet context={{ userId, rating: rating?.rating ?? 1500 }} />
       </main>
       {/* Global "📷 Scan chess position" FAB. Fixed bottom-left so it's
-          always one tap away on phone (coach snaps a photo of a book
-          diagram or screenshot → goes straight to /board-editor which
-          hosts the vision pipeline). Hidden on /board-editor itself to
-          avoid redundancy. */}
+          always one tap away on phone. Hidden on /board-editor itself
+          to avoid redundancy. */}
       {loc.pathname !== "/board-editor" && (
         <Link
           to="/board-editor"

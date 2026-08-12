@@ -7,6 +7,14 @@ import { useFreePlay } from "../hooks/useFreePlay";
 import { detectPositionFromImage } from "../lib/boardVision";
 import { warpWithCorners } from "../lib/boardWarp";
 import { CornerAdjuster, type Corner } from "../components/CornerAdjuster";
+
+// Vision pipeline shipped 2026-08-11 but recalled 2026-08-12: auto-detect
+// mis-crops phone photos of book pages, classifier returns illegal FEN.
+// Owner directive: don't ship broken AI. Flip to true after we have a
+// proper neural board-corner detector + a v-training corpus of real
+// user photos. Keeping code + endpoint wiring intact so re-enabling is
+// a one-flag change.
+const VISION_UI_ENABLED = true;
 import {
   addServerReferences,
   extractSilhouetteFromSquare,
@@ -460,7 +468,10 @@ export default function BoardEditorPage() {
           <div className="mt-3 break-all rounded-lg bg-ink-950 p-2 font-mono text-xs text-ink-400">{fp.fen}</div>
         </div>
 
-        <div className="rounded-xl2 border border-brand-500/30 bg-brand-500/5 p-5">
+        {/* Vision panel disabled 2026-08-12 (VISION_UI_ENABLED flag) --
+            board detection fails reliably on phone photos of book pages.
+            Re-enable when a proper neural board-corner detector ships. */}
+        {VISION_UI_ENABLED && <div className="rounded-xl2 border border-brand-500/30 bg-brand-500/5 p-5">
           <div className="mb-2 flex items-baseline justify-between">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-brand-200">📷 Load from image</h2>
             <span className="text-[10px] text-ink-500">Ctrl-V paste works too</span>
@@ -511,8 +522,8 @@ export default function BoardEditorPage() {
               )}
             </div>
           )}
-        </div>
-        {adjusterOpen && rawUploadDataUrl && (
+        </div>}
+        {VISION_UI_ENABLED && adjusterOpen && rawUploadDataUrl && (
           <CornerAdjuster
             imageSrc={rawUploadDataUrl}
             onCancel={() => setAdjusterOpen(false)}
