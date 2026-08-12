@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import App from "./App";
 import PuzzlesPage from "./pages/Puzzles";
 import HistoryPage from "./pages/History";
@@ -47,6 +47,20 @@ import BookPage from "./pages/Book";
 import ClassPage from "./pages/Class";
 import ClassReplayPage from "./pages/ClassReplay";
 import ClassV2Page from "./pages/ClassV2";
+
+// Jitsi is retired (owner 2026-08-12) — every live-class URL now funnels into
+// Dream Meet (/class-v2/). These tiny redirect shims preserve old bookmarks +
+// server-generated push-notification joinPaths without keeping the Jitsi UI
+// or the old from-scratch mesh call code on the router. Uses replace so the
+// browser history doesn't stack a dead route entry.
+function ClassIdRedirect() {
+  const { id } = useParams();
+  return <Navigate to={`/class-v2/${encodeURIComponent(id ?? "")}`} replace />;
+}
+function CallRoomRedirect() {
+  const { room } = useParams();
+  return <Navigate to={`/class-v2/${encodeURIComponent(room ?? "")}`} replace />;
+}
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -96,13 +110,13 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="signup-academy" element={<SignupAcademyPage />} />
             <Route path="academy" element={<AcademyDashboardPage />} />
             <Route path="accept-invite" element={<AcceptInvitePage />} />
-            <Route path="call/:room" element={<CallRoomPage />} />
+            <Route path="call/:room" element={<CallRoomRedirect />} />
             <Route path="settings/accounts" element={<AccountLinksPage />} />
             <Route path="history/external/:id" element={<ExternalGamePage />} />
             <Route path="test/feedback-ui" element={<FeedbackUITestPage />} />
             <Route path="book" element={<BookPage />} />
             <Route path="class" element={<ClassPage />} />
-            <Route path="class/:id" element={<ClassPage />} />
+            <Route path="class/:id" element={<ClassIdRedirect />} />
             <Route path="class/:id/replay/:filename" element={<ClassReplayPage />} />
             <Route path="class-v2/:room" element={<ClassV2Page />} />
             <Route path="*" element={<Navigate to="/" replace />} />

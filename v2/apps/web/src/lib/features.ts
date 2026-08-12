@@ -55,7 +55,7 @@ export const FEATURES: Feature[] = [
   { id: "board-editor",        category: "play",         emoji: "✏️", title: "Board editor",               description: "Set up any position for teaching or analysis." },
 
   // ── Live classes ──────────────────────────────────────────────────────
-  { id: "live-class",          category: "classes",      emoji: "🎥", title: "Live video classes",         description: "Multi-student video calls with a shared board — self-hosted Jitsi, no third-party accounts." },
+  { id: "live-class",          category: "classes",      emoji: "🎥", title: "Live video classes",         description: "Multi-student video calls with a shared board — Dream Meet, our self-hosted video room." },
   { id: "class-recording",     category: "classes",      emoji: "📼", title: "Class recording + replay",   description: "One-click record; students catch up on the same board sync you had live." },
   { id: "board-annotations",   category: "classes",      emoji: "✏️", title: "Board annotations",          description: "Arrows + circles broadcast to every student in real time." },
   { id: "snap-position",       category: "classes",      emoji: "📸", title: "📸 Snap-position",            description: "Coach freezes a moment mid-class — students revisit it later on /academy." },
