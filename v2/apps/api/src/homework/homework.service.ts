@@ -53,7 +53,12 @@ export interface HomeworkDoc {
 // A friendly default mix that covers all major tactical motifs.
 // Used when we don't have enough per-student rating data to pick weakest themes.
 const DEFAULT_THEMES = ["pin", "fork", "skewer", "discoveredAttack", "sacrifice"];
-const DEFAULT_OPENING = "sicilian";
+// Must be a LEAF slug from OPENINGS (see apps/web/src/lib/openings) — family
+// ids like "sicilian" alone don't resolve on the OpeningDetail page and
+// render "Opening not found" (owner reported empty page 2026-08-12). The
+// Italian Giuoco Piano is a teaching-friendly default (universally taught,
+// clear plans, deep enough to matter, not overwhelming).
+const DEFAULT_OPENING = "italian-giuoco-piano";
 
 @Injectable()
 export class HomeworkService {
