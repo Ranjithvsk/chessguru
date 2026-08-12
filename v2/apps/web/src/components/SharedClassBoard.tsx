@@ -41,7 +41,7 @@ export function useClassSetupOpen(): boolean {
 // Coach action bus — reset / stepBack / stepForward triggers from the footer
 // buttons rendered by ClassV2 flow through this. ClassV2 has no access to the
 // class-ws socket; module scope keeps the wiring flat.
-type ClassBoardAction = "reset" | "stepBack" | "stepForward";
+type ClassBoardAction = "reset" | "stepBack" | "stepForward" | "toggleLock";
 const _actionSubs = new Set<(a: ClassBoardAction) => void>();
 export function triggerClassBoardAction(a: ClassBoardAction) { _actionSubs.forEach((f) => f(a)); }
 
@@ -57,6 +57,25 @@ export function useClassCursorInfo(): { cursorIdx: number; historyLen: number } 
   const [, force] = useState(0);
   useEffect(() => { const f = () => force((n) => n + 1); _cursorSubs.add(f); return () => { _cursorSubs.delete(f); }; }, []);
   return _cursorInfo;
+}
+
+// Room lock state (whether students can move pieces). Default = LOCKED —
+// students can never accidentally scramble the board mid-lesson (owner
+// 2026-08-12). Coach's footer button toggles it for interactive practice.
+let _lockedState = true;
+const _lockedSubs = new Set<() => void>();
+function _publishLocked(v: boolean) {
+  if (_lockedState === v) return;
+  _lockedState = v;
+  _lockedSubs.forEach((f) => f());
+}
+export function useClassLocked(): boolean {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((n) => n + 1); _lockedSubs.add(f); return () => { _lockedSubs.delete(f); }; }, []);
+  return _lockedState;
+}
+export function triggerClassLockToggle() {
+  _actionSubs.forEach((f) => f("toggleLock"));
 }
 
 export default function SharedClassBoard(
@@ -140,11 +159,14 @@ export default function SharedClassBoard(
         applyFen(msg.fen, msg.lastMove ?? null);
         setShapes(Array.isArray(msg.shapes) ? msg.shapes : []);
         _publishCursor(Number(msg.cursorIdx ?? (Array.isArray(msg.history) ? msg.history.length : 0)), Array.isArray(msg.history) ? msg.history.length : 0);
+        if (typeof msg.locked === "boolean") _publishLocked(msg.locked);
       }
       else if (msg.type === "move") {
         applyFen(msg.fen, msg.move);
         _publishCursor(Number(msg.cursorIdx ?? (Array.isArray(msg.history) ? msg.history.length : 0)), Array.isArray(msg.history) ? msg.history.length : 0);
+        if (typeof msg.locked === "boolean") _publishLocked(msg.locked);
       }
+      else if (msg.type === "lock") { if (typeof msg.locked === "boolean") _publishLocked(msg.locked); }
       else if (msg.type === "reset") applyFen(msg.fen, null);
       else if (msg.type === "annot") setShapes(Array.isArray(msg.shapes) ? msg.shapes : []);
       else if (msg.type === "role") {
@@ -224,17 +246,28 @@ export default function SharedClassBoard(
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     try { ws.send(JSON.stringify({ type: "stepForward" })); } catch { /* */ }
   };
-  // Subscribe to the footer's action bus so coach's ← → / Reset clicks in
-  // ClassV2 reach us and go over the ws.
+  const sendLock = (nextLocked: boolean) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try { ws.send(JSON.stringify({ type: "lock", locked: nextLocked })); } catch { /* */ }
+  };
+  // Subscribe to the footer's action bus so coach's ← → / Reset / Lock clicks
+  // in ClassV2 reach us and go over the ws.
   useEffect(() => {
     const handle = (a: ClassBoardAction) => {
       if (a === "reset") sendReset();
       else if (a === "stepBack") sendStepBack();
       else if (a === "stepForward") sendStepForward();
+      else if (a === "toggleLock") sendLock(!_lockedState);
     };
     _actionSubs.add(handle);
     return () => { _actionSubs.delete(handle); };
   }, []);
+
+  // Who can move a piece: default LOCKED so students never scramble the board.
+  // Coach can always move (the server enforces this too by dropping student
+  // moves when locked). "both" = any color; "none" = no drag/drop at all.
+  const boardMovable: "both" | "none" = role === "coach" ? "both" : (_lockedState ? "none" : "both");
   // Setup modal state now lives in the module (see setClassSetupOpen at top
   // of file) so ClassV2's footer button can open it. Local FEN/error still
   // in state because they're modal-local.
@@ -283,8 +316,8 @@ export default function SharedClassBoard(
     >
       <Board
         fen={fen}
-        movableColor="both"
-        dests={dests as any}
+        movableColor={boardMovable}
+        dests={boardMovable === "none" ? (new Map() as any) : (dests as any)}
         lastMove={lastMoveTuple}
         onMove={(f, t) => sendMove(String(f), String(t))}
         coordinates
@@ -307,13 +340,6 @@ export default function SharedClassBoard(
           <div className="h-5 w-5 rounded-full bg-amber-300/80 shadow-[0_0_20px_6px_rgba(252,211,77,0.55)] ring-2 ring-amber-100/90" />
         </div>
       )}
-      <button
-        onClick={sendReset}
-        title="Reset board — coach only"
-        className="absolute left-1.5 top-1.5 rounded-md bg-black/55 px-2 py-1 text-xs text-white/90 backdrop-blur hover:bg-black/75"
-      >
-        ↺
-      </button>
       {setupOpen && role === "coach" && (
         <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center p-4">
           <div className="pointer-events-auto w-full max-w-md space-y-3 rounded-xl border border-ink-700 bg-ink-900/95 p-4 shadow-2xl backdrop-blur" onClick={(e) => e.stopPropagation()}>

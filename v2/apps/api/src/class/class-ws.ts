@@ -206,8 +206,11 @@ const rooms = new Map<string, Room>();
 function getRoom(id: string): Room {
   let r = rooms.get(id);
   if (!r) {
+    // Default LOCKED so students can't scramble the board just by clicking a
+    // piece — owner reported 2026-08-12 that "students were controlling
+    // moves". Coach can unlock via the footer 🔒 toggle for interactive drills.
     r = { fen: START_FEN, lastMove: null, history: [], cursorIdx: 0, clients: new Set(),
-          coachToken: null, coach: null, locked: false, shapes: [], emptyEvictAt: null };
+          coachToken: null, coach: null, locked: true, shapes: [], emptyEvictAt: null };
     rooms.set(id, r);
   }
   // A returning client cancels pending eviction — they see the SAME state they

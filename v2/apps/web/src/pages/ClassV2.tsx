@@ -16,7 +16,7 @@ import {
 import { Track, DataPacket_Kind } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
-import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, useClassCursorInfo } from "../components/SharedClassBoard";
+import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, useClassCursorInfo, useClassLocked, triggerClassLockToggle } from "../components/SharedClassBoard";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -394,6 +394,21 @@ function CoachBoardNav() {
         →
       </button>
     </div>
+  );
+}
+
+// Coach-only lock toggle. Default LOCKED — students can watch but can't move
+// pieces. Coach can unlock for an interactive drill / "your move" moment.
+function CoachLockToggle() {
+  const locked = useClassLocked();
+  return (
+    <button
+      onClick={triggerClassLockToggle}
+      title={locked ? "Students CAN'T move — click to allow" : "Students CAN move — click to lock"}
+      className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${locked ? "border-rose-500/50 bg-rose-500/20 text-rose-100 hover:bg-rose-500/30" : "border-emerald-500/50 bg-emerald-500/20 text-emerald-100 hover:bg-emerald-500/30"}`}
+    >
+      {locked ? "🔒 Locked" : "🔓 Open"}
+    </button>
   );
 }
 
@@ -821,6 +836,7 @@ export default function ClassV2Page() {
                 <ChatToggleButton />
                 <ReactionsBar />
                 {role === "coach" && <CoachBoardNav />}
+                {role === "coach" && <CoachLockToggle />}
                 {role === "coach" && (
                   <button
                     onClick={() => setClassSetupOpen(true)}
