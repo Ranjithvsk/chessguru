@@ -100,10 +100,13 @@ export default function SharedClassBoard(
 
   const lastMoveTuple: [Key, Key] | undefined = lastMove ? [lastMove.from as Key, lastMove.to as Key] : undefined;
 
-  // Root width matches the board's own cap (min(100% width, viewport-minus-chrome))
-  // so the self-sizing square Board fills it exactly and the overlays align to it.
+  // Board sizes to the largest square that fits its parent — respects BOTH
+  // available width AND height. Prior version used a fixed
+  // width: min(100%, 100dvh - 10.5rem) which didn't account for pages with
+  // extra chrome (e.g. the Dream Meet top bar + control footer on
+  // /class-v2/), overflowing vertically and getting clipped at the top rank.
   return (
-    <div className="relative mx-auto" style={{ width: "min(100%, calc(100dvh - 10.5rem))" }}>
+    <div className="relative mx-auto aspect-square max-h-full max-w-full h-full">
       <Board
         fen={fen}
         movableColor="both"
