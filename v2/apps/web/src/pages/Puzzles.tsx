@@ -163,8 +163,8 @@ export default function PuzzlesPage() {
 
   // Deep-link handoff from the History page: /?review=<id> auto-loads that solve
   // in review mode. We consume the param once, then strip it so a refresh doesn't
-  // trap the user in review-of-N forever.
-  const [searchParams, setSearchParams] = useSearchParams();
+  // trap the user in review-of-N forever. (searchParams/setSearchParams are
+  // already destructured above the hw-mode block near the top of the fn.)
   useEffect(() => {
     const rid = searchParams.get("review");
     if (!rid) return;
