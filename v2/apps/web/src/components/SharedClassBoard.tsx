@@ -25,7 +25,11 @@ function destsFromChess(game: Chess): Map<Key, Key[]> {
 }
 
 export default function SharedClassBoard(
-  { room, userId, displayName }: { room: string; userId?: string | null; displayName?: string | null },
+  { room, userId, displayName, onClassEnded }: {
+    room: string; userId?: string | null; displayName?: string | null;
+    /** Coach explicitly ended the class — parent should navigate away / show a toast. */
+    onClassEnded?: (reason: string) => void;
+  },
 ) {
   const [fen, setFen] = useState<string>(() => new Chess().fen());
   const [lastMove, setLastMove] = useState<BoardMove | null>(null);
@@ -72,6 +76,7 @@ export default function SharedClassBoard(
       else if (msg.type === "move") applyFen(msg.fen, msg.move);
       else if (msg.type === "reset") applyFen(msg.fen, null);
       else if (msg.type === "annot") setShapes(Array.isArray(msg.shapes) ? msg.shapes : []);
+      else if (msg.type === "classEnded") { onClassEnded?.(String(msg.reason || "coach_left")); }
     };
     return () => {
       cancelled = true;
@@ -100,13 +105,20 @@ export default function SharedClassBoard(
 
   const lastMoveTuple: [Key, Key] | undefined = lastMove ? [lastMove.from as Key, lastMove.to as Key] : undefined;
 
-  // Board sizes to the largest square that fits its parent — respects BOTH
-  // available width AND height. Prior version used a fixed
-  // width: min(100%, 100dvh - 10.5rem) which didn't account for pages with
-  // extra chrome (e.g. the Dream Meet top bar + control footer on
-  // /class-v2/), overflowing vertically and getting clipped at the top rank.
+  // Board sizes to the LARGEST square that fits its parent — respects BOTH
+  // available width AND height. Container queries pick the smaller of the
+  // two so the board grows on portrait AND landscape parents alike. Falls
+  // back to `min(100vw, 100vh - chrome)` on browsers without cqi/cqb.
   return (
-    <div className="relative mx-auto aspect-square max-h-full max-w-full h-full">
+    <div
+      className="relative mx-auto"
+      style={{
+        containerType: 'size',
+        // width = whichever container dim is smaller
+        width: 'min(100cqi, 100cqb)',
+        aspectRatio: '1',
+      } as any}
+    >
       <Board
         fen={fen}
         movableColor="both"

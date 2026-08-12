@@ -6,7 +6,7 @@
 // Requires the API to have LIVEKIT_URL / _API_KEY / _API_SECRET envs. Until
 // those are set, the page renders a friendly "not configured yet" splash.
 import { useEffect, useRef, useState } from "react";
-import { Navigate, useParams, useSearchParams, Link } from "react-router-dom";
+import { Navigate, useParams, useSearchParams, Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   LiveKitRoom, RoomAudioRenderer, ControlBar,
@@ -439,6 +439,27 @@ export default function ClassV2Page() {
   const [sp] = useSearchParams();
   const role: "coach"|"student" = sp.get("role") === "coach" ? "coach" : "student";
   const { data: me, isLoading: authLoading } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
+  const navigate = useNavigate();
+  const [endedMsg, setEndedMsg] = useState<string | null>(null);
+
+  // Coach clicks Leave → tell the server to explicitly END the class:
+  //   * wipes the live-now announcement (students don't see a stale link)
+  //   * closes the class-ws room + kicks every student socket
+  //   * class-ws broadcasts classEnded to every client BEFORE hard-closing
+  // Then navigate away. On failure we still leave — server might be down and
+  // the coach shouldn't be stuck in the tab.
+  const endClass = async () => {
+    try { await post(`/api/class/${encodeURIComponent(room)}/end`, {}); } catch { /* ignore */ }
+    navigate("/class");
+  };
+
+  // Student receives classEnded from the class-ws bus — show a soft banner and
+  // auto-redirect after a couple seconds so they know WHY they were kicked
+  // (otherwise the sudden nav feels like a bug).
+  const onClassEnded = (_reason: string) => {
+    setEndedMsg("This class was ended by the coach.");
+    setTimeout(() => navigate("/dashboard"), 2500);
+  };
 
   const [errMsg, setErrMsg] = useState<string | null>(null);
   const [tokenData, setTokenData] = useState<LKTokenResp | null>(null);
@@ -560,7 +581,17 @@ export default function ClassV2Page() {
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <LiveHeaderBits room={room} />
-              <Link to="/class" className="rounded-lg bg-ink-800 px-2.5 py-1 text-xs font-semibold text-ink-200 hover:bg-ink-700">← Leave</Link>
+              {role === "coach" ? (
+                <button
+                  onClick={endClass}
+                  title="End this class for everyone — students will be sent back to their dashboard."
+                  className="rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-rose-500"
+                >
+                  End class
+                </button>
+              ) : (
+                <Link to="/dashboard" className="rounded-lg bg-ink-800 px-2.5 py-1 text-xs font-semibold text-ink-200 hover:bg-ink-700">← Leave</Link>
+              )}
             </div>
           </div>
 
@@ -576,7 +607,17 @@ export default function ClassV2Page() {
               className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-2"
               style={{ containerType: 'size' } as any}
             >
-              <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} />
+              <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} onClassEnded={onClassEnded} />
+              {endedMsg && (
+                <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center bg-ink-950/85 p-6 text-center">
+                  <div className="pointer-events-auto space-y-3 rounded-2xl border border-rose-500/50 bg-ink-900 p-6 shadow-2xl">
+                    <div className="text-4xl">🏁</div>
+                    <div className="font-display text-xl text-white">Class ended</div>
+                    <div className="text-sm text-ink-300">{endedMsg}</div>
+                    <div className="text-xs text-ink-500">Redirecting to your dashboard…</div>
+                  </div>
+                </div>
+              )}
               <CameraPIPMaybe />
               <CoachWaitingOverlay room={room} role={role} />
               <HandsRoster />

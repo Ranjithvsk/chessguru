@@ -11,7 +11,7 @@
 import { BadRequestException, Body, Controller, Get, Param, Post, Req } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
-import { getLiveAttendees } from "./class-ws";
+import { getLiveAttendees, closeClassRoom } from "./class-ws";
 import { PushService } from "../push/push.service";
 
 const ROOM_RE = /^[a-zA-Z0-9_-]{3,32}$/;
@@ -89,6 +89,31 @@ export class ClassLiveController {
       if (r.sent > 0) notified++;
     }));
     return { ok: true, notified };
+  }
+
+  /** POST /api/class/:id/end — coach explicitly ended the class. Deletes the
+   *  live-now announcement AND kicks every student in the class-ws room (they
+   *  get a `classEnded` frame + a hard socket close so their tab bails out).
+   *  Session-authed, coach/owner only. Idempotent: calling on a room that's
+   *  already gone is a no-op. Owner ask (2026-08-12): one live class per
+   *  coach, ended = kicked, no more stale rooms hanging around. */
+  @Post(":id/end")
+  async endClass(@Param("id") id: string, @Req() req: any) {
+    if (!ROOM_RE.test(id)) throw new BadRequestException("bad room id");
+    const me: string | null = req?.session?.userId ?? null;
+    const role: string | null = req?.session?.role ?? null;
+    const academyId: string | null = req?.session?.academyId ?? null;
+    if (!me || !academyId || (role !== "coach" && role !== "academy_owner")) return { ok: false };
+
+    // Only the coach who OWNS the announcement can end it (defence against a
+    // rogue coach in the same academy nuking another's live class).
+    const doc: any = await this.conn.db!.collection("classLiveAnnouncements").findOne(
+      { _id: id as any }, { projection: { coachUserId: 1, academyId: 1 } });
+    if (doc && doc.coachUserId && doc.coachUserId !== me) return { ok: false, reason: "not-your-class" };
+
+    await this.conn.db!.collection("classLiveAnnouncements").deleteOne({ _id: id as any });
+    const { closed } = closeClassRoom(id, "coach_left");
+    return { ok: true, kicked: closed };
   }
 
   /** GET /api/class/:id/live-attendance — who's connected right now, plus a

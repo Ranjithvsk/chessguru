@@ -351,6 +351,27 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
   });
 });
 
+/** Explicit close by the coach — broadcasts a `classEnded` frame so every
+ *  connected student's tab bails out of the room, then closes each socket and
+ *  deletes the room from memory (no grace — coach ENDED it, they're not coming
+ *  back to this room id). Called from the HTTP end-class endpoint. Safe to
+ *  call for a room id that isn't in memory (no-op). */
+export function closeClassRoom(id: string, reason: string = "coach_left"): { closed: number } {
+  const room = rooms.get(id);
+  if (!room) return { closed: 0 };
+  const frame = JSON.stringify({ type: "classEnded", reason });
+  let n = 0;
+  for (const c of room.clients) {
+    if (c.readyState === WebSocket.OPEN) {
+      try { c.send(frame); } catch { /* ignore */ }
+      n++;
+    }
+    try { c.close(1000, "class-ended"); } catch { /* ignore */ }
+  }
+  rooms.delete(id);
+  return { closed: n };
+}
+
 // Live-attendance snapshot — who is currently connected to this class right
 // now (in-memory, no mongo round-trip). Returns [] when nobody has joined
 // this process's room; the class may still have a stored attendance history.
