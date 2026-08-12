@@ -37,18 +37,44 @@ interface LKStatus { configured: boolean; url: string | null }
 interface LKTokenResp { ok: boolean; token: string; url: string; role: "coach"|"student"; room: string }
 
 // Compact participant grid — camera + screen-share tiles, filling the rail.
+// Publishes participant tiles when someone is ACTUALLY publishing video or
+// screen. Dropping `withPlaceholder: true` means a camera-less coach machine
+// (like the Server desktop) doesn't render an empty placeholder that
+// overlaps the shared board.
 function VideoRail() {
   const tracks = useTracks(
     [
-      { source: Track.Source.Camera, withPlaceholder: true },
+      { source: Track.Source.Camera, withPlaceholder: false },
       { source: Track.Source.ScreenShare, withPlaceholder: false },
     ],
     { onlySubscribed: false },
   );
+  if (tracks.length === 0) return null;
   return (
     <GridLayout tracks={tracks} style={{ height: "100%" }}>
       <ParticipantTile />
     </GridLayout>
+  );
+}
+
+// Wraps the PIP + rail — hides the entire chrome (drag bar too) when there
+// are zero real tracks. Otherwise an empty framed pill would still cover
+// part of the board on camera-less coach PCs.
+function CameraPIPMaybe() {
+  const tracks = useTracks(
+    [
+      { source: Track.Source.Camera, withPlaceholder: false },
+      { source: Track.Source.ScreenShare, withPlaceholder: false },
+    ],
+    { onlySubscribed: false },
+  );
+  if (tracks.length === 0) return null;
+  return (
+    <DraggableCameraPIP>
+      <div className="h-[120px]">
+        <VideoRail />
+      </div>
+    </DraggableCameraPIP>
   );
 }
 
@@ -267,12 +293,10 @@ export default function ClassV2Page() {
               <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} />
             </div>
 
-            {/* Floating camera PIP — draggable, remembers its position. */}
-            <DraggableCameraPIP>
-              <div className="h-[120px]">
-                <VideoRail />
-              </div>
-            </DraggableCameraPIP>
+            {/* Floating camera PIP — draggable, remembers its position.
+             *  Auto-hidden entirely when no one is publishing video/screen,
+             *  so the shared board isn't overlapped by an empty tile frame. */}
+            <CameraPIPMaybe />
 
             {/* Floating minimal controls — mic / cam / screen, bottom-center. */}
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-xl border border-ink-800 bg-ink-900/85 shadow-xl backdrop-blur">
