@@ -8,7 +8,7 @@
 // Any signed-in user can request a token for now; academy-role gating comes
 // once the coach/student roles from CHESSGURU-SAAS-VISION.md land in Q1.
 
-import { BadRequestException, Body, Controller, ForbiddenException, Get, Post, Query, Req, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Post, Query, Req, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import { LivekitService } from "./livekit.service";
 
 @Controller("livekit")
@@ -56,23 +56,5 @@ export class LivekitController {
       role,
     });
     return { ok: true, token, url, role, room: roomName };
-  }
-
-  /** POST /api/livekit/kick { room, identity } — coach removes a participant
-   *  from a room. Session-authed + coach/academy_owner role required. Identity
-   *  is the LiveKit participant identity (= userId per createToken above). */
-  @Post("kick")
-  async kick(@Body() body: any, @Req() req: any) {
-    if (!req?.session?.userId) throw new UnauthorizedException();
-    const role: string | null = req?.session?.role ?? null;
-    if (role !== "coach" && role !== "academy_owner") throw new ForbiddenException("coach only");
-    const roomName = String(body?.room || "").trim();
-    const identity = String(body?.identity || "").trim();
-    if (!/^[a-zA-Z0-9_-]{2,64}$/.test(roomName)) throw new BadRequestException("bad room");
-    if (!identity || identity.length > 128) throw new BadRequestException("bad identity");
-    if (identity === req.session.userId) throw new BadRequestException("cannot kick self");
-    if (!this.svc.isConfigured()) throw new ServiceUnavailableException("LiveKit not configured");
-    await this.svc.removeParticipant(roomName, identity);
-    return { ok: true };
   }
 }
