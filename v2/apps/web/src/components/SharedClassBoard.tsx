@@ -328,9 +328,11 @@ function PalettePieceBtn({ p, selected, onClick }: { p: string; selected: boolea
       title={PIECE_LABEL[p]}
       className={`relative grid h-11 w-11 place-items-center rounded-lg border transition ${
         selected
-          ? "border-brand-400 bg-brand-500/25 shadow-inner shadow-brand-500/40 ring-2 ring-brand-300"
-          : "border-ink-700 hover:bg-ink-700"
-      } ${isWhite ? "bg-ink-800" : "bg-ink-100/90 hover:bg-white"}`}
+          ? "border-brand-400 ring-2 ring-brand-300 shadow-inner shadow-brand-500/40"
+          : "border-ink-700"
+      } ${isWhite
+          ? "bg-ink-800 hover:bg-ink-700"
+          : "bg-white hover:bg-ink-100"}`}
     >
       {/* Reuse chessground's own cburnett CSS by wrapping in .cg-wrap + <piece class>.
        *  Fixed 40×40 so palette pieces render at ~the same visual size as the
