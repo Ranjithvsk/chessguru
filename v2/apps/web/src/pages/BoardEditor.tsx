@@ -258,6 +258,21 @@ export default function BoardEditorPage() {
       try {
         const cvs = await dataUrlToCanvas(res.imageDataUrl);
         setVisionSnapshot({ types: res.types, canvas: cvs, renderMode: res.meta.renderMode });
+        // Also upload the WARPED/CROPPED board (not the raw phone photo) to
+        // the server log so we can debug pipeline steps separately.
+        try {
+          const warpedB64 = cvs.toDataURL("image/png").replace(/^data:image\/[a-z]+;base64,/, "");
+          void fetch(`${API_BASE}/api/vision/log-scan`, {
+            method: "POST", credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ boardPngBase64: warpedB64, source: "warped-crop" }),
+          }).catch(() => {});
+        } catch { /* silent */ }
+        // AUTO-RUN Server AI right after the client detector finishes.
+        // Coach doesn't need to press a button -- accurate FEN arrives
+        // ~5-30s later and replaces the fast preview. Mirrors ChessVision AI
+        // "just upload and wait" experience.
+        void runServerClassifyOnCanvas(cvs);
       } catch { /* corrections just won't be captured this run */ }
       const ok = fp.load(res.fen);
       if (ok) {
@@ -275,18 +290,15 @@ export default function BoardEditorPage() {
       setVisionMsg({ tone: "err", text: String((e as Error).message || e) });
     } finally { setVisionBusy(false); }
   }
-  /** Run the server-side v3.6 trained chess classifier on the last vision
-   *  preview. Server splits the cropped 480x480 board into 64 squares and
-   *  runs them through a fine-tuned DINOv2 head (13-class softmax) in a
-   *  single batched ORT call. Model was trained on Vinayaka RTX 3080
-   *  against both synthetic cburnett variants AND real coach-corrected
-   *  book pixels — retrains nightly with fresh corrections. */
-  async function runServerClassify() {
+  /** Send the given cropped-board canvas to the v3.6 server classifier.
+   *  Extracted from runServerClassify so we can auto-trigger it right
+   *  after the client-side warp/crop finishes (with the warped canvas)
+   *  as well as from the manual button. */
+  async function runServerClassifyOnCanvas(canvas: HTMLCanvasElement) {
     if (serverBusy) return;
-    if (!visionSnapshot) { setServerMsg({ tone: "err", text: "Upload a board image first." }); return; }
-    setServerBusy(true); setServerMsg({ tone: "info", text: "🚀 Server AI classifying (3-6s)…" });
+    setServerBusy(true); setServerMsg({ tone: "info", text: "🚀 Server AI classifying (3-30s)…" });
     try {
-      const boardPngBase64 = visionSnapshot.canvas.toDataURL("image/png");
+      const boardPngBase64 = canvas.toDataURL("image/png");
       const r = await fetch(`${API_BASE}/api/vision/classify-board-v2`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -305,6 +317,14 @@ export default function BoardEditorPage() {
     } catch (e) {
       setServerMsg({ tone: "err", text: `Server AI failed: ${(e as Error).message.slice(0, 120)}` });
     } finally { setServerBusy(false); }
+  }
+  /** Manual "Try Server AI" button handler -- uses whatever snapshot the
+   *  last client detection produced. Same code path as the auto-trigger
+   *  in runVision, but wired to the visible button so coaches can re-run
+   *  server classification on demand (e.g. after adjusting orientation). */
+  async function runServerClassify() {
+    if (!visionSnapshot) { setServerMsg({ tone: "err", text: "Upload a board image first." }); return; }
+    await runServerClassifyOnCanvas(visionSnapshot.canvas);
   }
   const fileInputRef = useRef<HTMLInputElement>(null);
   function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {

@@ -47,10 +47,10 @@ async function bootstrap() {
   app.use("/api/class/:id/notes/:noteId/image", expressLib.raw({ type: "application/octet-stream", limit: "8mb" }));
   // Study materials: coach shares PDF/PGN/image/text. 25 MB cap.
   app.use("/api/academy/materials/:id/file", expressLib.raw({ type: "application/octet-stream", limit: "25mb" }));
-  // Vision endpoints carry base64-encoded PNG board/silhouette payloads
-  // that easily exceed express-json's 100KB default (a 480x480 board PNG
-  // is ~300-600KB base64). Cap at 4MB so a coach can't OOM us.
-  app.use("/api/vision", expressLib.json({ limit: "4mb" }));
+  // Vision endpoints carry base64-encoded PNG board/silhouette payloads.
+  // Phone-captured book photos land at 3-6MB. Cap at 12MB so any modern
+  // phone image fits.
+  app.use("/api/vision", expressLib.json({ limit: "12mb" }));
   // Global JSON + urlencoded parsers for every other route. Explicit — do NOT
   // rely on Nest's built-in default alone; when the /api/vision json mount
   // above was added, Nest's default silently stopped parsing (Express only

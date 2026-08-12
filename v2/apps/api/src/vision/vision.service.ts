@@ -247,8 +247,8 @@ export class VisionService {
   async classifyBoard(boardPngBase64: string): Promise<ClassifyBoardResult> {
     const started = Date.now();
     const boardB64 = boardPngBase64.replace(/^data:image\/[a-z]+;base64,/, "");
-    if (boardB64.length < 500 || boardB64.length > 2_000_000) {
-      throw new Error("board png out of range (need 500-2MB base64)");
+    if (boardB64.length < 500 || boardB64.length > 10_000_000) {
+      throw new Error("board png out of range (need 500B-10MB base64)");
     }
     const boardBuf = Buffer.from(boardB64, "base64");
     logScanImage(boardBuf, "v3-nn");
@@ -307,8 +307,8 @@ export class VisionService {
   async classifyBoardV2(boardPngBase64: string): Promise<ClassifyBoardV2Result> {
     const started = Date.now();
     const boardB64 = boardPngBase64.replace(/^data:image\/[a-z]+;base64,/, "");
-    if (boardB64.length < 500 || boardB64.length > 2_000_000) {
-      throw new Error("board png out of range (need 500-2MB base64)");
+    if (boardB64.length < 500 || boardB64.length > 10_000_000) {
+      throw new Error("board png out of range (need 500B-10MB base64)");
     }
     const boardBuf = Buffer.from(boardB64, "base64");
     logScanImage(boardBuf, "v2");
@@ -370,8 +370,8 @@ export class VisionService {
   async classifyBoardV4(boardPngBase64: string): Promise<ClassifyBoardV4Result> {
     const started = Date.now();
     const boardB64 = boardPngBase64.replace(/^data:image\/[a-z]+;base64,/, "");
-    if (boardB64.length < 500 || boardB64.length > 2_000_000) {
-      throw new Error("board png out of range (need 500-2MB base64)");
+    if (boardB64.length < 500 || boardB64.length > 10_000_000) {
+      throw new Error("board png out of range (need 500B-10MB base64)");
     }
     const boardBuf = Buffer.from(boardB64, "base64");
     logScanImage(boardBuf, "v4");
