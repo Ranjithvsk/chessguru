@@ -347,9 +347,58 @@ function HomeworkCard() {
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-ink-800">
                 <div className="h-full bg-gradient-to-r from-purple-500 to-fuchsia-500 transition-[width] duration-500" style={{ width: `${pct}%` }} />
               </div>
+              {/* Per-task list — owner 2026-08-12: "student completed only one topic and closed
+               *  the page, where can he see the homework". Now every section is visible with
+               *  its own progress + click-to-open, so a student can resume any pending task
+               *  directly (not just the "next" one). Green tick when done, purple play icon
+               *  when pending. */}
+              <ul className="mt-2.5 space-y-1">
+                {h.tasks.map((t, i) => {
+                  const done = h.progress?.[String(i)] ?? 0;
+                  const target = t.kind === "puzzle_pack" ? (t.targetCount || 1) : 1;
+                  const finished = done >= target;
+                  const label = t.kind === "puzzle_pack"
+                    ? `${t.theme}${t.targetRating ? ` · ~${t.targetRating}` : ""}`
+                    : t.kind === "opening_revision" ? `Opening: ${t.openingSlug}`
+                    : "Study revision";
+                  const to = t.kind === "puzzle_pack" && t.theme
+                    ? (() => {
+                        const p = new URLSearchParams();
+                        p.set("theme", t.theme);
+                        if (t.targetRating) p.set("rating", String(t.targetRating));
+                        p.set("hw", h._id);
+                        p.set("hwTaskIdx", String(i));
+                        return `/?${p.toString()}`;
+                      })()
+                    : t.kind === "opening_revision" && t.openingSlug ? `/study/openings/${t.openingSlug}`
+                    : "/study";
+                  return (
+                    <li key={i}>
+                      <Link
+                        to={to}
+                        className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition ${
+                          finished
+                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200/80 hover:bg-emerald-500/15"
+                            : "border-ink-700 bg-ink-800 text-white hover:border-purple-500/50 hover:bg-purple-500/10"
+                        }`}
+                      >
+                        <span className="flex items-center gap-2 min-w-0">
+                          <span className={`inline-grid h-5 w-5 shrink-0 place-items-center rounded ${finished ? "bg-emerald-500 text-ink-950" : "bg-purple-500 text-white"}`}>
+                            {finished ? "✓" : "▶"}
+                          </span>
+                          <span className="truncate">{label}</span>
+                        </span>
+                        <span className={`shrink-0 tabular-nums text-[11px] ${finished ? "text-emerald-200" : "text-purple-200"}`}>
+                          {done}/{target}
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
               <div className="mt-2 flex justify-end">
                 <Link to={cta.to} className="rounded-md bg-purple-500/25 px-3 py-1 text-xs font-semibold text-purple-100 hover:bg-purple-500/40">
-                  {cta.label} →
+                  Continue next → {cta.label.replace(/^Solve |^Revise /, "")}
                 </Link>
               </div>
             </div>
