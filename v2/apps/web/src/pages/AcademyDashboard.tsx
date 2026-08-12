@@ -1394,6 +1394,7 @@ export default function AcademyDashboardPage() {
       <AssignHomeworkModal open={showAssignHw} onClose={() => setShowAssignHw(false)} students={studentsShown} isOwner={isOwner} />
 
       {canManage && <TodayStrip schedule={schedule} snaps={snaps} recordings={recordings} />}
+      {canManage && <AttendanceTodayCard />}
       {canManage && <ReviewHeatmapStrip snaps={snaps} />}
       {canManage && <SnapVolumeChart snaps={snaps} />}
       {canManage && <NextUpToReview snaps={snaps} />}
@@ -1999,6 +2000,81 @@ function InvoiceCard({ inv, config, isOwner, onMarkPaid, markPaidPending }: {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// "Attendance today" card — quick who-came-to-class-today rollup for the
+// coach/owner. Owner asked 2026-08-12 for attendance on the academy home.
+// One fetch per page load; polls every 60s so it refreshes as students join
+// during live classes. Empty-state hides the whole card (no dead space).
+type AttendanceTodayRow = {
+  classId: string; title: string; coach: string; startAt: string | null;
+  count: number; distinctCount: number;
+  attendees: Array<{ userId: string | null; name: string; joinedAt: string }>;
+};
+type AttendanceToday = { classes: AttendanceTodayRow[]; totalStudents: number; totalJoins: number };
+function AttendanceTodayCard() {
+  const { data } = useQuery({
+    queryKey: ["attendance-today"],
+    queryFn: () => get<AttendanceToday>("/api/class/attendance-today"),
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    staleTime: 30_000,
+  });
+  const [open, setOpen] = useState<string | null>(null);   // classId or null
+  const rows = data?.classes ?? [];
+  if (!data) return null;
+  if (rows.length === 0 && data.totalStudents === 0) return null;
+  return (
+    <div className="rounded-xl2 border border-emerald-500/30 bg-gradient-to-br from-emerald-500/8 via-teal-500/5 to-transparent p-4">
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <div className="flex items-baseline gap-3">
+          <h2 className="font-display text-lg font-semibold text-white">👥 Attendance today</h2>
+          <span className="text-xs text-ink-400">
+            {data.totalStudents} {data.totalStudents === 1 ? "student" : "students"} · {rows.length} {rows.length === 1 ? "class" : "classes"}
+          </span>
+        </div>
+        <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-200">LIVE · updates every min</span>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {rows.map((r) => {
+          const isOpen = open === r.classId;
+          const time = r.startAt ? new Date(r.startAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "";
+          return (
+            <div key={r.classId} className="rounded-lg border border-ink-700 bg-ink-900/60 p-3">
+              <button
+                onClick={() => setOpen(isOpen ? null : r.classId)}
+                className="flex w-full items-start justify-between gap-2 text-left"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold text-white">{r.title}</div>
+                  <div className="mt-0.5 text-[11px] text-ink-400">
+                    {r.coach && <>Coach {r.coach} · </>}
+                    {time && <>{time} · </>}
+                    {r.distinctCount} attended
+                  </div>
+                </div>
+                <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-500/20 text-lg font-bold text-emerald-200 tabular-nums">
+                  {r.distinctCount}
+                </div>
+              </button>
+              {isOpen && (
+                <ul className="mt-2 max-h-40 space-y-0.5 overflow-y-auto border-t border-ink-800 pt-2 text-[11px]">
+                  {r.attendees.map((a, i) => (
+                    <li key={i} className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-ink-800">
+                      <span className="truncate text-ink-100">{a.name}</span>
+                      <span className="text-ink-500 tabular-nums">
+                        {new Date(a.joinedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

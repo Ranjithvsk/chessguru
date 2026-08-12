@@ -129,6 +129,61 @@ export class ClassLiveController {
    *  going-live (a coach entering a room) within the last 2h. Powers the in-site
    *  "class live" banner so an ONLINE student sees an ad-hoc class even without
    *  push. Returns the room system as roomKind so the client links correctly. */
+  /** GET /api/class/attendance-today — every class (scheduled or ad-hoc) with
+   *  at least one attendance record for the caller's academy today, plus a
+   *  distinct-student total. Powers the "👥 Attendance today" card on the
+   *  academy homepage (owner ask 2026-08-12). Academy-scoped: coach/owner
+   *  only. Uses local calendar day of the SERVER — good enough since all
+   *  academies here run on Asia/Kolkata timezone anchoring in the SSR layer. */
+  @Get("attendance-today")
+  async attendanceToday(@Req() req: any) {
+    const academyId: string | null = req?.session?.academyId ?? null;
+    if (!academyId) return { classes: [], totalStudents: 0, totalJoins: 0 };
+    // "Today" in server UTC — good enough; the dashboard shows the number, not
+    // a to-the-minute timestamp.
+    const start = new Date(); start.setUTCHours(0, 0, 0, 0);
+    const end   = new Date(start); end.setUTCDate(end.getUTCDate() + 1);
+    // Which classes in THIS academy had any attendance today?
+    const classIds = await this.conn.db!.collection("classSchedules")
+      .find({ academyId }, { projection: { _id: 1 } })
+      .toArray()
+      .then((rows: any[]) => rows.map((r) => r._id));
+    if (!classIds.length) return { classes: [], totalStudents: 0, totalJoins: 0 };
+    const attendance = await this.conn.db!.collection("classAttendance")
+      .find({ classId: { $in: classIds }, joinedAt: { $gte: start, $lt: end } },
+            { projection: { classId: 1, userId: 1, name: 1, joinedAt: 1 } })
+      .toArray();
+    if (!attendance.length) return { classes: [], totalStudents: 0, totalJoins: 0 };
+    // Group by classId
+    const byClass = new Map<string, { classId: string; attendees: Array<{ userId: string | null; name: string; joinedAt: Date }> }>();
+    const distinct = new Set<string>();
+    for (const a of attendance as any[]) {
+      const cid = String(a.classId);
+      if (!byClass.has(cid)) byClass.set(cid, { classId: cid, attendees: [] });
+      byClass.get(cid)!.attendees.push({ userId: a.userId ?? null, name: a.name ?? "Guest", joinedAt: a.joinedAt });
+      distinct.add(a.userId ? `u:${a.userId}` : `g:${a.name}`);
+    }
+    // Fetch class titles + coach names for display
+    const classes = await this.conn.db!.collection("classSchedules")
+      .find({ _id: { $in: [...byClass.keys()] } as any },
+            { projection: { title: 1, coach: 1, startAt: 1 } })
+      .toArray();
+    const meta = new Map<string, any>(classes.map((c: any) => [String(c._id), c]));
+    const rows = [...byClass.values()].map((g) => {
+      const m = meta.get(g.classId) || {};
+      return {
+        classId: g.classId,
+        title: m.title || "Class",
+        coach: m.coach || "",
+        startAt: m.startAt || null,
+        count: g.attendees.length,
+        distinctCount: new Set(g.attendees.map((a) => a.userId ? `u:${a.userId}` : `g:${a.name}`)).size,
+        attendees: g.attendees.sort((a, b) => new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime()),
+      };
+    }).sort((a, b) => new Date(b.startAt || 0).getTime() - new Date(a.startAt || 0).getTime());
+    return { classes: rows, totalStudents: distinct.size, totalJoins: attendance.length };
+  }
+
   @Get("live-now")
   async liveNow(@Req() req: any) {
     const academyId: string | null = req?.session?.academyId ?? null;
