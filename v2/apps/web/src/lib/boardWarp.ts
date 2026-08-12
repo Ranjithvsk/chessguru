@@ -1,16 +1,18 @@
-// Robust chess-board detection + perspective warp via OpenCV.js.
+// Robust chess-board detection + perspective warp.
 //
-// Handles phone photos, book pages, screenshots -- any image where a
-// chess board is visually prominent. Finds the 4 corners of the largest
-// quadrilateral in the image and warps it to a canonical 480x480 square.
-// Result is then fed to the existing classifier pipeline.
+// Two-tier detection:
+//   1. PRIMARY: neuralBoardDetect (trained MobileNetV3-small corner
+//      regressor, runs in-browser via onnxruntime-web). Trained on 15K
+//      camera-realistic synthetic photos of chess book pages; handles
+//      phone photos, book pages, screenshots, tilt, lighting, occlusion.
+//   2. FALLBACK: OpenCV.js contour + Hough-line finder (loads lazily
+//      from CDN, 9MB). Used only if the neural detector fails or
+//      returns implausible corners.
 //
-// OpenCV.js is loaded lazily from CDN on first call (9MB one-time cost;
-// browser caches it forever). We wrap the load in a Promise so multiple
-// concurrent callers wait on a single load.
-//
-// If OpenCV fails to find a plausible board, returns null so the caller
-// can fall back to the naive centre-crop / auto-detect path.
+// Warping uses OpenCV.js in both cases (getPerspectiveTransform +
+// warpPerspective for pixel-accurate output).
+
+import { detectBoardCorners } from "./neuralBoardDetect";
 
 const OPENCV_URL = "https://docs.opencv.org/4.10.0/opencv.js";
 
@@ -61,7 +63,7 @@ export function preloadOpenCV(): void {
 export interface BoardWarpResult {
   canvas: HTMLCanvasElement;        // 480x480 canonical warped board
   corners: Array<{ x: number; y: number }>;  // 4 corners in source-image coordinates
-  method: "opencv" | "manual";
+  method: "neural" | "opencv" | "manual";
 }
 
 /** Warp with EXPLICIT corners (from the manual CornerAdjuster). Used when
@@ -235,6 +237,22 @@ async function findBoardViaHough(cv: any, src: any, workW: number, workH: number
  *  Pick whichever produces a higher checker-pattern score. Returns null
  *  when both fail. */
 export async function warpToCanonicalBoard(source: HTMLImageElement | HTMLCanvasElement): Promise<BoardWarpResult | null> {
+  // PRIMARY: trained neural corner detector. Handles phone photos,
+  // book pages, screenshots -- anything with a chess board.
+  try {
+    const neuralCorners = await detectBoardCorners(source);
+    if (neuralCorners) {
+      const warped = await warpWithCorners(source, neuralCorners);
+      if (warped) {
+        return { canvas: warped.canvas, corners: warped.corners, method: "neural" };
+      }
+    }
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn("[boardWarp] neural detector failed, falling back to opencv:", e);
+  }
+
+  // FALLBACK: OpenCV heuristic (Hough lines + contour detection).
   let cv: any;
   try {
     cv = await loadOpenCV();
