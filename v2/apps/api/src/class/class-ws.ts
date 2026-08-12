@@ -51,6 +51,8 @@ type ClientFrame =
   | { type: "lock"; locked: boolean }       // coach only — student moves are dropped when true
   | { type: "takeback" }                    // coach only — pops the last move
   | { type: "annot"; shapes: Shape[] }      // arrows/circles — anyone can annotate
+  | { type: "pointer"; x: number; y: number } // coach only — live cursor over board (normalized 0..1)
+  | { type: "pointer-off" }                   // coach only — cursor left the board
   | { type: "ping" };
 // Server → client frames. `role` sent once after hello resolves; everything else
 // is broadcast to the room on state changes.
@@ -61,6 +63,8 @@ type ServerFrame =
   | { type: "reset"; fen: string; participants: number; locked: boolean }
   | { type: "lock"; locked: boolean; participants: number }
   | { type: "annot"; shapes: Shape[]; participants: number }
+  | { type: "pointer"; x: number; y: number }  // coach's live cursor over the board (normalized 0..1)
+  | { type: "pointer-off" }                    // coach's cursor left the board (students hide the dot)
   | { type: "participants"; participants: number }
   | { type: "pong" };
 
@@ -289,6 +293,31 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       room.fen = c.fen();
       room.lastMove = room.history[room.history.length - 1] ?? null;
       broadcast(room, { type: "state", fen: room.fen, lastMove: room.lastMove, history: room.history, participants: room.clients.size, locked: room.locked, shapes: room.shapes });
+      return;
+    }
+
+    if (frame.type === "pointer" || frame.type === "pointer-off") {
+      // Coach-only live cursor broadcast — students see where the coach is
+      // gesturing over the board even without an actual move. Dropped for
+      // non-coach senders (silent — normal students shouldn't be firing this
+      // anyway, but a rogue tab won't turn every student's board into a
+      // 60-fps stream of noise). Not echoed back to the sender.
+      if (!isCoach()) return;
+      let out: ServerFrame;
+      if (frame.type === "pointer") {
+        // Clamp coords to [0,1] so a malformed frame can't render off-canvas.
+        const x = Math.max(0, Math.min(1, Number(frame.x) || 0));
+        const y = Math.max(0, Math.min(1, Number(frame.y) || 0));
+        out = { type: "pointer", x, y };
+      } else {
+        out = { type: "pointer-off" };
+      }
+      const payload = JSON.stringify(out);
+      for (const c of room.clients) {
+        if (c === ws) continue;                     // don't echo to sender
+        if (c.readyState !== WebSocket.OPEN) continue;
+        try { c.send(payload); } catch { /* ignore */ }
+      }
       return;
     }
 
