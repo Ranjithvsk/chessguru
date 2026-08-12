@@ -528,6 +528,12 @@ export default function SharedClassBoard(
   useEffect(() => {
     if (setupOpen) { setSetupFen(gameRef.current.fen()); setSetupErr(null); }
   }, [setupOpen]);
+  // Broadcast a candidate FEN to the room. Silent — no modal close, no state
+  // toggles. The debounced live-edit useEffect in PositionEditorModal calls
+  // this on every keystroke/click; the ✓ Done and Cancel buttons in the modal
+  // handle their own `onClose()` separately. (Previous version closed the
+  // modal here, which caused the "opens then instantly closes" bug the
+  // moment the debounced first fire hit.)
   const applySetup = (fenStr: string) => {
     const s = (fenStr || "").trim();
     if (!s) { setSetupErr("Paste a FEN string first."); return; }
@@ -535,7 +541,6 @@ export default function SharedClassBoard(
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) { setSetupErr("Not connected. Retry in a moment."); return; }
     try { ws.send(JSON.stringify({ type: "loadFen", fen: s })); } catch { /* */ }
-    setClassSetupOpen(false);
   };
   const sendAnnot = (next: Array<{ orig: string; dest?: string; brush?: string }>) => {
     const ws = wsRef.current;
