@@ -24,6 +24,20 @@ function destsFromChess(game: Chess): Map<Key, Key[]> {
   return dests;
 }
 
+// Setup-position modal state is shared between the SharedClassBoard (renders
+// the modal + owns the ws) and the ClassV2 footer control (renders the trigger
+// button OUTSIDE the board — owner 2026-08-12: the on-board 📋 button was
+// covering pieces on a8/b8). Module-scoped so we don't have to prop-drill or
+// lift the class-ws ref out of the component.
+let _setupOpen = false;
+const _setupSubs = new Set<(v: boolean) => void>();
+export function setClassSetupOpen(v: boolean) { _setupOpen = v; _setupSubs.forEach((f) => f(v)); }
+export function useClassSetupOpen(): boolean {
+  const [v, setV] = useState(_setupOpen);
+  useEffect(() => { _setupSubs.add(setV); return () => { _setupSubs.delete(setV); }; }, []);
+  return v;
+}
+
 export default function SharedClassBoard(
   { room, userId, displayName, onClassEnded, intendedRole }: {
     room: string; userId?: string | null; displayName?: string | null;
@@ -172,17 +186,17 @@ export default function SharedClassBoard(
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     try { ws.send(JSON.stringify({ type: "reset" })); } catch { /* */ }  // server drops non-coach resets
   };
-  const [setupOpen, setSetupOpen] = useState(false);
+  // Setup modal state now lives in the module (see setClassSetupOpen at top
+  // of file) so ClassV2's footer button can open it. Local FEN/error still
+  // in state because they're modal-local.
+  const setupOpen = useClassSetupOpen();
   const [setupFen, setSetupFen] = useState<string>("");
   const [setupErr, setSetupErr] = useState<string | null>(null);
-  // Coach clicks "📋 Setup" → paste a FEN → validate locally with chess.js →
-  // send to server which broadcasts a new state to every client. Coach-only
-  // (button is only rendered for coach), server is also coach-gated.
-  const openSetup = () => {
-    setSetupFen(gameRef.current.fen());   // pre-fill with current position for convenience
-    setSetupErr(null);
-    setSetupOpen(true);
-  };
+  // Pre-fill the paste field with the CURRENT FEN whenever the modal opens
+  // (convenient starting point for a coach who wants to tweak).
+  useEffect(() => {
+    if (setupOpen) { setSetupFen(gameRef.current.fen()); setSetupErr(null); }
+  }, [setupOpen]);
   const applySetup = (fenStr: string) => {
     const s = (fenStr || "").trim();
     if (!s) { setSetupErr("Paste a FEN string first."); return; }
@@ -190,7 +204,7 @@ export default function SharedClassBoard(
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) { setSetupErr("Not connected. Retry in a moment."); return; }
     try { ws.send(JSON.stringify({ type: "loadFen", fen: s })); } catch { /* */ }
-    setSetupOpen(false);
+    setClassSetupOpen(false);
   };
   const sendAnnot = (next: Array<{ orig: string; dest?: string; brush?: string }>) => {
     const ws = wsRef.current;
@@ -251,21 +265,12 @@ export default function SharedClassBoard(
       >
         ↺
       </button>
-      {role === "coach" && (
-        <button
-          onClick={openSetup}
-          title="Set up position — paste a FEN or use the Board Editor to scan from a photo"
-          className="absolute left-10 top-1.5 rounded-md bg-black/55 px-2 py-1 text-xs text-white/90 backdrop-blur hover:bg-black/75"
-        >
-          📋 Setup
-        </button>
-      )}
       {setupOpen && role === "coach" && (
         <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center p-4">
           <div className="pointer-events-auto w-full max-w-md space-y-3 rounded-xl border border-ink-700 bg-ink-900/95 p-4 shadow-2xl backdrop-blur" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <div className="font-display text-sm font-bold text-white">Set up position</div>
-              <button onClick={() => setSetupOpen(false)} className="text-lg leading-none text-ink-400 hover:text-white">×</button>
+              <button onClick={() => setClassSetupOpen(false)} className="text-lg leading-none text-ink-400 hover:text-white">×</button>
             </div>
             <textarea
               value={setupFen}

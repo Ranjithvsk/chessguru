@@ -16,7 +16,7 @@ import {
 import { Track, DataPacket_Kind } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
-import SharedClassBoard from "../components/SharedClassBoard";
+import SharedClassBoard, { setClassSetupOpen } from "../components/SharedClassBoard";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -789,6 +789,15 @@ export default function ClassV2Page() {
                 <HandRaiseButton />
                 <ChatToggleButton />
                 <ReactionsBar />
+                {role === "coach" && (
+                  <button
+                    onClick={() => setClassSetupOpen(true)}
+                    title="Set up any chess position (paste FEN, empty board, or Board Editor)"
+                    className="rounded-full border border-brand-500/50 bg-brand-500/20 px-3 py-1.5 text-sm font-semibold text-brand-100 hover:bg-brand-500/30"
+                  >
+                    📋 Setup
+                  </button>
+                )}
               </div>
             </div>
           </div>
