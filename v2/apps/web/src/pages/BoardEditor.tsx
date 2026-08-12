@@ -219,6 +219,23 @@ export default function BoardEditorPage() {
   async function runVision(src: string | Blob) {
     if (visionBusy) return;
     setVisionBusy(true); setVisionMsg({ tone: "info", text: "Analysing image…" });
+    // Fire-and-forget server-side log of the RAW input, so failing scans
+    // are debuggable later. Runs regardless of client-side detection result.
+    try {
+      const b64 = typeof src === "string"
+        ? src.replace(/^data:image\/[a-z]+;base64,/, "")
+        : await new Promise<string>((res, rej) => {
+            const fr = new FileReader();
+            fr.onload = () => res(String(fr.result).replace(/^data:image\/[a-z]+;base64,/, ""));
+            fr.onerror = () => rej(new Error("read"));
+            fr.readAsDataURL(src);
+          });
+      void fetch(`${API_BASE}/api/vision/log-scan`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ boardPngBase64: b64, source: "board-editor-upload" }),
+      }).catch(() => {});
+    } catch { /* silent */ }
     try {
       const res = await detectPositionFromImage(src);
       const files = ["a", "b", "c", "d", "e", "f", "g", "h"];

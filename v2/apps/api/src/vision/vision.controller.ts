@@ -76,6 +76,22 @@ export class VisionController {
     }
   }
 
+  /** Public: fire-and-forget endpoint the client calls IMMEDIATELY on any
+   *  image upload -- so the raw input hits vision-log/ even when the coach
+   *  never presses "Server AI" (client-side detection alone doesn't log).
+   *  Body: { boardPngBase64, source } where source is a free-form tag
+   *  ("upload", "camera", "paste", etc.). Response is trivial. */
+  @Post("log-scan")
+  async logScan(@Body() body: { boardPngBase64: string; source?: string }) {
+    if (!body?.boardPngBase64) throw new BadRequestException("boardPngBase64 required");
+    try {
+      await this.svc.logScanOnly(body.boardPngBase64, body.source || "upload");
+      return { ok: true };
+    } catch (e) {
+      throw new BadRequestException((e as Error).message);
+    }
+  }
+
   /** v4 super-fast classifier: MobileNetV3-small (INT8) + chess-rules FEN
    *  legality repair. Target <200ms warm CPU inference, 98%+ accuracy on
    *  unfamiliar book fonts. Legal-only FEN output guaranteed via top-3

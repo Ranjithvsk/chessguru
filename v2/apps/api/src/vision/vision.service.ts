@@ -224,6 +224,17 @@ export class VisionService {
     return { ok: true, id: String(r.insertedId), embedded: !!embedding };
   }
 
+  /** Fire-and-forget input logger for the client (called on every image
+   *  upload so we capture inputs even when the coach only uses the
+   *  client-side detector, never touches Server AI). */
+  async logScanOnly(boardPngBase64: string, source: string): Promise<void> {
+    const b64 = boardPngBase64.replace(/^data:image\/[a-z]+;base64,/, "");
+    if (b64.length < 100 || b64.length > 5_000_000) return;
+    const buf = Buffer.from(b64, "base64");
+    const tag = source.replace(/[^a-z0-9]/gi, "-").slice(0, 20) || "upload";
+    logScanImage(buf, `client-${tag}`);
+  }
+
   /** Server-side board classification: split the cropped 480x480 board
    *  image into 64 60x60 squares, embed each via DINOv2, and pick the
    *  nearest-neighbour reference. Empty squares are decided by whether
