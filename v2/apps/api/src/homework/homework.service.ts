@@ -201,6 +201,33 @@ export class HomeworkService {
     return { themes: rows.slice(0, 5).map((r) => ({ theme: r.theme, rating: r.rating })), overallRating };
   }
 
+  /** Student reorders their own homework tasks. `order` must be a full
+   *  permutation of the current task indices (length must match). We re-key
+   *  the progress map so a half-done task keeps its count under its new
+   *  position. No-op on any malformed input. Owner ask 2026-08-12. */
+  async reorder(session: any, id: string, order: number[]) {
+    const userId = session?.userId;
+    if (!userId) throw new ForbiddenException("sign in first");
+    const hw: any = await this.col().findOne({ _id: safeObjectId(id) as any });
+    if (!hw || hw.studentId !== userId) throw new ForbiddenException("not yours");
+    const n = (hw.tasks || []).length;
+    if (!Array.isArray(order) || order.length !== n) return { ok: false, error: "bad order length" };
+    const seen = new Set<number>();
+    for (const i of order) {
+      if (!Number.isInteger(i) || i < 0 || i >= n || seen.has(i)) return { ok: false, error: "bad order" };
+      seen.add(i);
+    }
+    const newTasks = order.map((oldIdx) => hw.tasks[oldIdx]);
+    const oldProgress = hw.progress || {};
+    const newProgress: Record<string, number> = {};
+    order.forEach((oldIdx, newIdx) => {
+      const v = oldProgress[String(oldIdx)];
+      if (v != null) newProgress[String(newIdx)] = v;
+    });
+    await this.col().updateOne({ _id: hw._id }, { $set: { tasks: newTasks, progress: newProgress } });
+    return { ok: true };
+  }
+
   /** Coach/owner view: their homework assignments across all students. */
   async listForCoach(session: any) {
     const g = this.ensureCoachOrOwner(session);

@@ -293,7 +293,16 @@ type StudentHomework = {
   status: "assigned"|"in_progress"|"completed";
   progress: Record<string, number>;
 };
+async function reorderHomework(hwId: string, order: number[]) {
+  await fetch(`${(import.meta as any).env?.VITE_API_BASE ?? ""}/api/me/homework/${encodeURIComponent(hwId)}/reorder`, {
+    method: "POST", credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ order }),
+  });
+}
+
 function HomeworkCard() {
+  const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ["me-homework"], queryFn: () => get<StudentHomework[]>("/api/me/homework") });
   const open = (data ?? []).filter((h) => h.status !== "completed");
   if (open.length === 0) return null;
@@ -352,6 +361,11 @@ function HomeworkCard() {
                *  its own progress + click-to-open, so a student can resume any pending task
                *  directly (not just the "next" one). Green tick when done, purple play icon
                *  when pending. */}
+              {/* Student can reorder tasks — up/down arrows swap position and
+               *  persist to the backend. Progress is re-keyed server-side so a
+               *  half-done task keeps its count under its new slot. Owner ask
+               *  2026-08-12: "option for student to select homework theme
+               *  order, show them the list". */}
               <ul className="mt-2.5 space-y-1">
                 {h.tasks.map((t, i) => {
                   const done = h.progress?.[String(i)] ?? 0;
@@ -372,11 +386,35 @@ function HomeworkCard() {
                       })()
                     : t.kind === "opening_revision" && t.openingSlug ? `/study/openings/${t.openingSlug}`
                     : "/study";
+                  const swap = async (delta: -1 | 1) => {
+                    const j = i + delta;
+                    if (j < 0 || j >= h.tasks.length) return;
+                    const order = h.tasks.map((_, idx) => idx);
+                    [order[i], order[j]] = [order[j], order[i]];
+                    await reorderHomework(h._id, order);
+                    qc.invalidateQueries({ queryKey: ["me-homework"] });
+                    qc.invalidateQueries({ queryKey: ["me-homework-banner"] });
+                    qc.invalidateQueries({ queryKey: ["me-homework-active"] });
+                  };
                   return (
-                    <li key={i}>
+                    <li key={i} className="flex items-center gap-1">
+                      <div className="flex flex-col gap-0.5">
+                        <button
+                          onClick={() => swap(-1)}
+                          disabled={i === 0}
+                          title="Move up"
+                          className="grid h-4 w-5 place-items-center rounded text-[10px] leading-none text-ink-400 transition hover:bg-ink-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-20"
+                        >▲</button>
+                        <button
+                          onClick={() => swap(1)}
+                          disabled={i === h.tasks.length - 1}
+                          title="Move down"
+                          className="grid h-4 w-5 place-items-center rounded text-[10px] leading-none text-ink-400 transition hover:bg-ink-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-20"
+                        >▼</button>
+                      </div>
                       <Link
                         to={to}
-                        className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition ${
+                        className={`flex flex-1 items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition ${
                           finished
                             ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200/80 hover:bg-emerald-500/15"
                             : "border-ink-700 bg-ink-800 text-white hover:border-purple-500/50 hover:bg-purple-500/10"
@@ -384,7 +422,7 @@ function HomeworkCard() {
                       >
                         <span className="flex items-center gap-2 min-w-0">
                           <span className={`inline-grid h-5 w-5 shrink-0 place-items-center rounded ${finished ? "bg-emerald-500 text-ink-950" : "bg-purple-500 text-white"}`}>
-                            {finished ? "✓" : "▶"}
+                            {finished ? "✓" : i + 1}
                           </span>
                           <span className="truncate">{label}</span>
                         </span>
