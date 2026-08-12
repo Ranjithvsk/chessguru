@@ -396,20 +396,77 @@ function ReactionsBar() {
 }
 
 // Live participant count + one-tap "copy student invite" — lives inside the
-// LiveKitRoom so useParticipants has room context.
+// LiveKitRoom so useParticipants has room context. Clicking the count opens a
+// dropdown showing WHO'S in the room right now — coach's most-requested view
+// (owner 2026-08-12: "coach can't see participants details"). Each row shows
+// display name + identity + "coach"/"student" tag + join time.
 function LiveHeaderBits({ room }: { room: string }) {
   const participants = useParticipants();
+  const { localParticipant } = useLocalParticipant();
+  const me = localParticipant?.identity ?? "";
   const [copied, setCopied] = useState(false);
+  const [rosterOpen, setRosterOpen] = useState(false);
   const inviteUrl = `${location.origin}${import.meta.env.BASE_URL}class-v2/${encodeURIComponent(room)}?role=student`;
   const copy = async () => {
     try { await navigator.clipboard.writeText(inviteUrl); setCopied(true); setTimeout(() => setCopied(false), 1500); }
     catch { window.prompt("Copy the student invite link:", inviteUrl); }
   };
+  // Sort: self first, then alphabetical by name — deterministic so the list
+  // doesn't jitter as LiveKit re-emits the array on speaking-state changes.
+  const rows = [...participants].sort((a, b) => {
+    if (a.identity === me) return -1;
+    if (b.identity === me) return 1;
+    return (a.name || a.identity).localeCompare(b.name || b.identity);
+  });
   return (
     <>
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-ink-800 px-2.5 py-1 text-xs text-ink-200" title="In the room now">
-        👤 {participants.length}
-      </span>
+      <div className="relative">
+        <button
+          onClick={() => setRosterOpen((v) => !v)}
+          title="Show who's in the room"
+          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition ${rosterOpen ? "bg-brand-500/30 text-brand-100" : "bg-ink-800 text-ink-200 hover:bg-ink-700"}`}>
+          👤 {participants.length}
+        </button>
+        {rosterOpen && (
+          <>
+            {/* click-away closer */}
+            <div className="fixed inset-0 z-40" onClick={() => setRosterOpen(false)} />
+            <div className="absolute right-0 top-full z-50 mt-1 w-[240px] overflow-hidden rounded-xl border border-ink-700 bg-ink-900/95 shadow-2xl backdrop-blur">
+              <div className="border-b border-ink-800 bg-ink-800/60 px-3 py-2 text-xs font-semibold text-white">
+                In the room · {participants.length}
+              </div>
+              <ul className="max-h-72 overflow-y-auto py-1">
+                {rows.length === 0 && <li className="px-3 py-2 text-xs text-ink-500">No one yet.</li>}
+                {rows.map((p) => {
+                  const isSelf = p.identity === me;
+                  const joinedMinAgo = p.joinedAt
+                    ? Math.max(0, Math.round((Date.now() - new Date(p.joinedAt).getTime()) / 60_000))
+                    : null;
+                  const speaking = (p as any).isSpeaking as boolean | undefined;
+                  return (
+                    <li key={p.sid || p.identity} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+                      <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${speaking ? "bg-emerald-400 animate-pulse" : "bg-ink-600"}`} title={speaking ? "speaking" : "silent"} />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-semibold text-white">
+                          {p.name || p.identity}
+                          {isSelf && <span className="ml-1 text-[10px] font-normal text-brand-300">(you)</span>}
+                        </div>
+                        <div className="truncate text-[10px] text-ink-500">
+                          {p.identity}
+                          {joinedMinAgo != null && <> · {joinedMinAgo === 0 ? "just now" : `${joinedMinAgo}m ago`}</>}
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="border-t border-ink-800 bg-ink-950/40 px-3 py-2 text-[10px] text-ink-500">
+                Green dot = currently speaking · updated live
+              </div>
+            </div>
+          </>
+        )}
+      </div>
       <button onClick={copy}
         className="inline-flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-800 px-2.5 py-1 text-xs font-semibold text-ink-100 hover:bg-ink-700">
         {copied ? "✓ Copied" : "🔗 Invite"}
