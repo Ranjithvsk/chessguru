@@ -57,6 +57,21 @@ export class LivekitService {
     return { token: await at.toJwt(), url };
   }
 
+  /** Kick a participant. Coach-only in controller. Idempotent — LiveKit
+   *  returns 404 if the participant already left; we swallow it. */
+  async removeParticipant(roomName: string, identity: string): Promise<void> {
+    const { httpUrl, key, secret, configured } = this.cfg();
+    if (!configured) throw new Error("LiveKit not configured");
+    const svc = new RoomServiceClient(httpUrl, key, secret);
+    try {
+      await svc.removeParticipant(roomName, identity);
+    } catch (err: any) {
+      const msg = String(err?.message || err);
+      if (!/not found|does not exist/i.test(msg)) throw err;
+      this.log.warn(`removeParticipant ${roomName}/${identity}: already gone`);
+    }
+  }
+
   /** Best-effort create-or-fetch of a room. LiveKit lazy-creates on first join
    *  too, but calling this lets us set metadata (owning academy, class title). */
   async ensureRoom(roomName: string, metadata?: Record<string, unknown>) {
