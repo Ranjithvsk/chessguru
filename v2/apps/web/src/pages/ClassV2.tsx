@@ -167,17 +167,21 @@ function useChatToasts(): ChatToast[] {
 function ChatToastStack() {
   const toasts = useChatToasts();
   if (toasts.length === 0) return null;
+  // Fixed to the VIEWPORT (not absolute-in-board) — owner 2026-08-12:
+  // "chat animation shows inside the board, show outside". Positioned above
+  // the browser bottom edge, safely clear of the class page's own footer
+  // controls, so it never covers pieces on the board mid-lesson.
   return (
-    <div className="pointer-events-none absolute bottom-20 left-1/2 z-40 flex -translate-x-1/2 flex-col items-center gap-2">
+    <div className="pointer-events-none fixed bottom-4 right-4 z-[70] flex max-w-[min(90vw,360px)] flex-col items-end gap-2 sm:bottom-6 sm:right-6">
       {toasts.map((t) => (
         <button
           key={t.id}
           onClick={() => { setChatOpen(true); chatMarkRead(); }}
-          className="pointer-events-auto max-w-[80vw] rounded-xl border border-brand-400/50 bg-ink-900/95 px-4 py-2 text-sm text-white shadow-2xl backdrop-blur hover:border-brand-300 hover:bg-ink-800"
+          className="pointer-events-auto w-full rounded-xl border border-brand-400/50 bg-ink-900/95 px-4 py-2 text-left text-sm text-white shadow-2xl backdrop-blur transition hover:border-brand-300 hover:bg-ink-800"
         >
           <span className="mr-2">💬</span>
           <span className="font-semibold text-brand-200">{t.who}:</span>{" "}
-          {t.emoji ? <span className="text-lg leading-none">{t.text}</span> : <span>{t.text.length > 60 ? t.text.slice(0, 60) + "…" : t.text}</span>}
+          {t.emoji ? <span className="text-lg leading-none">{t.text}</span> : <span>{t.text.length > 80 ? t.text.slice(0, 80) + "…" : t.text}</span>}
         </button>
       ))}
     </div>
