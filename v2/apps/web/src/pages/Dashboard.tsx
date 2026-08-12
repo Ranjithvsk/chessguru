@@ -43,6 +43,53 @@ async function uploadBinary(path: string, blob: Blob): Promise<void> {
   if (!r.ok) throw new Error(`${path} → ${r.status}`);
 }
 
+// Big permanent "🔴 Live now" card on the student dashboard — points at the
+// CURRENT live class from their coach. Backend deletes stale announcements
+// on going-live, so this card can't get stuck on an old room. Auto-hides
+// entirely when no coach in the student's academy is live.
+type LiveNow = { live: Array<{ _id: string; title: string; coach: string; roomKind?: "call"|"meet"; startAt: string }> };
+function StudentLiveClassCard() {
+  const { data } = useQuery({
+    queryKey: ["student-live-now"],
+    queryFn: () => get<LiveNow>("/api/class/live-now"),
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
+  });
+  const rows = data?.live ?? [];
+  if (rows.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      {rows.slice(0, 3).map((c) => {
+        const join = c.roomKind === "meet"
+          ? `/class-v2/${encodeURIComponent(c._id)}?role=student`
+          : `/call/${encodeURIComponent(c._id)}?board=1`;
+        const startedMin = Math.max(0, Math.round((Date.now() - new Date(c.startAt).getTime()) / 60_000));
+        return (
+          <Link key={c._id} to={join}
+            className="block rounded-2xl border-2 border-rose-500/60 bg-gradient-to-r from-rose-600/25 via-red-600/15 to-orange-500/15 p-4 shadow-lg transition hover:scale-[1.01] hover:brightness-110">
+            <div className="flex items-center gap-4">
+              <div className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-rose-500 text-2xl text-white shadow-lg">
+                <span className="animate-pulse">●</span>
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-white shadow">LIVE NOW</span>
+                  {startedMin > 0 && <span className="text-[11px] text-ink-300">started {startedMin}m ago</span>}
+                </div>
+                <div className="mt-1 truncate font-display text-lg font-bold text-white">{c.title}</div>
+                <div className="text-xs text-rose-200">Coach {c.coach} · Join to mark your attendance</div>
+              </div>
+              <div className="shrink-0 rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-rose-600 shadow-lg">
+                Join →
+              </div>
+            </div>
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
 function StudentClassNotesCard() {
   const qc = useQueryClient();
   const { data: notes } = useQuery({
@@ -1016,6 +1063,7 @@ export default function DashboardPage() {
       )}
       <h1 className="font-display text-2xl text-white">{viewedAs ? `${viewedAs}'s performance` : "📊 My performance"}</h1>
 
+      {!viewedAs && <StudentLiveClassCard />}
       {!viewedAs && <HomeworkCard />}
       {!viewedAs && <StudentMaterialsCard />}
       {!viewedAs && <StudentClassNotesCard />}
