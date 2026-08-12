@@ -286,21 +286,24 @@ export default function ClassV2Page() {
             </div>
           </div>
 
-          {/* Body: board fills the whole stage; camera + controls float over it. */}
-          <div className="relative min-h-0 flex-1 bg-ink-950/40 p-2">
-            {/* Board centered; it self-sizes to the largest square that fits. */}
-            <div className="flex h-full w-full items-center justify-center">
+          {/* Body: board on top, controls stacked BELOW it (not overlapping).
+           *  Camera PIP still floats over the board — it self-hides when
+           *  nobody is publishing (CameraPIPMaybe). */}
+          <div className="relative flex min-h-0 flex-1 flex-col bg-ink-950/40">
+            {/* Board area — self-sizes to the largest square that fits. */}
+            <div className="relative flex min-h-0 flex-1 items-center justify-center p-2">
               <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} />
+              <CameraPIPMaybe />
             </div>
 
-            {/* Floating camera PIP — draggable, remembers its position.
-             *  Auto-hidden entirely when no one is publishing video/screen,
-             *  so the shared board isn't overlapped by an empty tile frame. */}
-            <CameraPIPMaybe />
-
-            {/* Floating minimal controls — mic / cam / screen, bottom-center. */}
-            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-xl border border-ink-800 bg-ink-900/85 shadow-xl backdrop-blur">
-              <ControlBar variation="minimal" controls={{ microphone: true, camera: true, screenShare: true, chat: false, leave: false }} />
+            {/* Controls footer — mic / cam / screen, sits UNDER the board so it
+             *  never overlaps pieces. Centered, with breathing room. */}
+            <div className="shrink-0 border-t border-ink-800 bg-ink-900/70 px-4 py-2">
+              <div className="flex justify-center">
+                <div className="rounded-xl border border-ink-800 bg-ink-900 shadow">
+                  <ControlBar variation="minimal" controls={{ microphone: true, camera: true, screenShare: true, chat: false, leave: false }} />
+                </div>
+              </div>
             </div>
           </div>
           <RoomAudioRenderer />
