@@ -52,7 +52,7 @@ function StudentLiveClassCard() {
   const { data } = useQuery({
     queryKey: ["student-live-now"],
     queryFn: () => get<LiveNow>("/api/class/live-now"),
-    refetchInterval: 30_000,
+    refetchInterval: 5_000,         // was 30s; owner (2026-08-12) said students didn't see it without refresh
     refetchOnWindowFocus: true,
   });
   const rows = data?.live ?? [];
