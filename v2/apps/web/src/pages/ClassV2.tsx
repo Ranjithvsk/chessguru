@@ -212,9 +212,37 @@ export default function ClassV2Page() {
           serverUrl={tokenData.url}
           token={tokenData.token}
           connect
-          video
-          audio
-          onError={(e) => setErrMsg(e.message)}
+          /* video + audio are opt-in — devices without a camera/mic (like a
+           * headless coach machine or many desktop PCs) hit getUserMedia
+           * errors that LiveKit surfaces as ConnectionError(InternalError,
+           * reason=2, code=1). Users publish video/audio via the ControlBar
+           * button after joining. This is what LiveKit's own examples do. */
+          options={{ logLevel: 'debug' }}
+          onError={(e) => {
+            // Verbose error trail so we can catch the ACTUAL cause below
+            // "Could not join room" — LiveKit's onError fires for many
+            // things (connect timeout, media perms, WS drop). Include
+            // name + full stack + any nested cause so the debug screen
+            // isn't just "Client initiated disconnect".
+            const parts = [];
+            if (e?.name) parts.push(`${e.name}`);
+            if (e?.message) parts.push(e.message);
+            const anyE = e as any;
+            if (anyE?.reason) parts.push(`reason=${anyE.reason}`);
+            if (anyE?.code) parts.push(`code=${anyE.code}`);
+            if (anyE?.cause?.message) parts.push(`cause=${anyE.cause.message}`);
+            // eslint-disable-next-line no-console
+            console.error("[ClassV2] LiveKit error", e, "extras=", { ...anyE });
+            setErrMsg(parts.join(" · ") || "Unknown error");
+          }}
+          onDisconnected={(reason) => {
+            // eslint-disable-next-line no-console
+            console.warn("[ClassV2] LiveKit disconnected. reason=", reason);
+          }}
+          onConnected={() => {
+            // eslint-disable-next-line no-console
+            console.log("[ClassV2] LiveKit connected OK");
+          }}
           className="flex h-full min-h-0 flex-col"
         >
           {/* Top bar */}
