@@ -73,6 +73,23 @@ interface Room {
   coach: WebSocket | null;      // currently-connected coach socket (may go null between reconnects)
   locked: boolean;              // student-move lock
   shapes: Shape[];              // last-published annotation set (echoed to new joiners)
+  emptyEvictAt: number | null;  // when to drop this room from memory after last client left
+}
+
+// Grace before an emptied room is evicted. Owner reported (2026-08-12) that
+// when both coach + student briefly reconnect at the same moment, the room was
+// being deleted between drops → fresh reconnects landed in a start-of-game
+// board, wiping every move + shape. Keeping the room alive for a bit means
+// transient network churn (or LiveKit-driven re-renders) doesn't erase state.
+const EMPTY_EVICT_MS = 15 * 60_000;
+
+// Sweep rooms whose eviction timestamp has passed. Called on every close so
+// idle rooms don't leak — no separate timer.
+function sweepEvicted(): void {
+  const now = Date.now();
+  for (const [id, r] of rooms) {
+    if (r.clients.size === 0 && r.emptyEvictAt != null && r.emptyEvictAt <= now) rooms.delete(id);
+  }
 }
 
 // role() and lookup helpers use a per-socket WeakMap so the ws frame handler can
@@ -175,9 +192,12 @@ function getRoom(id: string): Room {
   let r = rooms.get(id);
   if (!r) {
     r = { fen: START_FEN, lastMove: null, history: [], clients: new Set(),
-          coachToken: null, coach: null, locked: false, shapes: [] };
+          coachToken: null, coach: null, locked: false, shapes: [], emptyEvictAt: null };
     rooms.set(id, r);
   }
+  // A returning client cancels pending eviction — they see the SAME state they
+  // left, not a fresh start.
+  r.emptyEvictAt = null;
   return r;
 }
 
@@ -320,9 +340,11 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     const who = socketWho.get(ws);
     if (who) void recordAttendance(who.classId, who.userId, who.name, "leave");
     if (room.clients.size === 0) {
-      // Room is empty: drop everything (token included). Next class with the same id
-      // starts fresh, which is the right default for public URLs.
-      rooms.delete(roomId);
+      // KEEP the room in memory for a grace window. Coach tab reloads, or a
+      // simultaneous coach+student hiccup, no longer wipe the board. Actual
+      // delete happens later via sweepEvicted() once the grace expires.
+      room.emptyEvictAt = Date.now() + EMPTY_EVICT_MS;
+      sweepEvicted();
       return;
     }
     broadcast(room, { type: "participants", participants: room.clients.size });
