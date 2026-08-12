@@ -5,6 +5,8 @@ import Board from "../components/Board";
 import type { Key } from "chessground/types";
 import { useFreePlay } from "../hooks/useFreePlay";
 import { detectPositionFromImage } from "../lib/boardVision";
+import { warpWithCorners } from "../lib/boardWarp";
+import { CornerAdjuster, type Corner } from "../components/CornerAdjuster";
 import {
   addServerReferences,
   extractSilhouetteFromSquare,
@@ -105,6 +107,11 @@ export default function BoardEditorPage() {
   // the backend classifier; ~3-6s per board.
   const [serverBusy, setServerBusy] = useState(false);
   const [serverMsg, setServerMsg] = useState<{ tone: "ok" | "err" | "info"; text: string } | null>(null);
+  // Manual corner adjuster (fallback when auto-detect crops wrong).
+  // Keeps the raw uploaded image dataURL so the coach can re-warp with
+  // manually-placed corners. Null when adjuster is closed.
+  const [adjusterOpen, setAdjusterOpen] = useState(false);
+  const [rawUploadDataUrl, setRawUploadDataUrl] = useState<string | null>(null);
   // Fetch the crowd-sourced reference bank on first mount. See loadServerRefsOnce.
   useEffect(() => { void loadServerRefsOnce(); }, []);
   // Position-editor mode: when on, board clicks PLACE a piece (from palette)
@@ -219,17 +226,22 @@ export default function BoardEditorPage() {
   async function runVision(src: string | Blob) {
     if (visionBusy) return;
     setVisionBusy(true); setVisionMsg({ tone: "info", text: "Analysing image…" });
-    // Fire-and-forget server-side log of the RAW input, so failing scans
-    // are debuggable later. Runs regardless of client-side detection result.
+    // Cache the raw uploaded image as a data URL so the manual
+    // CornerAdjuster can re-warp with user-placed corners later.
+    let rawDataUrl = "";
     try {
-      const b64 = typeof src === "string"
-        ? src.replace(/^data:image\/[a-z]+;base64,/, "")
-        : await new Promise<string>((res, rej) => {
-            const fr = new FileReader();
-            fr.onload = () => res(String(fr.result).replace(/^data:image\/[a-z]+;base64,/, ""));
-            fr.onerror = () => rej(new Error("read"));
-            fr.readAsDataURL(src);
-          });
+      if (typeof src === "string") {
+        rawDataUrl = src.startsWith("data:") ? src : `data:image/png;base64,${src}`;
+      } else {
+        rawDataUrl = await new Promise<string>((res, rej) => {
+          const fr = new FileReader();
+          fr.onload = () => res(String(fr.result));
+          fr.onerror = () => rej(new Error("read"));
+          fr.readAsDataURL(src);
+        });
+      }
+      setRawUploadDataUrl(rawDataUrl);
+      const b64 = rawDataUrl.replace(/^data:image\/[a-z]+;base64,/, "");
       void fetch(`${API_BASE}/api/vision/log-scan`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -478,14 +490,20 @@ export default function BoardEditorPage() {
             </div>
           )}
           {visionSnapshot && (
-            <div className="mt-3 border-t border-brand-500/20 pt-2">
+            <div className="mt-3 border-t border-brand-500/20 pt-2 flex flex-wrap gap-2 items-center">
               <button onClick={runServerClassify} disabled={serverBusy}
                 className="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-500 disabled:cursor-wait disabled:bg-brand-800">
                 {serverBusy ? "🚀 Classifying…" : "🚀 Try Server AI (DINOv2)"}
               </button>
-              <span className="ml-2 text-[10px] text-ink-500">Slower (3-6s) but improves with coach corrections. Try when client detection is off.</span>
+              {rawUploadDataUrl && (
+                <button onClick={() => setAdjusterOpen(true)}
+                  className="inline-flex items-center gap-1 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-500/20">
+                  ✂ Adjust corners
+                </button>
+              )}
+              <span className="text-[10px] text-ink-500 w-full">Server AI is slower but more accurate. Use "Adjust corners" if the crop is wrong.</span>
               {serverMsg && (
-                <div className={`mt-2 rounded border px-2 py-1 text-[11px] ${serverMsg.tone === "ok" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"
+                <div className={`mt-1 w-full rounded border px-2 py-1 text-[11px] ${serverMsg.tone === "ok" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"
                   : serverMsg.tone === "err" ? "border-rose-500/40 bg-rose-500/10 text-rose-100"
                   : "border-ink-700 bg-ink-800 text-ink-300"}`}>
                   {serverMsg.text}
@@ -494,6 +512,43 @@ export default function BoardEditorPage() {
             </div>
           )}
         </div>
+        {adjusterOpen && rawUploadDataUrl && (
+          <CornerAdjuster
+            imageSrc={rawUploadDataUrl}
+            onCancel={() => setAdjusterOpen(false)}
+            onConfirm={async (corners: Corner[]) => {
+              setAdjusterOpen(false);
+              setServerBusy(true);
+              setServerMsg({ tone: "info", text: "✂ Re-warping with your corners + running Server AI…" });
+              try {
+                const img = new Image();
+                img.crossOrigin = "anonymous";
+                await new Promise<void>((res, rej) => {
+                  img.onload = () => res();
+                  img.onerror = () => rej(new Error("image reload"));
+                  img.src = rawUploadDataUrl;
+                });
+                const warped = await warpWithCorners(img, corners);
+                if (!warped) throw new Error("warp failed (opencv unavailable?)");
+                setVisionSnapshot((prev) => prev ? { ...prev, canvas: warped.canvas } : prev);
+                setVisionPreview(warped.canvas.toDataURL("image/png"));
+                // Log the manually-warped result + auto-run server classify.
+                try {
+                  const b64 = warped.canvas.toDataURL("image/png").replace(/^data:image\/[a-z]+;base64,/, "");
+                  void fetch(`${API_BASE}/api/vision/log-scan`, {
+                    method: "POST", credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ boardPngBase64: b64, source: "manual-warp" }),
+                  }).catch(() => {});
+                } catch { /* silent */ }
+                await runServerClassifyOnCanvas(warped.canvas);
+              } catch (e) {
+                setServerMsg({ tone: "err", text: `Manual warp failed: ${(e as Error).message.slice(0, 120)}` });
+                setServerBusy(false);
+              }
+            }}
+          />
+        )}
 
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-400">Presets</h2>

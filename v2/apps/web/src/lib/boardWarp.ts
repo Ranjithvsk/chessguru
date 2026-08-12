@@ -61,7 +61,41 @@ export function preloadOpenCV(): void {
 export interface BoardWarpResult {
   canvas: HTMLCanvasElement;        // 480x480 canonical warped board
   corners: Array<{ x: number; y: number }>;  // 4 corners in source-image coordinates
-  method: "opencv";
+  method: "opencv" | "manual";
+}
+
+/** Warp with EXPLICIT corners (from the manual CornerAdjuster). Used when
+ *  auto-detection got it wrong and the coach dragged handles to the true
+ *  board corners. Corners can be in any order; we normalise via
+ *  orderCorners internally. */
+export async function warpWithCorners(
+  source: HTMLImageElement | HTMLCanvasElement,
+  corners: Array<{ x: number; y: number }>,
+): Promise<BoardWarpResult | null> {
+  if (corners.length !== 4) return null;
+  let cv: any;
+  try { cv = await loadOpenCV(); } catch { return null; }
+  const sw = "naturalWidth" in source ? source.naturalWidth : source.width;
+  const sh = "naturalHeight" in source ? source.naturalHeight : source.height;
+  const fullSrcCanvas = document.createElement("canvas");
+  fullSrcCanvas.width = sw; fullSrcCanvas.height = sh;
+  fullSrcCanvas.getContext("2d")!.drawImage(source, 0, 0);
+  const fullSrc = cv.imread(fullSrcCanvas);
+  const dst = new cv.Mat();
+  const OUT = 480;
+  const ordered = orderCorners(corners);
+  const srcPoints = cv.matFromArray(4, 1, cv.CV_32FC2,
+    [ordered[0]!.x, ordered[0]!.y, ordered[1]!.x, ordered[1]!.y,
+     ordered[2]!.x, ordered[2]!.y, ordered[3]!.x, ordered[3]!.y]);
+  const dstPoints = cv.matFromArray(4, 1, cv.CV_32FC2,
+    [0, 0, OUT, 0, OUT, OUT, 0, OUT]);
+  const M = cv.getPerspectiveTransform(srcPoints, dstPoints);
+  cv.warpPerspective(fullSrc, dst, M, new cv.Size(OUT, OUT), cv.INTER_CUBIC);
+  const outCanvas = document.createElement("canvas");
+  outCanvas.width = OUT; outCanvas.height = OUT;
+  cv.imshow(outCanvas, dst);
+  srcPoints.delete(); dstPoints.delete(); M.delete(); dst.delete(); fullSrc.delete();
+  return { canvas: outCanvas, corners: ordered, method: "manual" };
 }
 
 /** Order 4 corners as [top-left, top-right, bottom-right, bottom-left]
