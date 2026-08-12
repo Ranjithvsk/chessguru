@@ -187,10 +187,18 @@ function PositionEditorModal(props: {
   const blackRow = ["k","q","r","b","n","p"];
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={cancel}>
+    // NO backdrop-click-to-close: the same click that opened the modal also
+    // fires on the newly-mounted backdrop and would instantly cancel. Owner
+    // 2026-08-12: "it's opening but instantly closing". Close via × / Cancel /
+    // Escape instead — safer for a stateful editor anyway (backdrop clicks
+    // eat unsaved work).
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      onKeyDown={(e) => { if (e.key === "Escape") cancel(); }}
+      tabIndex={-1}
+    >
       <div
         className="w-full max-w-3xl overflow-hidden rounded-2xl border border-ink-700 bg-ink-900 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
       >
         {/* header */}
         <div className="flex items-center justify-between border-b border-ink-800 bg-ink-800/60 px-4 py-2.5">
