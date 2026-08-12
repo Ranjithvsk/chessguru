@@ -78,6 +78,243 @@ export function triggerClassLockToggle() {
   _actionSubs.forEach((f) => f("toggleLock"));
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// PositionEditorModal — inline "board editor" for the class Setup flow.
+// Coach picks a piece from the palette, clicks squares to place it, and
+// EVERY change is broadcast live via loadFen so students see the position
+// being assembled in real-time (owner 2026-08-12: "students should also
+// see live setting of board"). Fixed viewport overlay (was absolute-in-
+// board before, cramped by container queries), palette + board side-by-
+// side, small FEN paste tucked at the bottom for the pro users.
+// ─────────────────────────────────────────────────────────────────────
+function fenToGrid(fen: string): string[][] {
+  const grid: string[][] = Array.from({ length: 8 }, () => Array(8).fill(""));
+  const placement = (fen.split(" ")[0] || "");
+  const ranks = placement.split("/");
+  for (let r = 0; r < 8 && r < ranks.length; r++) {
+    let col = 0;
+    for (const ch of ranks[r]) {
+      if (/\d/.test(ch)) col += parseInt(ch, 10);
+      else if (col < 8) { grid[r][col] = ch; col++; }
+    }
+  }
+  return grid;
+}
+function gridToFen(grid: string[][], turn: "w" | "b", castling: string, ep: string): string {
+  const ranks: string[] = [];
+  for (let r = 0; r < 8; r++) {
+    let s = ""; let empty = 0;
+    for (let c = 0; c < 8; c++) {
+      const p = grid[r][c];
+      if (!p) empty++;
+      else { if (empty > 0) { s += empty; empty = 0; } s += p; }
+    }
+    if (empty > 0) s += empty;
+    ranks.push(s);
+  }
+  return `${ranks.join("/")} ${turn} ${castling || "-"} ${ep || "-"} 0 1`;
+}
+function squareToRowCol(sq: string): [number, number] | null {
+  if (sq.length !== 2) return null;
+  const col = sq.charCodeAt(0) - 97;
+  const row = 8 - parseInt(sq[1], 10);
+  if (col < 0 || col > 7 || row < 0 || row > 7 || isNaN(row)) return null;
+  return [row, col];
+}
+const PIECE_UNICODE: Record<string, string> = {
+  K: "♔", Q: "♕", R: "♖", B: "♗", N: "♘", P: "♙",
+  k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟",
+};
+const PIECE_LABEL: Record<string, string> = {
+  K: "White King", Q: "White Queen", R: "White Rook", B: "White Bishop", N: "White Knight", P: "White Pawn",
+  k: "Black King", q: "Black Queen", r: "Black Rook", b: "Black Bishop", n: "Black Knight", p: "Black Pawn",
+};
+
+function PositionEditorModal(props: {
+  initialFen: string;
+  onApply: (fen: string) => void;
+  onClose: () => void;
+  error: string | null;
+}) {
+  const { initialFen, onApply, onClose } = props;
+  const [grid, setGrid] = useState<string[][]>(() => fenToGrid(initialFen));
+  const [turn, setTurn] = useState<"w" | "b">(() => (initialFen.split(" ")[1] === "b" ? "b" : "w"));
+  const initialCastling = useRef<string>(initialFen.split(" ")[2] || "KQkq").current;
+  const initialEp = useRef<string>(initialFen.split(" ")[3] || "-").current;
+  const [selected, setSelected] = useState<string>("P");    // piece to paint, "_" = eraser
+  const [fenText, setFenText] = useState<string>(initialFen);
+  const [showFen, setShowFen] = useState<boolean>(false);
+
+  const currentFen = gridToFen(grid, turn, initialCastling, initialEp);
+
+  // Live-broadcast every edit so students see the position being built up.
+  // Debounced ~120ms to smooth rapid click sequences into one broadcast.
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => { onApply(currentFen); }, 120);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentFen]);
+  // Sync typed FEN back into the grid whenever the paste box changes (only if
+  // valid; ignore transient half-typed FENs).
+  useEffect(() => {
+    const t = fenText.trim();
+    if (!t || t === currentFen) return;
+    try { const c = new Chess(t); setGrid(fenToGrid(c.fen())); setTurn(t.split(" ")[1] === "b" ? "b" : "w"); }
+    catch { /* invalid, ignore until user finishes */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fenText]);
+
+  const onSquareClick = (sq: Key) => {
+    const rc = squareToRowCol(String(sq));
+    if (!rc) return;
+    const [r, c] = rc;
+    setGrid((g) => {
+      const ng = g.map((row) => row.slice());
+      ng[r][c] = selected === "_" ? "" : selected;
+      return ng;
+    });
+  };
+  const clearAll = () => setGrid(fenToGrid("8/8/8/8/8/8/8/8"));
+  const resetStart = () => { setGrid(fenToGrid(new Chess().fen())); setTurn("w"); };
+  const revert = () => { setGrid(fenToGrid(initialFen)); setTurn(initialFen.split(" ")[1] === "b" ? "b" : "w"); };
+
+  const applyAndClose = () => { onApply(currentFen); onClose(); };
+  const cancel = () => { onApply(initialFen); onClose(); };   // revert live edits when cancelling
+
+  const whiteRow = ["K","Q","R","B","N","P"];
+  const blackRow = ["k","q","r","b","n","p"];
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={cancel}>
+      <div
+        className="w-full max-w-3xl overflow-hidden rounded-2xl border border-ink-700 bg-ink-900 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* header */}
+        <div className="flex items-center justify-between border-b border-ink-800 bg-ink-800/60 px-4 py-2.5">
+          <div className="flex items-baseline gap-2">
+            <span className="font-display text-base font-bold text-white">📋 Set up position</span>
+            <span className="text-[10px] text-emerald-300">● Live — students see every change</span>
+          </div>
+          <button onClick={cancel} title="Cancel (revert to the position that was there before)"
+            className="rounded-md p-1 text-xl leading-none text-ink-400 hover:bg-ink-700 hover:text-white">×</button>
+        </div>
+
+        <div className="grid gap-4 p-4 md:grid-cols-[1fr_360px]">
+          {/* Editor board (fills left column, capped) */}
+          <div className="mx-auto w-full max-w-[360px]">
+            <Board
+              fen={currentFen}
+              movableColor="none"
+              dests={new Map() as any}
+              coordinates
+              onSelect={onSquareClick}
+            />
+            <div className="mt-2 flex items-center justify-center gap-4 text-xs text-ink-300">
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="radio" checked={turn === "w"} onChange={() => setTurn("w")} className="accent-brand-500" />
+                <span>White to move</span>
+              </label>
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="radio" checked={turn === "b"} onChange={() => setTurn("b")} className="accent-brand-500" />
+                <span>Black to move</span>
+              </label>
+            </div>
+          </div>
+
+          {/* Right pane — palette + actions */}
+          <div className="space-y-3">
+            <div>
+              <div className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-ink-500">Piece — tap then tap a square</div>
+              <div className="grid grid-cols-6 gap-1.5">
+                {whiteRow.map((p) => <PalettePieceBtn key={p} p={p} selected={selected === p} onClick={() => setSelected(p)} />)}
+                {blackRow.map((p) => <PalettePieceBtn key={p} p={p} selected={selected === p} onClick={() => setSelected(p)} />)}
+              </div>
+              <button
+                onClick={() => setSelected("_")}
+                title="Eraser — tap a square to remove the piece there"
+                className={`mt-2 flex w-full items-center justify-center gap-2 rounded-lg border py-2 text-sm font-semibold transition ${selected === "_" ? "border-rose-400 bg-rose-500/20 text-rose-100" : "border-ink-700 bg-ink-800 text-ink-200 hover:bg-ink-700"}`}
+              >
+                ✕ Eraser
+              </button>
+            </div>
+
+            <div className="border-t border-ink-800 pt-3">
+              <div className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-ink-500">Quick actions</div>
+              <div className="grid grid-cols-3 gap-1.5">
+                <button onClick={resetStart}
+                  className="rounded-lg border border-ink-700 bg-ink-800 px-2 py-1.5 text-xs text-ink-100 hover:bg-ink-700">Start</button>
+                <button onClick={clearAll}
+                  className="rounded-lg border border-ink-700 bg-ink-800 px-2 py-1.5 text-xs text-ink-100 hover:bg-ink-700">Empty</button>
+                <button onClick={revert}
+                  className="rounded-lg border border-ink-700 bg-ink-800 px-2 py-1.5 text-xs text-ink-100 hover:bg-ink-700">Revert</button>
+              </div>
+            </div>
+
+            <div className="border-t border-ink-800 pt-3">
+              <button
+                onClick={() => setShowFen((v) => !v)}
+                className="text-[11px] font-semibold text-ink-400 hover:text-ink-200"
+              >
+                {showFen ? "▾" : "▸"} Advanced — paste FEN
+              </button>
+              {showFen && (
+                <textarea
+                  value={fenText}
+                  onChange={(e) => setFenText(e.target.value)}
+                  rows={2}
+                  spellCheck={false}
+                  placeholder="Paste any FEN (Lichess, Chess.com, engine output)…"
+                  className="mt-1.5 w-full rounded-lg border border-ink-700 bg-ink-800 px-2.5 py-2 font-mono text-[10px] text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none"
+                />
+              )}
+              {props.error && <div className="mt-1 text-[11px] text-rose-400">{props.error}</div>}
+              <div className="mt-1 text-[10px] text-ink-500 truncate" title={currentFen}>
+                <span className="text-ink-400">Current:</span> <span className="font-mono">{currentFen}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 border-t border-ink-800 pt-3">
+              <button
+                onClick={applyAndClose}
+                className="flex-1 rounded-lg bg-brand-500 px-4 py-2 text-sm font-bold text-white hover:bg-brand-400"
+              >
+                ✓ Done
+              </button>
+              <button
+                onClick={cancel}
+                title="Cancel — revert to the position that was on the board before you opened this"
+                className="rounded-lg border border-ink-700 bg-ink-800 px-4 py-2 text-sm text-ink-200 hover:bg-ink-700"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PalettePieceBtn({ p, selected, onClick }: { p: string; selected: boolean; onClick: () => void }) {
+  const isWhite = p === p.toUpperCase();
+  return (
+    <button
+      onClick={onClick}
+      title={PIECE_LABEL[p]}
+      className={`grid aspect-square place-items-center rounded-lg border text-3xl leading-none transition ${
+        selected
+          ? "border-brand-400 bg-brand-500/25 shadow-inner shadow-brand-500/40 ring-1 ring-brand-300"
+          : "border-ink-700 bg-ink-800 hover:bg-ink-700"
+      } ${isWhite ? "text-white" : "text-ink-950 bg-ink-100/95 hover:bg-white"}`}
+    >
+      <span className="drop-shadow-sm">{PIECE_UNICODE[p]}</span>
+    </button>
+  );
+}
+
 export default function SharedClassBoard(
   { room, userId, displayName, onClassEnded, intendedRole }: {
     room: string; userId?: string | null; displayName?: string | null;
@@ -345,57 +582,12 @@ export default function SharedClassBoard(
         </div>
       )}
       {setupOpen && role === "coach" && (
-        <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center p-4">
-          <div className="pointer-events-auto w-full max-w-md space-y-3 rounded-xl border border-ink-700 bg-ink-900/95 p-4 shadow-2xl backdrop-blur" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <div className="font-display text-sm font-bold text-white">Set up position</div>
-              <button onClick={() => setClassSetupOpen(false)} className="text-lg leading-none text-ink-400 hover:text-white">×</button>
-            </div>
-            <textarea
-              value={setupFen}
-              onChange={(e) => { setSetupFen(e.target.value); setSetupErr(null); }}
-              rows={3}
-              spellCheck={false}
-              placeholder="Paste a FEN, e.g. r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3"
-              className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 font-mono text-[11px] text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none"
-            />
-            {setupErr && <div className="text-xs text-rose-400">{setupErr}</div>}
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => applySetup(setupFen)}
-                className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-400"
-              >
-                Load on board
-              </button>
-              <button
-                onClick={() => applySetup(new Chess().fen())}
-                className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-1.5 text-xs text-ink-100 hover:bg-ink-700"
-                title="Starting position (same as ↺)"
-              >
-                Start
-              </button>
-              <button
-                onClick={() => applySetup("8/8/8/8/8/8/8/8 w - - 0 1")}
-                className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-1.5 text-xs text-ink-100 hover:bg-ink-700"
-                title="Empty board — useful for teaching from a diagram"
-              >
-                Empty
-              </button>
-              <a
-                href="/v2/board-editor"
-                target="_blank"
-                rel="noopener"
-                className="ml-auto rounded-lg border border-brand-500/50 bg-brand-500/10 px-3 py-1.5 text-xs font-semibold text-brand-200 hover:bg-brand-500/20"
-                title="Open Board Editor in a new tab — scan from photo or drag pieces; copy the FEN back here"
-              >
-                📷 Board Editor →
-              </a>
-            </div>
-            <div className="text-[10px] text-ink-500">
-              Tip: get FENs from Lichess (📋 in analysis), Chess.com (Share → FEN), or the Board Editor's Copy button.
-            </div>
-          </div>
-        </div>
+        <PositionEditorModal
+          initialFen={gameRef.current.fen()}
+          onApply={applySetup}
+          onClose={() => setClassSetupOpen(false)}
+          error={setupErr}
+        />
       )}
       <span
         className={`absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full ${connected ? "bg-emerald-400" : "bg-ink-500"}`}
