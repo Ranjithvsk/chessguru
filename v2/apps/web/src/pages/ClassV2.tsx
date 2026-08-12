@@ -101,6 +101,49 @@ function LiveHeaderBits({ room }: { room: string }) {
   );
 }
 
+// Coach-only overlay while alone in the room — big invite link, one-tap
+// copy, and mini QR so a student sitting next to the coach can join
+// without a laptop. Auto-hides the moment anyone else joins so it never
+// covers the board mid-class.
+function CoachWaitingOverlay({ room, role }: { room: string; role: "coach" | "student" }) {
+  const participants = useParticipants();
+  const [copied, setCopied] = useState(false);
+  if (role !== "coach") return null;
+  if (participants.length > 1) return null;   // hide once anyone else joins
+  const inviteUrl = `${location.origin}${import.meta.env.BASE_URL}class-v2/${encodeURIComponent(room)}?role=student`;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(inviteUrl)}`;
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(inviteUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+    catch { window.prompt("Copy the student invite link:", inviteUrl); }
+  };
+  return (
+    <div className="absolute right-3 top-3 z-20 w-[280px] rounded-xl border border-amber-400/40 bg-ink-900/95 p-3 shadow-2xl backdrop-blur">
+      <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-300">
+        ⏳ Waiting for students
+      </div>
+      <div className="mb-2 text-[11px] text-ink-300">
+        Send this exact link to every student — otherwise they'll land in a different room and moves won't sync.
+      </div>
+      <div className="mb-2 flex items-center gap-2">
+        <input readOnly value={inviteUrl}
+          className="w-full truncate rounded-md border border-ink-700 bg-ink-950 px-2 py-1 text-[10px] text-ink-200"
+          onClick={(e) => (e.target as HTMLInputElement).select()} />
+        <button onClick={copy}
+          className="shrink-0 rounded-md bg-amber-500 px-2 py-1 text-[11px] font-bold text-ink-900 hover:bg-amber-400">
+          {copied ? "✓" : "Copy"}
+        </button>
+      </div>
+      <div className="flex items-center gap-2 rounded-md bg-white p-2">
+        <img src={qrUrl} alt="Scan to join" className="h-[100px] w-[100px]" />
+        <div className="text-[10px] leading-tight text-ink-900">
+          <div className="font-bold">Scan to join</div>
+          <div className="opacity-70">Room {room.slice(-6)}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Floating camera PIP the coach/student can drag anywhere over the board.
 // Clamps inside its positioned parent (the stage) and remembers its spot.
 function DraggableCameraPIP({ children }: { children: any }) {
@@ -294,11 +337,15 @@ export default function ClassV2Page() {
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-ink-950/40">
             {/* Board area — self-sizes to the largest square that fits.
              *  overflow-hidden clips any board that tries to grow past the
-             *  container (chessground boards can over-flow vertically if the
-             *  parent has no explicit min-height:0). */}
-            <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-2">
+             *  container. container-type:size gives SharedClassBoard's
+             *  cqi/cqb-based sizing an actual box to measure against. */}
+            <div
+              className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-2"
+              style={{ containerType: 'size' } as any}
+            >
               <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} />
               <CameraPIPMaybe />
+              <CoachWaitingOverlay room={room} role={role} />
             </div>
 
             {/* Controls footer — mic / cam / screen, sits UNDER the board so it
