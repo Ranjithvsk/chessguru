@@ -11,8 +11,9 @@ import { useQuery } from "@tanstack/react-query";
 import {
   LiveKitRoom, RoomAudioRenderer, ControlBar,
   GridLayout, ParticipantTile, useTracks, useParticipants,
+  useDataChannel, useLocalParticipant, useRoomContext,
 } from "@livekit/components-react";
-import { Track } from "livekit-client";
+import { Track, DataPacket_Kind } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
 import SharedClassBoard from "../components/SharedClassBoard";
@@ -75,6 +76,229 @@ function CameraPIPMaybe() {
         <VideoRail />
       </div>
     </DraggableCameraPIP>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Part B batch 1 — feature parity with /call/ page:
+//   Chat, Raise-hand, Emoji reactions. All ride LiveKit's DataChannel
+//   (peer-to-peer via SFU), no extra backend needed.
+// ─────────────────────────────────────────────────────────────────────
+
+const RX = new TextDecoder("utf-8");
+const TX = new TextEncoder();
+
+// Small tabbed side-panel — floating right of the board. Chat + raise-hand
+// live inside; independent of LiveKit's own Chat component so we have full
+// control over layout, emoji, and stored history-per-tab.
+type ChatMsg = { id: string; who: string; text: string; ts: number; emoji?: boolean };
+
+function ChatBubble({ msg, self }: { msg: ChatMsg; self: boolean }) {
+  const time = new Date(msg.ts).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return (
+    <div className={`flex flex-col ${self ? "items-end" : "items-start"}`}>
+      <div className="text-[10px] text-ink-500">{self ? "you" : msg.who} · {time}</div>
+      <div className={`mt-0.5 max-w-[85%] rounded-xl px-3 py-1.5 text-sm ${
+        msg.emoji ? "bg-transparent text-3xl leading-none px-1"
+        : self ? "bg-brand-600 text-white"
+        : "bg-ink-800 text-ink-100"
+      }`}>
+        {msg.text}
+      </div>
+    </div>
+  );
+}
+
+function ClassChatPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const room = useRoomContext();
+  const { localParticipant } = useLocalParticipant();
+  const me = localParticipant?.identity ?? "me";
+  const [msgs, setMsgs] = useState<ChatMsg[]>([]);
+  const [draft, setDraft] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const dc = useDataChannel("cg-chat");
+  useEffect(() => {
+    if (!dc.message) return;
+    try {
+      const raw = dc.message.payload instanceof Uint8Array ? RX.decode(dc.message.payload) : String(dc.message.payload);
+      const m = JSON.parse(raw) as ChatMsg;
+      if (m && m.text) setMsgs((s) => [...s.slice(-99), m]);
+    } catch { /* bad frame */ }
+  }, [dc.message]);
+  useEffect(() => { scrollRef.current?.scrollTo(0, 9e9); }, [msgs.length]);
+  const send = (text: string, emoji = false) => {
+    const t = text.trim(); if (!t || !room) return;
+    const m: ChatMsg = { id: Math.random().toString(36).slice(2), who: me, text: t, ts: Date.now(), emoji };
+    setMsgs((s) => [...s.slice(-99), m]);
+    try { room.localParticipant.publishData(TX.encode(JSON.stringify(m)), { reliable: true, topic: "cg-chat" }); } catch { /* */ }
+    setDraft("");
+  };
+  if (!open) return null;
+  return (
+    <div className="absolute right-3 top-3 bottom-3 z-30 flex w-[280px] flex-col overflow-hidden rounded-xl border border-ink-700 bg-ink-900/95 shadow-2xl backdrop-blur">
+      <div className="flex shrink-0 items-center justify-between border-b border-ink-800 bg-ink-800/60 px-3 py-2">
+        <div className="text-sm font-semibold text-white">💬 Class chat</div>
+        <button onClick={onClose} className="text-lg text-ink-400 hover:text-white">×</button>
+      </div>
+      <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto p-3">
+        {msgs.length === 0 && <div className="text-center text-xs text-ink-500">No messages yet.</div>}
+        {msgs.map((m) => <ChatBubble key={m.id} msg={m} self={m.who === me} />)}
+      </div>
+      <div className="shrink-0 border-t border-ink-800 bg-ink-950/50 p-2">
+        <div className="mb-1.5 flex flex-wrap gap-1">
+          {["👍","👏","😊","🤔","🔥","❤️","💯"].map((e) => (
+            <button key={e} onClick={() => send(e, true)}
+              className="rounded bg-ink-800 px-1.5 py-0.5 text-base leading-none hover:bg-ink-700">{e}</button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <input value={draft} onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(draft); } }}
+            placeholder="Message the class…"
+            className="flex-1 rounded-lg border border-ink-700 bg-ink-800 px-2.5 py-1.5 text-sm text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
+          <button onClick={() => send(draft)} disabled={!draft.trim()}
+            className="shrink-0 rounded-lg bg-brand-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-400 disabled:opacity-50">↩</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Raised-hands roster + floating "🖐 hand up" button. Broadcasts on `cg-hand`.
+type HandFrame = { from: string; up: boolean; ts: number };
+function useHandRaise() {
+  const room = useRoomContext();
+  const { localParticipant } = useLocalParticipant();
+  const me = localParticipant?.identity ?? "me";
+  const [handsUp, setHandsUp] = useState<Set<string>>(new Set());
+  const [mineUp, setMineUp] = useState(false);
+  const dc = useDataChannel("cg-hand");
+  useEffect(() => {
+    if (!dc.message) return;
+    try {
+      const raw = dc.message.payload instanceof Uint8Array ? RX.decode(dc.message.payload) : String(dc.message.payload);
+      const f = JSON.parse(raw) as HandFrame;
+      setHandsUp((prev) => {
+        const next = new Set(prev);
+        if (f.up) next.add(f.from); else next.delete(f.from);
+        return next;
+      });
+    } catch { /* */ }
+  }, [dc.message]);
+  const toggle = () => {
+    const next = !mineUp;
+    setMineUp(next);
+    setHandsUp((prev) => { const n = new Set(prev); if (next) n.add(me); else n.delete(me); return n; });
+    if (!room) return;
+    try { room.localParticipant.publishData(TX.encode(JSON.stringify({ from: me, up: next, ts: Date.now() } as HandFrame)), { reliable: true, topic: "cg-hand" }); } catch { /* */ }
+  };
+  return { handsUp, mineUp, toggle };
+}
+
+function HandRaiseButton() {
+  const { mineUp, toggle } = useHandRaise();
+  return (
+    <button onClick={toggle}
+      title={mineUp ? "Lower hand" : "Raise hand"}
+      className={`rounded-full border px-3 py-1.5 text-lg transition ${mineUp ? "border-amber-400 bg-amber-500/25 shadow-lg animate-pulse" : "border-ink-700 bg-ink-900 hover:bg-ink-800"}`}>
+      🖐
+    </button>
+  );
+}
+
+function HandsRoster() {
+  const { handsUp } = useHandRaise();
+  if (handsUp.size === 0) return null;
+  return (
+    <div className="absolute left-3 top-3 z-20 rounded-lg border border-amber-400/40 bg-amber-500/15 px-3 py-1.5 shadow-lg backdrop-blur">
+      <div className="text-[10px] uppercase tracking-wide text-amber-300">🖐 Hands up ({handsUp.size})</div>
+      <div className="mt-0.5 flex flex-wrap gap-1 text-xs text-amber-100">
+        {[...handsUp].slice(0, 6).map((n) => <span key={n} className="rounded bg-amber-400/20 px-1.5">{n}</span>)}
+      </div>
+    </div>
+  );
+}
+
+// Floating emoji reaction: click, it burst-floats up. Broadcast on cg-reactions.
+type ReactionFrame = { from: string; emoji: string; ts: number };
+function useReactions() {
+  const room = useRoomContext();
+  const { localParticipant } = useLocalParticipant();
+  const me = localParticipant?.identity ?? "me";
+  const [floats, setFloats] = useState<Array<{ id: string; emoji: string; left: number }>>([]);
+  const dc = useDataChannel("cg-reactions");
+  useEffect(() => {
+    if (!dc.message) return;
+    try {
+      const raw = dc.message.payload instanceof Uint8Array ? RX.decode(dc.message.payload) : String(dc.message.payload);
+      const f = JSON.parse(raw) as ReactionFrame;
+      const id = Math.random().toString(36).slice(2);
+      setFloats((s) => [...s, { id, emoji: f.emoji, left: 20 + Math.random() * 60 }]);
+      setTimeout(() => setFloats((s) => s.filter((x) => x.id !== id)), 2500);
+    } catch { /* */ }
+  }, [dc.message]);
+  const send = (emoji: string) => {
+    const id = Math.random().toString(36).slice(2);
+    setFloats((s) => [...s, { id, emoji, left: 20 + Math.random() * 60 }]);
+    setTimeout(() => setFloats((s) => s.filter((x) => x.id !== id)), 2500);
+    if (!room) return;
+    try { room.localParticipant.publishData(TX.encode(JSON.stringify({ from: me, emoji, ts: Date.now() } as ReactionFrame)), { reliable: true, topic: "cg-reactions" }); } catch { /* */ }
+  };
+  return { floats, send };
+}
+
+function ReactionOverlay() {
+  const { floats } = useReactions();
+  return (
+    <>
+      <style>{`@keyframes cg-floatup { 0% { transform: translateY(0); opacity: 0; } 15% { opacity: 1; } 100% { transform: translateY(-260px) scale(1.3); opacity: 0; } }`}</style>
+      <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
+        {floats.map((f) => (
+          <span key={f.id}
+            style={{ position: "absolute", left: `${f.left}%`, bottom: "12%", fontSize: 40, animation: "cg-floatup 2.5s ease-out forwards" }}>
+            {f.emoji}
+          </span>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// Toggle state for the chat panel is shared between the footer button and
+// the panel itself via a tiny module-scoped store so we don't have to
+// prop-drill through the whole LiveKitRoom subtree.
+let _chatOpen = false;
+const _chatSubs = new Set<(open: boolean) => void>();
+const setChatOpen = (v: boolean) => { _chatOpen = v; _chatSubs.forEach((f) => f(v)); };
+function useChatOpen(): [boolean, (v: boolean) => void] {
+  const [open, setOpenLocal] = useState(_chatOpen);
+  useEffect(() => { _chatSubs.add(setOpenLocal); return () => { _chatSubs.delete(setOpenLocal); }; }, []);
+  return [open, setChatOpen];
+}
+function ChatPanelHost() {
+  const [open, setOpen] = useChatOpen();
+  return <ClassChatPanel open={open} onClose={() => setOpen(false)} />;
+}
+function ChatToggleButton() {
+  const [open, setOpen] = useChatOpen();
+  return (
+    <button onClick={() => setOpen(!open)}
+      title={open ? "Close chat" : "Open chat"}
+      className={`rounded-full border px-3 py-1.5 text-lg transition ${open ? "border-brand-400 bg-brand-500/25" : "border-ink-700 bg-ink-900 hover:bg-ink-800"}`}>
+      💬
+    </button>
+  );
+}
+
+function ReactionsBar() {
+  const { send } = useReactions();
+  return (
+    <div className="flex items-center gap-1 rounded-full border border-ink-700 bg-ink-900/80 px-2 py-1 backdrop-blur">
+      {["👏","🎉","❤️","🔥","💯","😂","🤯"].map((e) => (
+        <button key={e} onClick={() => send(e)}
+          className="rounded-full px-1.5 text-lg hover:bg-ink-800">{e}</button>
+      ))}
+    </div>
   );
 }
 
@@ -346,15 +570,21 @@ export default function ClassV2Page() {
               <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} />
               <CameraPIPMaybe />
               <CoachWaitingOverlay room={room} role={role} />
+              <HandsRoster />
+              <ReactionOverlay />
+              <ChatPanelHost />
             </div>
 
-            {/* Controls footer — mic / cam / screen, sits UNDER the board so it
-             *  never overlaps pieces. Centered, with breathing room. */}
+            {/* Controls footer — mic / cam / screen + hand / chat / reactions,
+             *  sits UNDER the board so nothing overlaps pieces. */}
             <div className="shrink-0 border-t border-ink-800 bg-ink-900/70 px-4 py-2">
-              <div className="flex justify-center">
+              <div className="flex flex-wrap items-center justify-center gap-3">
                 <div className="rounded-xl border border-ink-800 bg-ink-900 shadow">
                   <ControlBar variation="minimal" controls={{ microphone: true, camera: true, screenShare: true, chat: false, leave: false }} />
                 </div>
+                <HandRaiseButton />
+                <ChatToggleButton />
+                <ReactionsBar />
               </div>
             </div>
           </div>
