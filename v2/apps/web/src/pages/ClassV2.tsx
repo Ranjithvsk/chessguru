@@ -109,27 +109,114 @@ function ChatBubble({ msg, self }: { msg: ChatMsg; self: boolean }) {
   );
 }
 
-function ClassChatPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const room = useRoomContext();
+// Module-scoped chat store — msgs, unread count, and a floating toast for
+// new messages while the panel is closed. Owner reported 2026-08-12 that when
+// coach sent a chat message, students didn't see anything — before this change
+// the msgs state lived inside ClassChatPanel and messages only rendered when
+// the panel was open, with no badge or popup to nudge anyone.
+type ChatToast = { id: string; who: string; text: string; emoji?: boolean };
+let _chatMsgs: ChatMsg[] = [];
+let _chatUnread = 0;
+let _chatToasts: ChatToast[] = [];
+const _chatMsgsSubs = new Set<() => void>();
+const _chatUnreadSubs = new Set<() => void>();
+const _chatToastSubs = new Set<() => void>();
+function _notifyChatMsgs() { _chatMsgsSubs.forEach((f) => f()); }
+function _notifyChatUnread() { _chatUnreadSubs.forEach((f) => f()); }
+function _notifyChatToasts() { _chatToastSubs.forEach((f) => f()); }
+function chatIngest(m: ChatMsg, self: boolean) {
+  _chatMsgs = [..._chatMsgs.slice(-99), m];
+  _notifyChatMsgs();
+  if (self) return;                              // never buzz for your own send
+  if (!_chatOpen) {
+    _chatUnread += 1;
+    _notifyChatUnread();
+    const t: ChatToast = { id: Math.random().toString(36).slice(2), who: m.who, text: m.text, emoji: m.emoji };
+    _chatToasts = [..._chatToasts.slice(-4), t];
+    _notifyChatToasts();
+    setTimeout(() => {
+      _chatToasts = _chatToasts.filter((x) => x.id !== t.id);
+      _notifyChatToasts();
+    }, 5000);
+  }
+}
+function chatMarkRead() {
+  if (_chatUnread === 0) return;
+  _chatUnread = 0;
+  _notifyChatUnread();
+}
+function useChatMsgs(): ChatMsg[] {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((n) => n + 1); _chatMsgsSubs.add(f); return () => { _chatMsgsSubs.delete(f); }; }, []);
+  return _chatMsgs;
+}
+function useChatUnread(): number {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((n) => n + 1); _chatUnreadSubs.add(f); return () => { _chatUnreadSubs.delete(f); }; }, []);
+  return _chatUnread;
+}
+function useChatToasts(): ChatToast[] {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((n) => n + 1); _chatToastSubs.add(f); return () => { _chatToastSubs.delete(f); }; }, []);
+  return _chatToasts;
+}
+
+// Floating stack of "💬 who: text" popups — appears bottom-center for anyone
+// who has the chat panel CLOSED when a new message arrives. Auto-dismiss 5s.
+// Clicking a toast opens the chat panel and clears unread.
+function ChatToastStack() {
+  const toasts = useChatToasts();
+  if (toasts.length === 0) return null;
+  return (
+    <div className="pointer-events-none absolute bottom-20 left-1/2 z-40 flex -translate-x-1/2 flex-col items-center gap-2">
+      {toasts.map((t) => (
+        <button
+          key={t.id}
+          onClick={() => { setChatOpen(true); chatMarkRead(); }}
+          className="pointer-events-auto max-w-[80vw] rounded-xl border border-brand-400/50 bg-ink-900/95 px-4 py-2 text-sm text-white shadow-2xl backdrop-blur hover:border-brand-300 hover:bg-ink-800"
+        >
+          <span className="mr-2">💬</span>
+          <span className="font-semibold text-brand-200">{t.who}:</span>{" "}
+          {t.emoji ? <span className="text-lg leading-none">{t.text}</span> : <span>{t.text.length > 60 ? t.text.slice(0, 60) + "…" : t.text}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// A tiny sink component that subscribes to cg-chat ALWAYS (mounted on the
+// class page whether the chat panel is open or not) so incoming messages
+// always land in the module store + trigger toasts + badge. Without this the
+// old code only received messages while the panel was rendered.
+function ChatSink() {
   const { localParticipant } = useLocalParticipant();
   const me = localParticipant?.identity ?? "me";
-  const [msgs, setMsgs] = useState<ChatMsg[]>([]);
-  const [draft, setDraft] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
   const dc = useDataChannel("cg-chat");
   useEffect(() => {
     if (!dc.message) return;
     try {
       const raw = dc.message.payload instanceof Uint8Array ? RX.decode(dc.message.payload) : String(dc.message.payload);
       const m = JSON.parse(raw) as ChatMsg;
-      if (m && m.text) setMsgs((s) => [...s.slice(-99), m]);
+      if (m && m.text) chatIngest(m, m.who === me);
     } catch { /* bad frame */ }
-  }, [dc.message]);
-  useEffect(() => { scrollRef.current?.scrollTo(0, 9e9); }, [msgs.length]);
+  }, [dc.message, me]);
+  return null;
+}
+
+function ClassChatPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const room = useRoomContext();
+  const { localParticipant } = useLocalParticipant();
+  const me = localParticipant?.identity ?? "me";
+  const msgs = useChatMsgs();
+  const [draft, setDraft] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // When the panel becomes visible, clear unread (student "saw" everything).
+  useEffect(() => { if (open) chatMarkRead(); }, [open]);
+  useEffect(() => { if (open) scrollRef.current?.scrollTo(0, 9e9); }, [msgs.length, open]);
   const send = (text: string, emoji = false) => {
     const t = text.trim(); if (!t || !room) return;
     const m: ChatMsg = { id: Math.random().toString(36).slice(2), who: me, text: t, ts: Date.now(), emoji };
-    setMsgs((s) => [...s.slice(-99), m]);
+    chatIngest(m, true);
     try { room.localParticipant.publishData(TX.encode(JSON.stringify(m)), { reliable: true, topic: "cg-chat" }); } catch { /* */ }
     setDraft("");
   };
@@ -281,11 +368,17 @@ function ChatPanelHost() {
 }
 function ChatToggleButton() {
   const [open, setOpen] = useChatOpen();
+  const unread = useChatUnread();
   return (
-    <button onClick={() => setOpen(!open)}
-      title={open ? "Close chat" : "Open chat"}
-      className={`rounded-full border px-3 py-1.5 text-lg transition ${open ? "border-brand-400 bg-brand-500/25" : "border-ink-700 bg-ink-900 hover:bg-ink-800"}`}>
+    <button onClick={() => { setOpen(!open); if (!open) chatMarkRead(); }}
+      title={open ? "Close chat" : unread > 0 ? `${unread} unread message${unread === 1 ? "" : "s"}` : "Open chat"}
+      className={`relative rounded-full border px-3 py-1.5 text-lg transition ${open ? "border-brand-400 bg-brand-500/25" : unread > 0 ? "border-rose-400 bg-rose-500/20 animate-pulse" : "border-ink-700 bg-ink-900 hover:bg-ink-800"}`}>
       💬
+      {unread > 0 && !open && (
+        <span className="absolute -right-1 -top-1 grid h-5 min-w-[20px] place-items-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white shadow ring-2 ring-ink-900">
+          {unread > 99 ? "99+" : unread}
+        </span>
+      )}
     </button>
   );
 }
@@ -623,6 +716,10 @@ export default function ClassV2Page() {
               <HandsRoster />
               <ReactionOverlay />
               <ChatPanelHost />
+              {/* Always-mounted chat receiver — feeds the module store so the
+               *  toggle badge + toast pop even when the panel is closed. */}
+              <ChatSink />
+              <ChatToastStack />
             </div>
 
             {/* Controls footer — mic / cam / screen + hand / chat / reactions,
