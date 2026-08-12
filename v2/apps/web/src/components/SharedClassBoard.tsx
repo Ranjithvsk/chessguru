@@ -38,6 +38,27 @@ export function useClassSetupOpen(): boolean {
   return v;
 }
 
+// Coach action bus — reset / stepBack / stepForward triggers from the footer
+// buttons rendered by ClassV2 flow through this. ClassV2 has no access to the
+// class-ws socket; module scope keeps the wiring flat.
+type ClassBoardAction = "reset" | "stepBack" | "stepForward";
+const _actionSubs = new Set<(a: ClassBoardAction) => void>();
+export function triggerClassBoardAction(a: ClassBoardAction) { _actionSubs.forEach((f) => f(a)); }
+
+// Cursor position (which move index students are currently seeing) — the
+// footer nav shows "3 / 12" so the coach knows where they are in the game.
+let _cursorInfo = { cursorIdx: 0, historyLen: 0 };
+const _cursorSubs = new Set<() => void>();
+function _publishCursor(cursorIdx: number, historyLen: number) {
+  _cursorInfo = { cursorIdx, historyLen };
+  _cursorSubs.forEach((f) => f());
+}
+export function useClassCursorInfo(): { cursorIdx: number; historyLen: number } {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((n) => n + 1); _cursorSubs.add(f); return () => { _cursorSubs.delete(f); }; }, []);
+  return _cursorInfo;
+}
+
 export default function SharedClassBoard(
   { room, userId, displayName, onClassEnded, intendedRole }: {
     room: string; userId?: string | null; displayName?: string | null;
@@ -115,8 +136,15 @@ export default function SharedClassBoard(
       if (cancelled) return;
       let msg: any;
       try { msg = JSON.parse(ev.data); } catch { return; }
-      if (msg.type === "state") { applyFen(msg.fen, msg.lastMove ?? null); setShapes(Array.isArray(msg.shapes) ? msg.shapes : []); }
-      else if (msg.type === "move") applyFen(msg.fen, msg.move);
+      if (msg.type === "state") {
+        applyFen(msg.fen, msg.lastMove ?? null);
+        setShapes(Array.isArray(msg.shapes) ? msg.shapes : []);
+        _publishCursor(Number(msg.cursorIdx ?? (Array.isArray(msg.history) ? msg.history.length : 0)), Array.isArray(msg.history) ? msg.history.length : 0);
+      }
+      else if (msg.type === "move") {
+        applyFen(msg.fen, msg.move);
+        _publishCursor(Number(msg.cursorIdx ?? (Array.isArray(msg.history) ? msg.history.length : 0)), Array.isArray(msg.history) ? msg.history.length : 0);
+      }
       else if (msg.type === "reset") applyFen(msg.fen, null);
       else if (msg.type === "annot") setShapes(Array.isArray(msg.shapes) ? msg.shapes : []);
       else if (msg.type === "role") {
@@ -186,6 +214,27 @@ export default function SharedClassBoard(
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     try { ws.send(JSON.stringify({ type: "reset" })); } catch { /* */ }  // server drops non-coach resets
   };
+  const sendStepBack = () => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try { ws.send(JSON.stringify({ type: "stepBack" })); } catch { /* */ }
+  };
+  const sendStepForward = () => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try { ws.send(JSON.stringify({ type: "stepForward" })); } catch { /* */ }
+  };
+  // Subscribe to the footer's action bus so coach's ← → / Reset clicks in
+  // ClassV2 reach us and go over the ws.
+  useEffect(() => {
+    const handle = (a: ClassBoardAction) => {
+      if (a === "reset") sendReset();
+      else if (a === "stepBack") sendStepBack();
+      else if (a === "stepForward") sendStepForward();
+    };
+    _actionSubs.add(handle);
+    return () => { _actionSubs.delete(handle); };
+  }, []);
   // Setup modal state now lives in the module (see setClassSetupOpen at top
   // of file) so ClassV2's footer button can open it. Local FEN/error still
   // in state because they're modal-local.

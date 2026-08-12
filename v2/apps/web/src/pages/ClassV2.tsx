@@ -16,7 +16,7 @@ import {
 import { Track, DataPacket_Kind } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
-import SharedClassBoard, { setClassSetupOpen } from "../components/SharedClassBoard";
+import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, useClassCursorInfo } from "../components/SharedClassBoard";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -366,6 +366,37 @@ function ChatPanelHost() {
   const [open, setOpen] = useChatOpen();
   return <ClassChatPanel open={open} onClose={() => setOpen(false)} />;
 }
+// Coach-only prev/next arrows through the game history + "3 / 12" indicator.
+// Non-destructive — walking back and forward keeps every move; playing a new
+// move from a rewound position truncates the "future" (like editor undo/redo).
+function CoachBoardNav() {
+  const { cursorIdx, historyLen } = useClassCursorInfo();
+  const canBack = cursorIdx > 0;
+  const canFwd  = cursorIdx < historyLen;
+  const label = historyLen === 0 ? "start" : `${cursorIdx} / ${historyLen}`;
+  return (
+    <div className="inline-flex items-center gap-1 rounded-full border border-ink-700 bg-ink-900 px-2 py-1 shadow">
+      <button
+        onClick={() => triggerClassBoardAction("stepBack")}
+        disabled={!canBack}
+        title="Previous move (←) — non-destructive; step forward again to return"
+        className="rounded-md px-2 py-0.5 text-sm text-white transition hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-30"
+      >
+        ←
+      </button>
+      <span className="px-1 font-mono text-[11px] tabular-nums text-ink-400">{label}</span>
+      <button
+        onClick={() => triggerClassBoardAction("stepForward")}
+        disabled={!canFwd}
+        title="Next move (→)"
+        className="rounded-md px-2 py-0.5 text-sm text-white transition hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-30"
+      >
+        →
+      </button>
+    </div>
+  );
+}
+
 function ChatToggleButton() {
   const [open, setOpen] = useChatOpen();
   const unread = useChatUnread();
@@ -789,6 +820,7 @@ export default function ClassV2Page() {
                 <HandRaiseButton />
                 <ChatToggleButton />
                 <ReactionsBar />
+                {role === "coach" && <CoachBoardNav />}
                 {role === "coach" && (
                   <button
                     onClick={() => setClassSetupOpen(true)}
@@ -796,6 +828,15 @@ export default function ClassV2Page() {
                     className="rounded-full border border-brand-500/50 bg-brand-500/20 px-3 py-1.5 text-sm font-semibold text-brand-100 hover:bg-brand-500/30"
                   >
                     📋 Setup
+                  </button>
+                )}
+                {role === "coach" && (
+                  <button
+                    onClick={() => { if (confirm("Reset board to the starting position for everyone?")) triggerClassBoardAction("reset"); }}
+                    title="Reset board to the starting position (destructive — clears the move list for everyone)"
+                    className="rounded-full border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm text-ink-100 hover:bg-ink-800"
+                  >
+                    ↺ Reset
                   </button>
                 )}
               </div>
