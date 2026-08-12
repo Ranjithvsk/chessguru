@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Navbar from "./components/Navbar";
 import StreakAtRiskBanner from "./components/StreakAtRiskBanner";
 import LiveClassBanner from "./components/LiveClassBanner";
+import HomeworkPendingBanner from "./components/HomeworkPendingBanner";
 import { api } from "./lib/api";
 
 export default function App() {
@@ -32,6 +33,7 @@ export default function App() {
         )}
         <LiveClassBanner />
         <StreakAtRiskBanner />
+        <HomeworkPendingBanner />
         <Outlet context={{ userId, rating: rating?.rating ?? 1500 }} />
       </main>
       {/* Global "📷 Scan chess position" FAB. Fixed bottom-left so it's
