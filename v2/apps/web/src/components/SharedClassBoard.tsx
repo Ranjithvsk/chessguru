@@ -25,13 +25,10 @@ function destsFromChess(game: Chess): Map<Key, Key[]> {
 }
 
 export default function SharedClassBoard(
-  { room, userId, displayName, onClassEnded, onFenChange }: {
+  { room, userId, displayName, onClassEnded }: {
     room: string; userId?: string | null; displayName?: string | null;
     /** Coach explicitly ended the class — parent should navigate away / show a toast. */
     onClassEnded?: (reason: string) => void;
-    /** Fires whenever the authoritative FEN changes. Lets a parent (e.g. ClassV2)
-     *  hoist the current position for features like "📸 Snap position". */
-    onFenChange?: (fen: string) => void;
   },
 ) {
   const [fen, setFen] = useState<string>(() => new Chess().fen());
@@ -41,9 +38,6 @@ export default function SharedClassBoard(
   const [shapes, setShapes] = useState<Array<{ orig: string; dest?: string; brush?: string }>>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const gameRef = useRef<Chess>(new Chess());
-  const onFenChangeRef = useRef(onFenChange);
-  useEffect(() => { onFenChangeRef.current = onFenChange; });
-  useEffect(() => { onFenChangeRef.current?.(fen); }, [fen]);
 
   // Server is truth: rebuild the local engine from its fen; if chess.js rejects
   // it, fall back to a fresh game so dests stop offering moves for a bad board.

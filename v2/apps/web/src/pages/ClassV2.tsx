@@ -275,196 +275,6 @@ function useChatOpen(): [boolean, (v: boolean) => void] {
   useEffect(() => { _chatSubs.add(setOpenLocal); return () => { _chatSubs.delete(setOpenLocal); }; }, []);
   return [open, setChatOpen];
 }
-
-// ─────────────────────────────────────────────────────────────────────
-// Part B batch 2 — coach moderation (mute-all, kick) + snap position.
-// Same DataChannel pattern as chat/hand/reactions: topic `cg-modctl` for
-// moderation events, coach broadcasts, everyone else subscribes.
-// ─────────────────────────────────────────────────────────────────────
-
-type ModCtlFrame =
-  | { type: "mute-all"; from: string }
-  | { type: "kicked"; target: string; from: string };
-
-// Tiny toast — module store so any inner component can push a toast without
-// prop-drilling. Auto-dismisses after 2.5s. NEVER pull in a toast library.
-type Toast = { id: string; text: string };
-let _toasts: Toast[] = [];
-const _toastSubs = new Set<(t: Toast[]) => void>();
-function pushToast(text: string) {
-  const id = Math.random().toString(36).slice(2);
-  _toasts = [..._toasts, { id, text }];
-  _toastSubs.forEach((f) => f(_toasts));
-  setTimeout(() => {
-    _toasts = _toasts.filter((t) => t.id !== id);
-    _toastSubs.forEach((f) => f(_toasts));
-  }, 2500);
-}
-function ToastHost() {
-  const [toasts, setToasts] = useState<Toast[]>(_toasts);
-  useEffect(() => { _toastSubs.add(setToasts); return () => { _toastSubs.delete(setToasts); }; }, []);
-  if (toasts.length === 0) return null;
-  return (
-    <div className="pointer-events-none absolute bottom-20 left-1/2 z-50 flex -translate-x-1/2 flex-col gap-2">
-      {toasts.map((t) => (
-        <div key={t.id} className="pointer-events-auto rounded-lg border border-ink-700 bg-ink-900/95 px-4 py-2 text-sm text-white shadow-2xl backdrop-blur">
-          {t.text}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// Kicked-overlay signal (module scoped so nested components can flip it).
-let _kickedSet = false;
-const _kickedSubs = new Set<(k: boolean) => void>();
-function setKicked(v: boolean) { _kickedSet = v; _kickedSubs.forEach((f) => f(v)); }
-function useKicked(): boolean {
-  const [v, setV] = useState(_kickedSet);
-  useEffect(() => { _kickedSubs.add(setV); return () => { _kickedSubs.delete(setV); }; }, []);
-  return v;
-}
-
-// Hoisted FEN store (SharedClassBoard is inside LiveKitRoom; coach control
-// buttons need to read the current FEN when Snap is clicked).
-let _liveFen = "";
-function setLiveFen(f: string) { _liveFen = f; }
-function getLiveFen(): string { return _liveFen; }
-
-// Coach's moderation controls — Mute All + Snap. Kick lives per-tile in
-// VideoRail overlay. This block only renders on the coach side.
-function CoachModControls({ room }: { room: string }) {
-  const roomCtx = useRoomContext();
-  const { localParticipant } = useLocalParticipant();
-  const me = localParticipant?.identity ?? "coach";
-  const doMuteAll = () => {
-    if (!roomCtx) return;
-    const frame: ModCtlFrame = { type: "mute-all", from: me };
-    try { roomCtx.localParticipant.publishData(TX.encode(JSON.stringify(frame)), { reliable: true, topic: "cg-modctl" }); } catch { /* */ }
-    pushToast("🔇 Muted all students");
-  };
-  const doSnap = async () => {
-    const fen = getLiveFen();
-    if (!fen) { pushToast("⚠ No board position yet"); return; }
-    try {
-      const r = await post<{ ok: boolean; id?: string }>(`/api/class/${encodeURIComponent(room)}/snap`, { fen });
-      if (r?.ok) pushToast("✅ Position saved");
-      else pushToast("⚠ Save failed");
-    } catch (err: any) {
-      pushToast(`⚠ Snap failed: ${err?.message || "error"}`);
-    }
-  };
-  return (
-    <>
-      <button onClick={doMuteAll}
-        title="Mute all students (mic only). Video is untouched."
-        className="rounded-full border border-ink-700 bg-ink-900 px-3 py-1.5 text-lg hover:bg-ink-800">
-        🔇
-      </button>
-      <button onClick={doSnap}
-        title="Snap current board position — saved to this class's snap album."
-        className="rounded-full border border-ink-700 bg-ink-900 px-3 py-1.5 text-lg hover:bg-ink-800">
-        📸
-      </button>
-      <Link to={`/class-v2/${encodeURIComponent(room)}/snaps`}
-        title="View saved snaps for this class"
-        className="rounded-full border border-ink-700 bg-ink-900 px-3 py-1.5 text-xs font-semibold text-ink-100 hover:bg-ink-800">
-        🗂 Snaps
-      </Link>
-    </>
-  );
-}
-
-// Every client subscribes to cg-modctl. Non-coach mutes on "mute-all", target
-// clients show a "you were removed" overlay on "kicked".
-function ModCtlListener({ role }: { role: "coach" | "student" }) {
-  const { localParticipant } = useLocalParticipant();
-  const me = localParticipant?.identity ?? "";
-  const dc = useDataChannel("cg-modctl");
-  useEffect(() => {
-    if (!dc.message) return;
-    try {
-      const raw = dc.message.payload instanceof Uint8Array ? RX.decode(dc.message.payload) : String(dc.message.payload);
-      const f = JSON.parse(raw) as ModCtlFrame;
-      if (f.type === "mute-all") {
-        // Coach ignores their own broadcast. Everyone else force-mutes mic.
-        if (role === "coach" || f.from === me) return;
-        try { localParticipant?.setMicrophoneEnabled(false); } catch { /* */ }
-        pushToast("🔇 Muted by coach");
-      } else if (f.type === "kicked") {
-        if (f.target === me) {
-          setKicked(true);
-        }
-      }
-    } catch { /* bad frame */ }
-  }, [dc.message, role, me, localParticipant]);
-  return null;
-}
-
-// Kicked-participant overlay — full-cover blocker + auto-nav after 2.5s.
-// LiveKit's own removeParticipant will also disconnect the socket; this just
-// gives the user a friendly "why" before the nav fires.
-function KickedOverlay() {
-  const kicked = useKicked();
-  const navigate = useNavigate();
-  useEffect(() => {
-    if (!kicked) return;
-    const t = setTimeout(() => navigate("/dashboard"), 2500);
-    return () => clearTimeout(t);
-  }, [kicked, navigate]);
-  if (!kicked) return null;
-  return (
-    <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center bg-ink-950/90 p-6 text-center">
-      <div className="pointer-events-auto space-y-3 rounded-2xl border border-rose-500/50 bg-ink-900 p-6 shadow-2xl">
-        <div className="text-4xl">🚪</div>
-        <div className="font-display text-xl text-white">You were removed by the coach</div>
-        <div className="text-xs text-ink-500">Redirecting to your dashboard…</div>
-      </div>
-    </div>
-  );
-}
-
-// Per-tile kick button — sits over each remote participant tile when the
-// viewer is the coach. Small ⤫, calls /api/livekit/kick + also fires a
-// cg-modctl `kicked` frame so the target shows the friendly overlay before
-// their LiveKit socket closes.
-function CoachKickOverlay({ room }: { room: string }) {
-  const roomCtx = useRoomContext();
-  const { localParticipant } = useLocalParticipant();
-  const participants = useParticipants();
-  const me = localParticipant?.identity ?? "";
-  const targets = participants.filter((p) => p.identity && p.identity !== me);
-  if (targets.length === 0) return null;
-  const kick = async (identity: string) => {
-    if (!confirm(`Remove ${identity} from the class?`)) return;
-    try {
-      // Broadcast the friendly notice first — target sees overlay, then the
-      // server-side removeParticipant closes their socket.
-      if (roomCtx) {
-        const frame: ModCtlFrame = { type: "kicked", target: identity, from: me };
-        try { roomCtx.localParticipant.publishData(TX.encode(JSON.stringify(frame)), { reliable: true, topic: "cg-modctl" }); } catch { /* */ }
-      }
-      await post(`/api/livekit/kick`, { room, identity });
-      pushToast(`⤫ Removed ${identity}`);
-    } catch (err: any) {
-      pushToast(`⚠ Kick failed: ${err?.message || "error"}`);
-    }
-  };
-  return (
-    <div className="pointer-events-none absolute inset-0 z-30">
-      <div className="pointer-events-auto absolute left-2 top-2 flex flex-wrap gap-1">
-        {targets.slice(0, 8).map((p) => (
-          <button key={p.identity}
-            onClick={() => kick(p.identity)}
-            title={`Remove ${p.identity} from the class`}
-            className="rounded-md bg-rose-600/90 px-2 py-0.5 text-[10px] font-bold text-white shadow hover:bg-rose-500">
-            ⤫ {p.identity.slice(0, 10)}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
 function ChatPanelHost() {
   const [open, setOpen] = useChatOpen();
   return <ClassChatPanel open={open} onClose={() => setOpen(false)} />;
@@ -797,7 +607,7 @@ export default function ClassV2Page() {
               className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-2"
               style={{ containerType: 'size' } as any}
             >
-              <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} onClassEnded={onClassEnded} onFenChange={setLiveFen} />
+              <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} onClassEnded={onClassEnded} />
               {endedMsg && (
                 <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center bg-ink-950/85 p-6 text-center">
                   <div className="pointer-events-auto space-y-3 rounded-2xl border border-rose-500/50 bg-ink-900 p-6 shadow-2xl">
@@ -813,10 +623,6 @@ export default function ClassV2Page() {
               <HandsRoster />
               <ReactionOverlay />
               <ChatPanelHost />
-              <ModCtlListener role={role} />
-              <KickedOverlay />
-              <ToastHost />
-              {role === "coach" && <CoachKickOverlay room={room} />}
             </div>
 
             {/* Controls footer — mic / cam / screen + hand / chat / reactions,
@@ -829,7 +635,6 @@ export default function ClassV2Page() {
                 <HandRaiseButton />
                 <ChatToggleButton />
                 <ReactionsBar />
-                {role === "coach" && <CoachModControls room={room} />}
               </div>
             </div>
           </div>
