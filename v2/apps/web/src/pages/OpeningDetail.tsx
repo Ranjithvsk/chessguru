@@ -8,6 +8,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { Chess } from "chess.js";
 import Board from "../components/Board";
 import type { Key } from "chessground/types";
@@ -23,6 +24,15 @@ import { activateOpening, deactivateOpening, isActivated } from "../lib/cards";
 import EngineCoach from "../components/EngineCoach";
 import { resolveStory, saveUserStory, speak, clearUserStory } from "../lib/userStories";
 import type { Opening } from "../lib/openings/types";
+import { api, get } from "../lib/api";
+
+const BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
+type MoveNoteMap = { slug: string; notes: Record<string, { note: string; authorName: string; updatedAt: string }>; pendingRequests: Record<string, number> };
+async function postJSON<T>(path: string, body?: unknown): Promise<T> {
+  const r = await fetch(`${BASE}${path}`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) });
+  if (!r.ok) throw new Error(`POST ${path} → ${r.status}`);
+  return r.json() as Promise<T>;
+}
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -225,26 +235,18 @@ export default function OpeningDetail() {
             keys: ← → step · Home/End jump · F flip
           </p>
 
-          {/* Move list */}
-          <div className="mt-3 rounded-lg border border-gray-100 bg-white p-3">
-            <div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-gray-500">Mainline</div>
-            <div className="flex flex-wrap gap-x-2 gap-y-1 font-mono text-xs">
-              {moves.map((san, i) => {
-                const moveNo = Math.floor(i / 2) + 1;
-                const isWhite = i % 2 === 0;
-                const isCritical = opening.criticalMoveNo != null && moveNo === opening.criticalMoveNo && !isWhite === false && (i % 2 === 0);
-                return (
-                  <button
-                    key={i}
-                    onClick={() => setPly(i + 1)}
-                    className={`rounded px-1 py-0.5 ${cur === i + 1 ? "bg-yellow-100 font-bold" : "hover:bg-gray-100"} ${isCritical ? "ring-1 ring-amber-400" : ""}`}
-                  >
-                    {isWhite ? `${moveNo}.` : ""}{san}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          {/* Move list — each move has a small "?" button that opens the
+           *  Move-note modal. Coach/owner can author notes on-demand; students
+           *  see the note if it exists or a "Request explanation" button
+           *  otherwise (Path C, owner ask 2026-08-12). */}
+          <MoveListWithNotes
+            opening={opening}
+            moves={moves}
+            cur={cur}
+            setPly={setPly}
+          />
+
+          {opening && <NotesSummary slug={opening.slug} />}
 
           <button
             onClick={handoffToTrainer}
