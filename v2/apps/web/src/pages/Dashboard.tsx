@@ -313,17 +313,23 @@ function HomeworkCard() {
           const pct = totalTargets ? Math.round((totalDone / totalTargets) * 100) : 0;
           const firstOpen = h.tasks.findIndex((t, i) => (h.progress?.[String(i)] ?? 0) < (t.kind === "puzzle_pack" ? (t.targetCount || 1) : 1));
           const nextTask = h.tasks[firstOpen] ?? h.tasks[0];
+          // Build the deep link:
+          //   * hw + hwTaskIdx → puzzle trainer enters "homework mode" (locked
+          //     theme, progress bar, POST advance on each solve). Owner
+          //     reported 2026-08-12 that solves weren't updating — root cause
+          //     was these two params missing from the URL, so the trainer
+          //     never knew it was in homework mode.
+          //   * rating → puzzle picker serves in this student's band
+          //     (snapshotted per-theme at assign time by the coach's one-click).
           const cta = nextTask?.kind === "puzzle_pack" && nextTask.theme
-            ? {
-                // Pass the per-theme rating in the URL so the puzzle picker
-                // serves puzzles in this student's own rating band (backend
-                // snapshot at assign time; coach one-click gives each
-                // student their weakest themes at their own rating).
-                label: `Solve ${nextTask.theme} puzzle`,
-                to: nextTask.targetRating
-                  ? `/?theme=${encodeURIComponent(nextTask.theme)}&rating=${nextTask.targetRating}`
-                  : `/?theme=${encodeURIComponent(nextTask.theme)}`,
-              }
+            ? (() => {
+                const params = new URLSearchParams();
+                params.set("theme", nextTask.theme);
+                if (nextTask.targetRating) params.set("rating", String(nextTask.targetRating));
+                params.set("hw", h._id);
+                params.set("hwTaskIdx", String(firstOpen >= 0 ? firstOpen : 0));
+                return { label: `Solve ${nextTask.theme} puzzle`, to: `/?${params.toString()}` };
+              })()
             : nextTask?.kind === "opening_revision" && nextTask.openingSlug
               ? { label: "Revise opening", to: `/study/openings/${nextTask.openingSlug}` }
               : { label: "Continue", to: "/study" };
