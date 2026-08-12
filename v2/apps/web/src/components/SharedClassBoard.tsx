@@ -36,8 +36,25 @@ export default function SharedClassBoard(
   const [dests, setDests] = useState<Map<Key, Key[]>>(() => destsFromChess(new Chess()));
   const [connected, setConnected] = useState(false);
   const [shapes, setShapes] = useState<Array<{ orig: string; dest?: string; brush?: string }>>([]);
+  // Live remote cursor — coach's cursor as seen by students. Normalized 0..1
+  // relative to the board square. Server never echoes to sender, so this is
+  // only meaningful on the student side.
+  const [remotePointer, setRemotePointer] = useState<{ x: number; y: number } | null>(null);
+  // Client role — set from the server's `role` frame after hello resolves.
+  // Only the coach sends pointer frames; server drops any student pointer.
+  const [role, setRole] = useState<"coach" | "student" | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const gameRef = useRef<Chess>(new Chess());
+  const boardWrapRef = useRef<HTMLDivElement | null>(null);
+  const lastPointerSentAt = useRef<number>(0);
+  const pointerOffTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Auto-hide remote pointer after 2s of silence — catches coach navigating
+  // away without a clean "pointer-off" (page close, network drop).
+  useEffect(() => {
+    if (!remotePointer) return;
+    const t = setTimeout(() => setRemotePointer(null), 2000);
+    return () => clearTimeout(t);
+  }, [remotePointer]);
 
   // Server is truth: rebuild the local engine from its fen; if chess.js rejects
   // it, fall back to a fresh game so dests stop offering moves for a bad board.
@@ -76,6 +93,9 @@ export default function SharedClassBoard(
       else if (msg.type === "move") applyFen(msg.fen, msg.move);
       else if (msg.type === "reset") applyFen(msg.fen, null);
       else if (msg.type === "annot") setShapes(Array.isArray(msg.shapes) ? msg.shapes : []);
+      else if (msg.type === "role") setRole(msg.role === "coach" ? "coach" : "student");
+      else if (msg.type === "pointer") setRemotePointer({ x: Number(msg.x) || 0, y: Number(msg.y) || 0 });
+      else if (msg.type === "pointer-off") setRemotePointer(null);
       else if (msg.type === "classEnded") { onClassEnded?.(String(msg.reason || "coach_left")); }
     };
     return () => {
@@ -85,6 +105,41 @@ export default function SharedClassBoard(
       wsRef.current = null;
     };
   }, [room, userId, displayName]);
+
+  // Throttled coach-cursor broadcast (~30Hz) so students see where the coach
+  // is gesturing during explanation. Silent no-op for students (server would
+  // drop it anyway, but skipping here avoids wasted bandwidth).
+  const sendPointer = (nx: number, ny: number) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (role !== "coach") return;
+    const now = performance.now();
+    if (now - lastPointerSentAt.current < 33) return;
+    lastPointerSentAt.current = now;
+    try { ws.send(JSON.stringify({ type: "pointer", x: nx, y: ny })); } catch { /* */ }
+  };
+  const sendPointerOff = () => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (role !== "coach") return;
+    try { ws.send(JSON.stringify({ type: "pointer-off" })); } catch { /* */ }
+  };
+  const onBoardPointerMove = (ev: React.PointerEvent<HTMLDivElement>) => {
+    if (role !== "coach") return;
+    const el = boardWrapRef.current; if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const x = (ev.clientX - rect.left) / rect.width;
+    const y = (ev.clientY - rect.top)  / rect.height;
+    if (x < 0 || x > 1 || y < 0 || y > 1) return;
+    sendPointer(x, y);
+    if (pointerOffTimer.current) clearTimeout(pointerOffTimer.current);
+    pointerOffTimer.current = setTimeout(sendPointerOff, 400);
+  };
+  const onBoardPointerLeave = () => {
+    if (role !== "coach") return;
+    if (pointerOffTimer.current) { clearTimeout(pointerOffTimer.current); pointerOffTimer.current = null; }
+    sendPointerOff();
+  };
 
   const sendMove = (from: string, to: string) => {
     const ws = wsRef.current;
@@ -111,6 +166,7 @@ export default function SharedClassBoard(
   // back to `min(100vw, 100vh - chrome)` on browsers without cqi/cqb.
   return (
     <div
+      ref={boardWrapRef}
       className="relative mx-auto"
       style={{
         containerType: 'size',
@@ -118,6 +174,8 @@ export default function SharedClassBoard(
         width: 'min(100cqi, 100cqb)',
         aspectRatio: '1',
       } as any}
+      onPointerMove={onBoardPointerMove}
+      onPointerLeave={onBoardPointerLeave}
     >
       <Board
         fen={fen}
@@ -129,6 +187,22 @@ export default function SharedClassBoard(
         shapes={shapes as any}
         onShapesChange={(s) => sendAnnot(s as any)}
       />
+      {/* Coach's live cursor — students see a soft-glow amber dot at the
+       *  normalized position. Coach never sees their own (server doesn't
+       *  echo). pointer-events-none so it can't block board interactions. */}
+      {remotePointer && role !== "coach" && (
+        <div
+          className="pointer-events-none absolute z-20"
+          style={{
+            left: `${remotePointer.x * 100}%`,
+            top:  `${remotePointer.y * 100}%`,
+            transform: 'translate(-50%, -50%)',
+          }}
+          aria-hidden
+        >
+          <div className="h-5 w-5 rounded-full bg-amber-300/80 shadow-[0_0_20px_6px_rgba(252,211,77,0.55)] ring-2 ring-amber-100/90" />
+        </div>
+      )}
       <button
         onClick={sendReset}
         title="Reset board — coach only"
