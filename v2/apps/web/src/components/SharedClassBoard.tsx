@@ -151,6 +151,26 @@ export default function SharedClassBoard(
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     try { ws.send(JSON.stringify({ type: "reset" })); } catch { /* */ }  // server drops non-coach resets
   };
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [setupFen, setSetupFen] = useState<string>("");
+  const [setupErr, setSetupErr] = useState<string | null>(null);
+  // Coach clicks "📋 Setup" → paste a FEN → validate locally with chess.js →
+  // send to server which broadcasts a new state to every client. Coach-only
+  // (button is only rendered for coach), server is also coach-gated.
+  const openSetup = () => {
+    setSetupFen(gameRef.current.fen());   // pre-fill with current position for convenience
+    setSetupErr(null);
+    setSetupOpen(true);
+  };
+  const applySetup = (fenStr: string) => {
+    const s = (fenStr || "").trim();
+    if (!s) { setSetupErr("Paste a FEN string first."); return; }
+    try { new Chess(s); } catch { setSetupErr("That's not a valid FEN."); return; }
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) { setSetupErr("Not connected. Retry in a moment."); return; }
+    try { ws.send(JSON.stringify({ type: "loadFen", fen: s })); } catch { /* */ }
+    setSetupOpen(false);
+  };
   const sendAnnot = (next: Array<{ orig: string; dest?: string; brush?: string }>) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -210,6 +230,68 @@ export default function SharedClassBoard(
       >
         ↺
       </button>
+      {role === "coach" && (
+        <button
+          onClick={openSetup}
+          title="Set up position — paste a FEN or use the Board Editor to scan from a photo"
+          className="absolute left-10 top-1.5 rounded-md bg-black/55 px-2 py-1 text-xs text-white/90 backdrop-blur hover:bg-black/75"
+        >
+          📋 Setup
+        </button>
+      )}
+      {setupOpen && role === "coach" && (
+        <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center p-4">
+          <div className="pointer-events-auto w-full max-w-md space-y-3 rounded-xl border border-ink-700 bg-ink-900/95 p-4 shadow-2xl backdrop-blur" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <div className="font-display text-sm font-bold text-white">Set up position</div>
+              <button onClick={() => setSetupOpen(false)} className="text-lg leading-none text-ink-400 hover:text-white">×</button>
+            </div>
+            <textarea
+              value={setupFen}
+              onChange={(e) => { setSetupFen(e.target.value); setSetupErr(null); }}
+              rows={3}
+              spellCheck={false}
+              placeholder="Paste a FEN, e.g. r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3"
+              className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 font-mono text-[11px] text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none"
+            />
+            {setupErr && <div className="text-xs text-rose-400">{setupErr}</div>}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => applySetup(setupFen)}
+                className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-400"
+              >
+                Load on board
+              </button>
+              <button
+                onClick={() => applySetup(new Chess().fen())}
+                className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-1.5 text-xs text-ink-100 hover:bg-ink-700"
+                title="Starting position (same as ↺)"
+              >
+                Start
+              </button>
+              <button
+                onClick={() => applySetup("8/8/8/8/8/8/8/8 w - - 0 1")}
+                className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-1.5 text-xs text-ink-100 hover:bg-ink-700"
+                title="Empty board — useful for teaching from a diagram"
+              >
+                Empty
+              </button>
+              <a
+                href="/v2/board-editor"
+                target="_blank"
+                rel="noopener"
+                className="ml-auto rounded-lg border border-brand-500/50 bg-brand-500/10 px-3 py-1.5 text-xs font-semibold text-brand-200 hover:bg-brand-500/20"
+                title="Open Board Editor in a new tab — scan from photo or drag pieces; copy the FEN back here"
+              >
+                📷 Board Editor →
+              </a>
+            </div>
+            <div className="text-[10px] text-ink-500">
+              Tip: get FENs from Lichess (📋 in analysis), Chess.com (Share → FEN), or the Board Editor's Copy button.
+            </div>
+          </div>
+        </div>
+      )}
       <span
         className={`absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full ${connected ? "bg-emerald-400" : "bg-ink-500"}`}
         title={connected ? "Board synced" : "Board offline"}

@@ -48,6 +48,7 @@ type ClientFrame =
   | { type: "hello"; coachToken?: string; userId?: string; displayName?: string }
   | { type: "move"; move: Move }
   | { type: "reset" }
+  | { type: "loadFen"; fen: string }        // coach only — set the board to an arbitrary position
   | { type: "lock"; locked: boolean }       // coach only — student moves are dropped when true
   | { type: "takeback" }                    // coach only — pops the last move
   | { type: "annot"; shapes: Shape[] }      // arrows/circles — anyone can annotate
@@ -271,6 +272,30 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       if (!isCoach()) return;                            // coach-gated to prevent accidental reset by a student
       room.fen = START_FEN; room.lastMove = null; room.history = [];
       broadcast(room, { type: "reset", fen: room.fen, participants: room.clients.size, locked: room.locked });
+      return;
+    }
+
+    if (frame.type === "loadFen") {
+      // Coach-only: replace the board with an arbitrary starting position (for
+      // teaching endgames, tactics, or a paste-from-Lichess/Chess.com position).
+      // Owner-asked 2026-08-12 for the ability to set up positions during class.
+      // History is cleared — the loaded FEN becomes the new base position; moves
+      // played from here go into a fresh history[] so takeback stops at the setup.
+      if (!isCoach()) return;
+      let cleanFen: string;
+      try {
+        const c = new Chess(frame.fen);   // constructor validates + normalizes
+        cleanFen = c.fen();
+      } catch {
+        // Bad FEN — silently ignore rather than crash the room. Coach's modal
+        // should already have chess.js-validated it client-side too.
+        return;
+      }
+      room.fen = cleanFen;
+      room.lastMove = null;
+      room.history = [];
+      room.shapes = [];    // stale arrows/circles from the previous position are meaningless
+      broadcast(room, { type: "state", fen: room.fen, lastMove: null, history: [], participants: room.clients.size, locked: room.locked, shapes: [] });
       return;
     }
 
