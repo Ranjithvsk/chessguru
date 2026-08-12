@@ -43,9 +43,27 @@ import { Injectable } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import sharp from "sharp";
+import { existsSync, writeFile, mkdir } from "fs";
+import path from "path";
 import { embedImageDinov2, DINOV2_EMBEDDING_DIM } from "../lib/dinovImage";
 import { classifyBatch as chessClassifyBatch, classifyBatchFromCHW as chessClassifyBatchFromCHW, CHESS_CLASSIFIER_VERSION } from "../lib/chessClassifier";
 import { classifyBatchV4, classifyBatchV4FromCHW, tilesFromBoardPixels, repairForLegalFen, CHESS_CLASSIFIER_V4_VERSION } from "../lib/chessClassifierV4";
+
+/** Persist every classify-board request's input PNG to disk under a
+ *  timestamped name. Failing scans can then be re-fetched + debugged
+ *  offline. Fails silently -- must never break the classify response
+ *  path. Log dir provisioned by ops (chown ubuntu:ubuntu). */
+const VISION_LOG_DIR = process.env.VISION_LOG_DIR ?? "/var/lib/chessguru/vision-log";
+function logScanImage(pngBuf: Buffer, tag: string): void {
+  try {
+    if (!existsSync(VISION_LOG_DIR)) {
+      mkdir(VISION_LOG_DIR, { recursive: true }, () => {});
+    }
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const name = `${ts}-${tag}.png`;
+    writeFile(path.join(VISION_LOG_DIR, name), pngBuf, () => {});
+  } catch { /* silent */ }
+}
 
 export type PieceLetter = "P" | "N" | "B" | "R" | "Q" | "K";
 export type PieceColor = "w" | "b";
@@ -222,6 +240,7 @@ export class VisionService {
       throw new Error("board png out of range (need 500-2MB base64)");
     }
     const boardBuf = Buffer.from(boardB64, "base64");
+    logScanImage(boardBuf, "v3-nn");
     const meta = await sharp(boardBuf).metadata();
     if (!meta.width || !meta.height) throw new Error("unreadable board image");
     // Resize to a canonical 480x480 so per-square math is stable.
@@ -281,6 +300,7 @@ export class VisionService {
       throw new Error("board png out of range (need 500-2MB base64)");
     }
     const boardBuf = Buffer.from(boardB64, "base64");
+    logScanImage(boardBuf, "v2");
     // FAST-PATH preprocessing: single sharp() call decodes + resizes the
     // whole board to 1792x1792 raw RGB, then tilesFromBoardPixels shuffles
     // bytes into 64 pre-normalized CHW tensors in pure JS. Cheaper than
@@ -343,6 +363,7 @@ export class VisionService {
       throw new Error("board png out of range (need 500-2MB base64)");
     }
     const boardBuf = Buffer.from(boardB64, "base64");
+    logScanImage(boardBuf, "v4");
     // Fast path: single sharp call to produce a 1792×1792 raw RGB buffer
     // (8×224 for the model's per-tile input size). Then slice into 64
     // 224×224 tiles in pure JS. Beats the previous 64-subprocess approach

@@ -16,6 +16,7 @@
 // button in the UI re-runs the FEN build with rows reversed.
 
 import { classifyPiece, type PieceType } from "./pieceClassifier";
+import { warpToCanonicalBoard } from "./boardWarp";
 
 export type SquareState = "empty" | "white" | "black";
 /** Two rendering conventions the detector handles:
@@ -467,7 +468,24 @@ export function gridToFen(grid: SquareState[][], types?: (PieceType | null)[][])
  *  bundled Lichess-default (cburnett) SVGs. */
 export async function detectPositionFromImage(src: string | Blob): Promise<DetectResult & { autoDetected: boolean; autoScore: number | null }> {
   const img = await loadImage(src);
-  const { canvas, auto, score } = detectAndCrop(img);
+  // Try full perspective warp via OpenCV.js first -- handles phone photos,
+  // tilted screenshots, book pages with page background. If it can't find
+  // a plausible board, falls back to the heuristic detectAndCrop path
+  // (which handles clean chessground/lichess screenshots well).
+  const warped = await warpToCanonicalBoard(img).catch(() => null);
+  let canvas: HTMLCanvasElement;
+  let auto: boolean;
+  let score: number | null;
+  if (warped) {
+    canvas = warped.canvas;
+    auto = true;
+    score = 999; // sentinel: sourced from OpenCV warp
+  } else {
+    const legacy = detectAndCrop(img);
+    canvas = legacy.canvas;
+    auto = legacy.auto;
+    score = legacy.score;
+  }
   const { grid, confidence, renderMode } = classifyGrid(canvas);
   // Classify piece TYPES for every occupied square. Multiply the two
   // confidences (occupancy × type) so downstream UI can flag squares
