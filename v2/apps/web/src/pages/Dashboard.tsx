@@ -288,7 +288,7 @@ function StudentMaterialsCard() {
 // the right theme pre-filtered so the solve counts against the task.
 type StudentHomework = {
   _id: string; title: string;
-  tasks: Array<{ kind: "puzzle_pack"|"study_revision"|"opening_revision"; theme?: string; targetCount?: number; studyType?: string; openingSlug?: string }>;
+  tasks: Array<{ kind: "puzzle_pack"|"study_revision"|"opening_revision"; theme?: string; targetCount?: number; targetRating?: number; studyType?: string; openingSlug?: string }>;
   dueAt: string; assignedAt: string;
   status: "assigned"|"in_progress"|"completed";
   progress: Record<string, number>;
@@ -314,7 +314,16 @@ function HomeworkCard() {
           const firstOpen = h.tasks.findIndex((t, i) => (h.progress?.[String(i)] ?? 0) < (t.kind === "puzzle_pack" ? (t.targetCount || 1) : 1));
           const nextTask = h.tasks[firstOpen] ?? h.tasks[0];
           const cta = nextTask?.kind === "puzzle_pack" && nextTask.theme
-            ? { label: `Solve ${nextTask.theme} puzzle`, to: `/?theme=${nextTask.theme}` }
+            ? {
+                // Pass the per-theme rating in the URL so the puzzle picker
+                // serves puzzles in this student's own rating band (backend
+                // snapshot at assign time; coach one-click gives each
+                // student their weakest themes at their own rating).
+                label: `Solve ${nextTask.theme} puzzle`,
+                to: nextTask.targetRating
+                  ? `/?theme=${encodeURIComponent(nextTask.theme)}&rating=${nextTask.targetRating}`
+                  : `/?theme=${encodeURIComponent(nextTask.theme)}`,
+              }
             : nextTask?.kind === "opening_revision" && nextTask.openingSlug
               ? { label: "Revise opening", to: `/study/openings/${nextTask.openingSlug}` }
               : { label: "Continue", to: "/study" };

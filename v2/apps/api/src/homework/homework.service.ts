@@ -20,7 +20,18 @@ import { randomBytes } from "crypto";
 
 export type HomeworkKind = "puzzle_pack" | "study_revision" | "opening_revision";
 
-export interface PuzzlePackTask { kind: "puzzle_pack"; theme: string; targetCount: number; }
+export interface PuzzlePackTask {
+  kind: "puzzle_pack";
+  theme: string;
+  targetCount: number;
+  /** Snapshotted at assign time from userperfs.themes[theme].gl.r (or the
+   *  student's overall puzzle rating when we don't have per-theme data). The
+   *  student's homework CTA passes this in the URL so the puzzle picker
+   *  serves puzzles in a ±100 band — each student's homework auto-scales
+   *  to their level. Owner ask 2026-08-12: "assign puzzles in their students
+   *  rating range". */
+  targetRating?: number;
+}
 export interface StudyRevisionTask { kind: "study_revision"; studyType: string; }
 export interface OpeningRevisionTask { kind: "opening_revision"; openingSlug: string; }
 export type HomeworkTask = PuzzlePackTask | StudyRevisionTask | OpeningRevisionTask;
@@ -137,9 +148,16 @@ export class HomeworkService {
     for (const s of students) {
       const sid = String(s._id);
       if (skip.has(sid)) { skipped++; continue; }
-      const themes = await this.pickWeakThemesForStudent(sid);
+      const { themes, overallRating } = await this.pickWeakThemesForStudent(sid);
       const tasks: HomeworkTask[] = [
-        ...themes.map((t) => ({ kind: "puzzle_pack" as const, theme: t, targetCount: 5 })),
+        ...themes.map((t) => ({
+          kind: "puzzle_pack" as const,
+          theme: t.theme,
+          targetCount: 5,
+          // Prefer per-theme rating; fall back to the student's overall puzzle
+          // rating so brand-new students still get puzzles near their level.
+          targetRating: Math.round(t.rating ?? overallRating ?? 1500),
+        })),
         { kind: "opening_revision" as const, openingSlug: DEFAULT_OPENING },
       ];
       docs.push({
@@ -154,9 +172,19 @@ export class HomeworkService {
   }
 
   /** Rank the student's per-theme ratings, return the 5 weakest with ≥3 solves.
-   *  Falls back to the default themes when there isn't enough data. */
-  private async pickWeakThemesForStudent(userId: string): Promise<string[]> {
-    const perf: any = await this.conn.db!.collection("userperfs").findOne({ _id: userId as any }, { projection: { themes: 1 } });
+   *  Falls back to the default themes when there isn't enough data. Also
+   *  returns the student's overall puzzle rating so callers can bake it into
+   *  tasks that don't have a per-theme rating available. */
+  private async pickWeakThemesForStudent(userId: string): Promise<{
+    themes: Array<{ theme: string; rating: number | null }>;
+    overallRating: number | null;
+  }> {
+    const [perf, userRating]: any[] = await Promise.all([
+      this.conn.db!.collection("userperfs").findOne({ _id: userId as any }, { projection: { themes: 1 } }),
+      // The user's overall puzzle rating — stored on the user doc for fast reads
+      this.conn.db!.collection("users").findOne({ _id: userId as any }, { projection: { puzzleRating: 1, rating: 1 } }),
+    ]);
+    const overallRating = (userRating?.puzzleRating ?? userRating?.rating ?? null) as number | null;
     const themes = perf?.themes || {};
     const rows: Array<{ theme: string; rating: number; nb: number }> = [];
     for (const [k, v] of Object.entries<any>(themes)) {
@@ -164,9 +192,13 @@ export class HomeworkService {
       if (v.nb < 3) continue;
       rows.push({ theme: k, rating: v.gl.r, nb: v.nb });
     }
-    if (rows.length < 5) return DEFAULT_THEMES;
+    if (rows.length < 5) {
+      // Not enough per-theme data — fall back to a curated tactical mix.
+      // Rating null on each = client will use overallRating for the URL band.
+      return { themes: DEFAULT_THEMES.map((t) => ({ theme: t, rating: null })), overallRating };
+    }
     rows.sort((a, b) => a.rating - b.rating);   // ascending: weakest first
-    return rows.slice(0, 5).map((r) => r.theme);
+    return { themes: rows.slice(0, 5).map((r) => ({ theme: r.theme, rating: r.rating })), overallRating };
   }
 
   /** Coach/owner view: their homework assignments across all students. */
