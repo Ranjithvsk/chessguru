@@ -193,12 +193,12 @@ function PositionEditorModal(props: {
     // Escape instead — safer for a stateful editor anyway (backdrop clicks
     // eat unsaved work).
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-black/70 backdrop-blur-sm p-4 sm:items-center"
       onKeyDown={(e) => { if (e.key === "Escape") cancel(); }}
       tabIndex={-1}
     >
       <div
-        className="w-full max-w-3xl overflow-hidden rounded-2xl border border-ink-700 bg-ink-900 shadow-2xl"
+        className="my-auto w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-2xl border border-ink-700 bg-ink-900 shadow-2xl"
       >
         {/* header */}
         <div className="flex items-center justify-between border-b border-ink-800 bg-ink-800/60 px-4 py-2.5">
@@ -306,19 +306,38 @@ function PositionEditorModal(props: {
   );
 }
 
+// Map FEN char → chessground piece class (piece.<type>.<color>) so the palette
+// icons are the SAME cburnett SVGs that render on the board. No more unicode
+// vs SVG mismatch (owner 2026-08-12: "edit piece make it same like pieces on
+// board"). The CSS lives in chessground.cburnett.css imported by index.css.
+const PIECE_TYPE_CLASS: Record<string, string> = {
+  p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king",
+};
+function fenCharToPieceClass(p: string): string {
+  const color = p === p.toUpperCase() ? "white" : "black";
+  const type = PIECE_TYPE_CLASS[p.toLowerCase()];
+  return `${type} ${color}`;
+}
 function PalettePieceBtn({ p, selected, onClick }: { p: string; selected: boolean; onClick: () => void }) {
   const isWhite = p === p.toUpperCase();
   return (
     <button
       onClick={onClick}
       title={PIECE_LABEL[p]}
-      className={`grid aspect-square place-items-center rounded-lg border text-3xl leading-none transition ${
+      className={`relative grid aspect-square place-items-center rounded-lg border transition ${
         selected
-          ? "border-brand-400 bg-brand-500/25 shadow-inner shadow-brand-500/40 ring-1 ring-brand-300"
-          : "border-ink-700 bg-ink-800 hover:bg-ink-700"
-      } ${isWhite ? "text-white" : "text-ink-950 bg-ink-100/95 hover:bg-white"}`}
+          ? "border-brand-400 bg-brand-500/25 shadow-inner shadow-brand-500/40 ring-2 ring-brand-300"
+          : "border-ink-700 hover:bg-ink-700"
+      } ${isWhite ? "bg-ink-800" : "bg-ink-100/90 hover:bg-white"}`}
     >
-      <span className="drop-shadow-sm">{PIECE_UNICODE[p]}</span>
+      {/* Reuse chessground's own cburnett CSS by wrapping in .cg-wrap + <piece class>.
+       *  Matches exactly what renders on the board next to us. */}
+      <div className="cg-wrap" style={{ width: "82%", height: "82%" }}>
+        <piece
+          className={fenCharToPieceClass(p)}
+          style={{ position: "relative", display: "block", width: "100%", height: "100%", backgroundSize: "contain", backgroundRepeat: "no-repeat", backgroundPosition: "center" } as any}
+        />
+      </div>
     </button>
   );
 }
