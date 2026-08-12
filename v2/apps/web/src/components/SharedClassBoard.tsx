@@ -236,8 +236,10 @@ function PositionEditorModal(props: {
           <div className="space-y-3">
             <div>
               <div className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-ink-500">Piece — tap then tap a square</div>
-              <div className="grid grid-cols-6 gap-1.5">
+              <div className="flex flex-wrap justify-center gap-1.5">
                 {whiteRow.map((p) => <PalettePieceBtn key={p} p={p} selected={selected === p} onClick={() => setSelected(p)} />)}
+              </div>
+              <div className="mt-1.5 flex flex-wrap justify-center gap-1.5">
                 {blackRow.map((p) => <PalettePieceBtn key={p} p={p} selected={selected === p} onClick={() => setSelected(p)} />)}
               </div>
               <button
@@ -324,15 +326,17 @@ function PalettePieceBtn({ p, selected, onClick }: { p: string; selected: boolea
     <button
       onClick={onClick}
       title={PIECE_LABEL[p]}
-      className={`relative grid aspect-square place-items-center rounded-lg border transition ${
+      className={`relative grid h-11 w-11 place-items-center rounded-lg border transition ${
         selected
           ? "border-brand-400 bg-brand-500/25 shadow-inner shadow-brand-500/40 ring-2 ring-brand-300"
           : "border-ink-700 hover:bg-ink-700"
       } ${isWhite ? "bg-ink-800" : "bg-ink-100/90 hover:bg-white"}`}
     >
       {/* Reuse chessground's own cburnett CSS by wrapping in .cg-wrap + <piece class>.
-       *  Matches exactly what renders on the board next to us. */}
-      <div className="cg-wrap" style={{ width: "82%", height: "82%" }}>
+       *  Fixed 40×40 so palette pieces render at ~the same visual size as the
+       *  40-45px pieces on the mini editor board next to us — owner asked to
+       *  match sizes so the palette doesn't look "extra size". */}
+      <div className="cg-wrap" style={{ width: "40px", height: "40px" }}>
         <piece
           className={fenCharToPieceClass(p)}
           style={{ position: "relative", display: "block", width: "100%", height: "100%", backgroundSize: "contain", backgroundRepeat: "no-repeat", backgroundPosition: "center" } as any}
