@@ -78,9 +78,60 @@ function orderCorners(pts: Array<{ x: number; y: number }>): Array<{ x: number; 
   return [tl, tr, br, bl];
 }
 
-/** Find the largest 4-corner quadrilateral in the image (the chess board)
- *  and warp it to a canonical 480x480 square. Returns null when detection
- *  fails so callers can use a naive-crop fallback. */
+/** Score a candidate quadrilateral by how "chess-board-like" its interior
+ *  is. Warp preview at 96×96, sample the 8×8 grid at cell centres, learn
+ *  dark/light means from alternating positions, count how many samples
+ *  land on the correct side of the midpoint. 64 = perfect chess board;
+ *  ≤ 45 = probably a false positive (page block, text region, etc.).
+ *  Uses this instead of raw contour area so page-sized false quadrilateral
+ *  don't win over the real board when both are 4-sided contours. */
+function checkerScore(cv: any, sourceMat: any, corners: Array<{ x: number; y: number }>): number {
+  const OUT = 96;
+  try {
+    const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2,
+      [corners[0]!.x, corners[0]!.y, corners[1]!.x, corners[1]!.y,
+       corners[2]!.x, corners[2]!.y, corners[3]!.x, corners[3]!.y]);
+    const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, OUT, 0, OUT, OUT, 0, OUT]);
+    const M = cv.getPerspectiveTransform(srcPts, dstPts);
+    const warped = new cv.Mat();
+    cv.warpPerspective(sourceMat, warped, M, new cv.Size(OUT, OUT), cv.INTER_LINEAR);
+    const gray = new cv.Mat();
+    cv.cvtColor(warped, gray, cv.COLOR_RGBA2GRAY);
+    const cell = OUT / 8;
+    const samples: number[] = new Array(64);
+    let lightSum = 0, lightN = 0, darkSum = 0, darkN = 0;
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const sx = Math.round(c * cell + cell / 2);
+        const sy = Math.round(r * cell + cell / 2);
+        const v = gray.ucharPtr(sy, sx)[0];
+        samples[r * 8 + c] = v;
+        if ((r + c) % 2 === 0) { lightSum += v; lightN++; }
+        else { darkSum += v; darkN++; }
+      }
+    }
+    const lightMean = lightSum / Math.max(1, lightN);
+    const darkMean = darkSum / Math.max(1, darkN);
+    srcPts.delete(); dstPts.delete(); M.delete(); warped.delete(); gray.delete();
+    if (Math.abs(lightMean - darkMean) < 12) return 0;   // no chess-like contrast
+    const mid = (lightMean + darkMean) / 2;
+    let correct = 0;
+    for (let i = 0; i < 64; i++) {
+      const r = Math.floor(i / 8), c = i % 8;
+      const expectLight = (r + c) % 2 === 0;
+      const isLight = samples[i]! >= mid;
+      if (isLight === expectLight) correct++;
+    }
+    return correct;
+  } catch {
+    return 0;
+  }
+}
+
+/** Find the chess board in the image and warp it to a canonical 480x480
+ *  square. Selects among 4-corner candidates by CHECKER-PATTERN score
+ *  (via checkerScore) so page-sized or text-block false positives don't
+ *  win over the real board. Returns null when nothing scores well enough. */
 export async function warpToCanonicalBoard(source: HTMLImageElement | HTMLCanvasElement): Promise<BoardWarpResult | null> {
   let cv: any;
   try {
@@ -121,30 +172,57 @@ export async function warpToCanonicalBoard(source: HTMLImageElement | HTMLCanvas
 
     cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-    let bestCorners: Array<{ x: number; y: number }> | null = null;
-    let bestArea = 0;
-    const minArea = 0.08 * workW * workH;   // ignore tiny contours
+    // Collect ALL plausibly-sized 4-corner candidates then rank by
+    // checker-pattern score (not by raw area). Text blocks / whole-page
+    // rectangles score < 45; a real chess board scores 55+.
+    const candidates: Array<{ corners: Array<{ x: number; y: number }>; area: number }> = [];
+    const minArea = 0.03 * workW * workH;
+    const maxArea = 0.95 * workW * workH;   // reject whole-image quads
 
     for (let i = 0; i < contours.size(); i++) {
       const cnt = contours.get(i);
       const area = cv.contourArea(cnt);
-      if (area < minArea) { cnt.delete(); continue; }
+      if (area < minArea || area > maxArea) { cnt.delete(); continue; }
       const peri = cv.arcLength(cnt, true);
       const approx = new cv.Mat();
       cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
-      if (approx.rows === 4 && area > bestArea) {
+      if (approx.rows === 4) {
         const pts: Array<{ x: number; y: number }> = [];
         for (let j = 0; j < 4; j++) {
           pts.push({ x: approx.data32S[j * 2]!, y: approx.data32S[j * 2 + 1]! });
         }
-        bestArea = area;
-        bestCorners = pts;
+        // Reject strongly non-square candidates (aspect ratio outside 0.5-2.0
+        // is not a chess board even under perspective distortion).
+        const xs = pts.map((p) => p.x); const ys = pts.map((p) => p.y);
+        const bw = Math.max(...xs) - Math.min(...xs);
+        const bh = Math.max(...ys) - Math.min(...ys);
+        const ar = bw / Math.max(1, bh);
+        if (ar >= 0.5 && ar <= 2.0) {
+          candidates.push({ corners: pts, area });
+        }
       }
       approx.delete();
       cnt.delete();
     }
 
-    if (!bestCorners) return null;
+    // Also try approximating each contour more loosely (0.04 epsilon) so
+    // slightly-noisy contours that don't reduce to exactly 4 sides get a
+    // second chance -- important for phone photos with soft board edges.
+    // (skipped for now -- kept simple; the 0.02 pass usually catches boards)
+
+    if (candidates.length === 0) return null;
+
+    let bestCorners: Array<{ x: number; y: number }> | null = null;
+    let bestScore = 0;
+    for (const cand of candidates) {
+      const score = checkerScore(cv, src, orderCorners(cand.corners));
+      if (score > bestScore) {
+        bestScore = score;
+        bestCorners = cand.corners;
+      }
+    }
+    // Reject if even the best candidate doesn't look chess-board-like.
+    if (!bestCorners || bestScore < 45) return null;
 
     // Bump corners back to source-image coordinates.
     const inv = 1 / scale;
