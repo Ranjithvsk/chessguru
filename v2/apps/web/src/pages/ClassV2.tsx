@@ -5,7 +5,7 @@
 //
 // Requires the API to have LIVEKIT_URL / _API_KEY / _API_SECRET envs. Until
 // those are set, the page renders a friendly "not configured yet" splash.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Navigate, useParams, useSearchParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -72,6 +72,63 @@ function LiveHeaderBits({ room }: { room: string }) {
         {copied ? "✓ Copied" : "🔗 Invite"}
       </button>
     </>
+  );
+}
+
+// Floating camera PIP the coach/student can drag anywhere over the board.
+// Clamps inside its positioned parent (the stage) and remembers its spot.
+function DraggableCameraPIP({ children }: { children: any }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(() => {
+    try { const v = localStorage.getItem("cg_pip_pos"); return v ? JSON.parse(v) : null; } catch { return null; }
+  });
+  const drag = useRef<{ dx: number; dy: number } | null>(null);
+  useEffect(() => {
+    if (!pos) return;
+    try { localStorage.setItem("cg_pip_pos", JSON.stringify(pos)); } catch { /* */ }
+  }, [pos]);
+
+  const down = (e: any) => {
+    const el = ref.current; if (!el) return;
+    const r = el.getBoundingClientRect();
+    drag.current = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    try { el.setPointerCapture(e.pointerId); } catch { /* */ }
+  };
+  const move = (e: any) => {
+    const el = ref.current; if (!el || !drag.current) return;
+    const parent = el.offsetParent as HTMLElement | null;
+    const pr = parent ? parent.getBoundingClientRect()
+      : ({ left: 0, top: 0, width: window.innerWidth, height: window.innerHeight } as any);
+    let x = e.clientX - pr.left - drag.current.dx;
+    let y = e.clientY - pr.top - drag.current.dy;
+    x = Math.max(0, Math.min(x, pr.width - el.offsetWidth));
+    y = Math.max(0, Math.min(y, pr.height - el.offsetHeight));
+    setPos({ x, y });
+  };
+  const up = (e: any) => {
+    drag.current = null;
+    const el = ref.current;
+    try { el?.releasePointerCapture(e.pointerId); } catch { /* */ }
+  };
+
+  const style: any = pos
+    ? { position: "absolute", left: pos.x, top: pos.y, touchAction: "none" }
+    : { position: "absolute", right: 12, top: 12, touchAction: "none" };
+
+  return (
+    <div
+      ref={ref}
+      onPointerDown={down}
+      onPointerMove={move}
+      onPointerUp={up}
+      style={style}
+      className="w-[190px] select-none overflow-hidden rounded-xl border border-ink-700 bg-black/70 shadow-xl"
+    >
+      <div className="flex cursor-grab items-center gap-1 bg-ink-900/80 px-2 py-1 text-[10px] text-ink-400 active:cursor-grabbing">
+        <span className="tracking-widest">⠿</span> drag
+      </div>
+      {children}
+    </div>
   );
 }
 
@@ -194,12 +251,12 @@ export default function ClassV2Page() {
               <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} />
             </div>
 
-            {/* Floating camera PIP — small coach cam in the top-right corner. */}
-            <div className="absolute right-3 top-3 w-[190px] overflow-hidden rounded-xl border border-ink-700 bg-black/70 shadow-xl">
+            {/* Floating camera PIP — draggable, remembers its position. */}
+            <DraggableCameraPIP>
               <div className="h-[120px]">
                 <VideoRail />
               </div>
-            </div>
+            </DraggableCameraPIP>
 
             {/* Floating minimal controls — mic / cam / screen, bottom-center. */}
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-xl border border-ink-800 bg-ink-900/85 shadow-xl backdrop-blur">
