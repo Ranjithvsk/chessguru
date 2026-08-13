@@ -233,6 +233,12 @@ export default function AcademyPublicPage() {
   const primaryContactHref = p.socials.whatsapp ? socialHref("whatsapp", p.socials.whatsapp)
     : p.socials.website ? socialHref("website", p.socials.website)
     : null;
+  // Tenant-safe "join" CTA — NEVER links to ChessGuru's /signup-academy on a
+  // custom-domain page (owner ask 2026-08-13). Priority: WhatsApp → email →
+  // in-page scroll to the coach roster. When no contact channel is set,
+  // renders as a link to #coaches (no external redirect at all).
+  const joinCtaHref = primaryContactHref || "#coaches";
+  const joinCtaExternal = !!primaryContactHref;
 
   return (
     <div className="min-h-screen bg-[#fafaf9] text-slate-900 font-sans antialiased">
@@ -267,12 +273,13 @@ export default function AcademyPublicPage() {
             <a href="#coaches" className={`hidden md:inline-block text-sm font-medium px-3 py-1.5 rounded-md ${scrolled ? "text-slate-700 hover:text-indigo-700" : "text-white/90 hover:text-white"}`}>Coaches</a>
             <a href="#about" className={`hidden md:inline-block text-sm font-medium px-3 py-1.5 rounded-md ${scrolled ? "text-slate-700 hover:text-indigo-700" : "text-white/90 hover:text-white"}`}>About</a>
             <a href="#classes" className={`hidden md:inline-block text-sm font-medium px-3 py-1.5 rounded-md ${scrolled ? "text-slate-700 hover:text-indigo-700" : "text-white/90 hover:text-white"}`}>Classes</a>
-            <Link
-              to="/signup-academy"
+            <a
+              href={joinCtaHref}
+              {...(joinCtaExternal ? { target: "_blank", rel: "noreferrer" } : {})}
               className="inline-flex items-center gap-1 px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white text-sm font-semibold shadow-lg shadow-emerald-500/30"
             >
-              Join Free
-            </Link>
+              {joinCtaExternal ? "Contact us" : "Meet coaches"}
+            </a>
           </div>
         </div>
       </nav>
@@ -311,13 +318,14 @@ export default function AcademyPublicPage() {
                 </p>
               )}
               <div className="flex flex-wrap gap-3">
-                <Link
-                  to="/signup-academy"
+                <a
+                  href={joinCtaHref}
+                  {...(joinCtaExternal ? { target: "_blank", rel: "noreferrer" } : {})}
                   className="inline-flex items-center gap-2 px-6 py-3.5 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-300 hover:to-teal-400 text-white font-bold text-base shadow-2xl shadow-emerald-500/40 transition-transform hover:scale-105"
                 >
-                  <span>Join Free</span>
+                  <span>{joinCtaExternal ? "Contact us" : "Meet the coaches"}</span>
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
-                </Link>
+                </a>
                 <a
                   href="#coaches"
                   className="inline-flex items-center gap-2 px-6 py-3.5 rounded-xl bg-white/10 backdrop-blur-sm border border-white/30 hover:bg-white/20 text-white font-semibold"
@@ -475,12 +483,13 @@ export default function AcademyPublicPage() {
               </h2>
               <div dangerouslySetInnerHTML={renderDescription(p.description)} />
               <div className="mt-8 flex flex-wrap gap-3">
-                <Link
-                  to="/signup-academy"
+                <a
+                  href={joinCtaHref}
+                  {...(joinCtaExternal ? { target: "_blank", rel: "noreferrer" } : {})}
                   className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-lg shadow-indigo-500/30"
                 >
-                  Enroll now →
-                </Link>
+                  {joinCtaExternal ? "Contact to enroll →" : "See our coaches →"}
+                </a>
                 {primaryContactHref && (
                   <a
                     href={primaryContactHref}
@@ -662,13 +671,14 @@ export default function AcademyPublicPage() {
             Whether you're new to the game or preparing for tournaments, our coaches will meet you where you are — and help you climb.
           </p>
           <div className="flex flex-wrap justify-center gap-3">
-            <Link
-              to="/signup-academy"
+            <a
+              href={joinCtaHref}
+              {...(joinCtaExternal ? { target: "_blank", rel: "noreferrer" } : {})}
               className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-white font-bold text-lg shadow-2xl shadow-amber-500/40 transition-transform hover:scale-105"
             >
-              Sign Up Free
+              {joinCtaExternal ? "Contact the academy" : "See our coaches"}
               <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
-            </Link>
+            </a>
             {primaryContactHref && (
               <a
                 href={primaryContactHref}
