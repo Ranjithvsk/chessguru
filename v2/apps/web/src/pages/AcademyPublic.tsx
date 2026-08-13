@@ -197,9 +197,16 @@ export default function AcademyPublicPage() {
           <p className="text-slate-600 mb-6">
             No academy with slug <code className="px-1.5 py-0.5 rounded bg-slate-100 text-indigo-700">{slug}</code> — or the owner hasn't set up a public page yet.
           </p>
-          <Link to="/" className="inline-block px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-lg shadow-indigo-500/30">
-            ← Back to ChessGuru
-          </Link>
+          {/* On custom domains, don't cross-link to ChessGuru — just prompt a refresh */}
+          {typeof window !== "undefined" && !/harinitharanjith|localhost/.test(window.location.hostname) ? (
+            <button onClick={() => window.location.reload()} className="inline-block px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-lg shadow-indigo-500/30">
+              Retry
+            </button>
+          ) : (
+            <Link to="/" className="inline-block px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-lg shadow-indigo-500/30">
+              ← Back to ChessGuru
+            </Link>
+          )}
         </div>
       </div>
     );
