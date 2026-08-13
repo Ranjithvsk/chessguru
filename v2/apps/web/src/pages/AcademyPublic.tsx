@@ -1,54 +1,30 @@
 // AcademyPublic.tsx — public academy landing at /academy-page/:slug
 //
-// Rewrite v4 (2026-08-13): chessiverse-inspired, chess-themed, colourful.
-// Owner rejected the previous muted dark version as "ugly" — this version:
-//   - Forces its OWN light palette (bypasses the dark app shell). The public
-//     landing page needs a marketing feel that doesn't inherit the dark chrome.
-//   - Chess decorations (piece silhouettes, board patterns) everywhere.
-//   - Vivid palette: chess-blue #1e3a8a, amber #f59e0b, violet #7c3aed,
-//     emerald #10b981, rose #e11d48, cyan #06b6d4.
-//   - Sticky top nav that solidifies on scroll.
-//   - 100vh-ish hero with diagonal SVG bottom, coach-strong CTAs.
-//   - Rich sections: coaches, about+mini-board, achievements, testimonials,
-//     upcoming classes, final CTA, footer.
+// Rewrite v5 (2026-08-13, Claude-designed). Owner rejected v4 as "crappy".
+// This pass: strip decorations, single accent (warm amber), editorial
+// magazine feel, big elegant typography, generous whitespace. Content-first
+// (photos + real copy do the heavy lifting), not decoration-first.
 //
-// API contract unchanged — GET /api/academy-page/:slug still returns the same
-// shape. This is a pure presentation refactor.
+// API contract unchanged — GET /api/academy-page/:slug.
 
-import { useQuery } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
-
-import {
-  PieceSilhouette,
-  ChessboardPattern,
-  RatingPill,
-  TitleBadge,
-  CountryFlag,
-  StarRating,
-  HeroChessScene,
-  MiniBoardDiagram,
-} from "../components/academy-public/decorations";
+import { Link, useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 
 const BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
 
 interface Achievement { id: string; title: string; description?: string; year?: number; imageUrl?: string }
 interface Testimonial { id: string; author: string; role?: string; quote: string; rating?: number; imageUrl?: string }
-interface Socials {
-  website?: string; twitter?: string; youtube?: string; instagram?: string; whatsapp?: string;
-}
-interface AcademyProfile {
+interface Socials { website?: string; twitter?: string; youtube?: string; instagram?: string; whatsapp?: string }
+interface Profile {
   academyId: string; slug: string;
   displayName: string; tagline: string; description: string;
   logoUrl: string; coverUrl: string; themeUrl: string;
   country: string; city: string; foundedYear?: number;
   socials: Socials;
   achievements: Achievement[]; testimonials: Testimonial[];
-  featuredCoachIds: string[];
-  customDomain: string; customDomainStatus: string;
-  updatedAt: string | null;
 }
-interface CoachRow {
+interface Coach {
   userId: string; username: string; fullName: string | null;
   role: "coach" | "academy_owner"; isOwner: boolean;
   coachProfile: {
@@ -57,235 +33,81 @@ interface CoachRow {
     playingStyles: string[]; photoUrl: string;
   };
 }
-interface ClassRow {
-  _id: string; title: string; coach: string; startAt: string; durationMin: number;
-  coachUserId?: string | null; topics?: string[];
-}
-interface AcademyResp {
+interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; topics?: string[] }
+interface Resp {
   academy: { _id: string; slug: string; name: string; ownerId: string };
-  profile: AcademyProfile;
-  coaches: CoachRow[];
+  profile: Profile;
+  coaches: Coach[];
   upcomingClasses: ClassRow[];
 }
 
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(`${BASE}${path}`, { credentials: "include" });
-  if (!r.ok) {
-    const err: any = new Error(`GET ${path} → ${r.status}`);
-    err.status = r.status;
-    throw err;
-  }
-  return r.json() as Promise<T>;
+  if (!r.ok) { const e: any = new Error(`${path} -> ${r.status}`); e.status = r.status; throw e; }
+  return r.json();
 }
 
-// Same markdown-lite parser as before — paragraphs (\n\n), **bold**, *italic*.
-// Escapes < & > first so we don't create an XSS surface via profile copy.
+function isoToFlag(cc: string): string {
+  if (!cc || cc.length !== 2) return "";
+  const OFFSET = 127397;
+  const chars = [...cc.toUpperCase()];
+  if (!chars.every((c) => c >= "A" && c <= "Z")) return "";
+  return String.fromCodePoint(...chars.map((c) => OFFSET + c.charCodeAt(0)));
+}
+
 function renderDescription(text: string): { __html: string } {
-  const esc = text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  const esc = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const paragraphs = esc.split(/\n{2,}/).map((p) => {
-    const withBold = p.replace(/\*\*([^*]+)\*\*/g, "<strong class='text-slate-900'>$1</strong>");
-    const withItalic = withBold.replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
-    const withBreaks = withItalic.replace(/\n/g, "<br/>");
-    return `<p class='mb-4 leading-relaxed text-slate-600 text-lg'>${withBreaks}</p>`;
+    const b = p.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    const i = b.replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
+    const nl = i.replace(/\n/g, "<br/>");
+    return `<p class="mb-6 leading-[1.75] text-[17px] md:text-[19px] text-stone-700">${nl}</p>`;
   });
-  return { __html: paragraphs.join("\n") };
+  return { __html: paragraphs.join("") };
 }
 
-function fmtStart(d: string) {
-  const dt = new Date(d);
-  return dt.toLocaleString(undefined, { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-}
-
-function SocialIcon({ kind }: { kind: string }) {
-  const c = "w-4 h-4";
-  switch (kind) {
-    case "website": return <svg className={c} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 010 20M12 2a15 15 0 000 20"/></svg>;
-    case "twitter": return <svg className={c} viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2H21l-6.52 7.45L22.5 22h-6.9l-4.85-6.34L4.9 22H2l7.02-8.02L1.5 2h7.1l4.4 5.85L18.244 2zm-2.42 18h1.66L7.9 4H6.2l9.624 16z"/></svg>;
-    case "youtube": return <svg className={c} viewBox="0 0 24 24" fill="currentColor"><path d="M23.5 6.2a3 3 0 00-2.1-2.1C19.6 3.6 12 3.6 12 3.6s-7.6 0-9.4.5A3 3 0 00.5 6.2C0 8 0 12 0 12s0 4 .5 5.8a3 3 0 002.1 2.1c1.8.5 9.4.5 9.4.5s7.6 0 9.4-.5a3 3 0 002.1-2.1C24 16 24 12 24 12s0-4-.5-5.8zM9.6 15.6V8.4L15.8 12l-6.2 3.6z"/></svg>;
-    case "instagram": return <svg className={c} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor"/></svg>;
-    case "whatsapp": return <svg className={c} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 00-8.5 15.2L2 22l4.9-1.5A10 10 0 1012 2zm5.5 14.3c-.2.6-1.3 1.2-1.8 1.2-.5.1-1 .1-3.3-.7-2.8-1.1-4.5-3.9-4.6-4-.1-.2-1.1-1.5-1.1-2.8 0-1.3.7-2 1-2.3.2-.2.5-.3.7-.3h.5c.2 0 .4 0 .6.5.2.6.7 1.9.8 2 .1.2.1.3 0 .5-.1.2-.2.3-.3.5-.2.2-.3.3-.5.5-.1.1-.3.3-.1.6.2.3.9 1.4 1.9 2.3 1.3 1.1 2.4 1.5 2.7 1.7.3.2.5.1.7-.1.2-.2.8-1 1-1.3.2-.3.4-.2.7-.1s1.9.9 2.2 1c.3.2.5.2.6.4.1.1.1.7-.1 1.4z"/></svg>;
-    default: return null;
-  }
-}
 function socialHref(kind: string, v: string): string {
   if (/^https?:\/\//i.test(v)) return v;
-  const handle = v.replace(/^@/, "");
+  const h = v.replace(/^@/, "");
   switch (kind) {
-    case "twitter": return `https://twitter.com/${handle}`;
-    case "youtube": return handle.startsWith("UC") ? `https://youtube.com/channel/${handle}` : `https://youtube.com/@${handle}`;
-    case "instagram": return `https://instagram.com/${handle}`;
-    case "whatsapp": return `https://wa.me/${handle.replace(/[^0-9]/g, "")}`;
-    default: return handle.startsWith("http") ? handle : `https://${handle}`;
+    case "twitter":   return `https://twitter.com/${h}`;
+    case "youtube":   return h.startsWith("UC") ? `https://youtube.com/channel/${h}` : `https://youtube.com/@${h}`;
+    case "instagram": return `https://instagram.com/${h}`;
+    case "whatsapp":  return `https://wa.me/${h.replace(/\D/g, "")}`;
+    default:          return h.startsWith("http") ? h : `https://${h}`;
   }
 }
 
-// Corner watermark piece → chosen by title. GM/queen-tier gets ♛, IM/knight
-// gets ♞, everything else ♟. Purely decorative.
-// DWP-style hero banner — full-width slide carousel with overlaid title/CTAs.
-// Auto-advances every 5s, pauses on hover. Arrows swipe left/right; dots
-// below indicate current slide. Slides = Gemini-generated chess images
-// pulled from the profile (cover + achievement pics + theme).
-function HeroBanner(props: {
-  slides: string[];
-  currentIdx: number;
-  onIdxChange: (n: number) => void;
-  academyName: string;
-  tagline?: string;
-  country?: string;
-  city?: string;
-  foundedYear?: number;
-  studentsChip: string;
-  joinCtaHref: string;
-  joinCtaExternal: boolean;
-  isOwner: boolean;
-}) {
-  const { slides, currentIdx, onIdxChange, academyName, tagline, country, city, foundedYear, studentsChip, joinCtaHref, joinCtaExternal, isOwner } = props;
-  const n = Math.max(slides.length, 1);
-  const [hovering, setHovering] = useState(false);
-  useEffect(() => {
-    if (hovering || n <= 1) return;
-    const id = setInterval(() => onIdxChange((currentIdx + 1) % n), 5000);
-    return () => clearInterval(id);
-  }, [hovering, currentIdx, n, onIdxChange]);
-  const cur = slides[currentIdx % n];
-  return (
-    <header
-      className="relative w-full h-[64vh] md:h-[78vh] min-h-[520px] overflow-hidden pt-16 group"
-      onMouseEnter={() => setHovering(true)}
-      onMouseLeave={() => setHovering(false)}
-    >
-      {/* Slides — cross-fade between them */}
-      {slides.length === 0 ? (
-        <div className="absolute inset-0 bg-gradient-to-br from-indigo-900 via-violet-800 to-cyan-700" />
-      ) : (
-        slides.map((src, i) => (
-          <div
-            key={i}
-            aria-hidden={i !== currentIdx % n}
-            className={`absolute inset-0 bg-cover bg-center transition-opacity duration-[900ms] ${i === currentIdx % n ? "opacity-100" : "opacity-0"}`}
-            style={{ backgroundImage: `url(${src})` }}
-          />
-        ))
-      )}
-      {/* Dark gradient overlay for text legibility (bottom-heavy so text on
-       *  the lower-left has plenty of contrast even against bright slides). */}
-      <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/30 to-transparent" />
-      <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
-
-      {/* Prev / next arrows — hidden until hover on desktop, always tap-friendly on mobile */}
-      {n > 1 && (
-        <>
-          <button
-            onClick={() => onIdxChange((currentIdx - 1 + n) % n)}
-            aria-label="Previous"
-            className="absolute left-3 md:left-6 top-1/2 -translate-y-1/2 z-20 w-11 h-11 md:w-14 md:h-14 rounded-full bg-black/40 hover:bg-black/70 backdrop-blur-md border border-white/25 grid place-items-center text-white transition-all md:opacity-0 md:group-hover:opacity-100"
-          >
-            <svg className="w-5 h-5 md:w-6 md:h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M15 18l-6-6 6-6"/></svg>
-          </button>
-          <button
-            onClick={() => onIdxChange((currentIdx + 1) % n)}
-            aria-label="Next"
-            className="absolute right-3 md:right-6 top-1/2 -translate-y-1/2 z-20 w-11 h-11 md:w-14 md:h-14 rounded-full bg-black/40 hover:bg-black/70 backdrop-blur-md border border-white/25 grid place-items-center text-white transition-all md:opacity-0 md:group-hover:opacity-100"
-          >
-            <svg className="w-5 h-5 md:w-6 md:h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 6l6 6-6 6"/></svg>
-          </button>
-        </>
-      )}
-
-      {/* Slide dots */}
-      {n > 1 && (
-        <div className="absolute bottom-4 md:bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2">
-          {slides.map((_, i) => (
-            <button
-              key={i}
-              onClick={() => onIdxChange(i)}
-              aria-label={`Slide ${i + 1}`}
-              className={`h-1.5 rounded-full transition-all ${i === currentIdx % n ? "w-8 bg-white" : "w-2 bg-white/40 hover:bg-white/70"}`}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Corner chip — top-left, like DWP's price bubble */}
-      <div className="absolute top-4 left-4 md:top-8 md:left-8 z-20 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/90 backdrop-blur-md shadow-lg text-xs md:text-sm font-semibold text-slate-900">
-        <span className="text-lg">🏆</span>
-        <span>{studentsChip}</span>
-      </div>
-
-      {/* Overlay content — bottom-left glass panel */}
-      <div className="absolute inset-x-0 bottom-0 z-10 pointer-events-none">
-        <div className="mx-auto max-w-7xl px-4 md:px-10 pb-12 md:pb-20">
-          <div className="max-w-3xl pointer-events-auto cg-fade-up">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 backdrop-blur-md border border-white/25 text-xs md:text-sm text-white mb-4">
-              <CountryFlag country={country || ""} />
-              <span>{city || "Online"}</span>
-              {foundedYear && <><span className="text-white/50">·</span><span>Est. {foundedYear}</span></>}
-            </div>
-            <h1 className="font-display text-white text-4xl md:text-6xl lg:text-7xl leading-[1.05] tracking-tight mb-4 drop-shadow-2xl">
-              {academyName}
-            </h1>
-            {tagline && (
-              <p className="text-base md:text-xl text-white/90 mb-6 max-w-2xl drop-shadow-lg">
-                {tagline}
-              </p>
-            )}
-            <div className="flex flex-wrap gap-3">
-              <a
-                href={joinCtaHref}
-                {...(joinCtaExternal ? { target: "_blank", rel: "noreferrer" } : {})}
-                className="inline-flex items-center gap-2 px-6 py-3.5 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-300 hover:to-teal-400 text-white font-bold text-base shadow-2xl shadow-emerald-500/40 transition-transform hover:scale-105"
-              >
-                <span>{joinCtaExternal ? "Contact us" : "Meet the coaches"}</span>
-                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
-              </a>
-              <a
-                href="#coaches"
-                className="inline-flex items-center gap-2 px-6 py-3.5 rounded-xl bg-white/15 backdrop-blur-md border border-white/40 hover:bg-white/25 text-white font-semibold"
-              >
-                Meet the coaches
-              </a>
-              {isOwner && (
-                <Link
-                  to="/academy-profile/edit"
-                  className="inline-flex items-center gap-1 px-4 py-3.5 rounded-xl border border-amber-300/60 text-amber-100 hover:text-white hover:bg-amber-400/25 text-sm font-medium backdrop-blur-md"
-                >
-                  ✎ Edit page
-                </Link>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    </header>
-  );
+function fmtWhen(iso: string): { day: string; date: string; time: string } {
+  const d = new Date(iso);
+  return {
+    day:  d.toLocaleString(undefined, { weekday: "short" }),
+    date: d.toLocaleString(undefined, { day: "2-digit", month: "short" }),
+    time: d.toLocaleString(undefined, { hour: "2-digit", minute: "2-digit" }),
+  };
 }
 
-function coachWatermarkPiece(title: string): "queen" | "knight" | "bishop" | "rook" | "pawn" {
-  const t = (title || "").toUpperCase();
-  if (t === "GM" || t === "WGM") return "queen";
-  if (t === "IM" || t === "WIM") return "knight";
-  if (t === "FM" || t === "WFM") return "bishop";
-  if (t === "CM" || t === "WCM" || t === "NM") return "rook";
-  return "pawn";
+function InitialsAvatar({ name, className = "" }: { name: string; className?: string }) {
+  const initials = name.split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
+  return (
+    <div className={`grid place-items-center bg-stone-200 text-stone-500 font-display ${className}`}>
+      <span className="text-3xl">{initials}</span>
+    </div>
+  );
 }
 
 export default function AcademyPublicPage() {
   const { slug } = useParams<{ slug: string }>();
 
-  // ── ALL HOOKS ABOVE EVERY EARLY RETURN (React #310 rule of hooks) ───────
   const [scrolled, setScrolled] = useState(false);
-  const [slide, setSlide] = useState(0);   // hero carousel index
 
   const authQ = useQuery({
     queryKey: ["auth-me"],
-    queryFn: () => get<{ loggedIn: boolean; userId?: string; username?: string; academyId?: string }>("/auth/me"),
+    queryFn: () => get<{ loggedIn: boolean; academyId?: string }>("/auth/me"),
   });
   const acadQ = useQuery({
     queryKey: ["academy-public", slug],
-    queryFn: () => get<AcademyResp>(`/api/academy-page/${encodeURIComponent(slug || "")}`),
+    queryFn: () => get<Resp>(`/api/academy-page/${encodeURIComponent(slug || "")}`),
     enabled: !!slug,
     retry: false,
   });
@@ -295,57 +117,42 @@ export default function AcademyPublicPage() {
     [acadQ.data, slug],
   );
 
-  // Scroll listener — solidifies the sticky nav after the hero fades out.
-  // Uses passive: true so we don't stall touch scroll on mobile.
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 60);
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    const html = document.documentElement;
+    const prev = html.getAttribute("class") || "";
+    html.classList.remove("dark");
+    html.classList.add("light");
+    return () => { html.setAttribute("class", prev); };
   }, []);
 
-  // The page has its own light-mode look regardless of app theme. We force
-  // .light on <html> for the lifetime of this mount, then restore the user's
-  // choice on unmount so the dark app pages still work.
   useEffect(() => {
-    const root = document.documentElement;
-    const hadDark = root.classList.contains("dark");
-    root.classList.remove("dark");
-    root.classList.add("light");
-    return () => {
-      root.classList.remove("light");
-      if (hadDark) root.classList.add("dark");
-    };
+    const on = () => setScrolled(window.scrollY > 32);
+    on();
+    window.addEventListener("scroll", on, { passive: true });
+    return () => window.removeEventListener("scroll", on);
   }, []);
 
-  if (acadQ.isLoading) {
+  if (acadQ.isLoading || authQ.isLoading) {
     return (
-      <div className="min-h-screen grid place-items-center bg-gradient-to-br from-amber-50 via-white to-indigo-100">
-        <div className="flex flex-col items-center gap-3 text-slate-500">
-          <div className="text-5xl animate-pulse">♞</div>
-          <div>Loading academy…</div>
-        </div>
+      <div className="min-h-screen bg-stone-50 grid place-items-center">
+        <div className="text-sm tracking-widest text-stone-400 uppercase">Loading</div>
       </div>
     );
   }
-  if (acadQ.isError || !acadQ.data) {
+  if ((acadQ.error as any)?.status === 404 || !acadQ.data) {
+    const onCustom = typeof window !== "undefined" && !/harinitharanjith|localhost/.test(window.location.hostname);
     return (
-      <div className="min-h-screen grid place-items-center bg-gradient-to-br from-amber-50 via-white to-indigo-100 px-6">
-        <div className="max-w-md text-center">
-          <div className="text-7xl mb-4">♟</div>
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">Academy not found</h1>
-          <p className="text-slate-600 mb-6">
-            No academy with slug <code className="px-1.5 py-0.5 rounded bg-slate-100 text-indigo-700">{slug}</code> — or the owner hasn't set up a public page yet.
+      <div className="min-h-screen bg-stone-50 grid place-items-center px-6 text-center">
+        <div>
+          <div className="text-6xl mb-4">&#9822;</div>
+          <h1 className="font-display text-3xl md:text-4xl text-stone-900 mb-3">Academy not found</h1>
+          <p className="text-stone-500 max-w-md mx-auto mb-6">
+            No academy with slug <code className="px-1.5 py-0.5 rounded bg-stone-100 text-stone-700">{slug}</code>.
           </p>
-          {/* On custom domains, don't cross-link to ChessGuru — just prompt a refresh */}
-          {typeof window !== "undefined" && !/harinitharanjith|localhost/.test(window.location.hostname) ? (
-            <button onClick={() => window.location.reload()} className="inline-block px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-lg shadow-indigo-500/30">
-              Retry
-            </button>
+          {onCustom ? (
+            <button onClick={() => window.location.reload()} className="px-6 py-3 rounded-full bg-stone-900 text-white text-sm font-semibold hover:bg-stone-800">Retry</button>
           ) : (
-            <Link to="/" className="inline-block px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-lg shadow-indigo-500/30">
-              ← Back to ChessGuru
-            </Link>
+            <Link to="/" className="px-6 py-3 rounded-full bg-stone-900 text-white text-sm font-semibold hover:bg-stone-800">Back home</Link>
           )}
         </div>
       </div>
@@ -353,369 +160,255 @@ export default function AcademyPublicPage() {
   }
 
   const { academy, profile: p, coaches, upcomingClasses } = acadQ.data;
-
-  const yearsRunning = p.foundedYear ? Math.max(0, new Date().getFullYear() - p.foundedYear) : null;
-  const trophyCount = p.achievements.length;
-
-  // Stats bar — always show 4 tiles; use graceful defaults so the "hero
-  // stats" band never looks half-populated. Owner-supplied first, then
-  // sensible derived numbers.
-  const stats: Array<{ label: string; value: number | string; icon: string; tint: string }> = [
-    { label: "Coaches", value: coaches.length || 1, icon: "♞", tint: "from-indigo-500 to-violet-600" },
-    { label: "Years Teaching", value: yearsRunning != null ? yearsRunning : "—", icon: "🏆", tint: "from-amber-400 to-orange-500" },
-    { label: "Achievements", value: trophyCount || 0, icon: "🏅", tint: "from-emerald-400 to-teal-600" },
-    { label: "Happy Students", value: p.testimonials.length ? `${p.testimonials.length * 50}+` : "500+", icon: "♟", tint: "from-rose-400 to-pink-600" },
-  ];
-
-  const socialEntries: Array<[string, string]> = ([
-    ["website", p.socials.website],
-    ["twitter", p.socials.twitter],
-    ["youtube", p.socials.youtube],
-    ["instagram", p.socials.instagram],
-    ["whatsapp", p.socials.whatsapp],
-  ] as Array<[string, string | undefined]>).filter(([, v]) => !!v) as Array<[string, string]>;
-
   const isOwner = !!authQ.data?.loggedIn && authQ.data.academyId === academy._id;
 
   const primaryContactHref = p.socials.whatsapp ? socialHref("whatsapp", p.socials.whatsapp)
     : p.socials.website ? socialHref("website", p.socials.website)
     : null;
-  // Tenant-safe "join" CTA — NEVER links to ChessGuru's /signup-academy on a
-  // custom-domain page (owner ask 2026-08-13). Priority: WhatsApp → email →
-  // in-page scroll to the coach roster. When no contact channel is set,
-  // renders as a link to #coaches (no external redirect at all).
-  const joinCtaHref = primaryContactHref || "#coaches";
-  const joinCtaExternal = !!primaryContactHref;
+  const joinHref = primaryContactHref || "#coaches";
+  const joinLabel = primaryContactHref ? "Get in touch" : "Meet the coaches";
+  const joinExternal = !!primaryContactHref;
+
+  const yearsCoaching = coaches.reduce((max, c) => Math.max(max, c.coachProfile.yearsTeaching || 0), 0)
+    || (p.foundedYear ? Math.max(1, new Date().getFullYear() - p.foundedYear) : 0);
+
+  const socialsList: Array<[keyof Socials, string]> = [
+    ["website",   p.socials.website   || ""],
+    ["twitter",   p.socials.twitter   || ""],
+    ["youtube",   p.socials.youtube   || ""],
+    ["instagram", p.socials.instagram || ""],
+    ["whatsapp",  p.socials.whatsapp  || ""],
+  ];
 
   return (
-    <div className="min-h-screen bg-[#fafaf9] text-slate-900 font-sans antialiased relative">
-      {/* Full-viewport painterly background layer — owner-supplied via Gemini
-          "theme" gen (see /me/academy-profile/gen-image target:theme). Sits
-          behind everything at very low opacity with a light gradient overlay
-          so section text stays readable. Falls back to the tiled chessboard
-          SVG when unset. */}
-      {/* Owner 2026-08-13: theme bg made text unreadable + looked "ugly". Kept
-       *  the field so a coach/academy CAN opt in later, but the default page
-       *  now uses a clean solid background — the theme image only shows as a
-       *  small subtle wash at the top so text stays crisp on every section. */}
-      {p.themeUrl ? (
-        <>
-          <div
-            aria-hidden
-            className="pointer-events-none fixed inset-x-0 top-0 h-[70vh] -z-10 bg-cover bg-center"
-            style={{ backgroundImage: `url(${p.themeUrl})`, opacity: 0.06 }}
-          />
-          <div
-            aria-hidden
-            className="pointer-events-none fixed inset-0 -z-10 bg-gradient-to-b from-[#fafaf9]/85 via-[#fafaf9]/95 to-[#fafaf9]"
-          />
-          <div aria-hidden className="pointer-events-none fixed inset-0 -z-20 bg-[#fafaf9]" />
-        </>
-      ) : (
-        <div
-          aria-hidden
-          className="pointer-events-none fixed inset-0 -z-10"
-          style={{ background: "#fafaf9" }}
-        />
-      )}
-      {/* keyframes for scroll-in fade + subtle float on hero decorations */}
-      <style>{`
-        @keyframes cgFadeUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes cgFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
-        @keyframes cgPulseRing { 0% { box-shadow: 0 0 0 0 rgba(16,185,129,0.55); } 70% { box-shadow: 0 0 0 14px rgba(16,185,129,0); } 100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); } }
-        .cg-fade-up { animation: cgFadeUp 0.7s ease-out both; }
-        .cg-float { animation: cgFloat 6s ease-in-out infinite; }
-        .cg-pulse-ring { animation: cgPulseRing 2.2s ease-out infinite; }
-        .cg-hero-clip { clip-path: polygon(0 0, 100% 0, 100% calc(100% - 60px), 0 100%); }
-        @media (min-width: 768px) { .cg-hero-clip { clip-path: polygon(0 0, 100% 0, 100% calc(100% - 100px), 0 100%); } }
-      `}</style>
-
-      {/* ═════════════════════ STICKY TOP NAV ═════════════════════ */}
-      <nav className={`fixed top-0 inset-x-0 z-50 transition-all duration-300 ${scrolled ? "bg-white/95 backdrop-blur-md shadow-md border-b border-slate-200" : "bg-transparent"}`}>
-        <div className="mx-auto max-w-7xl px-4 md:px-8 flex items-center justify-between h-16">
-          <Link to={`/academy-page/${p.slug}`} className="flex items-center gap-2.5 min-w-0">
+    <div className="min-h-screen bg-stone-50 text-stone-900 font-sans antialiased selection:bg-amber-200 selection:text-stone-900">
+      <nav className={`fixed inset-x-0 top-0 z-50 transition-all duration-300 ${scrolled ? "bg-white/90 backdrop-blur-md border-b border-stone-200" : "bg-transparent"}`}>
+        <div className="mx-auto max-w-6xl px-6 md:px-10 h-16 flex items-center justify-between">
+          <a href="#top" className="flex items-center gap-3">
             {p.logoUrl ? (
-              <img src={p.logoUrl} alt="" className="w-9 h-9 rounded-full object-cover ring-2 ring-white shadow-md bg-white" />
+              <img src={p.logoUrl} alt="" className="w-8 h-8 rounded-full object-cover ring-1 ring-stone-200" />
             ) : (
-              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-600 to-violet-700 grid place-items-center text-white font-bold shadow-md">
-                {displayName.charAt(0).toUpperCase()}
+              <div className="w-8 h-8 rounded-full bg-amber-500 grid place-items-center text-white font-display text-sm">
+                {displayName[0]?.toUpperCase() || "A"}
               </div>
             )}
-            <span className={`font-display text-lg md:text-xl truncate ${scrolled ? "text-slate-900" : "text-white drop-shadow"}`}>
-              {displayName}
-            </span>
-          </Link>
+            <span className="font-display text-lg tracking-tight text-stone-900">{displayName}</span>
+          </a>
           <div className="flex items-center gap-2">
-            <a href="#coaches" className={`hidden md:inline-block text-sm font-medium px-3 py-1.5 rounded-md ${scrolled ? "text-slate-700 hover:text-indigo-700" : "text-white/90 hover:text-white"}`}>Coaches</a>
-            <a href="#about" className={`hidden md:inline-block text-sm font-medium px-3 py-1.5 rounded-md ${scrolled ? "text-slate-700 hover:text-indigo-700" : "text-white/90 hover:text-white"}`}>About</a>
-            <a href="#classes" className={`hidden md:inline-block text-sm font-medium px-3 py-1.5 rounded-md ${scrolled ? "text-slate-700 hover:text-indigo-700" : "text-white/90 hover:text-white"}`}>Classes</a>
+            {isOwner && (
+              <Link to="/academy-profile/edit" className="hidden sm:inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium text-stone-500 hover:text-stone-900">
+                Edit
+              </Link>
+            )}
             <a
-              href={joinCtaHref}
-              {...(joinCtaExternal ? { target: "_blank", rel: "noreferrer" } : {})}
-              className="inline-flex items-center gap-1 px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white text-sm font-semibold shadow-lg shadow-emerald-500/30"
+              href={joinHref}
+              {...(joinExternal ? { target: "_blank", rel: "noreferrer" } : {})}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium bg-stone-900 text-white hover:bg-amber-600 transition-colors"
             >
-              {joinCtaExternal ? "Contact us" : "Meet coaches"}
+              {joinLabel}
             </a>
           </div>
         </div>
       </nav>
 
-      {/* ═════════════════════ HERO — DWP-style full-width carousel ═════════════════════
-       *  Owner 2026-08-13 asked for a "banner like in dwp" (dreamworldplants.com)
-       *  populated with the Gemini-generated chess images. Slides = cover +
-       *  achievement images. Auto-advances every 5s, left/right arrows, bottom-left
-       *  glass-morphed overlay for the academy name / tagline / CTAs. */}
-      <HeroBanner
-        slides={(function () {
-          const s: string[] = [];
-          if (p.coverUrl) s.push(p.coverUrl);
-          for (const a of p.achievements) if (a.imageUrl) s.push(a.imageUrl);
-          if (p.themeUrl) s.push(p.themeUrl);
-          return s;
-        })()}
-        currentIdx={slide}
-        onIdxChange={setSlide}
-        academyName={displayName}
-        tagline={p.tagline}
-        country={p.country}
-        city={p.city}
-        foundedYear={p.foundedYear}
-        studentsChip={p.testimonials.length ? `${p.testimonials.length * 50}+ students` : "500+ students"}
-        joinCtaHref={joinCtaHref}
-        joinCtaExternal={joinCtaExternal}
-        isOwner={isOwner}
-      />
-
-      {/* ═════════════════════ STATS BAR (floats over hero seam) ═════════════════════ */}
-      <section className="relative mx-auto max-w-7xl px-4 md:px-8 -mt-24 md:-mt-28 z-10">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5">
-          {stats.map((s, i) => (
-            <div
-              key={s.label}
-              className="cg-fade-up bg-white rounded-2xl shadow-xl p-5 flex flex-col items-center text-center border border-slate-100 hover:-translate-y-1 transition-transform"
-              style={{ animationDelay: `${0.2 + i * 0.06}s` }}
-            >
-              <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${s.tint} grid place-items-center text-2xl mb-3 shadow-lg`}>
-                <span aria-hidden>{s.icon}</span>
+      <header id="top" className="pt-32 md:pt-40 pb-16 md:pb-24">
+        <div className="mx-auto max-w-6xl px-6 md:px-10 grid md:grid-cols-[1.15fr_1fr] gap-12 md:gap-16 items-center">
+          <div>
+            <div className="flex items-center gap-2 text-xs tracking-[0.2em] uppercase text-stone-500 mb-6">
+              {isoToFlag(p.country) && <span className="text-base leading-none">{isoToFlag(p.country)}</span>}
+              <span>{p.city || "Online"}</span>
+              {p.foundedYear && <><span className="text-stone-300">&middot;</span><span>Est. {p.foundedYear}</span></>}
+            </div>
+            <h1 className="font-display text-5xl md:text-6xl lg:text-[80px] leading-[0.98] tracking-[-0.02em] text-stone-900 mb-6">
+              {displayName}
+            </h1>
+            {p.tagline && (
+              <p className="text-xl md:text-2xl text-stone-500 leading-[1.4] max-w-xl mb-10">{p.tagline}</p>
+            )}
+            <div className="flex flex-wrap items-center gap-3">
+              <a
+                href={joinHref}
+                {...(joinExternal ? { target: "_blank", rel: "noreferrer" } : {})}
+                className="inline-flex items-center gap-2 px-6 py-3.5 rounded-full bg-stone-900 text-white text-sm font-semibold hover:bg-amber-600 transition-colors"
+              >
+                {joinLabel}
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+              </a>
+              <a href="#coaches" className="inline-flex items-center gap-1 px-6 py-3.5 text-sm font-medium text-stone-700 hover:text-stone-900">
+                Meet the coaches &rarr;
+              </a>
+            </div>
+          </div>
+          <div className="relative">
+            {p.coverUrl ? (
+              <div className="relative aspect-[4/5] overflow-hidden rounded-[2rem] bg-stone-200">
+                <img src={p.coverUrl} alt={displayName} className="w-full h-full object-cover" />
+                <div className="absolute inset-0 ring-1 ring-inset ring-stone-900/5 rounded-[2rem]" />
               </div>
-              <div className="text-3xl md:text-4xl font-display text-slate-900 leading-none">{s.value}</div>
-              <div className="text-xs md:text-sm text-slate-500 mt-2 uppercase tracking-wider font-semibold">{s.label}</div>
+            ) : (
+              <div className="relative aspect-[4/5] rounded-[2rem] bg-gradient-to-br from-amber-100 via-stone-100 to-amber-50 grid place-items-center">
+                <div className="text-9xl text-stone-400/70">&#9822;</div>
+              </div>
+            )}
+            <div className="absolute -bottom-4 -left-4 md:-bottom-5 md:-left-5 bg-white rounded-2xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.15)] px-4 py-3 flex items-center gap-3 ring-1 ring-stone-100">
+              <div className="w-9 h-9 rounded-xl bg-amber-500 grid place-items-center text-white text-lg">&#9823;</div>
+              <div>
+                <div className="text-[10px] tracking-widest uppercase text-stone-400">Coaches</div>
+                <div className="text-sm font-semibold text-stone-900">{coaches.length} on staff</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section className="border-y border-stone-200 bg-white">
+        <div className="mx-auto max-w-6xl px-6 md:px-10 py-8 md:py-10 grid grid-cols-2 md:grid-cols-4 gap-6 md:gap-4 text-center md:text-left">
+          {[
+            { k: coaches.length, l: coaches.length === 1 ? "Coach" : "Coaches" },
+            { k: yearsCoaching || (p.foundedYear ? new Date().getFullYear() - p.foundedYear : "-"), l: "Years teaching" },
+            { k: p.achievements.length, l: "Achievements" },
+            { k: upcomingClasses.length || 0, l: "Classes ahead" },
+          ].map((s, i) => (
+            <div key={i} className="md:border-l md:border-stone-200 md:pl-6 first:border-l-0 first:pl-0">
+              <div className="font-display text-4xl md:text-5xl text-stone-900 tracking-tight leading-none">{s.k}</div>
+              <div className="text-xs md:text-sm tracking-widest uppercase text-stone-400 mt-2">{s.l}</div>
             </div>
           ))}
         </div>
       </section>
 
-      {/* ═════════════════════ MEET OUR COACHES ═════════════════════ */}
-      <section id="coaches" className="relative mx-auto max-w-7xl px-4 md:px-8 py-20 md:py-28">
-        <div className="text-center mb-12 md:mb-16">
-          <div className="inline-block px-3 py-1 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold uppercase tracking-widest mb-4">Our Team</div>
-          <h2 className="font-display text-4xl md:text-5xl text-slate-900 mb-3">Meet Our Coaches</h2>
-          <p className="text-lg text-slate-600 max-w-2xl mx-auto">
-            Learn from {coaches.length > 0 ? `${coaches.length} handpicked coach${coaches.length === 1 ? "" : "es"}` : "our team"}, each with their own style and titles from FIDE and beyond.
-          </p>
-        </div>
-
-        {coaches.length === 0 ? (
-          <div className="rounded-3xl bg-white p-12 text-center text-slate-500 shadow-md">
-            Coaches coming soon.
+      <section id="coaches" className="py-20 md:py-28">
+        <div className="mx-auto max-w-6xl px-6 md:px-10">
+          <div className="mb-12 md:mb-16 max-w-2xl">
+            <div className="text-xs tracking-[0.2em] uppercase text-amber-600 font-semibold mb-3">Our roster</div>
+            <h2 className="font-display text-4xl md:text-5xl tracking-tight text-stone-900 leading-[1.05]">
+              Coaches you can count on.
+            </h2>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {coaches.map((c, idx) => {
+          <div className="grid gap-6 md:grid-cols-2">
+            {coaches.map((c) => {
               const cp = c.coachProfile;
-              const name = cp.displayName || c.fullName || c.username;
-              const watermarkPiece = coachWatermarkPiece(cp.titleClass);
+              const styles = cp.playingStyles?.slice(0, 3) ?? [];
               return (
                 <Link
                   key={c.userId}
-                  to={`/coach/${c.username}`}
-                  className="group relative overflow-hidden rounded-3xl bg-white border border-slate-100 shadow-lg hover:shadow-2xl hover:-translate-y-1 transition-all cg-fade-up"
-                  style={{ animationDelay: `${idx * 0.08}s` }}
+                  to={`/coach/${encodeURIComponent(c.username)}`}
+                  className="group flex bg-white rounded-3xl overflow-hidden ring-1 ring-stone-200 hover:ring-amber-500 hover:shadow-[0_20px_60px_-20px_rgba(0,0,0,0.1)] transition-all"
                 >
-                  {/* watermark piece */}
-                  <PieceSilhouette
-                    piece={watermarkPiece}
-                    className="absolute -right-4 -top-4 w-32 text-indigo-100 group-hover:text-indigo-200 transition-colors"
-                  />
-                  {/* header band */}
-                  <div className="relative h-24 bg-gradient-to-br from-indigo-600 via-violet-600 to-cyan-500 overflow-hidden">
-                    <ChessboardPattern light="#c7d2fe" dark="#312e81" opacity={0.14} />
-                  </div>
-                  {/* photo overlapping the band */}
-                  <div className="relative flex justify-center -mt-14 mb-4">
-                    <div className="relative">
-                      <div className="p-1 rounded-full bg-gradient-to-br from-cyan-400 via-violet-500 to-amber-400">
-                        <div className="p-1 rounded-full bg-white">
-                          {cp.photoUrl ? (
-                            <img src={cp.photoUrl} alt={name} className="w-24 h-24 rounded-full object-cover bg-slate-100" />
-                          ) : (
-                            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-indigo-500 to-violet-700 grid place-items-center text-3xl font-bold text-white">
-                              {name.charAt(0).toUpperCase()}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      {c.isOwner && (
-                        <div className="absolute -bottom-1 -right-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-orange-500 text-white text-[10px] font-black uppercase tracking-wider shadow-md">
-                          Founder
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="relative px-6 pb-6 text-center">
-                    <div className="flex items-center justify-center gap-2 mb-1">
-                      <TitleBadge title={cp.titleClass} />
-                      <span className="font-display text-xl text-slate-900">{name}</span>
-                      <CountryFlag country={cp.country} />
-                    </div>
-                    {cp.tagline && (
-                      <p className="text-sm text-slate-500 line-clamp-2 mb-3">{cp.tagline}</p>
+                  <div className="w-32 md:w-40 aspect-square shrink-0 bg-stone-100 overflow-hidden">
+                    {cp.photoUrl ? (
+                      <img src={cp.photoUrl} alt={cp.displayName} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                    ) : (
+                      <InitialsAvatar name={cp.displayName || c.username} className="w-full h-full" />
                     )}
-                    <div className="flex flex-wrap justify-center gap-1.5 mb-4">
-                      {cp.elo ? <RatingPill rating={cp.elo} /> : null}
-                      {cp.playingStyles.slice(0, 2).map((s) => (
-                        <span key={s} className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[11px] font-medium">
-                          {s}
-                        </span>
-                      ))}
+                  </div>
+                  <div className="flex-1 min-w-0 p-5 md:p-6 flex flex-col justify-center">
+                    <div className="flex items-center gap-2 text-xs tracking-widest uppercase text-stone-400 mb-2">
+                      {cp.titleClass && <span className="font-semibold text-amber-600">{cp.titleClass}</span>}
+                      {isoToFlag(cp.country) && <span className="text-base leading-none">{isoToFlag(cp.country)}</span>}
+                      {cp.elo != null && <><span className="text-stone-300">&middot;</span><span>{cp.elo}</span></>}
                     </div>
-                    <span className="inline-flex items-center gap-1 text-sm font-semibold text-indigo-600 group-hover:text-indigo-700">
-                      View Profile
-                      <svg className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
-                    </span>
+                    <div className="font-display text-xl md:text-2xl text-stone-900 truncate leading-tight mb-1">
+                      {cp.displayName || c.fullName || c.username}
+                    </div>
+                    {cp.tagline && <div className="text-sm text-stone-500 line-clamp-2 mb-3">{cp.tagline}</div>}
+                    {styles.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {styles.map((s) => (
+                          <span key={s} className="text-[10px] tracking-wider uppercase px-2 py-1 rounded-full bg-stone-100 text-stone-600 font-medium">{s}</span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </Link>
               );
             })}
           </div>
-        )}
+          {coaches.length === 0 && (
+            <div className="text-center py-16 text-stone-400 text-sm">Coach profiles coming soon.</div>
+          )}
+        </div>
       </section>
 
-      {/* ═════════════════════ ABOUT + MINI BOARD ═════════════════════ */}
       {p.description && (
-        <section id="about" className="relative bg-white py-20 md:py-28 overflow-hidden">
-          <ChessboardPattern light="#fef7e0" dark="#fde68a" opacity={0.08} className="[mask-image:radial-gradient(ellipse_at_center,black_20%,transparent_70%)]" />
-          <div className="relative mx-auto max-w-7xl px-4 md:px-8 grid md:grid-cols-2 gap-12 items-center">
-            <div>
-              <div className="inline-block px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-bold uppercase tracking-widest mb-4">About the Academy</div>
-              <h2 className="font-display text-4xl md:text-5xl text-slate-900 mb-6 leading-tight">
-                Where <span className="text-indigo-600">champions</span> are made
+        <section id="about" className="py-20 md:py-28 bg-white border-y border-stone-200">
+          <div className="mx-auto max-w-6xl px-6 md:px-10 grid md:grid-cols-[1fr_1.4fr] gap-12 md:gap-20 items-start">
+            <div className="md:sticky md:top-24">
+              <div className="text-xs tracking-[0.2em] uppercase text-amber-600 font-semibold mb-3">About</div>
+              <h2 className="font-display text-4xl md:text-5xl tracking-tight text-stone-900 leading-[1.05]">
+                Chess, taught with care.
               </h2>
-              <div dangerouslySetInnerHTML={renderDescription(p.description)} />
-              <div className="mt-8 flex flex-wrap gap-3">
-                <a
-                  href={joinCtaHref}
-                  {...(joinCtaExternal ? { target: "_blank", rel: "noreferrer" } : {})}
-                  className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-lg shadow-indigo-500/30"
-                >
-                  {joinCtaExternal ? "Contact to enroll →" : "See our coaches →"}
-                </a>
-                {primaryContactHref && (
-                  <a
-                    href={primaryContactHref}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white border-2 border-indigo-200 hover:border-indigo-500 text-indigo-700 font-semibold"
-                  >
-                    Contact us
-                  </a>
-                )}
+              <div className="mt-8 flex items-center gap-3 text-sm text-stone-500">
+                <div className="w-10 h-px bg-stone-300" />
+                <span>Since {p.foundedYear || "day one"}</span>
               </div>
             </div>
-            <div className="relative">
-              <div className="absolute -inset-6 bg-gradient-to-br from-amber-200 via-orange-200 to-rose-200 rounded-3xl opacity-40 blur-2xl" />
-              <div className="relative">
-                <MiniBoardDiagram />
-              </div>
-            </div>
+            <div dangerouslySetInnerHTML={renderDescription(p.description)} />
           </div>
         </section>
       )}
 
-      {/* ═════════════════════ ACHIEVEMENTS ═════════════════════ */}
       {p.achievements.length > 0 && (
-        <section className="relative mx-auto max-w-7xl px-4 md:px-8 py-20 md:py-28">
-          <div className="text-center mb-12">
-            <div className="inline-block px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-bold uppercase tracking-widest mb-4">Trophy Room</div>
-            <h2 className="font-display text-4xl md:text-5xl text-slate-900 mb-3">
-              🏆 Achievements
-            </h2>
-            <p className="text-lg text-slate-600 max-w-2xl mx-auto">
-              A snapshot of what our students and coaches have accomplished on the board.
-            </p>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {p.achievements.map((a, i) => (
-              <div
-                key={a.id}
-                className="relative overflow-hidden rounded-3xl bg-white border border-amber-100 shadow-lg hover:shadow-2xl hover:-translate-y-1 transition-all cg-fade-up"
-                style={{ animationDelay: `${i * 0.06}s` }}
-              >
-                {a.imageUrl ? (
-                  <img src={a.imageUrl} alt={a.title} className="w-full h-44 object-cover" />
-                ) : (
-                  <div className="relative h-44 bg-gradient-to-br from-amber-100 via-orange-100 to-yellow-200 grid place-items-center overflow-hidden">
-                    <div className="text-7xl drop-shadow-lg">🏆</div>
-                    <PieceSilhouette piece="king" className="absolute -right-4 -bottom-4 w-24 text-amber-300/70" />
-                  </div>
-                )}
-                <div className="p-5">
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <h3 className="font-display text-xl text-slate-900 leading-tight">{a.title}</h3>
-                    {a.year && (
-                      <span className="shrink-0 px-2.5 py-1 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 text-white text-xs font-bold shadow-md">
-                        {a.year}
-                      </span>
-                    )}
-                  </div>
-                  {a.description && (
-                    <p className="text-sm text-slate-600 leading-relaxed">{a.description}</p>
-                  )}
-                </div>
+        <section className="py-20 md:py-28">
+          <div className="mx-auto max-w-6xl px-6 md:px-10">
+            <div className="mb-12 md:mb-16 flex items-end justify-between gap-6 flex-wrap">
+              <div>
+                <div className="text-xs tracking-[0.2em] uppercase text-amber-600 font-semibold mb-3">Milestones</div>
+                <h2 className="font-display text-4xl md:text-5xl tracking-tight text-stone-900 leading-[1.05]">
+                  What our students have won.
+                </h2>
               </div>
-            ))}
+              <div className="text-sm text-stone-400 tracking-widest uppercase">
+                {p.achievements.length} highlight{p.achievements.length === 1 ? "" : "s"}
+              </div>
+            </div>
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {p.achievements.map((a) => (
+                <div key={a.id} className="bg-white rounded-3xl overflow-hidden ring-1 ring-stone-200 hover:shadow-[0_20px_60px_-20px_rgba(0,0,0,0.1)] transition-shadow group">
+                  {a.imageUrl && (
+                    <div className="aspect-[4/3] bg-stone-100 overflow-hidden">
+                      <img src={a.imageUrl} alt={a.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
+                    </div>
+                  )}
+                  <div className="p-6">
+                    {a.year && <div className="text-xs tracking-widest uppercase text-amber-600 font-semibold mb-2">{a.year}</div>}
+                    <div className="font-display text-xl text-stone-900 leading-tight mb-2">{a.title}</div>
+                    {a.description && <p className="text-sm text-stone-500 leading-relaxed">{a.description}</p>}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
       )}
 
-      {/* ═════════════════════ TESTIMONIALS ═════════════════════ */}
       {p.testimonials.length > 0 && (
-        <section className="relative bg-gradient-to-br from-violet-50 via-white to-cyan-50 py-20 md:py-28 overflow-hidden">
-          <PieceSilhouette piece="bishop" className="absolute left-4 top-10 w-32 text-violet-200 opacity-60" />
-          <PieceSilhouette piece="rook" className="absolute right-4 bottom-10 w-32 text-cyan-200 opacity-60" />
-          <div className="relative mx-auto max-w-7xl px-4 md:px-8">
-            <div className="text-center mb-12">
-              <div className="inline-block px-3 py-1 rounded-full bg-violet-100 text-violet-700 text-xs font-bold uppercase tracking-widest mb-4">Community Love</div>
-              <h2 className="font-display text-4xl md:text-5xl text-slate-900 mb-3">
-                💬 What Students Say
+        <section className="py-20 md:py-28 bg-white border-y border-stone-200">
+          <div className="mx-auto max-w-6xl px-6 md:px-10">
+            <div className="mb-12 md:mb-16 max-w-2xl">
+              <div className="text-xs tracking-[0.2em] uppercase text-amber-600 font-semibold mb-3">Testimonials</div>
+              <h2 className="font-display text-4xl md:text-5xl tracking-tight text-stone-900 leading-[1.05]">
+                Words from our students.
               </h2>
-              <p className="text-lg text-slate-600 max-w-2xl mx-auto">
-                Real families, real progress, real wins on the board.
-              </p>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {p.testimonials.map((t, i) => (
-                <figure
-                  key={t.id}
-                  className="relative rounded-3xl bg-white p-6 shadow-lg hover:shadow-2xl hover:-translate-y-1 transition-all cg-fade-up border border-violet-100"
-                  style={{ animationDelay: `${i * 0.06}s` }}
-                >
-                  <div className="absolute -top-3 left-6 text-5xl text-violet-400 leading-none">"</div>
-                  {typeof t.rating === "number" && <StarRating rating={t.rating} />}
-                  <blockquote className="mt-3 text-slate-700 leading-relaxed italic">
+            <div className="grid gap-8 md:grid-cols-2">
+              {p.testimonials.slice(0, 4).map((t) => (
+                <figure key={t.id} className="bg-stone-50 rounded-3xl p-8 md:p-10 ring-1 ring-stone-200">
+                  <div className="text-6xl text-amber-500 leading-none mb-3 font-display">&ldquo;</div>
+                  <blockquote className="font-display text-xl md:text-2xl leading-[1.4] text-stone-800 mb-6">
                     {t.quote}
                   </blockquote>
-                  <figcaption className="mt-5 flex items-center gap-3">
+                  <figcaption className="flex items-center gap-3">
                     {t.imageUrl ? (
-                      <img src={t.imageUrl} alt={t.author} className="w-12 h-12 rounded-full object-cover bg-slate-100 ring-2 ring-white shadow" />
+                      <img src={t.imageUrl} alt={t.author} className="w-11 h-11 rounded-full object-cover ring-1 ring-stone-200" />
                     ) : (
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-600 grid place-items-center text-white font-bold shadow">
-                        {t.author.charAt(0).toUpperCase() || "?"}
+                      <div className="w-11 h-11 rounded-full bg-amber-500 grid place-items-center text-white font-display text-sm">
+                        {t.author.split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase()}
                       </div>
                     )}
-                    <div className="min-w-0">
-                      <div className="font-semibold text-slate-900">{t.author}</div>
-                      {t.role && <div className="text-xs text-slate-500">{t.role}</div>}
+                    <div>
+                      <div className="text-sm font-semibold text-stone-900">{t.author}</div>
+                      {t.role && <div className="text-xs text-stone-500">{t.role}</div>}
                     </div>
                   </figcaption>
                 </figure>
@@ -725,155 +418,88 @@ export default function AcademyPublicPage() {
         </section>
       )}
 
-      {/* ═════════════════════ UPCOMING CLASSES ═════════════════════ */}
       {upcomingClasses.length > 0 && (
-        <section id="classes" className="relative mx-auto max-w-7xl px-4 md:px-8 py-20 md:py-28">
-          <div className="text-center mb-12">
-            <div className="inline-block px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold uppercase tracking-widest mb-4">On the calendar</div>
-            <h2 className="font-display text-4xl md:text-5xl text-slate-900 mb-3">
-              📅 Upcoming Classes
-            </h2>
-            <p className="text-lg text-slate-600 max-w-2xl mx-auto">
-              Drop in on the next few live sessions — students learn best by playing along.
-            </p>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            {upcomingClasses.slice(0, 6).map((cl, i) => (
-              <div
-                key={cl._id}
-                className="relative rounded-3xl bg-white p-6 shadow-lg hover:shadow-2xl hover:-translate-y-1 transition-all border border-emerald-100 cg-fade-up"
-                style={{ animationDelay: `${i * 0.06}s` }}
-              >
-                <div className="flex items-start justify-between gap-2 mb-3">
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 cg-pulse-ring inline-block" />
-                    Live class
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-xs font-semibold">
-                    {cl.durationMin} min
-                  </span>
-                </div>
-                <h3 className="font-display text-xl text-slate-900 mb-2 leading-tight">{cl.title || "Chess class"}</h3>
-                <div className="text-sm text-slate-500 mb-4">
-                  {fmtStart(cl.startAt)}
-                  {cl.coach && <><br /><span className="text-slate-700 font-medium">with {cl.coach}</span></>}
-                </div>
-                {authQ.data?.loggedIn ? (
-                  <Link
-                    to={`/class-v2/${cl._id}?role=student`}
-                    className="inline-flex items-center gap-1 text-sm font-semibold text-emerald-700 hover:text-emerald-800"
-                  >
-                    Join room →
-                  </Link>
-                ) : (
-                  <Link to="/login" className="inline-flex items-center gap-1 text-sm font-semibold text-emerald-700 hover:text-emerald-800">
-                    Sign in to join →
-                  </Link>
-                )}
-              </div>
-            ))}
+        <section className="py-20 md:py-28">
+          <div className="mx-auto max-w-6xl px-6 md:px-10">
+            <div className="mb-12 md:mb-16 max-w-2xl">
+              <div className="text-xs tracking-[0.2em] uppercase text-amber-600 font-semibold mb-3">On the calendar</div>
+              <h2 className="font-display text-4xl md:text-5xl tracking-tight text-stone-900 leading-[1.05]">
+                Upcoming classes.
+              </h2>
+            </div>
+            <div className="divide-y divide-stone-200 border-y border-stone-200 bg-white rounded-3xl overflow-hidden">
+              {upcomingClasses.map((cl) => {
+                const w = fmtWhen(cl.startAt);
+                return (
+                  <div key={cl._id} className="flex items-center gap-5 md:gap-8 px-5 md:px-8 py-6 hover:bg-amber-50/40 transition-colors">
+                    <div className="text-center shrink-0 w-16 md:w-20">
+                      <div className="text-[10px] tracking-widest uppercase text-amber-600 font-semibold">{w.day}</div>
+                      <div className="font-display text-2xl md:text-3xl text-stone-900 leading-none mt-1">{w.date}</div>
+                      <div className="text-xs text-stone-500 mt-1">{w.time}</div>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-display text-lg md:text-xl text-stone-900 truncate">{cl.title}</div>
+                      <div className="text-sm text-stone-500 mt-0.5">
+                        with {cl.coach || "coach"} &middot; {cl.durationMin} min
+                        {cl.topics && cl.topics.length > 0 && <> &middot; {cl.topics.slice(0, 2).join(" &middot; ")}</>}
+                      </div>
+                    </div>
+                    <a
+                      href={joinHref}
+                      {...(joinExternal ? { target: "_blank", rel: "noreferrer" } : {})}
+                      className="hidden sm:inline-flex items-center gap-1 text-sm font-semibold text-stone-700 hover:text-amber-600 transition-colors"
+                    >
+                      RSVP &rarr;
+                    </a>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </section>
       )}
 
-      {/* ═════════════════════ FINAL CTA BAND ═════════════════════ */}
-      <section className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-indigo-900 via-violet-800 to-fuchsia-700" />
-        <ChessboardPattern light="#a5b4fc" dark="#1e1b4b" opacity={0.1} />
-        <PieceSilhouette piece="king" className="absolute -left-8 top-1/2 -translate-y-1/2 w-64 text-white/8" />
-        <PieceSilhouette piece="queen" className="absolute -right-10 top-1/2 -translate-y-1/2 w-72 text-white/10" />
-        <div className="relative mx-auto max-w-4xl px-4 md:px-8 py-20 md:py-32 text-center text-white">
-          <div className="text-6xl mb-6 cg-float inline-block">♟</div>
-          <h2 className="font-display text-4xl md:text-6xl leading-tight mb-5">
-            Your chess journey<br />starts here.
+      <section className="py-24 md:py-32 bg-stone-900 text-white">
+        <div className="mx-auto max-w-4xl px-6 md:px-10 text-center">
+          <h2 className="font-display text-4xl md:text-6xl tracking-tight leading-[1.05] mb-6">
+            Ready to move your first piece?
           </h2>
-          <p className="text-lg md:text-xl text-indigo-100 mb-8 max-w-2xl mx-auto">
-            Whether you're new to the game or preparing for tournaments, our coaches will meet you where you are — and help you climb.
+          <p className="text-lg md:text-xl text-stone-400 max-w-xl mx-auto mb-10">
+            Whether you are new to the game or reaching for your next title,
+            we will meet you where you are.
           </p>
-          <div className="flex flex-wrap justify-center gap-3">
-            <a
-              href={joinCtaHref}
-              {...(joinCtaExternal ? { target: "_blank", rel: "noreferrer" } : {})}
-              className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-white font-bold text-lg shadow-2xl shadow-amber-500/40 transition-transform hover:scale-105"
-            >
-              {joinCtaExternal ? "Contact the academy" : "See our coaches"}
-              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
-            </a>
-            {primaryContactHref && (
-              <a
-                href={primaryContactHref}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl bg-white/10 backdrop-blur-sm border border-white/30 hover:bg-white/20 text-white font-semibold text-lg"
-              >
-                Talk to us
-              </a>
-            )}
-          </div>
-          <div className="mt-6 text-sm text-indigo-200">
-            Join <span className="font-bold text-white">{p.testimonials.length ? `${p.testimonials.length * 50}+` : "500+"}</span> students already learning with {displayName}
-          </div>
+          <a
+            href={joinHref}
+            {...(joinExternal ? { target: "_blank", rel: "noreferrer" } : {})}
+            className="inline-flex items-center gap-2 px-8 py-4 rounded-full bg-amber-500 text-stone-900 text-base font-semibold hover:bg-amber-400 transition-colors"
+          >
+            {joinLabel}
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </a>
         </div>
       </section>
 
-      {/* ═════════════════════ FOOTER ═════════════════════ */}
-      <footer className="bg-slate-900 text-slate-300">
-        <div className="mx-auto max-w-7xl px-4 md:px-8 py-12 grid md:grid-cols-3 gap-8">
-          <div>
-            <div className="flex items-center gap-2.5 mb-4">
-              {p.logoUrl ? (
-                <img src={p.logoUrl} alt="" className="w-10 h-10 rounded-full object-cover ring-2 ring-slate-700" />
-              ) : (
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-violet-700 grid place-items-center text-white font-bold">
-                  {displayName.charAt(0).toUpperCase()}
-                </div>
-              )}
-              <div className="font-display text-xl text-white">{displayName}</div>
-            </div>
-            {p.tagline && <p className="text-sm text-slate-400 leading-relaxed">{p.tagline}</p>}
-          </div>
-          <div>
-            <h4 className="font-semibold text-white mb-3 text-sm uppercase tracking-widest">Get in touch</h4>
-            <div className="space-y-1.5 text-sm text-slate-400">
-              {(p.city || p.country) && (
-                <div>
-                  <CountryFlag country={p.country} /> <span className="ml-1">{p.city}{p.country ? `, ${p.country}` : ""}</span>
-                </div>
-              )}
-              {p.foundedYear && <div>Est. {p.foundedYear}</div>}
-              {p.customDomain && <div><a href={`https://${p.customDomain}`} className="hover:text-white">{p.customDomain}</a></div>}
-            </div>
-          </div>
-          <div>
-            <h4 className="font-semibold text-white mb-3 text-sm uppercase tracking-widest">Follow us</h4>
-            {socialEntries.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {socialEntries.map(([kind, v]) => (
-                  <a
-                    key={kind}
-                    href={socialHref(kind, v)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white transition-colors"
-                    title={kind}
-                    aria-label={kind}
-                  >
-                    <SocialIcon kind={kind} />
-                  </a>
-                ))}
-              </div>
+      <footer className="py-10 md:py-12 bg-stone-950 text-stone-400 text-sm">
+        <div className="mx-auto max-w-6xl px-6 md:px-10 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="flex items-center gap-3">
+            {p.logoUrl ? (
+              <img src={p.logoUrl} alt="" className="w-7 h-7 rounded-full object-cover" />
             ) : (
-              <p className="text-sm text-slate-500">Add your social links to appear here.</p>
+              <div className="w-7 h-7 rounded-full bg-amber-500 grid place-items-center text-stone-900 font-display text-xs">
+                {displayName[0]?.toUpperCase() || "A"}
+              </div>
             )}
+            <span className="font-display text-white">{displayName}</span>
+            {p.city && <span className="text-stone-600 hidden sm:inline">&middot; {p.city}</span>}
           </div>
-        </div>
-        <div className="border-t border-slate-800">
-          <div className="mx-auto max-w-7xl px-4 md:px-8 py-5 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
-            <div>© {new Date().getFullYear()} {displayName}. All rights reserved.</div>
-            <Link to="/" className="hover:text-white">
-              Powered by <span className="font-semibold text-slate-300">ChessGuru</span>
-            </Link>
+          <div className="flex items-center gap-4">
+            {socialsList.filter(([, v]) => v).map(([k, v]) => (
+              <a key={k} href={socialHref(k, v)} target="_blank" rel="noreferrer" className="hover:text-white transition-colors capitalize text-xs tracking-widest uppercase">
+                {k}
+              </a>
+            ))}
           </div>
+          <div className="text-xs text-stone-600">Powered by ChessGuru</div>
         </div>
       </footer>
     </div>
