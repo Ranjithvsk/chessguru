@@ -256,12 +256,13 @@ export class AcademyProfileService {
     return { ok: true, url };
   }
 
-  /** Gemini text→image — mirrors coach gen-image. Never throws when the key
-   *  is unset; returns {ok:false,error} instead. */
-  async genImage(session: any, body: { target?: string; prompt?: string; subId?: string | null }) {
+  /** Text→image gen — supports Gemini 2.5-flash-image OR OpenAI gpt-image-1
+   *  (DALL-E successor). Owner-selectable via body.provider. Falls back to
+   *  Gemini when unspecified. Never throws when the relevant key is unset;
+   *  returns {ok:false,error} instead so the editor can show it inline. */
+  async genImage(session: any, body: { target?: string; prompt?: string; subId?: string | null; provider?: string }) {
     const g = this.ensureOwner(session);
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) return { ok: false, error: "GEMINI_API_KEY not set — ask owner to configure" };
+    const provider = String(body?.provider || "gemini").toLowerCase();
     const target = String(body?.target || "").trim();
     const prompt = String(body?.prompt || "").trim().slice(0, 2000);
     if (!prompt) throw new BadRequestException("prompt required");
@@ -278,30 +279,58 @@ export class AcademyProfileService {
       throw new BadRequestException("bad target");
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${key}`;
-    const reqBody = { contents: [{ parts: [{ text: prompt }] }] };
     let png: Buffer;
-    try {
-      const r = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(reqBody),
-      });
-      if (!r.ok) {
-        const t = await r.text();
-        return { ok: false, error: `Gemini HTTP ${r.status}: ${t.slice(0, 240)}` };
+    if (provider === "openai" || provider === "chatgpt" || provider === "dalle") {
+      const key = process.env.OPENAI_API_KEY;
+      if (!key) return { ok: false, error: "OPENAI_API_KEY not set — ask owner to configure" };
+      // gpt-image-1 (currently OpenAI's flagship image model — DALL-E-3 successor).
+      // 1536x1024 for hero-ish covers, 1024x1024 for square logos/achievements.
+      const size = kind === "cover" ? "1536x1024" : "1024x1024";
+      try {
+        const r = await fetch("https://api.openai.com/v1/images/generations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+          body: JSON.stringify({ model: "gpt-image-1", prompt, size, n: 1 }),
+        });
+        if (!r.ok) {
+          const t = await r.text();
+          return { ok: false, error: `OpenAI HTTP ${r.status}: ${t.slice(0, 280)}` };
+        }
+        const j = (await r.json()) as any;
+        const b64 = j?.data?.[0]?.b64_json;
+        if (!b64) return { ok: false, error: "no image in OpenAI response (try a different prompt)" };
+        png = Buffer.from(b64, "base64");
+      } catch (e: any) {
+        return { ok: false, error: `OpenAI call failed: ${String(e?.message || e).slice(0, 200)}` };
       }
-      const j = (await r.json()) as any;
-      const parts = j?.candidates?.[0]?.content?.parts ?? [];
-      let data: string | undefined;
-      for (const p of parts) {
-        const inline = p.inlineData ?? p.inline_data;
-        if (inline?.data) { data = inline.data; break; }
+    } else {
+      // Gemini path (default)
+      const key = process.env.GEMINI_API_KEY;
+      if (!key) return { ok: false, error: "GEMINI_API_KEY not set — ask owner to configure" };
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${key}`;
+      const reqBody = { contents: [{ parts: [{ text: prompt }] }] };
+      try {
+        const r = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(reqBody),
+        });
+        if (!r.ok) {
+          const t = await r.text();
+          return { ok: false, error: `Gemini HTTP ${r.status}: ${t.slice(0, 240)}` };
+        }
+        const j = (await r.json()) as any;
+        const parts = j?.candidates?.[0]?.content?.parts ?? [];
+        let data: string | undefined;
+        for (const p of parts) {
+          const inline = p.inlineData ?? p.inline_data;
+          if (inline?.data) { data = inline.data; break; }
+        }
+        if (!data) return { ok: false, error: "no image in Gemini response (try a different prompt)" };
+        png = Buffer.from(data, "base64");
+      } catch (e: any) {
+        return { ok: false, error: `Gemini call failed: ${String(e?.message || e).slice(0, 200)}` };
       }
-      if (!data) return { ok: false, error: "no image in Gemini response (try a different prompt)" };
-      png = Buffer.from(data, "base64");
-    } catch (e: any) {
-      return { ok: false, error: `Gemini call failed: ${String(e?.message || e).slice(0, 200)}` };
     }
 
     await this.ensureDir();
