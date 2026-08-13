@@ -448,24 +448,9 @@ export default function CoachProfileEditPage() {
         newRow={() => ({ id: shortId(), name: "" })}
       />
 
-      {/* Custom domain */}
-      <section className="bg-slate-800/60 rounded-2xl p-6 space-y-3">
-        <h2 className="font-semibold text-slate-200">Custom domain</h2>
-        <p className="text-xs text-slate-400">
-          Coming soon — DNS + SSL automation is Phase 2. Add your domain now so we know
-          what to wire when we ship it.
-        </p>
-        <input
-          value={form.customDomain} maxLength={240}
-          onChange={(e) => patch("customDomain", e.target.value.toLowerCase())}
-          className={inputCls} placeholder="e.g. coach-you.com"
-        />
-        {form.customDomain && form.customDomainStatus && (
-          <div className="text-xs text-slate-400">
-            Status: <span className="text-slate-200">{form.customDomainStatus.replace(/_/g, " ")}</span>
-          </div>
-        )}
-      </section>
+      {/* Custom domain — real DNS + SSL provisioning flow (Phase 2, 2026-08-13) */}
+      <DomainSection />
+
 
       {/* Save */}
       <div className="sticky bottom-4 z-10 flex justify-end">
@@ -540,6 +525,238 @@ function RowSection<T extends { id: string; imageUrl?: string }>(props: RowSecti
             </div>
           ))}
         </div>
+      )}
+    </section>
+  );
+}
+
+/* ---------------- Custom-domain section (Phase 2) -----------------
+ * 5 UI states driven by GET /api/me/coach-profile/domain/status:
+ *   (none)          → prompt input + Save (POST /domain/set)
+ *   pending_dns     → DNS instructions + Verify button (POST /domain/verify)
+ *   verifying/      → spinner + auto-poll every 5s
+ *     provisioning
+ *   active          → green check + link + Remove
+ *   failed          → rose banner + Try again + Change domain
+ * Hooks are all above every early return (React #310 rule). */
+interface DomainStatus {
+  domain: string;
+  status: string;                 // "" | pending_dns | verifying | provisioning | active | failed
+  addedAt: string | null;
+  lastCheckedAt: string | null;
+  activatedAt: string | null;
+  error: string;
+  cnameTarget: string;
+  aTarget: string;
+}
+function DomainSection() {
+  const qc = useQueryClient();
+  const statusQ = useQuery<DomainStatus>({
+    queryKey: ["coach-domain-status"],
+    queryFn: () => get<DomainStatus>("/api/me/coach-profile/domain/status"),
+    // Poll every 5s while the cert is provisioning; otherwise idle.
+    refetchInterval: (q) => {
+      const s = q.state?.data?.status;
+      return s === "verifying" || s === "provisioning" ? 5000 : false;
+    },
+  });
+  const [input, setInput] = useState("");
+  const [uiErr, setUiErr] = useState<string | null>(null);
+
+  const setMut = useMutation({
+    mutationFn: async (domain: string) => {
+      const r = await fetch(`${BASE}/api/me/coach-profile/domain/set`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ domain }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.message || `HTTP ${r.status}`);
+      return j as DomainStatus;
+    },
+    onSuccess: () => { setUiErr(null); setInput(""); qc.invalidateQueries({ queryKey: ["coach-domain-status"] }); },
+    onError: (e: any) => setUiErr(String(e?.message || e)),
+  });
+  const verifyMut = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`${BASE}/api/me/coach-profile/domain/verify`, {
+        method: "POST", credentials: "include",
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.message || `HTTP ${r.status}`);
+      return j as DomainStatus;
+    },
+    onSuccess: () => { setUiErr(null); qc.invalidateQueries({ queryKey: ["coach-domain-status"] }); },
+    onError: (e: any) => setUiErr(String(e?.message || e)),
+  });
+  const removeMut = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`${BASE}/api/me/coach-profile/domain/remove`, {
+        method: "POST", credentials: "include",
+      });
+      return r.json() as Promise<DomainStatus>;
+    },
+    onSuccess: () => { setUiErr(null); qc.invalidateQueries({ queryKey: ["coach-domain-status"] }); },
+  });
+  const copy = useCallback(async (text: string) => {
+    try { await navigator.clipboard.writeText(text); } catch { /* no-op */ }
+  }, []);
+
+  const s = statusQ.data;
+  const status = s?.status || "";
+  const domain = s?.domain || "";
+  const cnameTarget = s?.cnameTarget || "coach.dreamcy.com";
+  const aTarget = s?.aTarget || "213.32.21.226";
+
+  return (
+    <section className="bg-slate-800/60 rounded-2xl p-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="font-semibold text-slate-200">Custom domain</h2>
+        {domain && status && (
+          <span className={`text-xs px-2 py-0.5 rounded-full ${
+            status === "active" ? "bg-emerald-500/20 text-emerald-300"
+            : status === "failed" ? "bg-rose-500/20 text-rose-300"
+            : status === "pending_dns" ? "bg-amber-500/20 text-amber-300"
+            : "bg-cyan-500/20 text-cyan-300"
+          }`}>{status.replace(/_/g, " ")}</span>
+        )}
+      </div>
+
+      {/* Step 1 — no domain set */}
+      {(!domain || !status) && (
+        <>
+          <p className="text-xs text-slate-400">
+            Point your own domain at your public coach page (e.g.
+            <code className="mx-1 px-1 bg-slate-900/70 rounded">yourname.com</code>).
+            We'll issue a free SSL cert automatically after you set the DNS record.
+          </p>
+          <div className="flex gap-2">
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value.toLowerCase().trim())}
+              placeholder="e.g. yourname.com"
+              className={inputCls} maxLength={253}
+            />
+            <button
+              type="button"
+              disabled={!input || setMut.isPending}
+              onClick={() => setMut.mutate(input)}
+              className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-medium text-sm disabled:opacity-60 whitespace-nowrap"
+            >{setMut.isPending ? "Saving…" : "Add domain"}</button>
+          </div>
+          {uiErr && <p className="text-xs text-rose-400">{uiErr}</p>}
+        </>
+      )}
+
+      {/* Step 2 — pending DNS */}
+      {status === "pending_dns" && (
+        <>
+          <div className="rounded-lg bg-slate-900/60 border border-slate-700 p-4 space-y-3">
+            <p className="text-sm text-slate-200 font-medium">
+              Add ONE of these DNS records at your domain registrar for
+              <code className="mx-1 px-1 bg-slate-950 rounded">{domain}</code>:
+            </p>
+            <div className="text-xs space-y-2 font-mono">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="px-2 py-0.5 rounded bg-cyan-700 text-white">CNAME</span>
+                <span className="text-slate-400">host:</span>
+                <code className="text-slate-100">@ (or subdomain)</code>
+                <span className="text-slate-400">→</span>
+                <code className="text-emerald-300">{cnameTarget}</code>
+                <button type="button" onClick={() => copy(cnameTarget)}
+                  className="px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-white text-xs">Copy</button>
+              </div>
+              <div className="text-slate-500 text-xs">— OR —</div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="px-2 py-0.5 rounded bg-slate-700 text-white">A</span>
+                <span className="text-slate-400">host:</span>
+                <code className="text-slate-100">@</code>
+                <span className="text-slate-400">→</span>
+                <code className="text-emerald-300">{aTarget}</code>
+                <button type="button" onClick={() => copy(aTarget)}
+                  className="px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-white text-xs">Copy</button>
+              </div>
+            </div>
+            <p className="text-xs text-slate-500">
+              DNS changes usually take 5-30 min to propagate. If you use Cloudflare,
+              make sure the record is set to DNS-only (grey cloud) — proxied records
+              break the SSL flow.
+            </p>
+          </div>
+          {s?.error && <p className="text-xs text-amber-300">{s.error}</p>}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button" onClick={() => verifyMut.mutate()}
+              disabled={verifyMut.isPending}
+              className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-medium text-sm disabled:opacity-60"
+            >{verifyMut.isPending ? "Checking DNS…" : "I've added it — Verify now"}</button>
+            <button
+              type="button" onClick={() => removeMut.mutate()}
+              className="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-100 text-sm"
+            >Change domain</button>
+          </div>
+          {uiErr && <p className="text-xs text-rose-400">{uiErr}</p>}
+        </>
+      )}
+
+      {/* Step 3 — verifying / provisioning (transient — auto-polling) */}
+      {(status === "verifying" || status === "provisioning") && (
+        <div className="rounded-lg bg-slate-900/60 border border-slate-700 p-4 flex items-start gap-3">
+          <div className="mt-0.5 h-4 w-4 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
+          <div className="space-y-1">
+            <p className="text-sm text-slate-100">Provisioning your SSL certificate for
+              <code className="mx-1 px-1 bg-slate-950 rounded">{domain}</code>…</p>
+            <p className="text-xs text-slate-500">
+              This usually takes 30-60 seconds. This page auto-refreshes.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Step 4 — active */}
+      {status === "active" && (
+        <>
+          <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/30 p-4">
+            <p className="text-sm text-emerald-300 font-medium">
+              ✓ Your site is live at{" "}
+              <a href={`https://${domain}`} target="_blank" rel="noreferrer"
+                className="underline hover:text-emerald-200">https://{domain}</a>
+            </p>
+            {s?.activatedAt && (
+              <p className="text-xs text-emerald-500/80 mt-1">
+                Activated {new Date(s.activatedAt).toLocaleString()}
+              </p>
+            )}
+          </div>
+          <button
+            type="button" onClick={() => removeMut.mutate()}
+            disabled={removeMut.isPending}
+            className="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-100 text-sm disabled:opacity-60"
+          >{removeMut.isPending ? "Removing…" : "Remove this domain"}</button>
+        </>
+      )}
+
+      {/* Step 5 — failed */}
+      {status === "failed" && (
+        <>
+          <div className="rounded-lg bg-rose-500/10 border border-rose-500/30 p-4 space-y-1">
+            <p className="text-sm text-rose-300 font-medium">SSL provisioning failed for
+              <code className="mx-1 px-1 bg-slate-950 rounded">{domain}</code></p>
+            <p className="text-xs text-rose-400/90">{s?.error || "Unknown error — try again in an hour."}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button" onClick={() => verifyMut.mutate()}
+              disabled={verifyMut.isPending}
+              className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-medium text-sm disabled:opacity-60"
+            >{verifyMut.isPending ? "Retrying…" : "Try again"}</button>
+            <button
+              type="button" onClick={() => removeMut.mutate()}
+              className="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-100 text-sm"
+            >Change domain</button>
+          </div>
+          {uiErr && <p className="text-xs text-rose-400">{uiErr}</p>}
+        </>
       )}
     </section>
   );
