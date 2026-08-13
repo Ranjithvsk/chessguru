@@ -47,6 +47,8 @@ import FeedbackUITestPage from "./pages/FeedbackUITest";
 import BookPage from "./pages/Book";
 import ClassReplayPage from "./pages/ClassReplay";
 import ClassV2Page from "./pages/ClassV2";
+import CoachPublicPage from "./pages/CoachPublic";
+import CoachProfileEditPage from "./pages/CoachEdit";
 
 // Jitsi is retired (owner 2026-08-12) — every live-class URL now funnels into
 // Dream Meet (/class-v2/). These tiny redirect shims preserve old bookmarks +
@@ -72,6 +74,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/+$/, "")}>
         <Routes>
+          {/* Public coach page — rendered standalone (no App chrome/nav) so it
+              reads like a landing page, chessiverse-style. Must be BEFORE the
+              App-wrapped block so it matches first. */}
+          <Route path="coach/:username" element={<CoachPublicPage />} />
           <Route element={<App />}>
             <Route index element={<PuzzlesPage />} />
             <Route path="play" element={<PlayPage />} />
@@ -119,6 +125,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="class/:id" element={<ClassIdRedirect />} />
             <Route path="class/:id/replay/:filename" element={<ClassReplayPage />} />
             <Route path="class-v2/:room" element={<ClassV2Page />} />
+            <Route path="coach-profile/edit" element={<CoachProfileEditPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

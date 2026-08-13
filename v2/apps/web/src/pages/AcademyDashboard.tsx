@@ -1382,6 +1382,23 @@ export default function AcademyDashboardPage() {
         </div>
       )}
       {canManage && (
+        <div className="rounded-xl2 border border-cyan-500/40 bg-gradient-to-r from-cyan-900/40 to-slate-900/60 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+          <div className="text-sm text-cyan-100">
+            <span className="font-semibold">Public coach profile</span>
+            <span className="text-cyan-200/80"> — share your ChessGuru page at </span>
+            <code className="text-cyan-300">/coach/{me.username}</code>
+          </div>
+          <div className="flex gap-2">
+            <Link to="/coach-profile/edit" className="rounded-lg bg-cyan-600 hover:bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-white">
+              Edit profile
+            </Link>
+            <Link to={`/coach/${me.username}`} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-cyan-500/40 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/40">
+              View public page →
+            </Link>
+          </div>
+        </div>
+      )}
+      {canManage && (
         <div className="grid gap-4 lg:grid-cols-2">
           <UpcomingClassesPanel classes={schedule?.upcoming ?? []} live={schedule?.live ?? []} />
           <HomeworkPanel homework={homework ?? []} />
