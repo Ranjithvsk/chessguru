@@ -7,13 +7,24 @@
 //               POST /api/me/coach-profile/gen-image
 
 import {
-  BadRequestException, Body, Controller, Get, Param, Post, Req,
+  BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, Req,
 } from "@nestjs/common";
 import { CoachProfileService } from "./coach-profile.service";
+import { CoachDomainService } from "./coach-domain.service";
 
 @Controller("coach")
 export class CoachPublicController {
-  constructor(private readonly svc: CoachProfileService) {}
+  constructor(
+    private readonly svc: CoachProfileService,
+    private readonly domainSvc: CoachDomainService,
+  ) {}
+
+  @Get("by-domain/:domain")
+  async byDomain(@Param("domain") domain: string) {
+    const hit = await this.domainSvc.lookupByDomain(domain);
+    if (!hit) throw new NotFoundException("no coach with that domain");
+    return hit;
+  }
 
   @Get(":username")
   get(@Param("username") username: string) {
@@ -23,7 +34,32 @@ export class CoachPublicController {
 
 @Controller("me/coach-profile")
 export class MyCoachProfileController {
-  constructor(private readonly svc: CoachProfileService) {}
+  constructor(
+    private readonly svc: CoachProfileService,
+    private readonly domainSvc: CoachDomainService,
+  ) {}
+
+  /* ----- custom-domain automation (Phase 2) ----- */
+
+  @Post("domain/set")
+  domainSet(@Req() req: any, @Body() body: any) {
+    return this.domainSvc.setDomain(req.session, body || {});
+  }
+
+  @Post("domain/verify")
+  domainVerify(@Req() req: any) {
+    return this.domainSvc.verify(req.session);
+  }
+
+  @Get("domain/status")
+  domainStatus(@Req() req: any) {
+    return this.domainSvc.status(req.session);
+  }
+
+  @Post("domain/remove")
+  domainRemove(@Req() req: any) {
+    return this.domainSvc.remove(req.session);
+  }
 
   @Get()
   getMine(@Req() req: any) {
