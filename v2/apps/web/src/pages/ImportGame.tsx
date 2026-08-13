@@ -33,7 +33,7 @@ export default function ImportGame() {
     <div className="mx-auto max-w-4xl p-4">
       <header className="mb-4">
         <h1 className="text-2xl font-bold">Import a game</h1>
-        <p className="mt-1 text-sm text-gray-500">
+        <p className="mt-1 text-sm text-ink-500">
           Paste a PGN. We'll identify the opening from the 500-corpus, count how many book moves you
           played, and pin the first deviation so its cards enter your daily queue.
         </p>
@@ -45,32 +45,32 @@ export default function ImportGame() {
             value={pgn}
             onChange={(e) => setPgn(e.target.value)}
             placeholder="[Event ...]&#10;1. e4 c5 2. Nf3 d6 ..."
-            className="h-72 w-full rounded-xl border border-gray-200 p-3 font-mono text-xs outline-none focus:border-gray-400"
+            className="h-72 w-full rounded-xl border border-ink-800 p-3 font-mono text-xs outline-none focus:border-ink-600"
           />
           <div className="mt-2 flex gap-2">
             <button
               onClick={() => setSubmitted(pgn)}
               disabled={!pgn.trim()}
-              className="rounded-full bg-gray-900 px-4 py-2 text-sm font-bold text-white hover:bg-gray-800 disabled:opacity-40"
+              className="rounded-full bg-ink-100 px-4 py-2 text-sm font-bold text-white hover:bg-ink-200 disabled:opacity-40"
             >
               Analyse
             </button>
             <button
               onClick={() => { setPgn(SAMPLE_PGN); setSubmitted(null); }}
-              className="rounded-full bg-gray-100 px-3 py-2 text-xs font-semibold hover:bg-gray-200"
+              className="rounded-full bg-ink-900 px-3 py-2 text-xs font-semibold hover:bg-ink-800"
             >
               Load sample
             </button>
             {submitted && (
               <button
                 onClick={() => { setPgn(""); setSubmitted(null); }}
-                className="rounded-full bg-gray-100 px-3 py-2 text-xs font-semibold hover:bg-gray-200"
+                className="rounded-full bg-ink-900 px-3 py-2 text-xs font-semibold hover:bg-ink-800"
               >
                 Clear
               </button>
             )}
           </div>
-          <p className="mt-2 text-[10px] text-gray-400">
+          <p className="mt-2 text-[10px] text-ink-600">
             Tip: from Lichess, click "Share &amp; export" → "PGN". From Chess.com, the download PGN button.
           </p>
         </div>
@@ -87,7 +87,7 @@ export default function ImportGame() {
 
 function Placeholder() {
   return (
-    <div className="rounded-xl border border-dashed border-gray-200 bg-white p-6 text-center text-sm text-gray-500">
+    <div className="rounded-xl border border-dashed border-ink-800 bg-ink-900 p-6 text-center text-sm text-ink-500">
       Paste a PGN on the left and click <b>Analyse</b>.
     </div>
   );
@@ -115,8 +115,8 @@ function ResultPanel({ a }: { a: GameAnalysis }) {
   return (
     <div className="space-y-4">
       {/* Summary line */}
-      <div className="rounded-xl border border-gray-100 bg-white p-4">
-        <p className="text-sm leading-relaxed text-gray-800">{summarise(a)}</p>
+      <div className="rounded-xl border border-ink-900 bg-ink-900 p-4">
+        <p className="text-sm leading-relaxed text-ink-200">{summarise(a)}</p>
         <div className="mt-2 grid grid-cols-3 gap-2 text-center">
           <MiniStat label="game plies" value={a.totalPlies} />
           <MiniStat label="book plies" value={a.bookPly} accent="text-emerald-600" />
@@ -130,10 +130,10 @@ function ResultPanel({ a }: { a: GameAnalysis }) {
 
       {/* Opening identity */}
       {opening ? (
-        <div className="rounded-xl border border-gray-100 bg-white p-4">
+        <div className="rounded-xl border border-ink-900 bg-ink-900 p-4">
           <div className="flex items-baseline gap-2">
-            <span className="rounded bg-gray-100 px-2 py-0.5 font-mono text-xs font-bold">{opening.eco}</span>
-            <Link to={`/study/openings/${opening.slug}`} className="text-base font-bold text-gray-900 hover:underline">
+            <span className="rounded bg-ink-900 px-2 py-0.5 font-mono text-xs font-bold">{opening.eco}</span>
+            <Link to={`/study/openings/${opening.slug}`} className="text-base font-bold text-ink-100 hover:underline">
               {opening.name}
             </Link>
             {family && (
@@ -143,14 +143,14 @@ function ResultPanel({ a }: { a: GameAnalysis }) {
             )}
           </div>
           {opening.idea?.short && (
-            <p className="mt-1 text-xs text-gray-600">{opening.idea.short}</p>
+            <p className="mt-1 text-xs text-ink-400">{opening.idea.short}</p>
           )}
           <div className="mt-2 flex flex-wrap gap-1">
             {opening.tagSlugs.slice(0, 6).map((s) => {
               const t = tagBySlug.get(s);
               if (!t) return null;
               return (
-                <span key={s} className="rounded bg-gray-50 px-1.5 py-0.5 text-[10px] text-gray-600">
+                <span key={s} className="rounded bg-ink-950 px-1.5 py-0.5 text-[10px] text-ink-400">
                   {t.glyph ? `${t.glyph} ` : ""}{t.label}
                 </span>
               );
@@ -180,9 +180,9 @@ function ResultPanel({ a }: { a: GameAnalysis }) {
               <p className="mb-2 text-orange-900">
                 Move <b>{Math.ceil(a.deviation.ply / 2)}{a.deviation.side === "black" ? "…" : "."}</b> — <b>{a.deviation.side}</b> to play.
               </p>
-              <p className="text-xs text-gray-600">You played</p>
+              <p className="text-xs text-ink-400">You played</p>
               <p className="font-mono text-2xl font-bold text-red-700">{a.deviation.played}</p>
-              <p className="mt-2 text-xs text-gray-600">Theory says</p>
+              <p className="mt-2 text-xs text-ink-400">Theory says</p>
               <p className="font-mono text-2xl font-bold text-emerald-700">{a.deviation.theory}</p>
               <div className="mt-3 flex flex-col gap-1.5">
                 {!added ? (
@@ -196,12 +196,12 @@ function ResultPanel({ a }: { a: GameAnalysis }) {
                   </div>
                 )}
                 <Link to={`/study/openings/${opening.slug}`}
-                  className="rounded-lg bg-gray-900 px-3 py-2 text-center text-xs font-bold text-white hover:bg-gray-800">
+                  className="rounded-lg bg-ink-100 px-3 py-2 text-center text-xs font-bold text-white hover:bg-ink-200">
                   Read the theory →
                 </Link>
                 {deviationCardId(a) && (
                   <Link to="/study/daily"
-                    className="rounded-lg bg-white px-3 py-2 text-center text-xs font-bold text-gray-800 ring-1 ring-gray-200 hover:bg-gray-50">
+                    className="rounded-lg bg-ink-900 px-3 py-2 text-center text-xs font-bold text-ink-200 ring-1 ring-ink-800 hover:bg-ink-950">
                     Review deviation card →
                   </Link>
                 )}
@@ -222,9 +222,9 @@ function ResultPanel({ a }: { a: GameAnalysis }) {
 
 function MiniStat({ label, value, accent }: { label: string; value: number | string; accent?: string }) {
   return (
-    <div className="rounded-lg bg-gray-50 p-2">
-      <div className={`text-lg font-bold ${accent ?? "text-gray-900"}`}>{value}</div>
-      <div className="text-[10px] uppercase tracking-wide text-gray-500">{label}</div>
+    <div className="rounded-lg bg-ink-950 p-2">
+      <div className={`text-lg font-bold ${accent ?? "text-ink-100"}`}>{value}</div>
+      <div className="text-[10px] uppercase tracking-wide text-ink-500">{label}</div>
     </div>
   );
 }

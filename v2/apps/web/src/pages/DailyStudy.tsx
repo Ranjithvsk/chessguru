@@ -68,13 +68,13 @@ export default function DailyStudy() {
       <header className="mb-4 flex items-baseline justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">Daily Study</h1>
-          <p className="mt-1 text-sm text-gray-500">Spaced repetition · FSRS scheduling · your active repertoire first.</p>
+          <p className="mt-1 text-sm text-ink-500">Spaced repetition · FSRS scheduling · your active repertoire first.</p>
         </div>
         <div className="flex shrink-0 gap-2">
           <Link to="/study/progress" className="rounded-full bg-purple-100 px-3 py-1 text-xs font-semibold text-purple-700 hover:bg-purple-200">
             📊 progress
           </Link>
-          <Link to="/study/openings" className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold hover:bg-gray-200">
+          <Link to="/study/openings" className="rounded-full bg-ink-900 px-3 py-1 text-xs font-semibold hover:bg-ink-800">
             + add openings
           </Link>
         </div>
@@ -82,7 +82,7 @@ export default function DailyStudy() {
 
       {/* Stats strip */}
       <div className="mb-4 grid grid-cols-4 gap-2 text-center">
-        <Stat label="due now" value={summary.dueNow} accent={summary.dueNow > 0 ? "text-emerald-600" : "text-gray-400"} />
+        <Stat label="due now" value={summary.dueNow} accent={summary.dueNow > 0 ? "text-emerald-600" : "text-ink-600"} />
         <Stat label="new" value={summary.newAvailable} accent="text-indigo-600" />
         <Stat label="cards" value={summary.totalCards} />
         <Stat label="openings" value={summary.activeOpenings} />
@@ -107,24 +107,24 @@ export default function DailyStudy() {
 
 function Stat({ label, value, accent }: { label: string; value: number; accent?: string }) {
   return (
-    <div className="rounded-lg border border-gray-100 bg-white p-2.5">
-      <div className={`text-xl font-bold ${accent ?? "text-gray-900"}`}>{value}</div>
-      <div className="text-[10px] uppercase tracking-wide text-gray-500">{label}</div>
+    <div className="rounded-lg border border-ink-900 bg-ink-900 p-2.5">
+      <div className={`text-xl font-bold ${accent ?? "text-ink-100"}`}>{value}</div>
+      <div className="text-[10px] uppercase tracking-wide text-ink-500">{label}</div>
     </div>
   );
 }
 
 function EmptyState() {
   return (
-    <div className="rounded-xl border border-dashed border-gray-200 bg-white p-8 text-center">
+    <div className="rounded-xl border border-dashed border-ink-800 bg-ink-900 p-8 text-center">
       <p className="text-2xl">📚</p>
       <h2 className="mt-2 text-lg font-bold">No openings in your study queue yet</h2>
-      <p className="mx-auto mt-1 max-w-sm text-sm text-gray-500">
+      <p className="mx-auto mt-1 max-w-sm text-sm text-ink-500">
         Add one from the Openings browser — a "Start studying" button on any opening detail creates
         its cards and schedules them here.
       </p>
       <div className="mt-4 flex flex-wrap justify-center gap-2">
-        <Link to="/study/openings" className="rounded-full bg-gray-900 px-4 py-2 text-sm font-bold text-white hover:bg-gray-800">
+        <Link to="/study/openings" className="rounded-full bg-ink-100 px-4 py-2 text-sm font-bold text-white hover:bg-ink-200">
           Browse 500 openings
         </Link>
         <Link to="/study/repertoire" className="rounded-full bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700">
@@ -147,7 +147,7 @@ function AllCaughtUp({ sessionCount }: { sessionCount: number }) {
         {sessionCount > 0 ? `Reviewed ${sessionCount} card${sessionCount === 1 ? "" : "s"}. ` : ""}
         Come back later — {active} opening{active === 1 ? "" : "s"} scheduled.
       </p>
-      <Link to="/study/openings" className="mt-4 inline-block rounded-full bg-white px-4 py-2 text-sm font-bold text-emerald-700 hover:bg-emerald-100">
+      <Link to="/study/openings" className="mt-4 inline-block rounded-full bg-ink-900 px-4 py-2 text-sm font-bold text-emerald-700 hover:bg-emerald-100">
         + add more openings
       </Link>
     </div>
@@ -167,12 +167,12 @@ function CardView({
 }) {
   const opening = openingBySlug.get(card.slug)!;
   return (
-    <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+    <div className="rounded-xl border border-ink-900 bg-ink-900 p-5 shadow-sm">
       <div className="mb-3 flex items-center justify-between text-xs">
-        <Link to={`/study/openings/${card.slug}`} className="font-semibold text-gray-700 hover:underline">
+        <Link to={`/study/openings/${card.slug}`} className="font-semibold text-ink-300 hover:underline">
           {opening.name}
         </Link>
-        <span className="text-gray-400">
+        <span className="text-ink-600">
           {card.fsrs.state} · {humanDue(card.fsrs)}
           {card.fsrs.reps > 0 && ` · ${card.fsrs.reps} reps`}
         </span>
@@ -187,7 +187,7 @@ function CardView({
         {!revealed ? (
           <button
             onClick={onReveal}
-            className="w-full rounded-xl bg-gray-900 py-3 text-sm font-bold text-white hover:bg-gray-800"
+            className="w-full rounded-xl bg-ink-100 py-3 text-sm font-bold text-white hover:bg-ink-200"
           >
             Show answer <span className="ml-2 text-xs opacity-60">(space)</span>
           </button>
@@ -247,14 +247,14 @@ function PlansCard({ card, side, revealed }: { card: Card; side: "white" | "blac
   const plans = side === "white" ? opening.idea?.whitePlans : opening.idea?.blackPlans;
   return (
     <div>
-      <div className="mb-3 rounded-lg bg-gray-50 p-4 text-center text-sm">
-        <div className="text-[10px] font-bold uppercase tracking-wide text-gray-500">recall</div>
-        <div className="mt-1 text-base font-semibold text-gray-800">
+      <div className="mb-3 rounded-lg bg-ink-950 p-4 text-center text-sm">
+        <div className="text-[10px] font-bold uppercase tracking-wide text-ink-500">recall</div>
+        <div className="mt-1 text-base font-semibold text-ink-200">
           What is {side}'s plan in the {opening.name}?
         </div>
       </div>
       {revealed && (
-        <ul className={`rounded-lg p-3 text-sm ${side === "white" ? "bg-blue-50 text-blue-900" : "bg-slate-100 text-slate-900"}`}>
+        <ul className={`rounded-lg p-3 text-sm ${side === "white" ? "bg-blue-50 text-blue-900" : "bg-ink-100 text-ink-900"}`}>
           {(plans ?? []).map((p, i) => (
             <li key={i} className="flex gap-1.5 py-0.5"><span>•</span><span>{p}</span></li>
           ))}
@@ -269,9 +269,9 @@ function StructureCard({ card, revealed }: { card: Card; revealed: boolean }) {
   const struct = opening.structureSlug ? structureBySlug.get(opening.structureSlug) : null;
   return (
     <div>
-      <div className="mb-3 rounded-lg bg-gray-50 p-4 text-center text-sm">
-        <div className="text-[10px] font-bold uppercase tracking-wide text-gray-500">recall</div>
-        <div className="mt-1 text-base font-semibold text-gray-800">
+      <div className="mb-3 rounded-lg bg-ink-950 p-4 text-center text-sm">
+        <div className="text-[10px] font-bold uppercase tracking-wide text-ink-500">recall</div>
+        <div className="mt-1 text-base font-semibold text-ink-200">
           What pawn structure does the {opening.name} reach?
         </div>
       </div>

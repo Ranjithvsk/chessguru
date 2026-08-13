@@ -1382,7 +1382,7 @@ export default function AcademyDashboardPage() {
         </div>
       )}
       {canManage && (
-        <div className="rounded-xl2 border border-cyan-500/40 bg-gradient-to-r from-cyan-900/40 to-slate-900/60 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+        <div className="rounded-xl2 border border-cyan-500/40 bg-gradient-to-r from-cyan-900/40 to-ink-900/60 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
           <div className="text-sm text-cyan-100">
             <span className="font-semibold">Public coach profile</span>
             <span className="text-cyan-200/80"> — share your ChessGuru page at </span>
@@ -1401,7 +1401,7 @@ export default function AcademyDashboardPage() {
       {/* Public ACADEMY page — owner only (an academy has ONE landing page,
           managed by the owner; coaches only edit their own /coach/:username). */}
       {isOwner && (
-        <div className="rounded-xl2 border border-amber-500/40 bg-gradient-to-r from-amber-900/30 to-slate-900/60 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+        <div className="rounded-xl2 border border-amber-500/40 bg-gradient-to-r from-amber-900/30 to-ink-900/60 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
           <div className="text-sm text-amber-100">
             <span className="font-semibold">Public academy page</span>
             <span className="text-amber-200/80"> — chessiverse-style landing at </span>

@@ -1,6 +1,9 @@
 import type { Config } from "tailwindcss";
 
 // Colourful, neat design system for ChessGuru v2.
+// The ink-* neutral palette resolves through CSS variables so we can flip the
+// entire app between dark (default) and light modes by swapping var values
+// on <html class="light">. See src/index.css for the light-mode overrides.
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   darkMode: "class",
@@ -18,10 +21,18 @@ export default {
           400: "#34d399", 500: "#10b981", 600: "#059669",
         },
         gold: { 400: "#fbbf24", 500: "#f59e0b" },
-        // dark surfaces with good contrast (fixes old grey-on-black)
+        // Neutral surfaces are theme-swappable — see src/index.css.
         ink: {
-          950: "#0b0d12", 900: "#11141b", 800: "#1a1f29", 700: "#252b38",
-          600: "#323a4d", 500: "#5b6678", 400: "#8b95a7", 300: "#c2c9d6",
+          950: "rgb(var(--ink-950) / <alpha-value>)",
+          900: "rgb(var(--ink-900) / <alpha-value>)",
+          800: "rgb(var(--ink-800) / <alpha-value>)",
+          700: "rgb(var(--ink-700) / <alpha-value>)",
+          600: "rgb(var(--ink-600) / <alpha-value>)",
+          500: "rgb(var(--ink-500) / <alpha-value>)",
+          400: "rgb(var(--ink-400) / <alpha-value>)",
+          300: "rgb(var(--ink-300) / <alpha-value>)",
+          200: "rgb(var(--ink-200) / <alpha-value>)",
+          100: "rgb(var(--ink-100) / <alpha-value>)",
         },
       },
       fontFamily: {

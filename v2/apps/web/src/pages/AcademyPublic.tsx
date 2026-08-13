@@ -133,7 +133,7 @@ export default function AcademyPublicPage() {
 
   if (acadQ.isLoading) {
     return (
-      <div className="mx-auto max-w-6xl p-8 text-center text-slate-400">
+      <div className="mx-auto max-w-6xl p-8 text-center text-ink-400">
         Loading academy…
       </div>
     );
@@ -142,8 +142,8 @@ export default function AcademyPublicPage() {
     return (
       <div className="mx-auto max-w-3xl p-12 text-center">
         <div className="text-6xl mb-4">♟</div>
-        <h1 className="text-2xl font-bold text-slate-100 mb-2">Academy not found</h1>
-        <p className="text-slate-400 mb-6">
+        <h1 className="text-2xl font-bold text-ink-100 mb-2">Academy not found</h1>
+        <p className="text-ink-400 mb-6">
           No academy with slug <code className="text-cyan-300">{slug}</code> — or the owner hasn't set up a public page yet.
         </p>
         <Link to="/" className="inline-block px-6 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-medium">
@@ -174,14 +174,14 @@ export default function AcademyPublicPage() {
   const isOwner = !!authQ.data?.loggedIn && authQ.data.academyId === academy._id;
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100">
+    <div className="min-h-screen bg-ink-900 text-ink-100">
       {/* Hero */}
       <div className="relative">
         <div
-          className="h-64 md:h-80 w-full bg-gradient-to-br from-cyan-800 via-teal-900 to-slate-900 bg-cover bg-center"
+          className="h-64 md:h-80 w-full bg-gradient-to-br from-cyan-800 via-teal-900 to-ink-900 bg-cover bg-center"
           style={p.coverUrl ? { backgroundImage: `url(${p.coverUrl})` } : undefined}
         />
-        <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-slate-900 to-transparent" />
+        <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-ink-900 to-transparent" />
         <div className="mx-auto max-w-6xl px-4 md:px-8">
           <div className="relative -mt-20 md:-mt-24 flex flex-col md:flex-row md:items-end gap-4 md:gap-6 pb-6">
             {/* Logo */}
@@ -189,10 +189,10 @@ export default function AcademyPublicPage() {
               {p.logoUrl ? (
                 <img
                   src={p.logoUrl} alt={displayName}
-                  className="w-32 h-32 md:w-40 md:h-40 rounded-full border-4 border-slate-900 shadow-xl object-cover bg-slate-800"
+                  className="w-32 h-32 md:w-40 md:h-40 rounded-full border-4 border-ink-900 shadow-xl object-cover bg-ink-800"
                 />
               ) : (
-                <div className="w-32 h-32 md:w-40 md:h-40 rounded-full border-4 border-slate-900 shadow-xl bg-gradient-to-br from-cyan-500 to-teal-700 grid place-items-center text-5xl font-bold text-white">
+                <div className="w-32 h-32 md:w-40 md:h-40 rounded-full border-4 border-ink-900 shadow-xl bg-gradient-to-br from-cyan-500 to-teal-700 grid place-items-center text-5xl font-bold text-white">
                   {displayName.charAt(0).toUpperCase()}
                 </div>
               )}
@@ -200,14 +200,14 @@ export default function AcademyPublicPage() {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2 mb-1">
                 {flag && <span className="text-2xl leading-none" title={p.country}>{flag}</span>}
-                {p.city && <span className="text-slate-400 text-sm">{p.city}</span>}
+                {p.city && <span className="text-ink-400 text-sm">{p.city}</span>}
                 {p.foundedYear && (
-                  <span className="text-slate-500 text-sm">· est. {p.foundedYear}</span>
+                  <span className="text-ink-500 text-sm">· est. {p.foundedYear}</span>
                 )}
               </div>
               <h1 className="text-3xl md:text-4xl font-bold text-white leading-tight">{displayName}</h1>
               {p.tagline && (
-                <p className="text-slate-300 mt-1 text-sm md:text-base">{p.tagline}</p>
+                <p className="text-ink-300 mt-1 text-sm md:text-base">{p.tagline}</p>
               )}
               {isOwner && (
                 <div className="mt-3">
@@ -231,7 +231,7 @@ export default function AcademyPublicPage() {
                 <a
                   href={p.socials.whatsapp ? socialHref("whatsapp", p.socials.whatsapp) : socialHref("website", p.socials.website!)}
                   target="_blank" rel="noreferrer"
-                  className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-slate-700/70 hover:bg-slate-700 text-slate-100 font-medium"
+                  className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-ink-700/70 hover:bg-ink-700 text-ink-100 font-medium"
                 >Contact</a>
               )}
             </div>
@@ -244,9 +244,9 @@ export default function AcademyPublicPage() {
         <div className="mx-auto max-w-6xl px-4 md:px-8 pb-2">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {stats.map((s) => (
-              <div key={s.label} className="rounded-2xl bg-gradient-to-br from-cyan-900/40 to-slate-800/60 border border-cyan-800/30 p-4 text-center">
+              <div key={s.label} className="rounded-2xl bg-gradient-to-br from-cyan-900/40 to-ink-800/60 border border-cyan-800/30 p-4 text-center">
                 <div className="text-2xl md:text-3xl font-bold text-white">{s.value}</div>
-                <div className="text-xs text-slate-400 mt-1 uppercase tracking-wide">{s.label}</div>
+                <div className="text-xs text-ink-400 mt-1 uppercase tracking-wide">{s.label}</div>
               </div>
             ))}
           </div>
@@ -255,12 +255,12 @@ export default function AcademyPublicPage() {
 
       {/* Our Coaches — chessiverse creator grid */}
       <section className="mx-auto max-w-6xl px-4 md:px-8 py-8">
-        <h2 className="text-2xl font-bold text-slate-100 mb-1">Our Coaches</h2>
-        <p className="text-sm text-slate-400 mb-6">
+        <h2 className="text-2xl font-bold text-ink-100 mb-1">Our Coaches</h2>
+        <p className="text-sm text-ink-400 mb-6">
           Learn from {coaches.length > 0 ? `${coaches.length} handpicked coach${coaches.length === 1 ? "" : "es"}` : "our team"}, each with their own style.
         </p>
         {coaches.length === 0 ? (
-          <div className="rounded-xl bg-slate-800/60 border border-slate-700/60 p-8 text-center text-slate-400">
+          <div className="rounded-xl bg-ink-800/60 border border-ink-700/60 p-8 text-center text-ink-400">
             Coaches coming soon.
           </div>
         ) : (
@@ -273,15 +273,15 @@ export default function AcademyPublicPage() {
                 <Link
                   key={c.userId}
                   to={`/coach/${c.username}`}
-                  className="group rounded-2xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 hover:border-cyan-700/60 p-5 transition-colors shadow-lg flex flex-col items-center text-center"
+                  className="group rounded-2xl bg-ink-800/60 hover:bg-ink-800 border border-ink-700/60 hover:border-cyan-700/60 p-5 transition-colors shadow-lg flex flex-col items-center text-center"
                 >
                   {cp.photoUrl ? (
                     <img
                       src={cp.photoUrl} alt={name}
-                      className="w-24 h-24 rounded-full object-cover bg-slate-900 border-2 border-slate-700 group-hover:border-cyan-500"
+                      className="w-24 h-24 rounded-full object-cover bg-ink-900 border-2 border-ink-700 group-hover:border-cyan-500"
                     />
                   ) : (
-                    <div className="w-24 h-24 rounded-full bg-gradient-to-br from-cyan-500 to-teal-700 grid place-items-center text-3xl font-bold text-white border-2 border-slate-700 group-hover:border-cyan-500">
+                    <div className="w-24 h-24 rounded-full bg-gradient-to-br from-cyan-500 to-teal-700 grid place-items-center text-3xl font-bold text-white border-2 border-ink-700 group-hover:border-cyan-500">
                       {name.charAt(0).toUpperCase()}
                     </div>
                   )}
@@ -289,14 +289,14 @@ export default function AcademyPublicPage() {
                     {cp.titleClass && (
                       <span className="px-1.5 py-0.5 rounded bg-yellow-500 text-black text-[10px] font-bold">{cp.titleClass}</span>
                     )}
-                    <div className="font-semibold text-slate-100">{name}</div>
+                    <div className="font-semibold text-ink-100">{name}</div>
                     {cflag && <span className="text-base leading-none">{cflag}</span>}
                   </div>
                   {c.isOwner && (
                     <div className="text-[10px] uppercase tracking-wide text-amber-300 mt-0.5">Founder</div>
                   )}
                   {cp.tagline && (
-                    <div className="text-xs text-slate-400 mt-1 line-clamp-2">{cp.tagline}</div>
+                    <div className="text-xs text-ink-400 mt-1 line-clamp-2">{cp.tagline}</div>
                   )}
                   <div className="flex flex-wrap justify-center gap-1.5 mt-3">
                     {cp.elo && (
@@ -305,7 +305,7 @@ export default function AcademyPublicPage() {
                       </span>
                     )}
                     {cp.playingStyles.slice(0, 2).map((s) => (
-                      <span key={s} className="px-2 py-0.5 rounded-full bg-slate-700/60 text-slate-300 text-[11px]">
+                      <span key={s} className="px-2 py-0.5 rounded-full bg-ink-700/60 text-ink-300 text-[11px]">
                         {s}
                       </span>
                     ))}
@@ -325,10 +325,10 @@ export default function AcademyPublicPage() {
         <div className="mx-auto max-w-6xl px-4 md:px-8 pb-8 grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="md:col-span-2 space-y-6">
             {p.description && (
-              <section className="bg-slate-800/50 rounded-2xl p-6 shadow-lg">
-                <h2 className="text-lg font-semibold text-slate-200 mb-3">About</h2>
+              <section className="bg-ink-800/50 rounded-2xl p-6 shadow-lg">
+                <h2 className="text-lg font-semibold text-ink-200 mb-3">About</h2>
                 <div
-                  className="prose prose-invert prose-sm max-w-none text-slate-300 leading-relaxed [&_p]:mb-3 [&_p:last-child]:mb-0"
+                  className="prose prose-invert prose-sm max-w-none text-ink-300 leading-relaxed [&_p]:mb-3 [&_p:last-child]:mb-0"
                   dangerouslySetInnerHTML={renderDescription(p.description)}
                 />
               </section>
@@ -336,15 +336,15 @@ export default function AcademyPublicPage() {
           </div>
           <div className="space-y-6">
             {upcomingClasses.length > 0 && (
-              <section className="bg-slate-800/50 rounded-2xl p-6 shadow-lg">
-                <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-4">
+              <section className="bg-ink-800/50 rounded-2xl p-6 shadow-lg">
+                <h2 className="text-sm font-semibold text-ink-300 uppercase tracking-wide mb-4">
                   <span className="mr-1">📅</span> Upcoming Classes
                 </h2>
                 <div className="space-y-3">
                   {upcomingClasses.map((cl) => (
-                    <div key={cl._id} className="rounded-xl bg-slate-900/60 p-4 border border-slate-700/60">
-                      <div className="font-medium text-slate-100">{cl.title || "Chess class"}</div>
-                      <div className="text-xs text-slate-400 mt-1">
+                    <div key={cl._id} className="rounded-xl bg-ink-900/60 p-4 border border-ink-700/60">
+                      <div className="font-medium text-ink-100">{cl.title || "Chess class"}</div>
+                      <div className="text-xs text-ink-400 mt-1">
                         {fmtStart(cl.startAt)} · {cl.durationMin} min
                         {cl.coach ? ` · ${cl.coach}` : ""}
                       </div>
@@ -370,15 +370,15 @@ export default function AcademyPublicPage() {
       {/* Achievements */}
       {p.achievements.length > 0 && (
         <section className="mx-auto max-w-6xl px-4 md:px-8 pb-8">
-          <h2 className="text-xl font-bold text-slate-100 mb-4">🏆 Achievements</h2>
+          <h2 className="text-xl font-bold text-ink-100 mb-4">🏆 Achievements</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {p.achievements.map((a) => (
-              <div key={a.id} className="bg-slate-800/60 rounded-2xl p-4 shadow-lg hover:bg-slate-800 transition-colors">
+              <div key={a.id} className="bg-ink-800/60 rounded-2xl p-4 shadow-lg hover:bg-ink-800 transition-colors">
                 {a.imageUrl && (
-                  <img src={a.imageUrl} alt={a.title} className="w-full h-[140px] object-cover rounded-lg mb-3 bg-slate-900" />
+                  <img src={a.imageUrl} alt={a.title} className="w-full h-[140px] object-cover rounded-lg mb-3 bg-ink-900" />
                 )}
                 <div className="flex items-start justify-between gap-2">
-                  <div className="font-semibold text-slate-100">{a.title}</div>
+                  <div className="font-semibold text-ink-100">{a.title}</div>
                   {a.year && (
                     <span className="shrink-0 px-2 py-0.5 rounded-md bg-amber-600/20 text-amber-300 text-xs">
                       {a.year}
@@ -386,7 +386,7 @@ export default function AcademyPublicPage() {
                   )}
                 </div>
                 {a.description && (
-                  <p className="text-sm text-slate-400 mt-2">{a.description}</p>
+                  <p className="text-sm text-ink-400 mt-2">{a.description}</p>
                 )}
               </div>
             ))}
@@ -397,29 +397,29 @@ export default function AcademyPublicPage() {
       {/* Testimonials */}
       {p.testimonials.length > 0 && (
         <section className="mx-auto max-w-6xl px-4 md:px-8 pb-8">
-          <h2 className="text-xl font-bold text-slate-100 mb-4">💬 What our students say</h2>
+          <h2 className="text-xl font-bold text-ink-100 mb-4">💬 What our students say</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {p.testimonials.map((t) => (
-              <figure key={t.id} className="bg-slate-800/60 rounded-2xl p-5 shadow-lg flex flex-col">
+              <figure key={t.id} className="bg-ink-800/60 rounded-2xl p-5 shadow-lg flex flex-col">
                 {typeof t.rating === "number" && (
                   <div className="text-amber-300 text-sm mb-2" aria-label={`${t.rating} out of 5 stars`}>
-                    {"★".repeat(t.rating)}<span className="text-slate-600">{"★".repeat(5 - t.rating)}</span>
+                    {"★".repeat(t.rating)}<span className="text-ink-600">{"★".repeat(5 - t.rating)}</span>
                   </div>
                 )}
-                <blockquote className="text-slate-200 italic leading-relaxed">
+                <blockquote className="text-ink-200 italic leading-relaxed">
                   “{t.quote}”
                 </blockquote>
                 <figcaption className="mt-4 flex items-center gap-3">
                   {t.imageUrl ? (
-                    <img src={t.imageUrl} alt={t.author} className="w-10 h-10 rounded-full object-cover bg-slate-900" />
+                    <img src={t.imageUrl} alt={t.author} className="w-10 h-10 rounded-full object-cover bg-ink-900" />
                   ) : (
                     <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-500 to-teal-700 grid place-items-center text-sm font-bold text-white">
                       {t.author.charAt(0).toUpperCase() || "?"}
                     </div>
                   )}
                   <div className="min-w-0">
-                    <div className="text-sm font-medium text-slate-100 truncate">{t.author}</div>
-                    {t.role && <div className="text-xs text-slate-400 truncate">{t.role}</div>}
+                    <div className="text-sm font-medium text-ink-100 truncate">{t.author}</div>
+                    {t.role && <div className="text-xs text-ink-400 truncate">{t.role}</div>}
                   </div>
                 </figcaption>
               </figure>
@@ -429,14 +429,14 @@ export default function AcademyPublicPage() {
       )}
 
       {/* Footer band */}
-      <footer className="mx-auto max-w-6xl px-4 md:px-8 pt-6 pb-8 border-t border-slate-800 mt-6">
+      <footer className="mx-auto max-w-6xl px-4 md:px-8 pt-6 pb-8 border-t border-ink-800 mt-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           {socialEntries.length > 0 ? (
             <div className="flex flex-wrap items-center gap-3">
               {socialEntries.map(([kind, v]) => (
                 <a
                   key={kind} href={socialHref(kind, v)} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800/70 hover:bg-slate-700 text-slate-200 text-sm"
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-ink-800/70 hover:bg-ink-700 text-ink-200 text-sm"
                   title={kind}
                 >
                   <SocialIcon kind={kind} /> <span className="capitalize">{kind}</span>
@@ -444,7 +444,7 @@ export default function AcademyPublicPage() {
               ))}
             </div>
           ) : <div />}
-          <Link to="/" className="text-xs text-slate-500 hover:text-slate-300">
+          <Link to="/" className="text-xs text-ink-500 hover:text-ink-300">
             Powered by ChessGuru
           </Link>
         </div>

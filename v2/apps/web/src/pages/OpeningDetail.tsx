@@ -72,7 +72,7 @@ export default function OpeningDetail() {
   if (!opening) {
     return (
       <div className="mx-auto max-w-3xl p-8 text-center">
-        <p className="text-sm text-gray-500">Opening not found.</p>
+        <p className="text-sm text-ink-500">Opening not found.</p>
         <Link to="/study/openings" className="mt-3 inline-block text-sm text-blue-600 hover:underline">
           ← Back to Openings
         </Link>
@@ -139,39 +139,39 @@ export default function OpeningDetail() {
   return (
     <div className="mx-auto max-w-6xl p-4">
       <div className="mb-3 flex items-center gap-3 text-xs">
-        <Link to="/study/openings" className="text-gray-500 hover:text-gray-800">← All openings</Link>
+        <Link to="/study/openings" className="text-ink-500 hover:text-ink-200">← All openings</Link>
         <div className="ml-auto flex items-center gap-2">
           {siblings.prev ? (
             <Link to={`/study/openings/${siblings.prev.slug}`}
-              className="rounded-full bg-gray-100 px-2.5 py-1 font-semibold text-gray-700 hover:bg-gray-200"
+              className="rounded-full bg-ink-900 px-2.5 py-1 font-semibold text-ink-300 hover:bg-ink-800"
               title={`Previous in ${family?.name ?? "family"}`}>
               ← {siblings.prev.name.length > 30 ? siblings.prev.name.slice(0, 30) + "…" : siblings.prev.name}
             </Link>
-          ) : <span className="rounded-full bg-gray-50 px-2.5 py-1 text-gray-300">← start of family</span>}
+          ) : <span className="rounded-full bg-ink-950 px-2.5 py-1 text-ink-700">← start of family</span>}
           {family && (
-            <span className="text-[10px] text-gray-500">
+            <span className="text-[10px] text-ink-500">
               {siblings.idx + 1}/{siblings.list.length} · {family.name}
             </span>
           )}
           {siblings.next ? (
             <Link to={`/study/openings/${siblings.next.slug}`}
-              className="rounded-full bg-gray-100 px-2.5 py-1 font-semibold text-gray-700 hover:bg-gray-200"
+              className="rounded-full bg-ink-900 px-2.5 py-1 font-semibold text-ink-300 hover:bg-ink-800"
               title={`Next in ${family?.name ?? "family"}`}>
               {siblings.next.name.length > 30 ? siblings.next.name.slice(0, 30) + "…" : siblings.next.name} →
             </Link>
-          ) : <span className="rounded-full bg-gray-50 px-2.5 py-1 text-gray-300">end of family →</span>}
+          ) : <span className="rounded-full bg-ink-950 px-2.5 py-1 text-ink-700">end of family →</span>}
         </div>
       </div>
 
       <header className="mb-4">
         <div className="flex flex-wrap items-baseline gap-3">
           <h1 className="text-2xl font-bold">{opening.name}</h1>
-          <span className="rounded bg-gray-100 px-2 py-0.5 font-mono text-xs font-bold">{opening.eco}</span>
+          <span className="rounded bg-ink-900 px-2 py-0.5 font-mono text-xs font-bold">{opening.eco}</span>
           {opening.tier === 1 && (
             <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-bold uppercase text-amber-700">Pillar</span>
           )}
         </div>
-        <div className="mt-1 text-sm text-gray-600">
+        <div className="mt-1 text-sm text-ink-400">
           {family && (
             <Link
               to={`/study/openings?family=${family.id}`}
@@ -181,7 +181,7 @@ export default function OpeningDetail() {
               {family.name}
             </Link>
           )}
-          {opening.aliases?.length ? <span className="text-gray-400">· also: {opening.aliases.join(" · ")}</span> : null}
+          {opening.aliases?.length ? <span className="text-ink-600">· also: {opening.aliases.join(" · ")}</span> : null}
         </div>
       </header>
 
@@ -194,14 +194,14 @@ export default function OpeningDetail() {
           <div className="mt-3 flex items-center gap-2">
             <button
               onClick={() => setPly(0)}
-              className="rounded border border-gray-200 px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-40"
+              className="rounded border border-ink-800 px-2 py-1 text-xs hover:bg-ink-950 disabled:opacity-40"
               disabled={cur === 0}
             >
               ⏮
             </button>
             <button
               onClick={() => setPly((p) => Math.max(0, p - 1))}
-              className="rounded border border-gray-200 px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-40"
+              className="rounded border border-ink-800 px-2 py-1 text-xs hover:bg-ink-950 disabled:opacity-40"
               disabled={cur === 0}
             >
               ◀
@@ -211,27 +211,27 @@ export default function OpeningDetail() {
             </span>
             <button
               onClick={() => setPly((p) => Math.min(positions.length - 1, p + 1))}
-              className="rounded border border-gray-200 px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-40"
+              className="rounded border border-ink-800 px-2 py-1 text-xs hover:bg-ink-950 disabled:opacity-40"
               disabled={cur >= positions.length - 1}
             >
               ▶
             </button>
             <button
               onClick={() => setPly(positions.length - 1)}
-              className="rounded border border-gray-200 px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-40"
+              className="rounded border border-ink-800 px-2 py-1 text-xs hover:bg-ink-950 disabled:opacity-40"
               disabled={cur >= positions.length - 1}
             >
               ⏭
             </button>
             <button
               onClick={() => setOrientation((o) => o === "white" ? "black" : "white")}
-              className="ml-auto rounded border border-gray-200 px-2 py-1 text-xs hover:bg-gray-50"
+              className="ml-auto rounded border border-ink-800 px-2 py-1 text-xs hover:bg-ink-950"
               title="Flip board (F)"
             >
               ⇅ flip
             </button>
           </div>
-          <p className="mt-1 text-[10px] text-gray-400">
+          <p className="mt-1 text-[10px] text-ink-600">
             keys: ← → step · Home/End jump · F flip
           </p>
 
@@ -250,7 +250,7 @@ export default function OpeningDetail() {
 
           <button
             onClick={handoffToTrainer}
-            className="mt-4 w-full rounded-xl bg-gray-900 py-3 text-sm font-bold text-white hover:bg-gray-800 disabled:opacity-40"
+            className="mt-4 w-full rounded-xl bg-ink-100 py-3 text-sm font-bold text-white hover:bg-ink-200 disabled:opacity-40"
             disabled={moves.length === 0}
           >
             ▶ Learn this opening in the trainer
@@ -282,10 +282,10 @@ export default function OpeningDetail() {
         {/* Text panel */}
         <div className="space-y-5">
           {idea?.short && (
-            <p className="text-base leading-snug text-gray-800">{idea.short}</p>
+            <p className="text-base leading-snug text-ink-200">{idea.short}</p>
           )}
           {idea?.long && (
-            <div className="rounded-lg bg-gray-50 p-3 text-sm leading-relaxed text-gray-700">
+            <div className="rounded-lg bg-ink-950 p-3 text-sm leading-relaxed text-ink-300">
               {idea.long.split(/\n\n/).map((para, i) => <p key={i} className={i > 0 ? "mt-2" : ""}>{para}</p>)}
             </div>
           )}
@@ -293,13 +293,13 @@ export default function OpeningDetail() {
           {/* Tags */}
           {opening.tagSlugs.length > 0 && (
             <div>
-              <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-gray-500">Tags</div>
+              <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-ink-500">Tags</div>
               <div className="flex flex-wrap gap-1">
                 {opening.tagSlugs.map((s) => {
                   const t = tagBySlug.get(s);
                   if (!t) return null;
                   return (
-                    <span key={s} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700">
+                    <span key={s} className="rounded-full bg-ink-900 px-2 py-0.5 text-xs font-semibold text-ink-300">
                       {t.glyph ? `${t.glyph} ` : ""}{t.label}
                     </span>
                   );
@@ -313,16 +313,16 @@ export default function OpeningDetail() {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {idea.whitePlans?.length && (
                 <div>
-                  <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-gray-500">White plans</div>
-                  <ul className="space-y-1 text-xs text-gray-700">
+                  <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-ink-500">White plans</div>
+                  <ul className="space-y-1 text-xs text-ink-300">
                     {idea.whitePlans.map((p, i) => <li key={i} className="flex gap-1.5"><span>•</span><span>{p}</span></li>)}
                   </ul>
                 </div>
               )}
               {idea.blackPlans?.length && (
                 <div>
-                  <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-gray-500">Black plans</div>
-                  <ul className="space-y-1 text-xs text-gray-700">
+                  <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-ink-500">Black plans</div>
+                  <ul className="space-y-1 text-xs text-ink-300">
                     {idea.blackPlans.map((p, i) => <li key={i} className="flex gap-1.5"><span>•</span><span>{p}</span></li>)}
                   </ul>
                 </div>
@@ -336,10 +336,10 @@ export default function OpeningDetail() {
           {/* Structure */}
           {structure && (
             <div>
-              <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-gray-500">Pawn structure</div>
+              <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-ink-500">Pawn structure</div>
               <div className="text-sm">
                 <span className="font-semibold">{structure.glyph} {structure.name}</span>
-                <span className="ml-2 text-gray-600">— {structure.short}</span>
+                <span className="ml-2 text-ink-400">— {structure.short}</span>
               </div>
             </div>
           )}
@@ -358,14 +358,14 @@ export default function OpeningDetail() {
           {/* Citations */}
           {idea?.citations?.length && (
             <div>
-              <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-gray-500">Cited from</div>
-              <ul className="space-y-0.5 text-xs text-gray-600">
+              <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-ink-500">Cited from</div>
+              <ul className="space-y-0.5 text-xs text-ink-400">
                 {idea.citations.map((c, i) => (
                   <li key={i}>
                     • {c.author && <span className="font-semibold">{c.author} — </span>}
                     {c.url ? <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{c.work}</a> : c.work}
-                    {c.section && <span className="text-gray-400">, {c.section}</span>}
-                    {c.licence && <span className="ml-1 text-gray-400">({c.licence})</span>}
+                    {c.section && <span className="text-ink-600">, {c.section}</span>}
+                    {c.licence && <span className="ml-1 text-ink-600">({c.licence})</span>}
                   </li>
                 ))}
               </ul>
@@ -414,28 +414,28 @@ function StoryPanel({ opening }: { opening: Opening }) {
 
   const badge = story.source === "user" ? { label: "Your story", cls: "bg-emerald-100 text-emerald-800" }
     : story.source === "pillar" ? { label: "Author-written", cls: "bg-purple-100 text-purple-800" }
-    : { label: "Auto", cls: "bg-gray-200 text-gray-700" };
+    : { label: "Auto", cls: "bg-ink-800 text-ink-300" };
 
   const bgCls = story.source === "user" ? "border-emerald-100 bg-emerald-50"
     : story.source === "pillar" ? "border-purple-100 bg-purple-50"
-    : "border-gray-200 bg-gray-50";
-  const textCls = story.source === "user" ? "text-emerald-900" : story.source === "pillar" ? "text-purple-900" : "text-gray-800";
+    : "border-ink-800 bg-ink-950";
+  const textCls = story.source === "user" ? "text-emerald-900" : story.source === "pillar" ? "text-purple-900" : "text-ink-200";
 
   return (
     <div className={`rounded-lg border p-3 ${bgCls}`}>
       <div className="mb-1 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Story</div>
+          <div className="text-[10px] font-bold uppercase tracking-wide text-ink-500">Story</div>
           <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${badge.cls}`}>{badge.label}</span>
         </div>
         <div className="flex gap-1.5">
           <button onClick={toggleSpeak}
-            className="rounded bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50">
+            className="rounded bg-ink-900 px-2 py-0.5 text-[10px] font-semibold text-ink-300 ring-1 ring-ink-800 hover:bg-ink-950">
             {speaking ? "⏹ stop" : "🔊 read"}
           </button>
           {!editing && (
             <button onClick={startEdit}
-              className="rounded bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50">
+              className="rounded bg-ink-900 px-2 py-0.5 text-[10px] font-semibold text-ink-300 ring-1 ring-ink-800 hover:bg-ink-950">
               ✏️ your story
             </button>
           )}
@@ -460,14 +460,14 @@ function StoryPanel({ opening }: { opening: Opening }) {
             value={draftHook}
             onChange={(e) => setDraftHook(e.target.value)}
             placeholder="One sentence — the hook you'll remember"
-            className="w-full rounded border border-gray-200 bg-white px-2 py-1 text-sm outline-none focus:border-gray-400"
+            className="w-full rounded border border-ink-800 bg-ink-900 px-2 py-1 text-sm outline-none focus:border-ink-600"
           />
           <textarea
             value={draftLong}
             onChange={(e) => setDraftLong(e.target.value)}
             placeholder="Optional — longer narration"
             rows={4}
-            className="w-full rounded border border-gray-200 bg-white px-2 py-1 text-xs outline-none focus:border-gray-400"
+            className="w-full rounded border border-ink-800 bg-ink-900 px-2 py-1 text-xs outline-none focus:border-ink-600"
           />
           <div className="flex gap-1.5">
             <button onClick={save} disabled={!draftHook.trim()}
@@ -475,7 +475,7 @@ function StoryPanel({ opening }: { opening: Opening }) {
               Save
             </button>
             <button onClick={() => setEditing(false)}
-              className="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-semibold hover:bg-gray-200">
+              className="rounded-lg bg-ink-900 px-3 py-1.5 text-xs font-semibold hover:bg-ink-800">
               Cancel
             </button>
             {story.source === "user" && (
@@ -516,10 +516,10 @@ function MoveListWithNotes({ opening, moves, cur, setPly }: {
   const [openPly, setOpenPly] = useState<number | null>(null);
   return (
     <>
-      <div className="mt-3 rounded-lg border border-gray-100 bg-white p-3">
+      <div className="mt-3 rounded-lg border border-ink-900 bg-ink-900 p-3">
         <div className="mb-2 flex items-center justify-between">
-          <div className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Mainline</div>
-          <div className="text-[10px] text-gray-500">Tap <span className="font-mono">?</span> beside a move to see or request its explanation</div>
+          <div className="text-[10px] font-bold uppercase tracking-wide text-ink-500">Mainline</div>
+          <div className="text-[10px] text-ink-500">Tap <span className="font-mono">?</span> beside a move to see or request its explanation</div>
         </div>
         <div className="flex flex-wrap gap-x-2 gap-y-1 font-mono text-xs">
           {moves.map((san, i) => {
@@ -533,7 +533,7 @@ function MoveListWithNotes({ opening, moves, cur, setPly }: {
               <span key={i} className="inline-flex items-center">
                 <button
                   onClick={() => setPly(ply)}
-                  className={`rounded px-1 py-0.5 ${cur === ply ? "bg-yellow-100 font-bold" : "hover:bg-gray-100"} ${isCritical ? "ring-1 ring-amber-400" : ""}`}
+                  className={`rounded px-1 py-0.5 ${cur === ply ? "bg-yellow-100 font-bold" : "hover:bg-ink-900"} ${isCritical ? "ring-1 ring-amber-400" : ""}`}
                 >
                   {isWhite ? `${moveNo}.` : ""}{san}
                 </button>
@@ -544,8 +544,8 @@ function MoveListWithNotes({ opening, moves, cur, setPly }: {
                     hasNote
                       ? "bg-emerald-500 text-white hover:bg-emerald-400"
                       : pendingCount > 0
-                        ? "bg-amber-400 text-gray-900 hover:bg-amber-300"
-                        : "bg-gray-200 text-gray-600 hover:bg-gray-300"
+                        ? "bg-amber-400 text-ink-100 hover:bg-amber-300"
+                        : "bg-ink-800 text-ink-400 hover:bg-ink-700"
                   }`}
                 >
                   ?
@@ -603,30 +603,30 @@ function MoveNoteModal(props: {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 sm:items-center" onClick={onClose}>
-      <div className="my-auto w-full max-w-xl max-h-[92vh] overflow-y-auto rounded-2xl border border-gray-200 bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+      <div className="my-auto w-full max-w-xl max-h-[92vh] overflow-y-auto rounded-2xl border border-ink-800 bg-ink-900 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-ink-900 px-4 py-3">
           <div className="min-w-0">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-gray-500">Move explanation</div>
-            <div className="mt-0.5 truncate font-display text-base font-bold text-gray-900">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-ink-500">Move explanation</div>
+            <div className="mt-0.5 truncate font-display text-base font-bold text-ink-100">
               {openingName}
-              <span className="mx-2 text-gray-400">·</span>
-              <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-sm">{moveNo}.{ply % 2 === 0 ? ".." : ""}{san}</span>
-              <span className="ml-1.5 text-xs font-normal text-gray-500">({side}'s move)</span>
+              <span className="mx-2 text-ink-600">·</span>
+              <span className="rounded bg-ink-900 px-1.5 py-0.5 font-mono text-sm">{moveNo}.{ply % 2 === 0 ? ".." : ""}{san}</span>
+              <span className="ml-1.5 text-xs font-normal text-ink-500">({side}'s move)</span>
             </div>
           </div>
-          <button onClick={onClose} className="rounded-md p-1 text-xl leading-none text-gray-400 hover:bg-gray-100 hover:text-gray-800">×</button>
+          <button onClick={onClose} className="rounded-md p-1 text-xl leading-none text-ink-600 hover:bg-ink-900 hover:text-ink-200">×</button>
         </div>
 
         <div className="space-y-3 p-4">
           {!editing && note && (
             <>
-              <div className="whitespace-pre-wrap rounded-lg border border-gray-100 bg-gray-50 p-3 text-sm leading-relaxed text-gray-800">
+              <div className="whitespace-pre-wrap rounded-lg border border-ink-900 bg-ink-950 p-3 text-sm leading-relaxed text-ink-200">
                 {note.note}
               </div>
-              <div className="flex items-center justify-between text-[11px] text-gray-500">
-                <span>By <b className="text-gray-700">{note.authorName}</b> · {new Date(note.updatedAt).toLocaleDateString()}</span>
+              <div className="flex items-center justify-between text-[11px] text-ink-500">
+                <span>By <b className="text-ink-300">{note.authorName}</b> · {new Date(note.updatedAt).toLocaleDateString()}</span>
                 {isCoach && (
-                  <button onClick={() => setEditing(true)} className="rounded-md border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50">Edit</button>
+                  <button onClick={() => setEditing(true)} className="rounded-md border border-ink-800 px-2 py-1 text-xs font-semibold text-ink-300 hover:bg-ink-950">Edit</button>
                 )}
               </div>
             </>
@@ -634,9 +634,9 @@ function MoveNoteModal(props: {
 
           {!editing && !note && (
             <div className="space-y-3">
-              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 text-center">
+              <div className="rounded-lg border border-dashed border-ink-700 bg-ink-950 p-4 text-center">
                 <div className="text-3xl">📝</div>
-                <div className="mt-1 text-sm text-gray-600">No explanation yet for this move.</div>
+                <div className="mt-1 text-sm text-ink-400">No explanation yet for this move.</div>
                 {pendingCount > 0 && (
                   <div className="mt-1 text-[11px] text-amber-700">
                     {pendingCount} {pendingCount === 1 ? "student has" : "students have"} requested one.
@@ -659,7 +659,7 @@ function MoveNoteModal(props: {
 
           {editing && (
             <div className="space-y-2">
-              <label className="block text-[11px] font-bold uppercase tracking-wide text-gray-500">Explanation (up to 5000 chars)</label>
+              <label className="block text-[11px] font-bold uppercase tracking-wide text-ink-500">Explanation (up to 5000 chars)</label>
               <textarea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
@@ -667,12 +667,12 @@ function MoveNoteModal(props: {
                 maxLength={5000}
                 autoFocus
                 placeholder={`Why ${san} here? Explain the idea, common responses, traps to avoid…`}
-                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-indigo-500 focus:outline-none"
+                className="w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-ink-200 focus:border-indigo-500 focus:outline-none"
               />
               <div className="flex items-center justify-between">
-                <div className="text-[11px] text-gray-500">{draft.length}/5000</div>
+                <div className="text-[11px] text-ink-500">{draft.length}/5000</div>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => { setEditing(false); setDraft(note?.note ?? ""); }} className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">Cancel</button>
+                  <button onClick={() => { setEditing(false); setDraft(note?.note ?? ""); }} className="rounded-md border border-ink-800 px-3 py-1.5 text-xs font-semibold text-ink-300 hover:bg-ink-950">Cancel</button>
                   <button onClick={save} disabled={saving || !draft.trim()} className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
                 </div>
               </div>
@@ -691,10 +691,10 @@ function NotesSummary({ slug }: { slug: string }) {
   const pendingCount = Object.values(data.pendingRequests || {}).reduce((s: number, n: any) => s + Number(n || 0), 0);
   if (noteCount === 0 && pendingCount === 0) return null;
   return (
-    <div className="mt-2 flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-1.5 text-[11px] text-gray-600">
+    <div className="mt-2 flex items-center justify-between rounded-lg border border-ink-900 bg-ink-950 px-3 py-1.5 text-[11px] text-ink-400">
       <span>
         {noteCount > 0 && <>📝 {noteCount} move{noteCount === 1 ? "" : "s"} explained</>}
-        {noteCount > 0 && pendingCount > 0 && <span className="mx-1.5 text-gray-400">·</span>}
+        {noteCount > 0 && pendingCount > 0 && <span className="mx-1.5 text-ink-600">·</span>}
         {pendingCount > 0 && <span className="text-amber-700">🙋 {pendingCount} pending request{pendingCount === 1 ? "" : "s"}</span>}
       </span>
     </div>

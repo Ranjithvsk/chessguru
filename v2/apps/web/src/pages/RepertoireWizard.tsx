@@ -52,20 +52,20 @@ export default function RepertoireWizard() {
   if (step === "intro") {
     return (
       <div className="mx-auto max-w-2xl p-6">
-        <Link to="/study/openings" className="mb-3 inline-block text-xs text-gray-500 hover:text-gray-800">← All openings</Link>
+        <Link to="/study/openings" className="mb-3 inline-block text-xs text-ink-500 hover:text-ink-200">← All openings</Link>
         <h1 className="text-2xl font-bold">Build my repertoire</h1>
-        <p className="mt-2 text-gray-700">
+        <p className="mt-2 text-ink-300">
           10 quick questions → a personalised list of openings drawn from the 500. Kept in your
           browser only; skip or redo any time. Once you have a repertoire, we'll prioritise its
           openings in your daily study queue (when the card engine ships).
         </p>
         <div className="mt-6 flex gap-3">
           <button onClick={() => setStep("questions")}
-            className="rounded-xl bg-gray-900 px-5 py-3 text-sm font-bold text-white hover:bg-gray-800">
+            className="rounded-xl bg-ink-100 px-5 py-3 text-sm font-bold text-white hover:bg-ink-200">
             Start · 10 questions
           </button>
           <Link to="/study/openings"
-            className="rounded-xl border border-gray-300 px-5 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+            className="rounded-xl border border-ink-700 px-5 py-3 text-sm font-semibold text-ink-300 hover:bg-ink-950">
             Skip — browse all 500
           </Link>
         </div>
@@ -77,14 +77,14 @@ export default function RepertoireWizard() {
   if (step === "review" && preview) {
     return (
       <div className="mx-auto max-w-4xl p-6">
-        <Link to="/study/openings" className="mb-3 inline-block text-xs text-gray-500 hover:text-gray-800">← All openings</Link>
+        <Link to="/study/openings" className="mb-3 inline-block text-xs text-ink-500 hover:text-ink-200">← All openings</Link>
         <div className="flex items-baseline justify-between gap-3">
           <h1 className="text-2xl font-bold">Your repertoire</h1>
-          <div className="text-xs text-gray-500">
+          <div className="text-xs text-ink-500">
             saved · {new Date(preview.updatedAt).toLocaleString()}
           </div>
         </div>
-        <p className="mt-2 text-sm text-gray-600">
+        <p className="mt-2 text-sm text-ink-400">
           {preview.whiteSlugs.length + preview.blackVsE4.length + preview.blackVsD4.length} openings across White, vs-1.e4, and vs-1.d4.
           Openings you don't like → tap to remove; add more from the browse page.
         </p>
@@ -97,7 +97,7 @@ export default function RepertoireWizard() {
 
         <div className="mt-6 flex flex-wrap gap-3">
           <button onClick={() => { setAnswers(preview.answers); setStep("questions"); }}
-            className="rounded-xl bg-gray-900 px-5 py-3 text-sm font-bold text-white hover:bg-gray-800">
+            className="rounded-xl bg-ink-100 px-5 py-3 text-sm font-bold text-white hover:bg-ink-200">
             Redo the questions
           </button>
           <button onClick={() => { clearRepertoire(); setPreview(null); setStep("intro"); }}
@@ -105,7 +105,7 @@ export default function RepertoireWizard() {
             Clear repertoire
           </button>
           <button onClick={() => nav("/study/openings")}
-            className="rounded-xl border border-gray-300 px-5 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+            className="rounded-xl border border-ink-700 px-5 py-3 text-sm font-semibold text-ink-300 hover:bg-ink-950">
             Browse all openings
           </button>
         </div>
@@ -116,9 +116,9 @@ export default function RepertoireWizard() {
   // ── Questions ─────────────────────────────────────────────────────────
   return (
     <div className="mx-auto max-w-2xl p-6">
-      <Link to="/study/openings" className="mb-3 inline-block text-xs text-gray-500 hover:text-gray-800">← Cancel</Link>
+      <Link to="/study/openings" className="mb-3 inline-block text-xs text-ink-500 hover:text-ink-200">← Cancel</Link>
       <h1 className="text-2xl font-bold">10 quick questions</h1>
-      <p className="mt-1 text-sm text-gray-500">Answer honestly — we'll pick openings that fit YOU, not the popularity ranking.</p>
+      <p className="mt-1 text-sm text-ink-500">Answer honestly — we'll pick openings that fit YOU, not the popularity ranking.</p>
 
       <div className="mt-6 space-y-5">
         <Question label="1. Your rating">
@@ -211,16 +211,16 @@ export default function RepertoireWizard() {
 
       <div className="mt-8 flex flex-wrap gap-3">
         <button onClick={commit}
-          className="rounded-xl bg-gray-900 px-6 py-3 text-sm font-bold text-white hover:bg-gray-800">
+          className="rounded-xl bg-ink-100 px-6 py-3 text-sm font-bold text-white hover:bg-ink-200">
           Build my repertoire
         </button>
         <button onClick={() => { buildPreview(); }}
-          className="rounded-xl border border-gray-300 px-5 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+          className="rounded-xl border border-ink-700 px-5 py-3 text-sm font-semibold text-ink-300 hover:bg-ink-950">
           Preview only
         </button>
         {preview && (
           <button onClick={() => setStep("review")}
-            className="rounded-xl border border-gray-300 px-5 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+            className="rounded-xl border border-ink-700 px-5 py-3 text-sm font-semibold text-ink-300 hover:bg-ink-950">
             View last preview
           </button>
         )}
@@ -233,7 +233,7 @@ export default function RepertoireWizard() {
 function Question({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="mb-1.5 text-sm font-semibold text-gray-800">{label}</div>
+      <div className="mb-1.5 text-sm font-semibold text-ink-200">{label}</div>
       <div className="flex flex-wrap gap-1.5">{children}</div>
     </div>
   );
@@ -242,7 +242,7 @@ function Question({ label, children }: { label: string; children: React.ReactNod
 function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button onClick={onClick}
-      className={`rounded-full px-3 py-1 text-xs font-semibold transition ${active ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>
+      className={`rounded-full px-3 py-1 text-xs font-semibold transition ${active ? "bg-ink-100 text-white" : "bg-ink-900 text-ink-300 hover:bg-ink-800"}`}>
       {children}
     </button>
   );
@@ -250,13 +250,13 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
 
 function RepertoireColumn({ label, slugs }: { label: string; slugs: string[] }) {
   return (
-    <div className="rounded-xl border border-gray-100 bg-white p-3">
+    <div className="rounded-xl border border-ink-900 bg-ink-900 p-3">
       <div className="mb-2 flex items-baseline justify-between">
-        <span className="text-xs font-bold uppercase tracking-wide text-gray-500">{label}</span>
-        <span className="text-xs text-gray-400">{slugs.length}</span>
+        <span className="text-xs font-bold uppercase tracking-wide text-ink-500">{label}</span>
+        <span className="text-xs text-ink-600">{slugs.length}</span>
       </div>
       {slugs.length === 0 ? (
-        <p className="text-xs text-gray-500">No openings matched. Try broadening the wizard answers.</p>
+        <p className="text-xs text-ink-500">No openings matched. Try broadening the wizard answers.</p>
       ) : (
         <ul className="space-y-1">
           {slugs.map((s) => {
@@ -265,7 +265,7 @@ function RepertoireColumn({ label, slugs }: { label: string; slugs: string[] }) 
             const family = familyById.get(o.familyId);
             return (
               <li key={s}>
-                <Link to={`/study/openings/${s}`} className="flex items-baseline gap-2 rounded px-2 py-1.5 text-sm hover:bg-gray-50">
+                <Link to={`/study/openings/${s}`} className="flex items-baseline gap-2 rounded px-2 py-1.5 text-sm hover:bg-ink-950">
                   <span className="font-mono text-[10px] font-bold" style={{ color: family?.colorHex ?? "#6b7280" }}>{o.eco}</span>
                   <span className="truncate">{o.name}</span>
                 </Link>

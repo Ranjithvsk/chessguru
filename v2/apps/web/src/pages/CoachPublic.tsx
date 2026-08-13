@@ -145,7 +145,7 @@ export default function CoachPublicPage() {
 
   if (coachQ.isLoading) {
     return (
-      <div className="mx-auto max-w-6xl p-8 text-center text-slate-400">
+      <div className="mx-auto max-w-6xl p-8 text-center text-ink-400">
         Loading coach profile…
       </div>
     );
@@ -154,8 +154,8 @@ export default function CoachPublicPage() {
     return (
       <div className="mx-auto max-w-3xl p-12 text-center">
         <div className="text-6xl mb-4">♟</div>
-        <h1 className="text-2xl font-bold text-slate-100 mb-2">Coach not found</h1>
-        <p className="text-slate-400 mb-6">
+        <h1 className="text-2xl font-bold text-ink-100 mb-2">Coach not found</h1>
+        <p className="text-ink-400 mb-6">
           No coach with that username exists — or they haven't set up a public page yet.
         </p>
         <Link to="/" className="inline-block px-6 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-medium">
@@ -188,14 +188,14 @@ export default function CoachPublicPage() {
   const isMe = !!authQ.data?.loggedIn && authQ.data.username === c.username;
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100">
+    <div className="min-h-screen bg-ink-900 text-ink-100">
       {/* Hero */}
       <div className="relative">
         <div
-          className="h-64 md:h-80 w-full bg-gradient-to-br from-cyan-800 via-teal-900 to-slate-900 bg-cover bg-center"
+          className="h-64 md:h-80 w-full bg-gradient-to-br from-cyan-800 via-teal-900 to-ink-900 bg-cover bg-center"
           style={p.coverUrl ? { backgroundImage: `url(${p.coverUrl})` } : undefined}
         />
-        <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-slate-900 to-transparent" />
+        <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-ink-900 to-transparent" />
         <div className="mx-auto max-w-6xl px-4 md:px-8">
           <div className="relative -mt-20 md:-mt-24 flex flex-col md:flex-row md:items-end gap-4 md:gap-6 pb-6">
             {/* Photo */}
@@ -203,10 +203,10 @@ export default function CoachPublicPage() {
               {p.photoUrl ? (
                 <img
                   src={p.photoUrl} alt={displayName}
-                  className="w-36 h-36 md:w-44 md:h-44 rounded-full border-4 border-slate-900 shadow-xl object-cover bg-slate-800"
+                  className="w-36 h-36 md:w-44 md:h-44 rounded-full border-4 border-ink-900 shadow-xl object-cover bg-ink-800"
                 />
               ) : (
-                <div className="w-36 h-36 md:w-44 md:h-44 rounded-full border-4 border-slate-900 shadow-xl bg-gradient-to-br from-cyan-500 to-teal-700 grid place-items-center text-5xl font-bold text-white">
+                <div className="w-36 h-36 md:w-44 md:h-44 rounded-full border-4 border-ink-900 shadow-xl bg-gradient-to-br from-cyan-500 to-teal-700 grid place-items-center text-5xl font-bold text-white">
                   {displayName.charAt(0).toUpperCase()}
                 </div>
               )}
@@ -220,18 +220,18 @@ export default function CoachPublicPage() {
                   </span>
                 )}
                 {flag && <span className="text-2xl leading-none" title={p.country}>{flag}</span>}
-                {p.city && <span className="text-slate-400 text-sm">{p.city}</span>}
+                {p.city && <span className="text-ink-400 text-sm">{p.city}</span>}
                 {c.academyName && (
-                  <span className="text-slate-500 text-sm">· {c.academyName}</span>
+                  <span className="text-ink-500 text-sm">· {c.academyName}</span>
                 )}
               </div>
               <h1 className="text-3xl md:text-4xl font-bold text-white leading-tight">{displayName}</h1>
               {p.tagline && (
-                <p className="text-slate-300 mt-1 text-sm md:text-base">{p.tagline}</p>
+                <p className="text-ink-300 mt-1 text-sm md:text-base">{p.tagline}</p>
               )}
               <div className="flex flex-wrap items-center gap-2 mt-3">
                 {p.elo && (
-                  <span className="px-3 py-1 rounded-full bg-slate-800 text-cyan-300 text-xs font-semibold">
+                  <span className="px-3 py-1 rounded-full bg-ink-800 text-cyan-300 text-xs font-semibold">
                     FIDE {p.elo}{p.federation ? ` · ${p.federation}` : ""}
                   </span>
                 )}
@@ -263,17 +263,17 @@ export default function CoachPublicPage() {
         {/* Left column: bio + styles + socials */}
         <div className="md:col-span-2 space-y-6">
           {p.bio && (
-            <section className="bg-slate-800/50 rounded-2xl p-6 shadow-lg">
-              <h2 className="text-lg font-semibold text-slate-200 mb-3">About</h2>
+            <section className="bg-ink-800/50 rounded-2xl p-6 shadow-lg">
+              <h2 className="text-lg font-semibold text-ink-200 mb-3">About</h2>
               <div
-                className="prose prose-invert prose-sm max-w-none text-slate-300 leading-relaxed [&_p]:mb-3 [&_p:last-child]:mb-0"
+                className="prose prose-invert prose-sm max-w-none text-ink-300 leading-relaxed [&_p]:mb-3 [&_p:last-child]:mb-0"
                 dangerouslySetInnerHTML={renderBio(p.bio)}
               />
             </section>
           )}
           {p.playingStyles.length > 0 && (
-            <section className="bg-slate-800/50 rounded-2xl p-6 shadow-lg">
-              <h2 className="text-lg font-semibold text-slate-200 mb-3">Playing style</h2>
+            <section className="bg-ink-800/50 rounded-2xl p-6 shadow-lg">
+              <h2 className="text-lg font-semibold text-ink-200 mb-3">Playing style</h2>
               <div className="flex flex-wrap gap-2">
                 {p.playingStyles.map((s) => (
                   <span key={s} className="px-3 py-1.5 rounded-full bg-cyan-600/20 border border-cyan-500/40 text-cyan-200 text-sm">
@@ -284,13 +284,13 @@ export default function CoachPublicPage() {
             </section>
           )}
           {socialEntries.length > 0 && (
-            <section className="bg-slate-800/50 rounded-2xl p-6 shadow-lg">
-              <h2 className="text-lg font-semibold text-slate-200 mb-3">Find me on</h2>
+            <section className="bg-ink-800/50 rounded-2xl p-6 shadow-lg">
+              <h2 className="text-lg font-semibold text-ink-200 mb-3">Find me on</h2>
               <div className="flex flex-wrap gap-3">
                 {socialEntries.map(([kind, v]) => (
                   <a
                     key={kind} href={socialHref(kind, v)} target="_blank" rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-700/60 hover:bg-slate-700 text-slate-200 text-sm"
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-ink-700/60 hover:bg-ink-700 text-ink-200 text-sm"
                     title={kind}
                   >
                     <SocialIcon kind={kind} /> <span className="capitalize">{kind}</span>
@@ -303,28 +303,28 @@ export default function CoachPublicPage() {
         {/* Right column: stats */}
         <div className="space-y-6">
           {stats.length > 0 && (
-            <section className="bg-gradient-to-br from-cyan-900/50 to-slate-800/50 rounded-2xl p-6 shadow-lg border border-cyan-800/40">
+            <section className="bg-gradient-to-br from-cyan-900/50 to-ink-800/50 rounded-2xl p-6 shadow-lg border border-cyan-800/40">
               <h2 className="text-sm font-semibold text-cyan-300 uppercase tracking-wide mb-4">Stats</h2>
               <div className="grid grid-cols-2 gap-4">
                 {stats.map((s) => (
                   <div key={s.label}>
                     <div className="text-2xl font-bold text-white">{s.value}</div>
-                    <div className="text-xs text-slate-400 mt-0.5">{s.label}</div>
+                    <div className="text-xs text-ink-400 mt-0.5">{s.label}</div>
                   </div>
                 ))}
               </div>
             </section>
           )}
           {upcoming.length > 0 && (
-            <section className="bg-slate-800/50 rounded-2xl p-6 shadow-lg">
-              <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-4">
+            <section className="bg-ink-800/50 rounded-2xl p-6 shadow-lg">
+              <h2 className="text-sm font-semibold text-ink-300 uppercase tracking-wide mb-4">
                 <span className="mr-1">📅</span> Upcoming Classes
               </h2>
               <div className="space-y-3">
                 {upcoming.map((cl) => (
-                  <div key={cl._id} className="rounded-xl bg-slate-900/60 p-4 border border-slate-700/60">
-                    <div className="font-medium text-slate-100">{cl.title}</div>
-                    <div className="text-xs text-slate-400 mt-1">{fmtStart(cl.startAt)} · {cl.durationMin} min</div>
+                  <div key={cl._id} className="rounded-xl bg-ink-900/60 p-4 border border-ink-700/60">
+                    <div className="font-medium text-ink-100">{cl.title}</div>
+                    <div className="text-xs text-ink-400 mt-1">{fmtStart(cl.startAt)} · {cl.durationMin} min</div>
                     {authQ.data?.loggedIn ? (
                       <Link
                         to={`/class-v2/${cl._id}?role=student`}
@@ -348,15 +348,15 @@ export default function CoachPublicPage() {
       {/* Achievements */}
       {p.achievements.length > 0 && (
         <section className="mx-auto max-w-6xl px-4 md:px-8 pb-8">
-          <h2 className="text-xl font-bold text-slate-100 mb-4">🏆 Achievements</h2>
+          <h2 className="text-xl font-bold text-ink-100 mb-4">🏆 Achievements</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {p.achievements.map((a) => (
-              <div key={a.id} className="bg-slate-800/60 rounded-2xl p-4 shadow-lg hover:bg-slate-800 transition-colors">
+              <div key={a.id} className="bg-ink-800/60 rounded-2xl p-4 shadow-lg hover:bg-ink-800 transition-colors">
                 {a.imageUrl && (
-                  <img src={a.imageUrl} alt={a.title} className="w-full h-[140px] object-cover rounded-lg mb-3 bg-slate-900" />
+                  <img src={a.imageUrl} alt={a.title} className="w-full h-[140px] object-cover rounded-lg mb-3 bg-ink-900" />
                 )}
                 <div className="flex items-start justify-between gap-2">
-                  <div className="font-semibold text-slate-100">{a.title}</div>
+                  <div className="font-semibold text-ink-100">{a.title}</div>
                   {a.year && (
                     <span className="shrink-0 px-2 py-0.5 rounded-md bg-amber-600/20 text-amber-300 text-xs">
                       {a.year}
@@ -364,7 +364,7 @@ export default function CoachPublicPage() {
                   )}
                 </div>
                 {a.description && (
-                  <p className="text-sm text-slate-400 mt-2">{a.description}</p>
+                  <p className="text-sm text-ink-400 mt-2">{a.description}</p>
                 )}
               </div>
             ))}
@@ -375,25 +375,25 @@ export default function CoachPublicPage() {
       {/* Top Students */}
       {p.topStudents.length > 0 && (
         <section className="mx-auto max-w-6xl px-4 md:px-8 pb-8">
-          <h2 className="text-xl font-bold text-slate-100 mb-4">🎓 Top Students</h2>
+          <h2 className="text-xl font-bold text-ink-100 mb-4">🎓 Top Students</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {p.topStudents.map((s) => (
-              <div key={s.id} className="bg-slate-800/60 rounded-2xl p-4 shadow-lg flex gap-3 items-start">
+              <div key={s.id} className="bg-ink-800/60 rounded-2xl p-4 shadow-lg flex gap-3 items-start">
                 {s.imageUrl ? (
-                  <img src={s.imageUrl} alt={s.name} className="w-16 h-16 rounded-full object-cover shrink-0 bg-slate-900" />
+                  <img src={s.imageUrl} alt={s.name} className="w-16 h-16 rounded-full object-cover shrink-0 bg-ink-900" />
                 ) : (
                   <div className="w-16 h-16 rounded-full bg-gradient-to-br from-cyan-500 to-teal-700 grid place-items-center text-xl font-bold text-white shrink-0">
                     {s.name.charAt(0).toUpperCase()}
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="font-semibold text-slate-100">{s.name}</div>
+                  <div className="font-semibold text-ink-100">{s.name}</div>
                   {s.peakRating && (
                     <span className="inline-block mt-1 px-2 py-0.5 rounded-md bg-cyan-600/20 text-cyan-300 text-xs">
                       Peak {s.peakRating}
                     </span>
                   )}
-                  {s.note && <p className="text-sm text-slate-400 mt-2">{s.note}</p>}
+                  {s.note && <p className="text-sm text-ink-400 mt-2">{s.note}</p>}
                 </div>
               </div>
             ))}
@@ -404,27 +404,27 @@ export default function CoachPublicPage() {
       {/* Trophies */}
       {p.trophies.length > 0 && (
         <section className="mx-auto max-w-6xl px-4 md:px-8 pb-12">
-          <h2 className="text-xl font-bold text-slate-100 mb-4">🏅 Trophies</h2>
+          <h2 className="text-xl font-bold text-ink-100 mb-4">🏅 Trophies</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
             {p.trophies.map((t) => (
-              <div key={t.id} className="bg-slate-800/60 rounded-2xl p-3 shadow-lg text-center">
+              <div key={t.id} className="bg-ink-800/60 rounded-2xl p-3 shadow-lg text-center">
                 {t.imageUrl ? (
-                  <img src={t.imageUrl} alt={t.name} className="w-full aspect-square object-cover rounded-lg mb-2 bg-slate-900" />
+                  <img src={t.imageUrl} alt={t.name} className="w-full aspect-square object-cover rounded-lg mb-2 bg-ink-900" />
                 ) : (
                   <div className="w-full aspect-square rounded-lg mb-2 bg-gradient-to-br from-amber-500 to-yellow-700 grid place-items-center text-4xl">
                     🏅
                   </div>
                 )}
-                <div className="text-sm font-medium text-slate-100 truncate">{t.name}</div>
-                {t.year && <div className="text-xs text-slate-400 mt-0.5">{t.year}</div>}
+                <div className="text-sm font-medium text-ink-100 truncate">{t.name}</div>
+                {t.year && <div className="text-xs text-ink-400 mt-0.5">{t.year}</div>}
               </div>
             ))}
           </div>
         </section>
       )}
 
-      <div className="mx-auto max-w-6xl px-4 md:px-8 pb-8 pt-4 text-center text-xs text-slate-500 border-t border-slate-800">
-        <Link to="/" className="hover:text-slate-300">Powered by ChessGuru</Link>
+      <div className="mx-auto max-w-6xl px-4 md:px-8 pb-8 pt-4 text-center text-xs text-ink-500 border-t border-ink-800">
+        <Link to="/" className="hover:text-ink-300">Powered by ChessGuru</Link>
       </div>
     </div>
   );

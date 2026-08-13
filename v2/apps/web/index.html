@@ -11,6 +11,21 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="ChessGuru" />
+    <script>
+      // Resolve theme BEFORE React renders so the page never flashes in the
+      // wrong palette. localStorage("cg.theme") wins over OS preference; when
+      // set to "system" (or unset) we follow prefers-color-scheme.
+      (function () {
+        try {
+          var saved = localStorage.getItem("cg.theme");
+          var mode = saved === "light" || saved === "dark" ? saved
+            : (window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+          var root = document.documentElement;
+          root.classList.toggle("light", mode === "light");
+          root.classList.toggle("dark", mode !== "light");
+        } catch (e) { /* fall through with default dark from HTML */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

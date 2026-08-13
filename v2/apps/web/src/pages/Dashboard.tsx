@@ -81,7 +81,7 @@ function StudentLiveClassCard() {
                 <div className="mt-1 truncate font-display text-lg font-bold text-white">{c.title}</div>
                 <div className="text-xs text-rose-200">Coach {c.coach} · Join to mark your attendance</div>
               </div>
-              <div className="shrink-0 rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-rose-600 shadow-lg">
+              <div className="shrink-0 rounded-xl bg-ink-900 px-4 py-2.5 text-sm font-bold text-rose-600 shadow-lg">
                 Join →
               </div>
             </div>

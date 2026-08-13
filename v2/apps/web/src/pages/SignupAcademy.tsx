@@ -384,7 +384,7 @@ function CategoryFilter({ value, onChange, counts }: {
       <button onClick={() => onChange("all")}
         className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${
           value === "all"
-            ? "bg-white text-ink-900 shadow-lg"
+            ? "bg-ink-100 text-ink-950 shadow-lg"
             : "bg-ink-800/60 text-ink-300 hover:bg-ink-700 hover:text-white"
         }`}>
         Everything <span className="ml-1 text-xs opacity-60">{counts.all}</span>

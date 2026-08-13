@@ -127,7 +127,7 @@ export default function EngineCoach({ fen, declaredSan, ctaLabel = "Ask engine" 
           <EvalStrip a={result.a} sideToMove={result.sideToMove} />
 
           <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="rounded bg-white p-2">
+            <div className="rounded bg-ink-900 p-2">
               <div className="text-[9px] font-bold uppercase text-sky-700">Engine's move</div>
               <div className="mt-0.5 font-mono text-base font-bold text-sky-900">{result.bestSan}</div>
               {result.pvSan.length > 1 && (
@@ -137,7 +137,7 @@ export default function EngineCoach({ fen, declaredSan, ctaLabel = "Ask engine" 
               )}
             </div>
             {declaredSan && (
-              <div className="rounded bg-white p-2">
+              <div className="rounded bg-ink-900 p-2">
                 <div className="text-[9px] font-bold uppercase text-sky-700">Theory move</div>
                 <div className="mt-0.5 font-mono text-base font-bold text-sky-900">{declaredSan}</div>
                 <div className="mt-1 text-[10px]">
@@ -148,7 +148,7 @@ export default function EngineCoach({ fen, declaredSan, ctaLabel = "Ask engine" 
                     <span className="font-bold text-amber-700">≠ engine prefers {result.bestSan}</span>
                   )}
                   {result.declaredIsBest == null && (
-                    <span className="text-gray-500">could not compare</span>
+                    <span className="text-ink-500">could not compare</span>
                   )}
                 </div>
               </div>
@@ -178,9 +178,9 @@ function EvalStrip({ a, sideToMove }: { a: Analysis; sideToMove: "w" | "b" }) {
         <span className="font-bold">Eval (white)</span>
         <span className="font-mono font-bold">{label}</span>
       </div>
-      <div className="relative h-2 overflow-hidden rounded-full bg-gray-900">
+      <div className="relative h-2 overflow-hidden rounded-full bg-ink-100">
         <div className="h-full bg-white transition-all" style={{ width: `${whitePct}%` }} />
-        <div className="absolute inset-y-0 left-1/2 w-px bg-gray-400/70" />
+        <div className="absolute inset-y-0 left-1/2 w-px bg-ink-600/70" />
       </div>
     </div>
   );

@@ -14,14 +14,175 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Dark is the default theme. All neutral (ink-*) colours in Tailwind resolve
+   through these CSS variables, so flipping the entire app to light mode is a
+   matter of overriding the vars under html.light — no rewrite of the 3000+
+   ink-* utility classnames scattered across pages. */
 :root {
   color-scheme: dark;
+  --ink-950: 11 13 18;      /* #0b0d12 — page background      */
+  --ink-900: 17 20 27;      /* #11141b — cards / navbar       */
+  --ink-800: 26 31 41;      /* #1a1f29 — elevated / hover     */
+  --ink-700: 37 43 56;      /* #252b38 — borders              */
+  --ink-600: 50 58 77;      /* #323a4d — heavy borders        */
+  --ink-500: 91 102 120;    /* #5b6678 — dim text             */
+  --ink-400: 139 149 167;   /* #8b95a7 — secondary text       */
+  --ink-300: 194 201 214;   /* #c2c9d6 — body text            */
+  --ink-200: 226 231 240;
+  --ink-100: 241 244 250;
+  --text-primary: 255 255 255;  /* used to flip .text-white in light mode */
 }
+html.light {
+  color-scheme: light;
+  --ink-950: 255 255 255;   /* #ffffff — page background      */
+  --ink-900: 246 248 251;   /* #f6f8fb — cards / navbar       */
+  --ink-800: 235 238 244;   /* #ebeef4 — elevated / hover     */
+  --ink-700: 219 224 232;   /* #dbe0e8 — borders              */
+  --ink-600: 189 196 208;   /* #bdc4d0 — heavy borders        */
+  --ink-500: 100 116 139;   /* slate-500 — dim text (bumped darker for readability on white bg) */
+  --ink-400: 71 85 105;     /* slate-600 — secondary text (bumped darker for readability)      */
+  --ink-300: 37 43 56;      /* #252b38 — body text            */
+  --ink-200: 26 31 41;
+  --ink-100: 17 20 27;
+  --text-primary: 15 23 42; /* slate-900 — headings on light  */
+}
+/* text-ink-{600..900} in light mode need extra contrast so dim/label text stays
+   legible on white surfaces. The plain ink var flip preserves the border/surface
+   role (borders should stay subtle) but is too pale for text — scope these
+   overrides to text-* only. */
+html.light .text-ink-600 { color: rgb(100 116 139); }  /* slate-500 */
+html.light .text-ink-700 { color: rgb(71 85 105); }    /* slate-600 */
+html.light .text-ink-800 { color: rgb(51 65 85); }     /* slate-700 */
+html.light .text-ink-900 { color: rgb(30 41 59); }     /* slate-800 */
+html.light .text-ink-950 { color: rgb(15 23 42); }     /* slate-900 */
+
+/* "Inverse pill" pattern rescue: `bg-ink-100 text-white` was originally a
+   `bg-gray-900 text-white` CTA. The gray sweep inverted the bg (light → dark
+   in dark mode; dark → light… wait no) — the surface flips with the theme
+   which is what we want. But my global text-white override makes it slate-900
+   in light mode, so on the now-dark bg-ink-100 pill the text vanishes. Same
+   for bg-ink-200. Restore white text and dark hover on those combos. */
+html.light .bg-ink-100.text-white,
+html.light .bg-ink-200.text-white,
+html.light .hover\:bg-ink-100:hover.text-white,
+html.light .hover\:bg-ink-200:hover.text-white { color: #fff; }
+html.light .text-white.hover\:bg-ink-100:hover,
+html.light .text-white.hover\:bg-ink-200:hover { color: #fff; }
+
+/* Coloured accent text (labels, chips, hint strings) uses the 100–400 pale
+   shades so they read well on the dark app surfaces. On white surfaces those
+   pale hues wash out — flip them to the 700 shade of the same colour family in
+   light mode so the semantic meaning is preserved while the contrast holds.
+   Solid-bg buttons that pair `bg-X-600 text-X-100` may look slightly off in
+   light mode; those should be migrated to text-white if a case appears. */
+html.light .text-brand-50,
+html.light .text-brand-100,
+html.light .text-brand-200,
+html.light .text-brand-300,
+html.light .text-brand-400  { color: #4338ca; } /* brand-700  */
+html.light .text-brand-500  { color: #4338ca; } /* brand-700 for readability */
+
+html.light .text-accent-300,
+html.light .text-accent-400 { color: #047857; } /* emerald-700 */
+
+html.light .text-emerald-100,
+html.light .text-emerald-200,
+html.light .text-emerald-300,
+html.light .text-emerald-400 { color: #047857; }
+html.light .text-emerald-500 { color: #047857; }
+
+html.light .text-rose-100,
+html.light .text-rose-200,
+html.light .text-rose-300,
+html.light .text-rose-400   { color: #be123c; } /* rose-700 */
+
+html.light .text-amber-100,
+html.light .text-amber-200,
+html.light .text-amber-300,
+html.light .text-amber-400  { color: #b45309; } /* amber-700 */
+
+html.light .text-cyan-100,
+html.light .text-cyan-200,
+html.light .text-cyan-300,
+html.light .text-cyan-400   { color: #0e7490; } /* cyan-700 */
+
+html.light .text-sky-200,
+html.light .text-sky-300    { color: #0369a1; } /* sky-700 */
+
+html.light .text-violet-100,
+html.light .text-violet-200,
+html.light .text-violet-300 { color: #6d28d9; } /* violet-700 */
+
+html.light .text-orange-100,
+html.light .text-orange-200,
+html.light .text-orange-300 { color: #c2410c; } /* orange-700 */
+
+html.light .text-purple-100,
+html.light .text-purple-200,
+html.light .text-purple-300 { color: #7e22ce; } /* purple-700 */
+
+html.light .text-indigo-100,
+html.light .text-indigo-300 { color: #4338ca; } /* indigo-700 */
+
+html.light .text-teal-100,
+html.light .text-teal-200,
+html.light .text-teal-300   { color: #0f766e; } /* teal-700 */
+
+html.light .text-gold-400   { color: #b45309; } /* amber-700 proxy */
 
 body {
   @apply bg-ink-950 text-ink-300 font-sans antialiased;
   margin: 0;
 }
+
+/* text-white is used ~670× across the app for headings and label text on ink
+   surfaces. In light mode those surfaces flip pale, so pure white would
+   vanish. Flip .text-white to the primary text colour by default, then win
+   back explicit white on coloured surfaces (brand/accent/status buttons)
+   where white text is required for contrast against the coloured chip. */
+html.light .text-white { color: rgb(var(--text-primary)); }
+html.light [class*="bg-brand-"] .text-white,
+html.light [class*="bg-brand-"].text-white,
+html.light .bg-brand-gradient .text-white,
+html.light .bg-brand-gradient.text-white,
+html.light [class*="bg-accent-"] .text-white,
+html.light [class*="bg-accent-"].text-white,
+html.light [class*="bg-emerald-"] .text-white,
+html.light [class*="bg-emerald-"].text-white,
+html.light [class*="bg-rose-"] .text-white,
+html.light [class*="bg-rose-"].text-white,
+html.light [class*="bg-amber-"] .text-white,
+html.light [class*="bg-amber-"].text-white,
+html.light [class*="bg-orange-"] .text-white,
+html.light [class*="bg-orange-"].text-white,
+html.light [class*="bg-sky-"] .text-white,
+html.light [class*="bg-sky-"].text-white,
+html.light [class*="bg-cyan-"] .text-white,
+html.light [class*="bg-cyan-"].text-white,
+html.light [class*="bg-red-"] .text-white,
+html.light [class*="bg-red-"].text-white,
+html.light [class*="bg-teal-"] .text-white,
+html.light [class*="bg-teal-"].text-white,
+html.light [class*="bg-indigo-"] .text-white,
+html.light [class*="bg-indigo-"].text-white,
+html.light [class*="bg-violet-"] .text-white,
+html.light [class*="bg-violet-"].text-white,
+html.light [class*="bg-purple-"] .text-white,
+html.light [class*="bg-purple-"].text-white,
+html.light [class*="bg-fuchsia-"] .text-white,
+html.light [class*="bg-fuchsia-"].text-white,
+html.light [class*="bg-pink-"] .text-white,
+html.light [class*="bg-pink-"].text-white,
+html.light [class*="bg-gold-"] .text-white,
+html.light [class*="bg-gold-"].text-white,
+html.light [class*="bg-yellow-"] .text-white,
+html.light [class*="bg-yellow-"].text-white,
+html.light [class*="bg-lime-"] .text-white,
+html.light [class*="bg-lime-"].text-white,
+html.light [class*="bg-green-"] .text-white,
+html.light [class*="bg-green-"].text-white,
+html.light [class*="bg-blue-"] .text-white,
+html.light [class*="bg-blue-"].text-white { color: #fff; }
 
 /* board wrapper keeps a clean square that scales with its container */
 .cg-board-wrap {
@@ -118,10 +279,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  border: 1px solid #252b38;          /* ink-700 */
+  border: 1px solid rgb(var(--ink-700));
   border-left-width: 4px;
-  border-left-color: #5b6678;         /* ink-500 (neutral default) */
-  background: #11141b;                /* ink-900 */
+  border-left-color: rgb(var(--ink-500));
+  background: rgb(var(--ink-900));
   border-radius: 1rem;
   padding: 1.25rem;
 }
@@ -142,15 +303,15 @@ body {
   width: 3.5rem;
   height: 3.5rem;
   border-radius: 0.5rem;
-  background: #1a1f29;                /* ink-800 */
+  background: rgb(var(--ink-800));
 }
 .puzzle__feedback .instruction {
   display: flex;
   flex-direction: column;
   line-height: 1.3;
 }
-.puzzle__feedback .instruction strong { color: #fff; font-weight: 600; font-size: 1.05rem; }
-.puzzle__feedback .instruction em     { color: #8b95a7; font-style: normal; font-size: 0.875rem; }
+.puzzle__feedback .instruction strong { color: rgb(var(--text-primary)); font-weight: 600; font-size: 1.05rem; }
+.puzzle__feedback .instruction em     { color: rgb(var(--ink-400)); font-style: normal; font-size: 0.875rem; }
 .puzzle__feedback.good .instruction strong { color: #34d399; }
 .puzzle__feedback.fail .instruction strong { color: #fb7185; }
 
@@ -165,10 +326,10 @@ body {
 }
 .puzzle__feedback .button-empty {
   background: transparent;
-  border: 1px solid #323a4d;          /* ink-600 */
-  color: #c2c9d6;                     /* ink-300 */
+  border: 1px solid rgb(var(--ink-600));
+  color: rgb(var(--ink-300));
 }
-.puzzle__feedback .button-empty:hover { background: #1a1f29; }
+.puzzle__feedback .button-empty:hover { background: rgb(var(--ink-800)); }
 .puzzle__feedback .puzzle__hint.active {
   background: #10b981;                /* accent-500 (hint used) */
   border: 1px solid #10b981;
@@ -177,7 +338,7 @@ body {
 
 .puzzle__feedback .complete { display: flex; flex-direction: column; gap: 0.25rem; }
 .puzzle__feedback .complete__title { color: #34d399; font-weight: 700; font-size: 1.25rem; }
-.puzzle__feedback .complete__sub   { color: #8b95a7; font-style: normal; font-size: 0.875rem; }
+.puzzle__feedback .complete__sub   { color: rgb(var(--ink-400)); font-style: normal; font-size: 0.875rem; }
 .puzzle__feedback .complete__rating { margin-top: 0.25rem; font-size: 0.875rem; }
 .puzzle__feedback .puzzle__next {
   width: 100%;

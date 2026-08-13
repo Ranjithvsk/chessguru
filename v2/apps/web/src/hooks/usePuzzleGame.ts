@@ -67,7 +67,6 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   const startedAtRef = useRef<number | null>(null);
   const solveMsRef = useRef<number | null>(null);
   const [solveMs, setSolveMs] = useState<number | null>(null);
-  const [elapsedMs, setElapsedMs] = useState(0); // live tick, only used for the display
   // Wrong-move capture: UCI of the FIRST incorrect move played (later misses on the
   // same puzzle are ignored — the player usually retries after the first miss and
   // we already recorded the fail). Stored so history can replay "what went wrong".
@@ -144,20 +143,10 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
       startedAtRef.current = Date.now();
       solveMsRef.current = null;
       setSolveMs(null);
-      setElapsedMs(0);
       wrongMoveRef.current = null;
       try { if (puzzle.id) localStorage.setItem(STORE_KEY, JSON.stringify({ id: puzzle.id, theme, maxPc: maxPc ?? 0 })); } catch { /* */ }
     }
   }, [puzzle]);
-
-  // Live-ticking elapsed clock (500ms). Runs only while the puzzle is unsolved so we
-  // don't churn re-renders on the review/solved views. Cheap: single state update.
-  useEffect(() => {
-    if (!puzzle || solved.current || startedAtRef.current == null) return;
-    const start = startedAtRef.current;
-    const t = setInterval(() => setElapsedMs(Date.now() - start), 500);
-    return () => clearInterval(t);
-  }, [puzzle, fb.kind]);
 
   const submit = useCallback((win: boolean) => {
     if (!puzzle) return;
@@ -378,7 +367,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
     lastMove: exploring ? exploreLast : replayView ? replayView.lastMove : lastMove,
     hintShapes: exploring ? [] : hintShapes,
     fb, ratingDiff, displayRating, milestone, clearMilestone: () => setMilestone(null),
-    solveMs, elapsedMs, practice,
+    solveMs, practice,
     solved: solved.current, hinted: hinted.current, failed: failed.current,
     onMove: exploring ? exploreMove : onMove, tryInput, showHint, viewSolution, next, review, retry,
     replayPly, replayTotal: solution.current.length, replayPrev, replayNext,

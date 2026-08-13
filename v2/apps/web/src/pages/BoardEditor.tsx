@@ -493,7 +493,7 @@ export default function BoardEditorPage() {
                       : isErase
                         ? "border border-rose-500/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20"
                         : isWhite
-                          ? "border border-ink-600 bg-ink-100 text-ink-950 hover:bg-white"
+                          ? "border border-ink-600 bg-ink-100 text-ink-950 hover:bg-ink-200"
                           : "border border-ink-600 bg-ink-950 text-ink-100 hover:bg-ink-800"}`}>
                     {label}
                   </button>

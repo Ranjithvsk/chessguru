@@ -1,6 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import InstallButton from "./InstallButton";
+import { useTheme } from "../hooks/useTheme";
+
+function ThemeToggle() {
+  const { resolved, toggle } = useTheme();
+  const label = resolved === "light" ? "Switch to dark mode" : "Switch to light mode";
+  return (
+    <button onClick={toggle} title={label} aria-label={label}
+      className="grid h-9 w-9 place-items-center rounded-lg text-ink-300 hover:bg-ink-800 hover:text-white">
+      {resolved === "light" ? (
+        // moon (currently light → offer dark)
+        <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M16.5 12.5A6.5 6.5 0 1 1 7.5 3.5a5.5 5.5 0 0 0 9 9Z" />
+        </svg>
+      ) : (
+        // sun (currently dark → offer light)
+        <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="10" cy="10" r="3.5" />
+          <path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.2 4.2l1.4 1.4M14.4 14.4l1.4 1.4M4.2 15.8l1.4-1.4M14.4 5.6l1.4-1.4" />
+        </svg>
+      )}
+    </button>
+  );
+}
 
 // Lichess-style grouped navigation (owner 2026-07-08). Desktop (md+) shows four
 // dropdown groups; small screens keep the proven flat scrollable row.
@@ -135,6 +158,7 @@ export default function Navbar({ rating, username, admin, onLogout }: Props) {
         </div>
 
         <div className="ml-auto flex items-center gap-3 pl-2">
+          <ThemeToggle />
           <InstallButton />
           {rating != null && (
             <span className="hidden rounded-lg bg-ink-800 px-3 py-1.5 text-sm sm:inline">

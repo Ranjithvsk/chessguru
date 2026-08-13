@@ -72,7 +72,7 @@ export default function PrepTest() {
       <div className="mx-auto max-w-2xl p-4">
         <header className="mb-4">
           <h1 className="text-2xl font-bold">Prep-test</h1>
-          <p className="mt-1 text-sm text-gray-500">
+          <p className="mt-1 text-sm text-ink-500">
             You're playing soon. Pick which side — we'll drill the {DECK_SIZE} most-critical mainline moves from
             your activated openings on that side. 3-5 minutes.
           </p>
@@ -91,7 +91,7 @@ export default function PrepTest() {
           <SideCard s="any"      active={active} rep={repertoire} onStart={startDrill} label="Any (mixed)"       hint="All activated openings" />
         </div>
 
-        <p className="mt-4 text-[10px] text-gray-400">
+        <p className="mt-4 text-[10px] text-ink-600">
           Grades still feed FSRS — a "Again" here schedules the card back for tomorrow.
         </p>
       </div>
@@ -104,11 +104,11 @@ export default function PrepTest() {
       <div className="mx-auto max-w-2xl p-6 text-center">
         <p className="text-2xl">🤔</p>
         <h2 className="mt-2 text-lg font-bold">No cards for this side</h2>
-        <p className="mt-1 text-sm text-gray-500">
+        <p className="mt-1 text-sm text-ink-500">
           Nothing in your activated queue matches "{sideLabel(side)}". Try a different side, or add openings on that side first.
         </p>
         <button onClick={() => setSide(null)}
-          className="mt-4 rounded-full bg-gray-900 px-4 py-2 text-sm font-bold text-white hover:bg-gray-800">
+          className="mt-4 rounded-full bg-ink-100 px-4 py-2 text-sm font-bold text-white hover:bg-ink-200">
           ← back
         </button>
       </div>
@@ -123,17 +123,17 @@ export default function PrepTest() {
     <div className="mx-auto max-w-3xl p-4">
       <header className="mb-3 flex items-baseline justify-between">
         <div>
-          <span className="text-xs uppercase tracking-wide text-gray-400">{sideLabel(side)}</span>
+          <span className="text-xs uppercase tracking-wide text-ink-600">{sideLabel(side)}</span>
           <h1 className="text-xl font-bold">Prep-test · {idx + 1}/{deck.length}</h1>
         </div>
         <button onClick={() => setSide(null)}
-          className="text-xs text-gray-500 hover:underline">exit</button>
+          className="text-xs text-ink-500 hover:underline">exit</button>
       </header>
 
       {/* Progress dots */}
       <div className="mb-4 flex gap-1">
         {deck.map((_, i) => (
-          <span key={i} className={`h-1 flex-1 rounded-full ${i < idx ? "bg-emerald-500" : i === idx ? "bg-amber-400" : "bg-gray-200"}`} />
+          <span key={i} className={`h-1 flex-1 rounded-full ${i < idx ? "bg-emerald-500" : i === idx ? "bg-amber-400" : "bg-ink-800"}`} />
         ))}
       </div>
 
@@ -150,9 +150,9 @@ function SideCard({ s, active, rep, label, hint, onStart }: {
   const enabled = count > 0;
   return (
     <button onClick={() => enabled && onStart(s)} disabled={!enabled}
-      className={`rounded-xl border p-4 text-left transition ${enabled ? "border-gray-200 bg-white hover:border-gray-900 hover:shadow-sm" : "border-gray-100 bg-gray-50 opacity-50"}`}>
-      <div className="text-lg font-bold text-gray-900">{label}</div>
-      <div className="text-xs text-gray-500">{hint}</div>
+      className={`rounded-xl border p-4 text-left transition ${enabled ? "border-ink-800 bg-ink-900 hover:border-ink-100 hover:shadow-sm" : "border-ink-900 bg-ink-950 opacity-50"}`}>
+      <div className="text-lg font-bold text-ink-100">{label}</div>
+      <div className="text-xs text-ink-500">{hint}</div>
       <div className="mt-2 text-[11px] font-semibold text-emerald-700">
         {enabled ? `${Math.min(count, DECK_SIZE)}-card deck available` : "no cards on this side"}
       </div>
@@ -171,8 +171,8 @@ function PrepCard({ card, revealed, onReveal, onGrade }: {
   const { fen, san, sideToMove, moveNo } = rendered;
 
   return (
-    <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
-      <div className="mb-2 text-center text-xs text-gray-500">
+    <div className="rounded-xl border border-ink-900 bg-ink-900 p-4 shadow-sm">
+      <div className="mb-2 text-center text-xs text-ink-500">
         <Link to={`/study/openings/${card.slug}`} className="font-semibold hover:underline">{opening.name}</Link>
       </div>
       <div className="mb-2 text-center text-sm font-semibold">
@@ -191,7 +191,7 @@ function PrepCard({ card, revealed, onReveal, onGrade }: {
       <div className="mt-4">
         {!revealed ? (
           <button onClick={onReveal}
-            className="w-full rounded-xl bg-gray-900 py-3 text-sm font-bold text-white hover:bg-gray-800">
+            className="w-full rounded-xl bg-ink-100 py-3 text-sm font-bold text-white hover:bg-ink-200">
             Show answer <span className="ml-2 text-xs opacity-60">(space)</span>
           </button>
         ) : (
@@ -233,18 +233,18 @@ function ResultScreen({ results, side, onRedo }: {
       <div className={`rounded-xl border p-6 text-center ${passed === total ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
         <p className="text-3xl">{passed === total ? "🎯" : passed / total >= 0.7 ? "👍" : "⚠️"}</p>
         <h2 className="mt-2 text-2xl font-bold">{passed}/{total} remembered</h2>
-        <p className="mt-1 text-xs text-gray-600">{sideLabel(side)} · {failed.length} lapse{failed.length === 1 ? "" : "s"}</p>
+        <p className="mt-1 text-xs text-ink-400">{sideLabel(side)} · {failed.length} lapse{failed.length === 1 ? "" : "s"}</p>
       </div>
 
       {weakest.length > 0 && failed.length > 0 && (
-        <div className="mt-4 rounded-xl border border-gray-100 bg-white p-4">
-          <div className="mb-2 text-xs font-bold uppercase tracking-wide text-gray-500">Weakest openings</div>
-          <ul className="divide-y divide-gray-100">
+        <div className="mt-4 rounded-xl border border-ink-900 bg-ink-900 p-4">
+          <div className="mb-2 text-xs font-bold uppercase tracking-wide text-ink-500">Weakest openings</div>
+          <ul className="divide-y divide-ink-900">
             {weakest.map((w) => {
               const o = openingBySlug.get(w.slug);
               return (
                 <li key={w.slug} className="flex items-center justify-between py-2 text-sm">
-                  <Link to={`/study/openings/${w.slug}`} className="font-semibold text-gray-800 hover:underline">
+                  <Link to={`/study/openings/${w.slug}`} className="font-semibold text-ink-200 hover:underline">
                     {o?.name ?? w.slug}
                   </Link>
                   <span className={`text-xs font-bold ${w.pct < 0.5 ? "text-red-600" : "text-amber-600"}`}>
@@ -259,7 +259,7 @@ function ResultScreen({ results, side, onRedo }: {
 
       <div className="mt-4 flex gap-2">
         <button onClick={onRedo}
-          className="flex-1 rounded-xl bg-gray-900 py-3 text-sm font-bold text-white hover:bg-gray-800">
+          className="flex-1 rounded-xl bg-ink-100 py-3 text-sm font-bold text-white hover:bg-ink-200">
           Re-drill (new side)
         </button>
         <Link to="/study/daily"
