@@ -47,6 +47,10 @@ async function bootstrap() {
   app.use("/api/class/:id/notes/:noteId/image", expressLib.raw({ type: "application/octet-stream", limit: "8mb" }));
   // Study materials: coach shares PDF/PGN/image/text. 25 MB cap.
   app.use("/api/academy/materials/:id/file", expressLib.raw({ type: "application/octet-stream", limit: "25mb" }));
+  // Coach profile image uploads (photo/cover/achievement/trophy/topStudent).
+  // Body is raw image bytes (image/*). 8 MB cap. Handles both top-level
+  // and :kind/:subId nested paths under the same mount.
+  app.use("/api/me/coach-profile/upload", expressLib.raw({ type: "image/*", limit: "8mb" }));
   // Vision endpoints carry base64-encoded PNG board/silhouette payloads.
   // Phone-captured book photos land at 3-6MB. Cap at 12MB so any modern
   // phone image fits.
