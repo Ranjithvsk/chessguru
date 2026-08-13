@@ -124,6 +124,145 @@ function socialHref(kind: string, v: string): string {
 
 // Corner watermark piece → chosen by title. GM/queen-tier gets ♛, IM/knight
 // gets ♞, everything else ♟. Purely decorative.
+// DWP-style hero banner — full-width slide carousel with overlaid title/CTAs.
+// Auto-advances every 5s, pauses on hover. Arrows swipe left/right; dots
+// below indicate current slide. Slides = Gemini-generated chess images
+// pulled from the profile (cover + achievement pics + theme).
+function HeroBanner(props: {
+  slides: string[];
+  currentIdx: number;
+  onIdxChange: (n: number) => void;
+  academyName: string;
+  tagline?: string;
+  country?: string;
+  city?: string;
+  foundedYear?: number;
+  studentsChip: string;
+  joinCtaHref: string;
+  joinCtaExternal: boolean;
+  isOwner: boolean;
+}) {
+  const { slides, currentIdx, onIdxChange, academyName, tagline, country, city, foundedYear, studentsChip, joinCtaHref, joinCtaExternal, isOwner } = props;
+  const n = Math.max(slides.length, 1);
+  const [hovering, setHovering] = useState(false);
+  useEffect(() => {
+    if (hovering || n <= 1) return;
+    const id = setInterval(() => onIdxChange((currentIdx + 1) % n), 5000);
+    return () => clearInterval(id);
+  }, [hovering, currentIdx, n, onIdxChange]);
+  const cur = slides[currentIdx % n];
+  return (
+    <header
+      className="relative w-full h-[64vh] md:h-[78vh] min-h-[520px] overflow-hidden pt-16 group"
+      onMouseEnter={() => setHovering(true)}
+      onMouseLeave={() => setHovering(false)}
+    >
+      {/* Slides — cross-fade between them */}
+      {slides.length === 0 ? (
+        <div className="absolute inset-0 bg-gradient-to-br from-indigo-900 via-violet-800 to-cyan-700" />
+      ) : (
+        slides.map((src, i) => (
+          <div
+            key={i}
+            aria-hidden={i !== currentIdx % n}
+            className={`absolute inset-0 bg-cover bg-center transition-opacity duration-[900ms] ${i === currentIdx % n ? "opacity-100" : "opacity-0"}`}
+            style={{ backgroundImage: `url(${src})` }}
+          />
+        ))
+      )}
+      {/* Dark gradient overlay for text legibility (bottom-heavy so text on
+       *  the lower-left has plenty of contrast even against bright slides). */}
+      <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/30 to-transparent" />
+      <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
+
+      {/* Prev / next arrows — hidden until hover on desktop, always tap-friendly on mobile */}
+      {n > 1 && (
+        <>
+          <button
+            onClick={() => onIdxChange((currentIdx - 1 + n) % n)}
+            aria-label="Previous"
+            className="absolute left-3 md:left-6 top-1/2 -translate-y-1/2 z-20 w-11 h-11 md:w-14 md:h-14 rounded-full bg-black/40 hover:bg-black/70 backdrop-blur-md border border-white/25 grid place-items-center text-white transition-all md:opacity-0 md:group-hover:opacity-100"
+          >
+            <svg className="w-5 h-5 md:w-6 md:h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
+          <button
+            onClick={() => onIdxChange((currentIdx + 1) % n)}
+            aria-label="Next"
+            className="absolute right-3 md:right-6 top-1/2 -translate-y-1/2 z-20 w-11 h-11 md:w-14 md:h-14 rounded-full bg-black/40 hover:bg-black/70 backdrop-blur-md border border-white/25 grid place-items-center text-white transition-all md:opacity-0 md:group-hover:opacity-100"
+          >
+            <svg className="w-5 h-5 md:w-6 md:h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+        </>
+      )}
+
+      {/* Slide dots */}
+      {n > 1 && (
+        <div className="absolute bottom-4 md:bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2">
+          {slides.map((_, i) => (
+            <button
+              key={i}
+              onClick={() => onIdxChange(i)}
+              aria-label={`Slide ${i + 1}`}
+              className={`h-1.5 rounded-full transition-all ${i === currentIdx % n ? "w-8 bg-white" : "w-2 bg-white/40 hover:bg-white/70"}`}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Corner chip — top-left, like DWP's price bubble */}
+      <div className="absolute top-4 left-4 md:top-8 md:left-8 z-20 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/90 backdrop-blur-md shadow-lg text-xs md:text-sm font-semibold text-slate-900">
+        <span className="text-lg">🏆</span>
+        <span>{studentsChip}</span>
+      </div>
+
+      {/* Overlay content — bottom-left glass panel */}
+      <div className="absolute inset-x-0 bottom-0 z-10 pointer-events-none">
+        <div className="mx-auto max-w-7xl px-4 md:px-10 pb-12 md:pb-20">
+          <div className="max-w-3xl pointer-events-auto cg-fade-up">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 backdrop-blur-md border border-white/25 text-xs md:text-sm text-white mb-4">
+              <CountryFlag country={country || ""} />
+              <span>{city || "Online"}</span>
+              {foundedYear && <><span className="text-white/50">·</span><span>Est. {foundedYear}</span></>}
+            </div>
+            <h1 className="font-display text-white text-4xl md:text-6xl lg:text-7xl leading-[1.05] tracking-tight mb-4 drop-shadow-2xl">
+              {academyName}
+            </h1>
+            {tagline && (
+              <p className="text-base md:text-xl text-white/90 mb-6 max-w-2xl drop-shadow-lg">
+                {tagline}
+              </p>
+            )}
+            <div className="flex flex-wrap gap-3">
+              <a
+                href={joinCtaHref}
+                {...(joinCtaExternal ? { target: "_blank", rel: "noreferrer" } : {})}
+                className="inline-flex items-center gap-2 px-6 py-3.5 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-300 hover:to-teal-400 text-white font-bold text-base shadow-2xl shadow-emerald-500/40 transition-transform hover:scale-105"
+              >
+                <span>{joinCtaExternal ? "Contact us" : "Meet the coaches"}</span>
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+              </a>
+              <a
+                href="#coaches"
+                className="inline-flex items-center gap-2 px-6 py-3.5 rounded-xl bg-white/15 backdrop-blur-md border border-white/40 hover:bg-white/25 text-white font-semibold"
+              >
+                Meet the coaches
+              </a>
+              {isOwner && (
+                <Link
+                  to="/academy-profile/edit"
+                  className="inline-flex items-center gap-1 px-4 py-3.5 rounded-xl border border-amber-300/60 text-amber-100 hover:text-white hover:bg-amber-400/25 text-sm font-medium backdrop-blur-md"
+                >
+                  ✎ Edit page
+                </Link>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+  );
+}
+
 function coachWatermarkPiece(title: string): "queen" | "knight" | "bishop" | "rook" | "pawn" {
   const t = (title || "").toUpperCase();
   if (t === "GM" || t === "WGM") return "queen";
@@ -138,6 +277,7 @@ export default function AcademyPublicPage() {
 
   // ── ALL HOOKS ABOVE EVERY EARLY RETURN (React #310 rule of hooks) ───────
   const [scrolled, setScrolled] = useState(false);
+  const [slide, setSlide] = useState(0);   // hero carousel index
 
   const authQ = useQuery({
     queryKey: ["auth-me"],
@@ -320,87 +460,31 @@ export default function AcademyPublicPage() {
         </div>
       </nav>
 
-      {/* ═════════════════════ HERO ═════════════════════ */}
-      <header className="relative overflow-hidden cg-hero-clip pt-16">
-        {/* Layered gradient — indigo → violet → cyan (chessiverse-ish but bolder) */}
-        <div className="absolute inset-0 bg-gradient-to-br from-indigo-900 via-violet-800 to-cyan-700" />
-        <ChessboardPattern light="#f0f9ff" dark="#312e81" opacity={0.08} />
-        {/* floating decorative pieces */}
-        <PieceSilhouette
-          piece="knight"
-          className="absolute -left-6 top-24 w-40 md:w-56 text-white/10 cg-float"
-        />
-        <PieceSilhouette
-          piece="queen"
-          className="absolute -right-8 bottom-24 w-48 md:w-72 text-white/10 cg-float"
-        />
-        <div className="absolute top-40 right-1/4 w-6 h-6 rounded-full bg-amber-300/70 blur-sm cg-float" />
-        <div className="absolute bottom-40 left-1/3 w-8 h-8 rounded-full bg-rose-400/50 blur-md" />
-
-        <div className="relative mx-auto max-w-7xl px-4 md:px-8 pt-14 pb-32 md:pt-24 md:pb-40">
-          <div className="grid md:grid-cols-2 gap-10 items-center">
-            <div className="text-white cg-fade-up">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-sm text-white/90 mb-6">
-                <CountryFlag country={p.country} />
-                <span>{p.city || "Online"}</span>
-                {p.foundedYear && <><span className="text-white/40">·</span><span>Est. {p.foundedYear}</span></>}
-              </div>
-              <h1 className="font-display text-5xl md:text-6xl lg:text-7xl leading-[1.05] tracking-tight mb-5 text-white">
-                {displayName}
-              </h1>
-              {p.tagline && (
-                <p className="text-lg md:text-2xl text-indigo-100 mb-8 leading-relaxed max-w-xl">
-                  {p.tagline}
-                </p>
-              )}
-              <div className="flex flex-wrap gap-3">
-                <a
-                  href={joinCtaHref}
-                  {...(joinCtaExternal ? { target: "_blank", rel: "noreferrer" } : {})}
-                  className="inline-flex items-center gap-2 px-6 py-3.5 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-300 hover:to-teal-400 text-white font-bold text-base shadow-2xl shadow-emerald-500/40 transition-transform hover:scale-105"
-                >
-                  <span>{joinCtaExternal ? "Contact us" : "Meet the coaches"}</span>
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
-                </a>
-                <a
-                  href="#coaches"
-                  className="inline-flex items-center gap-2 px-6 py-3.5 rounded-xl bg-white/10 backdrop-blur-sm border border-white/30 hover:bg-white/20 text-white font-semibold"
-                >
-                  Meet the coaches
-                </a>
-                {isOwner && (
-                  <Link
-                    to="/academy-profile/edit"
-                    className="inline-flex items-center gap-1 px-4 py-3.5 rounded-xl border border-amber-300/60 text-amber-200 hover:text-white hover:bg-amber-400/20 text-sm font-medium"
-                  >
-                    ✎ Edit page
-                  </Link>
-                )}
-              </div>
-            </div>
-
-            <div className="relative cg-fade-up" style={{ animationDelay: "0.15s" }}>
-              {p.coverUrl ? (
-                <div className="relative rounded-3xl overflow-hidden shadow-2xl ring-4 ring-white/20">
-                  <img src={p.coverUrl} alt={displayName} className="w-full h-72 md:h-96 object-cover" />
-                </div>
-              ) : (
-                <div className="relative rounded-3xl overflow-hidden shadow-2xl ring-4 ring-white/20">
-                  <HeroChessScene />
-                </div>
-              )}
-              {/* floating rating chip */}
-              <div className="absolute -bottom-5 -left-5 md:-bottom-6 md:-left-6 bg-white rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 grid place-items-center text-xl">🏆</div>
-                <div>
-                  <div className="text-xs font-semibold text-slate-500">Trusted by</div>
-                  <div className="text-sm font-bold text-slate-900">{p.testimonials.length ? `${p.testimonials.length * 50}+ students` : "500+ students"}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </header>
+      {/* ═════════════════════ HERO — DWP-style full-width carousel ═════════════════════
+       *  Owner 2026-08-13 asked for a "banner like in dwp" (dreamworldplants.com)
+       *  populated with the Gemini-generated chess images. Slides = cover +
+       *  achievement images. Auto-advances every 5s, left/right arrows, bottom-left
+       *  glass-morphed overlay for the academy name / tagline / CTAs. */}
+      <HeroBanner
+        slides={(function () {
+          const s: string[] = [];
+          if (p.coverUrl) s.push(p.coverUrl);
+          for (const a of p.achievements) if (a.imageUrl) s.push(a.imageUrl);
+          if (p.themeUrl) s.push(p.themeUrl);
+          return s;
+        })()}
+        currentIdx={slide}
+        onIdxChange={setSlide}
+        academyName={displayName}
+        tagline={p.tagline}
+        country={p.country}
+        city={p.city}
+        foundedYear={p.foundedYear}
+        studentsChip={p.testimonials.length ? `${p.testimonials.length * 50}+ students` : "500+ students"}
+        joinCtaHref={joinCtaHref}
+        joinCtaExternal={joinCtaExternal}
+        isOwner={isOwner}
+      />
 
       {/* ═════════════════════ STATS BAR (floats over hero seam) ═════════════════════ */}
       <section className="relative mx-auto max-w-7xl px-4 md:px-8 -mt-24 md:-mt-28 z-10">
