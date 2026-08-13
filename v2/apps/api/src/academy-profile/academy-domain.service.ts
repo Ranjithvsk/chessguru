@@ -57,8 +57,23 @@ export class AcademyDomainService {
     return { academyId };
   }
 
+  /** Gate check — superadmin can flip customDomainEnabled=false to block a
+   *  specific academy from touching set/verify. Undefined = allowed (grandfather
+   *  existing users). remove() intentionally skips this so a disabled academy
+   *  can still tear down a stale record. */
+  private async ensureFeatureEnabled(academyId: string) {
+    const doc: any = await this.col().findOne(
+      { _id: academyId as any },
+      { projection: { customDomainEnabled: 1 } },
+    );
+    if (doc && doc.customDomainEnabled === false) {
+      throw new ForbiddenException("Custom domains are not enabled for your academy — contact support");
+    }
+  }
+
   async setDomain(session: any, body: any) {
     const { academyId } = this.ensureOwner(session);
+    await this.ensureFeatureEnabled(academyId);
     const domain = validDomain(body?.domain);
     if (!domain) throw new BadRequestException("invalid domain — use e.g. yourname.com (lowercase, no protocol)");
 
@@ -87,6 +102,7 @@ export class AcademyDomainService {
 
   async verify(session: any) {
     const { academyId } = this.ensureOwner(session);
+    await this.ensureFeatureEnabled(academyId);
     const doc: any = await this.col().findOne({ _id: academyId as any });
     const domain = doc?.customDomain ? validDomain(doc.customDomain) : null;
     if (!domain) throw new BadRequestException("no domain set — POST /domain/set first");
@@ -150,9 +166,145 @@ export class AcademyDomainService {
       lastCheckedAt: doc.customDomainLastCheckedAt || null,
       activatedAt: doc.customDomainActivatedAt || null,
       error: String(doc.customDomainError || ""),
+      // undefined defaults to true (feature is on for existing academies unless
+      // superadmin explicitly disables). Only explicit false hides the UI.
+      enabled: doc.customDomainEnabled !== false,
       cnameTarget: CNAME_TARGET,
       aTarget: A_TARGET,
     };
+  }
+
+  /* -------------------------------------------------------- admin ops */
+  // Superadmin call-through helpers (validation + provisioning stays here so
+  // the AdminDomainService doesn't have to re-implement certbot/nginx).
+
+  async adminSetDomainFor(academyId: string, rawDomain: string) {
+    const id = String(academyId || "").trim().toLowerCase();
+    if (!id) throw new BadRequestException("missing academyId");
+    const domain = validDomain(rawDomain);
+    if (!domain) throw new BadRequestException("invalid domain — use e.g. yourname.com (lowercase, no protocol)");
+    const acad: any = await this.conn.db!.collection("academies").findOne({ _id: id as any }, { projection: { _id: 1 } });
+    if (!acad) throw new BadRequestException("no such academy");
+
+    const otherAcademy: any = await this.col().findOne({ _id: { $ne: id as any }, customDomain: domain });
+    if (otherAcademy) throw new BadRequestException("that domain is already registered by another academy");
+    const clashCoach: any = await this.coachProfiles().findOne({ customDomain: domain });
+    if (clashCoach) throw new BadRequestException("that domain is already used by a coach page");
+
+    await this.col().updateOne(
+      { _id: id as any },
+      {
+        $set: {
+          customDomain: domain,
+          customDomainStatus: "pending_dns",
+          customDomainAddedAt: new Date(),
+          customDomainError: "",
+          updatedAt: new Date(),
+        },
+        $setOnInsert: { _id: id },
+      },
+      { upsert: true },
+    );
+    return { ok: true, academyId: id, domain, status: "pending_dns" };
+  }
+
+  async adminVerifyFor(academyId: string) {
+    const id = String(academyId || "").trim().toLowerCase();
+    const doc: any = await this.col().findOne({ _id: id as any });
+    const domain = doc?.customDomain ? validDomain(doc.customDomain) : null;
+    if (!domain) throw new BadRequestException("no domain set for this academy");
+
+    let ok = false;
+    let observed: string | null = null;
+    try {
+      const cnames = await dns.resolveCname(domain);
+      observed = cnames.join(",");
+      const norm = cnames.map((s) => s.replace(/\.$/, "").toLowerCase());
+      if (norm.includes(CNAME_TARGET.toLowerCase())) ok = true;
+    } catch { /* no CNAME */ }
+    if (!ok) {
+      try {
+        const ips = await dns.resolve4(domain);
+        observed = observed ? `${observed} / A=${ips.join(",")}` : `A=${ips.join(",")}`;
+        if (ips.includes(A_TARGET)) ok = true;
+      } catch { /* no A */ }
+    }
+
+    if (!ok) {
+      await this.col().updateOne(
+        { _id: id as any },
+        {
+          $set: {
+            customDomainStatus: "pending_dns",
+            customDomainLastCheckedAt: new Date(),
+            customDomainError: `DNS not pointing here yet (observed: ${observed || "no record"}). Add CNAME → ${CNAME_TARGET} or A → ${A_TARGET}. DNS updates take 5-30 min.`,
+            updatedAt: new Date(),
+          },
+        },
+      );
+      return { ok: false, status: "pending_dns", observed };
+    }
+
+    await this.col().updateOne(
+      { _id: id as any },
+      {
+        $set: {
+          customDomainStatus: "provisioning",
+          customDomainLastCheckedAt: new Date(),
+          customDomainError: "",
+          updatedAt: new Date(),
+        },
+      },
+    );
+    setImmediate(() => this.provision(id, domain).catch((e) => {
+      console.error(`[academy-domain] admin-triggered provision crash ${domain}:`, e);
+    }));
+    return { ok: true, status: "provisioning" };
+  }
+
+  async adminRemoveFor(academyId: string) {
+    const id = String(academyId || "").trim().toLowerCase();
+    const doc: any = await this.col().findOne({ _id: id as any });
+    const domain = doc?.customDomain ? validDomain(doc.customDomain) : null;
+    if (domain) {
+      const confPath = `${NGINX_DIR}/${domain}.conf`;
+      if (existsSync(confPath)) {
+        await this.run("sudo", ["-n", "/bin/rm", confPath]).catch(() => null);
+      }
+      await this.run("sudo", ["-n", "/usr/bin/certbot", "delete", "--cert-name", domain, "--non-interactive"]).catch(() => null);
+      await this.run("sudo", ["-n", "/usr/sbin/nginx", "-t"]).catch(() => null);
+      await this.run("sudo", ["-n", "/bin/systemctl", "reload", "nginx"]).catch(() => null);
+    }
+    await this.col().updateOne(
+      { _id: id as any },
+      {
+        $set: {
+          customDomain: "",
+          customDomainStatus: "",
+          customDomainError: "",
+          customDomainAddedAt: null,
+          customDomainActivatedAt: null,
+          updatedAt: new Date(),
+        },
+      },
+    );
+    return { ok: true };
+  }
+
+  async adminSetEnabled(academyId: string, enabled: boolean) {
+    const id = String(academyId || "").trim().toLowerCase();
+    if (!id) throw new BadRequestException("missing academyId");
+    const acad: any = await this.conn.db!.collection("academies").findOne({ _id: id as any }, { projection: { _id: 1 } });
+    if (!acad) throw new BadRequestException("no such academy");
+    await this.col().updateOne(
+      { _id: id as any },
+      {
+        $set: { customDomainEnabled: !!enabled, updatedAt: new Date() },
+        $setOnInsert: { _id: id },
+      },
+      { upsert: true },
+    );
+    return { ok: true, academyId: id, customDomainEnabled: !!enabled };
   }
 
   async remove(session: any) {

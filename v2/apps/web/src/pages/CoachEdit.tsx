@@ -548,6 +548,9 @@ interface DomainStatus {
   error: string;
   cnameTarget: string;
   aTarget: string;
+  // false only when a superadmin explicitly disabled the feature for this
+  // coach. undefined/true = allowed. Set server-side in status().
+  enabled?: boolean;
 }
 function DomainSection() {
   const qc = useQueryClient();
@@ -607,12 +610,14 @@ function DomainSection() {
   const domain = s?.domain || "";
   const cnameTarget = s?.cnameTarget || "coach.dreamcy.com";
   const aTarget = s?.aTarget || "213.32.21.226";
+  // Explicit false only — undefined defaults to enabled (grandfathered).
+  const disabled = s?.enabled === false;
 
   return (
     <section className="bg-ink-800/60 rounded-2xl p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="font-semibold text-ink-200">Custom domain</h2>
-        {domain && status && (
+        {!disabled && domain && status && (
           <span className={`text-xs px-2 py-0.5 rounded-full ${
             status === "active" ? "bg-emerald-500/20 text-emerald-300"
             : status === "failed" ? "bg-rose-500/20 text-rose-300"
@@ -622,8 +627,23 @@ function DomainSection() {
         )}
       </div>
 
+      {disabled && (
+        <div className="rounded-lg bg-rose-500/10 border border-rose-500/30 p-4">
+          <p className="text-sm text-rose-200 font-medium">
+            🔒 Custom domains are disabled for your account.
+          </p>
+          <p className="text-xs text-rose-300/90 mt-1">
+            Contact support at{" "}
+            <a href="mailto:ranjith.vsk@gmail.com" className="underline hover:text-rose-100">
+              ranjith.vsk@gmail.com
+            </a>{" "}
+            to enable this feature.
+          </p>
+        </div>
+      )}
+
       {/* Step 1 — no domain set */}
-      {(!domain || !status) && (
+      {!disabled && (!domain || !status) && (
         <>
           <p className="text-xs text-ink-400">
             Point your own domain at your public coach page (e.g.
@@ -649,7 +669,7 @@ function DomainSection() {
       )}
 
       {/* Step 2 — pending DNS */}
-      {status === "pending_dns" && (
+      {!disabled && status === "pending_dns" && (
         <>
           <div className="rounded-lg bg-ink-900/60 border border-ink-700 p-4 space-y-3">
             <p className="text-sm text-ink-200 font-medium">
@@ -700,7 +720,7 @@ function DomainSection() {
       )}
 
       {/* Step 3 — verifying / provisioning (transient — auto-polling) */}
-      {(status === "verifying" || status === "provisioning") && (
+      {!disabled && (status === "verifying" || status === "provisioning") && (
         <div className="rounded-lg bg-ink-900/60 border border-ink-700 p-4 flex items-start gap-3">
           <div className="mt-0.5 h-4 w-4 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
           <div className="space-y-1">
@@ -714,7 +734,7 @@ function DomainSection() {
       )}
 
       {/* Step 4 — active */}
-      {status === "active" && (
+      {!disabled && status === "active" && (
         <>
           <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/30 p-4">
             <p className="text-sm text-emerald-300 font-medium">
@@ -737,7 +757,7 @@ function DomainSection() {
       )}
 
       {/* Step 5 — failed */}
-      {status === "failed" && (
+      {!disabled && status === "failed" && (
         <>
           <div className="rounded-lg bg-rose-500/10 border border-rose-500/30 p-4 space-y-1">
             <p className="text-sm text-rose-300 font-medium">SSL provisioning failed for

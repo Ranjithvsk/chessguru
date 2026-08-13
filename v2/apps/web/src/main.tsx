@@ -42,6 +42,7 @@ import AdminPage from "./pages/Admin";
 import AdminUsersPage from "./pages/AdminUsers";
 import AdminMailLogPage from "./pages/AdminMailLog";
 import AdminWhitelabelPage from "./pages/AdminWhitelabel";
+import AdminDomainsPage from "./pages/AdminDomains";
 import AcademyBrandingPage from "./pages/AcademyBranding";
 import TenantHomePage from "./pages/TenantHome";
 import TenantLoginPage from "./pages/TenantLogin";
@@ -119,6 +120,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="admin/users" element={<AdminUsersPage />} />
             <Route path="admin/mail-log" element={<AdminMailLogPage />} />
             <Route path="admin/whitelabel" element={<AdminWhitelabelPage />} />
+            <Route path="admin/domains" element={<AdminDomainsPage />} />
             <Route path="academy/branding" element={<AcademyBrandingPage />} />
             <Route path="a/:slug" element={<TenantHomePage />} />
             <Route path="a/:slug/login" element={<TenantLoginPage />} />

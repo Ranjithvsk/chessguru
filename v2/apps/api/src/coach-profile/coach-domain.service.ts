@@ -92,10 +92,25 @@ export class CoachDomainService {
     return { userId };
   }
 
+  /** Gate check — superadmin can flip customDomainEnabled=false to lock a
+   *  coach out of set/verify. Undefined = allowed (grandfather existing users).
+   *  remove() intentionally skips this so a disabled coach can still tear
+   *  down a stale record. */
+  private async ensureFeatureEnabled(userId: string) {
+    const doc: any = await this.col().findOne(
+      { _id: userId as any },
+      { projection: { customDomainEnabled: 1 } },
+    );
+    if (doc && doc.customDomainEnabled === false) {
+      throw new ForbiddenException("Custom domains are not enabled for your account — contact support");
+    }
+  }
+
   /* -------------------------------------------------------------- set */
 
   async setDomain(session: any, body: any) {
     const { userId } = this.ensureCoachOrOwner(session);
+    await this.ensureFeatureEnabled(userId);
     const domain = validDomain(body?.domain);
     if (!domain) throw new BadRequestException("invalid domain — use e.g. yourname.com (lowercase, no protocol)");
 
@@ -124,6 +139,7 @@ export class CoachDomainService {
 
   async verify(session: any) {
     const { userId } = this.ensureCoachOrOwner(session);
+    await this.ensureFeatureEnabled(userId);
     const doc: any = await this.col().findOne({ _id: userId as any });
     const domain = doc?.customDomain ? validDomain(doc.customDomain) : null;
     if (!domain) throw new BadRequestException("no domain set — POST /domain/set first");
@@ -197,9 +213,146 @@ export class CoachDomainService {
       lastCheckedAt: doc.customDomainLastCheckedAt || null,
       activatedAt: doc.customDomainActivatedAt || null,
       error: String(doc.customDomainError || ""),
+      // undefined defaults to true (feature is on for existing coaches unless
+      // superadmin explicitly disables). Only explicit false hides the UI.
+      enabled: doc.customDomainEnabled !== false,
       cnameTarget: CNAME_TARGET,
       aTarget: A_TARGET,
     };
+  }
+
+  /* -------------------------------------------------------- admin ops */
+  // Superadmin call-through helpers — reuse the same certbot/nginx paths but
+  // key off a passed-in userId (looked up by username at the controller layer)
+  // instead of the current session.
+
+  async adminSetDomainFor(coachUserId: string, rawDomain: string) {
+    const id = String(coachUserId || "").trim().toLowerCase();
+    if (!id) throw new BadRequestException("missing coach id");
+    const domain = validDomain(rawDomain);
+    if (!domain) throw new BadRequestException("invalid domain — use e.g. yourname.com (lowercase, no protocol)");
+    const user: any = await this.conn.db!.collection("users").findOne({ _id: id as any }, { projection: { _id: 1, role: 1 } });
+    if (!user) throw new BadRequestException("no such user");
+
+    const clash: any = await this.col().findOne({ _id: { $ne: id as any }, customDomain: domain });
+    if (clash) throw new BadRequestException("that domain is already registered by another coach");
+    const acadClash: any = await this.conn.db!.collection("academyProfiles").findOne({ customDomain: domain });
+    if (acadClash) throw new BadRequestException("that domain is already used by an academy page");
+
+    await this.col().updateOne(
+      { _id: id as any },
+      {
+        $set: {
+          customDomain: domain,
+          customDomainStatus: "pending_dns",
+          customDomainAddedAt: new Date(),
+          customDomainError: "",
+          updatedAt: new Date(),
+        },
+        $setOnInsert: { _id: id },
+      },
+      { upsert: true },
+    );
+    return { ok: true, userId: id, domain, status: "pending_dns" };
+  }
+
+  async adminVerifyFor(coachUserId: string) {
+    const id = String(coachUserId || "").trim().toLowerCase();
+    const doc: any = await this.col().findOne({ _id: id as any });
+    const domain = doc?.customDomain ? validDomain(doc.customDomain) : null;
+    if (!domain) throw new BadRequestException("no domain set for this coach");
+
+    let ok = false;
+    let observed: string | null = null;
+    try {
+      const cnames = await dns.resolveCname(domain);
+      observed = cnames.join(",");
+      const norm = cnames.map((s) => s.replace(/\.$/, "").toLowerCase());
+      if (norm.includes(CNAME_TARGET.toLowerCase())) ok = true;
+    } catch { /* no CNAME */ }
+    if (!ok) {
+      try {
+        const ips = await dns.resolve4(domain);
+        observed = observed ? `${observed} / A=${ips.join(",")}` : `A=${ips.join(",")}`;
+        if (ips.includes(A_TARGET)) ok = true;
+      } catch { /* no A */ }
+    }
+
+    if (!ok) {
+      await this.col().updateOne(
+        { _id: id as any },
+        {
+          $set: {
+            customDomainStatus: "pending_dns",
+            customDomainLastCheckedAt: new Date(),
+            customDomainError: `DNS not pointing here yet (observed: ${observed || "no record"}). Add CNAME → ${CNAME_TARGET} or A → ${A_TARGET}. DNS updates take 5-30 min.`,
+            updatedAt: new Date(),
+          },
+        },
+      );
+      return { ok: false, status: "pending_dns", observed };
+    }
+
+    await this.col().updateOne(
+      { _id: id as any },
+      {
+        $set: {
+          customDomainStatus: "provisioning",
+          customDomainLastCheckedAt: new Date(),
+          customDomainError: "",
+          updatedAt: new Date(),
+        },
+      },
+    );
+    setImmediate(() => this.provision(id, domain).catch((e) => {
+      console.error(`[coach-domain] admin-triggered provision crash ${domain}:`, e);
+    }));
+    return { ok: true, status: "provisioning" };
+  }
+
+  async adminRemoveFor(coachUserId: string) {
+    const id = String(coachUserId || "").trim().toLowerCase();
+    const doc: any = await this.col().findOne({ _id: id as any });
+    const domain = doc?.customDomain ? validDomain(doc.customDomain) : null;
+    if (domain) {
+      const confPath = `${NGINX_DIR}/${domain}.conf`;
+      if (existsSync(confPath)) {
+        await this.run("sudo", ["-n", "/bin/rm", confPath]).catch(() => null);
+      }
+      await this.run("sudo", ["-n", "/usr/bin/certbot", "delete", "--cert-name", domain, "--non-interactive"]).catch(() => null);
+      await this.run("sudo", ["-n", "/usr/sbin/nginx", "-t"]).catch(() => null);
+      await this.run("sudo", ["-n", "/bin/systemctl", "reload", "nginx"]).catch(() => null);
+    }
+    await this.col().updateOne(
+      { _id: id as any },
+      {
+        $set: {
+          customDomain: "",
+          customDomainStatus: "",
+          customDomainError: "",
+          customDomainAddedAt: null,
+          customDomainActivatedAt: null,
+          updatedAt: new Date(),
+        },
+      },
+    );
+    return { ok: true };
+  }
+
+  async adminSetEnabled(coachUserId: string, enabled: boolean) {
+    const id = String(coachUserId || "").trim().toLowerCase();
+    if (!id) throw new BadRequestException("missing coach id");
+    const user: any = await this.conn.db!.collection("users").findOne({ _id: id as any }, { projection: { _id: 1 } });
+    if (!user) throw new BadRequestException("no such user");
+    await this.col().updateOne(
+      { _id: id as any },
+      {
+        $set: { customDomainEnabled: !!enabled, updatedAt: new Date() },
+        $setOnInsert: { _id: id },
+      },
+      { upsert: true },
+    );
+    return { ok: true, userId: id, customDomainEnabled: !!enabled };
   }
 
   /* ---------------------------------------------------------- remove */

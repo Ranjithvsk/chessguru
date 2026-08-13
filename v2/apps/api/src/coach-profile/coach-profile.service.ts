@@ -414,6 +414,9 @@ export class CoachProfileService {
       socials: doc?.socials && typeof doc.socials === "object" ? doc.socials : {},
       customDomain: String(doc?.customDomain || ""),
       customDomainStatus: String(doc?.customDomainStatus || ""),
+      // undefined defaults to enabled (grandfathered). Only explicit false
+      // signals a superadmin lock — the editor uses this to hide the domain UI.
+      customDomainEnabled: doc?.customDomainEnabled !== false,
       updatedAt: doc?.updatedAt || null,
     };
   }

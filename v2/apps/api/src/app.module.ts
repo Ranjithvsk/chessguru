@@ -9,6 +9,7 @@ import { AuthController } from "./auth/auth.controller";
 import { AuthService } from "./auth/auth.service";
 import { AdminController } from "./admin/admin.controller";
 import { AdminService } from "./admin/admin.service";
+import { AdminDomainsController } from "./admin/admin-domains.controller";
 import { EngineController } from "./engine/engine.controller";
 import { EngineService } from "./engine/engine.service";
 import { ExplorerController } from "./explorer/explorer.controller";
@@ -55,7 +56,7 @@ const MONGO_URI = process.env.MONGO_URI ?? "mongodb://localhost:27017/chessguru"
 
 @Module({
   imports: [MongooseModule.forRoot(MONGO_URI), IntegrationsModule, LivekitModule, AcademyModule],
-  controllers: [HealthController, MiscController, BroadcastsController, PuzzlesController, AuthController, AdminController, EngineController, ExplorerController, StudyController, ClassRecordingController, ClassScheduleController, ClassAttendanceController, ClassSnapController, ClassOptOutController, MailWebhookController, IceConfigController, DigestOptOutController, EmailOptOutController, PushController, AnnouncementsController, VisionController, HomeworkController, ClassNotesController, MyClassNotesController, AcademyClassNotesController, ClassLiveController, MaterialsController, MyMaterialsController, MaterialsFileController, OpeningNotesController, CoachPublicController, MyCoachProfileController, AcademyPublicController, MyAcademyProfileController],
+  controllers: [HealthController, MiscController, BroadcastsController, PuzzlesController, AuthController, AdminController, AdminDomainsController, EngineController, ExplorerController, StudyController, ClassRecordingController, ClassScheduleController, ClassAttendanceController, ClassSnapController, ClassOptOutController, MailWebhookController, IceConfigController, DigestOptOutController, EmailOptOutController, PushController, AnnouncementsController, VisionController, HomeworkController, ClassNotesController, MyClassNotesController, AcademyClassNotesController, ClassLiveController, MaterialsController, MyMaterialsController, MaterialsFileController, OpeningNotesController, CoachPublicController, MyCoachProfileController, AcademyPublicController, MyAcademyProfileController],
   providers: [PuzzlesService, AuthService, AdminService, EngineService, ExplorerService, StudyService, ClassReminderService, WeeklyDigestService, StreakReminderService, PushService, AnnouncementsService, VisionService, HomeworkService, MaterialReminderService, OpeningNotesService, CoachProfileService, CoachDomainService, AcademyProfileService, AcademyDomainService],
 })
 export class AppModule {}
