@@ -40,7 +40,7 @@ interface Socials {
 interface AcademyProfile {
   academyId: string; slug: string;
   displayName: string; tagline: string; description: string;
-  logoUrl: string; coverUrl: string;
+  logoUrl: string; coverUrl: string; themeUrl: string;
   country: string; city: string; foundedYear?: number;
   socials: Socials;
   achievements: Achievement[]; testimonials: Testimonial[];
@@ -248,7 +248,40 @@ export default function AcademyPublicPage() {
   const joinCtaExternal = !!primaryContactHref;
 
   return (
-    <div className="min-h-screen bg-[#fafaf9] text-slate-900 font-sans antialiased">
+    <div className="min-h-screen bg-[#fafaf9] text-slate-900 font-sans antialiased relative">
+      {/* Full-viewport painterly background layer — owner-supplied via Gemini
+          "theme" gen (see /me/academy-profile/gen-image target:theme). Sits
+          behind everything at very low opacity with a light gradient overlay
+          so section text stays readable. Falls back to the tiled chessboard
+          SVG when unset. */}
+      {p.themeUrl ? (
+        <>
+          <div
+            aria-hidden
+            className="pointer-events-none fixed inset-0 -z-10 bg-cover bg-center"
+            style={{ backgroundImage: `url(${p.themeUrl})`, opacity: 0.18 }}
+          />
+          <div
+            aria-hidden
+            className="pointer-events-none fixed inset-0 -z-10 bg-gradient-to-b from-[#fafaf9]/60 via-[#fafaf9]/40 to-[#fafaf9]/70"
+          />
+        </>
+      ) : (
+        <div
+          aria-hidden
+          className="pointer-events-none fixed inset-0 -z-10"
+          style={{
+            backgroundImage:
+              "url(\"data:image/svg+xml;utf8," +
+              encodeURIComponent(
+                "<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'><rect width='40' height='40' fill='%23fef7e0'/><rect x='40' y='40' width='40' height='40' fill='%23fef7e0'/><rect x='40' width='40' height='40' fill='%23c7d2fe'/><rect y='40' width='40' height='40' fill='%23c7d2fe'/></svg>"
+              ) +
+              "\")",
+            backgroundSize: "80px 80px",
+            opacity: 0.12,
+          }}
+        />
+      )}
       {/* keyframes for scroll-in fade + subtle float on hero decorations */}
       <style>{`
         @keyframes cgFadeUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }

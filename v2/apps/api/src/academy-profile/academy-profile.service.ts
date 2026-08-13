@@ -269,7 +269,8 @@ export class AcademyProfileService {
 
     let kind: string;
     let subId: string | null = null;
-    if (target === "logo" || target === "cover") {
+    if (target === "logo" || target === "cover" || target === "theme") {
+      // theme = page-wide painterly background layer (subtle, low-opacity in UI)
       kind = target;
     } else if (target === "achievement" || target === "testimonial") {
       subId = String(body?.subId || "").trim() || null;
@@ -347,7 +348,7 @@ export class AcademyProfileService {
   /* ---------- helpers ---------- */
 
   private isKnownKind(kind: string): boolean {
-    if (kind === "logo" || kind === "cover") return true;
+    if (kind === "logo" || kind === "cover" || kind === "theme") return true;
     const [top] = kind.split(":");
     return top === "achievement" || top === "testimonial";
   }
@@ -365,6 +366,17 @@ export class AcademyProfileService {
       await this.col().updateOne(
         { _id: academyId as any },
         { $set: { coverUrl: url, updatedAt: new Date() }, $setOnInsert: { _id: academyId } },
+        { upsert: true },
+      );
+      return;
+    }
+    if (kind === "theme") {
+      // Full-viewport painterly background layer — rendered by AcademyPublic.tsx
+      // as a fixed low-opacity div behind everything else, gracefully falling
+      // back to the SVG chessboard when unset.
+      await this.col().updateOne(
+        { _id: academyId as any },
+        { $set: { themeUrl: url, updatedAt: new Date() }, $setOnInsert: { _id: academyId } },
         { upsert: true },
       );
       return;
@@ -435,6 +447,7 @@ export class AcademyProfileService {
       description: String(doc?.description || ""),
       logoUrl: String(doc?.logoUrl || ""),
       coverUrl: String(doc?.coverUrl || ""),
+      themeUrl: String(doc?.themeUrl || ""),
       country: String(doc?.country || ""),
       city: String(doc?.city || ""),
       foundedYear: typeof doc?.foundedYear === "number" ? doc.foundedYear : undefined,

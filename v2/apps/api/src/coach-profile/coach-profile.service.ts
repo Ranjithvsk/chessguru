@@ -35,7 +35,7 @@ const MIME_EXT: Record<string, string> = {
   "image/gif": "gif",
 };
 
-export type ImageKindTop = "photo" | "cover";
+export type ImageKindTop = "photo" | "cover" | "theme";
 export type ImageKindNested = "achievement" | "trophy" | "topStudent";
 export type ImageKind = ImageKindTop | `${ImageKindNested}:${string}`;
 
@@ -48,9 +48,12 @@ export interface CoachTopStudent {
 export interface CoachTrophy {
   id: string; name: string; year?: number; imageUrl?: string;
 }
+export interface CoachTestimonial {
+  id: string; author: string; role?: string; quote: string; rating?: number; imageUrl?: string;
+}
 export interface CoachSocials {
   website?: string; twitter?: string; youtube?: string; instagram?: string;
-  lichess?: string; chesscom?: string;
+  lichess?: string; chesscom?: string; whatsapp?: string; email?: string;
 }
 export interface CoachProfile {
   _id: string;
@@ -66,9 +69,11 @@ export interface CoachProfile {
   playingStyles?: string[];
   photoUrl?: string;
   coverUrl?: string;
+  themeUrl?: string;
   achievements?: CoachAchievement[];
   topStudents?: CoachTopStudent[];
   trophies?: CoachTrophy[];
+  testimonials?: CoachTestimonial[];
   socials?: CoachSocials;
   customDomain?: string;
   customDomainStatus?: "pending_dns" | "verifying" | "active" | "failed";
@@ -194,6 +199,7 @@ export class CoachProfileService {
     if ("achievements" in body) $set.achievements = this.normalizeAchievements(body.achievements);
     if ("topStudents" in body) $set.topStudents = this.normalizeTopStudents(body.topStudents);
     if ("trophies" in body) $set.trophies = this.normalizeTrophies(body.trophies);
+    if ("testimonials" in body) $set.testimonials = this.normalizeTestimonials(body.testimonials);
     if ("socials" in body) $set.socials = this.normalizeSocials(body.socials);
     if ("customDomain" in body) {
       const d = String(body.customDomain ?? "").trim().toLowerCase().slice(0, 240);
@@ -237,20 +243,21 @@ export class CoachProfileService {
     return { ok: true, url };
   }
 
-  /** Gemini text→image generation. Returns 200 with {ok:false,error} when
-   *  the key is unset — never throws in that case (owner never wants a
-   *  cryptic 500 for "AI didn't answer"). */
-  async genImage(session: any, body: { target?: string; prompt?: string; subId?: string | null }) {
+  /** Text→image gen — supports Gemini 2.5-flash-image OR OpenAI gpt-image-1
+   *  (DALL-E successor). Owner-selectable via body.provider. Falls back to
+   *  Gemini when unspecified. Never throws when the relevant key is unset;
+   *  returns {ok:false,error} so the editor can show the error inline. */
+  async genImage(session: any, body: { target?: string; prompt?: string; subId?: string | null; provider?: string }) {
     const g = this.ensureCoachOrOwner(session);
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) return { ok: false, error: "GEMINI_API_KEY not set — ask owner to configure" };
+    const provider = String(body?.provider || "gemini").toLowerCase();
     const target = String(body?.target || "").trim();
     const prompt = String(body?.prompt || "").trim().slice(0, 2000);
     if (!prompt) throw new BadRequestException("prompt required");
     // Map "target" to storage kind. Nested targets require a subId.
     let kind: string;
     let subId: string | null = null;
-    if (target === "photo" || target === "cover") {
+    if (target === "photo" || target === "cover" || target === "theme") {
+      // theme = page-wide painterly background layer (subtle, low-opacity in UI)
       kind = target;
     } else if (target === "achievement" || target === "trophy" || target === "topStudent") {
       subId = String(body?.subId || "").trim() || null;
@@ -260,30 +267,55 @@ export class CoachProfileService {
       throw new BadRequestException("bad target");
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${key}`;
-    const reqBody = { contents: [{ parts: [{ text: prompt }] }] };
     let png: Buffer;
-    try {
-      const r = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(reqBody),
-      });
-      if (!r.ok) {
-        const t = await r.text();
-        return { ok: false, error: `Gemini HTTP ${r.status}: ${t.slice(0, 240)}` };
+    if (provider === "openai" || provider === "chatgpt" || provider === "dalle") {
+      const key = process.env.OPENAI_API_KEY;
+      if (!key) return { ok: false, error: "OPENAI_API_KEY not set — ask owner to configure" };
+      const size = kind === "cover" || kind === "theme" ? "1536x1024" : "1024x1024";
+      try {
+        const r = await fetch("https://api.openai.com/v1/images/generations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+          body: JSON.stringify({ model: "gpt-image-1", prompt, size, n: 1 }),
+        });
+        if (!r.ok) {
+          const t = await r.text();
+          return { ok: false, error: `OpenAI HTTP ${r.status}: ${t.slice(0, 280)}` };
+        }
+        const j = (await r.json()) as any;
+        const b64 = j?.data?.[0]?.b64_json;
+        if (!b64) return { ok: false, error: "no image in OpenAI response (try a different prompt)" };
+        png = Buffer.from(b64, "base64");
+      } catch (e: any) {
+        return { ok: false, error: `OpenAI call failed: ${String(e?.message || e).slice(0, 200)}` };
       }
-      const j = (await r.json()) as any;
-      const parts = j?.candidates?.[0]?.content?.parts ?? [];
-      let data: string | undefined;
-      for (const p of parts) {
-        const inline = p.inlineData ?? p.inline_data;
-        if (inline?.data) { data = inline.data; break; }
+    } else {
+      const key = process.env.GEMINI_API_KEY;
+      if (!key) return { ok: false, error: "GEMINI_API_KEY not set — ask owner to configure" };
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${key}`;
+      const reqBody = { contents: [{ parts: [{ text: prompt }] }] };
+      try {
+        const r = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(reqBody),
+        });
+        if (!r.ok) {
+          const t = await r.text();
+          return { ok: false, error: `Gemini HTTP ${r.status}: ${t.slice(0, 240)}` };
+        }
+        const j = (await r.json()) as any;
+        const parts = j?.candidates?.[0]?.content?.parts ?? [];
+        let data: string | undefined;
+        for (const p of parts) {
+          const inline = p.inlineData ?? p.inline_data;
+          if (inline?.data) { data = inline.data; break; }
+        }
+        if (!data) return { ok: false, error: "no image in Gemini response (try a different prompt)" };
+        png = Buffer.from(data, "base64");
+      } catch (e: any) {
+        return { ok: false, error: `Gemini call failed: ${String(e?.message || e).slice(0, 200)}` };
       }
-      if (!data) return { ok: false, error: "no image in Gemini response (try a different prompt)" };
-      png = Buffer.from(data, "base64");
-    } catch (e: any) {
-      return { ok: false, error: `Gemini call failed: ${String(e?.message || e).slice(0, 200)}` };
     }
 
     await this.ensureDir();
@@ -300,7 +332,7 @@ export class CoachProfileService {
   /* ---------- helpers ---------- */
 
   private isKnownKind(kind: string): boolean {
-    if (kind === "photo" || kind === "cover") return true;
+    if (kind === "photo" || kind === "cover" || kind === "theme") return true;
     const [top] = kind.split(":");
     return top === "achievement" || top === "trophy" || top === "topStudent";
   }
@@ -318,6 +350,17 @@ export class CoachProfileService {
       await this.col().updateOne(
         { _id: userId as any },
         { $set: { coverUrl: url, updatedAt: new Date() }, $setOnInsert: { _id: userId } },
+        { upsert: true },
+      );
+      return;
+    }
+    if (kind === "theme") {
+      // Full-viewport painterly background layer — rendered by CoachPublic.tsx
+      // as a fixed low-opacity div behind everything else, gracefully falling
+      // back to the SVG chessboard when unset.
+      await this.col().updateOne(
+        { _id: userId as any },
+        { $set: { themeUrl: url, updatedAt: new Date() }, $setOnInsert: { _id: userId } },
         { upsert: true },
       );
       return;
@@ -381,10 +424,21 @@ export class CoachProfileService {
       imageUrl: cleanImageUrl(r?.imageUrl),
     })).filter((r: CoachTrophy) => r.name.length > 0 || r.imageUrl);
   }
+  private normalizeTestimonials(raw: any): CoachTestimonial[] {
+    if (!Array.isArray(raw)) return [];
+    return raw.slice(0, MAX_LIST).map((r: any) => ({
+      id: String(r?.id || shortId()).slice(0, 24),
+      author: String(r?.author || "").trim().slice(0, 120),
+      role: String(r?.role || "").trim().slice(0, 120),
+      quote: String(r?.quote || "").slice(0, 800),
+      rating: cleanRating(r?.rating),
+      imageUrl: cleanImageUrl(r?.imageUrl),
+    })).filter((r: CoachTestimonial) => r.author.length > 0 || r.quote.length > 0 || r.imageUrl);
+  }
   private normalizeSocials(raw: any): CoachSocials {
     if (!raw || typeof raw !== "object") return {};
     const s: CoachSocials = {};
-    const fields: (keyof CoachSocials)[] = ["website", "twitter", "youtube", "instagram", "lichess", "chesscom"];
+    const fields: (keyof CoachSocials)[] = ["website", "twitter", "youtube", "instagram", "lichess", "chesscom", "whatsapp", "email"];
     for (const k of fields) {
       const v = String(raw[k] ?? "").trim().slice(0, 240);
       if (v) s[k] = v;
@@ -408,9 +462,11 @@ export class CoachProfileService {
       playingStyles: Array.isArray(doc?.playingStyles) ? doc.playingStyles : [],
       photoUrl: String(doc?.photoUrl || ""),
       coverUrl: String(doc?.coverUrl || ""),
+      themeUrl: String(doc?.themeUrl || ""),
       achievements: Array.isArray(doc?.achievements) ? doc.achievements : [],
       topStudents: Array.isArray(doc?.topStudents) ? doc.topStudents : [],
       trophies: Array.isArray(doc?.trophies) ? doc.trophies : [],
+      testimonials: Array.isArray(doc?.testimonials) ? doc.testimonials : [],
       socials: doc?.socials && typeof doc.socials === "object" ? doc.socials : {},
       customDomain: String(doc?.customDomain || ""),
       customDomainStatus: String(doc?.customDomainStatus || ""),
@@ -427,6 +483,12 @@ function cleanYear(v: any): number | undefined {
   if (!Number.isFinite(n)) return undefined;
   const y = Math.round(n);
   return y >= 1900 && y <= 2100 ? y : undefined;
+}
+function cleanRating(v: any): number | undefined {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return undefined;
+  const r = Math.round(n);
+  return r >= 1 && r <= 5 ? r : undefined;
 }
 function cleanImageUrl(v: any): string | undefined {
   const s = String(v ?? "").trim().slice(0, 500);
