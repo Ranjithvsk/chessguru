@@ -13,17 +13,17 @@
     <meta name="apple-mobile-web-app-title" content="ChessGuru" />
     <script>
       // Resolve theme BEFORE React renders so the page never flashes in the
-      // wrong palette. localStorage("cg.theme") wins over OS preference; when
-      // set to "system" (or unset) we follow prefers-color-scheme.
+      // wrong palette. Default (no saved choice) is LIGHT for every user —
+      // owner ask: day mode is the intended out-of-the-box experience. Users
+      // who explicitly pick dark from the navbar toggle get it persisted.
       (function () {
         try {
           var saved = localStorage.getItem("cg.theme");
-          var mode = saved === "light" || saved === "dark" ? saved
-            : (window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+          var mode = saved === "dark" ? "dark" : "light";
           var root = document.documentElement;
           root.classList.toggle("light", mode === "light");
-          root.classList.toggle("dark", mode !== "light");
-        } catch (e) { /* fall through with default dark from HTML */ }
+          root.classList.toggle("dark", mode === "dark");
+        } catch (e) { /* fall through */ }
       })();
     </script>
   </head>
