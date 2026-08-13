@@ -41,12 +41,22 @@ export default function App() {
     // Only redirect from the "landing" paths. Deep links like /login shouldn't
     // get bounced off — the coach can still access /login etc. on their host.
     if (path !== "/" && path !== "/v2/" && path !== "/v2") return;
-    fetch(`${API_BASE}/api/coach/by-domain/${encodeURIComponent(host)}`, { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j: { username?: string } | null) => {
-        if (j?.username) navigate(`/coach/${j.username}`, { replace: true });
-      })
-      .catch(() => { /* silent — normal root will render */ });
+    // Try ACADEMY first — an owner-level domain trumps any coach-level match.
+    // Coach lookup only fires if the academy lookup 404s (unknown host).
+    (async () => {
+      try {
+        const rA = await fetch(`${API_BASE}/api/academy-page/by-domain/${encodeURIComponent(host)}`, { credentials: "include" });
+        if (rA.ok) {
+          const jA = await rA.json() as { slug?: string };
+          if (jA?.slug) { navigate(`/academy-page/${jA.slug}`, { replace: true }); return; }
+        }
+        const rC = await fetch(`${API_BASE}/api/coach/by-domain/${encodeURIComponent(host)}`, { credentials: "include" });
+        if (rC.ok) {
+          const jC = await rC.json() as { username?: string };
+          if (jC?.username) navigate(`/coach/${jC.username}`, { replace: true });
+        }
+      } catch { /* silent — normal root will render */ }
+    })();
   }, [navigate]);
 
   const logout = async () => { await api.logout(); await qc.invalidateQueries(); };

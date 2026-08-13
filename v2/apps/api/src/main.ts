@@ -51,6 +51,10 @@ async function bootstrap() {
   // Body is raw image bytes (image/*). 8 MB cap. Handles both top-level
   // and :kind/:subId nested paths under the same mount.
   app.use("/api/me/coach-profile/upload", expressLib.raw({ type: "image/*", limit: "8mb" }));
+  // Academy profile image uploads (logo/cover/achievement/testimonial). Same
+  // shape as coach uploads — raw image bytes, 8 MB cap, both top-level and
+  // nested :kind/:subId flow through the same mount.
+  app.use("/api/me/academy-profile/upload", expressLib.raw({ type: "image/*", limit: "8mb" }));
   // Vision endpoints carry base64-encoded PNG board/silhouette payloads.
   // Phone-captured book photos land at 3-6MB. Cap at 12MB so any modern
   // phone image fits.

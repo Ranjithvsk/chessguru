@@ -1398,6 +1398,25 @@ export default function AcademyDashboardPage() {
           </div>
         </div>
       )}
+      {/* Public ACADEMY page — owner only (an academy has ONE landing page,
+          managed by the owner; coaches only edit their own /coach/:username). */}
+      {isOwner && (
+        <div className="rounded-xl2 border border-amber-500/40 bg-gradient-to-r from-amber-900/30 to-slate-900/60 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+          <div className="text-sm text-amber-100">
+            <span className="font-semibold">Public academy page</span>
+            <span className="text-amber-200/80"> — chessiverse-style landing at </span>
+            <code className="text-amber-300">/academy-page/{me.academyId}</code>
+          </div>
+          <div className="flex gap-2">
+            <Link to="/academy-profile/edit" className="rounded-lg bg-amber-600 hover:bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+              Edit academy page
+            </Link>
+            <Link to={`/academy-page/${me.academyId}`} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-amber-500/40 px-3 py-1.5 text-xs text-amber-200 hover:bg-amber-900/40">
+              See public page →
+            </Link>
+          </div>
+        </div>
+      )}
       {canManage && (
         <div className="grid gap-4 lg:grid-cols-2">
           <UpcomingClassesPanel classes={schedule?.upcoming ?? []} live={schedule?.live ?? []} />

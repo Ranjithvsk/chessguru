@@ -41,6 +41,10 @@ import ExternalGamePage from "./pages/ExternalGame";
 import AdminPage from "./pages/Admin";
 import AdminUsersPage from "./pages/AdminUsers";
 import AdminMailLogPage from "./pages/AdminMailLog";
+import AdminWhitelabelPage from "./pages/AdminWhitelabel";
+import AcademyBrandingPage from "./pages/AcademyBranding";
+import TenantHomePage from "./pages/TenantHome";
+import TenantLoginPage from "./pages/TenantLogin";
 import DailyPage from "./pages/Daily";
 import PlayPage from "./pages/Play";
 import FeedbackUITestPage from "./pages/FeedbackUITest";
@@ -49,6 +53,8 @@ import ClassReplayPage from "./pages/ClassReplay";
 import ClassV2Page from "./pages/ClassV2";
 import CoachPublicPage from "./pages/CoachPublic";
 import CoachProfileEditPage from "./pages/CoachEdit";
+import AcademyPublicPage from "./pages/AcademyPublic";
+import AcademyProfileEditPage from "./pages/AcademyProfileEdit";
 
 // Jitsi is retired (owner 2026-08-12) — every live-class URL now funnels into
 // Dream Meet (/class-v2/). These tiny redirect shims preserve old bookmarks +
@@ -78,6 +84,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               reads like a landing page, chessiverse-style. Must be BEFORE the
               App-wrapped block so it matches first. */}
           <Route path="coach/:username" element={<CoachPublicPage />} />
+          {/* Public academy landing — also standalone (no App chrome) so it reads
+              like a chessiverse-style creator page, matching CoachPublic. */}
+          <Route path="academy-page/:slug" element={<AcademyPublicPage />} />
           <Route element={<App />}>
             <Route index element={<PuzzlesPage />} />
             <Route path="play" element={<PlayPage />} />
@@ -110,6 +119,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="admin" element={<AdminPage />} />
             <Route path="admin/users" element={<AdminUsersPage />} />
             <Route path="admin/mail-log" element={<AdminMailLogPage />} />
+            <Route path="admin/whitelabel" element={<AdminWhitelabelPage />} />
+            <Route path="academy/branding" element={<AcademyBrandingPage />} />
+            <Route path="a/:slug" element={<TenantHomePage />} />
+            <Route path="a/:slug/login" element={<TenantLoginPage />} />
             <Route path="daily" element={<DailyPage />} />
             <Route path="login" element={<LoginPage />} />
             <Route path="reset-password" element={<ResetPasswordPage />} />
@@ -126,6 +139,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="class/:id/replay/:filename" element={<ClassReplayPage />} />
             <Route path="class-v2/:room" element={<ClassV2Page />} />
             <Route path="coach-profile/edit" element={<CoachProfileEditPage />} />
+            <Route path="academy-profile/edit" element={<AcademyProfileEditPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
