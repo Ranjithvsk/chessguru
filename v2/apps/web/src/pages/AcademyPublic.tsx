@@ -254,32 +254,28 @@ export default function AcademyPublicPage() {
           behind everything at very low opacity with a light gradient overlay
           so section text stays readable. Falls back to the tiled chessboard
           SVG when unset. */}
+      {/* Owner 2026-08-13: theme bg made text unreadable + looked "ugly". Kept
+       *  the field so a coach/academy CAN opt in later, but the default page
+       *  now uses a clean solid background — the theme image only shows as a
+       *  small subtle wash at the top so text stays crisp on every section. */}
       {p.themeUrl ? (
         <>
           <div
             aria-hidden
-            className="pointer-events-none fixed inset-0 -z-10 bg-cover bg-center"
-            style={{ backgroundImage: `url(${p.themeUrl})`, opacity: 0.18 }}
+            className="pointer-events-none fixed inset-x-0 top-0 h-[70vh] -z-10 bg-cover bg-center"
+            style={{ backgroundImage: `url(${p.themeUrl})`, opacity: 0.06 }}
           />
           <div
             aria-hidden
-            className="pointer-events-none fixed inset-0 -z-10 bg-gradient-to-b from-[#fafaf9]/60 via-[#fafaf9]/40 to-[#fafaf9]/70"
+            className="pointer-events-none fixed inset-0 -z-10 bg-gradient-to-b from-[#fafaf9]/85 via-[#fafaf9]/95 to-[#fafaf9]"
           />
+          <div aria-hidden className="pointer-events-none fixed inset-0 -z-20 bg-[#fafaf9]" />
         </>
       ) : (
         <div
           aria-hidden
           className="pointer-events-none fixed inset-0 -z-10"
-          style={{
-            backgroundImage:
-              "url(\"data:image/svg+xml;utf8," +
-              encodeURIComponent(
-                "<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'><rect width='40' height='40' fill='%23fef7e0'/><rect x='40' y='40' width='40' height='40' fill='%23fef7e0'/><rect x='40' width='40' height='40' fill='%23c7d2fe'/><rect y='40' width='40' height='40' fill='%23c7d2fe'/></svg>"
-              ) +
-              "\")",
-            backgroundSize: "80px 80px",
-            opacity: 0.12,
-          }}
+          style={{ background: "#fafaf9" }}
         />
       )}
       {/* keyframes for scroll-in fade + subtle float on hero decorations */}
@@ -514,7 +510,7 @@ export default function AcademyPublicPage() {
       {/* ═════════════════════ ABOUT + MINI BOARD ═════════════════════ */}
       {p.description && (
         <section id="about" className="relative bg-white py-20 md:py-28 overflow-hidden">
-          <ChessboardPattern light="#fef7e0" dark="#fde68a" opacity={0.35} className="[mask-image:radial-gradient(ellipse_at_center,black_20%,transparent_70%)]" />
+          <ChessboardPattern light="#fef7e0" dark="#fde68a" opacity={0.08} className="[mask-image:radial-gradient(ellipse_at_center,black_20%,transparent_70%)]" />
           <div className="relative mx-auto max-w-7xl px-4 md:px-8 grid md:grid-cols-2 gap-12 items-center">
             <div>
               <div className="inline-block px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-bold uppercase tracking-widest mb-4">About the Academy</div>
