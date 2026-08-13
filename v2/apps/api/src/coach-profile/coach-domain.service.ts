@@ -58,10 +58,15 @@ const LE_EMAIL = process.env.LE_EMAIL ?? "owner@dreamcy.com";
 // - ≤ 253 chars overall (RFC 1035)
 const DOMAIN_RE = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 
+// Explicit allowlist that overrides the blocked-zone check. Used for smoke
+// testing the pipeline against a subdomain we control (test-coach.dreamcy.com).
+const TEST_ALLOWLIST = new Set(["test-coach.dreamcy.com"]);
+
 function validDomain(raw: string): string | null {
   const d = String(raw || "").trim().toLowerCase();
   if (!d || d.length > 253) return null;
   if (!DOMAIN_RE.test(d)) return null;
+  if (TEST_ALLOWLIST.has(d)) return d;
   // Block our own zones — a coach can't hijack harinitharanjith.com etc.
   const blocked = ["harinitharanjith.com", "dreamcy.com", "dreamworldplants.com", "dreamworldplants.in"];
   for (const b of blocked) if (d === b || d.endsWith(`.${b}`)) return null;
@@ -274,12 +279,10 @@ export class CoachDomainService {
         await this.markFailed(userId, msg);
         return;
       }
-      // Confirm the cert file exists.
-      const fullchain = `${LE_LIVE}/${domain}/fullchain.pem`;
-      if (!existsSync(fullchain)) {
-        await this.markFailed(userId, "cert file missing after certbot ran — check pm2 logs");
-        return;
-      }
+      // Cert should now exist at ${LE_LIVE}/${domain}/. We can't stat it as
+      // ubuntu (LE dirs are 0700 root:root), so we rely on certbot's exit
+      // code — if a symlink is missing, `nginx -t` below catches it and we
+      // clean up.
 
       // Step 2: write nginx server block via `sudo tee` (only path ubuntu can
       // write into NGINX_DIR is via the tee sudoers rule).
