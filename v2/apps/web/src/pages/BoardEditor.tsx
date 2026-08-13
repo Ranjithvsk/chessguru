@@ -288,11 +288,12 @@ export default function BoardEditorPage() {
             body: JSON.stringify({ boardPngBase64: warpedB64, source: "warped-crop" }),
           }).catch(() => {});
         } catch { /* silent */ }
-        // AUTO-RUN Server AI right after the client detector finishes.
-        // Coach doesn't need to press a button -- accurate FEN arrives
-        // ~5-30s later and replaces the fast preview. Mirrors ChessVision AI
-        // "just upload and wait" experience.
-        void runServerClassifyOnCanvas(cvs);
+        // AUTO-RUN Ultra AI right after the client detector's fast preview.
+        // Ultra AI is strictly better than the legacy /classify-board-v2
+        // (MIT YOLO extractor + Tandberg-quality classifier + chess-rules
+        // validation), so we prefer it as the default. Falls back to the
+        // legacy Server AI path only if Ultra AI errors out.
+        void runUltraScan().catch(() => runServerClassifyOnCanvas(cvs));
       } catch { /* corrections just won't be captured this run */ }
       // Always populate: even an illegal FEN has many correct pieces the coach
       // can keep and only fix the wrong squares. Never discard partial finds.
@@ -378,12 +379,28 @@ export default function BoardEditorPage() {
       const avgConf = (j.squares.flat().reduce((s: number, sq: any) => s + sq.confidence, 0) / 64 * 100).toFixed(0);
       const pieceCount = j.fen.split(" ")[0].replace(/[^KQRBNPkqrbnp]/g, "").length;
       const timing = `extract ${j.extractLatencyMs}ms + classify ${j.meta.latencyMs}ms`;
+      // Per-square uncertain rings: yellow ring on any square below 0.7
+      // confidence so the coach immediately sees which cells to double-check.
+      const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
+      const shapes: Array<{ orig: string; brush: string }> = [];
+      let uncertain = 0;
+      for (let r2 = 0; r2 < 8; r2++) {
+        for (let c2 = 0; c2 < 8; c2++) {
+          const conf = j.squares[r2]?.[c2]?.confidence ?? 1;
+          if (conf < 0.7) {
+            uncertain++;
+            shapes.push({ orig: `${files[c2]}${8 - r2}`, brush: "yellow" });
+          }
+        }
+      }
+      setUncertainShapes(shapes);
+      const uncertainTag = uncertain > 0 ? ` · ⚠ ${uncertain} uncertain` : "";
       setServerMsg({
         tone: placed ? "ok" : "err",
         text: placed
           ? (legal
-              ? `✨ Ultra AI: ${pieceCount} pieces, avg conf ${avgConf}% (${timing}).`
-              : `✨ Ultra AI placed ${pieceCount} pieces (conf ${avgConf}%). Position illegal — fix the misread squares.`)
+              ? `✨ Ultra AI: ${pieceCount} pieces, avg conf ${avgConf}% (${timing}${uncertainTag}).`
+              : `✨ Ultra AI placed ${pieceCount} pieces (conf ${avgConf}%${uncertainTag}). Position illegal — fix the misread squares.`)
           : `Ultra AI unparseable FEN: ${j.fen}`,
       });
     } catch (e) {

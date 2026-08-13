@@ -55,13 +55,6 @@ import CoachPublicPage from "./pages/CoachPublic";
 import CoachProfileEditPage from "./pages/CoachEdit";
 import AcademyPublicPage from "./pages/AcademyPublic";
 import AcademyProfileEditPage from "./pages/AcademyProfileEdit";
-// v3 preview — chessiverse-styled rebuild of the top-3 flagship public
-// pages. Standalone (no App chrome/nav) so the new V3Layout owns the whole
-// visual shell. See apps/web/src/theme/v3-tokens.css.
-import V3HomePage from "./pages/v3/V3HomePage";
-import V3AcademyPage from "./pages/v3/V3AcademyPage";
-import V3CoachPage from "./pages/v3/V3CoachPage";
-
 // Jitsi is retired (owner 2026-08-12) — every live-class URL now funnels into
 // Dream Meet (/class-v2/). These tiny redirect shims preserve old bookmarks +
 // server-generated push-notification joinPaths without keeping the Jitsi UI
@@ -93,11 +86,6 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           {/* Public academy landing — also standalone (no App chrome) so it reads
               like a chessiverse-style creator page, matching CoachPublic. */}
           <Route path="academy-page/:slug" element={<AcademyPublicPage />} />
-          {/* v3 preview — top-3 rebuilt in chessiverse style. Standalone,
-              must be BEFORE the App-wrapped block so /v3/* matches first. */}
-          <Route path="v3" element={<V3HomePage />} />
-          <Route path="v3/academy/:slug" element={<V3AcademyPage />} />
-          <Route path="v3/coach/:username" element={<V3CoachPage />} />
           <Route element={<App />}>
             <Route index element={<PuzzlesPage />} />
             <Route path="play" element={<PlayPage />} />

@@ -1,7 +1,6 @@
 @import "chessground/assets/chessground.base.css";
 @import "chessground/assets/chessground.brown.css";
 @import "chessground/assets/chessground.cburnett.css";
-@import "./theme/v3-tokens.css";
 
 /* Board square colours: light = white, dark = blue */
 .cg-board-wrap cg-board {
