@@ -2100,7 +2100,7 @@ export default function AcademyPublicPage() {
       <section id="top" className="cg-civ-hero">
         <div className="cg-civ-hero-text">
           <h1>
-            <span className="text-accent">Learn Without Stress</span>
+            <span className="text-accent">Learn With Joy</span>
             <br />
             <span>With Chennai&apos;s Top Titled Chess Coaches</span>
           </h1>
