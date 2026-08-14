@@ -2082,7 +2082,7 @@ export default function AcademyPublicPage() {
                 <span>Edit</span>
               </Link>
             )}
-            <Link to="/puzzles" className="cg-civ-btn cg-civ-btn--outlined cg-civ-btn--sm">
+            <Link to={`/a/${encodeURIComponent(academy.slug)}/login`} className="cg-civ-btn cg-civ-btn--outlined cg-civ-btn--sm">
               <span>Log In</span>
             </Link>
             <a
