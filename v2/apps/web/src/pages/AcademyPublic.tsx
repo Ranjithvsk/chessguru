@@ -643,20 +643,21 @@ export default function AcademyPublicPage() {
         </div>
       </nav>
 
-      {/* ═══════════ HERO ═══════════ */}
+      {/* ═══════════ HERO — one bold banner image ═══════════ */}
       <header id="top" className="relative pt-32 md:pt-40 pb-28 md:pb-40 overflow-hidden">
-        <div className="absolute inset-0 cg-mesh cg-gradient-shift" />
-        {/* Wide chess-board hero image faintly behind everything */}
-        <img src={`${IMG}/board-wide-hero.webp`} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20 mix-blend-multiply" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,transparent_0%,rgba(250,246,239,0.85)_75%)]" />
+        {/* Single hero banner: cyan/fuchsia neon-rim chess pieces on a cream-to-charcoal wash */}
+        <img
+          src={`${IMG}/hero-b-neon-modern.webp`}
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover"
+        />
+        {/* Cream wash overlay — keeps text readable, preserves the neon pop on the right */}
+        <div className="absolute inset-0 bg-gradient-to-b from-[#faf6ef]/70 via-[#faf6ef]/55 to-[#faf6ef]/85" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(250,246,239,0.6)_0%,transparent_60%)]" />
 
-        {/* floating decorative pieces */}
-        <img src={`${IMG}/piece-knight.webp`} alt="" className="hidden md:block absolute left-[4%] top-[22%] w-32 h-32 object-contain cg-float opacity-70" />
-        <img src={`${IMG}/piece-queen.webp`}  alt="" className="hidden md:block absolute right-[6%] top-[18%] w-36 h-36 object-contain cg-float opacity-70" style={{ animationDelay: '1.5s' }} />
-        <img src={`${IMG}/crown-detail.webp`} alt="" className="hidden lg:block absolute left-[20%] bottom-[8%] w-24 h-24 object-contain cg-float opacity-60" style={{ animationDelay: '3s' }} />
-
-        <div className="absolute right-[24%] bottom-[15%] w-8 h-8 rounded-full bg-cyan-400 blur-2xl cg-pulse-glow" />
-        <div className="absolute left-[25%] top-[35%] w-12 h-12 rounded-full bg-fuchsia-500 blur-3xl cg-pulse-glow" style={{ animationDelay: '1.5s' }} />
+        {/* Subtle neon-glow accents that echo the banner */}
+        <div className="absolute right-[18%] top-[35%] w-32 h-32 rounded-full bg-cyan-400/40 blur-3xl cg-pulse-glow" />
+        <div className="absolute left-[18%] top-[45%] w-32 h-32 rounded-full bg-fuchsia-500/30 blur-3xl cg-pulse-glow" style={{ animationDelay: '1.5s' }} />
 
         <div className="relative mx-auto max-w-7xl px-6 md:px-10 text-center">
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/80 backdrop-blur-md ring-1 ring-stone-200 shadow-sm text-xs tracking-widest uppercase mb-8 cg-fade-up">
@@ -704,11 +705,6 @@ export default function AcademyPublicPage() {
           </div>
         </div>
 
-        {/* Pawn-line band at bottom of hero */}
-        <div className="absolute bottom-0 inset-x-0 h-16 overflow-hidden opacity-70 pointer-events-none">
-          <img src={`${IMG}/piece-pawn-line.webp`} alt="" className="w-full h-full object-cover object-top" />
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[#faf6ef]" />
-        </div>
       </header>
 
       {/* ═══════════ STATS ═══════════ */}
