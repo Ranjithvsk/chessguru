@@ -1878,16 +1878,15 @@ export default function AcademyPublicPage() {
         @media (max-width: 900px) { .cg-civ-hero { flex-direction: column; padding: 2rem 1rem; } }
         .cg-civ-hero-text { flex: 1; display: flex; flex-direction: column; }
         .cg-civ-hero-visual { flex: 1; margin-inline: auto; position: relative; width: min(576px,100%); aspect-ratio: 1/1; min-height: 460px; }
-        /* Chessboard checker background — 8x8 alternating blue + cream squares */
+        /* Chessboard checker background — pale blue + cream (chessiverse subtle) */
         .cg-civ-hv-board { position: absolute; inset: 0; border-radius: 16px; overflow: hidden; box-shadow: var(--main-box-shadow); background:
-          conic-gradient(from 90deg at 12.5% 12.5%, #a3d8f0 25%, #f0f4c3 0 50%, #a3d8f0 0 75%, #f0f4c3 0);
+          conic-gradient(from 90deg at 25% 25%, #d9edf5 25%, #f4f0e0 0 50%, #d9edf5 0 75%, #f4f0e0 0);
           background-size: 25% 25%;
-          background-color: #d9edf5;
+          background-color: #e6f2f8;
         }
         .cg-civ-hv-board::before { content: ''; position: absolute; inset: 0; background:
-          linear-gradient(45deg, transparent 46%, rgba(255,255,255,0.06) 46% 54%, transparent 54%),
-          linear-gradient(135deg, transparent 46%, rgba(255,255,255,0.06) 46% 54%, transparent 54%);
-          background-size: 25% 25%;
+          linear-gradient(45deg, transparent 48%, rgba(255,255,255,0.04) 48% 52%, transparent 52%);
+          background-size: 12.5% 12.5%;
           pointer-events: none;
         }
         /* Small portrait card on the board */
