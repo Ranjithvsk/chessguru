@@ -1801,19 +1801,36 @@ export default function AcademyPublicPage() {
         .cg-civ-hero { display: flex; gap: 2rem; align-items: center; padding: 3rem 1rem; max-width: 1440px; margin: 0 auto; }
         @media (max-width: 900px) { .cg-civ-hero { flex-direction: column; padding: 2rem 1rem; } }
         .cg-civ-hero-text { flex: 1; display: flex; flex-direction: column; }
-        .cg-civ-hero-visual { flex: 1; margin-inline: auto; position: relative; width: min(576px,100%); }
-        /* Layered hero visual — portrait card + star badge + quote card, 1:1 chessiverse */
-        .cg-civ-hv-portrait { position: relative; border-radius: 16px; overflow: hidden; box-shadow: var(--main-box-shadow); aspect-ratio: 5/6; background: #232323; }
-        .cg-civ-hv-portrait img { width: 100%; height: 100%; object-fit: cover; display: block; }
-        .cg-civ-hv-portrait::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 55%, rgba(0,0,0,0.5) 100%); }
-        .cg-civ-hv-name { position: absolute; bottom: 12px; left: 16px; right: 16px; color: #fff; font-weight: 700; font-size: 1rem; letter-spacing: 0; z-index: 2; text-shadow: 0 1px 4px rgba(0,0,0,0.5); }
-        .cg-civ-hv-name .sub { display: block; font-weight: 400; font-size: 0.75rem; opacity: 0.85; margin-top: 2px; }
-        .cg-civ-hv-badge { position: absolute; top: -14px; right: -14px; background: #fff; border-radius: 999px; padding: 6px 12px; box-shadow: 0 6px 16px rgba(0,0,0,0.12); display: flex; align-items: center; gap: 4px; font-weight: 700; font-size: 0.8rem; z-index: 3; letter-spacing: 0; }
-        .cg-civ-hv-badge .stars { color: #f9a80a; letter-spacing: -1px; font-size: 0.9rem; }
-        .cg-civ-hv-quote { position: absolute; left: -14px; bottom: -22px; right: 20%; background: #fff; border-radius: 12px; padding: 12px 14px 12px 40px; box-shadow: 0 12px 32px rgba(20,162,184,0.18); z-index: 3; font-size: 0.8rem; line-height: 1.45; color: #232323; letter-spacing: 0; }
-        .cg-civ-hv-quote::before { content: '“'; position: absolute; top: -6px; left: 8px; font-size: 3rem; line-height: 1; color: #14a2b8; font-family: Georgia, serif; }
-        .cg-civ-hv-quote .attrib { display: block; margin-top: 6px; font-size: 0.7rem; color: #5a5a5a; font-weight: 600; }
-        @media (max-width: 600px) { .cg-civ-hv-quote { right: 8%; font-size: 0.72rem; } .cg-civ-hv-badge { top: -10px; right: -6px; font-size: 0.7rem; } }
+        .cg-civ-hero-visual { flex: 1; margin-inline: auto; position: relative; width: min(576px,100%); aspect-ratio: 1/1; min-height: 460px; }
+        /* Chessboard checker background — 8x8 alternating blue + cream squares */
+        .cg-civ-hv-board { position: absolute; inset: 0; border-radius: 16px; overflow: hidden; box-shadow: var(--main-box-shadow); background:
+          conic-gradient(from 90deg at 12.5% 12.5%, #a3d8f0 25%, #f0f4c3 0 50%, #a3d8f0 0 75%, #f0f4c3 0);
+          background-size: 25% 25%;
+          background-color: #d9edf5;
+        }
+        .cg-civ-hv-board::before { content: ''; position: absolute; inset: 0; background:
+          linear-gradient(45deg, transparent 46%, rgba(255,255,255,0.06) 46% 54%, transparent 54%),
+          linear-gradient(135deg, transparent 46%, rgba(255,255,255,0.06) 46% 54%, transparent 54%);
+          background-size: 25% 25%;
+          pointer-events: none;
+        }
+        /* Small portrait card on the board */
+        .cg-civ-hv-card { position: absolute; top: 8%; left: 18%; width: 52%; aspect-ratio: 5/6; border-radius: 12px; overflow: hidden; box-shadow: 0 12px 32px rgba(0,0,0,0.25); z-index: 2; background: #fff; border: 3px solid #fff; }
+        .cg-civ-hv-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .cg-civ-hv-card-name { position: absolute; left: 8px; right: 8px; bottom: 8px; background: rgba(0,0,0,0.65); color: #fff; padding: 4px 8px; border-radius: 6px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0; text-align: center; }
+        /* Yellow star badge floating top-right of the portrait */
+        .cg-civ-hv-stars { position: absolute; top: 4%; right: 6%; background: linear-gradient(180deg,#ffdfa2,#f9a80a,#ffb82e); border-radius: 999px; padding: 6px 12px; box-shadow: 0 6px 16px rgba(249,168,10,0.4); display: flex; align-items: center; gap: 4px; font-weight: 800; font-size: 0.85rem; z-index: 3; letter-spacing: 0; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.15); }
+        .cg-civ-hv-stars .st { font-size: 0.75rem; letter-spacing: -1px; }
+        /* Quote card overlay bottom-right with diagonal stripes decoration */
+        .cg-civ-hv-quote { position: absolute; right: 4%; bottom: 6%; width: 62%; background: #fff; border-radius: 12px; padding: 14px 14px 14px 44px; box-shadow: 0 12px 32px rgba(20,162,184,0.22); z-index: 3; font-size: 0.78rem; line-height: 1.45; color: #232323; letter-spacing: 0; }
+        .cg-civ-hv-quote::before { content: '“'; position: absolute; top: -2px; left: 10px; font-size: 3.4rem; line-height: 1; color: #14a2b8; font-family: Georgia, serif; }
+        .cg-civ-hv-quote .attrib { display: block; margin-top: 8px; font-size: 0.7rem; color: #5a5a5a; font-weight: 700; letter-spacing: 0; }
+        /* Decorative diagonal stripes on quote card corner */
+        .cg-civ-hv-quote::after { content: ''; position: absolute; top: -6px; right: -6px; width: 44px; height: 44px; background: repeating-linear-gradient(-45deg, #f9a80a 0 4px, transparent 4px 8px, #14a2b8 8px 12px, transparent 12px 16px, #e11d48 16px 20px, transparent 20px 24px); border-radius: 12px; opacity: 0.85; z-index: -1; }
+        /* Small "chess bots" note card bottom-left */
+        .cg-civ-hv-note { position: absolute; left: 4%; bottom: 4%; background: #fff; border-radius: 8px; padding: 8px 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); font-size: 0.65rem; color: #5a5a5a; font-weight: 600; letter-spacing: 0; display: flex; align-items: center; gap: 6px; z-index: 3; max-width: 30%; }
+        .cg-civ-hv-note .dot { width: 8px; height: 8px; border-radius: 50%; background: linear-gradient(180deg,#14a2b8,#40bfd3); flex-shrink: 0; }
+        @media (max-width: 600px) { .cg-civ-hero-visual { min-height: 380px; } .cg-civ-hv-card { top: 6%; left: 8%; width: 62%; } }
         .cg-civ-hero-desc { color: var(--clr-text-gray); font-size: 1rem; line-height: 1.6; margin: 1rem 0; }
         .cg-civ-hero-benefits { display: flex; gap: 1.5rem; margin: 1.5rem 0; flex-wrap: wrap; }
         .cg-civ-benefit { align-items: center; display: flex; gap: 0.5rem; font-size: 0.95rem; color: var(--clr-text-main); letter-spacing: 0; }
@@ -1945,20 +1962,24 @@ export default function AcademyPublicPage() {
           </div>
         </div>
         <div className="cg-civ-hero-visual">
-          <div className="cg-civ-hv-portrait">
+          <div className="cg-civ-hv-board" />
+          <div className="cg-civ-hv-card">
             <img src="/academy/arch-04-endgame.webp" alt="Guna Chess Coach" />
-            <div className="cg-civ-hv-name">
-              {coaches[0]?.coachProfile?.displayName || coaches[0]?.fullName || "Vikram · GM"}
-              <span className="sub">Guna Chess · {coaches[0]?.coachProfile?.titleClass || "Senior Coach"}</span>
+            <div className="cg-civ-hv-card-name">
+              {(coaches[0]?.coachProfile?.displayName || coaches[0]?.fullName || "Vikram").split(" ").slice(0,3).join(" ")}
             </div>
-            <div className="cg-civ-hv-badge">
-              <span className="stars">★★★★★</span>
-              <span>4.9</span>
-            </div>
-            <div className="cg-civ-hv-quote">
-              {p.testimonials[0]?.quote?.slice(0, 145) || "Every class feels one-on-one. My son went from 800 to 1450 in nine months — the coaches don't just teach chess, they teach thinking."}
-              <span className="attrib">— {p.testimonials[0]?.author || "Parent, Chennai"}</span>
-            </div>
+          </div>
+          <div className="cg-civ-hv-stars">
+            <span className="st">★★★★★</span>
+            <span>4.9</span>
+          </div>
+          <div className="cg-civ-hv-quote">
+            {(p.testimonials[0]?.quote || "Every class feels one-on-one. My son went from 800 to 1450 in nine months — the coaches don't just teach chess, they teach thinking.").slice(0, 150)}
+            <span className="attrib">— {p.testimonials[0]?.author || "Parent, Chennai"}</span>
+          </div>
+          <div className="cg-civ-hv-note">
+            <span className="dot"></span>
+            <span>Guna Chess · Chennai</span>
           </div>
         </div>
       </section>
