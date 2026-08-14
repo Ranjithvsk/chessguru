@@ -198,6 +198,107 @@ function BentoTile({ children, className = "", tint = "" }: { children: React.Re
   );
 }
 
+// ═════════════════════ INTERACTIVE HERO CAROUSEL ═════════════════════
+// 4 hero-image scenes auto-rotate every 5s with cross-fade. Dot indicators,
+// prev/next arrows, pause on hover, scene-label under the dots.
+const HERO_SCENES = [
+  { src: "/academy/hero-b-neon-modern.webp",   label: "Neon" },
+  { src: "/academy/hero-a-cinematic.webp",     label: "Cinematic" },
+  { src: "/academy/hero-d-topdown-modern.webp",label: "Marble" },
+  { src: "/academy/hero-c-crystal.webp",       label: "Crystal" },
+];
+
+function HeroCarousel() {
+  const [i, setI] = useState(0);
+  const [paused, setPaused] = useState(false);
+  useEffect(() => {
+    if (paused) return;
+    const id = setInterval(() => setI((v) => (v + 1) % HERO_SCENES.length), 5000);
+    return () => clearInterval(id);
+  }, [paused]);
+  const go = (dir: 1 | -1) => setI((v) => (v + dir + HERO_SCENES.length) % HERO_SCENES.length);
+  return (
+    <div
+      className="absolute inset-0 pointer-events-none"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+    >
+      {HERO_SCENES.map((s, k) => (
+        <img
+          key={s.src}
+          src={s.src}
+          alt=""
+          className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-[1400ms] ease-in-out ${k === i ? "opacity-100" : "opacity-0"}`}
+        />
+      ))}
+      {/* Cream wash + radial center highlight for text readability */}
+      <div className="absolute inset-0 bg-gradient-to-b from-[#faf6ef]/70 via-[#faf6ef]/55 to-[#faf6ef]/85" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(250,246,239,0.6)_0%,transparent_60%)]" />
+
+      {/* Prev / Next arrows (desktop only) */}
+      <button
+        onClick={() => go(-1)}
+        aria-label="Previous scene"
+        className="pointer-events-auto hidden md:grid absolute left-6 top-1/2 -translate-y-1/2 h-11 w-11 place-items-center rounded-full bg-white/80 backdrop-blur-md ring-1 ring-stone-200 shadow-lg text-stone-700 hover:bg-white hover:scale-110 transition-all z-20"
+      >
+        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M15 19l-7-7 7-7"/></svg>
+      </button>
+      <button
+        onClick={() => go(1)}
+        aria-label="Next scene"
+        className="pointer-events-auto hidden md:grid absolute right-6 top-1/2 -translate-y-1/2 h-11 w-11 place-items-center rounded-full bg-white/80 backdrop-blur-md ring-1 ring-stone-200 shadow-lg text-stone-700 hover:bg-white hover:scale-110 transition-all z-20"
+      >
+        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 5l7 7-7 7"/></svg>
+      </button>
+
+      {/* Dots + scene label */}
+      <div className="pointer-events-auto absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 z-20">
+        <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/80 backdrop-blur-md ring-1 ring-stone-200 shadow-lg">
+          {HERO_SCENES.map((s, k) => (
+            <button
+              key={s.src}
+              onClick={() => setI(k)}
+              aria-label={`Scene ${k + 1}: ${s.label}`}
+              className={`transition-all rounded-full ${k === i ? "w-8 h-2 bg-gradient-to-r from-cyan-500 to-fuchsia-500" : "w-2 h-2 bg-stone-300 hover:bg-stone-500"}`}
+            />
+          ))}
+        </div>
+        <div className="text-[10px] tracking-[0.3em] uppercase text-stone-600 font-semibold">
+          {HERO_SCENES[i].label}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CyclingTagline() {
+  const phrases = [
+    { text: "Play. Learn. Win.",       accent: "from-cyan-500 to-indigo-500"   },
+    { text: "Every game, a story.",    accent: "from-fuchsia-500 to-rose-500"  },
+    { text: "Guided by titled coaches.", accent: "from-amber-500 to-rose-500"  },
+    { text: "Your first rating awaits.", accent: "from-emerald-500 to-teal-500" },
+  ];
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setI((v) => (v + 1) % phrases.length), 3600);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div className="relative h-full">
+      {phrases.map((p, k) => (
+        <div
+          key={k}
+          className={`absolute inset-0 flex items-center justify-center transition-all duration-700 ${k === i ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"}`}
+        >
+          <span className={`text-base md:text-lg font-bold tracking-tight bg-gradient-to-r ${p.accent} bg-clip-text text-transparent`}>
+            {p.text}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ═════════════════════ INTERACTIVE MODULE 1 — Program Finder Quiz ═════════════════════
 // Three-step wizard: age band → level → goal. Ends with a recommended programme
 // and a CTA. Inspired by DWP's plant-finder module.
@@ -643,17 +744,9 @@ export default function AcademyPublicPage() {
         </div>
       </nav>
 
-      {/* ═══════════ HERO — one bold banner image ═══════════ */}
+      {/* ═══════════ HERO — interactive rotating banner ═══════════ */}
       <header id="top" className="relative pt-32 md:pt-40 pb-28 md:pb-40 overflow-hidden">
-        {/* Single hero banner: cyan/fuchsia neon-rim chess pieces on a cream-to-charcoal wash */}
-        <img
-          src={`${IMG}/hero-b-neon-modern.webp`}
-          alt=""
-          className="absolute inset-0 w-full h-full object-cover"
-        />
-        {/* Cream wash overlay — keeps text readable, preserves the neon pop on the right */}
-        <div className="absolute inset-0 bg-gradient-to-b from-[#faf6ef]/70 via-[#faf6ef]/55 to-[#faf6ef]/85" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(250,246,239,0.6)_0%,transparent_60%)]" />
+        <HeroCarousel />
 
         {/* Subtle neon-glow accents that echo the banner */}
         <div className="absolute right-[18%] top-[35%] w-32 h-32 rounded-full bg-cyan-400/40 blur-3xl cg-pulse-glow" />
@@ -672,10 +765,14 @@ export default function AcademyPublicPage() {
             )}
           </h1>
           {p.tagline && (
-            <p className="text-lg md:text-2xl text-stone-500 max-w-2xl mx-auto leading-relaxed mb-12 cg-fade-up" style={{ animationDelay: '.2s' }}>
+            <p className="text-lg md:text-2xl text-stone-500 max-w-2xl mx-auto leading-relaxed mb-2 cg-fade-up" style={{ animationDelay: '.2s' }}>
               {p.tagline}
             </p>
           )}
+          {/* Cycling headline underneath — rotates through 4 phrases */}
+          <div className="h-8 md:h-10 relative mb-10 cg-fade-up" style={{ animationDelay: '.25s' }}>
+            <CyclingTagline />
+          </div>
           <div className="flex flex-wrap items-center justify-center gap-4 cg-fade-up" style={{ animationDelay: '.3s' }}>
             <a
               href={joinHref}
