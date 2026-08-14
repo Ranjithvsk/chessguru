@@ -943,7 +943,7 @@ function QuotesCarousel() {
   }, []);
   const q = QUOTES[i];
   return (
-    <section className="relative py-16 md:py-24 overflow-hidden">
+    <section className="cg-civ-band-b relative py-16 md:py-24 overflow-hidden">
       <div className="absolute inset-0 cg-mesh opacity-40" />
       <div className="relative mx-auto max-w-4xl px-6 md:px-10 text-center">
         <div className="relative h-40 md:h-44">
@@ -988,7 +988,7 @@ function PieceStrip() {
   const [active, setActive] = useState(0);
   const p = PIECES[active];
   return (
-    <section className="relative py-16 md:py-20 border-y border-stone-200 bg-white/50">
+    <section className="cg-civ-band-a relative py-16 md:py-20">
       <div className="mx-auto max-w-6xl px-6 md:px-10">
         <Reveal>
           <div className="text-center mb-8">
@@ -1270,7 +1270,7 @@ const OPENING_DATA = [
 function OpeningTrendPanel() {
   const [open, setOpen] = useState(0);
   return (
-    <section className="relative py-20 md:py-28 border-y border-stone-200 bg-white/60">
+    <section className="cg-civ-band-a relative py-20 md:py-28">
       <style>{`
         .cg-op-list { display: flex; flex-direction: column; gap: .5rem; }
         .cg-op-row { background: #fff; border: 1px solid rgba(53,225,251,.14); border-radius: 8px; transition: border-color .2s, box-shadow .2s; }
@@ -1475,8 +1475,105 @@ export default function AcademyPublicPage() {
   const filteredCoaches = coaches.filter(activeFilter[2]);
 
   return (
-    <div className="min-h-screen bg-[#faf6ef] text-stone-900 font-sans antialiased overflow-x-hidden">
+    <div className="cg-civ-root min-h-screen antialiased overflow-x-hidden">
       <ScrollProgress />
+      <style>{`
+        /* ═══ CHESSIVERSE THEME TOKENS + BASE (1:1 clone, cg-civ-* prefix) ═══ */
+        .cg-civ-root {
+          --clr-background-main: #e5f5fe;
+          --clr-background-main-new: linear-gradient(180deg,#f3fdff,#ebfcff);
+          --clr-text-main: #232323;
+          --clr-text-gray: #5a5a5a;
+          --clr-text-darkgray: #2d2d2d;
+          --clr-accent-new: #14a2b8;
+          --clr-accent: #73cdee;
+          --clr-border-blue: #35e1fb;
+          --clr-golden: #f9a80a;
+          --clr-play: #24a9e7;
+          --clr-section-a: linear-gradient(90deg,#dbfaff,#e6fcff);
+          --clr-section-banner: linear-gradient(180deg,#caf6fd,#dbfaff,#caf6fd);
+          --clr-accent-gradient: linear-gradient(180deg,#14a2b8,#40bfd3);
+          --clr-play-gradient: linear-gradient(180deg,#24a9e7,#199ae0);
+          --clr-golden-gradient: linear-gradient(180deg,#ffdfa2,#f9a80a,#ffb82e);
+          --clr-golden-new: #f9a80a;
+          --clr-lightgray: #e8e9eb;
+          --clr-bg-lightgray: #f3f4f6;
+          --main-border: 1px solid #35e1fb;
+          --main-box-shadow: 0px 16px 32px 0px rgba(20,162,184,.2);
+          background: var(--clr-background-main-new);
+          color: var(--clr-text-main);
+          font-family: "Clash Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+          letter-spacing: 1px;
+          line-height: 1.5;
+        }
+        .cg-civ-root h1, .cg-civ-root h2, .cg-civ-root h3, .cg-civ-root h4, .cg-civ-root h5, .cg-civ-root h6 {
+          font-family: "Clash Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+          line-height: 1.2;
+          color: var(--clr-text-main);
+        }
+        .cg-civ-root h1 { font-size: 56px; font-weight: 700; line-height: 1.02; letter-spacing: -0.02em; }
+        @media (max-width: 768px) { .cg-civ-root h1 { font-size: 40px; } }
+        .cg-civ-root h2 { font-size: clamp(1.6rem, 3vw, 2.4rem); font-weight: 700; letter-spacing: -0.01em; }
+        .cg-civ-root h3 { font-size: 19px; font-weight: 600; margin: 0; }
+        .cg-civ-root .text-accent { color: var(--clr-accent-new); }
+        .cg-civ-root .text-gray { color: var(--clr-text-gray); }
+        /* Section bands */
+        .cg-civ-band-a { background: var(--clr-section-a); }
+        .cg-civ-band-b { background: var(--clr-background-main-new); }
+        .cg-civ-band-banner { background: var(--clr-section-banner); }
+        .cg-civ-section { padding: 5rem 1rem; }
+        @media (max-width: 768px) { .cg-civ-section { padding: 3rem 1rem 2rem; } }
+        .cg-civ-container { width: 100%; max-width: 1440px; margin: 0 auto; padding: 0 3rem; }
+        @media (max-width: 1024px) { .cg-civ-container { padding: 0 2rem; } }
+        @media (max-width: 768px) { .cg-civ-container { padding: 0 0.5rem; } }
+        /* Button system */
+        .cg-civ-btn { align-items: center; border: 1px solid transparent; border-radius: 8px; cursor: pointer; display: inline-flex; gap: 0.5rem; font-size: 0.9rem; font-weight: 600; justify-content: center; padding: 0.6rem 2.5rem; text-decoration: none; transition: all 0.2s ease-in-out; white-space: nowrap; letter-spacing: 0; }
+        .cg-civ-btn--accent { background: var(--clr-accent-gradient); color: #fff; }
+        .cg-civ-btn--accent:hover { box-shadow: 0 4px 12px rgba(20,162,184,.3); transform: translateY(-2px); }
+        .cg-civ-btn--outlined { background: #fff; border: 1px solid var(--clr-accent-new); color: var(--clr-accent-new); }
+        .cg-civ-btn--outlined:hover { box-shadow: 0 4px 12px rgba(20,162,184,.3); transform: translateY(-2px); }
+        .cg-civ-btn--white { background: linear-gradient(90deg,#ebf9fc,#eef5f7); border: none; box-shadow: 0 8px 12px rgba(20,162,184,.3); color: var(--clr-accent-new); }
+        .cg-civ-btn--white:hover { box-shadow: 0 4px 12px rgba(20,162,184,.15); transform: translateY(-2px); }
+        .cg-civ-btn--xl { font-size: 1.35rem; padding: 1.25rem 3rem; width: 340px; height: auto; }
+        @media (max-width: 480px) { .cg-civ-btn--xl { font-size: 1.15rem; padding: 1.1rem 2rem; width: 280px; } }
+        .cg-civ-btn--md { height: 2.4rem; min-width: 160px; padding: 0.6rem 1.5rem; }
+        /* Header */
+        .cg-civ-header { background: #e1f5ff; padding: 0.5rem 0; position: sticky; top: 0; z-index: 100; }
+        .cg-civ-header-container { align-items: center; display: flex; justify-content: space-between; margin: 0 auto; max-width: 1440px; min-height: 3rem; padding: 0 3.5rem; }
+        @media (max-width: 768px) { .cg-civ-header-container { padding: 0 1.5rem; } }
+        .cg-civ-header-brand { align-items: center; display: flex; font-size: 1.5rem; font-weight: 600; color: #232323; text-decoration: none; letter-spacing: 0; }
+        .cg-civ-header-brand:hover { color: #232323; }
+        .cg-civ-header-logo { border: 2px solid #fff; border-radius: 50%; height: 2rem; width: 2rem; margin-right: 0.5rem; object-fit: cover; }
+        .cg-civ-header-actions { align-items: center; display: flex; gap: 1rem; }
+        /* Hero */
+        .cg-civ-hero { display: flex; gap: 2rem; align-items: center; padding: 3rem 1rem; max-width: 1440px; margin: 0 auto; }
+        @media (max-width: 900px) { .cg-civ-hero { flex-direction: column; padding: 2rem 1rem; } }
+        .cg-civ-hero-text { flex: 1; display: flex; flex-direction: column; }
+        .cg-civ-hero-visual { flex: 1; margin-inline: auto; position: relative; width: min(576px,100%); border-radius: 16px; overflow: hidden; box-shadow: var(--main-box-shadow); }
+        .cg-civ-hero-desc { color: var(--clr-text-gray); font-size: 1rem; line-height: 1.6; margin: 1rem 0; }
+        .cg-civ-hero-benefits { display: flex; gap: 1.5rem; margin: 1.5rem 0; flex-wrap: wrap; }
+        .cg-civ-benefit { align-items: center; display: flex; gap: 0.5rem; font-size: 0.95rem; color: var(--clr-text-main); letter-spacing: 0; }
+        .cg-civ-benefit svg { color: var(--clr-accent-new); }
+        .cg-civ-benefit strong { font-weight: 600; }
+        .cg-civ-hero-buttons { display: flex; flex-direction: column; gap: 1rem; margin-top: 2rem; align-items: flex-start; }
+        .cg-civ-hero-cta-sub { color: var(--clr-text-gray); font-size: 0.85rem; letter-spacing: 0; }
+        /* Footer */
+        .cg-civ-footer { background: #b5f4ff; color: #232323; padding: 1.5rem 0; text-align: center; }
+        .cg-civ-footer-content { margin: 0 auto; max-width: 1200px; padding: 0 1rem; }
+        .cg-civ-copyright { color: #232323; font-size: 1rem; font-weight: 500; margin-bottom: 0.5rem; letter-spacing: 0; }
+        .cg-civ-footer-links { display: flex; flex-wrap: wrap; font-size: 1rem; gap: 0.5rem; justify-content: center; margin-bottom: 0.75rem; letter-spacing: 0; }
+        .cg-civ-footer-links a { color: #232323; font-weight: 500; text-decoration: underline; transition: color .2s ease; }
+        .cg-civ-footer-links a:hover { color: var(--clr-accent-new); }
+        .cg-civ-divider { color: #232323; margin: 0 0.25rem; }
+        .cg-civ-social-links { display: flex; gap: 1rem; justify-content: center; margin-top: 0.75rem; }
+        .cg-civ-social-links a { color: #232323; text-decoration: none; transition: color .2s ease; }
+        .cg-civ-social-links a:hover { color: var(--clr-accent-new); }
+        @media (max-width: 600px) { .cg-civ-footer-links { flex-direction: column; align-items: center; } .cg-civ-divider { display: none; } }
+        /* Section heading */
+        .cg-civ-eyebrow { color: var(--clr-accent-new); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.25em; text-transform: uppercase; margin-bottom: 0.75rem; text-align: center; letter-spacing: 0.25em; }
+        .cg-civ-section-title { color: var(--clr-text-main); text-align: center; }
+        .cg-civ-section-sub { color: var(--clr-text-gray); text-align: center; max-width: 640px; margin: 1rem auto 0; letter-spacing: 0; line-height: 1.6; }
+      `}</style>
       <style>{`
         @keyframes cgFloat { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-14px) rotate(3deg); } }
         @keyframes cgSpinSlow { to { transform: rotate(360deg); } }
@@ -1515,104 +1612,79 @@ export default function AcademyPublicPage() {
         }
       `}</style>
 
-      {/* ═══════════ TOP NAV ═══════════ */}
-      <nav className="fixed inset-x-0 top-0 z-50 backdrop-blur-lg bg-white/80 border-b border-stone-200">
-        <div className="mx-auto max-w-7xl px-6 md:px-10 h-16 flex items-center justify-between">
-          <a href="#top" className="flex items-center gap-3">
+      {/* ═══════════ CHESSIVERSE HEADER ═══════════ */}
+      <header className="cg-civ-header">
+        <div className="cg-civ-header-container">
+          <a href="#top" className="cg-civ-header-brand">
             {p.logoUrl ? (
-              <img src={p.logoUrl} alt="" className="w-9 h-9 rounded-full object-cover ring-1 ring-stone-300" />
+              <img src={p.logoUrl} alt="" className="cg-civ-header-logo" />
             ) : (
-              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-cyan-400 to-fuchsia-500 grid place-items-center text-white font-display text-sm shadow-lg shadow-fuchsia-500/40">
-                {displayName[0]?.toUpperCase() || "A"}
-              </div>
+              <span className="cg-civ-header-logo" style={{ display: 'grid', placeItems: 'center', background: 'var(--clr-accent-gradient)', color: '#fff', fontSize: '0.9rem', fontWeight: 700 }}>{displayName[0]?.toUpperCase() || "A"}</span>
             )}
-            <span className="font-display text-lg tracking-tight">{displayName}</span>
+            <span>{displayName}</span>
           </a>
-          <div className="hidden md:flex items-center gap-8 text-sm text-stone-600">
-            <a href="#coaches" className="hover:text-stone-900 transition-colors">Coaches</a>
-            <a href="#programs" className="hover:text-stone-900 transition-colors">Programs</a>
-            <a href="#about" className="hover:text-stone-900 transition-colors">About</a>
-            <a href="#milestones" className="hover:text-stone-900 transition-colors">Milestones</a>
-            <a href="#faq" className="hover:text-stone-900 transition-colors">FAQ</a>
-          </div>
-          <div className="flex items-center gap-2">
+          <div className="cg-civ-header-actions">
             {isOwner && (
-              <Link to="/academy-profile/edit" className="hidden sm:inline-flex px-3 py-1.5 text-xs text-stone-500 hover:text-stone-900">Edit</Link>
+              <Link to="/academy-profile/edit" className="cg-civ-btn cg-civ-btn--outlined cg-civ-btn--md hidden sm:inline-flex">
+                <span>Edit</span>
+              </Link>
             )}
             <a
               href={joinHref}
               {...(joinExternal ? { target: "_blank", rel: "noreferrer" } : {})}
-              className="inline-flex items-center gap-1.5 px-5 py-2 rounded-full text-sm font-semibold bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white shadow-lg shadow-fuchsia-500/30 hover:shadow-fuchsia-500/50 hover:scale-105 transition-all"
+              className="cg-civ-btn cg-civ-btn--accent cg-civ-btn--md"
             >
-              {joinLabel}
+              <span>{joinLabel}</span>
             </a>
           </div>
         </div>
-      </nav>
-
-      {/* ═══════════ HERO — interactive rotating banner ═══════════ */}
-      <header id="top" className="relative pt-32 md:pt-40 pb-28 md:pb-40 overflow-hidden">
-        <HeroCarousel />
-        <CursorSpotlight />
-
-        {/* Subtle neon-glow accents that echo the banner */}
-        <div className="absolute right-[18%] top-[35%] w-32 h-32 rounded-full bg-cyan-400/40 blur-3xl cg-pulse-glow" />
-        <div className="absolute left-[18%] top-[45%] w-32 h-32 rounded-full bg-fuchsia-500/30 blur-3xl cg-pulse-glow" style={{ animationDelay: '1.5s' }} />
-
-        <div className="relative mx-auto max-w-7xl px-6 md:px-10 text-center">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/80 backdrop-blur-md ring-1 ring-stone-200 shadow-sm text-xs tracking-widest uppercase mb-8 cg-fade-up">
-            {isoToFlag(p.country) && <span className="text-base">{isoToFlag(p.country)}</span>}
-            <span className="text-stone-700">{p.city || "Online"}</span>
-            {p.foundedYear && <><span className="text-stone-300">&middot;</span><span className="text-indigo-600 font-semibold">Since {p.foundedYear}</span></>}
-          </div>
-          <h1 className="font-display text-6xl md:text-8xl lg:text-[128px] leading-[0.9] tracking-[-0.03em] mb-8 cg-fade-up" style={{ animationDelay: '.1s' }}>
-            <span className="bg-gradient-to-br from-stone-900 via-indigo-700 to-stone-900 bg-clip-text text-transparent">{displayName.split(" ").slice(0, -1).join(" ") || displayName}</span>
-            {displayName.split(" ").length > 1 && (
-              <><br /><span className="bg-gradient-to-r from-fuchsia-500 via-rose-500 to-amber-500 bg-clip-text text-transparent cg-gradient-shift">{displayName.split(" ").slice(-1)[0]}</span></>
-            )}
-          </h1>
-          {p.tagline && (
-            <p className="text-lg md:text-2xl text-stone-500 max-w-2xl mx-auto leading-relaxed mb-2 cg-fade-up" style={{ animationDelay: '.2s' }}>
-              {p.tagline}
-            </p>
-          )}
-          {/* Cycling headline underneath — rotates through 4 phrases */}
-          <div className="h-8 md:h-10 relative mb-10 cg-fade-up" style={{ animationDelay: '.25s' }}>
-            <CyclingTagline />
-          </div>
-          <div className="flex flex-wrap items-center justify-center gap-4 cg-fade-up" style={{ animationDelay: '.3s' }}>
-            <a
-              href={joinHref}
-              {...(joinExternal ? { target: "_blank", rel: "noreferrer" } : {})}
-              className="group relative inline-flex items-center gap-2 px-8 py-4 rounded-full text-base font-bold text-white overflow-hidden cg-breath"
-            >
-              <span className="absolute inset-0 bg-gradient-to-r from-cyan-500 via-fuchsia-500 to-amber-500 cg-gradient-shift" />
-              <span className="absolute inset-0 bg-gradient-to-r from-cyan-500 via-fuchsia-500 to-amber-500 blur-xl opacity-60 group-hover:opacity-100 transition-opacity" />
-              <ShineSweep />
-              <span className="relative z-10">{joinLabel}</span>
-              <svg className="relative z-10 w-5 h-5 group-hover:translate-x-1 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
-            </a>
-            <a href="#coaches" className="inline-flex items-center gap-1.5 px-6 py-4 rounded-full text-sm font-semibold text-stone-700 hover:text-stone-900 bg-white/70 hover:bg-white ring-1 ring-stone-200 backdrop-blur-md transition-all shadow-sm">
-              Explore &darr;
-            </a>
-          </div>
-
-          {/* Live "training now" ticker — simulated presence, warm human touch */}
-          <div className="mt-10 inline-flex items-center gap-3 px-4 py-2 rounded-full bg-white/70 backdrop-blur-md ring-1 ring-emerald-200 text-xs text-stone-700 cg-fade-up" style={{ animationDelay: '.4s' }}>
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 cg-ping-slow"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-            </span>
-            <span className="font-semibold text-emerald-700">Live now</span>
-            <span className="text-stone-500">·</span>
-            <span>{Math.max(3, Math.min(30, coaches.length * 3 + 5))} students training</span>
-          </div>
-        </div>
-
       </header>
 
+      {/* ═══════════ CHESSIVERSE HERO — 1:1 clone ═══════════ */}
+      <section id="top" className="cg-civ-hero">
+        <div className="cg-civ-hero-text">
+          <h1>
+            <span className="text-accent">Learn Chess Without Stress</span>
+            <br />
+            <span>With Guna Chess Academy&apos;s Titled Coaches</span>
+          </h1>
+          <p className="cg-civ-hero-desc">
+            Play, practice, and puzzle with over {Math.max(20, coaches.length * 4)} of Chennai&apos;s most patient chess coaches, tuned to every rating from beginner to master.
+          </p>
+          <div className="cg-civ-hero-benefits">
+            <span className="cg-civ-benefit">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
+              <strong>No pressure</strong>
+            </span>
+            <span className="cg-civ-benefit">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
+              <strong>No waiting</strong>
+            </span>
+            <span className="cg-civ-benefit">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
+              <strong>Titled coaches</strong>
+            </span>
+          </div>
+          <div className="cg-civ-hero-buttons">
+            <a
+              href={joinHref}
+              {...(joinExternal ? { target: "_blank", rel: "noreferrer" } : {})}
+              className="cg-civ-btn cg-civ-btn--accent cg-civ-btn--xl"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M5 3l14 9-14 9V3z"/></svg>
+              <span>{joinLabel} — it&apos;s free!</span>
+            </a>
+            <div className="cg-civ-hero-cta-sub">Start your first class in 30 seconds!</div>
+          </div>
+        </div>
+        <div className="cg-civ-hero-visual" style={{ aspectRatio: '1/1', minHeight: '420px', position: 'relative' }}>
+          <HeroCarousel />
+          <CursorSpotlight />
+        </div>
+      </section>
+
       {/* ═══════════ STATS ═══════════ */}
-      <section className="relative py-16 md:py-24">
+      <section className="cg-civ-band-a relative py-16 md:py-24">
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-fuchsia-500/5 to-transparent" />
         <div className="relative mx-auto max-w-7xl px-6 md:px-10 grid grid-cols-2 md:grid-cols-4 gap-8 md:gap-4">
           <CountStat label="Coaches" value={coaches.length} />
@@ -1626,7 +1698,7 @@ export default function AcademyPublicPage() {
       <ClassCountdown items={upcomingClasses} joinHref={joinHref} joinExternal={joinExternal} />
 
       {/* ═══════════ MARQUEE ═══════════ */}
-      <section className="relative py-10 overflow-hidden border-y border-stone-200 bg-white/50">
+      <section className="cg-civ-band-a relative py-10 overflow-hidden">
         <div className="flex cg-marquee whitespace-nowrap">
           {[...Array(2)].map((_, dupe) => (
             <div key={dupe} className="flex items-center shrink-0">
@@ -1641,7 +1713,7 @@ export default function AcademyPublicPage() {
       </section>
 
       {/* ═══════════ BENTO ═══════════ */}
-      <section id="programs" className="relative py-20 md:py-28">
+      <section id="programs" className="cg-civ-band-b relative py-20 md:py-28">
         <div className="mx-auto max-w-7xl px-6 md:px-10">
           <Reveal className="mb-14 text-center">
             <div className="text-xs tracking-[0.25em] uppercase text-fuchsia-600 font-semibold mb-3">The academy</div>
@@ -1713,7 +1785,7 @@ export default function AcademyPublicPage() {
       <ProgramFinder ctaHref={joinHref} ctaExt={joinExternal} joinLabel={joinLabel} />
 
       {/* ═══════════ COACHES with filter pills ═══════════ */}
-      <section id="coaches" className="relative py-20 md:py-28">
+      <section id="coaches" className="cg-civ-band-b relative py-20 md:py-28">
         <div className="mx-auto max-w-7xl px-6 md:px-10">
           <Reveal className="mb-8 flex items-end justify-between flex-wrap gap-6">
             <div>
@@ -1767,7 +1839,7 @@ export default function AcademyPublicPage() {
 
       {/* ═══════════ ABOUT ═══════════ */}
       {p.description && (
-        <section id="about" className="relative py-20 md:py-28 border-y border-stone-200">
+        <section id="about" className="cg-civ-band-b relative py-20 md:py-28">
           <div className="absolute inset-0 cg-mesh opacity-30" />
           <div className="relative mx-auto max-w-6xl px-6 md:px-10 grid md:grid-cols-[220px_1fr] gap-10 items-start">
             <div className="hidden md:block relative">
@@ -1789,7 +1861,7 @@ export default function AcademyPublicPage() {
 
       {/* ═══════════ MILESTONES ═══════════ */}
       {p.achievements.length > 0 && (
-        <section id="milestones" className="relative py-20 md:py-28">
+        <section id="milestones" className="cg-civ-band-b relative py-20 md:py-28">
           <div className="mx-auto max-w-7xl px-6 md:px-10">
             <Reveal className="mb-14 flex items-end justify-between flex-wrap gap-6">
               <div>
@@ -1834,7 +1906,7 @@ export default function AcademyPublicPage() {
       <TestimonialCarousel items={p.testimonials} />
 
       {/* ═══════════ FAQ ═══════════ */}
-      <section id="faq" className="relative py-20 md:py-28 border-y border-stone-200">
+      <section id="faq" className="cg-civ-band-a relative py-20 md:py-28">
         <div className="mx-auto max-w-6xl px-6 md:px-10 grid md:grid-cols-[1fr_240px] gap-10 items-start">
           <div>
             <div className="mb-10">
@@ -1874,7 +1946,7 @@ export default function AcademyPublicPage() {
       <QuotesCarousel />
 
       {/* ═══════════ FINAL CTA ═══════════ */}
-      <section className="relative py-24 md:py-40 overflow-hidden">
+      <section className="cg-civ-band-banner relative py-24 md:py-40 overflow-hidden">
         <div className="absolute inset-0 cg-mesh cg-gradient-shift" />
         <img src={`${IMG}/crown-detail.webp`} alt="" className="absolute inset-0 w-full h-full object-cover opacity-15 mix-blend-multiply" />
         <div className="absolute inset-0 bg-gradient-to-b from-[#faf6ef]/60 via-transparent to-[#faf6ef]" />
@@ -1899,28 +1971,28 @@ export default function AcademyPublicPage() {
         </div>
       </section>
 
-      {/* ═══════════ FOOTER ═══════════ */}
-      <footer className="py-12 bg-stone-100 border-t border-stone-200">
-        <div className="mx-auto max-w-7xl px-6 md:px-10 flex flex-col md:flex-row items-center justify-between gap-6 text-sm text-stone-500">
-          <div className="flex items-center gap-3">
-            {p.logoUrl ? (
-              <img src={p.logoUrl} alt="" className="w-7 h-7 rounded-full object-cover" />
-            ) : (
-              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-cyan-500 to-fuchsia-500 grid place-items-center text-white font-display text-xs">
-                {displayName[0]?.toUpperCase() || "A"}
-              </div>
-            )}
-            <span className="text-stone-900 font-display">{displayName}</span>
-            {p.city && <span className="hidden sm:inline text-stone-300">&middot; {p.city}</span>}
+      {/* ═══════════ CHESSIVERSE FOOTER ═══════════ */}
+      <footer className="cg-civ-footer">
+        <div className="cg-civ-footer-content">
+          <div className="cg-civ-copyright">
+            © {new Date().getFullYear()} {displayName}{p.city ? ` · ${p.city}` : ""}. All rights reserved.
           </div>
-          <div className="flex items-center gap-4">
+          <div className="cg-civ-footer-links">
+            <a href="#about">About</a>
+            <span className="cg-civ-divider">•</span>
+            <a href="#coaches">Coaches</a>
+            <span className="cg-civ-divider">•</span>
+            <a href="#programs">Programs</a>
+            <span className="cg-civ-divider">•</span>
+            <a href="#faq">FAQ</a>
+          </div>
+          <div className="cg-civ-social-links">
             {socialsList.filter(([, v]) => v).map(([k, v]) => (
-              <a key={k} href={socialHref(k, v)} target="_blank" rel="noreferrer" className="text-xs tracking-widest uppercase hover:text-stone-900 transition-colors">
-                {k}
+              <a key={k} href={socialHref(k, v)} target="_blank" rel="noreferrer">
+                {String(k).charAt(0).toUpperCase() + String(k).slice(1)}
               </a>
             ))}
           </div>
-          <div className="text-xs text-stone-300">Powered by ChessGuru</div>
         </div>
       </footer>
 
