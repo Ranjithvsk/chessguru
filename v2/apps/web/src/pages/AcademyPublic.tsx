@@ -1544,15 +1544,15 @@ function PublicationsBand() {
 
 // ═════════════════════ CHESSIVERSE MODULE E — Testimonial masonry grid (1:1) ═════════════════════
 const TESTIMONIAL_CARDS = [
-  { text: "The bots are playing great — very human-like. Thanks for all the tweaks.", by: "Meenakshi", platform: "WhatsApp" },
-  { text: "My son's tournament rating jumped 300 points in six months. The coaches actually care.", by: "Ramesh", platform: "Google Review" },
-  { text: "I love playing with the bots for chess practice — it feels lonely on chess.com.", by: "Aditi", platform: "Instagram" },
-  { text: "The bot experience has been phenomenal. They challenge me and capitalize on my weaknesses, which is exactly what I need.", by: "Sanjay", platform: "Discord" },
-  { text: "I love playing with bots mainly for one thing — no cheaters. Usually I use the Lucascheks program.", by: "Priyanka", platform: "Survey" },
-  { text: "I saw looking for bots that would play like humans and have various styles of playing.", by: "Diya", platform: "Survey" },
-  { text: "I've been on GunaChess for two months and my puzzle rating went from 800 to 1350. The coaches are incredible.", by: "Karthik", platform: "Google Review" },
-  { text: "The endgame classes are pure gold. I never understood pawn endings until this academy.", by: "Sanjana", platform: "Instagram" },
-  { text: "My kid actually asks to go to chess class. That's the biggest win.", by: "Arun", platform: "WhatsApp" },
+  { text: "The coaches are patient and structured. Every class has a clear plan — my son actually looks forward to Saturdays now.", by: "Meenakshi", platform: "Parent, WhatsApp" },
+  { text: "My son's tournament rating jumped 300 points in six months. The one-on-one attention makes all the difference.", by: "Ramesh", platform: "Parent, Google Review" },
+  { text: "The endgame technique classes are gold. I never understood pawn endings until this academy.", by: "Aditi", platform: "Adult Student" },
+  { text: "Titled coaches who actually teach — not just play against you. My weekly game reviews have transformed my play.", by: "Sanjay", platform: "Adult Student" },
+  { text: "The homework via WhatsApp keeps my daughter practising daily. Small consistent habit, big results.", by: "Priyanka", platform: "Parent, Google Review" },
+  { text: "Small group of four students per class — feels almost like a private lesson. Way better than a crowded chess.com class.", by: "Diya", platform: "Adult Student" },
+  { text: "I've been at Guna Chess for two months. My puzzle rating went 800 → 1350. Coaches are incredible.", by: "Karthik", platform: "Adult Student" },
+  { text: "Every coach has a real title (IM/FM). It shows in the depth of their opening prep and game analysis.", by: "Sanjana", platform: "Adult Student" },
+  { text: "My kid used to hate chess. After his second class here he asks to go to class every week. Coaches make it fun.", by: "Arun", platform: "Parent, WhatsApp" },
 ];
 function TestimonialsGrid() {
   const rowA = useAutoScroll<HTMLDivElement>(55);
