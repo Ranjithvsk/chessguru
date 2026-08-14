@@ -1875,8 +1875,8 @@ export default function AcademyPublicPage() {
         .cg-civ-btn--md { height: 2.4rem; min-width: 160px; padding: 0.6rem 1.5rem; }
         /* Compact header buttons — small right-corner size matching chessiverse */
         .cg-civ-btn--sm { height: 2rem; min-width: auto; padding: 0.35rem 1rem; font-size: 0.8rem; border-radius: 8px; }
-        /* Header — WHITE bg matching chessiverse.com exactly */
-        .cg-civ-header { background: #ffffff; padding: 0.5rem 0; position: sticky; top: 0; z-index: 100; box-shadow: 0 1px 0 rgba(0,0,0,0.04); }
+        /* Header — #e1f5ff light cyan matching chessiverse exactly */
+        .cg-civ-header { background: #e1f5ff; padding: 0.5rem 0; position: sticky; top: 0; z-index: 100; }
         .cg-civ-header-container { align-items: center; display: flex; justify-content: space-between; margin: 0 auto; max-width: 1440px; min-height: 3rem; padding: 0 3.5rem; }
         @media (max-width: 768px) { .cg-civ-header-container { padding: 0 1.5rem; } }
         .cg-civ-header-brand { align-items: center; display: flex; font-family: "Clash Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important; font-size: 1.5rem; font-weight: 700; color: #232323; text-decoration: none; letter-spacing: 1px; }
@@ -1884,9 +1884,8 @@ export default function AcademyPublicPage() {
         .cg-civ-header-brand:hover { color: #232323; }
         .cg-civ-header-logo { border: 2px solid #fff; border-radius: 50%; height: 2rem; width: 2rem; margin-right: 0.5rem; object-fit: cover; }
         .cg-civ-header-actions { align-items: center; display: flex; gap: 1rem; }
-        /* Hero — 7.5rem (120px) horizontal padding to match Chessiverse's H1 x=120 indent */
-        .cg-civ-hero { display: flex; gap: 2rem; align-items: flex-end; padding: 3rem 7.5rem; max-width: 1440px; margin: 0 auto; }
-        @media (max-width: 1100px) { .cg-civ-hero { padding: 3rem 3rem; } }
+        /* Hero — 3.5rem padding matches header so H1 aligns with brand logo above */
+        .cg-civ-hero { display: flex; gap: 2rem; align-items: flex-end; padding: 3rem 3.5rem; max-width: 1440px; margin: 0 auto; }
         @media (max-width: 900px) { .cg-civ-hero { flex-direction: column; padding: 2rem 1.5rem; align-items: stretch; } }
         .cg-civ-hero-text { flex: 1; display: flex; flex-direction: column; max-width: 520px; }
         @media (max-width: 900px) { .cg-civ-hero-text { max-width: 100%; } }
