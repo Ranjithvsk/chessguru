@@ -1021,6 +1021,256 @@ function PieceStrip() {
   );
 }
 
+// ═════════════════════ CHESSIVERSE MODULE A — Playing-Style Slider ═════════════════════
+// Native scroll-snap horizontal carousel of playing archetypes. The card
+// closest to viewport-center scales up + brightens. Click a card to snap it
+// to center. No Swiper dep needed.
+const PLAY_STYLES = [
+  { icon: "⚔️", name: "Attacker",       tag: "AGGRESSIVE",  color: "from-rose-500 to-red-600",       desc: "Kingside storms, sacrifices, and mating attacks. You'd rather lose in flames than draw in peace." },
+  { icon: "🧠", name: "Strategist",     tag: "POSITIONAL",  color: "from-indigo-500 to-blue-600",    desc: "Long plans, tiny improvements, prophylaxis. You outthink opponents move by move." },
+  { icon: "⚡", name: "Tactician",      tag: "SHARP",       color: "from-amber-500 to-orange-600",   desc: "Sharp combinations, forcing moves, and deep calculation. Every position hides a puzzle for you." },
+  { icon: "👑", name: "Endgame Master", tag: "TECHNICAL",   color: "from-cyan-500 to-teal-600",      desc: "Precise conversions, opposition, and rook-endgame technique. You love the last twenty moves." },
+  { icon: "🎯", name: "Universal",      tag: "ADAPTIVE",    color: "from-fuchsia-500 to-purple-600", desc: "You match the position. Attack when it's time, defend when needed, simplify when winning." },
+  { icon: "🛡️", name: "Solid",          tag: "PATIENT",     color: "from-emerald-500 to-teal-600",   desc: "Trade pieces, minimize risk, wait for the opponent to overpress. Wins on stamina." },
+  { icon: "🔥", name: "Sharp",          tag: "GAMBIT",      color: "from-orange-500 to-rose-600",    desc: "Sacrifices for initiative. Opens the position, invites chaos, thrives on imbalance." },
+  { icon: "📚", name: "Classical",      tag: "PRINCIPLED",  color: "from-stone-700 to-stone-900",    desc: "Sound opening principles, harmonious development, central control. Book knowledge weaponized." },
+];
+
+function PlayingStyleSlider() {
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [active, setActive] = useState(0);
+
+  // Detect which card is centered as user scrolls
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const cards = Array.from(el.querySelectorAll<HTMLElement>("[data-style-card]"));
+    const io = new IntersectionObserver(
+      (entries) => {
+        // Pick the entry with the highest intersection ratio
+        const best = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        if (best) setActive(Number(best.target.getAttribute("data-idx")));
+      },
+      { root: el, threshold: [0.5, 0.75, 1], rootMargin: "0px -35% 0px -35%" }
+    );
+    cards.forEach((c) => io.observe(c));
+    return () => io.disconnect();
+  }, []);
+
+  const snapTo = (k: number) => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const card = el.querySelector<HTMLElement>(`[data-idx="${k}"]`);
+    if (card) card.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+  };
+
+  return (
+    <section className="relative py-20 md:py-28 overflow-hidden">
+      <div className="absolute inset-0 cg-mesh opacity-30" />
+      <div className="relative mx-auto max-w-7xl px-6 md:px-10">
+        <Reveal className="mb-10 text-center">
+          <div className="text-xs tracking-[0.25em] uppercase text-fuchsia-600 font-semibold mb-3">Your style</div>
+          <h2 className="font-display text-4xl md:text-6xl leading-[1.05] tracking-tight text-stone-900">
+            What kind of player will you become?
+          </h2>
+          <p className="mt-4 text-stone-500 max-w-xl mx-auto">Scroll or drag through the archetypes. Your coach will help you find the style that fits.</p>
+        </Reveal>
+
+        <div
+          ref={scrollerRef}
+          className="flex gap-4 md:gap-6 overflow-x-auto snap-x snap-mandatory py-8 -mx-6 md:-mx-10 px-6 md:px-[calc(50%-140px)] scrollbar-hide"
+          style={{ scrollbarWidth: "none" as any }}
+        >
+          {PLAY_STYLES.map((s, k) => {
+            const isActive = k === active;
+            return (
+              <button
+                key={s.name}
+                data-style-card
+                data-idx={k}
+                onClick={() => snapTo(k)}
+                className={`shrink-0 snap-center w-64 md:w-72 rounded-3xl p-6 md:p-8 text-left transition-all duration-500 will-change-transform ${isActive ? `bg-gradient-to-br ${s.color} text-white shadow-2xl scale-105 ring-2 ring-white` : "bg-white text-stone-800 ring-1 ring-stone-200 shadow-sm scale-95 opacity-70 hover:opacity-100"}`}
+                style={{ transformOrigin: "center" }}
+              >
+                <div className="text-6xl mb-4">{s.icon}</div>
+                <div className={`text-[10px] tracking-[0.25em] uppercase font-bold mb-2 ${isActive ? "text-white/80" : "text-stone-400"}`}>{s.tag}</div>
+                <div className={`font-display text-2xl md:text-3xl mb-3 leading-tight ${isActive ? "text-white" : "text-stone-900"}`}>{s.name}</div>
+                <div className={`text-sm leading-relaxed ${isActive ? "text-white/90" : "text-stone-500"}`}>{s.desc}</div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center justify-center gap-2 mt-6">
+          {PLAY_STYLES.map((_, k) => (
+            <button
+              key={k}
+              onClick={() => snapTo(k)}
+              aria-label={`Style ${k + 1}`}
+              className={`transition-all rounded-full ${k === active ? "w-8 h-2 bg-gradient-to-r from-fuchsia-500 to-rose-500" : "w-2 h-2 bg-stone-300 hover:bg-stone-500"}`}
+            />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ═════════════════════ CHESSIVERSE MODULE B — Training-Bot Grid ═════════════════════
+const BOTS = [
+  { name: "Vishy",  rating: 1200, style: "Attacker",   color: "from-rose-500 to-red-600",       emoji: "🦁", bio: "Loves the Sicilian. Sacrifices at f7 and f2 without hesitation." },
+  { name: "Priya",  rating: 1400, style: "Strategist", color: "from-indigo-500 to-blue-600",    emoji: "🦉", bio: "Plays the London System. Wins by tiny positional squeezes." },
+  { name: "Karthik",rating: 1000, style: "Tactician",  color: "from-amber-500 to-orange-600",   emoji: "🐯", bio: "Sees three-move combinations everywhere. Great for tactics practice." },
+  { name: "Amma",   rating: 800,  style: "Solid",      color: "from-emerald-500 to-teal-600",   emoji: "🐢", bio: "Patient and forgiving. Perfect first opponent for total beginners." },
+  { name: "Guru",   rating: 1800, style: "Universal",  color: "from-fuchsia-500 to-purple-600", emoji: "🦅", bio: "Adapts to your play. Punishes mistakes but never crushes you unnecessarily." },
+  { name: "Aparna", rating: 1600, style: "Endgame",    color: "from-cyan-500 to-teal-600",      emoji: "🐘", bio: "Simplifies to endgames early. Will teach you rook technique the hard way." },
+];
+
+function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: boolean; joinLabel: string }) {
+  const [selected, setSelected] = useState(0);
+  const s = BOTS[selected];
+  return (
+    <section className="relative py-20 md:py-28">
+      <div className="mx-auto max-w-7xl px-6 md:px-10">
+        <Reveal className="mb-10 text-center">
+          <div className="text-xs tracking-[0.25em] uppercase text-cyan-600 font-semibold mb-3">Practice partners</div>
+          <h2 className="font-display text-4xl md:text-6xl leading-[1.05] tracking-tight text-stone-900">
+            Meet your training bots.
+          </h2>
+          <p className="mt-4 text-stone-500 max-w-xl mx-auto">Six AI opponents tuned to different ratings and styles. Pick one to see who you'd start with.</p>
+        </Reveal>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-4 mb-8">
+          {BOTS.map((b, k) => {
+            const isSel = k === selected;
+            return (
+              <button
+                key={b.name}
+                onClick={() => setSelected(k)}
+                className={`group relative overflow-hidden rounded-3xl p-4 md:p-5 text-center transition-all duration-300 ring-1 ${isSel ? `bg-gradient-to-br ${b.color} text-white ring-transparent shadow-2xl -translate-y-1 scale-105` : "bg-white text-stone-800 ring-stone-200 hover:ring-cyan-300 hover:-translate-y-1 hover:shadow-lg"}`}
+              >
+                {!isSel && <ShineSweep />}
+                <div className="text-4xl md:text-5xl mb-2">{b.emoji}</div>
+                <div className={`font-display text-base md:text-lg leading-tight ${isSel ? "text-white" : "text-stone-900"}`}>{b.name}</div>
+                <div className={`text-[10px] tracking-widest uppercase mt-1 font-semibold ${isSel ? "text-white/80" : "text-stone-400"}`}>{b.style}</div>
+                <div className={`mt-2 inline-block text-xs font-mono tabular-nums px-2 py-0.5 rounded-full ${isSel ? "bg-white/25 text-white" : "bg-stone-100 text-stone-600"}`}>{b.rating}</div>
+              </button>
+            );
+          })}
+        </div>
+
+        <Reveal key={selected} className="rounded-3xl bg-white ring-1 ring-stone-200 shadow-xl p-6 md:p-8 grid md:grid-cols-[auto_1fr_auto] gap-6 items-center">
+          <div className={`w-24 h-24 md:w-32 md:h-32 rounded-3xl grid place-items-center text-6xl md:text-7xl bg-gradient-to-br ${s.color} text-white shadow-lg`}>
+            {s.emoji}
+          </div>
+          <div>
+            <div className="text-xs tracking-[0.25em] uppercase text-stone-500 font-semibold mb-1">Now selected</div>
+            <div className="font-display text-3xl md:text-4xl text-stone-900 mb-1">{s.name}</div>
+            <div className="flex items-center gap-2 mb-3">
+              <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-widest uppercase bg-gradient-to-r ${s.color} text-white`}>{s.style}</span>
+              <span className="text-sm text-stone-500 font-mono">rating {s.rating}</span>
+            </div>
+            <p className="text-stone-600 text-sm md:text-base leading-relaxed">{s.bio}</p>
+          </div>
+          <a
+            href={ctaHref}
+            {...(ctaExt ? { target: "_blank", rel: "noreferrer" } : {})}
+            className={`inline-flex items-center gap-2 px-6 py-3 rounded-full text-sm font-bold text-white bg-gradient-to-r ${s.color} shadow-lg hover:scale-105 transition-transform whitespace-nowrap`}
+          >
+            {joinLabel}
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </a>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+// ═════════════════════ CHESSIVERSE MODULE C — Opening Trend Panel ═════════════════════
+// Click an opening in the list; the detail panel expands showing segmented
+// win-rate bars (white / draw / black) and a sharpness pill.
+const OPENINGS = [
+  { name: "Ruy Lopez",       eco: "C60-C99", w: 42, d: 33, b: 25, sharp: "Medium",    color: "from-amber-500 to-orange-500",  taught: "Foundation opening — we cover it in Improver Path." },
+  { name: "Queen's Gambit",  eco: "D06-D69", w: 41, d: 35, b: 24, sharp: "Low",       color: "from-emerald-500 to-teal-500",  taught: "Central strategy staple — every club player should know it." },
+  { name: "Sicilian Defense",eco: "B20-B99", w: 33, d: 27, b: 40, sharp: "Very High", color: "from-rose-500 to-red-600",      taught: "Fighting response — for players who want unbalanced games." },
+  { name: "King's Indian",   eco: "E60-E99", w: 36, d: 27, b: 37, sharp: "High",      color: "from-fuchsia-500 to-purple-500",taught: "Complex counterattacker — Rated Path favourite." },
+  { name: "French Defense",  eco: "C00-C19", w: 40, d: 30, b: 30, sharp: "Medium",    color: "from-indigo-500 to-blue-500",   taught: "Solid structure — great for positional students." },
+  { name: "Caro-Kann",       eco: "B10-B19", w: 38, d: 36, b: 26, sharp: "Low",       color: "from-cyan-500 to-teal-500",     taught: "Rock-solid Black defense — the safest reply to 1.e4." },
+];
+
+function OpeningTrendPanel() {
+  const [open, setOpen] = useState(0);
+  return (
+    <section className="relative py-20 md:py-28 border-y border-stone-200 bg-white/50">
+      <div className="mx-auto max-w-6xl px-6 md:px-10">
+        <Reveal className="mb-10 text-center">
+          <div className="text-xs tracking-[0.25em] uppercase text-emerald-600 font-semibold mb-3">Openings we teach</div>
+          <h2 className="font-display text-4xl md:text-6xl leading-[1.05] tracking-tight text-stone-900">
+            The classical repertoire.
+          </h2>
+          <p className="mt-4 text-stone-500 max-w-xl mx-auto">Click any opening to see how it scores at master level.</p>
+        </Reveal>
+
+        <div className="grid gap-3">
+          {OPENINGS.map((o, k) => {
+            const isOpen = k === open;
+            const sharpColor =
+              o.sharp === "Very High" ? "bg-rose-100 text-rose-700 ring-rose-200" :
+              o.sharp === "High"      ? "bg-orange-100 text-orange-700 ring-orange-200" :
+              o.sharp === "Medium"    ? "bg-amber-100 text-amber-700 ring-amber-200" :
+                                        "bg-emerald-100 text-emerald-700 ring-emerald-200";
+            return (
+              <div key={o.name} className={`group rounded-2xl bg-white ring-1 shadow-sm hover:shadow-md transition-all ${isOpen ? "ring-emerald-300 shadow-lg" : "ring-stone-200 hover:ring-emerald-200"}`}>
+                <button
+                  onClick={() => setOpen(isOpen ? -1 : k)}
+                  className="w-full flex items-center gap-4 p-4 md:p-5 text-left"
+                >
+                  <div className={`w-12 h-12 md:w-14 md:h-14 rounded-2xl grid place-items-center text-white text-xl font-display shrink-0 bg-gradient-to-br ${o.color} shadow-md`}>
+                    {o.name.slice(0, 1)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-display text-lg md:text-xl text-stone-900 leading-tight">{o.name}</div>
+                    <div className="text-xs text-stone-500 font-mono">{o.eco}</div>
+                  </div>
+                  <div className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase ring-1 ${sharpColor}`}>
+                    {o.sharp}
+                  </div>
+                  <div className={`w-8 h-8 grid place-items-center rounded-full transition-transform ${isOpen ? "bg-emerald-100 text-emerald-700 rotate-45" : "bg-stone-100 text-stone-500"}`}>
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>
+                  </div>
+                </button>
+                <div className={`overflow-hidden transition-all duration-500 ease-out ${isOpen ? "max-h-80" : "max-h-0"}`}>
+                  <div className="px-5 pb-6 md:px-6 md:pb-6 grid md:grid-cols-[1fr_auto] gap-6 items-center">
+                    <div className="w-full">
+                      <div className="text-[10px] tracking-widest uppercase text-stone-500 font-semibold mb-2">Master win-rate</div>
+                      <div className="flex h-4 rounded-full overflow-hidden ring-1 ring-stone-200 shadow-inner">
+                        <div className="bg-gradient-to-r from-stone-100 to-stone-200 grid place-items-center text-[10px] font-bold text-stone-700 transition-all" style={{ width: `${o.w}%` }}>{o.w}%</div>
+                        <div className="bg-gradient-to-r from-stone-300 to-stone-400 grid place-items-center text-[10px] font-bold text-white transition-all" style={{ width: `${o.d}%` }}>{o.d}%</div>
+                        <div className="bg-gradient-to-r from-stone-700 to-stone-900 grid place-items-center text-[10px] font-bold text-white transition-all" style={{ width: `${o.b}%` }}>{o.b}%</div>
+                      </div>
+                      <div className="flex items-center gap-4 mt-2 text-[10px] uppercase tracking-widest text-stone-500">
+                        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-stone-200 ring-1 ring-stone-300" />White</span>
+                        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-stone-400" />Draw</span>
+                        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-stone-800" />Black</span>
+                      </div>
+                      <div className="text-sm text-stone-600 mt-4 leading-relaxed italic">{o.taught}</div>
+                    </div>
+                    <div className={`sm:hidden inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase ring-1 self-start ${sharpColor}`}>
+                      {o.sharp}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ═════════════════════ MAIN PAGE ═════════════════════
 export default function AcademyPublicPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -1335,6 +1585,9 @@ export default function AcademyPublicPage() {
       {/* ═══════════ PIECE STRIP (interactive hover) ═══════════ */}
       <PieceStrip />
 
+      {/* ═══════════ PLAYING-STYLE SLIDER (chessiverse) ═══════════ */}
+      <PlayingStyleSlider />
+
       {/* ═══════════ PROGRAM FINDER (interactive) ═══════════ */}
       <ProgramFinder ctaHref={joinHref} ctaExt={joinExternal} joinLabel={joinLabel} />
 
@@ -1379,11 +1632,17 @@ export default function AcademyPublicPage() {
         </div>
       </section>
 
+      {/* ═══════════ BOT GRID (chessiverse) ═══════════ */}
+      <BotGrid ctaHref={joinHref} ctaExt={joinExternal} joinLabel={joinLabel} />
+
       {/* ═══════════ PUZZLE QUIZ (interactive) ═══════════ */}
       <PuzzleQuiz />
 
       {/* ═══════════ WEEKLY SCHEDULE (interactive) ═══════════ */}
       <WeeklySchedule items={upcomingClasses} joinHref={joinHref} joinExternal={joinExternal} />
+
+      {/* ═══════════ OPENING TREND PANEL (chessiverse) ═══════════ */}
+      <OpeningTrendPanel />
 
       {/* ═══════════ ABOUT ═══════════ */}
       {p.description && (
