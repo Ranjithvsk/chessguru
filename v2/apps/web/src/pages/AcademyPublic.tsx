@@ -109,6 +109,78 @@ function useTilt() {
   return { ref, onMove, onLeave };
 }
 
+// Fires once when the viewport crosses the given fraction of the page height.
+// Returns 0..1 (scaled scroll position). Used by <ScrollProgress/>.
+function useScrollProgress(): number {
+  const [p, setP] = useState(0);
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const h = document.documentElement.scrollHeight - window.innerHeight;
+      const y = Math.max(0, Math.min(1, window.scrollY / Math.max(1, h)));
+      setP(y);
+      raf = 0;
+    };
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(tick); };
+    tick();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => { window.removeEventListener("scroll", onScroll); window.removeEventListener("resize", onScroll); if (raf) cancelAnimationFrame(raf); };
+  }, []);
+  return p;
+}
+
+// Thin gradient bar at the very top of the viewport — fills as visitor scrolls.
+function ScrollProgress() {
+  const p = useScrollProgress();
+  return (
+    <div className="fixed top-0 inset-x-0 h-[3px] z-[60] pointer-events-none bg-stone-200/40">
+      <div
+        className="h-full bg-gradient-to-r from-cyan-500 via-fuchsia-500 to-amber-500 origin-left transition-transform duration-100"
+        style={{ transform: `scaleX(${p})` }}
+      />
+    </div>
+  );
+}
+
+// Soft radial spotlight that follows the cursor inside a container.
+function CursorSpotlight() {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const parent = el.parentElement;
+    if (!parent) return;
+    const onMove = (e: MouseEvent) => {
+      const r = parent.getBoundingClientRect();
+      el.style.setProperty("--sx", `${e.clientX - r.left}px`);
+      el.style.setProperty("--sy", `${e.clientY - r.top}px`);
+    };
+    parent.addEventListener("mousemove", onMove);
+    return () => parent.removeEventListener("mousemove", onMove);
+  }, []);
+  return (
+    <div
+      ref={ref}
+      className="pointer-events-none absolute inset-0 opacity-70 mix-blend-plus-lighter"
+      style={{
+        background: `radial-gradient(240px circle at var(--sx, 50%) var(--sy, 50%), rgba(217,70,239,0.25), transparent 60%)`,
+      }}
+    />
+  );
+}
+
+// Reveal — wraps children so they fade+slide in the first time they enter view.
+function Reveal({ children, className = "", delay = 0, from = "up" }: { children: React.ReactNode; className?: string; delay?: number; from?: "up" | "left" | "right" }) {
+  const [ref, seen] = useOnScreen<HTMLDivElement>();
+  const anim = seen ? (from === "left" ? "cg-reveal-left" : from === "right" ? "cg-reveal-right" : "cg-reveal-up") : "";
+  return (
+    <div ref={ref} className={`${className} ${anim}`} style={seen ? { animationDelay: `${delay}ms` } : { opacity: 0 }}>
+      {children}
+    </div>
+  );
+}
+
 // Shine sweep — the DWP category-card hover flourish.
 function ShineSweep() {
   return (
@@ -601,6 +673,354 @@ function WeeklySchedule({ items, joinHref, joinExternal }: { items: ClassRow[]; 
   );
 }
 
+// ═════════════════════ INTERACTIVE MODULE 4 — Puzzle Quiz ═════════════════════
+// Unicode-piece mini-board + four move options. Auto-cycles or user-picks; shows
+// correct/wrong feedback with a colored ring and explanation.
+const UNI: Record<string, string> = { K: "♔", Q: "♕", R: "♖", B: "♗", N: "♘", P: "♙", k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
+
+interface Puzzle {
+  pieces: Record<string, string>;
+  toMove: "White" | "Black";
+  prompt: string;
+  hint: string;
+  options: Array<{ move: string; correct: boolean; why: string }>;
+}
+
+const PUZZLES: Puzzle[] = [
+  {
+    pieces: { g8: "k", f7: "p", g7: "p", h7: "p", d1: "R", g1: "K" },
+    toMove: "White",
+    prompt: "White to play. Mate in 1?",
+    hint: "The 8th rank is undefended.",
+    options: [
+      { move: "Rd8#",  correct: true,  why: "Rook to d8 delivers check along the 8th rank. King can't escape — every square is blocked by its own pawns or attacked." },
+      { move: "Rd7",   correct: false, why: "That's a quiet move — not even check." },
+      { move: "Kg2",   correct: false, why: "Passive king move — you missed the mate." },
+      { move: "Rh1",   correct: false, why: "You already have a mate available — take it!" },
+    ],
+  },
+  {
+    pieces: { a8: "k", a7: "p", c6: "Q", a1: "K" },
+    toMove: "White",
+    prompt: "White to play. Mate in 1?",
+    hint: "Trap the king in the corner along the 8th rank.",
+    options: [
+      { move: "Qc8#",  correct: true,  why: "Queen to c8 checks. King can't escape: b8 is attacked, a7 is blocked by its own pawn, b7 is attacked along the diagonal." },
+      { move: "Qxa7+", correct: false, why: "Queen isn't defended — king just captures. Blunder." },
+      { move: "Qb6",   correct: false, why: "Threat, but not mate — king still has b8." },
+      { move: "Kb1",   correct: false, why: "You have a mate — don't waste the tempo." },
+    ],
+  },
+  {
+    pieces: { h8: "k", g7: "p", h7: "p", h5: "Q", g5: "N", a1: "K" },
+    toMove: "White",
+    prompt: "White to play. Mate in 1?",
+    hint: "The knight guards a critical escape square.",
+    options: [
+      { move: "Qxh7#", correct: true,  why: "Queen takes h7 with check. King can't take because g5-knight guards h7. No escape squares — mate." },
+      { move: "Nf7+",  correct: false, why: "Only check, king simply moves." },
+      { move: "Qh6",   correct: false, why: "Not check, and drops the queen to gxh6." },
+      { move: "Qxg7+", correct: false, why: "King takes the queen — you lost your queen." },
+    ],
+  },
+];
+
+function MiniBoard({ pieces }: { pieces: Record<string, string> }) {
+  const files = ["a","b","c","d","e","f","g","h"];
+  const ranks = ["8","7","6","5","4","3","2","1"];
+  return (
+    <div className="inline-grid grid-cols-8 rounded-xl overflow-hidden ring-1 ring-stone-300 shadow-lg">
+      {ranks.map((r, ri) =>
+        files.map((f, fi) => {
+          const dark = (ri + fi) % 2 === 1;
+          const piece = pieces[f + r];
+          const isWhite = piece && piece === piece.toUpperCase();
+          return (
+            <div
+              key={f + r}
+              className={`w-8 md:w-11 aspect-square grid place-items-center text-2xl md:text-3xl select-none ${dark ? "bg-[#b58863]" : "bg-[#f0d9b5]"}`}
+            >
+              {piece && (
+                <span
+                  className={isWhite ? "text-white" : "text-stone-900"}
+                  style={{ textShadow: isWhite ? "0 1px 2px rgba(0,0,0,0.6)" : "0 1px 0 rgba(255,255,255,0.6)" }}
+                >
+                  {UNI[piece]}
+                </span>
+              )}
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+function PuzzleQuiz() {
+  const [i, setI] = useState(0);
+  const [picked, setPicked] = useState<number | null>(null);
+  const puz = PUZZLES[i];
+  const next = () => { setPicked(null); setI((v) => (v + 1) % PUZZLES.length); };
+  const pickedOpt = picked != null ? puz.options[picked] : null;
+
+  return (
+    <section className="relative py-20 md:py-28 overflow-hidden">
+      <div className="absolute inset-0 opacity-25 pointer-events-none" style={{ backgroundImage: `url(${IMG}/pattern-tile.webp)`, backgroundSize: '340px' }} />
+      <div className="relative mx-auto max-w-6xl px-6 md:px-10">
+        <Reveal className="mb-10 text-center">
+          <div className="text-xs tracking-[0.25em] uppercase text-indigo-600 font-semibold mb-3">Try your tactics</div>
+          <h2 className="font-display text-4xl md:text-6xl leading-[1.05] tracking-tight text-stone-900">
+            Can you find the mate?
+          </h2>
+          <p className="mt-4 text-stone-500 max-w-xl mx-auto">A live board and four candidate moves. Pick the one that ends it.</p>
+        </Reveal>
+
+        <div className="grid md:grid-cols-[auto_1fr] gap-10 items-center">
+          <Reveal from="left" className="flex justify-center">
+            <MiniBoard pieces={puz.pieces} />
+          </Reveal>
+
+          <Reveal delay={200}>
+            <div className="mb-4 flex items-center gap-3">
+              <span className="text-xs uppercase tracking-widest text-stone-500">Puzzle {i + 1} of {PUZZLES.length}</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-stone-100 text-stone-600 font-mono">{puz.toMove.toLowerCase()} to move</span>
+            </div>
+            <div className="font-display text-2xl md:text-3xl mb-3 text-stone-900">{puz.prompt}</div>
+            <div className="text-sm text-stone-500 italic mb-6">Hint: {puz.hint}</div>
+
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              {puz.options.map((o, k) => {
+                const state = picked == null ? "idle" : k === picked ? (o.correct ? "correct" : "wrong") : o.correct ? "correct-hint" : "dim";
+                const cls =
+                  state === "idle" ? "bg-white ring-stone-200 hover:ring-indigo-300 hover:-translate-y-0.5 hover:shadow" :
+                  state === "correct" ? "bg-gradient-to-br from-emerald-500 to-teal-600 text-white ring-transparent shadow-lg" :
+                  state === "wrong" ? "bg-gradient-to-br from-rose-500 to-red-600 text-white ring-transparent" :
+                  state === "correct-hint" ? "bg-emerald-50 ring-emerald-300 text-emerald-700" :
+                  "bg-white/60 ring-stone-100 text-stone-400";
+                return (
+                  <button
+                    key={k}
+                    onClick={() => picked == null && setPicked(k)}
+                    disabled={picked != null}
+                    className={`group relative overflow-hidden rounded-2xl px-5 py-4 text-left font-bold font-mono text-lg ring-1 transition-all ${cls}`}
+                  >
+                    {picked == null && <ShineSweep />}
+                    <span className="relative flex items-center gap-2">
+                      <span className={`w-6 h-6 rounded-full grid place-items-center text-xs font-sans ${state === "idle" ? "bg-stone-100 text-stone-500" : "bg-white/25 text-current"}`}>
+                        {String.fromCharCode(65 + k)}
+                      </span>
+                      {o.move}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {pickedOpt && (
+              <div className={`rounded-2xl p-5 cg-reveal-up ${pickedOpt.correct ? "bg-emerald-50 ring-1 ring-emerald-200 text-emerald-800" : "bg-rose-50 ring-1 ring-rose-200 text-rose-800"}`}>
+                <div className="font-bold mb-1">
+                  {pickedOpt.correct ? "✓ Correct — you found it!" : "✗ Not quite."}
+                </div>
+                <div className="text-sm leading-relaxed opacity-90">{pickedOpt.why}</div>
+              </div>
+            )}
+
+            <div className="mt-6 flex flex-wrap items-center gap-3">
+              <button
+                onClick={next}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-gradient-to-r from-indigo-500 to-fuchsia-500 text-white text-sm font-bold shadow-lg hover:scale-105 transition-transform"
+              >
+                Next puzzle
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+              </button>
+              {picked != null && (
+                <button
+                  onClick={() => setPicked(null)}
+                  className="text-sm text-stone-500 hover:text-stone-900"
+                >
+                  Try again
+                </button>
+              )}
+            </div>
+          </Reveal>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ═════════════════════ INTERACTIVE MODULE 5 — Class Countdown ═════════════════════
+function useCountdown(target: Date | null): { days: number; hours: number; minutes: number; seconds: number; done: boolean } {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  if (!target) return { days: 0, hours: 0, minutes: 0, seconds: 0, done: true };
+  const diff = Math.max(0, target.getTime() - now);
+  const days = Math.floor(diff / 86400000);
+  const hours = Math.floor((diff % 86400000) / 3600000);
+  const minutes = Math.floor((diff % 3600000) / 60000);
+  const seconds = Math.floor((diff % 60000) / 1000);
+  return { days, hours, minutes, seconds, done: diff === 0 };
+}
+
+function CountdownCell({ n, label }: { n: number; label: string }) {
+  return (
+    <div className="flex-1 min-w-[68px] text-center rounded-2xl bg-white ring-1 ring-stone-200 shadow-sm px-3 py-4">
+      <div className="font-display text-4xl md:text-5xl tabular-nums leading-none bg-gradient-to-br from-stone-900 via-indigo-700 to-fuchsia-700 bg-clip-text text-transparent">
+        {String(n).padStart(2, "0")}
+      </div>
+      <div className="mt-1 text-[10px] tracking-[0.25em] uppercase text-stone-500">{label}</div>
+    </div>
+  );
+}
+
+function ClassCountdown({ items, joinHref, joinExternal }: { items: ClassRow[]; joinHref: string; joinExternal: boolean }) {
+  const next = useMemo(() => {
+    const upcoming = items.filter(c => new Date(c.startAt).getTime() > Date.now()).sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
+    return upcoming[0] || null;
+  }, [items]);
+  const cd = useCountdown(next ? new Date(next.startAt) : null);
+  if (!next) return null;
+
+  return (
+    <section className="relative py-16 md:py-20">
+      <div className="mx-auto max-w-5xl px-6 md:px-10">
+        <Reveal>
+          <div className="relative overflow-hidden rounded-3xl bg-white ring-1 ring-stone-200 shadow-xl p-6 md:p-8">
+            <div className="absolute -right-8 -top-8 w-40 h-40 rounded-full bg-gradient-to-br from-cyan-400/30 to-fuchsia-500/30 blur-3xl cg-pulse-glow" />
+            <div className="relative grid md:grid-cols-[1fr_auto] gap-6 items-center">
+              <div>
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold tracking-widest uppercase ring-1 ring-emerald-200 mb-3">
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 cg-ping-slow" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                  </span>
+                  Next class
+                </div>
+                <div className="font-display text-2xl md:text-3xl leading-tight text-stone-900 mb-1">{next.title}</div>
+                <div className="text-sm text-stone-500">
+                  {new Date(next.startAt).toLocaleString(undefined, { weekday: 'long', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · {next.durationMin} min · {next.coach}
+                </div>
+              </div>
+              <a
+                href={joinHref}
+                {...(joinExternal ? { target: "_blank", rel: "noreferrer" } : {})}
+                className="cg-breath inline-flex items-center gap-2 px-6 py-3 rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold shadow-lg hover:scale-105 transition-transform whitespace-nowrap"
+              >
+                Reserve seat
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+              </a>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <CountdownCell n={cd.days} label="Days" />
+              <CountdownCell n={cd.hours} label="Hours" />
+              <CountdownCell n={cd.minutes} label="Min" />
+              <CountdownCell n={cd.seconds} label="Sec" />
+            </div>
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+// ═════════════════════ INTERACTIVE MODULE 6 — Chess Quotes Carousel ═════════════════════
+const QUOTES = [
+  { text: "Chess is the gymnasium of the mind.", by: "Blaise Pascal", accent: "from-indigo-500 to-cyan-500" },
+  { text: "Every chess master was once a beginner.", by: "Irving Chernev", accent: "from-fuchsia-500 to-rose-500" },
+  { text: "When you see a good move, look for a better one.", by: "Emanuel Lasker", accent: "from-amber-500 to-orange-500" },
+  { text: "Chess is life in miniature.", by: "Garry Kasparov", accent: "from-emerald-500 to-teal-500" },
+  { text: "In life, as in chess, forethought wins.", by: "Charles Buxton", accent: "from-rose-500 to-fuchsia-500" },
+];
+
+function QuotesCarousel() {
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setI((v) => (v + 1) % QUOTES.length), 4800);
+    return () => clearInterval(id);
+  }, []);
+  const q = QUOTES[i];
+  return (
+    <section className="relative py-16 md:py-24 overflow-hidden">
+      <div className="absolute inset-0 cg-mesh opacity-40" />
+      <div className="relative mx-auto max-w-4xl px-6 md:px-10 text-center">
+        <div className="relative h-40 md:h-44">
+          {QUOTES.map((qq, k) => (
+            <div
+              key={k}
+              className={`absolute inset-0 flex flex-col items-center justify-center transition-all duration-1000 ${k === i ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"}`}
+            >
+              <blockquote className={`font-display text-2xl md:text-4xl leading-tight tracking-tight bg-gradient-to-r ${qq.accent} bg-clip-text text-transparent mb-4 max-w-3xl`}>
+                &ldquo;{qq.text}&rdquo;
+              </blockquote>
+              <cite className="not-italic text-xs md:text-sm tracking-widest uppercase text-stone-500 font-semibold">— {qq.by}</cite>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 flex items-center justify-center gap-2">
+          {QUOTES.map((_, k) => (
+            <button
+              key={k}
+              onClick={() => setI(k)}
+              aria-label={`Quote ${k + 1}`}
+              className={`transition-all rounded-full ${k === i ? "w-6 h-1.5 bg-stone-800" : "w-1.5 h-1.5 bg-stone-300 hover:bg-stone-500"}`}
+            />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ═════════════════════ INTERACTIVE MODULE 7 — Piece Hover Strip ═════════════════════
+const PIECES = [
+  { u: "♔", name: "King",   role: "Move one square any direction. Your king is the game — check-mate ends everything." },
+  { u: "♕", name: "Queen",  role: "The most powerful piece. Moves any number of squares along any line — rank, file, or diagonal." },
+  { u: "♖", name: "Rook",   role: "Slides along ranks and files. Two rooks working together are a nightmare on open lines." },
+  { u: "♗", name: "Bishop", role: "Diagonal only — always stays on its starting color. The bishop pair is a long-term asset." },
+  { u: "♘", name: "Knight", role: "Jumps in an L shape. The only piece that can leap over others — deadly in cramped positions." },
+  { u: "♙", name: "Pawn",   role: "Forward only. Reach the far rank and promote — usually to a queen. Structure decides many games." },
+];
+
+function PieceStrip() {
+  const [active, setActive] = useState(0);
+  const p = PIECES[active];
+  return (
+    <section className="relative py-16 md:py-20 border-y border-stone-200 bg-white/50">
+      <div className="mx-auto max-w-6xl px-6 md:px-10">
+        <Reveal>
+          <div className="text-center mb-8">
+            <div className="text-xs tracking-[0.25em] uppercase text-fuchsia-600 font-semibold mb-2">Know your pieces</div>
+            <div className="font-display text-2xl md:text-3xl text-stone-900">Hover to learn each one.</div>
+          </div>
+        </Reveal>
+        <div className="grid md:grid-cols-[auto_1fr] items-center gap-8">
+          <div className="flex flex-wrap justify-center gap-2 md:gap-3">
+            {PIECES.map((pp, k) => (
+              <button
+                key={k}
+                onMouseEnter={() => setActive(k)}
+                onClick={() => setActive(k)}
+                aria-label={pp.name}
+                className={`group relative overflow-hidden w-16 h-16 md:w-20 md:h-20 rounded-2xl grid place-items-center text-4xl md:text-5xl transition-all ring-1 ${active === k ? "bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-white ring-transparent shadow-xl scale-110" : "bg-white text-stone-800 ring-stone-200 hover:-translate-y-1 hover:shadow"}`}
+              >
+                {active !== k && <ShineSweep />}
+                <span className="relative">{pp.u}</span>
+              </button>
+            ))}
+          </div>
+          <div key={active} className="cg-reveal-left">
+            <div className="text-xs tracking-widest uppercase text-fuchsia-600 font-semibold mb-2">The {p.name}</div>
+            <div className="text-lg md:text-xl text-stone-700 leading-relaxed">{p.role}</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ═════════════════════ MAIN PAGE ═════════════════════
 export default function AcademyPublicPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -685,6 +1105,7 @@ export default function AcademyPublicPage() {
 
   return (
     <div className="min-h-screen bg-[#faf6ef] text-stone-900 font-sans antialiased overflow-x-hidden">
+      <ScrollProgress />
       <style>{`
         @keyframes cgFloat { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-14px) rotate(3deg); } }
         @keyframes cgSpinSlow { to { transform: rotate(360deg); } }
@@ -693,6 +1114,20 @@ export default function AcademyPublicPage() {
         @keyframes cgPulseGlow { 0%,100% { opacity: 0.35; } 50% { opacity: 0.75; } }
         @keyframes cgGradientShift { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
         @keyframes cgPingSlow { 0% { transform: scale(1); opacity: 1; } 75%,100% { transform: scale(2.4); opacity: 0; } }
+        @keyframes cgRevealUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes cgRevealLeft { from { opacity: 0; transform: translateX(-30px); } to { opacity: 1; transform: translateX(0); } }
+        @keyframes cgRevealRight { from { opacity: 0; transform: translateX(30px); } to { opacity: 1; transform: translateX(0); } }
+        @keyframes cgBreath { 0%,100% { transform: scale(1); box-shadow: 0 12px 40px -10px rgba(217,70,239,0.5); } 50% { transform: scale(1.04); box-shadow: 0 20px 60px -10px rgba(217,70,239,0.75); } }
+        @keyframes cgWiggle { 0%,100% { transform: rotate(0); } 25% { transform: rotate(-4deg); } 75% { transform: rotate(4deg); } }
+        @keyframes cgTicker { from { transform: translateY(0); } to { transform: translateY(-50%); } }
+        .cg-reveal-up   { animation: cgRevealUp 0.9s cubic-bezier(0.16,1,0.3,1) both; }
+        .cg-reveal-left { animation: cgRevealLeft 0.9s cubic-bezier(0.16,1,0.3,1) both; }
+        .cg-reveal-right{ animation: cgRevealRight 0.9s cubic-bezier(0.16,1,0.3,1) both; }
+        .cg-breath      { animation: cgBreath 3.5s ease-in-out infinite; }
+        .cg-wiggle      { animation: cgWiggle 3s ease-in-out infinite; }
+        /* Scroll-driven bounce on chess-glyph in marquee */
+        .cg-hover-lift { transition: transform 0.35s cubic-bezier(0.16,1,0.3,1); }
+        .cg-hover-lift:hover { transform: translateY(-4px); }
         .cg-float { animation: cgFloat 6s ease-in-out infinite; }
         .cg-spin-slow { animation: cgSpinSlow 40s linear infinite; }
         .cg-fade-up { animation: cgFadeUp 0.9s ease-out both; }
@@ -747,6 +1182,7 @@ export default function AcademyPublicPage() {
       {/* ═══════════ HERO — interactive rotating banner ═══════════ */}
       <header id="top" className="relative pt-32 md:pt-40 pb-28 md:pb-40 overflow-hidden">
         <HeroCarousel />
+        <CursorSpotlight />
 
         {/* Subtle neon-glow accents that echo the banner */}
         <div className="absolute right-[18%] top-[35%] w-32 h-32 rounded-full bg-cyan-400/40 blur-3xl cg-pulse-glow" />
@@ -777,7 +1213,7 @@ export default function AcademyPublicPage() {
             <a
               href={joinHref}
               {...(joinExternal ? { target: "_blank", rel: "noreferrer" } : {})}
-              className="group relative inline-flex items-center gap-2 px-8 py-4 rounded-full text-base font-bold text-white overflow-hidden shadow-xl shadow-fuchsia-500/30"
+              className="group relative inline-flex items-center gap-2 px-8 py-4 rounded-full text-base font-bold text-white overflow-hidden cg-breath"
             >
               <span className="absolute inset-0 bg-gradient-to-r from-cyan-500 via-fuchsia-500 to-amber-500 cg-gradient-shift" />
               <span className="absolute inset-0 bg-gradient-to-r from-cyan-500 via-fuchsia-500 to-amber-500 blur-xl opacity-60 group-hover:opacity-100 transition-opacity" />
@@ -815,6 +1251,9 @@ export default function AcademyPublicPage() {
         </div>
       </section>
 
+      {/* ═══════════ CLASS COUNTDOWN (interactive, real-time) ═══════════ */}
+      <ClassCountdown items={upcomingClasses} joinHref={joinHref} joinExternal={joinExternal} />
+
       {/* ═══════════ MARQUEE ═══════════ */}
       <section className="relative py-10 overflow-hidden border-y border-stone-200 bg-white/50">
         <div className="flex cg-marquee whitespace-nowrap">
@@ -833,12 +1272,12 @@ export default function AcademyPublicPage() {
       {/* ═══════════ BENTO ═══════════ */}
       <section id="programs" className="relative py-20 md:py-28">
         <div className="mx-auto max-w-7xl px-6 md:px-10">
-          <div className="mb-14 text-center">
+          <Reveal className="mb-14 text-center">
             <div className="text-xs tracking-[0.25em] uppercase text-fuchsia-600 font-semibold mb-3">The academy</div>
             <h2 className="font-display text-4xl md:text-6xl leading-[1.05] tracking-tight text-stone-900">
               A whole world of chess.
             </h2>
-          </div>
+          </Reveal>
           <div className="grid gap-4 md:gap-5 grid-cols-2 md:grid-cols-4 auto-rows-[minmax(180px,auto)]">
             <BentoTile className="col-span-2 row-span-2 !p-0 overflow-hidden">
               {p.coverUrl ? (
@@ -893,13 +1332,16 @@ export default function AcademyPublicPage() {
         </div>
       </section>
 
+      {/* ═══════════ PIECE STRIP (interactive hover) ═══════════ */}
+      <PieceStrip />
+
       {/* ═══════════ PROGRAM FINDER (interactive) ═══════════ */}
       <ProgramFinder ctaHref={joinHref} ctaExt={joinExternal} joinLabel={joinLabel} />
 
       {/* ═══════════ COACHES with filter pills ═══════════ */}
       <section id="coaches" className="relative py-20 md:py-28">
         <div className="mx-auto max-w-7xl px-6 md:px-10">
-          <div className="mb-8 flex items-end justify-between flex-wrap gap-6">
+          <Reveal className="mb-8 flex items-end justify-between flex-wrap gap-6">
             <div>
               <div className="text-xs tracking-[0.25em] uppercase text-cyan-600 font-semibold mb-3">The roster</div>
               <h2 className="font-display text-4xl md:text-6xl leading-[1.05] tracking-tight text-stone-900">
@@ -907,7 +1349,7 @@ export default function AcademyPublicPage() {
               </h2>
             </div>
             <div className="text-stone-500 text-sm uppercase tracking-widest">{filteredCoaches.length} of {coaches.length}</div>
-          </div>
+          </Reveal>
 
           <div className="flex flex-wrap gap-2 mb-10">
             {coachCats.map(([k, label, pred]) => {
@@ -936,6 +1378,9 @@ export default function AcademyPublicPage() {
           )}
         </div>
       </section>
+
+      {/* ═══════════ PUZZLE QUIZ (interactive) ═══════════ */}
+      <PuzzleQuiz />
 
       {/* ═══════════ WEEKLY SCHEDULE (interactive) ═══════════ */}
       <WeeklySchedule items={upcomingClasses} joinHref={joinHref} joinExternal={joinExternal} />
@@ -966,15 +1411,15 @@ export default function AcademyPublicPage() {
       {p.achievements.length > 0 && (
         <section id="milestones" className="relative py-20 md:py-28">
           <div className="mx-auto max-w-7xl px-6 md:px-10">
-            <div className="mb-14 flex items-end justify-between flex-wrap gap-6">
+            <Reveal className="mb-14 flex items-end justify-between flex-wrap gap-6">
               <div>
                 <div className="text-xs tracking-[0.25em] uppercase text-amber-600 font-semibold mb-3">Milestones</div>
                 <h2 className="font-display text-4xl md:text-6xl leading-[1.05] tracking-tight text-stone-900">
                   Wins we&apos;re proud of.
                 </h2>
               </div>
-              <img src={`${IMG}/trophy.webp`} alt="" className="hidden md:block w-24 h-24 rounded-2xl object-cover ring-1 ring-stone-200 shadow-sm" />
-            </div>
+              <img src={`${IMG}/trophy.webp`} alt="" className="hidden md:block w-24 h-24 rounded-2xl object-cover ring-1 ring-stone-200 shadow-sm cg-wiggle" />
+            </Reveal>
             <div className="grid gap-5 md:grid-cols-3">
               {p.achievements.map((a, i) => (
                 <div key={a.id} className="group relative overflow-hidden rounded-3xl bg-white ring-1 ring-stone-200 shadow-sm hover:shadow-xl hover:ring-amber-300 hover:-translate-y-1 transition-all duration-500 cg-fade-up" style={{ animationDelay: `${i * 80}ms` }}>
@@ -1044,6 +1489,9 @@ export default function AcademyPublicPage() {
           </div>
         </div>
       </section>
+
+      {/* ═══════════ QUOTES CAROUSEL (interactive) ═══════════ */}
+      <QuotesCarousel />
 
       {/* ═══════════ FINAL CTA ═══════════ */}
       <section className="relative py-24 md:py-40 overflow-hidden">
