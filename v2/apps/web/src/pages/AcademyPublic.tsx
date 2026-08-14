@@ -1820,7 +1820,7 @@ export default function AcademyPublicPage() {
     const prevBodyBg = body.style.backgroundColor;
     html.classList.remove("dark");
     html.classList.add("light");
-    body.style.backgroundColor = "#dff8fc";
+    body.style.backgroundColor = "#c7edf5";
     return () => {
       html.setAttribute("class", prev);
       body.style.backgroundColor = prevBodyBg;
@@ -1879,7 +1879,7 @@ export default function AcademyPublicPage() {
   const filteredCoaches = coaches.filter(activeFilter[2]);
 
   return (
-    <div className="cg-civ-root min-h-screen antialiased overflow-x-hidden" style={{ backgroundColor: '#dff8fc' }}>
+    <div className="cg-civ-root min-h-screen antialiased overflow-x-hidden" style={{ backgroundColor: '#c7edf5' }}>
       <ScrollProgress />
       <style>{`
         /* ═══ Load Clash Display + Clash Grotesk from Fontshare CDN (same fonts chessiverse uses) ═══ */
@@ -1895,7 +1895,9 @@ export default function AcademyPublicPage() {
         }
         .cg-civ-root {
           --clr-background-main: #e5f5fe;
-          --clr-background-main-new: #dff8fc;
+          --clr-background-main-new: #c7edf5;
+          --clr-section-a-tint: #b8e6f2;
+          --clr-section-b-tint: #d5f0f7;
           --clr-text-main: #232323;
           --clr-text-gray: #5a5a5a;
           --clr-text-darkgray: #2d2d2d;
@@ -1934,9 +1936,9 @@ export default function AcademyPublicPage() {
         .cg-civ-root .text-accent { color: var(--clr-accent-new); }
         .cg-civ-root .text-gray { color: var(--clr-text-gray); }
         /* Section bands */
-        /* Unified section bg — no visible band-steps between sections */
-        .cg-civ-band-a { background: transparent; }
-        .cg-civ-band-b { background: transparent; }
+        /* Subtle section tints — enough color for visual rhythm without harsh bands */
+        .cg-civ-band-a { background: var(--clr-section-a-tint); }
+        .cg-civ-band-b { background: var(--clr-section-b-tint); }
         .cg-civ-band-banner { background: var(--clr-section-banner); }
         .cg-civ-section { padding: 5rem 1rem; }
         @media (max-width: 768px) { .cg-civ-section { padding: 3rem 1rem 2rem; } }
