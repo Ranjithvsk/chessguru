@@ -2105,20 +2105,20 @@ export default function AcademyPublicPage() {
             <span>With Chennai&apos;s Top Titled Chess Coaches</span>
           </h1>
           <p className="cg-civ-hero-desc">
-            Play, practise, and puzzle with over {Math.max(20, coaches.length * 4)} of Chennai&apos;s most patient chess coaches.
+            Play, practise, and puzzle with over {Math.max(20, coaches.length * 4)} of Chennai&apos;s most talented chess coaches.
           </p>
           <div className="cg-civ-hero-benefits">
             <span className="cg-civ-benefit">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
-              <strong>No pressure</strong>
+              <strong>Learn</strong>
             </span>
             <span className="cg-civ-benefit">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
-              <strong>No waiting</strong>
+              <strong>Play</strong>
             </span>
             <span className="cg-civ-benefit">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
-              <strong>No cheating</strong>
+              <strong>Enjoy</strong>
             </span>
           </div>
           <div className="cg-civ-hero-buttons">
