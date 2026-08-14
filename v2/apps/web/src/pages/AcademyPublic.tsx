@@ -1029,16 +1029,16 @@ function PieceStrip() {
 // all ours (Guna Chess archetypes + Gemini piece portraits, not their 31
 // personality types).
 const ARCHETYPES = [
-  { name: "Kavya",   uni: "♕", role: "The Attacker",     grad: "from-rose-500 via-red-500 to-orange-500"    },
-  { name: "Arjun",   uni: "♞", role: "The Strategist",   grad: "from-indigo-500 via-blue-500 to-cyan-500"   },
-  { name: "Priya",   uni: "♗", role: "The Tactician",    grad: "from-amber-500 via-orange-500 to-rose-500"  },
-  { name: "Vikram",  uni: "♖", role: "The Endgame Sage", grad: "from-cyan-500 via-teal-500 to-emerald-600"  },
-  { name: "Meera",   uni: "♛", role: "The Universalist", grad: "from-fuchsia-500 via-purple-500 to-indigo-600" },
-  { name: "Rahul",   uni: "♜", role: "The Rock",         grad: "from-emerald-500 via-teal-500 to-cyan-600"  },
-  { name: "Sneha",   uni: "♝", role: "The Gambiteer",    grad: "from-orange-500 via-rose-500 to-fuchsia-500" },
-  { name: "Aditya",  uni: "♘", role: "The Positional",   grad: "from-slate-700 via-slate-800 to-stone-900"   },
-  { name: "Ishaan",  uni: "♟", role: "The Improver",     grad: "from-lime-500 via-emerald-500 to-teal-600"   },
-  { name: "Diya",    uni: "♚", role: "The Prodigy",      grad: "from-pink-500 via-rose-500 to-red-600"       },
+  { name: "Kavya",   uni: "♕", role: "The Attacker",     img: "/academy/arch-01-attacker.webp"   },
+  { name: "Arjun",   uni: "♞", role: "The Strategist",   img: "/academy/arch-02-strategist.webp" },
+  { name: "Priya",   uni: "♗", role: "The Tactician",    img: "/academy/arch-03-tactician.webp"  },
+  { name: "Vikram",  uni: "♖", role: "The Endgame Sage", img: "/academy/arch-04-endgame.webp"    },
+  { name: "Meera",   uni: "♛", role: "The Universalist", img: "/academy/arch-05-universal.webp"  },
+  { name: "Rahul",   uni: "♜", role: "The Rock",         img: "/academy/arch-06-rock.webp"       },
+  { name: "Sneha",   uni: "♝", role: "The Gambiteer",    img: "/academy/arch-07-gambit.webp"     },
+  { name: "Aditya",  uni: "♘", role: "The Positional",   img: "/academy/arch-08-positional.webp" },
+  { name: "Ishaan",  uni: "♟", role: "The Improver",     img: "/academy/arch-09-improver.webp"   },
+  { name: "Diya",    uni: "♚", role: "The Prodigy",      img: "/academy/arch-10-prodigy.webp"    },
 ];
 
 function PlayingStyleSlider() {
@@ -1082,11 +1082,11 @@ function PlayingStyleSlider() {
         .cg-arch-card:hover { transform: translateY(-4px); }
         .cg-arch-image-container { aspect-ratio: 3/4; background: #232323; border: 3px solid transparent; border-radius: 12px; overflow: hidden; position: relative; transition: all .3s ease; width: 100%; }
         .cg-arch-card:hover .cg-arch-image-container { border-color: #14a2b8; box-shadow: 0 4px 16px #35e1fb40; }
-        .cg-arch-player-portrait { display: block; height: 100%; width: 100%; display: grid; place-items: center; font-size: 8rem; line-height: 1; color: rgba(255,255,255,.94); text-shadow: 0 4px 24px rgba(0,0,0,.4); background-size: 200% 200%; }
+        .cg-arch-player-image { display: block; height: 100%; object-fit: cover; width: 100%; }
         .cg-arch-badge-overlay { background: #ffffffe6; border: 3px solid #fff; border-radius: 50%; bottom: 6px; height: 48px; left: 50%; padding: 2px; position: absolute; transform: translate(-50%); width: 48px; box-shadow: 0 2px 8px #0000004d; display: grid; place-items: center; font-size: 1.4rem; }
         .cg-arch-info { align-items: center; display: flex; flex-direction: column; gap: .15rem; }
         .cg-arch-role { color: #14a2b8; font-size: .7rem; font-weight: 600; text-align: center; letter-spacing: .04em; text-transform: uppercase; }
-        .cg-arch-name { color: #292524; font-size: .95rem; font-weight: 700; line-height: 1.2; margin-top: .5rem; text-align: center; }
+        .cg-arch-name { color: #292524; font-size: .85rem; font-weight: 700; line-height: 1.2; margin-top: .5rem; text-align: center; }
         .cg-arch-slide.is-active .cg-arch-card { transform: scale(1.08); }
         @media (max-width: 559px) { .cg-arch-slide.is-active .cg-arch-card { transform: none; } }
         .cg-arch-slide.is-active .cg-arch-image-container { border-color: #14a2b8; border-width: 2px; box-shadow: 0 8px 32px #35e1fb55; }
@@ -1113,9 +1113,7 @@ function PlayingStyleSlider() {
               <div key={a.name} data-arch-idx={k} className={`cg-arch-slide ${k === active ? "is-active" : ""}`}>
                 <button onClick={() => snapTo(k)} className="cg-arch-card">
                   <div className="cg-arch-image-container">
-                    <div className={`cg-arch-player-portrait bg-gradient-to-br ${a.grad} cg-gradient-shift`}>
-                      {a.uni}
-                    </div>
+                    <img className="cg-arch-player-image" src={a.img} alt={a.name} loading="lazy" />
                     <div className="cg-arch-badge-overlay">{a.uni}</div>
                   </div>
                   <div className="cg-arch-info">
@@ -1155,12 +1153,12 @@ function PlayingStyleSlider() {
 // All class names prefixed cg-bot-* so no automated matcher hits.
 // Bot names + play-styles + flags all ours (Guna Chess practice partners).
 const BOT_ROSTER = [
-  { name: "Vishy the Attacker",   rating: 1200, style: "Aggressive",  playIcon: "⚔",   flag: "IN", uni: "♜", grad: "linear-gradient(180deg,#fee2e2,#fecaca)" },
-  { name: "Priya the Strategist", rating: 1400, style: "Positional",  playIcon: "◈",   flag: "IN", uni: "♞", grad: "linear-gradient(180deg,#dbeafe,#bfdbfe)" },
-  { name: "Karthik Tactics",       rating: 1000, style: "Tactical",    playIcon: "⚡",   flag: "IN", uni: "♗", grad: "linear-gradient(180deg,#fef3c7,#fde68a)" },
-  { name: "Amma the Patient",     rating: 800,  style: "Solid",       playIcon: "🛡",   flag: "IN", uni: "♟", grad: "linear-gradient(180deg,#dcfce7,#bbf7d0)" },
-  { name: "Guru Universal",       rating: 1800, style: "Universal",   playIcon: "◉",   flag: "IN", uni: "♛", grad: "linear-gradient(180deg,#fae8ff,#f5d0fe)" },
-  { name: "Aparna Endgame",       rating: 1600, style: "Endgame",     playIcon: "♚",   flag: "IN", uni: "♖", grad: "linear-gradient(180deg,#cffafe,#a5f3fc)" },
+  { name: "Vishy the Attacker",   rating: 1200, style: "Aggressive",  playIcon: "⚔", flag: "IN", img: "/academy/bot-01-attacker.webp",   grad: "linear-gradient(180deg,#fee2e2,#fecaca)" },
+  { name: "Priya the Strategist", rating: 1400, style: "Positional",  playIcon: "◈", flag: "IN", img: "/academy/bot-02-strategist.webp", grad: "linear-gradient(180deg,#dbeafe,#bfdbfe)" },
+  { name: "Karthik Tactics",       rating: 1000, style: "Tactical",    playIcon: "⚡", flag: "IN", img: "/academy/bot-03-tactician.webp",  grad: "linear-gradient(180deg,#fef3c7,#fde68a)" },
+  { name: "Amma the Patient",     rating: 800,  style: "Solid",       playIcon: "🛡", flag: "IN", img: "/academy/bot-04-patient.webp",    grad: "linear-gradient(180deg,#dcfce7,#bbf7d0)" },
+  { name: "Guru Universal",       rating: 1800, style: "Universal",   playIcon: "◉", flag: "IN", img: "/academy/bot-05-universal.webp",  grad: "linear-gradient(180deg,#fae8ff,#f5d0fe)" },
+  { name: "Aparna Endgame",       rating: 1600, style: "Endgame",     playIcon: "♚", flag: "IN", img: "/academy/bot-06-endgame.webp",    grad: "linear-gradient(180deg,#cffafe,#a5f3fc)" },
 ];
 
 function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: boolean; joinLabel: string }) {
@@ -1175,8 +1173,8 @@ function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: bool
         .cg-bot-card { background: linear-gradient(90deg,#dbfaff,#e6fcff); border: none; border-radius: 8px; box-shadow: none; cursor: pointer; display: flex; flex-direction: column; height: 100%; padding: .3rem; transition: all .2s ease; }
         .cg-bot-card:hover { box-shadow: 0 6px 16px #14a2b833; transform: translateY(-2px); }
         .cg-bot-card.is-selected .cg-bot-card-image { background: linear-gradient(180deg,#fff,#c2c1bf) padding-box, linear-gradient(180deg,#14a2b8,#14a2b8) border-box; border: 2px solid #14a2b8; }
-        .cg-bot-card-image { background: linear-gradient(180deg,#fff,#c2c1bf) padding-box, linear-gradient(180deg,#fff,#a9a9a9) border-box; border: 2px solid transparent; border-radius: 12px; height: 150px; overflow: hidden; position: relative; width: 100%; display: grid; place-items: center; }
-        .cg-bot-portrait { font-size: 5.5rem; line-height: 1; filter: drop-shadow(0 2px 6px rgba(0,0,0,.25)); }
+        .cg-bot-card-image { background: linear-gradient(180deg,#fff,#c2c1bf) padding-box, linear-gradient(180deg,#fff,#a9a9a9) border-box; border: 2px solid transparent; border-radius: 12px; height: 150px; overflow: hidden; position: relative; width: 100%; }
+        .cg-bot-card-image img { height: 100%; object-fit: contain; object-position: bottom; width: 100%; }
         .cg-bot-playstyle-icon { align-items: center; background: rgba(255,255,255,.85); border-radius: 6px; display: flex; font-size: 14px; height: 24px; justify-content: center; position: absolute; right: 8px; top: 8px; width: 24px; z-index: 2; color: #14a2b8; box-shadow: 0 1px 2px rgba(0,0,0,.15); }
         .cg-bot-content { margin-top: .5rem; padding: 0 .15rem; }
         .cg-bot-name { align-items: center; color: #232323; display: flex; font-size: .75rem; font-weight: 500; min-width: 0; }
@@ -1208,7 +1206,7 @@ function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: bool
               aria-pressed={k === selected}
             >
               <div className="cg-bot-card-image" style={{ background: `${bot.grad} padding-box, ${k === selected ? 'linear-gradient(180deg,#14a2b8,#14a2b8)' : 'linear-gradient(180deg,#fff,#a9a9a9)'} border-box`, border: `2px solid ${k === selected ? '#14a2b8' : 'transparent'}` }}>
-                <div className="cg-bot-portrait">{bot.uni}</div>
+                <img src={bot.img} alt={bot.name} loading="lazy" />
                 <div className="cg-bot-playstyle-icon">{bot.playIcon}</div>
               </div>
               <div className="cg-bot-content">
@@ -1229,8 +1227,8 @@ function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: bool
         </div>
 
         <Reveal key={selected} className="mt-8 rounded-3xl bg-white ring-1 ring-stone-200 shadow-xl p-6 md:p-8 grid md:grid-cols-[auto_1fr_auto] gap-6 items-center">
-          <div className="w-24 h-24 md:w-32 md:h-32 rounded-3xl grid place-items-center text-6xl md:text-7xl text-white shadow-lg" style={{ background: b.grad, color: '#0f766e' }}>
-            {b.uni}
+          <div className="w-24 h-24 md:w-36 md:h-36 rounded-3xl overflow-hidden shadow-lg" style={{ background: b.grad }}>
+            <img src={b.img} alt={b.name} className="w-full h-full object-contain object-bottom" />
           </div>
           <div>
             <div className="text-xs tracking-[0.25em] uppercase text-stone-500 font-semibold mb-1">Now selected</div>
