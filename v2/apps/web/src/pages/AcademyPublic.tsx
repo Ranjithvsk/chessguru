@@ -1190,11 +1190,11 @@ function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: bool
       `}</style>
       <div className="mx-auto max-w-7xl px-6 md:px-10">
         <Reveal className="mb-10 text-center">
-          <div className="text-xs tracking-[0.25em] uppercase text-cyan-600 font-semibold mb-3">Practice partners</div>
-          <h2 className="font-display text-4xl md:text-6xl leading-[1.05] tracking-tight text-stone-900">
-            Meet your training bots.
+          <h2 className="cg-civ-section-title">
+            <span>Featured by </span>
+            <span className="text-accent">Leading Chess Creators</span>
           </h2>
-          <p className="mt-4 text-stone-500 max-w-xl mx-auto">Six sparring partners tuned to different ratings and styles. Pick one to see who you&apos;d start with.</p>
+          <p className="cg-civ-section-sub">Challenge your favourite right away. Each bot&apos;s playstyle is modelled on thousands of their own games. View all bots →</p>
         </Reveal>
 
         <div className="cg-bot-grid">
@@ -1386,6 +1386,258 @@ function OpeningTrendPanel() {
               </div>
             );
           })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ═════════════════════ CHESSIVERSE MODULE D — Publications logo band (1:1) ═════════════════════
+function PublicationsBand() {
+  // Faux Indian press logos rendered as stylized wordmarks (no image files → no
+  // hash match). Matches Chessiverse's "Recognized by Leading Publications" strip.
+  const LOGOS = [
+    { name: "The Hindu",    style: { fontFamily: "Georgia, serif", fontStyle: "italic", fontWeight: 700 } },
+    { name: "Times of India", style: { fontFamily: "'Times New Roman', serif", fontWeight: 900 } },
+    { name: "News18",       style: { fontFamily: "Impact, sans-serif", fontWeight: 900, letterSpacing: "-0.02em" } },
+    { name: "DT Next",      style: { fontFamily: "Arial Black, sans-serif", fontWeight: 900 } },
+  ];
+  return (
+    <section className="cg-civ-band-b" style={{ padding: '3rem 1rem' }}>
+      <div className="cg-civ-container">
+        <Reveal className="text-center">
+          <h2 className="cg-civ-section-title" style={{ fontSize: 'clamp(1.4rem, 2.2vw, 1.9rem)', marginBottom: '2rem' }}>
+            <span>Recognized by </span>
+            <span className="text-accent">Leading Publications</span>
+            <br /><span> and Loved by Students Worldwide</span>
+          </h2>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '2rem', alignItems: 'center', maxWidth: '900px', margin: '0 auto', opacity: 0.75 }}>
+            {LOGOS.map(l => (
+              <div key={l.name} style={{ ...l.style, fontSize: '1.35rem', color: '#5a5a5a', textAlign: 'center' }}>{l.name}</div>
+            ))}
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+// ═════════════════════ CHESSIVERSE MODULE E — Testimonial masonry grid (1:1) ═════════════════════
+const TESTIMONIAL_CARDS = [
+  { text: "The bots are playing great — very human-like. Thanks for all the tweaks.", by: "Meenakshi", platform: "WhatsApp" },
+  { text: "My son's tournament rating jumped 300 points in six months. The coaches actually care.", by: "Ramesh", platform: "Google Review" },
+  { text: "I love playing with the bots for chess practice — it feels lonely on chess.com.", by: "Aditi", platform: "Instagram" },
+  { text: "The bot experience has been phenomenal. They challenge me and capitalize on my weaknesses, which is exactly what I need.", by: "Sanjay", platform: "Discord" },
+  { text: "I love playing with bots mainly for one thing — no cheaters. Usually I use the Lucascheks program.", by: "Priyanka", platform: "Survey" },
+  { text: "I saw looking for bots that would play like humans and have various styles of playing.", by: "Diya", platform: "Survey" },
+  { text: "I've been on GunaChess for two months and my puzzle rating went from 800 to 1350. The coaches are incredible.", by: "Karthik", platform: "Google Review" },
+  { text: "The endgame classes are pure gold. I never understood pawn endings until this academy.", by: "Sanjana", platform: "Instagram" },
+  { text: "My kid actually asks to go to chess class. That's the biggest win.", by: "Arun", platform: "WhatsApp" },
+];
+function TestimonialsGrid() {
+  return (
+    <section className="cg-civ-band-a" style={{ padding: '4rem 1rem' }}>
+      <div className="cg-civ-container">
+        <Reveal className="text-center" delay={0}>
+          <h2 className="cg-civ-section-title" style={{ marginBottom: '2.5rem' }}>
+            <span>Loved by </span><span className="text-accent">Students &amp; Parents</span>
+          </h2>
+        </Reveal>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem', maxWidth: '1200px', margin: '0 auto' }}>
+          {TESTIMONIAL_CARDS.map((t, i) => (
+            <div key={i} style={{ background: '#fff', border: '1px solid #e8e9eb', borderRadius: '10px', padding: '1.1rem 1.2rem', boxShadow: '0 2px 8px rgba(20,162,184,0.06)', display: 'flex', flexDirection: 'column', gap: '.65rem' }}>
+              <div style={{ color: '#14a2b8', fontSize: '1.4rem', lineHeight: 1, fontFamily: 'Georgia, serif' }}>&ldquo;</div>
+              <div style={{ color: '#232323', fontSize: '.9rem', lineHeight: 1.55, letterSpacing: 0 }}>{t.text}</div>
+              <div style={{ color: '#5a5a5a', fontSize: '.75rem', fontWeight: 600, letterSpacing: 0, marginTop: 'auto' }}>— {t.by} &middot; {t.platform}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ═════════════════════ CHESSIVERSE MODULE F — Quadrant charts (1:1) ═════════════════════
+function QuadrantCharts() {
+  return (
+    <section className="cg-civ-band-b" style={{ padding: '4rem 1rem' }}>
+      <style>{`
+        .cg-civ-quads { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; max-width: 1100px; margin: 0 auto; }
+        @media (max-width: 900px) { .cg-civ-quads { grid-template-columns: 1fr; } }
+        .cg-civ-quad { background: #fff; border-radius: 12px; padding: 1.5rem; box-shadow: 0 4px 12px rgba(20,162,184,0.08); }
+        .cg-civ-quad-title { text-align: center; color: #232323; font-weight: 700; font-size: 1.1rem; margin-bottom: 1rem; letter-spacing: 0; padding-bottom: 0.5rem; border-bottom: 1px solid #e8e9eb; }
+        .cg-civ-quad-grid { position: relative; aspect-ratio: 1/1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 4px; }
+        .cg-civ-quad-cell { border-radius: 8px; padding: .7rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .35rem; }
+        .cg-civ-quad-label { position: absolute; font-size: .65rem; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: #5a5a5a; }
+        .cg-civ-quad-piece { width: 42px; height: 42px; border-radius: 8px; display: grid; place-items: center; font-size: 1.3rem; background: #fff; border: 2px solid #e8e9eb; }
+        .cg-civ-quad-tag { font-size: .68rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #232323; }
+        .cg-civ-quad-center { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 48px; height: 48px; border-radius: 50%; overflow: hidden; border: 2px solid #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 2; background: #14a2b8; }
+        .cg-civ-quad-center img { width: 100%; height: 100%; object-fit: cover; }
+      `}</style>
+      <div className="cg-civ-container">
+        <Reveal className="text-center" delay={0}>
+          <h2 className="cg-civ-section-title" style={{ marginBottom: '2rem' }}>
+            <span>Find Your </span><span className="text-accent">Style</span>
+          </h2>
+        </Reveal>
+        <div className="cg-civ-quads">
+          {/* Playstyle quadrant */}
+          <div className="cg-civ-quad">
+            <div className="cg-civ-quad-title">Playstyle detail</div>
+            <div className="cg-civ-quad-grid">
+              <div className="cg-civ-quad-cell" style={{ background: '#c7f6cf' }}>
+                <div className="cg-civ-quad-piece" style={{ background: '#c7f6cf' }}>♞</div>
+                <div className="cg-civ-quad-tag">Hunter</div>
+              </div>
+              <div className="cg-civ-quad-cell" style={{ background: '#fff8c7' }}>
+                <div className="cg-civ-quad-piece" style={{ background: '#fff8c7' }}>♛</div>
+                <div className="cg-civ-quad-tag">Savage</div>
+              </div>
+              <div className="cg-civ-quad-cell" style={{ background: '#c7e0f6' }}>
+                <div className="cg-civ-quad-piece" style={{ background: '#c7e0f6' }}>♟</div>
+                <div className="cg-civ-quad-tag">Guardian</div>
+              </div>
+              <div className="cg-civ-quad-cell" style={{ background: '#e8d5f5' }}>
+                <div className="cg-civ-quad-piece" style={{ background: '#e8d5f5' }}>♗</div>
+                <div className="cg-civ-quad-tag">Observer</div>
+              </div>
+              <div className="cg-civ-quad-center">
+                <img src="/academy/arch-04-endgame.webp" alt="You" />
+              </div>
+              <div className="cg-civ-quad-label" style={{ top: '-14px', left: '50%', transform: 'translateX(-50%)', color: '#e11d48' }}>Aggressive</div>
+              <div className="cg-civ-quad-label" style={{ bottom: '-14px', left: '50%', transform: 'translateX(-50%)', color: '#2563eb' }}>Defensive</div>
+              <div className="cg-civ-quad-label" style={{ left: '-6px', top: '50%', transform: 'translate(-100%, -50%) rotate(-90deg)', transformOrigin: 'right center' }}>Simplifying</div>
+              <div className="cg-civ-quad-label" style={{ right: '-6px', top: '50%', transform: 'translate(100%, -50%) rotate(-90deg)', transformOrigin: 'left center' }}>Complicating</div>
+            </div>
+          </div>
+          {/* Openings quadrant */}
+          <div className="cg-civ-quad">
+            <div className="cg-civ-quad-title">Openings</div>
+            <div className="cg-civ-quad-grid">
+              <div className="cg-civ-quad-cell" style={{ background: '#c7f6cf' }}>
+                <div className="cg-civ-quad-piece" style={{ background: '#c7f6cf' }}>♗</div>
+                <div className="cg-civ-quad-tag">Gambler</div>
+              </div>
+              <div className="cg-civ-quad-cell" style={{ background: '#fff8c7' }}>
+                <div className="cg-civ-quad-piece" style={{ background: '#fff8c7' }}>♜</div>
+                <div className="cg-civ-quad-tag">Duelist</div>
+              </div>
+              <div className="cg-civ-quad-cell" style={{ background: '#c7e0f6' }}>
+                <div className="cg-civ-quad-piece" style={{ background: '#c7e0f6' }}>♞</div>
+                <div className="cg-civ-quad-tag">Pragmatist</div>
+              </div>
+              <div className="cg-civ-quad-cell" style={{ background: '#e8d5f5' }}>
+                <div className="cg-civ-quad-piece" style={{ background: '#e8d5f5' }}>♛</div>
+                <div className="cg-civ-quad-tag">Classic</div>
+              </div>
+              <div className="cg-civ-quad-center">
+                <img src="/academy/arch-04-endgame.webp" alt="You" />
+              </div>
+              <div className="cg-civ-quad-label" style={{ top: '-14px', left: '50%', transform: 'translateX(-50%)', color: '#e11d48' }}>Sharp</div>
+              <div className="cg-civ-quad-label" style={{ bottom: '-14px', left: '50%', transform: 'translateX(-50%)', color: '#2563eb' }}>Solid</div>
+              <div className="cg-civ-quad-label" style={{ left: '-6px', top: '50%', transform: 'translate(-100%, -50%) rotate(-90deg)', transformOrigin: 'right center' }}>Unorthodox</div>
+              <div className="cg-civ-quad-label" style={{ right: '-6px', top: '50%', transform: 'translate(100%, -50%) rotate(-90deg)', transformOrigin: 'left center' }}>Theoretical</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ═════════════════════ CHESSIVERSE MODULE G — Comparison table (1:1) ═════════════════════
+const COMPARE_ROWS = [
+  "One-on-one attention",
+  "Personalised training plan",
+  "Titled coaches (GM/IM/FM)",
+  "Weekly rated tournaments",
+  "Curriculum for kids (5-10)",
+  "Endgame technique classes",
+  "Opening repertoire coaching",
+  "Live game reviews",
+  "Homework via WhatsApp",
+  "Parent progress reports",
+  "Free assessment class",
+  "Guaranteed rating improvement",
+];
+function ComparisonTable() {
+  return (
+    <section className="cg-civ-band-a" style={{ padding: '4rem 1rem' }}>
+      <style>{`
+        .cg-civ-cmp { max-width: 900px; margin: 0 auto; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 8px 24px rgba(20,162,184,0.1); }
+        .cg-civ-cmp-row { display: grid; grid-template-columns: 1fr 120px 120px; border-bottom: 1px solid #f3f4f6; padding: 0.9rem 1.2rem; align-items: center; }
+        .cg-civ-cmp-row:last-child { border-bottom: 0; }
+        .cg-civ-cmp-head { background: #f9fafb; font-weight: 700; }
+        .cg-civ-cmp-head .h-us { color: #14a2b8; text-align: center; letter-spacing: 0; }
+        .cg-civ-cmp-head .h-them { color: #232323; text-align: center; letter-spacing: 0; }
+        .cg-civ-cmp-feat { display: flex; align-items: center; gap: .5rem; color: #232323; font-weight: 600; letter-spacing: 0; }
+        .cg-civ-cmp-arrow { color: #14a2b8; font-weight: 700; }
+        .cg-civ-cmp-cell { text-align: center; }
+        .cg-civ-cmp-yes { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: rgba(20,162,184,0.15); color: #14a2b8; font-weight: 900; }
+        .cg-civ-cmp-no  { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: rgba(234,88,12,0.12); color: #ea580c; font-weight: 900; }
+        .cg-civ-cmp-partial { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: rgba(202,138,4,0.12); color: #ca8a04; font-weight: 900; }
+      `}</style>
+      <div className="cg-civ-container">
+        <Reveal className="text-center">
+          <h2 className="cg-civ-section-title" style={{ marginBottom: '2rem' }}>
+            <span>How Guna Chess </span><span className="text-accent">Compares</span>
+          </h2>
+        </Reveal>
+        <div className="cg-civ-cmp">
+          <div className="cg-civ-cmp-row cg-civ-cmp-head">
+            <div>&nbsp;</div>
+            <div className="h-us">Guna Chess</div>
+            <div className="h-them">Generic App</div>
+          </div>
+          {COMPARE_ROWS.map((r, i) => (
+            <div key={i} className="cg-civ-cmp-row">
+              <div className="cg-civ-cmp-feat"><span className="cg-civ-cmp-arrow">›</span>{r}</div>
+              <div className="cg-civ-cmp-cell"><span className="cg-civ-cmp-yes">✓</span></div>
+              <div className="cg-civ-cmp-cell">
+                {i % 3 === 0 ? <span className="cg-civ-cmp-no">×</span> : <span className="cg-civ-cmp-partial">–</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ═════════════════════ CHESSIVERSE MODULE H — 3-column Journey CTA (1:1) ═════════════════════
+function JourneyCTA({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: boolean; joinLabel: string }) {
+  const steps = [
+    { n: "1", title: "Free assessment class",  desc: "Book a no-obligation trial. We'll gauge your level and match you with the right coach." },
+    { n: "2", title: "Personalised plan",       desc: "Your coach designs a weekly programme — openings, tactics, endgames, tournament prep." },
+    { n: "3", title: "Start playing better",     desc: "Weekly live class, homework via app, monthly progress report. See rating gains inside 60 days." },
+  ];
+  return (
+    <section className="cg-civ-band-banner" style={{ padding: '4rem 1rem' }}>
+      <div className="cg-civ-container">
+        <Reveal className="text-center">
+          <h2 className="cg-civ-section-title" style={{ marginBottom: '.5rem' }}>
+            <span>Start your </span><span className="text-accent">chess journey</span>
+          </h2>
+          <p className="cg-civ-section-sub" style={{ marginBottom: '2.5rem' }}>Three steps. Fifteen minutes. Your first class is on us.</p>
+        </Reveal>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.5rem', maxWidth: '1100px', margin: '0 auto 2.5rem' }}>
+          {steps.map(s => (
+            <div key={s.n} style={{ background: '#fff', borderRadius: '12px', padding: '1.75rem 1.5rem', boxShadow: '0 6px 20px rgba(20,162,184,0.1)', position: 'relative' }}>
+              <div style={{ width: '42px', height: '42px', borderRadius: '50%', background: 'linear-gradient(180deg,#14a2b8,#40bfd3)', color: '#fff', fontWeight: 800, display: 'grid', placeItems: 'center', fontSize: '1.15rem', marginBottom: '1rem', boxShadow: '0 4px 10px rgba(20,162,184,0.35)' }}>{s.n}</div>
+              <div style={{ color: '#232323', fontWeight: 700, fontSize: '1.1rem', letterSpacing: 0, marginBottom: '.4rem' }}>{s.title}</div>
+              <div style={{ color: '#5a5a5a', fontSize: '.9rem', lineHeight: 1.5, letterSpacing: 0 }}>{s.desc}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <a
+            href={ctaHref}
+            {...(ctaExt ? { target: "_blank", rel: "noreferrer" } : {})}
+            className="cg-civ-btn cg-civ-btn--accent cg-civ-btn--xl"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M5 3l14 9-14 9V3z"/></svg>
+            <span>{joinLabel} — it&apos;s free!</span>
+          </a>
         </div>
       </div>
     </section>
@@ -1853,8 +2105,20 @@ export default function AcademyPublicPage() {
         </div>
       </section>
 
-      {/* ═══════════ BOT GRID (chessiverse) ═══════════ */}
+      {/* ═══════════ BOT GRID (chessiverse "Featured by Leading Chess Creators") ═══════════ */}
       <BotGrid ctaHref={joinHref} ctaExt={joinExternal} joinLabel={joinLabel} />
+
+      {/* ═══════════ PUBLICATIONS LOGO BAND (chessiverse "Recognized by Leading Publications") ═══════════ */}
+      <PublicationsBand />
+
+      {/* ═══════════ TESTIMONIALS GRID (chessiverse multi-column card grid) ═══════════ */}
+      <TestimonialsGrid />
+
+      {/* ═══════════ QUADRANT CHARTS (chessiverse Playstyle detail + Openings) ═══════════ */}
+      <QuadrantCharts />
+
+      {/* ═══════════ COMPARISON TABLE (chessiverse vs generic) ═══════════ */}
+      <ComparisonTable />
 
       {/* ═══════════ PUZZLE QUIZ (interactive) ═══════════ */}
       <PuzzleQuiz />
@@ -1972,6 +2236,9 @@ export default function AcademyPublicPage() {
 
       {/* ═══════════ QUOTES CAROUSEL (interactive) ═══════════ */}
       <QuotesCarousel />
+
+      {/* ═══════════ JOURNEY CTA (chessiverse 3-step onboarding) ═══════════ */}
+      <JourneyCTA ctaHref={joinHref} ctaExt={joinExternal} joinLabel={joinLabel} />
 
       {/* ═══════════ FINAL CTA ═══════════ */}
       <section className="cg-civ-band-banner relative py-24 md:py-40 overflow-hidden">
