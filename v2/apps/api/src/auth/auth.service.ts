@@ -83,8 +83,13 @@ export class AuthService {
     // require that the user's academyId matches the tenant's academy. This keeps
     // Academy X students out of Academy Y's login door.
     if (tenantSlug) {
-      const acad: any = await this.conn.db!.collection("academies").findOne({ slug: String(tenantSlug) });
-      if (!acad) return { ok: false, error: "Invalid username or password." };
+      // Academy slug maps to slug|ownerId|_id in that priority (mongodb schema
+      // has no dedicated slug column on academies — ownerId is the URL slug).
+      const s = String(tenantSlug);
+      const acad: any = await this.conn.db!.collection("academies").findOne({
+        $or: [{ slug: s }, { ownerId: s }, { _id: s as any }],
+      });
+      if (!acad) return { ok: false, error: "This academy does not exist." };
       if (String(user.academyId || "") !== String(acad._id)) {
         return { ok: false, error: "This account is not registered with this academy." };
       }
@@ -307,9 +312,10 @@ export class AuthService {
     // Tenant-scoped OTP login: same guard as password signin — user must belong
     // to the requested academy.
     if (tenantSlug) {
-      const acad: any = await this.conn.db!.collection("academies").findOne({ slug: tenantSlug });
-      if (!acad) return { ok: false, error: "This account is not registered with this academy." };
-      if (String(user.academyId || "") !== String(acad._id)) {
+      const acad: any = await this.conn.db!.collection("academies").findOne({
+        $or: [{ slug: tenantSlug }, { ownerId: tenantSlug }, { _id: tenantSlug as any }],
+      });
+      if (!acad || String(user.academyId || "") !== String(acad._id)) {
         return { ok: false, error: "This account is not registered with this academy." };
       }
     }
