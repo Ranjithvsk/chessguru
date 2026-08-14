@@ -35,10 +35,32 @@ export default function TenantHomePage() {
 
   useEffect(() => {
     let cancelled = false;
+    // Two-tier lookup: prefer the dedicated brand endpoint; if it 404s (not
+    // implemented for this tenant), fall back to /api/academy-page/:slug which
+    // returns the same identity fields we need for the tenant home chrome.
+    const fromPage = (j: any): Brand => ({
+      slug: j?.academy?.slug || j?.academy?._id || slug,
+      name: j?.profile?.displayName || j?.academy?.name || slug,
+      approved: true,
+      brandName: j?.profile?.displayName || j?.academy?.name || slug,
+      brandColor: "#14a2b8",
+      tagline: j?.profile?.tagline || "",
+      logoDataUrl: j?.profile?.logoUrl || null,
+      coachName: "",
+      coachBio: j?.profile?.description || "",
+      coachAchievements: (j?.profile?.achievements || []).map((a: any) => a?.title).filter(Boolean),
+      coachPhotoDataUrl: null,
+      trophyGallery: (j?.profile?.achievements || []).map((a: any) => ({ imageDataUrl: a?.imageUrl || "", caption: a?.title || "" })).filter((x: any) => x.imageDataUrl),
+    });
     fetch(`${API_BASE}/api/academy/brand/${encodeURIComponent(slug)}`)
       .then((r) => r.ok ? r.json() : Promise.reject(r.status))
       .then((j) => { if (!cancelled) setBrand(j); })
-      .catch(() => { if (!cancelled) setNotFound(true); });
+      .catch(() =>
+        fetch(`${API_BASE}/api/academy-page/${encodeURIComponent(slug)}`)
+          .then((r) => r.ok ? r.json() : Promise.reject(r.status))
+          .then((j) => { if (!cancelled) setBrand(fromPage(j)); })
+          .catch(() => { if (!cancelled) setNotFound(true); })
+      );
     return () => { cancelled = true; };
   }, [slug]);
 
