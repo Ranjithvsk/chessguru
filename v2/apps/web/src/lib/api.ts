@@ -87,7 +87,7 @@ export const api = {
   masterPlayers: () => get<MasterPlayer[]>("/api/puzzles/master-players"),
   complete: (id: string, body: CompleteBody) => post<CompleteResult>(`/api/puzzles/${encodeURIComponent(id)}/complete`, body),
 
-  signin: (username: string, password: string, keep: boolean) => post<AuthResult>("/auth/signin", { username, password, keep }),
+  signin: (username: string, password: string, keep: boolean, tenantSlug?: string) => post<AuthResult>("/auth/signin", { username, password, keep, tenantSlug }),
   register: (username: string, password: string, email: string) => post<AuthResult>("/auth/register", { username, password, email }),
   signupAcademy: (body: { academyName: string; ownerName: string; ownerEmail: string; password: string }) =>
     post<AuthResult & { academyId?: string; academyName?: string }>("/auth/signup-academy", body),
@@ -95,7 +95,7 @@ export const api = {
   requestReset:  (email: string) => post<{ ok: boolean; error?: string }>("/auth/request-reset", { email }),
   resetPassword: (token: string, newPassword: string) => post<AuthResult & { username?: string }>("/auth/reset-password", { token, newPassword }),
   requestOtp:    (email: string) => post<{ ok: boolean; error?: string }>("/auth/request-otp", { email }),
-  otpSignin:     (email: string, code: string) => post<AuthResult>("/auth/otp-signin", { email, code }),
+  otpSignin:     (email: string, code: string, tenantSlug?: string) => post<AuthResult>("/auth/otp-signin", { email, code, tenantSlug }),
 
   adminOverview: () => get<Overview>("/api/status/overview"),
   adminDistribution: () => get<Distribution>("/api/status/distribution"),

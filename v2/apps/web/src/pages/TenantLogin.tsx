@@ -70,7 +70,7 @@ export default function TenantLoginPage() {
     clearMsg(); setBusy(true);
     try {
       if (mode === "signin") {
-        const r = await api.signin(username.trim(), password, keep);
+        const r = await api.signin(username.trim(), password, keep, slug);
         if (r.ok) { await qc.invalidateQueries(); nav(back); }
         else setErr(r.error || "Something went wrong.");
       } else {
@@ -79,7 +79,7 @@ export default function TenantLoginPage() {
           if (r.ok) { setOtpSent(true); setNote("Check your email for a 6-digit code."); }
           else setErr(r.error || "Something went wrong.");
         } else {
-          const r = await api.otpSignin(email.trim(), otp.trim());
+          const r = await api.otpSignin(email.trim(), otp.trim(), slug);
           if (r.ok) { await qc.invalidateQueries(); nav(back); }
           else setErr(r.error || "Something went wrong.");
         }

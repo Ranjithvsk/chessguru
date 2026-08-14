@@ -60,7 +60,7 @@ export class AuthService {
   }
 
   async signin(body: any, session: any) {
-    const { username, password, keep } = body ?? {};
+    const { username, password, keep, tenantSlug } = body ?? {};
     if (!username || !password) return { ok: false, error: "Please fill in all fields." };
     const col = this.users();
     const user: any = await col.findOne({
@@ -79,6 +79,16 @@ export class AuthService {
     if (!hash || typeof hash !== "string") return { ok: false, error: "Invalid username or password." };
     const ok = await bcrypt.compare(password, hash);
     if (!ok) return { ok: false, error: "Invalid username or password." };
+    // Tenant-scoped login: if tenantSlug was passed (login came from /a/:slug/login),
+    // require that the user's academyId matches the tenant's academy. This keeps
+    // Academy X students out of Academy Y's login door.
+    if (tenantSlug) {
+      const acad: any = await this.conn.db!.collection("academies").findOne({ slug: String(tenantSlug) });
+      if (!acad) return { ok: false, error: "Invalid username or password." };
+      if (String(user.academyId || "") !== String(acad._id)) {
+        return { ok: false, error: "This account is not registered with this academy." };
+      }
+    }
     session.userId = user._id;
     session.username = user.username;
     // Populate multi-tenant context on the session so /academy/* endpoints work
@@ -279,6 +289,7 @@ export class AuthService {
   async otpSignin(body: any, session: any) {
     const email = String(body?.email || "").trim().toLowerCase();
     const code  = String(body?.code || "").trim();
+    const tenantSlug = body?.tenantSlug ? String(body.tenantSlug) : "";
     if (!email || !code) return { ok: false, error: "Please enter your email and code." };
     if (!/^\d{6}$/.test(code)) return { ok: false, error: "The code should be 6 digits." };
     const user: any = await this.users().findOne({ email });
@@ -292,6 +303,15 @@ export class AuthService {
     if (sha256(code) !== user.otpHash) {
       await this.users().updateOne({ _id: user._id }, { $inc: { otpTries: 1 } });
       return genericErr;
+    }
+    // Tenant-scoped OTP login: same guard as password signin — user must belong
+    // to the requested academy.
+    if (tenantSlug) {
+      const acad: any = await this.conn.db!.collection("academies").findOne({ slug: tenantSlug });
+      if (!acad) return { ok: false, error: "This account is not registered with this academy." };
+      if (String(user.academyId || "") !== String(acad._id)) {
+        return { ok: false, error: "This account is not registered with this academy." };
+      }
     }
     // Success — burn the OTP and sign in.
     await this.users().updateOne(
