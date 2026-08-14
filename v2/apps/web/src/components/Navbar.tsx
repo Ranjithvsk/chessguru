@@ -128,10 +128,52 @@ function Dropdown({ group }: { group: Group }) {
 
 interface Props { rating?: number; username?: string; admin?: boolean; onLogout?: () => void; }
 
+// Detect the tenant slug from the URL (/a/:slug/*) OR from the custom domain
+// (gunachess.com → "gunachess"). Returns null when we're on the main ChessGuru
+// domain / localhost — no tenant chrome, keep default ChessGuru brand.
+function useTenantSlug(): string | null {
+  const { pathname } = useLocation();
+  // /a/:slug/... — SPA path
+  const m = pathname.match(/^\/a\/([^/]+)/);
+  if (m) return decodeURIComponent(m[1]);
+  // Custom domain — anything that isn't chessguru.com / harinitharanjith.com / localhost / bare IP
+  if (typeof window !== "undefined") {
+    const h = window.location.hostname.toLowerCase();
+    if (h && !/^(chessguru\.com|harinitharanjith\.com|localhost|127\.0\.0\.1|\d+\.\d+\.\d+\.\d+)$/.test(h)) {
+      // Take first label as the guess slug (gunachess.com → "gunachess"). Backend
+      // /api/academy-page/:slug tolerates ownerId lookup for tenants.
+      return h.split(".")[0];
+    }
+  }
+  return null;
+}
+
+interface Brand { name: string; logoUrl: string | null }
+function useTenantBrand(): Brand | null {
+  const slug = useTenantSlug();
+  const [brand, setBrand] = useState<Brand | null>(null);
+  useEffect(() => {
+    if (!slug) { setBrand(null); return; }
+    let cancelled = false;
+    fetch(`/api/academy-page/${encodeURIComponent(slug)}`)
+      .then((r) => r.ok ? r.json() : Promise.reject(r.status))
+      .then((j) => {
+        if (cancelled) return;
+        const name = j?.profile?.displayName || j?.academy?.name || "";
+        const logoUrl = j?.profile?.logoUrl || null;
+        if (name) setBrand({ name, logoUrl });
+      })
+      .catch(() => { if (!cancelled) setBrand(null); });
+    return () => { cancelled = true; };
+  }, [slug]);
+  return brand;
+}
+
 export default function Navbar({ rating, username, admin, onLogout }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const { pathname } = useLocation();
   useEffect(() => setMenuOpen(false), [pathname]); // navigating closes the drawer
+  const tenantBrand = useTenantBrand();
 
   const adminLink = (to: string, label: string) => (
     <NavLink to={to}
@@ -147,8 +189,12 @@ export default function Navbar({ rating, username, admin, onLogout }: Props) {
     <header className="sticky top-0 z-50 border-b border-ink-700/70 bg-ink-900/80 backdrop-blur">
       <nav className="mx-auto flex h-14 max-w-6xl items-center gap-1 px-4">
         <NavLink to="/" className="mr-2 flex items-center gap-2">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand-gradient text-white shadow-glow">♞</span>
-          <span className="font-display text-lg text-white">ChessGuru</span>
+          {tenantBrand?.logoUrl ? (
+            <img src={tenantBrand.logoUrl} alt="" className="h-8 w-8 rounded-lg object-cover ring-1 ring-white/20" />
+          ) : (
+            <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand-gradient text-white shadow-glow">♞</span>
+          )}
+          <span className="font-display text-lg text-white">{tenantBrand?.name || "ChessGuru"}</span>
         </NavLink>
 
         {/* Desktop: grouped dropdowns */}
