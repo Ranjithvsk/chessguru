@@ -1884,8 +1884,9 @@ export default function AcademyPublicPage() {
         .cg-civ-header-brand:hover { color: #232323; }
         .cg-civ-header-logo { border: 2px solid #fff; border-radius: 50%; height: 2rem; width: 2rem; margin-right: 0.5rem; object-fit: cover; }
         .cg-civ-header-actions { align-items: center; display: flex; gap: 1rem; }
-        /* Hero — padding matches header (3.5rem) so text aligns with logo, not viewport edge */
-        .cg-civ-hero { display: flex; gap: 1rem; align-items: flex-end; padding: 3rem 3.5rem; max-width: 1440px; margin: 0 auto; }
+        /* Hero — 7.5rem (120px) horizontal padding to match Chessiverse's H1 x=120 indent */
+        .cg-civ-hero { display: flex; gap: 2rem; align-items: flex-end; padding: 3rem 7.5rem; max-width: 1440px; margin: 0 auto; }
+        @media (max-width: 1100px) { .cg-civ-hero { padding: 3rem 3rem; } }
         @media (max-width: 900px) { .cg-civ-hero { flex-direction: column; padding: 2rem 1.5rem; align-items: stretch; } }
         .cg-civ-hero-text { flex: 1; display: flex; flex-direction: column; max-width: 520px; }
         @media (max-width: 900px) { .cg-civ-hero-text { max-width: 100%; } }
