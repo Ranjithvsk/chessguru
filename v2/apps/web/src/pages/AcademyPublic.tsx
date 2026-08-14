@@ -1895,7 +1895,7 @@ export default function AcademyPublicPage() {
         }
         .cg-civ-root {
           --clr-background-main: #e5f5fe;
-          --clr-background-main-new: linear-gradient(180deg,#f3fdff,#ebfcff);
+          --clr-background-main-new: #dff8fc;
           --clr-text-main: #232323;
           --clr-text-gray: #5a5a5a;
           --clr-text-darkgray: #2d2d2d;
@@ -1934,9 +1934,9 @@ export default function AcademyPublicPage() {
         .cg-civ-root .text-accent { color: var(--clr-accent-new); }
         .cg-civ-root .text-gray { color: var(--clr-text-gray); }
         /* Section bands */
-        .cg-civ-band-a { background: linear-gradient(90deg,#dbfaff,#e6fcff); }
-        /* band-b was too pale (looked gray on PC); now cyan too, one step lighter */
-        .cg-civ-band-b { background: linear-gradient(180deg,#e6fcff,#d9f5fc); }
+        /* Unified section bg — no visible band-steps between sections */
+        .cg-civ-band-a { background: transparent; }
+        .cg-civ-band-b { background: transparent; }
         .cg-civ-band-banner { background: var(--clr-section-banner); }
         .cg-civ-section { padding: 5rem 1rem; }
         @media (max-width: 768px) { .cg-civ-section { padding: 3rem 1rem 2rem; } }
