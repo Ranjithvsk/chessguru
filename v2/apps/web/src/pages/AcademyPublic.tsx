@@ -2004,12 +2004,12 @@ export default function AcademyPublicPage() {
       <section id="top" className="cg-civ-hero">
         <div className="cg-civ-hero-text">
           <h1>
-            <span className="text-accent">Learn Chess Without Stress</span>
+            <span className="text-accent">Learn Without Stress</span>
             <br />
-            <span>With Guna Chess Academy&apos;s Titled Coaches</span>
+            <span>With Titled Chess Coaches</span>
           </h1>
           <p className="cg-civ-hero-desc">
-            Play, practice, and puzzle with over {Math.max(20, coaches.length * 4)} of Chennai&apos;s most patient chess coaches, tuned to every rating from beginner to master.
+            Play, practise, and puzzle with over {Math.max(20, coaches.length * 4)} of Chennai&apos;s most patient chess coaches.
           </p>
           <div className="cg-civ-hero-benefits">
             <span className="cg-civ-benefit">
@@ -2022,7 +2022,7 @@ export default function AcademyPublicPage() {
             </span>
             <span className="cg-civ-benefit">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
-              <strong>Titled coaches</strong>
+              <strong>No cheating</strong>
             </span>
           </div>
           <div className="cg-civ-hero-buttons">
@@ -2032,9 +2032,9 @@ export default function AcademyPublicPage() {
               className="cg-civ-btn cg-civ-btn--accent cg-civ-btn--xl"
             >
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M5 3l14 9-14 9V3z"/></svg>
-              <span>{joinLabel} — it&apos;s free!</span>
+              <span>Play now for Free!</span>
             </a>
-            <div className="cg-civ-hero-cta-sub">Start your first class in 30 seconds!</div>
+            <div className="cg-civ-hero-cta-sub">Start playing in 30 seconds!</div>
           </div>
         </div>
         <div className="cg-civ-hero-visual">
