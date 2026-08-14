@@ -1179,10 +1179,13 @@ function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: bool
   return (
     <section className="cg-civ-band-b" style={{ padding: '5rem 1rem 3rem' }}>
       <style>{`
-        .cg-cr-grid { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 1rem 1rem; max-width: 1200px; margin: 2rem auto 0; }
-        @media (max-width: 1023px) { .cg-cr-grid { grid-template-columns: repeat(3, minmax(0,1fr)); } }
-        @media (max-width: 559px)  { .cg-cr-grid { grid-template-columns: repeat(2, minmax(0,1fr)); } }
-        .cg-cr-card { background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 6px rgba(0,0,0,0.06); transition: all 0.2s ease-in-out; cursor: pointer; display: flex; flex-direction: column; text-decoration: none; color: inherit; }
+        /* Horizontal auto-scroll marquee — matches chessiverse's swiper feel */
+        @keyframes cgCreatorScroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+        .cg-cr-viewport { overflow: hidden; max-width: 1200px; margin: 2rem auto 0; mask-image: linear-gradient(to right, transparent 0, #000 4%, #000 96%, transparent 100%); -webkit-mask-image: linear-gradient(to right, transparent 0, #000 4%, #000 96%, transparent 100%); }
+        .cg-cr-track { display: flex; gap: 1rem; width: max-content; animation: cgCreatorScroll 40s linear infinite; }
+        .cg-cr-viewport:hover .cg-cr-track { animation-play-state: paused; }
+        .cg-cr-card { flex: 0 0 180px; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 6px rgba(0,0,0,0.06); transition: all 0.2s ease-in-out; cursor: pointer; display: flex; flex-direction: column; text-decoration: none; color: inherit; }
+        @media (max-width: 559px) { .cg-cr-card { flex: 0 0 140px; } }
         .cg-cr-card:hover { transform: translateY(-4px); box-shadow: 0 10px 20px rgba(20,162,184,0.15); }
         .cg-cr-photo { position: relative; aspect-ratio: 1/1; overflow: hidden; background: #f3f4f6; }
         .cg-cr-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -1200,17 +1203,19 @@ function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: bool
           </h2>
           <p className="cg-civ-section-sub">Challenge your favourite right away. Each coach&apos;s teaching style is modelled on thousands of their own games. <a href="#" style={{ color: '#14a2b8', fontWeight: 700 }}>View all coaches →</a></p>
         </Reveal>
-        <div className="cg-cr-grid">
-          {CREATORS.map((c) => (
-            <a key={c.name} href={ctaHref} {...(ctaExt ? { target: "_blank", rel: "noreferrer" } : {})} className="cg-cr-card">
-              <div className="cg-cr-photo">
-                <img src={c.img} alt={c.name} loading="lazy" />
-                <div className="cg-cr-diamond" style={{ background: c.badge }} />
-              </div>
-              <div className="cg-cr-name">{c.name}</div>
-              <div className="cg-cr-sub">{c.sub}</div>
-            </a>
-          ))}
+        <div className="cg-cr-viewport">
+          <div className="cg-cr-track">
+            {[...CREATORS, ...CREATORS].map((c, i) => (
+              <a key={`${c.name}-${i}`} href={ctaHref} {...(ctaExt ? { target: "_blank", rel: "noreferrer" } : {})} className="cg-cr-card">
+                <div className="cg-cr-photo">
+                  <img src={c.img} alt={c.name} loading="lazy" />
+                  <div className="cg-cr-diamond" style={{ background: c.badge }} />
+                </div>
+                <div className="cg-cr-name">{c.name}</div>
+                <div className="cg-cr-sub">{c.sub}</div>
+              </a>
+            ))}
+          </div>
         </div>
         <div className="cg-cr-viewall">
           <a href={ctaHref} {...(ctaExt ? { target: "_blank", rel: "noreferrer" } : {})} className="cg-civ-btn cg-civ-btn--accent cg-civ-btn--md">
@@ -1475,11 +1480,14 @@ function PublicationsBand() {
             <span className="text-accent">Leading Publications</span>
             <br /><span> and Loved by Students Worldwide</span>
           </h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '2rem', alignItems: 'center', maxWidth: '900px', margin: '0 auto', opacity: 0.75 }}>
-            {LOGOS.map(l => (
-              <div key={l.name} style={{ ...l.style, fontSize: '1.35rem', color: '#5a5a5a', textAlign: 'center' }}>{l.name}</div>
-            ))}
+          <div style={{ overflow: 'hidden', maxWidth: '900px', margin: '0 auto', WebkitMaskImage: 'linear-gradient(to right, transparent 0, #000 8%, #000 92%, transparent 100%)', maskImage: 'linear-gradient(to right, transparent 0, #000 8%, #000 92%, transparent 100%)' }}>
+            <div style={{ display: 'flex', gap: '3.5rem', alignItems: 'center', width: 'max-content', animation: 'cgLogoScroll 28s linear infinite', opacity: 0.75 }} className="cg-logos-track">
+              {[...LOGOS, ...LOGOS, ...LOGOS].map((l, i) => (
+                <div key={`${l.name}-${i}`} style={{ ...l.style, fontSize: '1.35rem', color: '#5a5a5a', textAlign: 'center', whiteSpace: 'nowrap', flexShrink: 0 }}>{l.name}</div>
+              ))}
+            </div>
           </div>
+          <style>{`@keyframes cgLogoScroll { from { transform: translateX(0); } to { transform: translateX(-33.333%); } } .cg-logos-track:hover { animation-play-state: paused; }`}</style>
         </Reveal>
       </div>
     </section>
@@ -1881,7 +1889,7 @@ export default function AcademyPublicPage() {
         @media (max-width: 900px) { .cg-civ-hero { flex-direction: column; padding: 2rem 1.5rem; align-items: stretch; } }
         .cg-civ-hero-text { flex: 1; display: flex; flex-direction: column; max-width: 520px; }
         @media (max-width: 900px) { .cg-civ-hero-text { max-width: 100%; } }
-        .cg-civ-hero-visual { flex: 1; margin-inline: auto; position: relative; width: min(576px,100%); aspect-ratio: 1/1; min-height: 460px; }
+        .cg-civ-hero-visual { flex: 0 1 auto; margin-inline: auto; position: relative; width: min(440px,100%); aspect-ratio: 1/1; }
         /* Chessboard checker background — pale blue + cream (chessiverse subtle) */
         .cg-civ-hv-board { position: absolute; inset: 0; border-radius: 16px; overflow: hidden; box-shadow: var(--main-box-shadow); background:
           conic-gradient(from 90deg at 25% 25%, #d9edf5 25%, #f4f0e0 0 50%, #d9edf5 0 75%, #f4f0e0 0);
