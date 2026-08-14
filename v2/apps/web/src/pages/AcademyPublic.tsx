@@ -182,13 +182,15 @@ function Reveal({ children, className = "", delay = 0, from = "up" }: { children
 }
 
 // Native touch-scroll + auto-advance hook. Sets a ref on an overflow-x:auto
-// container; scrollLeft increments continuously. Pauses on user interaction
-// (touch/mouse). Chessiverse-style swiper feel without adding a library.
+// container; scrollLeft increments continuously. Negative pxPerSec scrolls
+// RIGHT (starts at halfway, decrements to 0, wraps). Pauses on user interaction.
 function useAutoScroll<T extends HTMLElement>(pxPerSec = 30) {
   const ref = useRef<T>(null);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    // Start at halfway when scrolling right so we have room to decrement into
+    if (pxPerSec < 0) el.scrollLeft = el.scrollWidth / 2;
     let raf = 0;
     let last = performance.now();
     let paused = false;
@@ -198,9 +200,10 @@ function useAutoScroll<T extends HTMLElement>(pxPerSec = 30) {
       last = now;
       if (!paused && now > resumeAt) {
         el.scrollLeft += (pxPerSec * dt) / 1000;
-        // seamless loop when duplicated content: at halfway, jump back
-        if (el.scrollLeft >= el.scrollWidth / 2) {
+        if (pxPerSec > 0 && el.scrollLeft >= el.scrollWidth / 2) {
           el.scrollLeft = 0;
+        } else if (pxPerSec < 0 && el.scrollLeft <= 0) {
+          el.scrollLeft = el.scrollWidth / 2;
         }
       }
       raf = requestAnimationFrame(tick);
@@ -1552,8 +1555,8 @@ const TESTIMONIAL_CARDS = [
   { text: "My kid actually asks to go to chess class. That's the biggest win.", by: "Arun", platform: "WhatsApp" },
 ];
 function TestimonialsGrid() {
-  const rowA = useAutoScroll<HTMLDivElement>(28);
-  const rowB = useAutoScroll<HTMLDivElement>(22);
+  const rowA = useAutoScroll<HTMLDivElement>(55);
+  const rowB = useAutoScroll<HTMLDivElement>(-48);
   return (
     <section className="cg-civ-band-a" style={{ padding: '4rem 1rem' }}>
       <style>{`
@@ -1561,10 +1564,10 @@ function TestimonialsGrid() {
         .cg-testi-vp::-webkit-scrollbar { display: none; }
         .cg-testi-vp:active { cursor: grabbing; }
         .cg-testi-row { display: flex; gap: 1rem; width: max-content; padding: .5rem 0; }
-        .cg-testi-card { flex: 0 0 280px; background: #fff; border: 1px solid #e8e9eb; border-radius: 10px; padding: 1.1rem 1.2rem; box-shadow: 0 2px 8px rgba(20,162,184,0.06); display: flex; flex-direction: column; gap: .65rem; user-select: none; }
-        .cg-testi-mark { color: #14a2b8; font-size: 1.4rem; line-height: 1; font-family: Georgia, serif; }
-        .cg-testi-text { color: #232323; font-size: .9rem; line-height: 1.55; letter-spacing: 1px; }
-        .cg-testi-attr { color: #5a5a5a; font-size: .75rem; font-weight: 600; letter-spacing: 1px; margin-top: auto; }
+        .cg-testi-card { flex: 0 0 220px; background: #fff; border: 1px solid #e8e9eb; border-radius: 8px; padding: .8rem .9rem; box-shadow: 0 2px 6px rgba(20,162,184,0.05); display: flex; flex-direction: column; gap: .4rem; user-select: none; }
+        .cg-testi-mark { color: #14a2b8; font-size: 1.15rem; line-height: 1; font-family: Georgia, serif; }
+        .cg-testi-text { color: #232323; font-size: .78rem; line-height: 1.45; letter-spacing: 1px; }
+        .cg-testi-attr { color: #5a5a5a; font-size: .68rem; font-weight: 600; letter-spacing: 1px; margin-top: auto; }
       `}</style>
       <div className="cg-civ-container">
         <Reveal className="text-center" delay={0}>
