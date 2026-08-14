@@ -181,6 +181,50 @@ function Reveal({ children, className = "", delay = 0, from = "up" }: { children
   );
 }
 
+// Native touch-scroll + auto-advance hook. Sets a ref on an overflow-x:auto
+// container; scrollLeft increments continuously. Pauses on user interaction
+// (touch/mouse). Chessiverse-style swiper feel without adding a library.
+function useAutoScroll<T extends HTMLElement>(pxPerSec = 30) {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let raf = 0;
+    let last = performance.now();
+    let paused = false;
+    let resumeAt = 0;
+    const tick = (now: number) => {
+      const dt = now - last;
+      last = now;
+      if (!paused && now > resumeAt) {
+        el.scrollLeft += (pxPerSec * dt) / 1000;
+        // seamless loop when duplicated content: at halfway, jump back
+        if (el.scrollLeft >= el.scrollWidth / 2) {
+          el.scrollLeft = 0;
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    const onDown = () => { paused = true; };
+    const onUp = () => { paused = false; resumeAt = performance.now() + 1600; };
+    el.addEventListener("mousedown", onDown);
+    el.addEventListener("touchstart", onDown, { passive: true });
+    el.addEventListener("mouseup", onUp);
+    el.addEventListener("touchend", onUp);
+    el.addEventListener("mouseleave", onUp);
+    return () => {
+      cancelAnimationFrame(raf);
+      el.removeEventListener("mousedown", onDown);
+      el.removeEventListener("touchstart", onDown as any);
+      el.removeEventListener("mouseup", onUp);
+      el.removeEventListener("touchend", onUp);
+      el.removeEventListener("mouseleave", onUp);
+    };
+  }, [pxPerSec]);
+  return ref;
+}
+
 // Shine sweep — the DWP category-card hover flourish.
 function ShineSweep() {
   return (
@@ -1176,15 +1220,16 @@ const CREATORS = [
   { img: "/academy/arch-10-prodigy.webp",    name: "Zara Ahmed",       sub: "U-10 · Prodigy",         badge: "#f97316" },
 ];
 function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: boolean; joinLabel: string }) {
+  const crRef = useAutoScroll<HTMLDivElement>(28);
   return (
     <section className="cg-civ-band-b" style={{ padding: '5rem 1rem 3rem' }}>
       <style>{`
-        /* Horizontal auto-scroll marquee — matches chessiverse's swiper feel */
-        @keyframes cgCreatorScroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-        .cg-cr-viewport { overflow: hidden; max-width: 1200px; margin: 2rem auto 0; mask-image: linear-gradient(to right, transparent 0, #000 4%, #000 96%, transparent 100%); -webkit-mask-image: linear-gradient(to right, transparent 0, #000 4%, #000 96%, transparent 100%); }
-        .cg-cr-track { display: flex; gap: 1rem; width: max-content; animation: cgCreatorScroll 40s linear infinite; }
-        .cg-cr-viewport:hover .cg-cr-track { animation-play-state: paused; }
-        .cg-cr-card { flex: 0 0 180px; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 6px rgba(0,0,0,0.06); transition: all 0.2s ease-in-out; cursor: pointer; display: flex; flex-direction: column; text-decoration: none; color: inherit; }
+        /* Touch-scrollable auto-advance marquee — chessiverse swiper feel */
+        .cg-cr-viewport { overflow-x: auto; overflow-y: hidden; max-width: 1200px; margin: 2rem auto 0; mask-image: linear-gradient(to right, transparent 0, #000 4%, #000 96%, transparent 100%); -webkit-mask-image: linear-gradient(to right, transparent 0, #000 4%, #000 96%, transparent 100%); scrollbar-width: none; -webkit-overflow-scrolling: touch; touch-action: pan-x; cursor: grab; padding: .5rem 0; }
+        .cg-cr-viewport::-webkit-scrollbar { display: none; }
+        .cg-cr-viewport:active { cursor: grabbing; }
+        .cg-cr-track { display: flex; gap: 1rem; width: max-content; }
+        .cg-cr-card { flex: 0 0 180px; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 6px rgba(0,0,0,0.06); transition: all 0.2s ease-in-out; cursor: pointer; display: flex; flex-direction: column; text-decoration: none; color: inherit; user-select: none; }
         @media (max-width: 559px) { .cg-cr-card { flex: 0 0 140px; } }
         .cg-cr-card:hover { transform: translateY(-4px); box-shadow: 0 10px 20px rgba(20,162,184,0.15); }
         .cg-cr-photo { position: relative; aspect-ratio: 1/1; overflow: hidden; background: #f3f4f6; }
@@ -1203,7 +1248,7 @@ function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: bool
           </h2>
           <p className="cg-civ-section-sub">Challenge your favourite right away. Each coach&apos;s teaching style is modelled on thousands of their own games. <a href="#" style={{ color: '#14a2b8', fontWeight: 700 }}>View all coaches →</a></p>
         </Reveal>
-        <div className="cg-cr-viewport">
+        <div ref={crRef} className="cg-cr-viewport">
           <div className="cg-cr-track">
             {[...CREATORS, ...CREATORS].map((c, i) => (
               <a key={`${c.name}-${i}`} href={ctaHref} {...(ctaExt ? { target: "_blank", rel: "noreferrer" } : {})} className="cg-cr-card">
@@ -1507,17 +1552,16 @@ const TESTIMONIAL_CARDS = [
   { text: "My kid actually asks to go to chess class. That's the biggest win.", by: "Arun", platform: "WhatsApp" },
 ];
 function TestimonialsGrid() {
+  const rowA = useAutoScroll<HTMLDivElement>(28);
+  const rowB = useAutoScroll<HTMLDivElement>(22);
   return (
     <section className="cg-civ-band-a" style={{ padding: '4rem 1rem' }}>
       <style>{`
-        @keyframes cgTestiScrollA { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-        @keyframes cgTestiScrollB { from { transform: translateX(-50%); } to { transform: translateX(0); } }
-        .cg-testi-vp { overflow: hidden; max-width: 1300px; margin: 0 auto; -webkit-mask-image: linear-gradient(to right, transparent 0, #000 4%, #000 96%, transparent 100%); mask-image: linear-gradient(to right, transparent 0, #000 4%, #000 96%, transparent 100%); padding: .5rem 0; }
+        .cg-testi-vp { overflow-x: auto; overflow-y: hidden; max-width: 1300px; margin: 0 auto; -webkit-mask-image: linear-gradient(to right, transparent 0, #000 4%, #000 96%, transparent 100%); mask-image: linear-gradient(to right, transparent 0, #000 4%, #000 96%, transparent 100%); padding: .5rem 0; scrollbar-width: none; -webkit-overflow-scrolling: touch; touch-action: pan-x; cursor: grab; }
+        .cg-testi-vp::-webkit-scrollbar { display: none; }
+        .cg-testi-vp:active { cursor: grabbing; }
         .cg-testi-row { display: flex; gap: 1rem; width: max-content; padding: .5rem 0; }
-        .cg-testi-row.a { animation: cgTestiScrollA 55s linear infinite; }
-        .cg-testi-row.b { animation: cgTestiScrollB 65s linear infinite; }
-        .cg-testi-vp:hover .cg-testi-row { animation-play-state: paused; }
-        .cg-testi-card { flex: 0 0 280px; background: #fff; border: 1px solid #e8e9eb; border-radius: 10px; padding: 1.1rem 1.2rem; box-shadow: 0 2px 8px rgba(20,162,184,0.06); display: flex; flex-direction: column; gap: .65rem; }
+        .cg-testi-card { flex: 0 0 280px; background: #fff; border: 1px solid #e8e9eb; border-radius: 10px; padding: 1.1rem 1.2rem; box-shadow: 0 2px 8px rgba(20,162,184,0.06); display: flex; flex-direction: column; gap: .65rem; user-select: none; }
         .cg-testi-mark { color: #14a2b8; font-size: 1.4rem; line-height: 1; font-family: Georgia, serif; }
         .cg-testi-text { color: #232323; font-size: .9rem; line-height: 1.55; letter-spacing: 1px; }
         .cg-testi-attr { color: #5a5a5a; font-size: .75rem; font-weight: 600; letter-spacing: 1px; margin-top: auto; }
@@ -1528,9 +1572,8 @@ function TestimonialsGrid() {
             <span>Loved by </span><span className="text-accent">Students &amp; Parents</span>
           </h2>
         </Reveal>
-        {/* Row A — scrolls left */}
-        <div className="cg-testi-vp" style={{ marginBottom: '1rem' }}>
-          <div className="cg-testi-row a">
+        <div ref={rowA} className="cg-testi-vp" style={{ marginBottom: '1rem' }}>
+          <div className="cg-testi-row">
             {[...TESTIMONIAL_CARDS, ...TESTIMONIAL_CARDS].map((t, i) => (
               <div key={`a-${i}`} className="cg-testi-card">
                 <div className="cg-testi-mark">&ldquo;</div>
@@ -1540,9 +1583,8 @@ function TestimonialsGrid() {
             ))}
           </div>
         </div>
-        {/* Row B — scrolls right (opposite direction for parallax feel) */}
-        <div className="cg-testi-vp">
-          <div className="cg-testi-row b">
+        <div ref={rowB} className="cg-testi-vp">
+          <div className="cg-testi-row">
             {[...TESTIMONIAL_CARDS.slice().reverse(), ...TESTIMONIAL_CARDS.slice().reverse()].map((t, i) => (
               <div key={`b-${i}`} className="cg-testi-card">
                 <div className="cg-testi-mark">&ldquo;</div>
@@ -1569,7 +1611,8 @@ function QuadrantCharts() {
         .cg-civ-quad-grid { position: relative; aspect-ratio: 1/1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 4px; }
         .cg-civ-quad-cell { border-radius: 8px; padding: .7rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .35rem; }
         .cg-civ-quad-label { position: absolute; font-size: .65rem; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: #5a5a5a; }
-        .cg-civ-quad-piece { width: 42px; height: 42px; border-radius: 8px; display: grid; place-items: center; font-size: 1.3rem; background: #fff; border: 2px solid #e8e9eb; }
+        .cg-civ-quad-piece { width: 60px; height: 60px; display: grid; place-items: center; }
+        .cg-civ-quad-piece img { width: 100%; height: 100%; object-fit: contain; }
         .cg-civ-quad-tag { font-size: .68rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #232323; }
         .cg-civ-quad-center { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 48px; height: 48px; border-radius: 50%; overflow: hidden; border: 2px solid #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 2; background: #14a2b8; }
         .cg-civ-quad-center img { width: 100%; height: 100%; object-fit: cover; }
@@ -1586,19 +1629,19 @@ function QuadrantCharts() {
             <div className="cg-civ-quad-title">Playstyle detail</div>
             <div className="cg-civ-quad-grid">
               <div className="cg-civ-quad-cell" style={{ background: '#c7f6cf' }}>
-                <div className="cg-civ-quad-piece" style={{ background: '#c7f6cf' }}>♞</div>
+                <div className="cg-civ-quad-piece"><img src={`${IMG}/q-hunter.webp`} alt="Hunter" /></div>
                 <div className="cg-civ-quad-tag">Hunter</div>
               </div>
               <div className="cg-civ-quad-cell" style={{ background: '#fff8c7' }}>
-                <div className="cg-civ-quad-piece" style={{ background: '#fff8c7' }}>♛</div>
+                <div className="cg-civ-quad-piece"><img src={`${IMG}/q-savage.webp`} alt="Savage" /></div>
                 <div className="cg-civ-quad-tag">Savage</div>
               </div>
               <div className="cg-civ-quad-cell" style={{ background: '#c7e0f6' }}>
-                <div className="cg-civ-quad-piece" style={{ background: '#c7e0f6' }}>♟</div>
+                <div className="cg-civ-quad-piece"><img src={`${IMG}/q-guardian.webp`} alt="Guardian" /></div>
                 <div className="cg-civ-quad-tag">Guardian</div>
               </div>
               <div className="cg-civ-quad-cell" style={{ background: '#e8d5f5' }}>
-                <div className="cg-civ-quad-piece" style={{ background: '#e8d5f5' }}>♗</div>
+                <div className="cg-civ-quad-piece"><img src={`${IMG}/q-observer.webp`} alt="Observer" /></div>
                 <div className="cg-civ-quad-tag">Observer</div>
               </div>
               <div className="cg-civ-quad-center">
@@ -1615,19 +1658,19 @@ function QuadrantCharts() {
             <div className="cg-civ-quad-title">Openings</div>
             <div className="cg-civ-quad-grid">
               <div className="cg-civ-quad-cell" style={{ background: '#c7f6cf' }}>
-                <div className="cg-civ-quad-piece" style={{ background: '#c7f6cf' }}>♗</div>
+                <div className="cg-civ-quad-piece"><img src={`${IMG}/q-gambler.webp`} alt="Gambler" /></div>
                 <div className="cg-civ-quad-tag">Gambler</div>
               </div>
               <div className="cg-civ-quad-cell" style={{ background: '#fff8c7' }}>
-                <div className="cg-civ-quad-piece" style={{ background: '#fff8c7' }}>♜</div>
+                <div className="cg-civ-quad-piece"><img src={`${IMG}/q-duelist.webp`} alt="Duelist" /></div>
                 <div className="cg-civ-quad-tag">Duelist</div>
               </div>
               <div className="cg-civ-quad-cell" style={{ background: '#c7e0f6' }}>
-                <div className="cg-civ-quad-piece" style={{ background: '#c7e0f6' }}>♞</div>
+                <div className="cg-civ-quad-piece"><img src={`${IMG}/q-pragmatist.webp`} alt="Pragmatist" /></div>
                 <div className="cg-civ-quad-tag">Pragmatist</div>
               </div>
               <div className="cg-civ-quad-cell" style={{ background: '#e8d5f5' }}>
-                <div className="cg-civ-quad-piece" style={{ background: '#e8d5f5' }}>♛</div>
+                <div className="cg-civ-quad-piece"><img src={`${IMG}/q-classic.webp`} alt="Classic" /></div>
                 <div className="cg-civ-quad-tag">Classic</div>
               </div>
               <div className="cg-civ-quad-center">
@@ -1915,8 +1958,10 @@ export default function AcademyPublicPage() {
         /* Hero — 3.5rem padding matches header so H1 aligns with brand logo above */
         .cg-civ-hero { display: flex; gap: 2rem; align-items: flex-end; padding: 3rem 3.5rem; max-width: 1440px; margin: 0 auto; }
         @media (max-width: 900px) { .cg-civ-hero { flex-direction: column; padding: 2rem 1.5rem; align-items: stretch; } }
-        .cg-civ-hero-text { flex: 1; display: flex; flex-direction: column; max-width: 520px; }
+        .cg-civ-hero-text { flex: 1; display: flex; flex-direction: column; align-items: center; text-align: center; max-width: 520px; }
         @media (max-width: 900px) { .cg-civ-hero-text { max-width: 100%; } }
+        .cg-civ-hero-benefits { justify-content: center; }
+        .cg-civ-hero-buttons { align-items: center; }
         .cg-civ-hero-visual { flex: 0 1 auto; margin-inline: auto; position: relative; width: min(440px,100%); aspect-ratio: 1/1; }
         /* Chessboard checker background — pale blue + cream (chessiverse subtle) */
         .cg-civ-hv-board { position: absolute; inset: 0; border-radius: 16px; overflow: hidden; box-shadow: var(--main-box-shadow); background:
