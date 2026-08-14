@@ -118,10 +118,10 @@ function CountStat({ label, value, suffix = "" }: { label: string; value: number
   const n = useCountUp(value, 1300, seen);
   return (
     <div ref={ref} className="text-center">
-      <div className="font-display text-5xl md:text-7xl tracking-tight bg-gradient-to-br from-white via-cyan-100 to-fuchsia-200 bg-clip-text text-transparent">
+      <div className="font-display text-5xl md:text-7xl tracking-tight bg-gradient-to-br from-stone-900 via-indigo-700 to-fuchsia-700 bg-clip-text text-transparent">
         {n}{suffix}
       </div>
-      <div className="mt-2 text-[10px] md:text-xs tracking-[0.25em] uppercase text-white/50">{label}</div>
+      <div className="mt-2 text-[10px] md:text-xs tracking-[0.25em] uppercase text-stone-500">{label}</div>
     </div>
   );
 }
@@ -138,7 +138,7 @@ function CoachTiltCard({ c }: { c: Coach }) {
     >
       <div
         ref={ref}
-        className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-white/[0.08] to-white/[0.02] backdrop-blur-xl ring-1 ring-white/10 hover:ring-cyan-400/50 transition-all duration-500 will-change-transform"
+        className="relative rounded-3xl overflow-hidden bg-white backdrop-blur-xl ring-1 ring-stone-200 hover:ring-cyan-400/50 transition-all duration-500 will-change-transform"
       >
         <div className="aspect-[3/4] relative overflow-hidden">
           {cp.photoUrl ? (
@@ -150,28 +150,28 @@ function CoachTiltCard({ c }: { c: Coach }) {
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent" />
           {cp.titleClass && (
-            <div className="absolute top-4 left-4 px-2.5 py-1 rounded-full bg-gradient-to-r from-amber-400 to-rose-500 text-[10px] tracking-widest uppercase font-bold text-white shadow-lg shadow-rose-500/50">
+            <div className="absolute top-4 left-4 px-2.5 py-1 rounded-full bg-gradient-to-r from-amber-400 to-rose-500 text-[10px] tracking-widest uppercase font-bold text-stone-900 shadow-lg shadow-rose-500/50">
               {cp.titleClass}
             </div>
           )}
           {cp.elo != null && (
-            <div className="absolute top-4 right-4 px-3 py-1 rounded-full bg-black/50 backdrop-blur-md text-xs font-mono text-cyan-300 ring-1 ring-cyan-400/40">
+            <div className="absolute top-4 right-4 px-3 py-1 rounded-full bg-stone-100 backdrop-blur-md text-xs font-mono text-cyan-300 ring-1 ring-cyan-400/40">
               {cp.elo}
             </div>
           )}
           <div className="absolute bottom-4 left-4 right-4">
-            <div className="flex items-center gap-2 mb-2 text-xs text-white/70">
+            <div className="flex items-center gap-2 mb-2 text-xs text-stone-600">
               {isoToFlag(cp.country) && <span className="text-base">{isoToFlag(cp.country)}</span>}
               {cp.yearsTeaching && <><span>{cp.yearsTeaching} yrs</span></>}
             </div>
-            <div className="font-display text-2xl md:text-3xl text-white leading-tight tracking-tight">
+            <div className="font-display text-2xl md:text-3xl text-stone-900 leading-tight tracking-tight">
               {cp.displayName || c.fullName || c.username}
             </div>
-            {cp.tagline && <div className="text-xs text-white/60 mt-1 line-clamp-2">{cp.tagline}</div>}
+            {cp.tagline && <div className="text-xs text-stone-500 mt-1 line-clamp-2">{cp.tagline}</div>}
             {cp.playingStyles?.length > 0 && (
               <div className="flex flex-wrap gap-1 mt-3">
                 {cp.playingStyles.slice(0, 3).map((s) => (
-                  <span key={s} className="text-[9px] tracking-wider uppercase px-2 py-0.5 rounded-full bg-white/10 text-white/80 backdrop-blur-sm ring-1 ring-white/10">
+                  <span key={s} className="text-[9px] tracking-wider uppercase px-2 py-0.5 rounded-full bg-stone-100 text-stone-700 backdrop-blur-sm ring-1 ring-stone-200">
                     {s}
                   </span>
                 ))}
@@ -186,7 +186,7 @@ function CoachTiltCard({ c }: { c: Coach }) {
 
 function BentoTile({ children, className = "", tint = "" }: { children: React.ReactNode; className?: string; tint?: string }) {
   return (
-    <div className={`relative rounded-3xl overflow-hidden bg-gradient-to-br from-white/[0.08] to-white/[0.02] backdrop-blur-xl ring-1 ring-white/10 p-6 md:p-8 ${tint} ${className}`}>
+    <div className={`relative rounded-3xl overflow-hidden bg-white backdrop-blur-xl ring-1 ring-stone-200 p-6 md:p-8 ${tint} ${className}`}>
       {children}
     </div>
   );
@@ -214,25 +214,25 @@ export default function AcademyPublicPage() {
   useEffect(() => {
     const html = document.documentElement;
     const prev = html.getAttribute("class") || "";
-    html.classList.remove("light");
-    html.classList.add("dark");
+    html.classList.remove("dark");
+    html.classList.add("light");
     return () => { html.setAttribute("class", prev); };
   }, []);
 
   if (acadQ.isLoading || authQ.isLoading) {
     return (
-      <div className="min-h-screen bg-[#050510] grid place-items-center text-white/40 text-sm tracking-widest uppercase">
+      <div className="min-h-screen bg-[#faf6ef] grid place-items-center text-stone-400 text-sm tracking-widest uppercase">
         Loading
       </div>
     );
   }
   if ((acadQ.error as any)?.status === 404 || !acadQ.data) {
     return (
-      <div className="min-h-screen bg-[#050510] text-white grid place-items-center px-6 text-center">
+      <div className="min-h-screen bg-[#faf6ef] text-stone-900 grid place-items-center px-6 text-center">
         <div>
           <div className="text-7xl mb-4">&#9822;</div>
           <h1 className="font-display text-4xl mb-3">Not found</h1>
-          <Link to="/" className="px-6 py-3 rounded-full bg-white/10 hover:bg-white/20 text-sm">Home</Link>
+          <Link to="/" className="px-6 py-3 rounded-full bg-stone-100 hover:bg-stone-200 text-sm">Home</Link>
         </div>
       </div>
     );
@@ -260,7 +260,7 @@ export default function AcademyPublicPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#050510] text-white font-sans antialiased overflow-x-hidden">
+    <div className="min-h-screen bg-[#faf6ef] text-stone-900 font-sans antialiased overflow-x-hidden">
       <style>{`
         @keyframes cgFloat { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-14px) rotate(3deg); } }
         @keyframes cgSpinSlow { to { transform: rotate(360deg); } }
@@ -276,40 +276,40 @@ export default function AcademyPublicPage() {
         .cg-gradient-shift { background-size: 200% 200%; animation: cgGradientShift 8s ease-in-out infinite; }
         .cg-mesh {
           background:
-            radial-gradient(at 20% 20%, rgba(147,51,234,0.35) 0px, transparent 50%),
-            radial-gradient(at 80% 15%, rgba(6,182,212,0.30) 0px, transparent 50%),
-            radial-gradient(at 40% 85%, rgba(236,72,153,0.25) 0px, transparent 50%),
-            radial-gradient(at 90% 90%, rgba(251,146,60,0.22) 0px, transparent 50%);
+            radial-gradient(at 20% 20%, rgba(147,51,234,0.14) 0px, transparent 50%),
+            radial-gradient(at 80% 15%, rgba(6,182,212,0.12) 0px, transparent 50%),
+            radial-gradient(at 40% 85%, rgba(236,72,153,0.10) 0px, transparent 50%),
+            radial-gradient(at 90% 90%, rgba(251,146,60,0.10) 0px, transparent 50%);
         }
       `}</style>
 
       {/* ═══════════ TOP NAV ═══════════ */}
-      <nav className="fixed inset-x-0 top-0 z-50 backdrop-blur-lg bg-black/30 border-b border-white/5">
+      <nav className="fixed inset-x-0 top-0 z-50 backdrop-blur-lg bg-white/80 border-b border-stone-200">
         <div className="mx-auto max-w-7xl px-6 md:px-10 h-16 flex items-center justify-between">
           <a href="#top" className="flex items-center gap-3">
             {p.logoUrl ? (
-              <img src={p.logoUrl} alt="" className="w-9 h-9 rounded-full object-cover ring-1 ring-white/20" />
+              <img src={p.logoUrl} alt="" className="w-9 h-9 rounded-full object-cover ring-1 ring-stone-300" />
             ) : (
-              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-cyan-400 to-fuchsia-500 grid place-items-center text-white font-display text-sm shadow-lg shadow-fuchsia-500/50">
+              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-cyan-400 to-fuchsia-500 grid place-items-center text-stone-900 font-display text-sm shadow-lg shadow-fuchsia-500/50">
                 {displayName[0]?.toUpperCase() || "A"}
               </div>
             )}
             <span className="font-display text-lg tracking-tight">{displayName}</span>
           </a>
-          <div className="hidden md:flex items-center gap-8 text-sm text-white/70">
-            <a href="#coaches" className="hover:text-white transition-colors">Coaches</a>
-            <a href="#about" className="hover:text-white transition-colors">About</a>
-            <a href="#milestones" className="hover:text-white transition-colors">Milestones</a>
-            <a href="#faq" className="hover:text-white transition-colors">FAQ</a>
+          <div className="hidden md:flex items-center gap-8 text-sm text-stone-600">
+            <a href="#coaches" className="hover:text-stone-900 transition-colors">Coaches</a>
+            <a href="#about" className="hover:text-stone-900 transition-colors">About</a>
+            <a href="#milestones" className="hover:text-stone-900 transition-colors">Milestones</a>
+            <a href="#faq" className="hover:text-stone-900 transition-colors">FAQ</a>
           </div>
           <div className="flex items-center gap-2">
             {isOwner && (
-              <Link to="/academy-profile/edit" className="hidden sm:inline-flex px-3 py-1.5 text-xs text-white/60 hover:text-white">Edit</Link>
+              <Link to="/academy-profile/edit" className="hidden sm:inline-flex px-3 py-1.5 text-xs text-stone-500 hover:text-white">Edit</Link>
             )}
             <a
               href={joinHref}
               {...(joinExternal ? { target: "_blank", rel: "noreferrer" } : {})}
-              className="inline-flex items-center gap-1.5 px-5 py-2 rounded-full text-sm font-semibold bg-gradient-to-r from-cyan-400 to-fuchsia-500 text-white shadow-lg shadow-fuchsia-500/40 hover:shadow-fuchsia-500/60 hover:scale-105 transition-all"
+              className="inline-flex items-center gap-1.5 px-5 py-2 rounded-full text-sm font-semibold bg-gradient-to-r from-cyan-400 to-fuchsia-500 text-stone-900 shadow-lg shadow-fuchsia-500/40 hover:shadow-fuchsia-500/60 hover:scale-105 transition-all"
             >
               {joinLabel}
             </a>
@@ -320,7 +320,7 @@ export default function AcademyPublicPage() {
       {/* ═══════════ HERO — dark, gradient mesh, floating pieces ═══════════ */}
       <header id="top" className="relative pt-32 md:pt-40 pb-28 md:pb-40 overflow-hidden">
         <div className="absolute inset-0 cg-mesh cg-gradient-shift" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,transparent_0%,#050510_75%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,transparent_0%,rgba(250,246,239,0.7)_75%)]" />
 
         {/* animated svg chess pieces */}
         <svg viewBox="0 0 24 24" className="absolute left-[6%] top-[22%] w-24 md:w-40 text-fuchsia-400/30 cg-float" fill="currentColor">
@@ -336,19 +336,19 @@ export default function AcademyPublicPage() {
         <div className="absolute left-[25%] top-[35%] w-12 h-12 rounded-full bg-fuchsia-500 blur-3xl cg-pulse-glow" style={{animationDelay:'1.5s'}} />
 
         <div className="relative mx-auto max-w-7xl px-6 md:px-10 text-center">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/[0.08] backdrop-blur-md ring-1 ring-white/15 text-xs tracking-widest uppercase mb-8 cg-fade-up">
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white backdrop-blur-md ring-1 ring-stone-200 text-xs tracking-widest uppercase mb-8 cg-fade-up">
             {isoToFlag(p.country) && <span className="text-base">{isoToFlag(p.country)}</span>}
-            <span className="text-white/80">{p.city || "Online"}</span>
-            {p.foundedYear && <><span className="text-white/30">&middot;</span><span className="text-cyan-300">Since {p.foundedYear}</span></>}
+            <span className="text-stone-700">{p.city || "Online"}</span>
+            {p.foundedYear && <><span className="text-stone-300">&middot;</span><span className="text-cyan-300">Since {p.foundedYear}</span></>}
           </div>
           <h1 className="font-display text-6xl md:text-8xl lg:text-[128px] leading-[0.9] tracking-[-0.03em] mb-8 cg-fade-up" style={{animationDelay:'.1s'}}>
-            <span className="bg-gradient-to-br from-white via-cyan-100 to-white bg-clip-text text-transparent">{displayName.split(" ").slice(0, -1).join(" ") || displayName}</span>
+            <span className="bg-gradient-to-br from-stone-900 via-indigo-700 to-stone-900 bg-clip-text text-transparent">{displayName.split(" ").slice(0, -1).join(" ") || displayName}</span>
             {displayName.split(" ").length > 1 && (
               <><br/><span className="bg-gradient-to-r from-fuchsia-400 via-rose-400 to-amber-400 bg-clip-text text-transparent cg-gradient-shift" style={{backgroundSize:'200% 200%'}}>{displayName.split(" ").slice(-1)[0]}</span></>
             )}
           </h1>
           {p.tagline && (
-            <p className="text-lg md:text-2xl text-white/60 max-w-2xl mx-auto leading-relaxed mb-12 cg-fade-up" style={{animationDelay:'.2s'}}>
+            <p className="text-lg md:text-2xl text-stone-500 max-w-2xl mx-auto leading-relaxed mb-12 cg-fade-up" style={{animationDelay:'.2s'}}>
               {p.tagline}
             </p>
           )}
@@ -356,14 +356,14 @@ export default function AcademyPublicPage() {
             <a
               href={joinHref}
               {...(joinExternal ? { target: "_blank", rel: "noreferrer" } : {})}
-              className="group relative inline-flex items-center gap-2 px-8 py-4 rounded-full text-base font-bold text-white overflow-hidden"
+              className="group relative inline-flex items-center gap-2 px-8 py-4 rounded-full text-base font-bold text-stone-900 overflow-hidden"
             >
               <span className="absolute inset-0 bg-gradient-to-r from-cyan-400 via-fuchsia-500 to-amber-400 cg-gradient-shift" />
               <span className="absolute inset-0 bg-gradient-to-r from-cyan-400 via-fuchsia-500 to-amber-400 blur-xl opacity-60 group-hover:opacity-100 transition-opacity" />
               <span className="relative z-10">{joinLabel}</span>
               <svg className="relative z-10 w-5 h-5 group-hover:translate-x-1 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
             </a>
-            <a href="#coaches" className="inline-flex items-center gap-1.5 px-6 py-4 rounded-full text-sm font-semibold text-white/80 hover:text-white bg-white/5 hover:bg-white/10 ring-1 ring-white/10 backdrop-blur-md transition-all">
+            <a href="#coaches" className="inline-flex items-center gap-1.5 px-6 py-4 rounded-full text-sm font-semibold text-stone-700 hover:text-stone-900 bg-stone-100 hover:bg-stone-100 ring-1 ring-stone-200 backdrop-blur-md transition-all">
               Explore &darr;
             </a>
           </div>
@@ -382,12 +382,12 @@ export default function AcademyPublicPage() {
       </section>
 
       {/* ═══════════ MARQUEE — playing styles ticker ═══════════ */}
-      <section className="relative py-10 overflow-hidden border-y border-white/5">
+      <section className="relative py-10 overflow-hidden border-y border-stone-200">
         <div className="flex cg-marquee whitespace-nowrap">
           {[...Array(2)].map((_, dupe) => (
             <div key={dupe} className="flex items-center shrink-0">
               {["Openings", "Tactics", "Endgames", "Strategy", "Blitz", "Positional", "Attacking", "Classical", "Memory", "Calculation"].map((w, i) => (
-                <span key={`${dupe}-${i}`} className="mx-8 text-3xl md:text-5xl font-display tracking-tight text-white/10 hover:text-white/40 transition-colors">
+                <span key={`${dupe}-${i}`} className="mx-8 text-3xl md:text-5xl font-display tracking-tight text-white/10 hover:text-stone-400 transition-colors">
                   <span className="mr-8 text-cyan-400/50">&#9822;</span>{w}
                 </span>
               ))}
@@ -432,7 +432,7 @@ export default function AcademyPublicPage() {
             <BentoTile tint="bg-gradient-to-br from-cyan-500/20 via-cyan-500/5 to-transparent">
               <div className="text-5xl mb-3">{isoToFlag(p.country) || "&#127760;"}</div>
               <div className="font-display text-xl">{p.city || "Online"}</div>
-              <div className="text-xs text-white/50 mt-1">{p.country || "Worldwide"}</div>
+              <div className="text-xs text-stone-500 mt-1">{p.country || "Worldwide"}</div>
             </BentoTile>
 
             {/* Est year tile */}
@@ -440,7 +440,7 @@ export default function AcademyPublicPage() {
               <BentoTile tint="bg-gradient-to-br from-amber-500/20 via-amber-500/5 to-transparent">
                 <div className="text-xs uppercase tracking-widest text-amber-300 mb-3">Established</div>
                 <div className="font-display text-6xl leading-none">{p.foundedYear}</div>
-                <div className="text-xs text-white/50 mt-2">{new Date().getFullYear() - p.foundedYear} years of teaching</div>
+                <div className="text-xs text-stone-500 mt-2">{new Date().getFullYear() - p.foundedYear} years of teaching</div>
               </BentoTile>
             )}
 
@@ -448,7 +448,7 @@ export default function AcademyPublicPage() {
             <BentoTile tint="bg-gradient-to-br from-rose-500/20 via-rose-500/5 to-transparent">
               <div className="text-4xl mb-3">&#127942;</div>
               <div className="font-display text-4xl leading-none">{p.achievements.length}</div>
-              <div className="text-xs text-white/50 mt-2 uppercase tracking-widest">Milestones</div>
+              <div className="text-xs text-stone-500 mt-2 uppercase tracking-widest">Milestones</div>
             </BentoTile>
           </div>
         </div>
@@ -464,27 +464,27 @@ export default function AcademyPublicPage() {
                 Meet the masters.
               </h2>
             </div>
-            <div className="text-white/40 text-sm uppercase tracking-widest">{coaches.length} on staff</div>
+            <div className="text-stone-400 text-sm uppercase tracking-widest">{coaches.length} on staff</div>
           </div>
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {coaches.map((c) => <CoachTiltCard key={c.userId} c={c} />)}
           </div>
           {coaches.length === 0 && (
-            <div className="text-white/40 text-center py-16">Coach profiles coming soon.</div>
+            <div className="text-stone-400 text-center py-16">Coach profiles coming soon.</div>
           )}
         </div>
       </section>
 
       {/* ═══════════ ABOUT — long-form ═══════════ */}
       {p.description && (
-        <section id="about" className="relative py-20 md:py-28 border-y border-white/5">
+        <section id="about" className="relative py-20 md:py-28 border-y border-stone-200">
           <div className="absolute inset-0 cg-mesh opacity-30" />
           <div className="relative mx-auto max-w-4xl px-6 md:px-10 text-center">
             <div className="text-xs tracking-[0.25em] uppercase text-fuchsia-400 font-semibold mb-3">Our story</div>
             <h2 className="font-display text-4xl md:text-6xl leading-[1.05] tracking-tight mb-10">
               Chess, with heart.
             </h2>
-            <div className="text-lg md:text-xl text-white/70 leading-[1.75] whitespace-pre-line max-w-3xl mx-auto text-left">
+            <div className="text-lg md:text-xl text-stone-600 leading-[1.75] whitespace-pre-line max-w-3xl mx-auto text-left">
               {p.description}
             </div>
           </div>
@@ -503,7 +503,7 @@ export default function AcademyPublicPage() {
             </div>
             <div className="grid gap-5 md:grid-cols-3">
               {p.achievements.map((a, i) => (
-                <div key={a.id} className="group relative rounded-3xl overflow-hidden bg-gradient-to-br from-white/[0.08] to-white/[0.02] backdrop-blur-xl ring-1 ring-white/10 hover:ring-amber-400/40 transition-all hover:-translate-y-2 duration-500 cg-fade-up" style={{animationDelay: `${i * 80}ms`}}>
+                <div key={a.id} className="group relative rounded-3xl overflow-hidden bg-white backdrop-blur-xl ring-1 ring-stone-200 hover:ring-amber-400/40 transition-all hover:-translate-y-2 duration-500 cg-fade-up" style={{animationDelay: `${i * 80}ms`}}>
                   {a.imageUrl && (
                     <div className="aspect-[4/3] overflow-hidden">
                       <img src={a.imageUrl} alt="" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000" />
@@ -517,7 +517,7 @@ export default function AcademyPublicPage() {
                       </div>
                     )}
                     <div className="font-display text-xl leading-tight mb-2">{a.title}</div>
-                    {a.description && <div className="text-sm text-white/60 leading-relaxed">{a.description}</div>}
+                    {a.description && <div className="text-sm text-stone-500 leading-relaxed">{a.description}</div>}
                   </div>
                 </div>
               ))}
@@ -528,7 +528,7 @@ export default function AcademyPublicPage() {
 
       {/* ═══════════ TESTIMONIALS — layered cards ═══════════ */}
       {p.testimonials.length > 0 && (
-        <section className="relative py-20 md:py-28 border-y border-white/5">
+        <section className="relative py-20 md:py-28 border-y border-stone-200">
           <div className="mx-auto max-w-7xl px-6 md:px-10">
             <div className="mb-14 text-center">
               <div className="text-xs tracking-[0.25em] uppercase text-fuchsia-400 font-semibold mb-3">Loved by</div>
@@ -538,22 +538,22 @@ export default function AcademyPublicPage() {
             </div>
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {p.testimonials.map((t, i) => (
-                <figure key={t.id} className="relative rounded-3xl bg-gradient-to-br from-white/[0.07] to-transparent backdrop-blur-xl ring-1 ring-white/10 p-8 hover:ring-fuchsia-400/40 transition-all cg-fade-up" style={{animationDelay: `${i * 80}ms`}}>
+                <figure key={t.id} className="relative rounded-3xl bg-white backdrop-blur-xl ring-1 ring-stone-200 p-8 hover:ring-fuchsia-400/40 transition-all cg-fade-up" style={{animationDelay: `${i * 80}ms`}}>
                   <div className="absolute -top-4 left-6 text-8xl font-display leading-none text-fuchsia-500/40">&ldquo;</div>
-                  <blockquote className="relative font-display text-lg md:text-xl leading-[1.5] text-white/90 mb-6">
+                  <blockquote className="relative font-display text-lg md:text-xl leading-[1.5] text-stone-800 mb-6">
                     {t.quote}
                   </blockquote>
                   <figcaption className="flex items-center gap-3">
                     {t.imageUrl ? (
                       <img src={t.imageUrl} alt={t.author} className="w-11 h-11 rounded-full object-cover ring-2 ring-fuchsia-400/40" />
                     ) : (
-                      <div className="w-11 h-11 rounded-full bg-gradient-to-br from-fuchsia-400 to-amber-500 grid place-items-center text-white text-sm font-display">
+                      <div className="w-11 h-11 rounded-full bg-gradient-to-br from-fuchsia-400 to-amber-500 grid place-items-center text-stone-900 text-sm font-display">
                         {t.author.split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase()}
                       </div>
                     )}
                     <div>
                       <div className="text-sm font-semibold">{t.author}</div>
-                      {t.role && <div className="text-xs text-white/50">{t.role}</div>}
+                      {t.role && <div className="text-xs text-stone-500">{t.role}</div>}
                     </div>
                     {t.rating && (
                       <div className="ml-auto text-amber-400 text-sm tracking-widest">{"★".repeat(Math.min(5, Math.max(1, Math.round(t.rating))))}</div>
@@ -580,23 +580,23 @@ export default function AcademyPublicPage() {
               {upcomingClasses.map((cl, i) => {
                 const d = new Date(cl.startAt);
                 return (
-                  <div key={cl._id} className="group flex items-center gap-5 rounded-2xl bg-white/[0.04] backdrop-blur-md ring-1 ring-white/10 hover:ring-cyan-400/50 hover:bg-white/[0.08] transition-all p-5 cg-fade-up" style={{animationDelay: `${i * 60}ms`}}>
+                  <div key={cl._id} className="group flex items-center gap-5 rounded-2xl bg-white backdrop-blur-md ring-1 ring-stone-200 hover:ring-cyan-400/50 hover:bg-white transition-all p-5 cg-fade-up" style={{animationDelay: `${i * 60}ms`}}>
                     <div className="w-16 shrink-0 text-center">
                       <div className="text-[10px] uppercase tracking-widest text-cyan-300 font-semibold">{d.toLocaleString(undefined, {weekday: 'short'})}</div>
                       <div className="font-display text-3xl leading-none mt-1">{d.getDate()}</div>
-                      <div className="text-[10px] text-white/50 mt-1 uppercase">{d.toLocaleString(undefined, {month: 'short'})}</div>
+                      <div className="text-[10px] text-stone-500 mt-1 uppercase">{d.toLocaleString(undefined, {month: 'short'})}</div>
                     </div>
-                    <div className="w-px h-12 bg-white/10" />
+                    <div className="w-px h-12 bg-stone-100" />
                     <div className="flex-1 min-w-0">
                       <div className="font-display text-lg md:text-xl leading-tight truncate">{cl.title}</div>
-                      <div className="text-sm text-white/50 mt-0.5">
+                      <div className="text-sm text-stone-500 mt-0.5">
                         {d.toLocaleString(undefined, {hour: '2-digit', minute: '2-digit'})} &middot; {cl.durationMin}min &middot; {cl.coach}
                       </div>
                     </div>
                     <a
                       href={joinHref}
                       {...(joinExternal ? { target: "_blank", rel: "noreferrer" } : {})}
-                      className="hidden sm:inline-flex items-center gap-1 px-4 py-2 rounded-full bg-white/10 hover:bg-cyan-400/20 text-xs font-semibold text-white/80 group-hover:text-cyan-300 transition-all"
+                      className="hidden sm:inline-flex items-center gap-1 px-4 py-2 rounded-full bg-stone-100 hover:bg-cyan-400/20 text-xs font-semibold text-stone-700 group-hover:text-cyan-300 transition-all"
                     >
                       RSVP &rarr;
                     </a>
@@ -609,7 +609,7 @@ export default function AcademyPublicPage() {
       )}
 
       {/* ═══════════ FAQ / DETAILED INFO ═══════════ */}
-      <section id="faq" className="relative py-20 md:py-28 border-y border-white/5">
+      <section id="faq" className="relative py-20 md:py-28 border-y border-stone-200">
         <div className="mx-auto max-w-4xl px-6 md:px-10">
           <div className="mb-14 text-center">
             <div className="text-xs tracking-[0.25em] uppercase text-amber-400 font-semibold mb-3">Answers</div>
@@ -625,14 +625,14 @@ export default function AcademyPublicPage() {
               { q: "Are classes online or in person?", a: `${p.city ? `${p.city} students can attend in person; ` : ""}online classes run live on our platform with a shared board, video, and homework tracking. Recordings available for missed classes.` },
               { q: "How do I sign up?", a: `${primaryContactHref ? `Tap "Get in touch" above and message us — you'll hear back within a day.` : "Scroll down to see our coaches, pick one that fits, and reach out through their profile."}` },
             ].map((f, i) => (
-              <details key={i} className="group rounded-2xl bg-white/[0.03] ring-1 ring-white/10 hover:ring-amber-400/40 transition-all">
+              <details key={i} className="group rounded-2xl bg-white ring-1 ring-stone-200 hover:ring-amber-400/40 transition-all">
                 <summary className="cursor-pointer list-none p-6 flex items-center justify-between gap-4">
                   <span className="font-display text-lg md:text-xl leading-tight pr-4">{f.q}</span>
                   <span className="w-8 h-8 shrink-0 rounded-full bg-amber-500/20 grid place-items-center text-amber-300 group-open:rotate-45 transition-transform">
                     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>
                   </span>
                 </summary>
-                <div className="px-6 pb-6 text-white/70 leading-relaxed text-[15px]">{f.a}</div>
+                <div className="px-6 pb-6 text-stone-600 leading-relaxed text-[15px]">{f.a}</div>
               </details>
             ))}
           </div>
@@ -645,15 +645,15 @@ export default function AcademyPublicPage() {
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/40 to-black/80" />
         <div className="relative mx-auto max-w-4xl px-6 md:px-10 text-center">
           <h2 className="font-display text-5xl md:text-7xl lg:text-8xl leading-[1] tracking-[-0.02em] mb-8">
-            <span className="bg-gradient-to-r from-white via-cyan-200 to-fuchsia-200 bg-clip-text text-transparent">Your move.</span>
+            <span className="bg-gradient-to-r from-stone-900 via-indigo-700 to-fuchsia-700 bg-clip-text text-transparent">Your move.</span>
           </h2>
-          <p className="text-lg md:text-2xl text-white/70 max-w-xl mx-auto mb-12">
+          <p className="text-lg md:text-2xl text-stone-600 max-w-xl mx-auto mb-12">
             Start with a free assessment class. We'll match you with the right coach.
           </p>
           <a
             href={joinHref}
             {...(joinExternal ? { target: "_blank", rel: "noreferrer" } : {})}
-            className="group relative inline-flex items-center gap-2 px-10 py-5 rounded-full text-lg font-bold text-white overflow-hidden"
+            className="group relative inline-flex items-center gap-2 px-10 py-5 rounded-full text-lg font-bold text-stone-900 overflow-hidden"
           >
             <span className="absolute inset-0 bg-gradient-to-r from-cyan-400 via-fuchsia-500 to-amber-400 cg-gradient-shift" />
             <span className="absolute inset-0 bg-gradient-to-r from-cyan-400 via-fuchsia-500 to-amber-400 blur-2xl opacity-70 group-hover:opacity-100 transition-opacity" />
@@ -664,27 +664,27 @@ export default function AcademyPublicPage() {
       </section>
 
       {/* ═══════════ FOOTER ═══════════ */}
-      <footer className="py-12 bg-black/50 border-t border-white/5">
-        <div className="mx-auto max-w-7xl px-6 md:px-10 flex flex-col md:flex-row items-center justify-between gap-6 text-sm text-white/50">
+      <footer className="py-12 bg-stone-100 border-t border-stone-200">
+        <div className="mx-auto max-w-7xl px-6 md:px-10 flex flex-col md:flex-row items-center justify-between gap-6 text-sm text-stone-500">
           <div className="flex items-center gap-3">
             {p.logoUrl ? (
               <img src={p.logoUrl} alt="" className="w-7 h-7 rounded-full object-cover" />
             ) : (
-              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-cyan-400 to-fuchsia-500 grid place-items-center text-white font-display text-xs">
+              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-cyan-400 to-fuchsia-500 grid place-items-center text-stone-900 font-display text-xs">
                 {displayName[0]?.toUpperCase() || "A"}
               </div>
             )}
-            <span className="text-white font-display">{displayName}</span>
-            {p.city && <span className="hidden sm:inline text-white/30">&middot; {p.city}</span>}
+            <span className="text-stone-900 font-display">{displayName}</span>
+            {p.city && <span className="hidden sm:inline text-stone-300">&middot; {p.city}</span>}
           </div>
           <div className="flex items-center gap-4">
             {socialsList.filter(([, v]) => v).map(([k, v]) => (
-              <a key={k} href={socialHref(k, v)} target="_blank" rel="noreferrer" className="text-xs tracking-widest uppercase hover:text-white transition-colors">
+              <a key={k} href={socialHref(k, v)} target="_blank" rel="noreferrer" className="text-xs tracking-widest uppercase hover:text-stone-900 transition-colors">
                 {k}
               </a>
             ))}
           </div>
-          <div className="text-xs text-white/30">Powered by ChessGuru</div>
+          <div className="text-xs text-stone-300">Powered by ChessGuru</div>
         </div>
       </footer>
     </div>
