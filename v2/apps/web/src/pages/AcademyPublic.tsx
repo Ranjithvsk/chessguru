@@ -1876,7 +1876,8 @@ export default function AcademyPublicPage() {
         /* Hero */
         .cg-civ-hero { display: flex; gap: 2rem; align-items: center; padding: 3rem 1rem; max-width: 1440px; margin: 0 auto; }
         @media (max-width: 900px) { .cg-civ-hero { flex-direction: column; padding: 2rem 1rem; } }
-        .cg-civ-hero-text { flex: 1; display: flex; flex-direction: column; }
+        .cg-civ-hero-text { flex: 1; display: flex; flex-direction: column; max-width: 520px; }
+        @media (max-width: 900px) { .cg-civ-hero-text { max-width: 100%; } }
         .cg-civ-hero-visual { flex: 1; margin-inline: auto; position: relative; width: min(576px,100%); aspect-ratio: 1/1; min-height: 460px; }
         /* Chessboard checker background — pale blue + cream (chessiverse subtle) */
         .cg-civ-hv-board { position: absolute; inset: 0; border-radius: 16px; overflow: hidden; box-shadow: var(--main-box-shadow); background:
@@ -2005,7 +2006,7 @@ export default function AcademyPublicPage() {
           <h1>
             <span className="text-accent">Learn Without Stress</span>
             <br />
-            <span>With Titled Chess Coaches</span>
+            <span>With Chennai&apos;s Top Titled Chess Coaches</span>
           </h1>
           <p className="cg-civ-hero-desc">
             Play, practise, and puzzle with over {Math.max(20, coaches.length * 4)} of Chennai&apos;s most patient chess coaches.
