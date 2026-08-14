@@ -1794,7 +1794,17 @@ export default function AcademyPublicPage() {
     <div className="cg-civ-root min-h-screen antialiased overflow-x-hidden">
       <ScrollProgress />
       <style>{`
+        /* ═══ Load Clash Display + Clash Grotesk from Fontshare CDN (same fonts chessiverse uses) ═══ */
+        @import url('https://api.fontshare.com/v2/css?f[]=clash-display@400,500,600,700&f[]=clash-grotesk@400,500,600,700&display=swap');
         /* ═══ CHESSIVERSE THEME TOKENS + BASE (1:1 clone, cg-civ-* prefix) ═══ */
+        .cg-civ-root, .cg-civ-root * {
+          font-family: "Clash Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+          letter-spacing: 1px;
+        }
+        .cg-civ-root h1, .cg-civ-root h2, .cg-civ-root h3, .cg-civ-root h4, .cg-civ-root h5, .cg-civ-root h6,
+        .cg-civ-root h1 *, .cg-civ-root h2 *, .cg-civ-root h3 * {
+          font-family: "Clash Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+        }
         .cg-civ-root {
           --clr-background-main: #e5f5fe;
           --clr-background-main-new: linear-gradient(180deg,#f3fdff,#ebfcff);
@@ -1827,10 +1837,12 @@ export default function AcademyPublicPage() {
           line-height: 1.2;
           color: var(--clr-text-main);
         }
-        .cg-civ-root h1 { font-size: 56px; font-weight: 700; line-height: 1.02; letter-spacing: -0.02em; }
-        @media (max-width: 768px) { .cg-civ-root h1 { font-size: 40px; } }
-        .cg-civ-root h2 { font-size: clamp(1.6rem, 3vw, 2.4rem); font-weight: 700; letter-spacing: -0.01em; }
-        .cg-civ-root h3 { font-size: 19px; font-weight: 600; margin: 0; }
+        .cg-civ-root h1 { font-size: 40px; font-weight: 700; line-height: 48px; letter-spacing: 1px; }
+        @media (max-width: 768px) { .cg-civ-root h1 { font-size: 32px; line-height: 40px; } }
+        .cg-civ-root h2 { font-size: 40px; font-weight: 700; line-height: 48px; letter-spacing: 1px; }
+        @media (max-width: 768px) { .cg-civ-root h2 { font-size: 28px; line-height: 34px; } }
+        .cg-civ-root h3 { font-size: 19px; font-weight: 600; margin: 0; letter-spacing: 1px; }
+        .cg-civ-root p { letter-spacing: 1px; line-height: 24px; }
         .cg-civ-root .text-accent { color: var(--clr-accent-new); }
         .cg-civ-root .text-gray { color: var(--clr-text-gray); }
         /* Section bands */
