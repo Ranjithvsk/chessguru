@@ -79,10 +79,14 @@ export class AcademyProfileService {
   async getBySlug(slug: string) {
     const s = String(slug || "").trim().toLowerCase();
     if (!s) throw new NotFoundException("no such academy");
-    const academy: any = await this.academies().findOne({ _id: s as any });
+    // Accept slug|_id|ownerId — tenant custom domains (gunachess.com) hit us with
+    // the domain first-label ("gunachess") which matches ownerId, not _id.
+    const academy: any = await this.academies().findOne({
+      $or: [{ _id: s as any }, { ownerId: s }, { slug: s }],
+    });
     if (!academy) throw new NotFoundException("no such academy");
 
-    const profile: any = (await this.col().findOne({ _id: s as any })) || {};
+    const profile: any = (await this.col().findOne({ _id: academy._id as any })) || {};
 
     // Enumerate every coach in the academy, then hydrate each with their
     // coachProfile in one $in query — cheaper than N round-trips.
