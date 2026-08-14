@@ -1161,7 +1161,71 @@ const BOT_ROSTER = [
   { name: "Aparna Endgame",       rating: 1600, style: "Endgame",     playIcon: "♚", flag: "IN", img: "/academy/bot-06-endgame.webp",    grad: "linear-gradient(180deg,#cffafe,#a5f3fc)" },
 ];
 
+// 1:1 chessiverse "Featured by Leading Chess Creators" — 10 compact person cards
+// in a 2×5 grid with colored diamond badge + name label + role subtitle.
+const CREATORS = [
+  { img: "/academy/arch-01-attacker.webp",   name: "IM Kavya Rao",     sub: "IM · Chess Coach",       badge: "#22c55e" },
+  { img: "/academy/arch-02-strategist.webp", name: "GM Marcus Ström",  sub: "GM · YouTube Creator",   badge: "#ef4444" },
+  { img: "/academy/arch-03-tactician.webp",  name: "WGM Amara Okafor", sub: "WGM · Streamer",         badge: "#eab308" },
+  { img: "/academy/arch-04-endgame.webp",    name: "GM Henrik Larsen", sub: "GM · Endgame Coach",     badge: "#3b82f6" },
+  { img: "/academy/arch-05-universal.webp",  name: "WIM Sofia Mendes", sub: "WIM · Chess Author",     badge: "#a855f7" },
+  { img: "/academy/arch-06-rock.webp",       name: "IM Rahul Nair",    sub: "IM · Blitz Specialist",  badge: "#14a2b8" },
+  { img: "/academy/arch-07-gambit.webp",     name: "FM Elena Volkova", sub: "FM · Gambit Expert",     badge: "#ec4899" },
+  { img: "/academy/arch-08-positional.webp", name: "IM Kenji Tanaka",  sub: "IM · Positional Coach",  badge: "#64748b" },
+  { img: "/academy/arch-09-improver.webp",   name: "CM Diego Ríos",    sub: "CM · Rising Star",       badge: "#10b981" },
+  { img: "/academy/arch-10-prodigy.webp",    name: "Zara Ahmed",       sub: "U-10 · Prodigy",         badge: "#f97316" },
+];
 function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: boolean; joinLabel: string }) {
+  return (
+    <section className="cg-civ-band-b" style={{ padding: '5rem 1rem 3rem' }}>
+      <style>{`
+        .cg-cr-grid { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 1rem 1rem; max-width: 1200px; margin: 2rem auto 0; }
+        @media (max-width: 1023px) { .cg-cr-grid { grid-template-columns: repeat(3, minmax(0,1fr)); } }
+        @media (max-width: 559px)  { .cg-cr-grid { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+        .cg-cr-card { background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 6px rgba(0,0,0,0.06); transition: all 0.2s ease-in-out; cursor: pointer; display: flex; flex-direction: column; text-decoration: none; color: inherit; }
+        .cg-cr-card:hover { transform: translateY(-4px); box-shadow: 0 10px 20px rgba(20,162,184,0.15); }
+        .cg-cr-photo { position: relative; aspect-ratio: 1/1; overflow: hidden; background: #f3f4f6; }
+        .cg-cr-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .cg-cr-diamond { position: absolute; top: 8px; right: 8px; width: 16px; height: 16px; transform: rotate(45deg); border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.25); z-index: 2; }
+        .cg-cr-name { color: #232323; font-size: 0.85rem; font-weight: 700; padding: 8px 10px 2px; letter-spacing: 0; line-height: 1.15; text-align: center; }
+        .cg-cr-sub { color: #5a5a5a; font-size: 0.7rem; padding: 0 10px 10px; letter-spacing: 0; line-height: 1.3; text-align: center; }
+        .cg-cr-viewall { display: flex; justify-content: center; margin: 2rem 0 0; }
+      `}</style>
+      <div className="cg-civ-container">
+        <Reveal className="text-center">
+          <h2 className="cg-civ-section-title">
+            <span style={{ color: '#f9a80a' }}>✦ </span>
+            <span>Featured by </span>
+            <span className="text-accent">Leading Chess Creators</span>
+          </h2>
+          <p className="cg-civ-section-sub">Challenge your favourite right away. Each coach&apos;s teaching style is modelled on thousands of their own games. <a href="#" style={{ color: '#14a2b8', fontWeight: 700 }}>View all coaches →</a></p>
+        </Reveal>
+        <div className="cg-cr-grid">
+          {CREATORS.map((c) => (
+            <a key={c.name} href={ctaHref} {...(ctaExt ? { target: "_blank", rel: "noreferrer" } : {})} className="cg-cr-card">
+              <div className="cg-cr-photo">
+                <img src={c.img} alt={c.name} loading="lazy" />
+                <div className="cg-cr-diamond" style={{ background: c.badge }} />
+              </div>
+              <div className="cg-cr-name">{c.name}</div>
+              <div className="cg-cr-sub">{c.sub}</div>
+            </a>
+          ))}
+        </div>
+        <div className="cg-cr-viewall">
+          <a href={ctaHref} {...(ctaExt ? { target: "_blank", rel: "noreferrer" } : {})} className="cg-civ-btn cg-civ-btn--accent cg-civ-btn--md">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 3l14 9-14 9V3z"/></svg>
+            <span>{joinLabel}</span>
+          </a>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// Retired mascot version — commented out for now to keep bundle lean.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function _BotMascotGridRetired({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: boolean; joinLabel: string }) {
   const [selected, setSelected] = useState(0);
   const b = BOT_ROSTER[selected];
   return (
@@ -1984,239 +2048,22 @@ export default function AcademyPublicPage() {
         </div>
       </section>
 
-      {/* ═══════════ STATS ═══════════ */}
-      <section className="cg-civ-band-a relative py-16 md:py-24">
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-fuchsia-500/5 to-transparent" />
-        <div className="relative mx-auto max-w-7xl px-6 md:px-10 grid grid-cols-2 md:grid-cols-4 gap-8 md:gap-4">
-          <CountStat label="Coaches" value={coaches.length} />
-          <CountStat label="Years teaching" value={yearsTeaching} suffix="+" />
-          <CountStat label="Milestones" value={p.achievements.length} />
-          <CountStat label="Testimonials" value={p.testimonials.length} />
-        </div>
-      </section>
+      {/* ═══════════ 1:1 CHESSIVERSE ORDER — hero → creators → publications → testi → quadrants → compare → faq → journey → footer ═══════════ */}
 
-      {/* ═══════════ CLASS COUNTDOWN (interactive, real-time) ═══════════ */}
-      <ClassCountdown items={upcomingClasses} joinHref={joinHref} joinExternal={joinExternal} />
-
-      {/* ═══════════ MARQUEE ═══════════ */}
-      <section className="cg-civ-band-a relative py-10 overflow-hidden">
-        <div className="flex cg-marquee whitespace-nowrap">
-          {[...Array(2)].map((_, dupe) => (
-            <div key={dupe} className="flex items-center shrink-0">
-              {["Openings", "Tactics", "Endgames", "Strategy", "Blitz", "Positional", "Attacking", "Classical", "Memory", "Calculation"].map((w, i) => (
-                <span key={`${dupe}-${i}`} className="mx-8 text-3xl md:text-5xl font-display tracking-tight text-stone-300 hover:text-stone-800 transition-colors">
-                  <span className="mr-8 text-fuchsia-400">&#9822;</span>{w}
-                </span>
-              ))}
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ═══════════ BENTO ═══════════ */}
-      <section id="programs" className="cg-civ-band-b relative py-20 md:py-28">
-        <div className="mx-auto max-w-7xl px-6 md:px-10">
-          <Reveal className="mb-14 text-center">
-            <div className="text-xs tracking-[0.25em] uppercase text-fuchsia-600 font-semibold mb-3">The academy</div>
-            <h2 className="font-display text-4xl md:text-6xl leading-[1.05] tracking-tight text-stone-900">
-              A whole world of chess.
-            </h2>
-          </Reveal>
-          <div className="grid gap-4 md:gap-5 grid-cols-2 md:grid-cols-4 auto-rows-[minmax(180px,auto)]">
-            <BentoTile className="col-span-2 row-span-2 !p-0 overflow-hidden">
-              {p.coverUrl ? (
-                <img src={p.coverUrl} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-1000" />
-              ) : (
-                <img src={`${IMG}/board-corner.webp`} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-1000" />
-              )}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-              <div className="absolute bottom-6 left-6 right-6 text-white">
-                <div className="text-xs uppercase tracking-widest text-cyan-200 mb-2">Featured</div>
-                <div className="font-display text-2xl md:text-3xl leading-tight">Where champions begin.</div>
-              </div>
-            </BentoTile>
-
-            <BentoTile tint="bg-gradient-to-br from-fuchsia-100 via-white to-white">
-              <img src={`${IMG}/piece-knight.webp`} alt="" className="absolute -right-4 -bottom-4 w-32 h-32 object-contain opacity-70" />
-              <div className="relative">
-                <div className="text-4xl mb-3">&#9819;</div>
-                <div className="font-display text-xl leading-tight text-stone-900">{p.tagline || "Grandmasters teach here."}</div>
-              </div>
-            </BentoTile>
-
-            <BentoTile tint="bg-gradient-to-br from-cyan-100 via-white to-white">
-              <img src={`${IMG}/piece-rook.webp`} alt="" className="absolute -right-4 -bottom-4 w-32 h-32 object-contain opacity-70" />
-              <div className="relative">
-                <div className="text-5xl mb-3">{isoToFlag(p.country) || "🌐"}</div>
-                <div className="font-display text-xl text-stone-900">{p.city || "Online"}</div>
-                <div className="text-xs text-stone-500 mt-1">{p.country || "Worldwide"}</div>
-              </div>
-            </BentoTile>
-
-            {p.foundedYear && (
-              <BentoTile tint="bg-gradient-to-br from-amber-100 via-white to-white">
-                <img src={`${IMG}/piece-queen.webp`} alt="" className="absolute -right-4 -bottom-4 w-32 h-32 object-contain opacity-70" />
-                <div className="relative">
-                  <div className="text-xs uppercase tracking-widest text-amber-600 font-semibold mb-3">Established</div>
-                  <div className="font-display text-6xl leading-none text-stone-900">{p.foundedYear}</div>
-                  <div className="text-xs text-stone-500 mt-2">{new Date().getFullYear() - p.foundedYear} years of teaching</div>
-                </div>
-              </BentoTile>
-            )}
-
-            <BentoTile tint="bg-gradient-to-br from-rose-100 via-white to-white">
-              <img src={`${IMG}/trophy.webp`} alt="" className="absolute -right-4 -bottom-4 w-32 h-32 object-contain opacity-80" />
-              <div className="relative">
-                <div className="text-4xl mb-3">&#127942;</div>
-                <div className="font-display text-4xl leading-none text-stone-900">{p.achievements.length}</div>
-                <div className="text-xs text-stone-500 mt-2 uppercase tracking-widest">Milestones</div>
-              </div>
-            </BentoTile>
-          </div>
-        </div>
-      </section>
-
-      {/* ═══════════ PIECE STRIP (interactive hover) ═══════════ */}
-      <PieceStrip />
-
-      {/* ═══════════ PLAYING-STYLE SLIDER (chessiverse) ═══════════ */}
-      <PlayingStyleSlider />
-
-      {/* ═══════════ PROGRAM FINDER (interactive) ═══════════ */}
-      <ProgramFinder ctaHref={joinHref} ctaExt={joinExternal} joinLabel={joinLabel} />
-
-      {/* ═══════════ COACHES with filter pills ═══════════ */}
-      <section id="coaches" className="cg-civ-band-b relative py-20 md:py-28">
-        <div className="mx-auto max-w-7xl px-6 md:px-10">
-          <Reveal className="mb-8 flex items-end justify-between flex-wrap gap-6">
-            <div>
-              <div className="text-xs tracking-[0.25em] uppercase text-cyan-600 font-semibold mb-3">The roster</div>
-              <h2 className="font-display text-4xl md:text-6xl leading-[1.05] tracking-tight text-stone-900">
-                Meet the masters.
-              </h2>
-            </div>
-            <div className="text-stone-500 text-sm uppercase tracking-widest">{filteredCoaches.length} of {coaches.length}</div>
-          </Reveal>
-
-          <div className="flex flex-wrap gap-2 mb-10">
-            {coachCats.map(([k, label, pred]) => {
-              const count = coaches.filter(pred).length;
-              const isActive = coachFilter === k;
-              const isEmpty = count === 0;
-              return (
-                <button
-                  key={k}
-                  onClick={() => !isEmpty && setCoachFilter(k)}
-                  disabled={isEmpty}
-                  className={`group relative overflow-hidden inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-bold transition-all ring-1 ${isActive ? "bg-gradient-to-r from-indigo-500 to-fuchsia-500 text-white ring-transparent shadow-lg" : isEmpty ? "bg-stone-50 text-stone-300 ring-stone-100 cursor-not-allowed" : "bg-white text-stone-700 ring-stone-200 hover:ring-fuchsia-300 hover:-translate-y-0.5"}`}
-                >
-                  {!isEmpty && !isActive && <ShineSweep />}
-                  <span className="relative">{label}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {filteredCoaches.map((c) => <CoachTiltCard key={c.userId} c={c} />)}
-          </div>
-          {filteredCoaches.length === 0 && (
-            <div className="text-stone-400 text-center py-16">No coaches match this filter yet.</div>
-          )}
-        </div>
-      </section>
-
-      {/* ═══════════ BOT GRID (chessiverse "Featured by Leading Chess Creators") ═══════════ */}
+      {/* Featured by Leading Chess Creators */}
       <BotGrid ctaHref={joinHref} ctaExt={joinExternal} joinLabel={joinLabel} />
 
-      {/* ═══════════ PUBLICATIONS LOGO BAND (chessiverse "Recognized by Leading Publications") ═══════════ */}
+      {/* Recognized by Leading Publications + logo strip */}
       <PublicationsBand />
 
-      {/* ═══════════ TESTIMONIALS GRID (chessiverse multi-column card grid) ═══════════ */}
+      {/* Testimonial masonry grid */}
       <TestimonialsGrid />
 
-      {/* ═══════════ QUADRANT CHARTS (chessiverse Playstyle detail + Openings) ═══════════ */}
+      {/* Playstyle + Openings quadrants */}
       <QuadrantCharts />
 
-      {/* ═══════════ COMPARISON TABLE (chessiverse vs generic) ═══════════ */}
+      {/* Comparison table */}
       <ComparisonTable />
-
-      {/* ═══════════ PUZZLE QUIZ (interactive) ═══════════ */}
-      <PuzzleQuiz />
-
-      {/* ═══════════ WEEKLY SCHEDULE (interactive) ═══════════ */}
-      <WeeklySchedule items={upcomingClasses} joinHref={joinHref} joinExternal={joinExternal} />
-
-      {/* ═══════════ OPENING TREND PANEL (chessiverse) ═══════════ */}
-      <OpeningTrendPanel />
-
-      {/* ═══════════ ABOUT ═══════════ */}
-      {p.description && (
-        <section id="about" className="cg-civ-band-b relative py-20 md:py-28">
-          <div className="absolute inset-0 cg-mesh opacity-30" />
-          <div className="relative mx-auto max-w-6xl px-6 md:px-10 grid md:grid-cols-[220px_1fr] gap-10 items-start">
-            <div className="hidden md:block relative">
-              <img src={`${IMG}/board-corner.webp`} alt="" className="rounded-3xl object-cover w-full ring-1 ring-stone-200 shadow-lg" />
-              <img src={`${IMG}/strategy-hand.webp`} alt="" className="hidden lg:block absolute -bottom-8 -right-8 w-28 h-28 rounded-2xl object-cover ring-4 ring-white shadow-xl" />
-            </div>
-            <div>
-              <div className="text-xs tracking-[0.25em] uppercase text-fuchsia-600 font-semibold mb-3">Our story</div>
-              <h2 className="font-display text-4xl md:text-6xl leading-[1.05] tracking-tight mb-8 text-stone-900">
-                Chess, with heart.
-              </h2>
-              <div className="text-lg md:text-xl text-stone-600 leading-[1.75] whitespace-pre-line">
-                {p.description}
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* ═══════════ MILESTONES ═══════════ */}
-      {p.achievements.length > 0 && (
-        <section id="milestones" className="cg-civ-band-b relative py-20 md:py-28">
-          <div className="mx-auto max-w-7xl px-6 md:px-10">
-            <Reveal className="mb-14 flex items-end justify-between flex-wrap gap-6">
-              <div>
-                <div className="text-xs tracking-[0.25em] uppercase text-amber-600 font-semibold mb-3">Milestones</div>
-                <h2 className="font-display text-4xl md:text-6xl leading-[1.05] tracking-tight text-stone-900">
-                  Wins we&apos;re proud of.
-                </h2>
-              </div>
-              <img src={`${IMG}/trophy.webp`} alt="" className="hidden md:block w-24 h-24 rounded-2xl object-cover ring-1 ring-stone-200 shadow-sm cg-wiggle" />
-            </Reveal>
-            <div className="grid gap-5 md:grid-cols-3">
-              {p.achievements.map((a, i) => (
-                <div key={a.id} className="group relative overflow-hidden rounded-3xl bg-white ring-1 ring-stone-200 shadow-sm hover:shadow-xl hover:ring-amber-300 hover:-translate-y-1 transition-all duration-500 cg-fade-up" style={{ animationDelay: `${i * 80}ms` }}>
-                  <ShineSweep />
-                  {a.imageUrl ? (
-                    <div className="aspect-[4/3] overflow-hidden">
-                      <img src={a.imageUrl} alt="" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000" />
-                    </div>
-                  ) : (
-                    <div className="aspect-[4/3] overflow-hidden">
-                      <img src={`${IMG}/trophy.webp`} alt="" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000" />
-                    </div>
-                  )}
-                  <div className="p-6 relative">
-                    {a.year && (
-                      <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-100 text-amber-700 text-xs font-mono ring-1 ring-amber-200 mb-3">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                        {a.year}
-                      </div>
-                    )}
-                    <div className="font-display text-xl leading-tight mb-2 text-stone-900">{a.title}</div>
-                    {a.description && <div className="text-sm text-stone-600 leading-relaxed">{a.description}</div>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* ═══════════ TESTIMONIALS carousel (interactive) ═══════════ */}
-      <TestimonialCarousel items={p.testimonials} />
 
       {/* ═══════════ FAQ ═══════════ */}
       <section id="faq" className="cg-civ-band-a relative py-20 md:py-28">
@@ -2255,37 +2102,8 @@ export default function AcademyPublicPage() {
         </div>
       </section>
 
-      {/* ═══════════ QUOTES CAROUSEL (interactive) ═══════════ */}
-      <QuotesCarousel />
-
       {/* ═══════════ JOURNEY CTA (chessiverse 3-step onboarding) ═══════════ */}
       <JourneyCTA ctaHref={joinHref} ctaExt={joinExternal} joinLabel={joinLabel} />
-
-      {/* ═══════════ FINAL CTA ═══════════ */}
-      <section className="cg-civ-band-banner relative py-24 md:py-40 overflow-hidden">
-        <div className="absolute inset-0 cg-mesh cg-gradient-shift" />
-        <img src={`${IMG}/crown-detail.webp`} alt="" className="absolute inset-0 w-full h-full object-cover opacity-15 mix-blend-multiply" />
-        <div className="absolute inset-0 bg-gradient-to-b from-[#faf6ef]/60 via-transparent to-[#faf6ef]" />
-        <div className="relative mx-auto max-w-4xl px-6 md:px-10 text-center">
-          <h2 className="font-display text-5xl md:text-7xl lg:text-8xl leading-[1] tracking-[-0.02em] mb-8">
-            <span className="bg-gradient-to-r from-stone-900 via-indigo-700 to-fuchsia-700 bg-clip-text text-transparent">Your move.</span>
-          </h2>
-          <p className="text-lg md:text-2xl text-stone-600 max-w-xl mx-auto mb-12">
-            Start with a free assessment class. We&apos;ll match you with the right coach.
-          </p>
-          <a
-            href={joinHref}
-            {...(joinExternal ? { target: "_blank", rel: "noreferrer" } : {})}
-            className="group relative inline-flex items-center gap-2 px-10 py-5 rounded-full text-lg font-bold text-white overflow-hidden shadow-2xl shadow-fuchsia-500/40"
-          >
-            <span className="absolute inset-0 bg-gradient-to-r from-cyan-500 via-fuchsia-500 to-amber-500 cg-gradient-shift" />
-            <span className="absolute inset-0 bg-gradient-to-r from-cyan-500 via-fuchsia-500 to-amber-500 blur-2xl opacity-70 group-hover:opacity-100 transition-opacity" />
-            <ShineSweep />
-            <span className="relative z-10">{joinLabel}</span>
-            <svg className="relative z-10 w-6 h-6 group-hover:translate-x-2 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
-          </a>
-        </div>
-      </section>
 
       {/* ═══════════ CHESSIVERSE FOOTER ═══════════ */}
       <footer className="cg-civ-footer">
