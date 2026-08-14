@@ -82,6 +82,17 @@ async function bootstrap() {
       cookie: { path: "/", httpOnly: true, sameSite: "lax", secure: false, maxAge: 30 * 24 * 60 * 60 * 1000, domain: process.env.COOKIE_DOMAIN || undefined },
     }),
   );
+  // Multi-tenant cookie domain override: gunachess.com (and future tenant
+  // custom domains) can't SSO with the harinitharanjith.com session cookie.
+  // For non-platform hosts, mutate the per-request cookie.domain so Set-Cookie
+  // is host-only (browser scopes the session to the tenant domain).
+  app.use((req: any, _res: any, next: any) => {
+    if (!req?.session?.cookie) return next();
+    const host = String(req.hostname || "").toLowerCase();
+    const isPlatform = /(^|\.)harinitharanjith\.com$/.test(host);
+    if (!isPlatform) req.session.cookie.domain = undefined;
+    next();
+  });
   // /api/* everywhere except the /auth/* routes (kept at root to match the client)
   app.setGlobalPrefix("api", {
     exclude: [

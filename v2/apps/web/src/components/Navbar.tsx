@@ -149,13 +149,14 @@ function useTenantSlug(): string | null {
 }
 
 interface Brand { name: string; logoUrl: string | null }
+const NAV_API_BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
 function useTenantBrand(): Brand | null {
   const slug = useTenantSlug();
   const [brand, setBrand] = useState<Brand | null>(null);
   useEffect(() => {
     if (!slug) { setBrand(null); return; }
     let cancelled = false;
-    fetch(`/api/academy-page/${encodeURIComponent(slug)}`)
+    fetch(`${NAV_API_BASE}/api/academy-page/${encodeURIComponent(slug)}`)
       .then((r) => r.ok ? r.json() : Promise.reject(r.status))
       .then((j) => {
         if (cancelled) return;
