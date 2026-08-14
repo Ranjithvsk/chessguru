@@ -1187,8 +1187,8 @@ function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: bool
         .cg-cr-photo { position: relative; aspect-ratio: 1/1; overflow: hidden; background: #f3f4f6; }
         .cg-cr-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
         .cg-cr-diamond { position: absolute; top: 8px; right: 8px; width: 16px; height: 16px; transform: rotate(45deg); border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.25); z-index: 2; }
-        .cg-cr-name { color: #232323; font-size: 0.85rem; font-weight: 700; padding: 8px 10px 2px; letter-spacing: 0; line-height: 1.15; text-align: center; }
-        .cg-cr-sub { color: #5a5a5a; font-size: 0.7rem; padding: 0 10px 10px; letter-spacing: 0; line-height: 1.3; text-align: center; }
+        .cg-cr-name { color: #232323; font-size: 0.85rem; font-weight: 700; padding: 8px 10px 2px; letter-spacing: 1px; line-height: 1.15; text-align: center; }
+        .cg-cr-sub { color: #5a5a5a; font-size: 0.7rem; padding: 0 10px 10px; letter-spacing: 1px; line-height: 1.3; text-align: center; }
         .cg-cr-viewall { display: flex; justify-content: center; margin: 2rem 0 0; }
       `}</style>
       <div className="cg-civ-container">
@@ -1529,7 +1529,7 @@ function QuadrantCharts() {
         .cg-civ-quads { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; max-width: 1100px; margin: 0 auto; }
         @media (max-width: 900px) { .cg-civ-quads { grid-template-columns: 1fr; } }
         .cg-civ-quad { background: #fff; border-radius: 12px; padding: 1.5rem; box-shadow: 0 4px 12px rgba(20,162,184,0.08); }
-        .cg-civ-quad-title { text-align: center; color: #232323; font-weight: 700; font-size: 1.1rem; margin-bottom: 1rem; letter-spacing: 0; padding-bottom: 0.5rem; border-bottom: 1px solid #e8e9eb; }
+        .cg-civ-quad-title { text-align: center; color: #232323; font-weight: 700; font-size: 1.1rem; margin-bottom: 1rem; letter-spacing: 1px; padding-bottom: 0.5rem; border-bottom: 1px solid #e8e9eb; }
         .cg-civ-quad-grid { position: relative; aspect-ratio: 1/1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 4px; }
         .cg-civ-quad-cell { border-radius: 8px; padding: .7rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .35rem; }
         .cg-civ-quad-label { position: absolute; font-size: .65rem; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: #5a5a5a; }
@@ -1632,9 +1632,9 @@ function ComparisonTable() {
         .cg-civ-cmp-row { display: grid; grid-template-columns: 1fr 120px 120px; border-bottom: 1px solid #f3f4f6; padding: 0.9rem 1.2rem; align-items: center; }
         .cg-civ-cmp-row:last-child { border-bottom: 0; }
         .cg-civ-cmp-head { background: #f9fafb; font-weight: 700; }
-        .cg-civ-cmp-head .h-us { color: #14a2b8; text-align: center; letter-spacing: 0; }
-        .cg-civ-cmp-head .h-them { color: #232323; text-align: center; letter-spacing: 0; }
-        .cg-civ-cmp-feat { display: flex; align-items: center; gap: .5rem; color: #232323; font-weight: 600; letter-spacing: 0; }
+        .cg-civ-cmp-head .h-us { color: #14a2b8; text-align: center; letter-spacing: 1px; }
+        .cg-civ-cmp-head .h-them { color: #232323; text-align: center; letter-spacing: 1px; }
+        .cg-civ-cmp-feat { display: flex; align-items: center; gap: .5rem; color: #232323; font-weight: 600; letter-spacing: 1px; }
         .cg-civ-cmp-arrow { color: #14a2b8; font-weight: 700; }
         .cg-civ-cmp-cell { text-align: center; }
         .cg-civ-cmp-yes { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: rgba(20,162,184,0.15); color: #14a2b8; font-weight: 900; }
@@ -1855,7 +1855,7 @@ export default function AcademyPublicPage() {
         @media (max-width: 1024px) { .cg-civ-container { padding: 0 2rem; } }
         @media (max-width: 768px) { .cg-civ-container { padding: 0 0.5rem; } }
         /* Button system */
-        .cg-civ-btn { align-items: center; border: 1px solid transparent; border-radius: 8px; cursor: pointer; display: inline-flex; gap: 0.5rem; font-size: 0.9rem; font-weight: 600; justify-content: center; padding: 0.6rem 2.5rem; text-decoration: none; transition: all 0.2s ease-in-out; white-space: nowrap; letter-spacing: 0; }
+        .cg-civ-btn { align-items: center; border: 1px solid transparent; border-radius: 8px; cursor: pointer; display: inline-flex; gap: 0.5rem; font-size: 0.9rem; font-weight: 600; justify-content: center; padding: 0.6rem 2.5rem; text-decoration: none; transition: all 0.2s ease-in-out; white-space: nowrap; letter-spacing: 1px; }
         .cg-civ-btn--accent { background: var(--clr-accent-gradient); color: #fff; }
         .cg-civ-btn--accent:hover { box-shadow: 0 4px 12px rgba(20,162,184,.3); transform: translateY(-2px); }
         .cg-civ-btn--outlined { background: #fff; border: 1px solid var(--clr-accent-new); color: var(--clr-accent-new); }
@@ -1869,7 +1869,7 @@ export default function AcademyPublicPage() {
         .cg-civ-header { background: #ffffff; padding: 0.5rem 0; position: sticky; top: 0; z-index: 100; box-shadow: 0 1px 0 rgba(0,0,0,0.04); }
         .cg-civ-header-container { align-items: center; display: flex; justify-content: space-between; margin: 0 auto; max-width: 1440px; min-height: 3rem; padding: 0 3.5rem; }
         @media (max-width: 768px) { .cg-civ-header-container { padding: 0 1.5rem; } }
-        .cg-civ-header-brand { align-items: center; display: flex; font-size: 1.5rem; font-weight: 600; color: #232323; text-decoration: none; letter-spacing: 0; }
+        .cg-civ-header-brand { align-items: center; display: flex; font-size: 1.5rem; font-weight: 600; color: #232323; text-decoration: none; letter-spacing: 1px; }
         .cg-civ-header-brand:hover { color: #232323; }
         .cg-civ-header-logo { border: 2px solid #fff; border-radius: 50%; height: 2rem; width: 2rem; margin-right: 0.5rem; object-fit: cover; }
         .cg-civ-header-actions { align-items: center; display: flex; gap: 1rem; }
@@ -1893,32 +1893,32 @@ export default function AcademyPublicPage() {
         /* Small portrait card on the board */
         .cg-civ-hv-card { position: absolute; top: 8%; left: 18%; width: 52%; aspect-ratio: 5/6; border-radius: 12px; overflow: hidden; box-shadow: 0 12px 32px rgba(0,0,0,0.25); z-index: 2; background: #fff; border: 3px solid #fff; }
         .cg-civ-hv-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
-        .cg-civ-hv-card-name { position: absolute; left: 8px; right: 8px; bottom: 8px; background: rgba(0,0,0,0.65); color: #fff; padding: 4px 8px; border-radius: 6px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0; text-align: center; }
+        .cg-civ-hv-card-name { position: absolute; left: 8px; right: 8px; bottom: 8px; background: rgba(0,0,0,0.65); color: #fff; padding: 4px 8px; border-radius: 6px; font-size: 0.7rem; font-weight: 700; letter-spacing: 1px; text-align: center; }
         /* Yellow star badge floating top-right of the portrait */
-        .cg-civ-hv-stars { position: absolute; top: 4%; right: 6%; background: linear-gradient(180deg,#ffdfa2,#f9a80a,#ffb82e); border-radius: 999px; padding: 6px 12px; box-shadow: 0 6px 16px rgba(249,168,10,0.4); display: flex; align-items: center; gap: 4px; font-weight: 800; font-size: 0.85rem; z-index: 3; letter-spacing: 0; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.15); }
+        .cg-civ-hv-stars { position: absolute; top: 4%; right: 6%; background: linear-gradient(180deg,#ffdfa2,#f9a80a,#ffb82e); border-radius: 999px; padding: 6px 12px; box-shadow: 0 6px 16px rgba(249,168,10,0.4); display: flex; align-items: center; gap: 4px; font-weight: 800; font-size: 0.85rem; z-index: 3; letter-spacing: 1px; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.15); }
         .cg-civ-hv-stars .st { font-size: 0.75rem; letter-spacing: -1px; }
         /* Quote card overlay bottom-right with diagonal stripes decoration */
-        .cg-civ-hv-quote { position: absolute; right: 4%; bottom: 6%; width: 62%; background: #fff; border-radius: 12px; padding: 14px 14px 14px 44px; box-shadow: 0 12px 32px rgba(20,162,184,0.22); z-index: 3; font-size: 0.78rem; line-height: 1.45; color: #232323; letter-spacing: 0; }
+        .cg-civ-hv-quote { position: absolute; right: 4%; bottom: 6%; width: 62%; background: #fff; border-radius: 12px; padding: 14px 14px 14px 44px; box-shadow: 0 12px 32px rgba(20,162,184,0.22); z-index: 3; font-size: 0.78rem; line-height: 1.45; color: #232323; letter-spacing: 1px; }
         .cg-civ-hv-quote::before { content: '“'; position: absolute; top: -2px; left: 10px; font-size: 3.4rem; line-height: 1; color: #14a2b8; font-family: Georgia, serif; }
-        .cg-civ-hv-quote .attrib { display: block; margin-top: 8px; font-size: 0.7rem; color: #5a5a5a; font-weight: 700; letter-spacing: 0; }
+        .cg-civ-hv-quote .attrib { display: block; margin-top: 8px; font-size: 0.7rem; color: #5a5a5a; font-weight: 700; letter-spacing: 1px; }
         /* Decorative diagonal stripes on quote card corner */
         .cg-civ-hv-quote::after { content: ''; position: absolute; top: -6px; right: -6px; width: 44px; height: 44px; background: repeating-linear-gradient(-45deg, #f9a80a 0 4px, transparent 4px 8px, #14a2b8 8px 12px, transparent 12px 16px, #e11d48 16px 20px, transparent 20px 24px); border-radius: 12px; opacity: 0.85; z-index: -1; }
         /* Small "chess bots" note card bottom-left */
-        .cg-civ-hv-note { position: absolute; left: 4%; bottom: 4%; background: #fff; border-radius: 8px; padding: 8px 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); font-size: 0.65rem; color: #5a5a5a; font-weight: 600; letter-spacing: 0; display: flex; align-items: center; gap: 6px; z-index: 3; max-width: 30%; }
+        .cg-civ-hv-note { position: absolute; left: 4%; bottom: 4%; background: #fff; border-radius: 8px; padding: 8px 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); font-size: 0.65rem; color: #5a5a5a; font-weight: 600; letter-spacing: 1px; display: flex; align-items: center; gap: 6px; z-index: 3; max-width: 30%; }
         .cg-civ-hv-note .dot { width: 8px; height: 8px; border-radius: 50%; background: linear-gradient(180deg,#14a2b8,#40bfd3); flex-shrink: 0; }
         @media (max-width: 600px) { .cg-civ-hero-visual { min-height: 380px; } .cg-civ-hv-card { top: 6%; left: 8%; width: 62%; } }
-        .cg-civ-hero-desc { color: var(--clr-text-gray); font-size: 1rem; line-height: 1.6; margin: 1rem 0; }
+        .cg-civ-hero-desc { color: var(--clr-text-gray); font-size: 1.15rem; font-weight: 500; line-height: 1.6; margin: 1rem 0; letter-spacing: 1px; }
         .cg-civ-hero-benefits { display: flex; gap: 1.5rem; margin: 1.5rem 0; flex-wrap: wrap; }
-        .cg-civ-benefit { align-items: center; display: flex; gap: 0.5rem; font-size: 0.95rem; color: var(--clr-text-main); letter-spacing: 0; }
+        .cg-civ-benefit { align-items: center; display: flex; gap: 0.5rem; font-size: 0.95rem; color: var(--clr-text-main); letter-spacing: 1px; font-weight: 500; }
         .cg-civ-benefit svg { color: var(--clr-accent-new); }
         .cg-civ-benefit strong { font-weight: 600; }
         .cg-civ-hero-buttons { display: flex; flex-direction: column; gap: 1rem; margin-top: 2rem; align-items: flex-start; }
-        .cg-civ-hero-cta-sub { color: var(--clr-text-gray); font-size: 0.85rem; letter-spacing: 0; }
+        .cg-civ-hero-cta-sub { color: var(--clr-text-gray); font-size: 0.85rem; letter-spacing: 1px; }
         /* Footer */
         .cg-civ-footer { background: #b5f4ff; color: #232323; padding: 1.5rem 0; text-align: center; }
         .cg-civ-footer-content { margin: 0 auto; max-width: 1200px; padding: 0 1rem; }
-        .cg-civ-copyright { color: #232323; font-size: 1rem; font-weight: 500; margin-bottom: 0.5rem; letter-spacing: 0; }
-        .cg-civ-footer-links { display: flex; flex-wrap: wrap; font-size: 1rem; gap: 0.5rem; justify-content: center; margin-bottom: 0.75rem; letter-spacing: 0; }
+        .cg-civ-copyright { color: #232323; font-size: 1rem; font-weight: 500; margin-bottom: 0.5rem; letter-spacing: 1px; }
+        .cg-civ-footer-links { display: flex; flex-wrap: wrap; font-size: 1rem; gap: 0.5rem; justify-content: center; margin-bottom: 0.75rem; letter-spacing: 1px; }
         .cg-civ-footer-links a { color: #232323; font-weight: 500; text-decoration: underline; transition: color .2s ease; }
         .cg-civ-footer-links a:hover { color: var(--clr-accent-new); }
         .cg-civ-divider { color: #232323; margin: 0 0.25rem; }
@@ -1929,7 +1929,7 @@ export default function AcademyPublicPage() {
         /* Section heading */
         .cg-civ-eyebrow { color: var(--clr-accent-new); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.25em; text-transform: uppercase; margin-bottom: 0.75rem; text-align: center; letter-spacing: 0.25em; }
         .cg-civ-section-title { color: var(--clr-text-main); text-align: center; }
-        .cg-civ-section-sub { color: var(--clr-text-gray); text-align: center; max-width: 640px; margin: 1rem auto 0; letter-spacing: 0; line-height: 1.6; }
+        .cg-civ-section-sub { color: var(--clr-text-gray); text-align: center; max-width: 640px; margin: 1rem auto 0; letter-spacing: 1px; line-height: 1.6; }
       `}</style>
       <style>{`
         @keyframes cgFloat { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-14px) rotate(3deg); } }
