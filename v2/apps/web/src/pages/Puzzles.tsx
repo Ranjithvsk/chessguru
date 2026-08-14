@@ -325,6 +325,19 @@ export default function PuzzlesPage() {
           movableColor={g.movableColor} dests={g.dests} lastMove={g.lastMove}
           shapes={boardShapes} onMove={g.onMove}
         />
+        {/* Live FEN — click to copy. Owner asked for FEN visible under the board. */}
+        {g.fen && (
+          <div className="mt-3 flex items-center justify-center gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-ink-400">FEN</span>
+            <button
+              onClick={() => { navigator.clipboard?.writeText(g.fen).catch(() => {}); }}
+              title="Click to copy"
+              className="max-w-full overflow-x-auto whitespace-nowrap rounded-md border border-ink-700 bg-ink-900/70 px-2 py-1 font-mono text-[11px] text-ink-200 hover:border-brand-500 hover:text-white"
+            >
+              {g.fen}
+            </button>
+          </div>
+        )}
         {g.solved && g.replayTotal > 0 && !g.exploring && (
           <div className="mt-3 flex flex-wrap items-center justify-center gap-3">
             <button onClick={g.replayPrev} aria-label="Previous move"
