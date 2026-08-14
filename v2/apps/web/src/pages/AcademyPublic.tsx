@@ -2082,7 +2082,7 @@ export default function AcademyPublicPage() {
                 <span>Edit</span>
               </Link>
             )}
-            <a href="#coaches" className="cg-civ-btn cg-civ-btn--outlined cg-civ-btn--sm">
+            <a href="https://harinitharanjith.com/puzzles" target="_blank" rel="noreferrer" className="cg-civ-btn cg-civ-btn--outlined cg-civ-btn--sm">
               <span>Log In</span>
             </a>
             <a
