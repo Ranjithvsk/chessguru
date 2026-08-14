@@ -325,19 +325,35 @@ export default function PuzzlesPage() {
           movableColor={g.movableColor} dests={g.dests} lastMove={g.lastMove}
           shapes={boardShapes} onMove={g.onMove}
         />
-        {/* Live FEN — click to copy. Owner asked for FEN visible under the board. */}
-        {g.fen && (
-          <div className="mt-3 flex items-center justify-center gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-widest text-ink-400">FEN</span>
-            <button
-              onClick={() => { navigator.clipboard?.writeText(g.fen).catch(() => {}); }}
-              title="Click to copy"
-              className="max-w-full overflow-x-auto whitespace-nowrap rounded-md border border-ink-700 bg-ink-900/70 px-2 py-1 font-mono text-[11px] text-ink-200 hover:border-brand-500 hover:text-white"
-            >
-              {g.fen}
-            </button>
-          </div>
-        )}
+        {/* Live FEN + QR — click text to copy; scan QR to open the same
+            position on any phone in this tenant's board editor. */}
+        {g.fen && (() => {
+          const boardUrl = `${typeof window !== "undefined" ? window.location.origin : ""}/board-editor?fen=${encodeURIComponent(g.fen)}`;
+          const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=90x90&margin=2&data=${encodeURIComponent(boardUrl)}`;
+          return (
+            <div className="mt-3 flex items-center justify-center gap-3">
+              <img
+                src={qrSrc}
+                alt="Scan to open this position"
+                title="Scan with phone to open this position"
+                width={72}
+                height={72}
+                className="rounded-md border border-ink-700 bg-white p-0.5"
+                loading="lazy"
+              />
+              <div className="flex min-w-0 flex-col gap-1">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-ink-400">FEN</span>
+                <button
+                  onClick={() => { navigator.clipboard?.writeText(g.fen).catch(() => {}); }}
+                  title="Click to copy FEN"
+                  className="max-w-full overflow-x-auto whitespace-nowrap rounded-md border border-ink-700 bg-ink-900/70 px-2 py-1 text-left font-mono text-[11px] text-ink-200 hover:border-brand-500 hover:text-white"
+                >
+                  {g.fen}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
         {g.solved && g.replayTotal > 0 && !g.exploring && (
           <div className="mt-3 flex flex-wrap items-center justify-center gap-3">
             <button onClick={g.replayPrev} aria-label="Previous move"
