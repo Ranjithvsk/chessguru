@@ -1,5 +1,5 @@
 // ChessGuru PWA service worker. Bump VERSION to invalidate caches on deploy.
-const VERSION = "cg-20260814033252";
+const VERSION = "cg-20260814033941";
 // Derive base from this SW's own URL so it's correct for both "/" and "/v2/" deploys.
 const BASE = self.location.pathname.replace(/sw\.js$/, "");
 const SHELL = [BASE, BASE + "manifest.webmanifest", BASE + "icons/icon-192.png", BASE + "icons/icon-512.png"];

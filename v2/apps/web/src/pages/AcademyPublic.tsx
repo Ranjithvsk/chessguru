@@ -1537,8 +1537,8 @@ export default function AcademyPublicPage() {
         .cg-civ-btn--xl { font-size: 1.35rem; padding: 1.25rem 3rem; width: 340px; height: auto; }
         @media (max-width: 480px) { .cg-civ-btn--xl { font-size: 1.15rem; padding: 1.1rem 2rem; width: 280px; } }
         .cg-civ-btn--md { height: 2.4rem; min-width: 160px; padding: 0.6rem 1.5rem; }
-        /* Header */
-        .cg-civ-header { background: #e1f5ff; padding: 0.5rem 0; position: sticky; top: 0; z-index: 100; }
+        /* Header — WHITE bg matching chessiverse.com exactly */
+        .cg-civ-header { background: #ffffff; padding: 0.5rem 0; position: sticky; top: 0; z-index: 100; box-shadow: 0 1px 0 rgba(0,0,0,0.04); }
         .cg-civ-header-container { align-items: center; display: flex; justify-content: space-between; margin: 0 auto; max-width: 1440px; min-height: 3rem; padding: 0 3.5rem; }
         @media (max-width: 768px) { .cg-civ-header-container { padding: 0 1.5rem; } }
         .cg-civ-header-brand { align-items: center; display: flex; font-size: 1.5rem; font-weight: 600; color: #232323; text-decoration: none; letter-spacing: 0; }
@@ -1549,7 +1549,19 @@ export default function AcademyPublicPage() {
         .cg-civ-hero { display: flex; gap: 2rem; align-items: center; padding: 3rem 1rem; max-width: 1440px; margin: 0 auto; }
         @media (max-width: 900px) { .cg-civ-hero { flex-direction: column; padding: 2rem 1rem; } }
         .cg-civ-hero-text { flex: 1; display: flex; flex-direction: column; }
-        .cg-civ-hero-visual { flex: 1; margin-inline: auto; position: relative; width: min(576px,100%); border-radius: 16px; overflow: hidden; box-shadow: var(--main-box-shadow); }
+        .cg-civ-hero-visual { flex: 1; margin-inline: auto; position: relative; width: min(576px,100%); }
+        /* Layered hero visual — portrait card + star badge + quote card, 1:1 chessiverse */
+        .cg-civ-hv-portrait { position: relative; border-radius: 16px; overflow: hidden; box-shadow: var(--main-box-shadow); aspect-ratio: 5/6; background: #232323; }
+        .cg-civ-hv-portrait img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .cg-civ-hv-portrait::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 55%, rgba(0,0,0,0.5) 100%); }
+        .cg-civ-hv-name { position: absolute; bottom: 12px; left: 16px; right: 16px; color: #fff; font-weight: 700; font-size: 1rem; letter-spacing: 0; z-index: 2; text-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+        .cg-civ-hv-name .sub { display: block; font-weight: 400; font-size: 0.75rem; opacity: 0.85; margin-top: 2px; }
+        .cg-civ-hv-badge { position: absolute; top: -14px; right: -14px; background: #fff; border-radius: 999px; padding: 6px 12px; box-shadow: 0 6px 16px rgba(0,0,0,0.12); display: flex; align-items: center; gap: 4px; font-weight: 700; font-size: 0.8rem; z-index: 3; letter-spacing: 0; }
+        .cg-civ-hv-badge .stars { color: #f9a80a; letter-spacing: -1px; font-size: 0.9rem; }
+        .cg-civ-hv-quote { position: absolute; left: -14px; bottom: -22px; right: 20%; background: #fff; border-radius: 12px; padding: 12px 14px 12px 40px; box-shadow: 0 12px 32px rgba(20,162,184,0.18); z-index: 3; font-size: 0.8rem; line-height: 1.45; color: #232323; letter-spacing: 0; }
+        .cg-civ-hv-quote::before { content: '“'; position: absolute; top: -6px; left: 8px; font-size: 3rem; line-height: 1; color: #14a2b8; font-family: Georgia, serif; }
+        .cg-civ-hv-quote .attrib { display: block; margin-top: 6px; font-size: 0.7rem; color: #5a5a5a; font-weight: 600; }
+        @media (max-width: 600px) { .cg-civ-hv-quote { right: 8%; font-size: 0.72rem; } .cg-civ-hv-badge { top: -10px; right: -6px; font-size: 0.7rem; } }
         .cg-civ-hero-desc { color: var(--clr-text-gray); font-size: 1rem; line-height: 1.6; margin: 1rem 0; }
         .cg-civ-hero-benefits { display: flex; gap: 1.5rem; margin: 1.5rem 0; flex-wrap: wrap; }
         .cg-civ-benefit { align-items: center; display: flex; gap: 0.5rem; font-size: 0.95rem; color: var(--clr-text-main); letter-spacing: 0; }
@@ -1625,16 +1637,19 @@ export default function AcademyPublicPage() {
           </a>
           <div className="cg-civ-header-actions">
             {isOwner && (
-              <Link to="/academy-profile/edit" className="cg-civ-btn cg-civ-btn--outlined cg-civ-btn--md hidden sm:inline-flex">
+              <Link to="/academy-profile/edit" className="cg-civ-btn cg-civ-btn--outlined cg-civ-btn--md hidden sm:inline-flex" style={{ borderColor: '#e5e7eb', color: '#374151' }}>
                 <span>Edit</span>
               </Link>
             )}
+            <a href="#coaches" className="cg-civ-btn cg-civ-btn--outlined cg-civ-btn--md">
+              <span>Log In</span>
+            </a>
             <a
               href={joinHref}
               {...(joinExternal ? { target: "_blank", rel: "noreferrer" } : {})}
               className="cg-civ-btn cg-civ-btn--accent cg-civ-btn--md"
             >
-              <span>{joinLabel}</span>
+              <span>Sign Up</span>
             </a>
           </div>
         </div>
@@ -1677,9 +1692,22 @@ export default function AcademyPublicPage() {
             <div className="cg-civ-hero-cta-sub">Start your first class in 30 seconds!</div>
           </div>
         </div>
-        <div className="cg-civ-hero-visual" style={{ aspectRatio: '1/1', minHeight: '420px', position: 'relative' }}>
-          <HeroCarousel />
-          <CursorSpotlight />
+        <div className="cg-civ-hero-visual">
+          <div className="cg-civ-hv-portrait">
+            <img src="/academy/arch-04-endgame.webp" alt="Guna Chess Coach" />
+            <div className="cg-civ-hv-name">
+              {coaches[0]?.coachProfile?.displayName || coaches[0]?.fullName || "Vikram · GM"}
+              <span className="sub">Guna Chess · {coaches[0]?.coachProfile?.titleClass || "Senior Coach"}</span>
+            </div>
+            <div className="cg-civ-hv-badge">
+              <span className="stars">★★★★★</span>
+              <span>4.9</span>
+            </div>
+            <div className="cg-civ-hv-quote">
+              {p.testimonials[0]?.quote?.slice(0, 145) || "Every class feels one-on-one. My son went from 800 to 1450 in nine months — the coaches don't just teach chess, they teach thinking."}
+              <span className="attrib">— {p.testimonials[0]?.author || "Parent, Chennai"}</span>
+            </div>
+          </div>
         </div>
       </section>
 
