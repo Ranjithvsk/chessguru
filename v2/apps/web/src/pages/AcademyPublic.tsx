@@ -1235,7 +1235,7 @@ function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: bool
         .cg-cr-card { flex: 0 0 180px; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 6px rgba(0,0,0,0.06); transition: all 0.2s ease-in-out; cursor: pointer; display: flex; flex-direction: column; text-decoration: none; color: inherit; user-select: none; }
         @media (max-width: 559px) { .cg-cr-card { flex: 0 0 140px; } }
         .cg-cr-card:hover { transform: translateY(-4px); box-shadow: 0 10px 20px rgba(20,162,184,0.15); }
-        .cg-cr-photo { position: relative; aspect-ratio: 1/1; overflow: hidden; background: #f3f4f6; }
+        .cg-cr-photo { position: relative; aspect-ratio: 1/1; overflow: hidden; background: #d9f5fc; }
         .cg-cr-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
         .cg-cr-diamond { position: absolute; top: 8px; right: 8px; width: 16px; height: 16px; transform: rotate(45deg); border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.25); z-index: 2; }
         .cg-cr-name { color: #232323; font-size: 0.85rem; font-weight: 700; padding: 8px 10px 2px; letter-spacing: 1px; line-height: 1.15; text-align: center; }
@@ -1820,7 +1820,7 @@ export default function AcademyPublicPage() {
     const prevBodyBg = body.style.backgroundColor;
     html.classList.remove("dark");
     html.classList.add("light");
-    body.style.backgroundColor = "#e6fcff";
+    body.style.backgroundColor = "#dff8fc";
     return () => {
       html.setAttribute("class", prev);
       body.style.backgroundColor = prevBodyBg;
@@ -1879,7 +1879,7 @@ export default function AcademyPublicPage() {
   const filteredCoaches = coaches.filter(activeFilter[2]);
 
   return (
-    <div className="cg-civ-root min-h-screen antialiased overflow-x-hidden" style={{ backgroundColor: '#e6fcff' }}>
+    <div className="cg-civ-root min-h-screen antialiased overflow-x-hidden" style={{ backgroundColor: '#dff8fc' }}>
       <ScrollProgress />
       <style>{`
         /* ═══ Load Clash Display + Clash Grotesk from Fontshare CDN (same fonts chessiverse uses) ═══ */
@@ -1934,8 +1934,9 @@ export default function AcademyPublicPage() {
         .cg-civ-root .text-accent { color: var(--clr-accent-new); }
         .cg-civ-root .text-gray { color: var(--clr-text-gray); }
         /* Section bands */
-        .cg-civ-band-a { background: var(--clr-section-a); }
-        .cg-civ-band-b { background: var(--clr-background-main-new); }
+        .cg-civ-band-a { background: linear-gradient(90deg,#dbfaff,#e6fcff); }
+        /* band-b was too pale (looked gray on PC); now cyan too, one step lighter */
+        .cg-civ-band-b { background: linear-gradient(180deg,#e6fcff,#d9f5fc); }
         .cg-civ-band-banner { background: var(--clr-section-banner); }
         .cg-civ-section { padding: 5rem 1rem; }
         @media (max-width: 768px) { .cg-civ-section { padding: 3rem 1rem 2rem; } }
