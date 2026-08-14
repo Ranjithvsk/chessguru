@@ -1614,10 +1614,10 @@ function QuadrantCharts() {
         .cg-civ-quad-grid { position: relative; aspect-ratio: 1/1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 4px; }
         .cg-civ-quad-cell { border-radius: 8px; padding: .7rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .35rem; }
         .cg-civ-quad-label { position: absolute; font-size: .65rem; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: #5a5a5a; }
-        .cg-civ-quad-piece { width: 60px; height: 60px; display: grid; place-items: center; }
+        .cg-civ-quad-piece { width: 42px; height: 42px; display: grid; place-items: center; }
         .cg-civ-quad-piece img { width: 100%; height: 100%; object-fit: contain; }
         .cg-civ-quad-tag { font-size: .68rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #232323; }
-        .cg-civ-quad-center { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 48px; height: 48px; border-radius: 50%; overflow: hidden; border: 2px solid #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 2; background: #14a2b8; }
+        .cg-civ-quad-center { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 36px; height: 36px; border-radius: 50%; overflow: hidden; border: 2px solid #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 2; background: #14a2b8; }
         .cg-civ-quad-center img { width: 100%; height: 100%; object-fit: cover; }
       `}</style>
       <div className="cg-civ-container">
