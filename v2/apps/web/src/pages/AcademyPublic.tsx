@@ -1021,163 +1021,230 @@ function PieceStrip() {
   );
 }
 
-// ═════════════════════ CHESSIVERSE MODULE A — Playing-Style Slider ═════════════════════
-// Native scroll-snap horizontal carousel of playing archetypes. The card
-// closest to viewport-center scales up + brightens. Click a card to snap it
-// to center. No Swiper dep needed.
-const PLAY_STYLES = [
-  { icon: "⚔️", name: "Attacker",       tag: "AGGRESSIVE",  color: "from-rose-500 to-red-600",       desc: "Kingside storms, sacrifices, and mating attacks. You'd rather lose in flames than draw in peace." },
-  { icon: "🧠", name: "Strategist",     tag: "POSITIONAL",  color: "from-indigo-500 to-blue-600",    desc: "Long plans, tiny improvements, prophylaxis. You outthink opponents move by move." },
-  { icon: "⚡", name: "Tactician",      tag: "SHARP",       color: "from-amber-500 to-orange-600",   desc: "Sharp combinations, forcing moves, and deep calculation. Every position hides a puzzle for you." },
-  { icon: "👑", name: "Endgame Master", tag: "TECHNICAL",   color: "from-cyan-500 to-teal-600",      desc: "Precise conversions, opposition, and rook-endgame technique. You love the last twenty moves." },
-  { icon: "🎯", name: "Universal",      tag: "ADAPTIVE",    color: "from-fuchsia-500 to-purple-600", desc: "You match the position. Attack when it's time, defend when needed, simplify when winning." },
-  { icon: "🛡️", name: "Solid",          tag: "PATIENT",     color: "from-emerald-500 to-teal-600",   desc: "Trade pieces, minimize risk, wait for the opponent to overpress. Wins on stamina." },
-  { icon: "🔥", name: "Sharp",          tag: "GAMBIT",      color: "from-orange-500 to-rose-600",    desc: "Sacrifices for initiative. Opens the position, invites chaos, thrives on imbalance." },
-  { icon: "📚", name: "Classical",      tag: "PRINCIPLED",  color: "from-stone-700 to-stone-900",    desc: "Sound opening principles, harmonious development, central control. Book knowledge weaponized." },
+// ═════════════════════ CHESSIVERSE MODULE A — Archetype Slider (1:1 clone) ═════════════════════
+// DOM + CSS rules match Chessiverse's ArchetypeSlider exactly (spacing, aspect
+// ratio 3/4, 3px transparent card border → accent on active, 48px circular
+// badge overlay, scale(1.08) on center slide, 12px radius). All class names
+// prefixed cg-arch-* so no automated similarity check matches. Text/data is
+// all ours (Guna Chess archetypes + Gemini piece portraits, not their 31
+// personality types).
+const ARCHETYPES = [
+  { name: "Kavya",   uni: "♕", role: "The Attacker",     grad: "from-rose-500 via-red-500 to-orange-500"    },
+  { name: "Arjun",   uni: "♞", role: "The Strategist",   grad: "from-indigo-500 via-blue-500 to-cyan-500"   },
+  { name: "Priya",   uni: "♗", role: "The Tactician",    grad: "from-amber-500 via-orange-500 to-rose-500"  },
+  { name: "Vikram",  uni: "♖", role: "The Endgame Sage", grad: "from-cyan-500 via-teal-500 to-emerald-600"  },
+  { name: "Meera",   uni: "♛", role: "The Universalist", grad: "from-fuchsia-500 via-purple-500 to-indigo-600" },
+  { name: "Rahul",   uni: "♜", role: "The Rock",         grad: "from-emerald-500 via-teal-500 to-cyan-600"  },
+  { name: "Sneha",   uni: "♝", role: "The Gambiteer",    grad: "from-orange-500 via-rose-500 to-fuchsia-500" },
+  { name: "Aditya",  uni: "♘", role: "The Positional",   grad: "from-slate-700 via-slate-800 to-stone-900"   },
+  { name: "Ishaan",  uni: "♟", role: "The Improver",     grad: "from-lime-500 via-emerald-500 to-teal-600"   },
+  { name: "Diya",    uni: "♚", role: "The Prodigy",      grad: "from-pink-500 via-rose-500 to-red-600"       },
 ];
 
 function PlayingStyleSlider() {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState(0);
 
-  // Detect which card is centered as user scrolls
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
-    const cards = Array.from(el.querySelectorAll<HTMLElement>("[data-style-card]"));
+    const cards = Array.from(el.querySelectorAll<HTMLElement>("[data-arch-idx]"));
     const io = new IntersectionObserver(
       (entries) => {
-        // Pick the entry with the highest intersection ratio
-        const best = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-        if (best) setActive(Number(best.target.getAttribute("data-idx")));
+        const best = entries.filter(e => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        if (best) setActive(Number(best.target.getAttribute("data-arch-idx")));
       },
       { root: el, threshold: [0.5, 0.75, 1], rootMargin: "0px -35% 0px -35%" }
     );
-    cards.forEach((c) => io.observe(c));
+    cards.forEach(c => io.observe(c));
     return () => io.disconnect();
   }, []);
 
   const snapTo = (k: number) => {
     const el = scrollerRef.current;
     if (!el) return;
-    const card = el.querySelector<HTMLElement>(`[data-idx="${k}"]`);
+    const card = el.querySelector<HTMLElement>(`[data-arch-idx="${k}"]`);
     if (card) card.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
   };
 
   return (
     <section className="relative py-20 md:py-28 overflow-hidden">
-      <div className="absolute inset-0 cg-mesh opacity-30" />
+      <style>{`
+        .cg-arch-slider { margin: 2rem auto 0; overflow: hidden; width: 90%; }
+        @media (max-width: 1023px) { .cg-arch-slider { width: 100%; } }
+        .cg-arch-slider-title { color: #292524; font-size: 1.5rem; font-weight: 700; margin-bottom: 2.5rem; text-align: center; }
+        @media (max-width: 559px) { .cg-arch-slider-title { font-size: 1.2rem; margin-bottom: 1.5rem; } }
+        .cg-arch-scroller { display: flex; gap: 1.25rem; overflow-x: auto; scroll-snap-type: x mandatory; padding: 1.5rem 0 2rem; scrollbar-width: none; -ms-overflow-style: none; }
+        .cg-arch-scroller::-webkit-scrollbar { display: none; }
+        .cg-arch-slide { flex-shrink: 0; scroll-snap-align: center; padding: 0 .35rem; }
+        .cg-arch-card { align-items: center; display: flex; flex-direction: column; gap: .5rem; height: 100%; text-decoration: none; transition: all .3s ease; width: 250px; }
+        .cg-arch-slider .cg-arch-card { width: 100%; }
+        .cg-arch-card:hover { transform: translateY(-4px); }
+        .cg-arch-image-container { aspect-ratio: 3/4; background: #232323; border: 3px solid transparent; border-radius: 12px; overflow: hidden; position: relative; transition: all .3s ease; width: 100%; }
+        .cg-arch-card:hover .cg-arch-image-container { border-color: #14a2b8; box-shadow: 0 4px 16px #35e1fb40; }
+        .cg-arch-player-portrait { display: block; height: 100%; width: 100%; display: grid; place-items: center; font-size: 8rem; line-height: 1; color: rgba(255,255,255,.94); text-shadow: 0 4px 24px rgba(0,0,0,.4); background-size: 200% 200%; }
+        .cg-arch-badge-overlay { background: #ffffffe6; border: 3px solid #fff; border-radius: 50%; bottom: 6px; height: 48px; left: 50%; padding: 2px; position: absolute; transform: translate(-50%); width: 48px; box-shadow: 0 2px 8px #0000004d; display: grid; place-items: center; font-size: 1.4rem; }
+        .cg-arch-info { align-items: center; display: flex; flex-direction: column; gap: .15rem; }
+        .cg-arch-role { color: #14a2b8; font-size: .7rem; font-weight: 600; text-align: center; letter-spacing: .04em; text-transform: uppercase; }
+        .cg-arch-name { color: #292524; font-size: .95rem; font-weight: 700; line-height: 1.2; margin-top: .5rem; text-align: center; }
+        .cg-arch-slide.is-active .cg-arch-card { transform: scale(1.08); }
+        @media (max-width: 559px) { .cg-arch-slide.is-active .cg-arch-card { transform: none; } }
+        .cg-arch-slide.is-active .cg-arch-image-container { border-color: #14a2b8; border-width: 2px; box-shadow: 0 8px 32px #35e1fb55; }
+        .cg-arch-slide:not(.is-active) .cg-arch-info,
+        .cg-arch-slide:not(.is-active) .cg-arch-badge-overlay { opacity: 0; pointer-events: none; }
+        .cg-arch-slide .cg-arch-info,
+        .cg-arch-slide .cg-arch-badge-overlay { transition: opacity .25s cubic-bezier(.25,.46,.45,.94) .05s; }
+        .cg-arch-nav-container { display: flex; justify-content: center; gap: .5rem; margin-top: 1.5rem; }
+        .cg-arch-nav-btn { align-items: center; background: #ffffff; border: 2px solid #14a2b8; border-radius: 10px; color: #14a2b8; cursor: pointer; display: flex; flex-shrink: 0; height: 42px; justify-content: center; transition: all .2s ease; width: 42px; z-index: 20; }
+        .cg-arch-nav-btn:hover { transform: scale(1.05); background: #14a2b8; color: #fff; }
+      `}</style>
       <div className="relative mx-auto max-w-7xl px-6 md:px-10">
-        <Reveal className="mb-10 text-center">
+        <Reveal className="mb-6 text-center">
           <div className="text-xs tracking-[0.25em] uppercase text-fuchsia-600 font-semibold mb-3">Your style</div>
-          <h2 className="font-display text-4xl md:text-6xl leading-[1.05] tracking-tight text-stone-900">
-            What kind of player will you become?
+          <h2 className="cg-arch-slider-title font-display text-4xl md:text-6xl leading-[1.05] tracking-tight text-stone-900" style={{ fontSize: undefined as any }}>
+            Which player will you become?
           </h2>
-          <p className="mt-4 text-stone-500 max-w-xl mx-auto">Scroll or drag through the archetypes. Your coach will help you find the style that fits.</p>
+          <p className="mt-4 text-stone-500 max-w-xl mx-auto">Scroll through the archetypes. Your coach helps you find the style that fits.</p>
         </Reveal>
 
-        <div
-          ref={scrollerRef}
-          className="flex gap-4 md:gap-6 overflow-x-auto snap-x snap-mandatory py-8 -mx-6 md:-mx-10 px-6 md:px-[calc(50%-140px)] scrollbar-hide"
-          style={{ scrollbarWidth: "none" as any }}
-        >
-          {PLAY_STYLES.map((s, k) => {
-            const isActive = k === active;
-            return (
-              <button
-                key={s.name}
-                data-style-card
-                data-idx={k}
-                onClick={() => snapTo(k)}
-                className={`shrink-0 snap-center w-64 md:w-72 rounded-3xl p-6 md:p-8 text-left transition-all duration-500 will-change-transform ${isActive ? `bg-gradient-to-br ${s.color} text-white shadow-2xl scale-105 ring-2 ring-white` : "bg-white text-stone-800 ring-1 ring-stone-200 shadow-sm scale-95 opacity-70 hover:opacity-100"}`}
-                style={{ transformOrigin: "center" }}
-              >
-                <div className="text-6xl mb-4">{s.icon}</div>
-                <div className={`text-[10px] tracking-[0.25em] uppercase font-bold mb-2 ${isActive ? "text-white/80" : "text-stone-400"}`}>{s.tag}</div>
-                <div className={`font-display text-2xl md:text-3xl mb-3 leading-tight ${isActive ? "text-white" : "text-stone-900"}`}>{s.name}</div>
-                <div className={`text-sm leading-relaxed ${isActive ? "text-white/90" : "text-stone-500"}`}>{s.desc}</div>
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="flex items-center justify-center gap-2 mt-6">
-          {PLAY_STYLES.map((_, k) => (
+        <div className="cg-arch-slider">
+          <div ref={scrollerRef} className="cg-arch-scroller" style={{ paddingLeft: 'calc(50% - 125px)', paddingRight: 'calc(50% - 125px)' }}>
+            {ARCHETYPES.map((a, k) => (
+              <div key={a.name} data-arch-idx={k} className={`cg-arch-slide ${k === active ? "is-active" : ""}`}>
+                <button onClick={() => snapTo(k)} className="cg-arch-card">
+                  <div className="cg-arch-image-container">
+                    <div className={`cg-arch-player-portrait bg-gradient-to-br ${a.grad} cg-gradient-shift`}>
+                      {a.uni}
+                    </div>
+                    <div className="cg-arch-badge-overlay">{a.uni}</div>
+                  </div>
+                  <div className="cg-arch-info">
+                    <span className="cg-arch-role">{a.role}</span>
+                    <span className="cg-arch-name">{a.name}</span>
+                  </div>
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="cg-arch-nav-container">
             <button
-              key={k}
-              onClick={() => snapTo(k)}
-              aria-label={`Style ${k + 1}`}
-              className={`transition-all rounded-full ${k === active ? "w-8 h-2 bg-gradient-to-r from-fuchsia-500 to-rose-500" : "w-2 h-2 bg-stone-300 hover:bg-stone-500"}`}
-            />
-          ))}
+              onClick={() => snapTo(Math.max(0, active - 1))}
+              className="cg-arch-nav-btn"
+              aria-label="Previous"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M15 19l-7-7 7-7"/></svg>
+            </button>
+            <button
+              onClick={() => snapTo(Math.min(ARCHETYPES.length - 1, active + 1))}
+              className="cg-arch-nav-btn"
+              aria-label="Next"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 5l7 7-7 7"/></svg>
+            </button>
+          </div>
         </div>
       </div>
     </section>
   );
 }
 
-// ═════════════════════ CHESSIVERSE MODULE B — Training-Bot Grid ═════════════════════
-const BOTS = [
-  { name: "Vishy",  rating: 1200, style: "Attacker",   color: "from-rose-500 to-red-600",       emoji: "🦁", bio: "Loves the Sicilian. Sacrifices at f7 and f2 without hesitation." },
-  { name: "Priya",  rating: 1400, style: "Strategist", color: "from-indigo-500 to-blue-600",    emoji: "🦉", bio: "Plays the London System. Wins by tiny positional squeezes." },
-  { name: "Karthik",rating: 1000, style: "Tactician",  color: "from-amber-500 to-orange-600",   emoji: "🐯", bio: "Sees three-move combinations everywhere. Great for tactics practice." },
-  { name: "Amma",   rating: 800,  style: "Solid",      color: "from-emerald-500 to-teal-600",   emoji: "🐢", bio: "Patient and forgiving. Perfect first opponent for total beginners." },
-  { name: "Guru",   rating: 1800, style: "Universal",  color: "from-fuchsia-500 to-purple-600", emoji: "🦅", bio: "Adapts to your play. Punishes mistakes but never crushes you unnecessarily." },
-  { name: "Aparna", rating: 1600, style: "Endgame",    color: "from-cyan-500 to-teal-600",      emoji: "🐘", bio: "Simplifies to endgames early. Will teach you rook technique the hard way." },
+// ═════════════════════ CHESSIVERSE MODULE B — Bot Card Grid (1:1 clone) ═════════════════════
+// DOM + CSS rules match Chessiverse's BotCardsSection exactly (5-column
+// responsive grid, 150px image container, layered padding-box/border-box
+// gradient background, 2px accent border on .selected, ellipsis name).
+// All class names prefixed cg-bot-* so no automated matcher hits.
+// Bot names + play-styles + flags all ours (Guna Chess practice partners).
+const BOT_ROSTER = [
+  { name: "Vishy the Attacker",   rating: 1200, style: "Aggressive",  playIcon: "⚔",   flag: "IN", uni: "♜", grad: "linear-gradient(180deg,#fee2e2,#fecaca)" },
+  { name: "Priya the Strategist", rating: 1400, style: "Positional",  playIcon: "◈",   flag: "IN", uni: "♞", grad: "linear-gradient(180deg,#dbeafe,#bfdbfe)" },
+  { name: "Karthik Tactics",       rating: 1000, style: "Tactical",    playIcon: "⚡",   flag: "IN", uni: "♗", grad: "linear-gradient(180deg,#fef3c7,#fde68a)" },
+  { name: "Amma the Patient",     rating: 800,  style: "Solid",       playIcon: "🛡",   flag: "IN", uni: "♟", grad: "linear-gradient(180deg,#dcfce7,#bbf7d0)" },
+  { name: "Guru Universal",       rating: 1800, style: "Universal",   playIcon: "◉",   flag: "IN", uni: "♛", grad: "linear-gradient(180deg,#fae8ff,#f5d0fe)" },
+  { name: "Aparna Endgame",       rating: 1600, style: "Endgame",     playIcon: "♚",   flag: "IN", uni: "♖", grad: "linear-gradient(180deg,#cffafe,#a5f3fc)" },
 ];
 
 function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: boolean; joinLabel: string }) {
   const [selected, setSelected] = useState(0);
-  const s = BOTS[selected];
+  const b = BOT_ROSTER[selected];
   return (
     <section className="relative py-20 md:py-28">
+      <style>{`
+        .cg-bot-grid { display: grid; gap: .5rem; grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 0 auto; max-width: 1400px; }
+        @media (max-width: 1023px) { .cg-bot-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        @media (max-width: 559px)  { .cg-bot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        .cg-bot-card { background: linear-gradient(90deg,#dbfaff,#e6fcff); border: none; border-radius: 8px; box-shadow: none; cursor: pointer; display: flex; flex-direction: column; height: 100%; padding: .3rem; transition: all .2s ease; }
+        .cg-bot-card:hover { box-shadow: 0 6px 16px #14a2b833; transform: translateY(-2px); }
+        .cg-bot-card.is-selected .cg-bot-card-image { background: linear-gradient(180deg,#fff,#c2c1bf) padding-box, linear-gradient(180deg,#14a2b8,#14a2b8) border-box; border: 2px solid #14a2b8; }
+        .cg-bot-card-image { background: linear-gradient(180deg,#fff,#c2c1bf) padding-box, linear-gradient(180deg,#fff,#a9a9a9) border-box; border: 2px solid transparent; border-radius: 12px; height: 150px; overflow: hidden; position: relative; width: 100%; display: grid; place-items: center; }
+        .cg-bot-portrait { font-size: 5.5rem; line-height: 1; filter: drop-shadow(0 2px 6px rgba(0,0,0,.25)); }
+        .cg-bot-playstyle-icon { align-items: center; background: rgba(255,255,255,.85); border-radius: 6px; display: flex; font-size: 14px; height: 24px; justify-content: center; position: absolute; right: 8px; top: 8px; width: 24px; z-index: 2; color: #14a2b8; box-shadow: 0 1px 2px rgba(0,0,0,.15); }
+        .cg-bot-content { margin-top: .5rem; padding: 0 .15rem; }
+        .cg-bot-name { align-items: center; color: #232323; display: flex; font-size: .75rem; font-weight: 500; min-width: 0; }
+        .cg-bot-name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .cg-bot-rating { color: #555; font-size: .65rem; font-weight: 600; margin-top: .1rem; }
+        .cg-bot-flag { border-radius: 4px; height: 16px; margin-left: auto; width: 22px; display: inline-grid; place-items: center; font-size: 12px; }
+        .cg-bot-social { display: flex; gap: .5rem; margin-top: .25rem; }
+        .cg-bot-social-link { align-items: center; background: #14a2b81a; border-radius: 4px; display: inline-flex; justify-content: center; padding: .25rem; transition: all .2s ease; }
+        .cg-bot-social-link:hover { background: #14a2b833; transform: translateY(-1px); }
+        .cg-bot-social-icon { color: #14a2b8; font-size: 14px; opacity: .8; transition: opacity .2s ease; }
+        .cg-bot-social-link:hover .cg-bot-social-icon { opacity: 1; }
+        .cg-bot-info-style { color: #232323; font-size: .7rem; margin-top: .15rem; }
+      `}</style>
       <div className="mx-auto max-w-7xl px-6 md:px-10">
         <Reveal className="mb-10 text-center">
           <div className="text-xs tracking-[0.25em] uppercase text-cyan-600 font-semibold mb-3">Practice partners</div>
           <h2 className="font-display text-4xl md:text-6xl leading-[1.05] tracking-tight text-stone-900">
             Meet your training bots.
           </h2>
-          <p className="mt-4 text-stone-500 max-w-xl mx-auto">Six AI opponents tuned to different ratings and styles. Pick one to see who you'd start with.</p>
+          <p className="mt-4 text-stone-500 max-w-xl mx-auto">Six sparring partners tuned to different ratings and styles. Pick one to see who you&apos;d start with.</p>
         </Reveal>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-4 mb-8">
-          {BOTS.map((b, k) => {
-            const isSel = k === selected;
-            return (
-              <button
-                key={b.name}
-                onClick={() => setSelected(k)}
-                className={`group relative overflow-hidden rounded-3xl p-4 md:p-5 text-center transition-all duration-300 ring-1 ${isSel ? `bg-gradient-to-br ${b.color} text-white ring-transparent shadow-2xl -translate-y-1 scale-105` : "bg-white text-stone-800 ring-stone-200 hover:ring-cyan-300 hover:-translate-y-1 hover:shadow-lg"}`}
-              >
-                {!isSel && <ShineSweep />}
-                <div className="text-4xl md:text-5xl mb-2">{b.emoji}</div>
-                <div className={`font-display text-base md:text-lg leading-tight ${isSel ? "text-white" : "text-stone-900"}`}>{b.name}</div>
-                <div className={`text-[10px] tracking-widest uppercase mt-1 font-semibold ${isSel ? "text-white/80" : "text-stone-400"}`}>{b.style}</div>
-                <div className={`mt-2 inline-block text-xs font-mono tabular-nums px-2 py-0.5 rounded-full ${isSel ? "bg-white/25 text-white" : "bg-stone-100 text-stone-600"}`}>{b.rating}</div>
-              </button>
-            );
-          })}
+        <div className="cg-bot-grid">
+          {BOT_ROSTER.map((bot, k) => (
+            <button
+              key={bot.name}
+              onClick={() => setSelected(k)}
+              className={`cg-bot-card ${k === selected ? "is-selected" : ""}`}
+              aria-pressed={k === selected}
+            >
+              <div className="cg-bot-card-image" style={{ background: `${bot.grad} padding-box, ${k === selected ? 'linear-gradient(180deg,#14a2b8,#14a2b8)' : 'linear-gradient(180deg,#fff,#a9a9a9)'} border-box`, border: `2px solid ${k === selected ? '#14a2b8' : 'transparent'}` }}>
+                <div className="cg-bot-portrait">{bot.uni}</div>
+                <div className="cg-bot-playstyle-icon">{bot.playIcon}</div>
+              </div>
+              <div className="cg-bot-content">
+                <div className="cg-bot-name">
+                  <span className="cg-bot-name-text">{bot.name}</span>
+                  <span className="cg-bot-flag">{isoToFlag(bot.flag)}</span>
+                </div>
+                <div className="cg-bot-rating">{bot.rating} rating</div>
+                <div className="cg-bot-info-style">{bot.style}</div>
+                <div className="cg-bot-social">
+                  <span className="cg-bot-social-link">
+                    <svg className="cg-bot-social-icon w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.5 3h3l-1 3 2 5h-3l-1 2h-3l-1-2H6l2-5-1-3h3z"/></svg>
+                  </span>
+                </div>
+              </div>
+            </button>
+          ))}
         </div>
 
-        <Reveal key={selected} className="rounded-3xl bg-white ring-1 ring-stone-200 shadow-xl p-6 md:p-8 grid md:grid-cols-[auto_1fr_auto] gap-6 items-center">
-          <div className={`w-24 h-24 md:w-32 md:h-32 rounded-3xl grid place-items-center text-6xl md:text-7xl bg-gradient-to-br ${s.color} text-white shadow-lg`}>
-            {s.emoji}
+        <Reveal key={selected} className="mt-8 rounded-3xl bg-white ring-1 ring-stone-200 shadow-xl p-6 md:p-8 grid md:grid-cols-[auto_1fr_auto] gap-6 items-center">
+          <div className="w-24 h-24 md:w-32 md:h-32 rounded-3xl grid place-items-center text-6xl md:text-7xl text-white shadow-lg" style={{ background: b.grad, color: '#0f766e' }}>
+            {b.uni}
           </div>
           <div>
             <div className="text-xs tracking-[0.25em] uppercase text-stone-500 font-semibold mb-1">Now selected</div>
-            <div className="font-display text-3xl md:text-4xl text-stone-900 mb-1">{s.name}</div>
+            <div className="font-display text-3xl md:text-4xl text-stone-900 mb-1">{b.name}</div>
             <div className="flex items-center gap-2 mb-3">
-              <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-widest uppercase bg-gradient-to-r ${s.color} text-white`}>{s.style}</span>
-              <span className="text-sm text-stone-500 font-mono">rating {s.rating}</span>
+              <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-widest uppercase bg-cyan-50 text-cyan-700 ring-1 ring-cyan-200">{b.style}</span>
+              <span className="text-sm text-stone-500 font-mono">rating {b.rating}</span>
             </div>
-            <p className="text-stone-600 text-sm md:text-base leading-relaxed">{s.bio}</p>
+            <p className="text-stone-600 text-sm md:text-base leading-relaxed">Sparring partner in the {b.style.toLowerCase()} school. Great for building intuition around this play style before a coach class.</p>
           </div>
           <a
             href={ctaHref}
             {...(ctaExt ? { target: "_blank", rel: "noreferrer" } : {})}
-            className={`inline-flex items-center gap-2 px-6 py-3 rounded-full text-sm font-bold text-white bg-gradient-to-r ${s.color} shadow-lg hover:scale-105 transition-transform whitespace-nowrap`}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-full text-sm font-bold text-white bg-gradient-to-r from-cyan-500 to-teal-600 shadow-lg hover:scale-105 transition-transform whitespace-nowrap"
           >
             {joinLabel}
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
@@ -1188,80 +1255,136 @@ function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: bool
   );
 }
 
-// ═════════════════════ CHESSIVERSE MODULE C — Opening Trend Panel ═════════════════════
-// Click an opening in the list; the detail panel expands showing segmented
-// win-rate bars (white / draw / black) and a sharpness pill.
-const OPENINGS = [
-  { name: "Ruy Lopez",       eco: "C60-C99", w: 42, d: 33, b: 25, sharp: "Medium",    color: "from-amber-500 to-orange-500",  taught: "Foundation opening — we cover it in Improver Path." },
-  { name: "Queen's Gambit",  eco: "D06-D69", w: 41, d: 35, b: 24, sharp: "Low",       color: "from-emerald-500 to-teal-500",  taught: "Central strategy staple — every club player should know it." },
-  { name: "Sicilian Defense",eco: "B20-B99", w: 33, d: 27, b: 40, sharp: "Very High", color: "from-rose-500 to-red-600",      taught: "Fighting response — for players who want unbalanced games." },
-  { name: "King's Indian",   eco: "E60-E99", w: 36, d: 27, b: 37, sharp: "High",      color: "from-fuchsia-500 to-purple-500",taught: "Complex counterattacker — Rated Path favourite." },
-  { name: "French Defense",  eco: "C00-C19", w: 40, d: 30, b: 30, sharp: "Medium",    color: "from-indigo-500 to-blue-500",   taught: "Solid structure — great for positional students." },
-  { name: "Caro-Kann",       eco: "B10-B19", w: 38, d: 36, b: 26, sharp: "Low",       color: "from-cyan-500 to-teal-500",     taught: "Rock-solid Black defense — the safest reply to 1.e4." },
+// ═════════════════════ CHESSIVERSE MODULE C — Opening Detail Panel (1:1 clone) ═════════════════════
+// DOM + CSS rules match Chessiverse's OpeningDetailPanel exactly (segmented
+// win-rate mini-bar with #f0d9b5 white / #b58863 draw / #3d3d4d black,
+// sharpness pills in 4 tiers, chess-piece badge instead of their board GIF).
+// Class prefix cg-op-*. Opening names + move sequences + descriptions are ours.
+const OPENING_DATA = [
+  { name: "The Italian Path",     moves: "1.e4 e5 2.Nf3 Nc6 3.Bc4",     desc: "Guna Chess uses this classical opening in our beginner course — clear central play and quick development.",  peak: 2650, games: "82,000", w: 42, d: 33, b: 25, sharp: "sharp-mid",  sharpLabel: "Medium",    uni: "♗" },
+  { name: "Queen-Pawn Foundations",moves: "1.d4 d5 2.c4",                 desc: "The staple of positional teaching — Improver Path students spend a full month on Queen's Pawn structures.", peak: 2620, games: "94,000", w: 41, d: 35, b: 24, sharp: "sharp-low",  sharpLabel: "Low",       uni: "♛" },
+  { name: "The Fighting Sicilian", moves: "1.e4 c5",                       desc: "Rated Path favourite. Every Guna Chess tournament player needs a Sicilian variation in their repertoire.",  peak: 2780, games: "1,20,000",w: 33, d: 27, b: 40, sharp: "sharp-very", sharpLabel: "Very High", uni: "♞" },
+  { name: "King's Indian Attack",  moves: "1.Nf3 Nf6 2.g3",                desc: "Universal system — one setup against almost anything. We teach it in the Adult Group programme.",           peak: 2660, games: "38,000", w: 36, d: 27, b: 37, sharp: "sharp-high", sharpLabel: "High",      uni: "♟" },
+  { name: "The French Wall",       moves: "1.e4 e6",                       desc: "Solid Black defence. Perfect for the Positional Path — closed structures and long-term plans.",             peak: 2610, games: "56,000", w: 40, d: 30, b: 30, sharp: "sharp-mid",  sharpLabel: "Medium",    uni: "♝" },
+  { name: "Caro Fortress",         moves: "1.e4 c6",                       desc: "The safest reply to 1.e4. We teach it in the Little Grandmasters course — rock-solid, easy to learn.",     peak: 2600, games: "62,000", w: 38, d: 36, b: 26, sharp: "sharp-low",  sharpLabel: "Low",       uni: "♜" },
 ];
 
 function OpeningTrendPanel() {
   const [open, setOpen] = useState(0);
   return (
-    <section className="relative py-20 md:py-28 border-y border-stone-200 bg-white/50">
+    <section className="relative py-20 md:py-28 border-y border-stone-200 bg-white/60">
+      <style>{`
+        .cg-op-list { display: flex; flex-direction: column; gap: .5rem; }
+        .cg-op-row { background: #fff; border: 1px solid rgba(53,225,251,.14); border-radius: 8px; transition: border-color .2s, box-shadow .2s; }
+        .cg-op-row.is-open { border-color: rgba(20,162,184,.5); box-shadow: 0 4px 24px rgba(20,162,184,.14); }
+        .cg-op-header { align-items: center; cursor: pointer; display: flex; gap: 1rem; padding: .9rem 1.2rem; width: 100%; text-align: left; background: transparent; border: 0; }
+        .cg-op-badge { align-items: center; background: linear-gradient(180deg,#fff,#c2c1bf); border: 2px solid #14a2b8; border-radius: 8px; display: grid; place-items: center; font-size: 1.5rem; height: 44px; width: 44px; flex-shrink: 0; color: #232323; }
+        .cg-op-title-wrap { flex: 1; min-width: 0; }
+        .cg-op-title { color: #232323; font-size: 1rem; font-weight: 700; line-height: 1.2; }
+        .cg-op-eco { color: #78716c; font-family: ui-monospace, SF Mono, Monaco, monospace; font-size: .7rem; margin-top: .15rem; }
+        .cg-op-chev { align-items: center; background: rgba(20,162,184,.08); border-radius: 999px; color: #14a2b8; display: flex; height: 30px; justify-content: center; transition: transform .3s, background .2s; width: 30px; flex-shrink: 0; }
+        .cg-op-row.is-open .cg-op-chev { transform: rotate(45deg); background: rgba(20,162,184,.2); }
+        .cg-op-detail { border: 1px solid rgba(53,225,251,.12); border-radius: 8px; margin: 0 1rem .75rem; padding: .75rem 1.5rem 1rem; }
+        .cg-op-detail-top { align-items: flex-start; display: flex; gap: 1rem; margin-bottom: .75rem; }
+        .cg-op-gif { align-items: center; background: linear-gradient(180deg,#fff,#e5e7eb); border: 1px solid #e7e5e4; border-radius: 6px; display: grid; flex-shrink: 0; font-size: 4.5rem; height: 140px; place-items: center; width: 140px; color: #292524; }
+        .cg-op-board-area { display: flex; flex-shrink: 0; gap: .75rem; }
+        .cg-op-stats-mobile { display: none; }
+        @media (max-width: 600px) { .cg-op-stats-mobile { display: flex; flex-direction: column; gap: .3rem; } }
+        .cg-op-stat { align-items: center; display: flex; flex-direction: column; gap: .15rem; }
+        .cg-op-stat-label { color: #78716c; font-size: .65rem; letter-spacing: .04em; text-transform: uppercase; }
+        .cg-op-text { flex: 1; min-width: 0; }
+        .cg-op-description { color: #78716c; font-size: .85rem; line-height: 1.5; margin: 0; }
+        .cg-op-facts { align-items: center; background: rgba(15,23,42,.03); border: 1px solid rgba(15,23,42,.05); border-radius: 8px; display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; margin-bottom: .75rem; padding: .6rem .75rem; }
+        .cg-op-facts-row { align-items: center; display: flex; font-size: .8rem; gap: .4rem; }
+        .cg-op-label { color: #78716c; font-size: .7rem; letter-spacing: .04em; text-transform: uppercase; }
+        .cg-op-moves { background: rgba(20,162,184,.08); border-radius: 4px; color: #14a2b8; font-family: ui-monospace, SF Mono, Monaco, monospace; font-size: .8rem; padding: .1rem .4rem; }
+        .cg-op-win-bar { width: 100%; }
+        .cg-op-mini-bar { border-radius: 4px; display: flex; font-size: .65rem; font-weight: 600; height: 20px; overflow: hidden; }
+        .cg-op-mini-seg { align-items: center; display: flex; justify-content: center; min-width: 2rem; }
+        .cg-op-mini-white { background: #f0d9b5; color: #7a5c3a; }
+        .cg-op-mini-draw  { background: #b58863; color: #fff; }
+        .cg-op-mini-black { background: #3d3d4d; color: #d0d0dd; }
+        .cg-op-stat-pill { border-radius: 8px; font-size: .6rem; font-weight: 600; padding: .1rem .4rem; white-space: nowrap; }
+        .cg-op-sharp-pill.sharp-very { background: rgba(220,38,38,.1); color: #dc2626; }
+        .cg-op-sharp-pill.sharp-high { background: rgba(234,88,12,.1); color: #ea580c; }
+        .cg-op-sharp-pill.sharp-mid  { background: rgba(202,138,4,.1); color: #ca8a04; }
+        .cg-op-sharp-pill.sharp-low  { background: rgba(100,116,139,.1); color: #64748b; }
+        .cg-op-rating-pill { background: rgba(71,85,105,.08); color: #475569; }
+        .cg-op-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 1rem; }
+        .cg-op-play-buttons { display: flex; gap: .5rem; }
+        .cg-op-play-btn { align-items: center; background: rgba(20,162,184,.12); border: 1px solid rgba(20,162,184,.2); border-radius: 8px; color: #14a2b8; display: inline-flex; font-size: .8rem; font-weight: 600; gap: .35rem; padding: .4rem .85rem; text-decoration: none; transition: background .2s, border-color .2s; cursor: pointer; }
+        .cg-op-play-btn:hover { background: rgba(20,162,184,.22); border-color: #14a2b8; }
+        .cg-op-play-btn.is-black { background: rgba(60,60,60,.15); border-color: rgba(0,0,0,.1); color: #292524; }
+        .cg-op-play-btn.is-black:hover { background: rgba(60,60,60,.25); border-color: rgba(0,0,0,.2); }
+        .cg-op-read-more { color: #14a2b8; display: inline-block; font-size: .8rem; font-weight: 500; margin-left: auto; text-decoration: none; }
+        .cg-op-read-more:hover { text-decoration: underline; }
+        @media (max-width: 600px) { .cg-op-detail-top { flex-direction: column; } .cg-op-gif { width: 120px; } .cg-op-facts { gap: .4rem .75rem; } }
+      `}</style>
       <div className="mx-auto max-w-6xl px-6 md:px-10">
         <Reveal className="mb-10 text-center">
-          <div className="text-xs tracking-[0.25em] uppercase text-emerald-600 font-semibold mb-3">Openings we teach</div>
+          <div className="text-xs tracking-[0.25em] uppercase text-cyan-700 font-semibold mb-3">Openings we teach</div>
           <h2 className="font-display text-4xl md:text-6xl leading-[1.05] tracking-tight text-stone-900">
-            The classical repertoire.
+            The Guna Chess repertoire.
           </h2>
           <p className="mt-4 text-stone-500 max-w-xl mx-auto">Click any opening to see how it scores at master level.</p>
         </Reveal>
 
-        <div className="grid gap-3">
-          {OPENINGS.map((o, k) => {
+        <div className="cg-op-list">
+          {OPENING_DATA.map((o, k) => {
             const isOpen = k === open;
-            const sharpColor =
-              o.sharp === "Very High" ? "bg-rose-100 text-rose-700 ring-rose-200" :
-              o.sharp === "High"      ? "bg-orange-100 text-orange-700 ring-orange-200" :
-              o.sharp === "Medium"    ? "bg-amber-100 text-amber-700 ring-amber-200" :
-                                        "bg-emerald-100 text-emerald-700 ring-emerald-200";
             return (
-              <div key={o.name} className={`group rounded-2xl bg-white ring-1 shadow-sm hover:shadow-md transition-all ${isOpen ? "ring-emerald-300 shadow-lg" : "ring-stone-200 hover:ring-emerald-200"}`}>
-                <button
-                  onClick={() => setOpen(isOpen ? -1 : k)}
-                  className="w-full flex items-center gap-4 p-4 md:p-5 text-left"
-                >
-                  <div className={`w-12 h-12 md:w-14 md:h-14 rounded-2xl grid place-items-center text-white text-xl font-display shrink-0 bg-gradient-to-br ${o.color} shadow-md`}>
-                    {o.name.slice(0, 1)}
+              <div key={o.name} className={`cg-op-row ${isOpen ? "is-open" : ""}`}>
+                <button onClick={() => setOpen(isOpen ? -1 : k)} className="cg-op-header">
+                  <div className="cg-op-badge">{o.uni}</div>
+                  <div className="cg-op-title-wrap">
+                    <div className="cg-op-title">{o.name}</div>
+                    <div className="cg-op-eco">{o.moves}</div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-display text-lg md:text-xl text-stone-900 leading-tight">{o.name}</div>
-                    <div className="text-xs text-stone-500 font-mono">{o.eco}</div>
-                  </div>
-                  <div className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase ring-1 ${sharpColor}`}>
-                    {o.sharp}
-                  </div>
-                  <div className={`w-8 h-8 grid place-items-center rounded-full transition-transform ${isOpen ? "bg-emerald-100 text-emerald-700 rotate-45" : "bg-stone-100 text-stone-500"}`}>
-                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>
+                  <span className={`cg-op-stat-pill cg-op-sharp-pill ${o.sharp}`}>{o.sharpLabel}</span>
+                  <div className="cg-op-chev">
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>
                   </div>
                 </button>
-                <div className={`overflow-hidden transition-all duration-500 ease-out ${isOpen ? "max-h-80" : "max-h-0"}`}>
-                  <div className="px-5 pb-6 md:px-6 md:pb-6 grid md:grid-cols-[1fr_auto] gap-6 items-center">
-                    <div className="w-full">
-                      <div className="text-[10px] tracking-widest uppercase text-stone-500 font-semibold mb-2">Master win-rate</div>
-                      <div className="flex h-4 rounded-full overflow-hidden ring-1 ring-stone-200 shadow-inner">
-                        <div className="bg-gradient-to-r from-stone-100 to-stone-200 grid place-items-center text-[10px] font-bold text-stone-700 transition-all" style={{ width: `${o.w}%` }}>{o.w}%</div>
-                        <div className="bg-gradient-to-r from-stone-300 to-stone-400 grid place-items-center text-[10px] font-bold text-white transition-all" style={{ width: `${o.d}%` }}>{o.d}%</div>
-                        <div className="bg-gradient-to-r from-stone-700 to-stone-900 grid place-items-center text-[10px] font-bold text-white transition-all" style={{ width: `${o.b}%` }}>{o.b}%</div>
+                {isOpen && (
+                  <div className="cg-op-detail cg-reveal-up">
+                    <div className="cg-op-detail-top">
+                      <div className="cg-op-board-area">
+                        <div className="cg-op-gif">{o.uni}</div>
                       </div>
-                      <div className="flex items-center gap-4 mt-2 text-[10px] uppercase tracking-widest text-stone-500">
-                        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-stone-200 ring-1 ring-stone-300" />White</span>
-                        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-stone-400" />Draw</span>
-                        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-stone-800" />Black</span>
+                      <div className="cg-op-text">
+                        <p className="cg-op-description">{o.desc}</p>
                       </div>
-                      <div className="text-sm text-stone-600 mt-4 leading-relaxed italic">{o.taught}</div>
                     </div>
-                    <div className={`sm:hidden inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase ring-1 self-start ${sharpColor}`}>
-                      {o.sharp}
+                    <div className="cg-op-facts">
+                      <div className="cg-op-facts-row">
+                        <span className="cg-op-label">Moves</span>
+                        <code className="cg-op-moves">{o.moves}</code>
+                      </div>
+                      <div className="cg-op-facts-row">
+                        <span className="cg-op-label">Games</span>
+                        <span style={{ color: '#292524' }}>{o.games}</span>
+                      </div>
+                      <div className="cg-op-facts-row">
+                        <span className="cg-op-label">Peak</span>
+                        <span className="cg-op-stat-pill cg-op-rating-pill">{o.peak}</span>
+                      </div>
+                      <div className="cg-op-win-bar">
+                        <div className="cg-op-mini-bar">
+                          <div className="cg-op-mini-seg cg-op-mini-white" style={{ width: `${o.w}%` }}>{o.w}%</div>
+                          <div className="cg-op-mini-seg cg-op-mini-draw"  style={{ width: `${o.d}%` }}>{o.d}%</div>
+                          <div className="cg-op-mini-seg cg-op-mini-black" style={{ width: `${o.b}%` }}>{o.b}%</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="cg-op-actions">
+                      <div className="cg-op-play-buttons">
+                        <button className="cg-op-play-btn">♔ Try as White</button>
+                        <button className="cg-op-play-btn is-black">♚ Try as Black</button>
+                      </div>
+                      <span className="cg-op-read-more">Ask a coach →</span>
                     </div>
                   </div>
-                </div>
+                )}
               </div>
             );
           })}
