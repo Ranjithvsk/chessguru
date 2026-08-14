@@ -160,15 +160,25 @@ export default function LoginPage() {
       <p className="mt-3 text-center text-xs text-ink-500">
         Signing in? <Link to="/" className="hover:underline">Back home</Link>
       </p>
-      <div className="mt-4 rounded-xl2 border border-brand-500/30 bg-gradient-to-br from-brand-500/10 via-ink-900 to-ink-900 p-4 text-center text-sm">
-        <div className="mb-1">🏛️ Running a chess academy?</div>
-        <Link to="/signup-academy" className="font-semibold text-brand-300 hover:underline">
-          Create your Academy →
-        </Link>
-        <p className="mt-1 text-[11px] text-ink-500">
-          Invite coaches, enroll students, run classes. Free during trial.
-        </p>
-      </div>
+      {/* Hide the "Create your Academy" prompt on tenant custom domains — those
+          visitors are already at a specific academy, we don't want to funnel
+          them into signing up their own competing academy. */}
+      {(() => {
+        const isTenantDomain = typeof window !== "undefined" &&
+          !/^(chessguru\.com|harinitharanjith\.com|localhost|127\.0\.0\.1|\d+\.\d+\.\d+\.\d+)$/.test(window.location.hostname.toLowerCase());
+        if (isTenantDomain) return null;
+        return (
+          <div className="mt-4 rounded-xl2 border border-brand-500/30 bg-gradient-to-br from-brand-500/10 via-ink-900 to-ink-900 p-4 text-center text-sm">
+            <div className="mb-1">🏛️ Running a chess academy?</div>
+            <Link to="/signup-academy" className="font-semibold text-brand-300 hover:underline">
+              Create your Academy →
+            </Link>
+            <p className="mt-1 text-[11px] text-ink-500">
+              Invite coaches, enroll students, run classes. Free during trial.
+            </p>
+          </div>
+        );
+      })()}
     </div>
   );
 }

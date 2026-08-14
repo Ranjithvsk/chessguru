@@ -109,12 +109,8 @@ export default function TenantHomePage() {
               Sign in
             </Link>
           )}
-          {!signedIn && (
-            <Link to="/signup-academy"
-              className="rounded-lg border border-ink-600 bg-ink-900/50 px-5 py-2.5 text-sm font-semibold text-white hover:bg-ink-800">
-              New here?
-            </Link>
-          )}
+          {/* "New here?" (signup-academy) removed on tenant page — visitors here
+              are prospective students of THIS academy, not owners of a new one. */}
         </div>
         {!brand.approved && (
           <p className="mx-auto mt-6 max-w-md rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
