@@ -64,7 +64,10 @@ export default function TenantLoginPage() {
   }, [slug]);
 
   const clearMsg = () => { setErr(""); setNote(""); };
-  const back = params.get("back") || `/a/${slug}`;
+  // After a tenant login, land students on the puzzle trainer (that's the
+  // primary "logged-in" experience), not the tenant home dashboard which is
+  // only useful for coaches/owners. A ?back= param still overrides.
+  const back = params.get("back") || `/puzzles`;
 
   const submit = async () => {
     clearMsg(); setBusy(true);
