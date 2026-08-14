@@ -40,10 +40,26 @@ export default function TenantLoginPage() {
 
   useEffect(() => {
     let cancelled = false;
+    // Try the dedicated brand endpoint first; if it 404s (not implemented for
+    // this tenant), fall back to /api/academy-page/:slug which returns the
+    // same data shape (name + logo + tagline) as part of the public page.
+    const fromPage = (j: any): Brand => ({
+      slug: j?.academy?.slug || slug,
+      name: j?.profile?.displayName || j?.academy?.name || slug,
+      brandName: j?.profile?.displayName || j?.academy?.name || slug,
+      brandColor: "#14a2b8",
+      tagline: j?.profile?.tagline || "",
+      logoDataUrl: j?.profile?.logoUrl || null,
+    });
     fetch(`${API_BASE}/api/academy/brand/${encodeURIComponent(slug)}`)
       .then((r) => r.ok ? r.json() : Promise.reject(r.status))
       .then((j) => { if (!cancelled) setBrand(j); })
-      .catch(() => { if (!cancelled) setNotFound(true); });
+      .catch(() =>
+        fetch(`${API_BASE}/api/academy-page/${encodeURIComponent(slug)}`)
+          .then((r) => r.ok ? r.json() : Promise.reject(r.status))
+          .then((j) => { if (!cancelled) setBrand(fromPage(j)); })
+          .catch(() => { if (!cancelled) setNotFound(true); })
+      );
     return () => { cancelled = true; };
   }, [slug]);
 
