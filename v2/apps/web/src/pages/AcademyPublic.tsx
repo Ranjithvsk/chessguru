@@ -2082,9 +2082,9 @@ export default function AcademyPublicPage() {
                 <span>Edit</span>
               </Link>
             )}
-            <a href="https://harinitharanjith.com/puzzles" target="_blank" rel="noreferrer" className="cg-civ-btn cg-civ-btn--outlined cg-civ-btn--sm">
+            <Link to="/puzzles" className="cg-civ-btn cg-civ-btn--outlined cg-civ-btn--sm">
               <span>Log In</span>
-            </a>
+            </Link>
             <a
               href={joinHref}
               {...(joinExternal ? { target: "_blank", rel: "noreferrer" } : {})}
