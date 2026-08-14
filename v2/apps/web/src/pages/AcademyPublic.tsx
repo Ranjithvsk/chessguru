@@ -1509,20 +1509,48 @@ const TESTIMONIAL_CARDS = [
 function TestimonialsGrid() {
   return (
     <section className="cg-civ-band-a" style={{ padding: '4rem 1rem' }}>
+      <style>{`
+        @keyframes cgTestiScrollA { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+        @keyframes cgTestiScrollB { from { transform: translateX(-50%); } to { transform: translateX(0); } }
+        .cg-testi-vp { overflow: hidden; max-width: 1300px; margin: 0 auto; -webkit-mask-image: linear-gradient(to right, transparent 0, #000 4%, #000 96%, transparent 100%); mask-image: linear-gradient(to right, transparent 0, #000 4%, #000 96%, transparent 100%); padding: .5rem 0; }
+        .cg-testi-row { display: flex; gap: 1rem; width: max-content; padding: .5rem 0; }
+        .cg-testi-row.a { animation: cgTestiScrollA 55s linear infinite; }
+        .cg-testi-row.b { animation: cgTestiScrollB 65s linear infinite; }
+        .cg-testi-vp:hover .cg-testi-row { animation-play-state: paused; }
+        .cg-testi-card { flex: 0 0 280px; background: #fff; border: 1px solid #e8e9eb; border-radius: 10px; padding: 1.1rem 1.2rem; box-shadow: 0 2px 8px rgba(20,162,184,0.06); display: flex; flex-direction: column; gap: .65rem; }
+        .cg-testi-mark { color: #14a2b8; font-size: 1.4rem; line-height: 1; font-family: Georgia, serif; }
+        .cg-testi-text { color: #232323; font-size: .9rem; line-height: 1.55; letter-spacing: 1px; }
+        .cg-testi-attr { color: #5a5a5a; font-size: .75rem; font-weight: 600; letter-spacing: 1px; margin-top: auto; }
+      `}</style>
       <div className="cg-civ-container">
         <Reveal className="text-center" delay={0}>
           <h2 className="cg-civ-section-title" style={{ marginBottom: '2.5rem' }}>
             <span>Loved by </span><span className="text-accent">Students &amp; Parents</span>
           </h2>
         </Reveal>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem', maxWidth: '1200px', margin: '0 auto' }}>
-          {TESTIMONIAL_CARDS.map((t, i) => (
-            <div key={i} style={{ background: '#fff', border: '1px solid #e8e9eb', borderRadius: '10px', padding: '1.1rem 1.2rem', boxShadow: '0 2px 8px rgba(20,162,184,0.06)', display: 'flex', flexDirection: 'column', gap: '.65rem' }}>
-              <div style={{ color: '#14a2b8', fontSize: '1.4rem', lineHeight: 1, fontFamily: 'Georgia, serif' }}>&ldquo;</div>
-              <div style={{ color: '#232323', fontSize: '.9rem', lineHeight: 1.55, letterSpacing: 0 }}>{t.text}</div>
-              <div style={{ color: '#5a5a5a', fontSize: '.75rem', fontWeight: 600, letterSpacing: 0, marginTop: 'auto' }}>— {t.by} &middot; {t.platform}</div>
-            </div>
-          ))}
+        {/* Row A — scrolls left */}
+        <div className="cg-testi-vp" style={{ marginBottom: '1rem' }}>
+          <div className="cg-testi-row a">
+            {[...TESTIMONIAL_CARDS, ...TESTIMONIAL_CARDS].map((t, i) => (
+              <div key={`a-${i}`} className="cg-testi-card">
+                <div className="cg-testi-mark">&ldquo;</div>
+                <div className="cg-testi-text">{t.text}</div>
+                <div className="cg-testi-attr">— {t.by} &middot; {t.platform}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        {/* Row B — scrolls right (opposite direction for parallax feel) */}
+        <div className="cg-testi-vp">
+          <div className="cg-testi-row b">
+            {[...TESTIMONIAL_CARDS.slice().reverse(), ...TESTIMONIAL_CARDS.slice().reverse()].map((t, i) => (
+              <div key={`b-${i}`} className="cg-testi-card">
+                <div className="cg-testi-mark">&ldquo;</div>
+                <div className="cg-testi-text">{t.text}</div>
+                <div className="cg-testi-attr">— {t.by} &middot; {t.platform}</div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </section>
