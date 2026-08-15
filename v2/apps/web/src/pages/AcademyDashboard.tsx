@@ -136,6 +136,42 @@ function ResetPasswordButton({ studentId, name }: { studentId: string; name: str
   );
 }
 
+/** Mark a student as attended for today. Idempotent per (coach, day). Ephemeral
+ *  success state — button turns green with a check for 3s, then resets. */
+function MarkAttendedButton({ studentId, name }: { studentId: string; name: string }) {
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const submit = async () => {
+    if (!confirm(`Mark ${name} as attended today?`)) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/v2api/api/academy/students/${encodeURIComponent(studentId)}/mark-attended`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({}),
+      });
+      const j = await r.json();
+      if (j?.ok) { setDone(true); setTimeout(() => setDone(false), 3000); }
+      else alert(j?.error || "Couldn't mark attended.");
+    } catch (e: any) {
+      alert(e?.message || "Network error.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      onClick={submit}
+      disabled={busy}
+      className={`rounded-lg border px-2 py-1 disabled:opacity-60 ${done ? "border-emerald-500/60 bg-emerald-500/20 text-emerald-100" : "border-cyan-500/50 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20"}`}
+      title="Mark this student as attended today"
+    >
+      {done ? "✓ Marked" : busy ? "…" : "✔ Attended"}
+    </button>
+  );
+}
+
 function fmtAgo(d?: string|null) {
   if (!d) return "—";
   const s = Math.max(0, Math.round((Date.now() - new Date(d).getTime()) / 1000));
@@ -1735,6 +1771,7 @@ export default function AcademyDashboardPage() {
                             <Link to={`/dashboard?as=${encodeURIComponent(s.username)}`} className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-2 py-1 text-brand-100 hover:bg-brand-500/20">📊 Perf</Link>
                             <Link to={`/history?as=${encodeURIComponent(s.username)}`} className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-2 py-1 text-brand-100 hover:bg-brand-500/20">📜 History</Link>
                             <ResetPasswordButton studentId={s._id} name={s.name || s.username} />
+                            <MarkAttendedButton studentId={s._id} name={s.name || s.username} />
                           </div>
                         </td>
                       </tr>

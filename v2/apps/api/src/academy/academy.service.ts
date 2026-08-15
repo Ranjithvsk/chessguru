@@ -224,6 +224,36 @@ export class AcademyService {
     };
   }
 
+  /** Manually mark a student as attended for a given date (defaults to today).
+   *  Coach can only mark their own students; owner can mark any. Writes to the
+   *  classAttendance collection with a synthetic classId = "manual-<coachId>-<yyyymmdd>"
+   *  so re-marking the same day is idempotent and the rollups in listStudents
+   *  (attendedTotal / attendedThisWeek / lastAttendedAt) pick it up. */
+  async markStudentAttended(session: any, studentId: string, body: any): Promise<any> {
+    const g = this.ensureCoachOrOwner(session);
+    const target: any = await this.users().findOne({ _id: studentId as any, academyId: g.academyId, role: "student" });
+    if (!target) return { ok: false, error: "That student isn't in this academy." };
+    if (g.role === "coach" && String(target.coachId || "") !== g.userId) {
+      return { ok: false, error: "That student isn't in your roster." };
+    }
+    // Normalise date. Accept YYYY-MM-DD from body, default to today.
+    const raw = String(body?.date || "").trim();
+    const d = raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? new Date(`${raw}T09:00:00`) : new Date();
+    if (isNaN(d.getTime())) return { ok: false, error: "Bad date." };
+    const yyyymmdd = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}`;
+    const classId = `manual-${g.userId}-${yyyymmdd}`;
+    const col = this.conn.db!.collection("classAttendance");
+    await col.updateOne(
+      { classId, key: target._id },
+      {
+        $setOnInsert: { joinedAt: d, classId, key: target._id, userId: target._id, name: target.name || target.username, manual: true, markedByUserId: g.userId },
+        $set: { lastSeenAt: new Date() },
+      },
+      { upsert: true },
+    );
+    return { ok: true, markedAt: d.toISOString() };
+  }
+
   /** Coach or owner resets a student's password. Coach can only reset students
    *  they own; owner can reset anyone in the academy. Returns the new plain-text
    *  password (single-use display) so the coach can hand it to the student in

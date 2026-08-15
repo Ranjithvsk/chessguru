@@ -117,6 +117,12 @@ export class AcademyController {
     return this.svc.setStudentPassword(req.session, id, body);
   }
 
+  /** Manually mark a student as attended. Body: { date?: "YYYY-MM-DD" } — defaults today. */
+  @Post("students/:id/mark-attended")
+  markStudentAttended(@Req() req: any, @Param("id") id: string, @Body() body: any) {
+    return this.svc.markStudentAttended(req.session, id, body);
+  }
+
   // ── Fees + billing ──────────────────────────────────────────────
   @Get("fees/config")
   getFeesConfig(@Req() req: any) { return this.svc.getFeesConfig(req.session); }
