@@ -1539,6 +1539,109 @@ function OpeningTrendPanel() {
 }
 
 // ═════════════════════ CHESSIVERSE MODULE D — Publications logo band (1:1) ═════════════════════
+// Coaching format cards — visitor picks the class shape that fits them.
+function CoachingFormats({ loginHref, joinHref, joinExternal }: { loginHref: string; joinHref: string; joinExternal: boolean }) {
+  const cards = [
+    {
+      badge: "PROFESSIONAL",
+      badgeColor: "linear-gradient(135deg,#f9a80a,#ff6a00)",
+      icon: "👑",
+      title: "Full-Day Private",
+      pitch: "For serious tournament players preparing for a rated event or a title norm.",
+      bullets: [
+        "Full-day (6–8 hrs) one-on-one intensive",
+        "Opening prep vs your next opponent",
+        "Deep endgame + middlegame drills",
+        "Post-tournament game analysis",
+      ],
+      priceHint: "By appointment",
+      cta: "Get in touch",
+      href: joinHref, ext: joinExternal, useLink: false,
+    },
+    {
+      badge: "MOST POPULAR",
+      badgeColor: "linear-gradient(135deg,#14a2b8,#40bfd3)",
+      icon: "🧑‍🏫",
+      title: "Individual Class",
+      pitch: "One-on-one with a titled coach. Personalised plan, weekly rating gains.",
+      bullets: [
+        "60–90 min per session",
+        "Custom curriculum by rating band",
+        "Weekly homework via WhatsApp",
+        "Monthly progress report",
+      ],
+      priceHint: "Flexible schedule",
+      cta: "Join now",
+      href: loginHref, ext: false, useLink: true,
+    },
+    {
+      badge: "BEST VALUE",
+      badgeColor: "linear-gradient(135deg,#ec4899,#a855f7)",
+      icon: "👥",
+      title: "Group Class",
+      pitch: "Small group (3–6 students) matched by rating. Peer learning + tournaments.",
+      bullets: [
+        "60 min per session, twice a week",
+        "Rating-matched cohort",
+        "Weekly rated in-group games",
+        "Shared homework + puzzle drills",
+      ],
+      priceHint: "From ₹1,500 / month",
+      cta: "Join a batch",
+      href: loginHref, ext: false, useLink: true,
+    },
+  ];
+  return (
+    <section className="cg-civ-band-b" style={{ padding: '4rem 1rem' }}>
+      <style>{`
+        .cg-fmt-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 1.25rem; max-width: 1200px; margin: 2rem auto 0; }
+        @media (max-width: 900px) { .cg-fmt-grid { grid-template-columns: 1fr; } }
+        .cg-fmt-card { position: relative; background: #fff; border-radius: 16px; padding: 1.75rem 1.5rem; box-shadow: 0 8px 24px rgba(20,162,184,0.08); transition: transform 0.4s cubic-bezier(0.16,1,0.3,1), box-shadow 0.4s; display: flex; flex-direction: column; }
+        .cg-fmt-card:hover { transform: translateY(-6px); box-shadow: 0 20px 40px rgba(20,162,184,0.18); }
+        .cg-fmt-card.is-featured { transform: scale(1.03); box-shadow: 0 16px 40px rgba(20,162,184,0.18); border: 2px solid #14a2b8; }
+        .cg-fmt-card.is-featured:hover { transform: scale(1.03) translateY(-6px); }
+        .cg-fmt-badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 0.65rem; font-weight: 800; letter-spacing: 0.18em; padding: 4px 12px; border-radius: 999px; text-transform: uppercase; box-shadow: 0 4px 12px rgba(0,0,0,0.15); white-space: nowrap; }
+        .cg-fmt-icon { font-size: 2.4rem; margin-bottom: 0.6rem; }
+        .cg-fmt-title { font-family: "Clash Display", sans-serif; font-size: 1.5rem; font-weight: 700; color: #232323; letter-spacing: 0; line-height: 1.2; margin-bottom: 0.4rem; }
+        .cg-fmt-pitch { color: #5a5a5a; font-size: 0.88rem; line-height: 1.5; letter-spacing: 1px; margin-bottom: 1.1rem; }
+        .cg-fmt-bullets { list-style: none; padding: 0; margin: 0 0 1.25rem; }
+        .cg-fmt-bullets li { color: #232323; font-size: 0.82rem; padding: 0.35rem 0 0.35rem 1.3rem; position: relative; letter-spacing: 1px; }
+        .cg-fmt-bullets li::before { content: "✓"; position: absolute; left: 0; top: 0.35rem; color: #14a2b8; font-weight: 800; }
+        .cg-fmt-price { color: #5a5a5a; font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; margin-bottom: 0.9rem; margin-top: auto; }
+        .cg-fmt-cta { display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; width: 100%; text-decoration: none; padding: 0.7rem 1rem; border-radius: 10px; font-size: 0.9rem; font-weight: 700; background: linear-gradient(180deg,#14a2b8,#40bfd3); color: #fff; letter-spacing: 0; box-shadow: 0 4px 12px rgba(20,162,184,0.3); transition: all 0.2s; }
+        .cg-fmt-cta:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(20,162,184,0.45); }
+      `}</style>
+      <div className="cg-civ-container">
+        <Reveal className="text-center">
+          <h2 className="cg-civ-section-title">
+            <span>Choose your </span><span className="text-accent">coaching format</span>
+          </h2>
+          <p className="cg-civ-section-sub">From full-day intensives for tournament players to small-group batches for improvers — every format is coached by titled players.</p>
+        </Reveal>
+        <div className="cg-fmt-grid">
+          {cards.map((c, i) => (
+            <div key={c.title} className={`cg-fmt-card ${i === 1 ? "is-featured" : ""}`}>
+              <div className="cg-fmt-badge" style={{ background: c.badgeColor }}>{c.badge}</div>
+              <div className="cg-fmt-icon">{c.icon}</div>
+              <div className="cg-fmt-title">{c.title}</div>
+              <div className="cg-fmt-pitch">{c.pitch}</div>
+              <ul className="cg-fmt-bullets">
+                {c.bullets.map((b) => <li key={b}>{b}</li>)}
+              </ul>
+              <div className="cg-fmt-price">{c.priceHint}</div>
+              {c.useLink ? (
+                <Link to={c.href} className="cg-fmt-cta">{c.cta} →</Link>
+              ) : (
+                <a href={c.href} {...(c.ext ? { target: "_blank", rel: "noreferrer" } : {})} className="cg-fmt-cta">{c.cta} →</a>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function PublicationsBand() {
   // Faux Indian press logos rendered as stylized wordmarks (no image files → no
   // hash match). Matches Chessiverse's "Recognized by Leading Publications" strip.
@@ -2273,6 +2376,9 @@ export default function AcademyPublicPage() {
 
       {/* Featured by Leading Chess Creators */}
       <BotGrid ctaHref={joinHref} ctaExt={joinExternal} joinLabel={joinLabel} />
+
+      {/* Coaching formats — full-day private, individual, group */}
+      <CoachingFormats loginHref={loginHref} joinHref={joinHref} joinExternal={joinExternal} />
 
       {/* Recognized by Leading Publications + logo strip */}
       <PublicationsBand />
