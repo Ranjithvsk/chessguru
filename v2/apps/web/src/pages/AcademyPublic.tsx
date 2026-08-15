@@ -2576,7 +2576,7 @@ export default function AcademyPublicPage() {
             ))}
           </div>
           <div style={{ marginTop: '0.75rem', fontSize: '0.8rem', color: '#232323' }}>
-            Powered by <Link to="/academy" style={{ color: '#14a2b8', fontWeight: 700, textDecoration: 'underline' }}>ChessGuru</Link>
+            Powered by <a href="https://harinitharanjith.com" target="_blank" rel="noreferrer" style={{ color: '#14a2b8', fontWeight: 700, textDecoration: 'underline' }}>ChessGuru</a>
           </div>
         </div>
       </footer>
