@@ -1622,7 +1622,7 @@ function BiggestAchievements() {
             <div className="cg-battles-eyebrow">🏆 Biggest Achievement</div>
             <h2 className="cg-battles-title">Battles Against<br/>the Titled Elite</h2>
             <p className="cg-battles-desc">
-              FM Gunasekaran K has <b>defeated 10+ International Masters</b> and <b>held 6 Grandmasters to a draw</b> over his tournament career — a rare record for any Indian player.
+              FM Gunasekaran K has <b>defeated 10+ International Masters</b> and <b>held 6 Grandmasters to a draw</b> over his tournament career — a nice achievement to celebrate.
             </p>
           </Reveal>
         </div>
