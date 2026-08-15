@@ -372,7 +372,7 @@ export class AcademyDomainService {
         return;
       }
 
-      const conf = this.buildNginxConf(domain);
+      const conf = this.buildNginxConf(domain, String(academyId));
       const write = await this.runWithStdin(
         "sudo",
         ["-n", "/usr/bin/tee", `${NGINX_DIR}/${domain}.conf`],
@@ -429,7 +429,7 @@ export class AcademyDomainService {
     console.error(`[academy-domain] academy ${academyId}: ${msg}`);
   }
 
-  private buildNginxConf(domain: string): string {
+  private buildNginxConf(domain: string, slug: string): string {
     // Same SPA vhost shape as coach-domain, plus /academy-img/ alias. The SPA
     // shim in App.tsx will look up /v2api/academy-page/by-domain/<host> on
     // mount and navigate() to /academy-page/<slug>.
@@ -455,6 +455,9 @@ server {
 
   root ${SPA_ROOT};
   index index.html;
+  # Server-side tenant landing (no client-side flash): / goes straight to the
+  # academy public page for this tenant.
+  location = / { return 302 /academy-page/${slug}; }
   # /v2/ prefix retired 2026-08-15 — legacy URLs 301 to root.
   location = /v2 { return 301 /; }
   location /v2/ { rewrite ^/v2/(.*)$ /$1 permanent; }

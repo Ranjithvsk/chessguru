@@ -1827,6 +1827,13 @@ export default function AcademyPublicPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!displayName) return;
+    const prev = document.title;
+    document.title = displayName;
+    return () => { document.title = prev; };
+  }, [displayName]);
+
   if (acadQ.isLoading || authQ.isLoading) {
     return (
       <div className="min-h-screen bg-[#faf6ef] grid place-items-center text-stone-400 text-sm tracking-widest uppercase">
