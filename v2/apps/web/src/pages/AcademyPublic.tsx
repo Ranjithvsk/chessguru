@@ -1539,6 +1539,124 @@ function OpeningTrendPanel() {
 }
 
 // ═════════════════════ CHESSIVERSE MODULE D — Publications logo band (1:1) ═════════════════════
+// Guna's biggest chess battles — wins vs IMs + draws vs GMs. Grand
+// celebration section: gold + burgundy palette, cinematic hero image,
+// staggered player-chip reveals on scroll.
+const BATTLES_WON = [
+  "IM Varghese Koshy", "IM Vishal Sareen", "IM Andrew Webster",
+  "IM CS Gokhale", "IM Suvarajit Saha", "IM Roktim Bandopadhyay",
+  "IM Muralikrishna BT", "IM Muthaiah AL", "IM Sundararajan Kidambi",
+  "IM Himanshu Sharma",
+];
+const BATTLES_DREW = [
+  "GM Ramesh RB", "GM Abhijit Kunte", "GM Sriram Jha",
+  "GM Alexander Fominyh", "GM Enamul Hossain", "GM Vijayalakshmi",
+];
+function BiggestAchievements() {
+  return (
+    <section className="cg-battles-section">
+      <style>{`
+        @keyframes cgBattleGlow { 0%,100% { box-shadow: 0 0 40px rgba(249,168,10,.25); } 50% { box-shadow: 0 0 80px rgba(249,168,10,.55); } }
+        @keyframes cgBattleShimmer { 0% { background-position: -200% center; } 100% { background-position: 200% center; } }
+        @keyframes cgBattleChipIn { from { opacity: 0; transform: translateY(20px) scale(0.9); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        @keyframes cgBattleFloat { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-8px) rotate(2deg); } }
+        @keyframes cgConfettiFall { 0% { opacity: 0; transform: translateY(-20vh) rotate(0deg); } 15% { opacity: 1; } 100% { opacity: 0; transform: translateY(120vh) rotate(720deg); } }
+        .cg-battles-section { position: relative; overflow: hidden; padding: 6rem 1rem; background: radial-gradient(ellipse at center top, #2a0b1e 0%, #1a0510 45%, #0e0308 100%); color: #fff; }
+        .cg-battles-section::before { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at 15% 25%, rgba(249,168,10,0.18) 0%, transparent 40%), radial-gradient(circle at 85% 75%, rgba(236,72,153,0.14) 0%, transparent 45%); pointer-events: none; }
+        .cg-battles-container { position: relative; max-width: 1200px; margin: 0 auto; }
+        .cg-battles-hero { display: flex; align-items: center; gap: 3rem; margin-bottom: 3rem; }
+        @media (max-width: 900px) { .cg-battles-hero { flex-direction: column; gap: 2rem; } }
+        .cg-battles-hero-img { flex: 0 0 300px; aspect-ratio: 1/1; border-radius: 20px; overflow: hidden; box-shadow: 0 30px 80px rgba(249,168,10,0.35); animation: cgBattleGlow 4s ease-in-out infinite, cgBattleFloat 6s ease-in-out infinite; }
+        .cg-battles-hero-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .cg-battles-hero-text { flex: 1; }
+        .cg-battles-eyebrow { color: #f9a80a; font-size: 0.85rem; font-weight: 800; letter-spacing: 0.3em; text-transform: uppercase; margin-bottom: 1rem; text-shadow: 0 0 20px rgba(249,168,10,0.5); }
+        .cg-battles-title { font-family: "Clash Display", sans-serif; font-size: clamp(2.4rem, 5vw, 4rem); font-weight: 900; line-height: 1; letter-spacing: -0.02em; margin: 0 0 1rem; background: linear-gradient(90deg, #ffd88a, #f9a80a 25%, #ff6a00 50%, #f9a80a 75%, #ffd88a); background-size: 200% auto; background-clip: text; -webkit-background-clip: text; color: transparent; animation: cgBattleShimmer 4s linear infinite; }
+        .cg-battles-desc { color: #fce8b5; font-size: 1.05rem; line-height: 1.6; letter-spacing: 1px; opacity: 0.9; max-width: 560px; }
+        .cg-battles-desc b { color: #ffd88a; font-weight: 800; }
+        .cg-battles-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 3rem; }
+        @media (max-width: 800px) { .cg-battles-grid { grid-template-columns: 1fr; } }
+        .cg-battles-col { background: linear-gradient(160deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02)); border: 1px solid rgba(249,168,10,0.25); border-radius: 20px; padding: 2rem 1.75rem; backdrop-filter: blur(12px); position: relative; overflow: hidden; }
+        .cg-battles-col::before { content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: conic-gradient(from 0deg, transparent 0deg, rgba(249,168,10,0.15) 30deg, transparent 60deg); animation: cgBattleGlow 8s linear infinite; pointer-events: none; }
+        .cg-battles-col-head { display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 1.5rem; position: relative; }
+        .cg-battles-col-icon { font-size: 2.4rem; filter: drop-shadow(0 4px 12px rgba(249,168,10,0.4)); }
+        .cg-battles-col-title { font-family: "Clash Display", sans-serif; font-size: 1.6rem; font-weight: 800; letter-spacing: 0; color: #ffd88a; }
+        .cg-battles-col-count { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(255,216,138,0.6); margin-left: auto; }
+        .cg-battles-chips { display: flex; flex-wrap: wrap; gap: 0.6rem; position: relative; }
+        .cg-battles-chip { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.55rem 1rem; background: linear-gradient(135deg, rgba(249,168,10,0.15), rgba(236,72,153,0.08)); border: 1px solid rgba(249,168,10,0.35); border-radius: 999px; font-size: 0.85rem; font-weight: 600; color: #fff; letter-spacing: 0.02em; box-shadow: 0 4px 12px rgba(249,168,10,0.15); transition: all 0.3s cubic-bezier(0.16,1,0.3,1); animation: cgBattleChipIn 0.6s cubic-bezier(0.16,1,0.3,1) both; }
+        .cg-battles-chip:hover { transform: translateY(-3px) scale(1.05); box-shadow: 0 10px 24px rgba(249,168,10,0.4); border-color: rgba(249,168,10,0.7); background: linear-gradient(135deg, rgba(249,168,10,0.3), rgba(236,72,153,0.15)); }
+        .cg-battles-chip::before { content: '♛'; color: #f9a80a; font-size: 0.9rem; text-shadow: 0 0 8px rgba(249,168,10,0.5); }
+        .cg-battles-chip-draw::before { content: '♚'; }
+        .cg-battles-chip:nth-child(1)  { animation-delay: 0.05s; }
+        .cg-battles-chip:nth-child(2)  { animation-delay: 0.10s; }
+        .cg-battles-chip:nth-child(3)  { animation-delay: 0.15s; }
+        .cg-battles-chip:nth-child(4)  { animation-delay: 0.20s; }
+        .cg-battles-chip:nth-child(5)  { animation-delay: 0.25s; }
+        .cg-battles-chip:nth-child(6)  { animation-delay: 0.30s; }
+        .cg-battles-chip:nth-child(7)  { animation-delay: 0.35s; }
+        .cg-battles-chip:nth-child(8)  { animation-delay: 0.40s; }
+        .cg-battles-chip:nth-child(9)  { animation-delay: 0.45s; }
+        .cg-battles-chip:nth-child(10) { animation-delay: 0.50s; }
+        /* Confetti particles floating in the background */
+        .cg-confetti { position: absolute; top: 0; left: 0; right: 0; height: 100%; pointer-events: none; z-index: 1; overflow: hidden; }
+        .cg-confetti span { position: absolute; width: 8px; height: 12px; border-radius: 2px; animation: cgConfettiFall 6s linear infinite; }
+        .cg-confetti span:nth-child(1)  { left: 8%;  background: #f9a80a; animation-delay: 0s;   animation-duration: 7s; }
+        .cg-confetti span:nth-child(2)  { left: 18%; background: #ec4899; animation-delay: 1s;   animation-duration: 8s; }
+        .cg-confetti span:nth-child(3)  { left: 27%; background: #14a2b8; animation-delay: 2s;   animation-duration: 6s; }
+        .cg-confetti span:nth-child(4)  { left: 38%; background: #ffd88a; animation-delay: 0.5s; animation-duration: 9s; }
+        .cg-confetti span:nth-child(5)  { left: 48%; background: #ff6a00; animation-delay: 3s;   animation-duration: 7s; }
+        .cg-confetti span:nth-child(6)  { left: 58%; background: #a855f7; animation-delay: 1.5s; animation-duration: 8s; }
+        .cg-confetti span:nth-child(7)  { left: 68%; background: #f9a80a; animation-delay: 2.5s; animation-duration: 6s; }
+        .cg-confetti span:nth-child(8)  { left: 78%; background: #ec4899; animation-delay: 0.8s; animation-duration: 8s; }
+        .cg-confetti span:nth-child(9)  { left: 88%; background: #14a2b8; animation-delay: 3.5s; animation-duration: 7s; }
+        .cg-confetti span:nth-child(10) { left: 95%; background: #ffd88a; animation-delay: 1.2s; animation-duration: 9s; }
+      `}</style>
+      <div className="cg-confetti">
+        {Array.from({ length: 10 }).map((_, i) => <span key={i} />)}
+      </div>
+      <div className="cg-battles-container">
+        <div className="cg-battles-hero">
+          <Reveal from="left" className="cg-battles-hero-img">
+            <img src="/academy/battles-hero.webp" alt="Chess trophies" onError={(e) => { (e.target as HTMLImageElement).src = "/academy/guna-hero.webp"; }} />
+          </Reveal>
+          <Reveal delay={200} className="cg-battles-hero-text">
+            <div className="cg-battles-eyebrow">🏆 Biggest Achievement</div>
+            <h2 className="cg-battles-title">Battles Against<br/>the Titled Elite</h2>
+            <p className="cg-battles-desc">
+              FM Gunasekaran K has <b>defeated 10+ International Masters</b> and <b>held 6 Grandmasters to a draw</b> over his tournament career — a rare record for any Indian player.
+            </p>
+          </Reveal>
+        </div>
+        <div className="cg-battles-grid">
+          <div className="cg-battles-col">
+            <div className="cg-battles-col-head">
+              <span className="cg-battles-col-icon">👑</span>
+              <span className="cg-battles-col-title">Wins vs IMs</span>
+              <span className="cg-battles-col-count">{BATTLES_WON.length} defeats</span>
+            </div>
+            <div className="cg-battles-chips">
+              {BATTLES_WON.map((name) => (
+                <span key={name} className="cg-battles-chip">{name}</span>
+              ))}
+            </div>
+          </div>
+          <div className="cg-battles-col">
+            <div className="cg-battles-col-head">
+              <span className="cg-battles-col-icon">🤝</span>
+              <span className="cg-battles-col-title">Draws vs GMs</span>
+              <span className="cg-battles-col-count">{BATTLES_DREW.length} holds</span>
+            </div>
+            <div className="cg-battles-chips">
+              {BATTLES_DREW.map((name) => (
+                <span key={name} className="cg-battles-chip cg-battles-chip-draw">{name}</span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // Coaching format cards — visitor picks the class shape that fits them.
 function CoachingFormats({ loginHref, joinHref, joinExternal }: { loginHref: string; joinHref: string; joinExternal: boolean }) {
   const cards = [
@@ -2376,6 +2494,9 @@ export default function AcademyPublicPage() {
 
       {/* Featured by Leading Chess Creators */}
       <BotGrid ctaHref={joinHref} ctaExt={joinExternal} joinLabel={joinLabel} />
+
+      {/* Biggest Achievement — battles vs IMs + GMs (grand celebration) */}
+      <BiggestAchievements />
 
       {/* Coaching formats — full-day private, individual, group */}
       <CoachingFormats loginHref={loginHref} joinHref={joinHref} joinExternal={joinExternal} />
