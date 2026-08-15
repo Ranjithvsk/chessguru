@@ -1643,7 +1643,7 @@ function QuadrantCharts() {
                 <div className="cg-civ-quad-tag">Observer</div>
               </div>
               <div className="cg-civ-quad-center">
-                <img src="/academy/arch-04-endgame.webp" alt="You" />
+                <img src="/academy/guna-hero.webp" alt="You" />
               </div>
               <div className="cg-civ-quad-label" style={{ top: '-14px', left: '50%', transform: 'translateX(-50%)', color: '#e11d48' }}>Aggressive</div>
               <div className="cg-civ-quad-label" style={{ bottom: '-14px', left: '50%', transform: 'translateX(-50%)', color: '#2563eb' }}>Defensive</div>
@@ -1672,7 +1672,7 @@ function QuadrantCharts() {
                 <div className="cg-civ-quad-tag">Classic</div>
               </div>
               <div className="cg-civ-quad-center">
-                <img src="/academy/arch-04-endgame.webp" alt="You" />
+                <img src="/academy/guna-hero.webp" alt="You" />
               </div>
               <div className="cg-civ-quad-label" style={{ top: '-14px', left: '50%', transform: 'translateX(-50%)', color: '#e11d48' }}>Sharp</div>
               <div className="cg-civ-quad-label" style={{ bottom: '-14px', left: '50%', transform: 'translateX(-50%)', color: '#2563eb' }}>Solid</div>
@@ -2187,9 +2187,9 @@ export default function AcademyPublicPage() {
         <div className="cg-civ-hero-visual">
           <div className="cg-civ-hv-board" />
           <div className="cg-civ-hv-card">
-            <img src="/academy/arch-04-endgame.webp" alt="Guna Chess Coach" />
+            <img src="/academy/guna-hero.webp" alt="FM Gunasekaran K with Chief Minister Trophy" />
             <div className="cg-civ-hv-card-name">
-              {(coaches[0]?.coachProfile?.displayName || coaches[0]?.fullName || "Vikram").split(" ").slice(0,3).join(" ")}
+              FM Gunasekaran K
             </div>
           </div>
           <div className="cg-civ-hv-stars">
