@@ -19,7 +19,7 @@ const ROOM_RE = /^[a-zA-Z0-9_-]{3,32}$/;
 // notification's deep-link against an open-redirect via a spoofed joinPath, and
 // carries the /v2 app base so the service worker resolves it under the SPA
 // (a bare /call/... would drop the base and miss the router).
-const JOIN_PATH_RE = /^\/v2\/(call|class-v2)\/[A-Za-z0-9_-]{1,64}(\?[A-Za-z0-9_=&%-]*)?$/;
+const JOIN_PATH_RE = /^\/(v2\/)?(call|class-v2)\/[A-Za-z0-9_-]{1,64}(\?[A-Za-z0-9_=&%-]*)?$/;
 
 @Controller("class")
 export class ClassLiveController {
@@ -48,7 +48,7 @@ export class ClassLiveController {
     // Jitsi + from-scratch mesh call are retired (owner 2026-08-12). Any
     // announcement that doesn't ship its own valid /class-v2/... path defaults
     // to Dream Meet — the sole live-class surface.
-    if (!JOIN_PATH_RE.test(joinPath)) joinPath = `/v2/class-v2/${id}?role=student`;
+    if (!JOIN_PATH_RE.test(joinPath)) joinPath = `/class-v2/${id}?role=student`;
 
     // Idempotent per room for 3h (skips push re-spam on reconnect).
     const prev: any = await this.conn.db!.collection("classLiveAnnouncements").findOne(

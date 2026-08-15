@@ -455,6 +455,9 @@ server {
 
   root ${SPA_ROOT};
   index index.html;
+  # /v2/ prefix retired 2026-08-15 — legacy URLs 301 to root.
+  location = /v2 { return 301 /; }
+  location /v2/ { rewrite ^/v2/(.*)$ /$1 permanent; }
   location / { try_files $uri $uri/ /index.html; add_header Cache-Control "no-cache" always; }
   location /assets/ { try_files $uri =404; }
 

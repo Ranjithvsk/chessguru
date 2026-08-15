@@ -13,9 +13,7 @@
     <meta name="apple-mobile-web-app-title" content="ChessGuru" />
     <script>
       // Resolve theme BEFORE React renders so the page never flashes in the
-      // wrong palette. Default (no saved choice) is LIGHT for every user —
-      // owner ask: day mode is the intended out-of-the-box experience. Users
-      // who explicitly pick dark from the navbar toggle get it persisted.
+      // wrong palette. Default (no saved choice) is LIGHT for every user.
       (function () {
         try {
           var saved = localStorage.getItem("cg.theme");
@@ -24,6 +22,46 @@
           root.classList.toggle("light", mode === "light");
           root.classList.toggle("dark", mode === "dark");
         } catch (e) { /* fall through */ }
+      })();
+    </script>
+    <script>
+      // WHITE-SCREEN SAFETY NET (2026-08-15). If React hasn't rendered
+      // anything into #root within 6 seconds, force-recover: unregister ALL
+      // service workers + clear caches + reload. This escapes stuck SW
+      // states where a cached bundle references an asset that no longer
+      // exists on the server (which broke every device during Aug 15's
+      // rapid-deploy cycle).
+      (function () {
+        setTimeout(function () {
+          try {
+            var root = document.getElementById("root");
+            if (root && root.childElementCount > 0) return;
+            if (sessionStorage.getItem("cg_recovered") === "1") {
+              document.body.innerHTML = "<div style='padding:20px;font-family:sans-serif'><h2>ChessGuru failed to load twice.</h2><p>Please close and reopen the browser tab, or try a different browser.</p></div>";
+              return;
+            }
+            sessionStorage.setItem("cg_recovered", "1");
+            (async function () {
+              try {
+                if ("serviceWorker" in navigator) {
+                  var regs = await navigator.serviceWorker.getRegistrations();
+                  for (var i = 0; i < regs.length; i++) await regs[i].unregister();
+                }
+                if ("caches" in window) {
+                  var keys = await caches.keys();
+                  for (var j = 0; j < keys.length; j++) await caches.delete(keys[j]);
+                }
+              } catch (e) { /* recover anyway */ }
+              location.reload();
+            })();
+          } catch (e) { /* nothing else to do */ }
+        }, 6000);
+        window.addEventListener("load", function () {
+          setTimeout(function () {
+            var root = document.getElementById("root");
+            if (root && root.childElementCount > 0) sessionStorage.removeItem("cg_recovered");
+          }, 2000);
+        });
       })();
     </script>
   </head>

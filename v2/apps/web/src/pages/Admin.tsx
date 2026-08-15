@@ -126,7 +126,7 @@ export default function AdminPage() {
             {gen!.puzzles.map((p) => (
               <div key={p.id} className="flex items-center justify-between rounded-lg border border-ink-700 px-3 py-2 text-sm">
                 <span className="text-white">#{p.id} · {p.rating}</span>
-                <a className="text-brand-300 hover:underline" href={`/v2/board-editor`}>{p.themes.slice(0, 2).join(", ")}</a>
+                <a className="text-brand-300 hover:underline" href={`/board-editor`}>{p.themes.slice(0, 2).join(", ")}</a>
               </div>
             ))}
           </div>

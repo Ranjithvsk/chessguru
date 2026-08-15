@@ -17,8 +17,8 @@
 
 import * as ort from "onnxruntime-web";
 
-const MODEL_URL = "/v2/models/chess-classifier-v4-int8.onnx";
-const CLASSES_URL = "/v2/models/chess-classifier-v4.classes.json";
+const MODEL_URL = "/models/chess-classifier-v4-int8.onnx";
+const CLASSES_URL = "/models/chess-classifier-v4.classes.json";
 const CROP = 224;
 const MEAN = [0.485, 0.456, 0.406];
 const STD = [0.229, 0.224, 0.225];

@@ -19,8 +19,8 @@
 
 import * as ort from "onnxruntime-web";
 
-const MODEL_URL = "/v2/models/chess-corner-detector-int8.onnx";
-const META_URL = "/v2/models/chess-corner-detector.meta.json";
+const MODEL_URL = "/models/chess-corner-detector-int8.onnx";
+const META_URL = "/models/chess-corner-detector.meta.json";
 const IMG_SIZE = 384;
 const MEAN = [0.485, 0.456, 0.406];
 const STD = [0.229, 0.224, 0.225];
