@@ -1561,30 +1561,30 @@ function BiggestAchievements() {
         @keyframes cgBattleChipIn { from { opacity: 0; transform: translateY(20px) scale(0.9); } to { opacity: 1; transform: translateY(0) scale(1); } }
         @keyframes cgBattleFloat { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-8px) rotate(2deg); } }
         @keyframes cgConfettiFall { 0% { opacity: 0; transform: translateY(-20vh) rotate(0deg); } 15% { opacity: 1; } 100% { opacity: 0; transform: translateY(120vh) rotate(720deg); } }
-        .cg-battles-section { position: relative; overflow: hidden; padding: 6rem 1rem; background: radial-gradient(ellipse at center top, #2a0b1e 0%, #1a0510 45%, #0e0308 100%); color: #fff; }
-        .cg-battles-section::before { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at 15% 25%, rgba(249,168,10,0.18) 0%, transparent 40%), radial-gradient(circle at 85% 75%, rgba(236,72,153,0.14) 0%, transparent 45%); pointer-events: none; }
+        .cg-battles-section { position: relative; overflow: hidden; padding: 6rem 1rem; background: linear-gradient(180deg, #d5f0f7 0%, #b8e6f2 50%, #c7edf5 100%); color: #232323; }
+        .cg-battles-section::before { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at 15% 25%, rgba(249,168,10,0.20) 0%, transparent 45%), radial-gradient(circle at 85% 75%, rgba(20,162,184,0.18) 0%, transparent 50%); pointer-events: none; }
         .cg-battles-container { position: relative; max-width: 1200px; margin: 0 auto; }
         .cg-battles-hero { display: flex; align-items: center; gap: 3rem; margin-bottom: 3rem; }
         @media (max-width: 900px) { .cg-battles-hero { flex-direction: column; gap: 2rem; } }
         .cg-battles-hero-img { flex: 0 0 300px; aspect-ratio: 1/1; border-radius: 20px; overflow: hidden; box-shadow: 0 30px 80px rgba(249,168,10,0.35); animation: cgBattleGlow 4s ease-in-out infinite, cgBattleFloat 6s ease-in-out infinite; }
         .cg-battles-hero-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
         .cg-battles-hero-text { flex: 1; }
-        .cg-battles-eyebrow { color: #f9a80a; font-size: 0.85rem; font-weight: 800; letter-spacing: 0.3em; text-transform: uppercase; margin-bottom: 1rem; text-shadow: 0 0 20px rgba(249,168,10,0.5); }
-        .cg-battles-title { font-family: "Clash Display", sans-serif; font-size: clamp(2.4rem, 5vw, 4rem); font-weight: 900; line-height: 1; letter-spacing: -0.02em; margin: 0 0 1rem; background: linear-gradient(90deg, #ffd88a, #f9a80a 25%, #ff6a00 50%, #f9a80a 75%, #ffd88a); background-size: 200% auto; background-clip: text; -webkit-background-clip: text; color: transparent; animation: cgBattleShimmer 4s linear infinite; }
-        .cg-battles-desc { color: #fce8b5; font-size: 1.05rem; line-height: 1.6; letter-spacing: 1px; opacity: 0.9; max-width: 560px; }
-        .cg-battles-desc b { color: #ffd88a; font-weight: 800; }
+        .cg-battles-eyebrow { color: #b57500; font-size: 0.85rem; font-weight: 800; letter-spacing: 0.3em; text-transform: uppercase; margin-bottom: 1rem; }
+        .cg-battles-title { font-family: "Clash Display", sans-serif; font-size: clamp(2.4rem, 5vw, 4rem); font-weight: 900; line-height: 1; letter-spacing: -0.02em; margin: 0 0 1rem; background: linear-gradient(90deg, #14a2b8, #40bfd3 20%, #f9a80a 45%, #ff6a00 55%, #f9a80a 65%, #14a2b8 90%); background-size: 200% auto; background-clip: text; -webkit-background-clip: text; color: transparent; animation: cgBattleShimmer 4s linear infinite; }
+        .cg-battles-desc { color: #2d2d2d; font-size: 1.05rem; line-height: 1.6; letter-spacing: 1px; max-width: 560px; }
+        .cg-battles-desc b { color: #14a2b8; font-weight: 800; }
         .cg-battles-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 3rem; }
         @media (max-width: 800px) { .cg-battles-grid { grid-template-columns: 1fr; } }
-        .cg-battles-col { background: linear-gradient(160deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02)); border: 1px solid rgba(249,168,10,0.25); border-radius: 20px; padding: 2rem 1.75rem; backdrop-filter: blur(12px); position: relative; overflow: hidden; }
-        .cg-battles-col::before { content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: conic-gradient(from 0deg, transparent 0deg, rgba(249,168,10,0.15) 30deg, transparent 60deg); animation: cgBattleGlow 8s linear infinite; pointer-events: none; }
+        .cg-battles-col { background: #fff; border: 1px solid rgba(20,162,184,0.25); border-radius: 20px; padding: 2rem 1.75rem; position: relative; overflow: hidden; box-shadow: 0 12px 40px rgba(20,162,184,0.12); }
+        .cg-battles-col::before { content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: conic-gradient(from 0deg, transparent 0deg, rgba(249,168,10,0.10) 30deg, transparent 60deg); animation: cgBattleGlow 8s linear infinite; pointer-events: none; }
         .cg-battles-col-head { display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 1.5rem; position: relative; }
-        .cg-battles-col-icon { font-size: 2.4rem; filter: drop-shadow(0 4px 12px rgba(249,168,10,0.4)); }
-        .cg-battles-col-title { font-family: "Clash Display", sans-serif; font-size: 1.6rem; font-weight: 800; letter-spacing: 0; color: #ffd88a; }
-        .cg-battles-col-count { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(255,216,138,0.6); margin-left: auto; }
+        .cg-battles-col-icon { font-size: 2.4rem; filter: drop-shadow(0 4px 12px rgba(249,168,10,0.35)); }
+        .cg-battles-col-title { font-family: "Clash Display", sans-serif; font-size: 1.6rem; font-weight: 800; letter-spacing: 0; color: #14a2b8; }
+        .cg-battles-col-count { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(20,162,184,0.7); margin-left: auto; }
         .cg-battles-chips { display: flex; flex-wrap: wrap; gap: 0.6rem; position: relative; }
-        .cg-battles-chip { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.55rem 1rem; background: linear-gradient(135deg, rgba(249,168,10,0.15), rgba(236,72,153,0.08)); border: 1px solid rgba(249,168,10,0.35); border-radius: 999px; font-size: 0.85rem; font-weight: 600; color: #fff; letter-spacing: 0.02em; box-shadow: 0 4px 12px rgba(249,168,10,0.15); transition: all 0.3s cubic-bezier(0.16,1,0.3,1); animation: cgBattleChipIn 0.6s cubic-bezier(0.16,1,0.3,1) both; }
-        .cg-battles-chip:hover { transform: translateY(-3px) scale(1.05); box-shadow: 0 10px 24px rgba(249,168,10,0.4); border-color: rgba(249,168,10,0.7); background: linear-gradient(135deg, rgba(249,168,10,0.3), rgba(236,72,153,0.15)); }
-        .cg-battles-chip::before { content: '♛'; color: #f9a80a; font-size: 0.9rem; text-shadow: 0 0 8px rgba(249,168,10,0.5); }
+        .cg-battles-chip { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.55rem 1rem; background: linear-gradient(135deg, #fff5e0, #fef0f7); border: 1px solid rgba(249,168,10,0.4); border-radius: 999px; font-size: 0.85rem; font-weight: 600; color: #232323; letter-spacing: 0.02em; box-shadow: 0 4px 12px rgba(249,168,10,0.15); transition: all 0.3s cubic-bezier(0.16,1,0.3,1); animation: cgBattleChipIn 0.6s cubic-bezier(0.16,1,0.3,1) both; }
+        .cg-battles-chip:hover { transform: translateY(-3px) scale(1.05); box-shadow: 0 10px 24px rgba(249,168,10,0.35); border-color: rgba(249,168,10,0.75); background: linear-gradient(135deg, #ffe6a3, #ffd2eb); }
+        .cg-battles-chip::before { content: '♛'; color: #d97706; font-size: 0.9rem; }
         .cg-battles-chip-draw::before { content: '♚'; }
         .cg-battles-chip:nth-child(1)  { animation-delay: 0.05s; }
         .cg-battles-chip:nth-child(2)  { animation-delay: 0.10s; }
