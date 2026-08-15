@@ -2326,8 +2326,20 @@ export default function AcademyPublicPage() {
         .cg-civ-benefit svg { color: var(--clr-accent-new); }
         .cg-civ-benefit strong { font-weight: 600; }
         .cg-civ-hero-buttons { display: flex; flex-direction: column; gap: 1rem; margin-top: 2rem; align-items: flex-start; }
-        .cg-civ-hero-cta-sub { color: var(--clr-text-gray); font-size: 0.85rem; letter-spacing: 1px; text-align: center; width: 340px; max-width: 100%; }
-        @media (max-width: 480px) { .cg-civ-hero-cta-sub { width: 280px; } }
+        @keyframes cgSubPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+        @keyframes cgSubShimmer { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
+        .cg-civ-hero-cta-sub {
+          font-size: 1.05rem; font-weight: 800; letter-spacing: 0.08em;
+          text-align: center; width: 340px; max-width: 100%;
+          text-transform: uppercase;
+          background: linear-gradient(90deg, #14a2b8, #f9a80a 30%, #ec4899 55%, #14a2b8 85%, #14a2b8);
+          background-size: 200% auto;
+          -webkit-background-clip: text; background-clip: text; color: transparent;
+          animation: cgSubShimmer 3.5s linear infinite, cgSubPulse 2.4s ease-in-out infinite;
+          margin-top: 0.5rem;
+          filter: drop-shadow(0 2px 8px rgba(20,162,184,0.15));
+        }
+        @media (max-width: 480px) { .cg-civ-hero-cta-sub { width: 280px; font-size: 0.95rem; } }
         /* Footer */
         .cg-civ-footer { background: #b5f4ff; color: #232323; padding: 1.5rem 0; text-align: center; }
         .cg-civ-footer-content { margin: 0 auto; max-width: 1200px; padding: 0 1rem; }
