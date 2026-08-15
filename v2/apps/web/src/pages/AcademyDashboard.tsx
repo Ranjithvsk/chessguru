@@ -136,6 +136,157 @@ function ResetPasswordButton({ studentId, name }: { studentId: string; name: str
   );
 }
 
+/** Batch = named list of students. Coach picks students → creates a batch →
+ *  schedules classes for that batch in one form (recurring supported). */
+function BatchesPanel({ students }: { students: any[] }) {
+  const qc = useQueryClient();
+  const { data: batches = [], refetch } = useQuery({
+    queryKey: ["academy-batches"],
+    queryFn: async () => {
+      const r = await fetch("/v2api/api/academy/batches", { credentials: "include" });
+      return r.ok ? r.json() : [];
+    },
+  });
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [scheduleFor, setScheduleFor] = useState<any | null>(null);
+  const create = async () => {
+    if (!newName.trim() || picked.size === 0) return;
+    const r = await fetch("/v2api/api/academy/batches", {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newName.trim(), studentIds: [...picked] }),
+    });
+    const j = await r.json();
+    if (j?.ok) { setCreating(false); setNewName(""); setPicked(new Set()); refetch(); }
+    else alert(j?.error || "Couldn't create batch.");
+  };
+  const remove = async (id: string, name: string) => {
+    if (!confirm(`Delete batch "${name}"? Existing scheduled classes stay.`)) return;
+    const r = await fetch(`/v2api/api/academy/batches/${encodeURIComponent(id)}/delete`, { method: "POST", credentials: "include" });
+    const j = await r.json();
+    if (j?.ok) refetch(); else alert(j?.error || "Couldn't delete.");
+  };
+  return (
+    <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="font-display text-lg text-white">👥 Batches <span className="ml-2 text-xs font-normal text-ink-400">({(batches as any[]).length})</span></h2>
+        {!creating && (
+          <button onClick={() => setCreating(true)} className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500">+ New batch</button>
+        )}
+      </div>
+      {creating && (
+        <div className="mb-4 rounded-lg border border-brand-500/40 bg-brand-500/5 p-4">
+          <label className="mb-1 block text-xs uppercase text-ink-400">Batch name</label>
+          <input
+            value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Monday Advanced Kids"
+            className="mb-3 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white"
+          />
+          <label className="mb-1 block text-xs uppercase text-ink-400">Pick students ({picked.size}/{students.length})</label>
+          <div className="mb-3 max-h-40 overflow-y-auto rounded-lg border border-ink-700 bg-ink-800 p-2">
+            {students.map((s) => (
+              <label key={s._id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm text-white hover:bg-ink-700">
+                <input
+                  type="checkbox"
+                  checked={picked.has(s._id)}
+                  onChange={(e) => {
+                    const next = new Set(picked);
+                    if (e.target.checked) next.add(s._id); else next.delete(s._id);
+                    setPicked(next);
+                  }}
+                />
+                {s.name || s.username}
+              </label>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={create} disabled={!newName.trim() || picked.size === 0} className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-40">Create</button>
+            <button onClick={() => { setCreating(false); setNewName(""); setPicked(new Set()); }} className="rounded-lg bg-ink-800 px-3 py-1.5 text-sm text-ink-200 hover:bg-ink-700">Cancel</button>
+          </div>
+        </div>
+      )}
+      {(batches as any[]).length === 0 && !creating && (
+        <p className="text-sm text-ink-400">No batches yet. Create one to schedule recurring classes for a group of students in a single form.</p>
+      )}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {(batches as any[]).map((b: any) => (
+          <div key={b._id} className="rounded-lg border border-ink-700 bg-ink-800/50 p-4">
+            <div className="mb-1 flex items-center justify-between">
+              <div className="font-display text-base text-white">{b.name}</div>
+              <button onClick={() => remove(b._id, b.name)} title="Delete batch" className="text-xs text-ink-500 hover:text-rose-300">🗑</button>
+            </div>
+            <div className="mb-3 text-xs text-ink-400">{(b.students || []).length} students · {(b.students || []).slice(0, 4).map((s: any) => s.name).join(", ")}{(b.students || []).length > 4 ? "…" : ""}</div>
+            <button onClick={() => setScheduleFor(b)} className="rounded-lg border border-cyan-500/50 bg-cyan-500/15 px-3 py-1.5 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/25">📅 Schedule class</button>
+          </div>
+        ))}
+      </div>
+      {scheduleFor && <ScheduleBatchModal batch={scheduleFor} onClose={() => { setScheduleFor(null); qc.invalidateQueries({ queryKey: ["schedule"] }); }} />}
+    </section>
+  );
+}
+
+function ScheduleBatchModal({ batch, onClose }: { batch: any; onClose: () => void }) {
+  const [title, setTitle] = useState(`${batch.name} class`);
+  const [startAt, setStartAt] = useState(() => {
+    const d = new Date(); d.setMinutes(0, 0, 0); d.setHours(d.getHours() + 1);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  });
+  const [durationMin, setDurationMin] = useState(60);
+  const [recurrence, setRecurrence] = useState<"none" | "weekly">("none");
+  const [recurrenceCount, setRecurrenceCount] = useState(4);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const submit = async () => {
+    setBusy(true); setMsg("");
+    try {
+      const r = await fetch(`/v2api/api/academy/batches/${encodeURIComponent(batch._id)}/schedule`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title.trim(), startAt: new Date(startAt).toISOString(), durationMin, recurrence, recurrenceCount, roomKind: "meet" }),
+      });
+      const j = await r.json();
+      if (j?.ok) { setMsg(`Scheduled ${j.count} class${j.count > 1 ? "es" : ""} for ${batch.name}.`); setTimeout(onClose, 1400); }
+      else setMsg(j?.error || "Couldn't schedule.");
+    } catch (e: any) { setMsg(e?.message || "Network error."); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4">
+      <div className="w-full max-w-md rounded-2xl border border-ink-700 bg-ink-900 p-5 shadow-2xl">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="font-display text-lg text-white">Schedule class for {batch.name}</h3>
+          <button onClick={onClose} className="text-ink-400 hover:text-white">✕</button>
+        </div>
+        <div className="mb-2 text-xs text-ink-400">{(batch.students || []).length} students in this batch</div>
+        <label className="mb-1 block text-xs uppercase text-ink-400">Class title</label>
+        <input value={title} onChange={(e) => setTitle(e.target.value)} className="mb-3 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
+        <label className="mb-1 block text-xs uppercase text-ink-400">Start</label>
+        <input type="datetime-local" value={startAt} onChange={(e) => setStartAt(e.target.value)} className="mb-3 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
+        <label className="mb-1 block text-xs uppercase text-ink-400">Duration (min)</label>
+        <input type="number" min={5} max={600} value={durationMin} onChange={(e) => setDurationMin(Number(e.target.value))} className="mb-3 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
+        <label className="mb-1 block text-xs uppercase text-ink-400">Recurrence</label>
+        <div className="mb-3 flex gap-2">
+          <label className="flex items-center gap-1.5 text-sm text-white"><input type="radio" checked={recurrence === "none"} onChange={() => setRecurrence("none")} /> One-off</label>
+          <label className="flex items-center gap-1.5 text-sm text-white"><input type="radio" checked={recurrence === "weekly"} onChange={() => setRecurrence("weekly")} /> Weekly</label>
+        </div>
+        {recurrence === "weekly" && (
+          <div className="mb-3">
+            <label className="mb-1 block text-xs uppercase text-ink-400">Weeks (max 52)</label>
+            <input type="number" min={1} max={52} value={recurrenceCount} onChange={(e) => setRecurrenceCount(Number(e.target.value))} className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
+          </div>
+        )}
+        {msg && <p className={`mb-2 text-xs ${msg.startsWith("Scheduled") ? "text-emerald-300" : "text-rose-300"}`}>{msg}</p>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg bg-ink-800 px-3 py-1.5 text-sm text-ink-200 hover:bg-ink-700">Cancel</button>
+          <button onClick={submit} disabled={busy || !title.trim()} className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-40">{busy ? "…" : "Schedule"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Mark a student as attended for today. Idempotent per (coach, day). Ephemeral
  *  success state — button turns green with a check for 3s, then resets. */
 function MarkAttendedButton({ studentId, name }: { studentId: string; name: string }) {
@@ -1867,6 +2018,9 @@ export default function AcademyDashboardPage() {
           {scheduleMsg && <p className={`mt-2 text-xs ${scheduleMsg.tone === "ok" ? "text-emerald-300" : "text-rose-300"}`}>{scheduleMsg.text}</p>}
         </section>
       )}
+
+      {/* ── Batches (coach schedules classes for a saved student group) ── */}
+      {canManage && <BatchesPanel students={students} />}
 
       {/* ── Upcoming + live classes ── */}
       <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">

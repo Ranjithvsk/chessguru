@@ -123,6 +123,24 @@ export class AcademyController {
     return this.svc.markStudentAttended(req.session, id, body);
   }
 
+  // ── Batches ──────────────────────────────────────────────
+  @Get("batches")
+  listBatches(@Req() req: any) { return this.svc.listBatches(req.session); }
+
+  @Post("batches")
+  createBatch(@Req() req: any, @Body() body: any) { return this.svc.createBatch(req.session, body); }
+
+  @Post("batches/:id")
+  updateBatch(@Req() req: any, @Param("id") id: string, @Body() body: any) { return this.svc.updateBatch(req.session, id, body); }
+
+  @Post("batches/:id/delete")
+  deleteBatch(@Req() req: any, @Param("id") id: string) { return this.svc.deleteBatch(req.session, id); }
+
+  @Post("batches/:id/schedule")
+  scheduleBatchClasses(@Req() req: any, @Param("id") id: string, @Body() body: any) {
+    return this.svc.scheduleBatchClasses(req.session, id, body);
+  }
+
   // ── Fees + billing ──────────────────────────────────────────────
   @Get("fees/config")
   getFeesConfig(@Req() req: any) { return this.svc.getFeesConfig(req.session); }

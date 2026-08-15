@@ -224,6 +224,159 @@ export class AcademyService {
     };
   }
 
+  // ═══════════ BATCHES ═══════════
+  // A batch is a named group of students within an academy. Coach owns their
+  // batches (`coachUserId`); owner can see all batches in the academy. Coaches
+  // use batches to schedule classes for a fixed roster without re-selecting
+  // students every time.
+  private batches() { return this.conn.db!.collection("academyBatches"); }
+
+  async listBatches(session: any): Promise<any[]> {
+    const g = this.ensureCoachOrOwner(session);
+    const filter: any = { academyId: g.academyId };
+    if (g.role === "coach") filter.coachUserId = g.userId;
+    const rows = await this.batches().find(filter, { sort: { createdAt: -1 } }).limit(200).toArray();
+    // Enrich with student mini-profiles so the UI shows names without a separate lookup.
+    const allIds = [...new Set(rows.flatMap((r: any) => (r.studentIds || []).map(String)))];
+    const students = allIds.length ? await this.users().find({ _id: { $in: allIds as any } }, { projection: { name: 1, username: 1 } }).toArray() : [];
+    const byId = new Map(students.map((u: any) => [String(u._id), u]));
+    return rows.map((r: any) => ({
+      ...r,
+      students: (r.studentIds || []).map((id: string) => {
+        const u = byId.get(String(id));
+        return u ? { _id: u._id, name: u.name || u.username, username: u.username } : { _id: id, name: id, username: id };
+      }),
+    }));
+  }
+
+  async createBatch(session: any, body: any): Promise<any> {
+    const g = this.ensureCoachOrOwner(session);
+    const name = String(body?.name || "").trim().slice(0, 80);
+    if (!name) return { ok: false, error: "Batch name is required." };
+    const rawIds = Array.isArray(body?.studentIds) ? body.studentIds : [];
+    const coachId = g.role === "coach" ? g.userId : (String(body?.coachUserId || "").trim() || g.userId);
+    // Filter studentIds to only those actually in this academy (and if caller
+    // is a coach, only their own students).
+    const roster = await this.users().find(
+      { academyId: g.academyId, role: "student", _id: { $in: rawIds as any } },
+      { projection: { _id: 1, coachId: 1 } },
+    ).toArray();
+    const validIds = roster
+      .filter((u: any) => g.role !== "coach" || String(u.coachId || "") === g.userId)
+      .map((u: any) => String(u._id));
+    if (!validIds.length) return { ok: false, error: "Pick at least one student from your roster." };
+    const now = new Date();
+    const doc = {
+      _id: `batch-${Math.random().toString(36).slice(2, 10)}`,
+      academyId: g.academyId,
+      coachUserId: coachId,
+      name,
+      studentIds: validIds,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: g.userId,
+    };
+    await this.batches().insertOne(doc as any);
+    return { ok: true, batch: doc };
+  }
+
+  async updateBatch(session: any, batchId: string, body: any): Promise<any> {
+    const g = this.ensureCoachOrOwner(session);
+    const existing: any = await this.batches().findOne({ _id: batchId as any, academyId: g.academyId });
+    if (!existing) return { ok: false, error: "Batch not found." };
+    if (g.role === "coach" && String(existing.coachUserId) !== g.userId) return { ok: false, error: "Not your batch." };
+    const patch: any = { updatedAt: new Date() };
+    if (typeof body?.name === "string") patch.name = body.name.trim().slice(0, 80);
+    if (Array.isArray(body?.studentIds)) {
+      const roster = await this.users().find(
+        { academyId: g.academyId, role: "student", _id: { $in: body.studentIds as any } },
+        { projection: { _id: 1, coachId: 1 } },
+      ).toArray();
+      patch.studentIds = roster
+        .filter((u: any) => g.role !== "coach" || String(u.coachId || "") === g.userId)
+        .map((u: any) => String(u._id));
+    }
+    await this.batches().updateOne({ _id: batchId as any }, { $set: patch });
+    return { ok: true };
+  }
+
+  async deleteBatch(session: any, batchId: string): Promise<any> {
+    const g = this.ensureCoachOrOwner(session);
+    const existing: any = await this.batches().findOne({ _id: batchId as any, academyId: g.academyId });
+    if (!existing) return { ok: false, error: "Batch not found." };
+    if (g.role === "coach" && String(existing.coachUserId) !== g.userId) return { ok: false, error: "Not your batch." };
+    await this.batches().deleteOne({ _id: batchId as any });
+    return { ok: true };
+  }
+
+  /** Schedule one or more classes for a batch. Takes the same shape the
+   *  class-schedule POST accepts (title, startAt, durationMin, recurrence,
+   *  recurrenceCount, recurrenceWeekdays, notes, topics, roomKind) plus the
+   *  batchId. Materialises class rows tagged with batchId so the students-of-
+   *  a-class lookup is derivable without email invites. */
+  async scheduleBatchClasses(session: any, batchId: string, body: any): Promise<any> {
+    const g = this.ensureCoachOrOwner(session);
+    const batch: any = await this.batches().findOne({ _id: batchId as any, academyId: g.academyId });
+    if (!batch) return { ok: false, error: "Batch not found." };
+    if (g.role === "coach" && String(batch.coachUserId) !== g.userId) return { ok: false, error: "Not your batch." };
+    const title = String(body?.title || "").trim().slice(0, 120);
+    if (!title) return { ok: false, error: "Class title is required." };
+    const startAtMs = new Date(body?.startAt || "").getTime();
+    if (!Number.isFinite(startAtMs)) return { ok: false, error: "Bad startAt." };
+    const durationMin = Math.max(5, Math.min(600, Math.floor(Number(body?.durationMin) || 60)));
+    const recurrence: "none" | "weekly" = body?.recurrence === "weekly" ? "weekly" : "none";
+    const count = recurrence === "weekly" ? Math.max(1, Math.min(52, Math.floor(Number(body?.recurrenceCount) || 1))) : 1;
+    const weekdaysRaw = Array.isArray(body?.recurrenceWeekdays) ? body.recurrenceWeekdays : [];
+    const weekdays = Array.from(new Set(weekdaysRaw.map((n: any) => Math.floor(Number(n))).filter((n: number) => Number.isInteger(n) && n >= 0 && n <= 6))) as number[];
+    const startTimes: number[] = [startAtMs];
+    if (recurrence === "weekly" && count > 1) {
+      if (weekdays.length === 0) {
+        for (let i = 1; i < count; i++) startTimes.push(startAtMs + i * 7 * 24 * 60 * 60 * 1000);
+      } else {
+        const dayMs = 24 * 60 * 60 * 1000;
+        for (let step = 1; startTimes.length < count && step <= count * 14; step++) {
+          const next = startAtMs + step * dayMs;
+          if (weekdays.includes(new Date(next).getDay())) startTimes.push(next);
+        }
+      }
+    }
+    // Look up the coach's display name so the class shows a proper coach label.
+    const coachUser: any = await this.users().findOne({ _id: batch.coachUserId as any }, { projection: { name: 1, username: 1 } });
+    const coachName = String(body?.coach || coachUser?.name || coachUser?.username || "Coach").slice(0, 80);
+    const docs: any[] = [];
+    const total = startTimes.length;
+    const col = this.conn.db!.collection("classSchedules");
+    const newId = () => Math.random().toString(36).slice(2, 8);
+    for (let i = 0; i < total; i++) {
+      let id = newId();
+      for (let r = 0; r < 3; r++) {
+        const existing = await col.findOne({ _id: id as any }, { projection: { _id: 1 } });
+        if (!existing) break;
+        id = newId();
+      }
+      docs.push({
+        _id: id,
+        title,
+        coach: coachName,
+        startAt: new Date(startTimes[i]!),
+        durationMin,
+        notes: String(body?.notes || "").slice(0, 2000),
+        topics: Array.isArray(body?.topics) ? body.topics.map((t: any) => String(t).trim().slice(0, 40)).filter(Boolean).slice(0, 8) : [],
+        createdAt: new Date(),
+        createdByUserId: batch.coachUserId,
+        academyId: g.academyId,
+        roomKind: body?.roomKind === "meet" ? "meet" : "meet",  // batches default to Dream Meet
+        batchId: batch._id,          // ← link
+        batchStudentIds: batch.studentIds,   // ← snapshot at create time
+        seriesId: total > 1 ? (i === 0 ? id : docs[0]!._id) : null,
+        seriesIndex: total > 1 ? i + 1 : undefined,
+        seriesTotal: total > 1 ? total : undefined,
+      });
+    }
+    await col.insertMany(docs);
+    return { ok: true, count: docs.length, first: docs[0] };
+  }
+
   /** Manually mark a student as attended for a given date (defaults to today).
    *  Coach can only mark their own students; owner can mark any. Writes to the
    *  classAttendance collection with a synthetic classId = "manual-<coachId>-<yyyymmdd>"
