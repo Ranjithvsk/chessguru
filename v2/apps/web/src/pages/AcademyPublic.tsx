@@ -1856,6 +1856,29 @@ export default function AcademyPublicPage() {
   const { academy, profile: p, coaches, upcomingClasses } = acadQ.data;
   const isOwner = !!authQ.data?.loggedIn && authQ.data.academyId === academy._id;
 
+  // Coach maintenance: any live-class rooms this coach forgot to end.
+  // Poll every 30s while the coach is signed in; renders a small banner near
+  // the top with a one-click End button per stale room.
+  const myOpenQ = useQuery({
+    queryKey: ["my-open-classes"],
+    queryFn: () => get<{ open: Array<{ _id: string; title: string; joinPath: string; startedAt: string }> }>("/api/class/my-open"),
+    enabled: isOwner,
+    refetchInterval: isOwner ? 30_000 : false,
+  });
+  const myOpen = myOpenQ.data?.open ?? [];
+  const endClass = async (id: string) => {
+    try {
+      await fetch(`${BASE}/api/class/${encodeURIComponent(id)}/end`, { method: "POST", credentials: "include" });
+      await myOpenQ.refetch();
+    } catch { /* silent — refetch will retry */ }
+  };
+  const fmtAgo = (iso: string): string => {
+    const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+    if (s < 60) return `${Math.floor(s)}s ago`;
+    if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+    return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ago`;
+  };
+
   const primaryContactHref = p.socials.whatsapp ? socialHref("whatsapp", p.socials.whatsapp)
     : p.socials.website ? socialHref("website", p.socials.website)
     : null;
@@ -2102,6 +2125,30 @@ export default function AcademyPublicPage() {
           </div>
         </div>
       </header>
+
+      {isOwner && myOpen.length > 0 && (
+        <div style={{ padding: '.75rem 1rem', background: 'linear-gradient(90deg,#fee2e2,#fecaca)', borderBottom: '1px solid #fca5a5', color: '#7f1d1d' }}>
+          <div style={{ maxWidth: 960, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '.5rem' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em' }}>
+              You have {myOpen.length} live-class room{myOpen.length === 1 ? '' : 's'} still open
+            </div>
+            {myOpen.map((c) => (
+              <div key={c._id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '.75rem', background: 'rgba(255,255,255,.6)', borderRadius: 8, padding: '.5rem .75rem' }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</div>
+                  <div style={{ fontSize: 11, opacity: .8 }}>started {fmtAgo(c.startedAt)}</div>
+                </div>
+                <div style={{ display: 'flex', gap: '.4rem', flexShrink: 0 }}>
+                  {c.joinPath ? (
+                    <Link to={c.joinPath.replace(/^\/(?:v2\/)?/, '/')} style={{ background: '#059669', color: '#fff', padding: '.4rem .7rem', borderRadius: 6, fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>Join</Link>
+                  ) : null}
+                  <button type="button" onClick={() => endClass(c._id)} style={{ background: '#dc2626', color: '#fff', padding: '.4rem .7rem', borderRadius: 6, fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer' }}>End class</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ═══════════ CHESSIVERSE HERO — 1:1 clone ═══════════ */}
       <section id="top" className="cg-civ-hero">

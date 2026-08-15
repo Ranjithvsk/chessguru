@@ -260,4 +260,37 @@ export class ClassLiveController {
       counts: { inRoom: inRoom.length, allTime: allTime.length, missing: missing.length },
     };
   }
+
+  /** GET /api/class/my-open — active class rooms this coach OWNS, so they can
+   *  clean up abandoned "Going live" rooms they forgot to end. Bounded to the
+   *  last 12h — anything older is definitely stale + auto-purged elsewhere.
+   *  Coach/owner only; returns empty for students. Each row carries the class
+   *  title (when known), the join path, and the started-at time so the UI can
+   *  show a "started 40 min ago — end this" widget. */
+  @Get("my-open")
+  async myOpen(@Req() req: any) {
+    const me: string | null = req?.session?.userId ?? null;
+    const role: string | null = req?.session?.role ?? null;
+    const academyId: string | null = req?.session?.academyId ?? null;
+    if (!me || !academyId || (role !== "coach" && role !== "academy_owner")) return { open: [] };
+    const since = new Date(Date.now() - 12 * 3_600_000);
+    const rows: any[] = await this.conn.db!.collection("classLiveAnnouncements")
+      .find({ academyId, coachUserId: me, at: { $gte: since } },
+            { projection: { _id: 1, at: 1, joinPath: 1 } })
+      .sort({ at: -1 }).limit(20).toArray();
+    if (!rows.length) return { open: [] };
+    const titleById = new Map<string, string>();
+    const roomIds = rows.map((r) => r._id);
+    const klasses = await this.conn.db!.collection("classSchedules")
+      .find({ _id: { $in: roomIds } }, { projection: { title: 1 } }).toArray();
+    for (const k of klasses as any[]) titleById.set(String(k._id), String(k.title || ""));
+    return {
+      open: rows.map((r) => ({
+        _id: String(r._id),
+        title: titleById.get(String(r._id)) || "Ad-hoc class",
+        joinPath: String(r.joinPath || ""),
+        startedAt: r.at,
+      })),
+    };
+  }
 }

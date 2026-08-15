@@ -579,11 +579,6 @@ function UpcomingClassesPanel({ classes, live }: { classes: ClassRow[]; live: Cl
         title="Start an instant class — video + shared board, scales to any class size">
         🎥 Dream Meet
       </Link>
-      <Link to={`/call/${adhocRoom}?board=1`}
-        className="rounded-lg bg-brand-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-brand-500"
-        title="Start an instant class on the board-call room — peer video + shared board (best for ≤8 students)">
-        ♟ Board call
-      </Link>
     </div>
   );
   const nextFew = classes.slice(0, 6);
@@ -1203,7 +1198,7 @@ export default function AcademyDashboardPage() {
   const [classAutoSummaryNote, setClassAutoSummaryNote] = useState("");
   // Topics to be covered — comma-separated in the form, serialized as an array.
   const [classTopics, setClassTopics] = useState("");
-  const [classRoom, setClassRoom] = useState<"call" | "meet">("call");
+  const [classRoom, setClassRoom] = useState<"call" | "meet">("meet");
   // "Last used" auto-summary defaults for the current user, persisted in
   // localStorage so scheduling a similar class next time is a one-tap
   // pre-fill. Keyed by userId so a shared browser doesn't cross-contaminate.
@@ -1271,7 +1266,7 @@ export default function AcademyDashboardPage() {
     onSuccess: (r: any) => {
       if (r && r._id) {
         setScheduleMsg({ tone: "ok", text: `"${r.title}" scheduled — join link ready.` });
-        setClassTitle(""); setClassCoach(""); setClassStartAt(localDatetimeDefault()); setClassDur(60); setClassTopics(""); setClassRoom("call");
+        setClassTitle(""); setClassCoach(""); setClassStartAt(localDatetimeDefault()); setClassDur(60); setClassTopics(""); setClassRoom("meet");
         // Persist autoSummary settings for next-time one-click restore.
         if (classAutoSummary && lastAutoKey) {
           try { localStorage.setItem(lastAutoKey, JSON.stringify({ note: classAutoSummaryNote })); setLastAutoDefault({ note: classAutoSummaryNote }); }
@@ -1748,19 +1743,7 @@ export default function AcademyDashboardPage() {
                 </div>
               )}
             </div>
-            <div className="md:col-span-2">
-              <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-400">🎥 Video room</label>
-              <div className="flex gap-2">
-                <button type="button" onClick={() => setClassRoom("call")}
-                  className={`flex-1 rounded-lg border px-3 py-2 text-xs font-semibold ${classRoom === "call" ? "border-brand-400 bg-brand-500/20 text-brand-100" : "border-ink-700 bg-ink-800 text-ink-300 hover:bg-ink-700"}`}>
-                  ♟ Board call <span className="block text-[10px] font-normal text-ink-400">Peer video + board · up to ~8 students</span>
-                </button>
-                <button type="button" onClick={() => setClassRoom("meet")}
-                  className={`flex-1 rounded-lg border px-3 py-2 text-xs font-semibold ${classRoom === "meet" ? "border-emerald-400 bg-emerald-500/20 text-emerald-100" : "border-ink-700 bg-ink-800 text-ink-300 hover:bg-ink-700"}`}>
-                  🎥 Dream Meet <span className="block text-[10px] font-normal text-ink-400">Video + board · scales to any class size</span>
-                </button>
-              </div>
-            </div>
+
             <div className="md:col-span-2 flex items-center gap-2">
               <label className="flex items-center gap-2 text-xs text-ink-300 cursor-pointer">
                 <input type="checkbox" checked={classAutoSummary} onChange={(e) => setClassAutoSummary(e.target.checked)}
