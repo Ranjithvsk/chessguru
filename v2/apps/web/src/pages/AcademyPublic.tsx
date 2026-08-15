@@ -2014,8 +2014,8 @@ export default function AcademyPublicPage() {
           pointer-events: none;
         }
         /* Small portrait card on the board */
-        .cg-civ-hv-card { position: absolute; top: 8%; left: 18%; width: 52%; aspect-ratio: 5/6; border-radius: 12px; overflow: hidden; box-shadow: 0 12px 32px rgba(0,0,0,0.25); z-index: 2; background: #fff; border: 3px solid #fff; }
-        .cg-civ-hv-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .cg-civ-hv-card { position: absolute; top: 5%; left: 20%; width: 55%; aspect-ratio: 3/4; border-radius: 12px; overflow: hidden; box-shadow: 0 12px 32px rgba(0,0,0,0.25); z-index: 2; background: #fff; border: 3px solid #fff; }
+        .cg-civ-hv-card img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
         .cg-civ-hv-card-name { position: absolute; left: 8px; right: 8px; bottom: 8px; background: rgba(0,0,0,0.65); color: #fff; padding: 4px 8px; border-radius: 6px; font-size: 0.7rem; font-weight: 700; letter-spacing: 1px; text-align: center; }
         /* Yellow star badge floating top-right of the portrait */
         /* FIDE rating badge — small "Highest" label + big 2312 number stack */
