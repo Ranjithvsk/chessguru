@@ -136,6 +136,245 @@ function ResetPasswordButton({ studentId, name }: { studentId: string; name: str
   );
 }
 
+// ═══════════ MASTER COACH DIRECTIVES ═══════════
+const DIRECTIVE_KINDS = [
+  { k: "topic",        icon: "📚", label: "Topic" },
+  { k: "homework",     icon: "📝", label: "Homework" },
+  { k: "student-note", icon: "🧑‍🎓", label: "Student note" },
+  { k: "general",      icon: "💬", label: "General" },
+];
+const kindMeta = (k: string) => DIRECTIVE_KINDS.find((x) => x.k === k) || DIRECTIVE_KINDS[3];
+
+function DirectivesPanel({ isOwner, coaches, students }: { isOwner: boolean; coaches: any[]; students: any[] }) {
+  const qc = useQueryClient();
+  const { data: rows = [], refetch } = useQuery({
+    queryKey: ["academy-directives"],
+    queryFn: async () => {
+      const r = await fetch("/v2api/api/academy/directives", { credentials: "include" });
+      return r.ok ? r.json() : [];
+    },
+  });
+  const [creating, setCreating] = useState(false);
+  const myUid = useQuery({ queryKey: ["auth-me"], queryFn: api.me }).data?.userId as string | undefined;
+  const unackedCount = (rows as any[]).filter((d: any) =>
+    !isOwner && myUid && (d.toCoachIds || []).includes(myUid) && !(d.ackedBy || []).some((a: any) => a.coachId === myUid)
+  ).length;
+  return (
+    <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="font-display text-lg text-white">
+          {isOwner ? "🧭 Master Coach" : "📥 From your master coach"}
+          <span className="ml-2 text-xs font-normal text-ink-400">({(rows as any[]).length})</span>
+          {unackedCount > 0 && (
+            <span className="ml-2 rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-bold text-white">{unackedCount} new</span>
+          )}
+        </h2>
+        {isOwner && !creating && (
+          <button onClick={() => setCreating(true)} className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500">+ New directive</button>
+        )}
+      </div>
+      {creating && <NewDirectiveModal coaches={coaches} students={students} onClose={() => { setCreating(false); refetch(); }} />}
+      {(rows as any[]).length === 0 ? (
+        <p className="text-sm text-ink-400">{isOwner ? "No directives yet. Send one to a coach to instruct them on topics, homework, or a student's performance." : "Nothing from your master coach yet. Instructions on topics + homework will appear here."}</p>
+      ) : (
+        <div className="grid gap-3">
+          {(rows as any[]).map((d: any) => (
+            <DirectiveCard key={d._id} d={d} isOwner={isOwner} myUid={myUid} onChange={() => { refetch(); qc.invalidateQueries({ queryKey: ["academy-directives"] }); }} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DirectiveCard({ d, isOwner, myUid, onChange }: { d: any; isOwner: boolean; myUid?: string; onChange: () => void }) {
+  const meta = kindMeta(d.kind);
+  const isTarget = !!myUid && (d.toCoachIds || []).includes(myUid);
+  const iAcked = !!myUid && (d.ackedBy || []).some((a: any) => a.coachId === myUid);
+  const iDone  = !!myUid && (d.doneBy || []).some((a: any) => a.coachId === myUid);
+  const ackedIds = new Set((d.ackedBy || []).map((a: any) => a.coachId));
+  const doneIds  = new Set((d.doneBy || []).map((a: any) => a.coachId));
+  const post = async (path: string, body: any = {}) => {
+    const r = await fetch(`/v2api/api/academy/directives/${encodeURIComponent(d._id)}/${path}`, {
+      method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json();
+    if (!j?.ok) alert(j?.error || "Action failed.");
+    else onChange();
+  };
+  const ack = () => post("ack");
+  const done = async () => {
+    const note = prompt("Add a note (optional)?", "") ?? "";
+    post("done", { note });
+  };
+  const remove = async () => { if (confirm("Delete this directive?")) post("delete"); };
+  return (
+    <div className={`rounded-lg border p-4 ${iAcked && !iDone ? "border-amber-500/40 bg-amber-500/5" : iDone ? "border-emerald-500/40 bg-emerald-500/5" : "border-ink-700 bg-ink-800/50"}`}>
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 flex items-center gap-2">
+            <span className="text-lg">{meta.icon}</span>
+            <span className="rounded-full bg-brand-500/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-brand-200">{meta.label}</span>
+            {d.dueAt && <span className="text-[11px] text-ink-400">Due {new Date(d.dueAt).toLocaleDateString(undefined, { day: "2-digit", month: "short" })}</span>}
+          </div>
+          <div className="font-display text-base text-white">{d.title}</div>
+          {d.body && <div className="mt-1 whitespace-pre-line text-sm text-ink-200">{d.body}</div>}
+          {(d.students || []).length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {(d.students || []).map((s: any) => (
+                <span key={s._id} className="rounded-full bg-cyan-500/15 px-2 py-0.5 text-[10px] text-cyan-100">👤 {s.name}</span>
+              ))}
+            </div>
+          )}
+          {(d.topicTags || []).length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {(d.topicTags || []).map((t: string) => (
+                <span key={t} className="rounded-full bg-purple-500/15 px-2 py-0.5 text-[10px] text-purple-100">#{t}</span>
+              ))}
+            </div>
+          )}
+        </div>
+        {isOwner && (
+          <button onClick={remove} title="Delete directive" className="shrink-0 text-xs text-ink-500 hover:text-rose-300">🗑</button>
+        )}
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-1">
+          {(d.toCoaches || []).map((c: any) => {
+            const state = doneIds.has(c._id) ? "done" : ackedIds.has(c._id) ? "ack" : "pending";
+            return (
+              <span key={c._id} className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${state === "done" ? "bg-emerald-500/25 text-emerald-100" : state === "ack" ? "bg-amber-500/25 text-amber-100" : "bg-ink-700 text-ink-300"}`}>
+                {state === "done" ? "✓" : state === "ack" ? "◐" : "○"} {c.name}
+              </span>
+            );
+          })}
+        </div>
+        {isTarget && !iDone && (
+          <div className="flex shrink-0 gap-1">
+            {!iAcked && <button onClick={ack} className="rounded-md border border-amber-500/50 bg-amber-500/15 px-2 py-1 text-xs font-semibold text-amber-100 hover:bg-amber-500/25">Acknowledge</button>}
+            <button onClick={done} className="rounded-md border border-emerald-500/50 bg-emerald-500/15 px-2 py-1 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/25">Mark done</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function NewDirectiveModal({ coaches, students, onClose }: { coaches: any[]; students: any[]; onClose: () => void }) {
+  const [kind, setKind] = useState<string>("topic");
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [toCoachIds, setToCoachIds] = useState<Set<string>>(new Set());
+  const [studentIds, setStudentIds] = useState<Set<string>>(new Set());
+  const [tagInput, setTagInput] = useState("");
+  const [topicTags, setTopicTags] = useState<string[]>([]);
+  const [dueAt, setDueAt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const addTag = () => {
+    const t = tagInput.trim().slice(0, 40);
+    if (t && !topicTags.includes(t) && topicTags.length < 12) { setTopicTags([...topicTags, t]); setTagInput(""); }
+  };
+  const submit = async () => {
+    setBusy(true); setErr("");
+    try {
+      const r = await fetch("/v2api/api/academy/directives", {
+        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, title, body, toCoachIds: [...toCoachIds], studentIds: [...studentIds], topicTags, dueAt: dueAt || null }),
+      });
+      const j = await r.json();
+      if (j?.ok) onClose(); else setErr(j?.error || "Couldn't create.");
+    } catch (e: any) { setErr(e?.message || "Network error."); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur">
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-brand-500/40 bg-ink-900 p-6 shadow-2xl">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="font-display text-xl text-white">🧭 New directive</h3>
+          <button onClick={onClose} className="text-ink-400 hover:text-white">✕</button>
+        </div>
+        <label className="mb-1 block text-xs uppercase text-ink-400">Kind</label>
+        <div className="mb-3 flex flex-wrap gap-2">
+          {DIRECTIVE_KINDS.map((k) => (
+            <button key={k.k} onClick={() => setKind(k.k)}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold ${kind === k.k ? "bg-brand-600 text-white" : "border border-ink-700 bg-ink-800 text-ink-300 hover:bg-ink-700"}`}>
+              {k.icon} {k.label}
+            </button>
+          ))}
+        </div>
+        <label className="mb-1 block text-xs uppercase text-ink-400">Title</label>
+        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Cover Sicilian Najdorf this week"
+          className="mb-3 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none" />
+        <label className="mb-1 block text-xs uppercase text-ink-400">Details</label>
+        <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={4} placeholder="What should the coach cover? Any specific games / positions?"
+          className="mb-3 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none" />
+        <label className="mb-1 block text-xs uppercase text-ink-400">Send to coach{coaches.length > 1 ? "es" : ""} ({toCoachIds.size})</label>
+        <div className="mb-3 max-h-32 overflow-y-auto rounded-lg border border-ink-700 bg-ink-800 p-2">
+          {coaches.map((c: any) => (
+            <label key={c._id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm text-white hover:bg-ink-700">
+              <input type="checkbox" checked={toCoachIds.has(c._id)} onChange={(e) => {
+                const next = new Set(toCoachIds);
+                if (e.target.checked) next.add(c._id); else next.delete(c._id);
+                setToCoachIds(next);
+              }} />
+              {c.username}{c.isOwner ? " · Owner" : ""}
+            </label>
+          ))}
+        </div>
+        {(kind === "student-note" || kind === "homework") && (
+          <>
+            <label className="mb-1 block text-xs uppercase text-ink-400">About student{studentIds.size !== 1 ? "s" : ""} ({studentIds.size}) <span className="text-ink-500">(optional)</span></label>
+            <div className="mb-3 max-h-32 overflow-y-auto rounded-lg border border-ink-700 bg-ink-800 p-2">
+              {students.map((s: any) => (
+                <label key={s._id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm text-white hover:bg-ink-700">
+                  <input type="checkbox" checked={studentIds.has(s._id)} onChange={(e) => {
+                    const next = new Set(studentIds);
+                    if (e.target.checked) next.add(s._id); else next.delete(s._id);
+                    setStudentIds(next);
+                  }} />
+                  {s.name || s.username}
+                </label>
+              ))}
+            </div>
+          </>
+        )}
+        <label className="mb-1 block text-xs uppercase text-ink-400">Topic tags <span className="text-ink-500">(optional)</span></label>
+        <div className="mb-3">
+          <div className="mb-1 flex gap-2">
+            <input value={tagInput} onChange={(e) => setTagInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTag(); } }} placeholder="Ruy López"
+              className="flex-1 rounded-lg border border-ink-700 bg-ink-800 px-3 py-1.5 text-sm text-white focus:border-brand-500 focus:outline-none" />
+            <button onClick={addTag} className="rounded-lg bg-ink-800 px-3 py-1.5 text-sm text-ink-200 hover:bg-ink-700">+ Add</button>
+          </div>
+          {topicTags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {topicTags.map((t) => (
+                <button key={t} onClick={() => setTopicTags(topicTags.filter((x) => x !== t))} className="rounded-full bg-purple-500/20 px-2 py-0.5 text-[11px] text-purple-100 hover:bg-purple-500/30">#{t} ✕</button>
+              ))}
+            </div>
+          )}
+        </div>
+        {kind === "homework" && (
+          <>
+            <label className="mb-1 block text-xs uppercase text-ink-400">Due date <span className="text-ink-500">(optional)</span></label>
+            <input type="date" value={dueAt} onChange={(e) => setDueAt(e.target.value)}
+              className="mb-3 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none" />
+          </>
+        )}
+        {err && <p className="mb-2 text-xs text-rose-300">{err}</p>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg bg-ink-800 px-3 py-1.5 text-sm text-ink-200 hover:bg-ink-700">Cancel</button>
+          <button onClick={submit} disabled={busy || !title.trim() || toCoachIds.size === 0}
+            className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-40">
+            {busy ? "…" : "Send directive"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Batch = named list of students. Coach picks students → creates a batch →
  *  schedules classes for that batch in one form (recurring supported). */
 function BatchesPanel({ students }: { students: any[] }) {
@@ -2160,6 +2399,10 @@ export default function AcademyDashboardPage() {
           {scheduleMsg && <p className={`mt-2 text-xs ${scheduleMsg.tone === "ok" ? "text-emerald-300" : "text-rose-300"}`}>{scheduleMsg.text}</p>}
         </section>
       )}
+
+      {/* ── Master Coach directives (owner instructs coaches on topics /
+              homework / student notes; coach sees their inbox) ── */}
+      {canManage && <DirectivesPanel isOwner={isOwner} coaches={coaches ?? []} students={students} />}
 
       {/* ── Batches (coach schedules classes for a saved student group) ── */}
       {canManage && <BatchesPanel students={students} />}

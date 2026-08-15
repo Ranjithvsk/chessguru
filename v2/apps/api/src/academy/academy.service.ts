@@ -224,6 +224,152 @@ export class AcademyService {
     };
   }
 
+  // ═══════════ MASTER COACH DIRECTIVES ═══════════
+  // Owner (master coach) sends short instructions to specific coach(es) — kinds:
+  //   topic / homework / student-note / general
+  // Optional linked studentIds + dueAt (for homework). Each target coach can
+  // acknowledge (removes red dot) + mark done. Owner sees per-coach status.
+  private directives() { return this.conn.db!.collection("academyDirectives"); }
+
+  async listDirectives(session: any): Promise<any[]> {
+    const g = this.ensureCoachOrOwner(session);
+    const filter: any = { academyId: g.academyId };
+    if (g.role === "coach") filter.toCoachIds = g.userId;
+    const rows = await this.directives().find(filter, { sort: { createdAt: -1 } }).limit(200).toArray();
+    // Enrich with target coach + student mini-profiles for the UI.
+    const coachIds = [...new Set(rows.flatMap((r: any) => (r.toCoachIds || []).map(String)))];
+    const studentIds = [...new Set(rows.flatMap((r: any) => (r.studentIds || []).map(String)))];
+    const [coaches, students] = await Promise.all([
+      coachIds.length ? this.users().find({ _id: { $in: coachIds as any } }, { projection: { name: 1, username: 1 } }).toArray() : [],
+      studentIds.length ? this.users().find({ _id: { $in: studentIds as any } }, { projection: { name: 1, username: 1 } }).toArray() : [],
+    ]);
+    const coachById = new Map(coaches.map((u: any) => [String(u._id), u]));
+    const studentById = new Map(students.map((u: any) => [String(u._id), u]));
+    return rows.map((r: any) => ({
+      ...r,
+      toCoaches: (r.toCoachIds || []).map((id: string) => {
+        const u = coachById.get(String(id));
+        return { _id: id, name: u?.name || u?.username || id };
+      }),
+      students: (r.studentIds || []).map((id: string) => {
+        const u = studentById.get(String(id));
+        return { _id: id, name: u?.name || u?.username || id };
+      }),
+    }));
+  }
+
+  async createDirective(session: any, body: any): Promise<any> {
+    const g = this.ensureOwner(session);
+    const kind = ["topic","homework","student-note","general"].includes(String(body?.kind)) ? String(body.kind) : "general";
+    const title = String(body?.title || "").trim().slice(0, 120);
+    if (!title) return { ok: false, error: "Title is required." };
+    const bodyText = String(body?.body || "").trim().slice(0, 2000);
+    const toRaw = Array.isArray(body?.toCoachIds) ? body.toCoachIds : [];
+    if (!toRaw.length) return { ok: false, error: "Pick at least one coach." };
+    const validCoaches = await this.users().find(
+      { academyId: g.academyId, role: { $in: ["coach", "academy_owner"] }, _id: { $in: toRaw as any } },
+      { projection: { _id: 1 } },
+    ).toArray();
+    const toCoachIds = validCoaches.map((u: any) => String(u._id));
+    if (!toCoachIds.length) return { ok: false, error: "None of the picked coaches are in this academy." };
+    const studentRaw = Array.isArray(body?.studentIds) ? body.studentIds : [];
+    let studentIds: string[] = [];
+    if (studentRaw.length) {
+      const validStudents = await this.users().find(
+        { academyId: g.academyId, role: "student", _id: { $in: studentRaw as any } },
+        { projection: { _id: 1 } },
+      ).toArray();
+      studentIds = validStudents.map((u: any) => String(u._id));
+    }
+    const topicTags = (Array.isArray(body?.topicTags) ? body.topicTags : [])
+      .map((t: any) => String(t).trim().slice(0, 40)).filter(Boolean).slice(0, 12);
+    const dueRaw = String(body?.dueAt || "").trim();
+    const dueAt = dueRaw ? new Date(dueRaw) : null;
+    if (dueAt && isNaN(dueAt.getTime())) return { ok: false, error: "Bad due date." };
+    const now = new Date();
+    const doc: any = {
+      _id: `dir-${Math.random().toString(36).slice(2, 10)}`,
+      academyId: g.academyId,
+      fromUserId: g.userId,
+      toCoachIds,
+      kind,
+      title,
+      body: bodyText,
+      studentIds,
+      topicTags,
+      dueAt,
+      status: "open",
+      ackedBy: [],
+      doneBy: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.directives().insertOne(doc);
+    return { ok: true, directive: doc };
+  }
+
+  async updateDirective(session: any, directiveId: string, body: any): Promise<any> {
+    const g = this.ensureOwner(session);
+    const existing: any = await this.directives().findOne({ _id: directiveId as any, academyId: g.academyId });
+    if (!existing) return { ok: false, error: "Directive not found." };
+    const patch: any = { updatedAt: new Date() };
+    if (typeof body?.title === "string") patch.title = body.title.trim().slice(0, 120);
+    if (typeof body?.body === "string") patch.body = body.body.trim().slice(0, 2000);
+    if (["open", "done"].includes(String(body?.status))) patch.status = String(body.status);
+    if (Array.isArray(body?.toCoachIds)) {
+      const validCoaches = await this.users().find(
+        { academyId: g.academyId, role: { $in: ["coach", "academy_owner"] }, _id: { $in: body.toCoachIds as any } },
+        { projection: { _id: 1 } },
+      ).toArray();
+      patch.toCoachIds = validCoaches.map((u: any) => String(u._id));
+    }
+    if ("dueAt" in body) {
+      const dueRaw = String(body?.dueAt || "").trim();
+      patch.dueAt = dueRaw ? new Date(dueRaw) : null;
+    }
+    await this.directives().updateOne({ _id: existing._id }, { $set: patch });
+    return { ok: true };
+  }
+
+  async ackDirective(session: any, directiveId: string): Promise<any> {
+    const g = this.ensureCoachOrOwner(session);
+    const existing: any = await this.directives().findOne({ _id: directiveId as any, academyId: g.academyId });
+    if (!existing) return { ok: false, error: "Directive not found." };
+    if (!(existing.toCoachIds || []).includes(g.userId)) return { ok: false, error: "Not addressed to you." };
+    const already = (existing.ackedBy || []).some((a: any) => a.coachId === g.userId);
+    if (!already) {
+      await this.directives().updateOne(
+        { _id: existing._id },
+        { $push: { ackedBy: { coachId: g.userId, at: new Date() } } as any, $set: { updatedAt: new Date() } },
+      );
+    }
+    return { ok: true };
+  }
+
+  async markDirectiveDone(session: any, directiveId: string, body: any): Promise<any> {
+    const g = this.ensureCoachOrOwner(session);
+    const existing: any = await this.directives().findOne({ _id: directiveId as any, academyId: g.academyId });
+    if (!existing) return { ok: false, error: "Directive not found." };
+    if (!(existing.toCoachIds || []).includes(g.userId) && g.role !== "academy_owner") {
+      return { ok: false, error: "Not addressed to you." };
+    }
+    const note = String(body?.note || "").trim().slice(0, 500);
+    const already = (existing.doneBy || []).some((a: any) => a.coachId === g.userId);
+    if (!already) {
+      await this.directives().updateOne(
+        { _id: existing._id },
+        { $push: { doneBy: { coachId: g.userId, at: new Date(), note } } as any, $set: { updatedAt: new Date() } },
+      );
+    }
+    return { ok: true };
+  }
+
+  async deleteDirective(session: any, directiveId: string): Promise<any> {
+    const g = this.ensureOwner(session);
+    await this.directives().deleteOne({ _id: directiveId as any, academyId: g.academyId });
+    return { ok: true };
+  }
+
   /** Owner-only: quick-add a coach. Mirrors quickAddStudent (username sanitize,
    *  password = <firstname>@123, bcrypt hash) but role="coach" + no coachId. */
   async quickAddCoach(session: any, body: any): Promise<any> {

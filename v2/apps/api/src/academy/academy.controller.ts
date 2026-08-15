@@ -153,6 +153,29 @@ export class AcademyController {
     return this.svc.scheduleBatchClasses(req.session, id, body);
   }
 
+  // ── Master Coach Directives ──────────────────────────────────
+  @Get("directives")
+  listDirectives(@Req() req: any) { return this.svc.listDirectives(req.session); }
+
+  @Post("directives")
+  createDirective(@Req() req: any, @Body() body: any) { return this.svc.createDirective(req.session, body); }
+
+  @Post("directives/:id")
+  updateDirective(@Req() req: any, @Param("id") id: string, @Body() body: any) {
+    return this.svc.updateDirective(req.session, id, body);
+  }
+
+  @Post("directives/:id/ack")
+  ackDirective(@Req() req: any, @Param("id") id: string) { return this.svc.ackDirective(req.session, id); }
+
+  @Post("directives/:id/done")
+  markDirectiveDone(@Req() req: any, @Param("id") id: string, @Body() body: any) {
+    return this.svc.markDirectiveDone(req.session, id, body);
+  }
+
+  @Post("directives/:id/delete")
+  deleteDirective(@Req() req: any, @Param("id") id: string) { return this.svc.deleteDirective(req.session, id); }
+
   // ── Fees + billing ──────────────────────────────────────────────
   @Get("fees/config")
   getFeesConfig(@Req() req: any) { return this.svc.getFeesConfig(req.session); }
