@@ -1278,7 +1278,7 @@ function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: bool
             <span>Achievements by </span>
             <span className="text-accent">FIDE Master Gunasekaran K</span>
           </h2>
-          <p className="cg-civ-section-sub">Tamil Nadu State Open Champion 2003 &amp; 2004 · National Team Runner-Up 1998 &amp; 2004 · Mount Chess FIDE Rating Tournament Winner 2001 · Maldives Closed Joint Winner 2008 · Chief Minister Trophy 2023 Winner.</p>
+          <p className="cg-civ-section-sub">A chess life in moments — from meeting World Champions to raising the next generation. Scroll down for the full championship record.</p>
         </Reveal>
         <div ref={crRef} className="cg-cr-viewport">
           <div className="cg-cr-track">
@@ -1539,6 +1539,204 @@ function OpeningTrendPanel() {
 }
 
 // ═════════════════════ CHESSIVERSE MODULE D — Publications logo band (1:1) ═════════════════════
+// ══════════ CHAMPIONSHIP TITLES — grand interactive gallery ══════════
+// Every trophy = one card. Click any card → detail panel with story.
+// Featured "Crown Jewel" (CM Trophy 2023) is a wide banner up top; the other
+// eight titles sit in a masonry grid below with unique per-tier styling.
+type TitleTier = "crown" | "gold" | "silver" | "fide" | "intl" | "many-state" | "many-national";
+interface ChampTitle {
+  id: string; year: number | string; tier: TitleTier;
+  name: string; rank: string; place: string;
+  story: string; extras?: string[];
+  image?: string;
+}
+const CHAMP_TITLES: ChampTitle[] = [
+  { id: "cm-2023",   year: 2023, tier: "crown",  name: "Chief Minister Trophy",           rank: "🥇 Winner",       place: "Chennai · Tamil Nadu",
+    story: "The pinnacle of state chess in Tamil Nadu — awarded by the Chief Minister to the tournament champion. A career-defining moment for FM Gunasekaran K.",
+    extras: ["Held at Chennai · 2023 edition", "Field: 200+ rated players", "State's premier annual title event"],
+    image: "/academy/guna-03.webp" },
+  { id: "tn-2003",   year: 2003, tier: "gold",   name: "Tamil Nadu State Open",           rank: "🥇 Champion",     place: "Tamil Nadu",
+    story: "First state open title. A breakout year that established FM Gunasekaran K as one of TN's strongest players.",
+    extras: ["Field: 150+ players", "1st place — clear winner"] },
+  { id: "tn-2004",   year: 2004, tier: "gold",   name: "Tamil Nadu State Open",           rank: "🥇 Champion (back-to-back)", place: "Tamil Nadu",
+    story: "Successful title defence. Second consecutive TN State Open — cementing dominance at state level.",
+    extras: ["Repeat champion", "Rare back-to-back state open win"] },
+  { id: "nat-1998",  year: 1998, tier: "silver", name: "National Team Championship",      rank: "🥈 Runner-Up",    place: "India National",
+    story: "Silver medal at the National Team event — as part of the Tamil Nadu team representing the state.",
+    extras: ["Team event", "TN state team member"] },
+  { id: "nat-2004",  year: 2004, tier: "silver", name: "National Team Championship",      rank: "🥈 Runner-Up",    place: "India National",
+    story: "Second silver on the national team stage — six years after the first.",
+    extras: ["TN state team member", "Repeat podium performance"] },
+  { id: "mount-2001",year: 2001, tier: "fide",   name: "Mount Chess Academy · FIDE Rating Tournament", rank: "🥇 Winner", place: "Chennai",
+    story: "1st place in the closed FIDE-rated tournament — earned significant rating points en route to FIDE title milestones.",
+    extras: ["FIDE-rated event", "Closed invitational format"] },
+  { id: "mdv-2008",  year: 2008, tier: "intl",   name: "Maldives Closed FIDE Rating",     rank: "🥇 Joint Winner", place: "Malé, Maldives",
+    story: "International title — joint winner of the Maldives Closed FIDE-rated tournament. A memorable overseas performance.",
+    extras: ["International tournament", "Joint 1st place"] },
+  { id: "many-state",year: "Many", tier: "many-state",    name: "State-Level Championships",  rank: "🏆 Multiple 1st Places",  place: "Tamil Nadu & across India",
+    story: "Numerous first-place finishes in state-level opens and invitational events across a two-decade tournament career.",
+    extras: ["20+ years of active tournament play", "Consistent state-level podium"] },
+  { id: "many-nat",  year: "Many", tier: "many-national", name: "National-Level Podiums",     rank: "🏅 Multiple Top Finishes", place: "All-India",
+    story: "Multiple top-tier finishes at national-level opens, team events, and inter-state championships.",
+    extras: ["Regular All-India top-10 finisher", "Team medals across the years"] },
+];
+
+const TIER_META: Record<TitleTier, { grad: string; border: string; badge: string; accent: string; emoji: string }> = {
+  crown:         { grad: "linear-gradient(135deg,#fff8dc 0%,#ffe19f 50%,#fbbf24 100%)", border: "#f9a80a", badge: "CROWN JEWEL",      accent: "#b57500", emoji: "👑" },
+  gold:          { grad: "linear-gradient(135deg,#fff5da 0%,#ffe6a3 100%)",             border: "#eab308", badge: "STATE CHAMPION",   accent: "#a16207", emoji: "🥇" },
+  silver:        { grad: "linear-gradient(135deg,#f1f5f9 0%,#cbd5e1 100%)",             border: "#94a3b8", badge: "NATIONAL SILVER",  accent: "#475569", emoji: "🥈" },
+  fide:          { grad: "linear-gradient(135deg,#dbfaff 0%,#a5f3fc 100%)",             border: "#14a2b8", badge: "FIDE TITLE",       accent: "#0e7490", emoji: "♛" },
+  intl:          { grad: "linear-gradient(135deg,#f5d0fe 0%,#e9d5ff 100%)",             border: "#a855f7", badge: "INTERNATIONAL",    accent: "#7e22ce", emoji: "🌏" },
+  "many-state":  { grad: "linear-gradient(135deg,#fed7aa 0%,#fdba74 100%)",             border: "#f97316", badge: "MULTIPLE TITLES",  accent: "#c2410c", emoji: "🏆" },
+  "many-national":{grad: "linear-gradient(135deg,#fecdd3 0%,#fda4af 100%)",             border: "#f43f5e", badge: "MULTIPLE PODIUMS", accent: "#be123c", emoji: "🏅" },
+};
+
+function ChampionshipTitles() {
+  const [openId, setOpenId] = useState<string | null>(null);
+  const open = CHAMP_TITLES.find(t => t.id === openId) || null;
+  const crown = CHAMP_TITLES[0];      // CM Trophy hero
+  const rest  = CHAMP_TITLES.slice(1);
+  return (
+    <section className="cg-titles-section">
+      <style>{`
+        @keyframes cgTitleShimmer { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
+        @keyframes cgTitleFadeUp { from { opacity: 0; transform: translateY(24px) scale(0.92); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        @keyframes cgTitleCrownSpin { 0%,100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
+        @keyframes cgTitleMedalSwing { 0%,100% { transform: rotate(-6deg); } 50% { transform: rotate(6deg); } }
+        @keyframes cgTitlePulseGlow { 0%,100% { box-shadow: 0 0 20px rgba(249,168,10,0.3); } 50% { box-shadow: 0 0 40px rgba(249,168,10,0.6); } }
+        @keyframes cgTitleFlipIn { from { opacity: 0; transform: rotateY(90deg); } to { opacity: 1; transform: rotateY(0deg); } }
+        @keyframes cgTitleShine { 0% { transform: translateX(-100%); } 100% { transform: translateX(200%); } }
+        .cg-titles-section { position: relative; padding: 6rem 1rem; background: linear-gradient(180deg, #c7edf5 0%, #d5f0f7 50%, #b8e6f2 100%); overflow: hidden; }
+        .cg-titles-section::before { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at 20% 20%, rgba(249,168,10,0.14) 0%, transparent 45%), radial-gradient(circle at 80% 80%, rgba(20,162,184,0.16) 0%, transparent 50%); pointer-events: none; }
+        .cg-titles-container { position: relative; max-width: 1200px; margin: 0 auto; }
+        .cg-titles-eyebrow { color: #b57500; font-size: 0.8rem; font-weight: 900; letter-spacing: 0.35em; text-transform: uppercase; text-align: center; margin-bottom: 1rem; }
+        .cg-titles-title { font-family: "Clash Display", sans-serif; font-size: clamp(2.4rem, 5vw, 3.8rem); font-weight: 900; text-align: center; line-height: 1; letter-spacing: -0.02em; margin: 0 auto 1rem; max-width: 800px; background: linear-gradient(90deg, #14a2b8, #f9a80a 30%, #ec4899 55%, #14a2b8 80%); background-size: 200% auto; background-clip: text; -webkit-background-clip: text; color: transparent; animation: cgTitleShimmer 4s linear infinite; }
+        .cg-titles-sub { color: #2d2d2d; text-align: center; font-size: 1rem; letter-spacing: 1px; max-width: 640px; margin: 0 auto 3rem; }
+        /* Crown-jewel featured card */
+        .cg-titles-crown { position: relative; display: grid; grid-template-columns: 1.3fr 1fr; gap: 2rem; align-items: center; padding: 2.5rem; background: linear-gradient(135deg,#fff8dc 0%,#ffe19f 40%,#f9a80a 100%); border-radius: 24px; box-shadow: 0 24px 60px rgba(249,168,10,0.32); cursor: pointer; transition: transform 0.4s cubic-bezier(0.16,1,0.3,1); margin-bottom: 3rem; overflow: hidden; animation: cgTitlePulseGlow 4s ease-in-out infinite; }
+        @media (max-width: 800px) { .cg-titles-crown { grid-template-columns: 1fr; padding: 1.75rem; } }
+        .cg-titles-crown:hover { transform: translateY(-6px) scale(1.005); }
+        .cg-titles-crown::before { content: ''; position: absolute; top: 0; left: -50%; width: 50%; height: 100%; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent); animation: cgTitleShine 4s ease-in-out infinite; pointer-events: none; }
+        .cg-titles-crown-emoji { font-size: 5rem; animation: cgTitleCrownSpin 3s ease-in-out infinite; text-shadow: 0 8px 24px rgba(249,168,10,0.5); display: inline-block; transform-origin: center bottom; }
+        .cg-titles-crown-badge { display: inline-block; background: rgba(255,255,255,0.9); color: #b57500; font-weight: 900; font-size: 0.7rem; letter-spacing: 0.25em; padding: 5px 14px; border-radius: 999px; margin-bottom: 0.75rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .cg-titles-crown-year { font-family: "Clash Display", sans-serif; font-size: 4rem; font-weight: 900; color: #b57500; line-height: 1; margin-bottom: 0.5rem; text-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .cg-titles-crown-name { font-family: "Clash Display", sans-serif; font-size: 2rem; font-weight: 800; color: #7c2d12; letter-spacing: 0; line-height: 1.1; margin-bottom: 0.75rem; }
+        .cg-titles-crown-rank { color: #78350f; font-weight: 700; letter-spacing: 1px; margin-bottom: 1rem; }
+        .cg-titles-crown-hint { color: #b57500; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; }
+        .cg-titles-crown-img { width: 100%; aspect-ratio: 1/1; border-radius: 16px; overflow: hidden; box-shadow: 0 12px 32px rgba(0,0,0,0.2); border: 4px solid #fff; }
+        .cg-titles-crown-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        /* Grid of remaining title cards */
+        .cg-titles-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 1.25rem; }
+        @media (max-width: 900px) { .cg-titles-grid { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+        @media (max-width: 560px) { .cg-titles-grid { grid-template-columns: 1fr; } }
+        .cg-titles-card { position: relative; padding: 1.5rem 1.25rem 1.25rem; border-radius: 16px; border: 2px solid; cursor: pointer; transition: transform 0.35s cubic-bezier(0.16,1,0.3,1), box-shadow 0.35s; opacity: 0; animation: cgTitleFadeUp 0.7s cubic-bezier(0.16,1,0.3,1) both; overflow: hidden; }
+        .cg-titles-card:hover { transform: translateY(-6px) rotate(-0.5deg); }
+        .cg-titles-card:nth-child(1)  { animation-delay: 0.05s; }
+        .cg-titles-card:nth-child(2)  { animation-delay: 0.15s; }
+        .cg-titles-card:nth-child(3)  { animation-delay: 0.25s; }
+        .cg-titles-card:nth-child(4)  { animation-delay: 0.35s; }
+        .cg-titles-card:nth-child(5)  { animation-delay: 0.45s; }
+        .cg-titles-card:nth-child(6)  { animation-delay: 0.55s; }
+        .cg-titles-card:nth-child(7)  { animation-delay: 0.65s; }
+        .cg-titles-card:nth-child(8)  { animation-delay: 0.75s; }
+        .cg-titles-card-badge { display: inline-block; font-size: 0.6rem; font-weight: 900; letter-spacing: 0.2em; padding: 3px 10px; border-radius: 999px; margin-bottom: 0.75rem; background: rgba(255,255,255,0.7); backdrop-filter: blur(4px); }
+        .cg-titles-card-emoji { position: absolute; top: 1rem; right: 1rem; font-size: 2.4rem; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.15)); transition: transform 0.4s cubic-bezier(0.34,1.56,0.64,1); }
+        .cg-titles-card:hover .cg-titles-card-emoji { animation: cgTitleMedalSwing 1s ease-in-out infinite; }
+        .cg-titles-card-year { font-family: "Clash Display", sans-serif; font-size: 2.4rem; font-weight: 900; line-height: 1; margin-bottom: 0.5rem; }
+        .cg-titles-card-year.many { font-size: 1.5rem; padding-top: 0.6rem; }
+        .cg-titles-card-name { font-family: "Clash Display", sans-serif; font-size: 1.1rem; font-weight: 800; letter-spacing: 0; line-height: 1.15; margin-bottom: 0.35rem; color: #232323; }
+        .cg-titles-card-rank { font-size: 0.85rem; font-weight: 700; letter-spacing: 1px; }
+        .cg-titles-card-place { font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 0.5rem; opacity: 0.7; font-weight: 600; }
+        .cg-titles-card-tap { position: absolute; bottom: 0.6rem; right: 0.75rem; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; opacity: 0; transition: opacity 0.3s; }
+        .cg-titles-card:hover .cg-titles-card-tap { opacity: 0.7; }
+        /* Detail modal overlay */
+        .cg-titles-overlay { position: fixed; inset: 0; z-index: 60; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(6px); display: grid; place-items: center; padding: 1rem; animation: cgTitleFadeUp 0.35s cubic-bezier(0.16,1,0.3,1); }
+        .cg-titles-modal { max-width: 640px; width: 100%; background: #fff; border-radius: 20px; padding: 2rem; box-shadow: 0 40px 100px rgba(0,0,0,0.35); position: relative; animation: cgTitleFlipIn 0.5s cubic-bezier(0.16,1,0.3,1); }
+        .cg-titles-modal-close { position: absolute; top: 12px; right: 16px; background: none; border: 0; color: #78716c; font-size: 1.6rem; cursor: pointer; line-height: 1; }
+        .cg-titles-modal-badge { display: inline-block; padding: 5px 14px; border-radius: 999px; font-size: 0.65rem; font-weight: 900; letter-spacing: 0.25em; color: #fff; margin-bottom: 0.75rem; }
+        .cg-titles-modal-year { font-family: "Clash Display", sans-serif; font-size: 3.5rem; font-weight: 900; line-height: 1; }
+        .cg-titles-modal-name { font-family: "Clash Display", sans-serif; font-size: 1.6rem; font-weight: 800; color: #232323; margin: 0.5rem 0; }
+        .cg-titles-modal-rank { font-size: 1rem; font-weight: 700; margin-bottom: 1rem; }
+        .cg-titles-modal-story { color: #44403c; line-height: 1.6; letter-spacing: 1px; margin-bottom: 1rem; }
+        .cg-titles-modal-extras { list-style: none; padding: 0; margin: 0; }
+        .cg-titles-modal-extras li { padding: 0.5rem 0 0.5rem 1.5rem; position: relative; color: #232323; letter-spacing: 1px; font-size: 0.9rem; border-bottom: 1px solid #f5f5f4; }
+        .cg-titles-modal-extras li:last-child { border-bottom: 0; }
+        .cg-titles-modal-extras li::before { content: '✦'; position: absolute; left: 0; top: 0.5rem; color: #f9a80a; font-weight: 900; }
+      `}</style>
+      <div className="cg-titles-container">
+        <Reveal className="text-center">
+          <div className="cg-titles-eyebrow">🏆 Championship Titles</div>
+          <h2 className="cg-titles-title">Big Tournament Titles</h2>
+          <p className="cg-titles-sub">First-place finishes across state, national, and international tournaments — every one a special chapter. <b>Tap any card</b> for the story.</p>
+        </Reveal>
+
+        {/* Crown-jewel featured card — Chief Minister Trophy 2023 */}
+        <div className="cg-titles-crown" onClick={() => setOpenId(crown.id)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setOpenId(crown.id); }}>
+          <div>
+            <div className="cg-titles-crown-badge">👑 {TIER_META[crown.tier].badge}</div>
+            <div className="cg-titles-crown-year">{crown.year}</div>
+            <div className="cg-titles-crown-name">{crown.name}</div>
+            <div className="cg-titles-crown-rank">{crown.rank} · {crown.place}</div>
+            <div className="cg-titles-crown-hint">Tap to read the full story →</div>
+          </div>
+          <div className="cg-titles-crown-img">
+            <span className="cg-titles-crown-emoji" style={{ position: 'absolute', top: '1rem', right: '1rem', zIndex: 2 }}>👑</span>
+            {crown.image && <img src={crown.image} alt={crown.name} />}
+          </div>
+        </div>
+
+        {/* Grid of remaining titles */}
+        <div className="cg-titles-grid">
+          {rest.map((t) => {
+            const meta = TIER_META[t.tier];
+            const yearIsMany = t.year === "Many";
+            return (
+              <div
+                key={t.id}
+                className="cg-titles-card"
+                style={{ background: meta.grad, borderColor: meta.border, color: meta.accent }}
+                onClick={() => setOpenId(t.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setOpenId(t.id); }}
+              >
+                <div className="cg-titles-card-emoji">{meta.emoji}</div>
+                <div className="cg-titles-card-badge" style={{ color: meta.accent }}>{meta.badge}</div>
+                <div className={`cg-titles-card-year ${yearIsMany ? "many" : ""}`} style={{ color: meta.accent }}>{t.year}</div>
+                <div className="cg-titles-card-name">{t.name}</div>
+                <div className="cg-titles-card-rank" style={{ color: meta.accent }}>{t.rank}</div>
+                <div className="cg-titles-card-place" style={{ color: meta.accent }}>{t.place}</div>
+                <div className="cg-titles-card-tap" style={{ color: meta.accent }}>Tap →</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Detail modal */}
+      {open && (
+        <div className="cg-titles-overlay" onClick={() => setOpenId(null)}>
+          <div className="cg-titles-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="cg-titles-modal-close" onClick={() => setOpenId(null)}>✕</button>
+            <div className="cg-titles-modal-badge" style={{ background: TIER_META[open.tier].border }}>
+              {TIER_META[open.tier].emoji} {TIER_META[open.tier].badge}
+            </div>
+            <div className="cg-titles-modal-year" style={{ color: TIER_META[open.tier].accent }}>{open.year}</div>
+            <div className="cg-titles-modal-name">{open.name}</div>
+            <div className="cg-titles-modal-rank" style={{ color: TIER_META[open.tier].accent }}>{open.rank} · {open.place}</div>
+            <p className="cg-titles-modal-story">{open.story}</p>
+            {open.extras && open.extras.length > 0 && (
+              <ul className="cg-titles-modal-extras">
+                {open.extras.map((e) => <li key={e}>{e}</li>)}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 // Guna's biggest chess battles — wins vs IMs + draws vs GMs. Grand
 // celebration section: gold + burgundy palette, cinematic hero image,
 // staggered player-chip reveals on scroll.
@@ -2507,6 +2705,9 @@ export default function AcademyPublicPage() {
 
       {/* Featured by Leading Chess Creators */}
       <BotGrid ctaHref={joinHref} ctaExt={joinExternal} joinLabel={joinLabel} />
+
+      {/* Championship titles — grand interactive gallery of tournament wins */}
+      <ChampionshipTitles />
 
       {/* Biggest Achievement — battles vs IMs + GMs (grand celebration) */}
       <BiggestAchievements />
