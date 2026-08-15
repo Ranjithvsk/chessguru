@@ -59,10 +59,27 @@ export class LivekitController {
     // legacy public meetings still work.
     try {
       const klass: any = await this.conn.db!.collection("classSchedules")
-        .findOne({ _id: roomName as any }, { projection: { academyId: 1 } });
+        .findOne({ _id: roomName as any }, { projection: { academyId: 1, createdByUserId: 1, batchStudentIds: 1 } });
       if (klass?.academyId) {
         const mine = req.session.academyId ?? null;
         if (mine !== klass.academyId) throw new HttpException("not found", HttpStatus.NOT_FOUND);
+        // If joining as COACH: the class must be created by this user (or the
+        // owner). Blocks other academy coaches from starting another coach's
+        // Dream Meet room.
+        if (role === "coach") {
+          const myRole = req.session.role;
+          const myUid = req.session.userId;
+          const isCreator = klass.createdByUserId === myUid;
+          const isOwner = myRole === "academy_owner";
+          if (!isCreator && !isOwner) throw new HttpException("not found", HttpStatus.NOT_FOUND);
+        }
+        // If joining as STUDENT and class has a batch: student must be in the batch.
+        if (role === "student" && Array.isArray(klass.batchStudentIds) && klass.batchStudentIds.length) {
+          const myUid = req.session.userId;
+          if (!myUid || !klass.batchStudentIds.includes(myUid)) {
+            throw new HttpException("not found", HttpStatus.NOT_FOUND);
+          }
+        }
       }
     } catch (e) {
       if (e instanceof HttpException) throw e;

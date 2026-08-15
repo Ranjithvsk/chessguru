@@ -242,12 +242,15 @@ export class ClassScheduleController {
     const now = new Date();
     const me: string | null = req?.session?.userId ?? null;
     const myAcademy: string | null = req?.session?.academyId ?? null;
+    const myRole: string | null = req?.session?.role ?? null;
     // Academy scoping — STRICT: tenant members see ONLY their academy's classes.
-    // Previously the OR fallback included orphan-academyId rows too, which
-    // leaked cross-tenant classes (e.g. harinitharanjith's class showing up on
-    // gunachess.com). Non-tenant users (platform-only) still see orphan rows.
+    // Coach-only refinement: a "coach" role sees only classes they created or
+    // batches that include their students. Owner + student roles still see the
+    // whole academy roster (student's dashboard has its own attendance filter).
     const filter: any = myAcademy
-      ? { academyId: myAcademy }
+      ? (myRole === "coach"
+          ? { academyId: myAcademy, createdByUserId: me }
+          : { academyId: myAcademy })
       : { academyId: { $in: [null, undefined] } };
     const rows = await this.col().find(filter, { sort: { startAt: 1 } }).limit(200).toArray();
     const live: (ScheduleDoc & { mine: boolean; attendedCount?: number })[] = [];
