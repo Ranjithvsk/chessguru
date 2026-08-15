@@ -2300,12 +2300,13 @@ export default function AcademyPublicPage() {
           @keyframes cgSplashFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
           @keyframes cgSplashShimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
           @keyframes cgSplashDots { 0%,20% { opacity: 0.2; } 50% { opacity: 1; } 100% { opacity: 0.2; } }
-          .cg-splash-piece { animation: cgSplashSpin 2.4s ease-in-out infinite, cgSplashFloat 3s ease-in-out infinite; display: inline-block; font-size: 5rem; line-height: 1; text-shadow: 0 8px 24px rgba(20,162,184,0.35); }
+          .cg-splash-piece { animation: cgSplashFloat 3s ease-in-out infinite; display: inline-block; width: 120px; height: 120px; filter: drop-shadow(0 8px 24px rgba(20,162,184,0.35)); }
+          .cg-splash-piece img { width: 100%; height: 100%; object-fit: contain; }
           .cg-splash-text { background: linear-gradient(90deg, #14a2b8, #40bfd3 25%, #f9a80a 50%, #40bfd3 75%, #14a2b8); background-size: 200% auto; -webkit-background-clip: text; background-clip: text; color: transparent; animation: cgSplashShimmer 2s linear infinite; font-weight: 700; }
           .cg-splash-dot { animation: cgSplashDots 1.4s ease-in-out infinite; }
         `}</style>
         <div className="flex flex-col items-center gap-6">
-          <div className="cg-splash-piece">♞</div>
+          <div className="cg-splash-piece"><img src="/academy/guna-logo.webp" alt="Guna Chess Academy" /></div>
           <div className="flex items-baseline gap-1 text-xl md:text-2xl tracking-widest uppercase cg-splash-text">
             <span>Guna Chess</span>
             <span className="cg-splash-dot">·</span>
