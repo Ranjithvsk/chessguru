@@ -908,15 +908,9 @@ export default function CoachPublicPage() {
             <div>© {new Date().getFullYear()} {displayName}. All rights reserved.</div>
             {/* On custom-domain tenants we deliberately do NOT link back to
                 ChessGuru marketing — just render the credit statically. */}
-            {typeof window !== "undefined" && /harinitharanjith|localhost/.test(window.location.hostname) ? (
-              <Link to="/" className="hover:text-white">
-                Powered by <span className="font-semibold text-slate-300">ChessGuru</span>
-              </Link>
-            ) : (
-              <span className="text-slate-500">
-                Powered by <span className="font-semibold text-slate-400">ChessGuru</span>
-              </span>
-            )}
+            <Link to="/academy" className="hover:text-white">
+              Powered by <span className="font-semibold text-slate-300">ChessGuru</span>
+            </Link>
           </div>
         </div>
       </footer>

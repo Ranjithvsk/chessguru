@@ -181,7 +181,7 @@ export default function TenantLoginPage() {
       </div>
 
       <p className="mt-6 text-center text-[11px] text-ink-500">
-        Powered by <Link to="/" className="underline hover:text-ink-300">ChessGuru</Link>
+        Powered by <Link to="/academy" className="underline hover:text-ink-300">ChessGuru</Link>
       </p>
     </div>
   );

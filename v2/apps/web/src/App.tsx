@@ -84,6 +84,13 @@ export default function App() {
         <HomeworkPendingBanner />
         <Outlet context={{ userId, rating: rating?.rating ?? 1500 }} />
       </main>
+      {/* Global "Powered by ChessGuru" footer — every App-wrapped page.
+       *  Clicking ChessGuru → /academy (the academy Resource Planner: batches,
+       *  students, coaches, directives, homework). */}
+      <footer className="mt-8 border-t border-ink-800/60 bg-ink-900/50 py-4 text-center text-xs text-ink-400">
+        Powered by <Link to="/academy" className="font-semibold text-brand-300 hover:text-brand-200 hover:underline">ChessGuru</Link>
+      </footer>
+
       {/* Global "📷 Scan chess position" FAB. Fixed bottom-left so it's
           always one tap away on phone. Hidden on /board-editor itself
           to avoid redundancy. */}
