@@ -109,6 +109,18 @@ export class AcademyController {
     return this.svc.quickAddStudent(req.session, body);
   }
 
+  /** Owner-only: quick-add a coach (mirrors student quick-add). */
+  @Post("coaches/quick-add")
+  quickAddCoach(@Req() req: any, @Body() body: any) {
+    return this.svc.quickAddCoach(req.session, body);
+  }
+
+  /** Owner-only: reassign a student to a different coach. Body: { coachId } */
+  @Post("students/:id/assign-coach")
+  assignStudentCoach(@Req() req: any, @Param("id") id: string, @Body() body: any) {
+    return this.svc.assignStudentCoach(req.session, id, String(body?.coachId || ""));
+  }
+
   /** Coach/owner sets or resets a student's password. Body: {newPassword?:string}
    *  If newPassword is omitted, backend generates <firstname>@123. Returns the
    *  new plain-text credentials once (owner-request UX). */

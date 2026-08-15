@@ -409,9 +409,9 @@ function StatsRow({ students, coaches, schedule, snaps, homework }: {
   );
 }
 
-function QuickActionsBar({ onAddStudent, onAssignHomework, onOneClick, oneClickBusy, studentCount }: {
-  onAddStudent: () => void; onAssignHomework: () => void; onOneClick: () => void;
-  oneClickBusy: boolean; studentCount: number;
+function QuickActionsBar({ onAddStudent, onAddCoach, onAssignHomework, onOneClick, oneClickBusy, studentCount, isOwner }: {
+  onAddStudent: () => void; onAddCoach: () => void; onAssignHomework: () => void; onOneClick: () => void;
+  oneClickBusy: boolean; studentCount: number; isOwner: boolean;
 }) {
   return (
     <section className="rounded-3xl border border-white/10 bg-ink-900/60 p-5 shadow backdrop-blur">
@@ -419,13 +419,21 @@ function QuickActionsBar({ onAddStudent, onAssignHomework, onOneClick, oneClickB
         <h2 className="font-display text-lg text-white">⚡ Quick actions</h2>
         <span className="text-xs text-ink-500">One tap, real work done</span>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className={`grid gap-3 sm:grid-cols-2 ${isOwner ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
         <button onClick={onAddStudent}
           className="group rounded-2xl border border-emerald-400/30 bg-gradient-to-br from-emerald-500/15 to-teal-500/10 p-4 text-left transition hover:-translate-y-0.5 hover:border-emerald-400/60 hover:shadow-lg">
           <div className="flex items-center gap-2 text-2xl">👦 <span className="text-emerald-200">+</span></div>
           <div className="mt-1 font-display text-base font-semibold text-white">Add student</div>
           <div className="text-xs text-ink-400">Instant — no email round-trip. Get a username + password to share.</div>
         </button>
+        {isOwner && (
+          <button onClick={onAddCoach}
+            className="group rounded-2xl border border-cyan-400/30 bg-gradient-to-br from-cyan-500/15 to-sky-500/10 p-4 text-left transition hover:-translate-y-0.5 hover:border-cyan-400/60 hover:shadow-lg">
+            <div className="flex items-center gap-2 text-2xl">🧑‍🏫 <span className="text-cyan-200">+</span></div>
+            <div className="mt-1 font-display text-base font-semibold text-white">Add coach</div>
+            <div className="text-xs text-ink-400">Instant. New coach gets a username + password — assign students to them right after.</div>
+          </button>
+        )}
         <button onClick={onAssignHomework} disabled={studentCount === 0}
           className="group rounded-2xl border border-purple-400/30 bg-gradient-to-br from-purple-500/15 to-fuchsia-500/10 p-4 text-left transition hover:-translate-y-0.5 hover:border-purple-400/60 hover:shadow-lg disabled:opacity-50">
           <div className="flex items-center gap-2 text-2xl">📝</div>
@@ -529,6 +537,121 @@ function AddStudentModal({ open, onClose, coaches, isOwner }: {
         )}
       </div>
     </div>
+  );
+}
+
+/** Owner-only: quick-add a coach. Mirrors AddStudentModal (name + optional
+ *  email → returns username + auto-generated password once). */
+function AddCoachModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [displayName, setDisplayName] = useState("");
+  const [email, setEmail] = useState("");
+  const [creds, setCreds] = useState<{ username: string; password: string } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const reset = () => { setDisplayName(""); setEmail(""); setCreds(null); setErr(null); };
+  const close = () => { reset(); onClose(); };
+  const submit = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const r = await fetch("/v2api/api/academy/coaches/quick-add", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ displayName, email }),
+      });
+      const j = await r.json();
+      if (j?.ok) { setCreds(j.credentials); qc.invalidateQueries({ queryKey: ["academy-coaches"] }); }
+      else setErr(j?.error || "Couldn't create coach.");
+    } catch (e: any) { setErr(e?.message || "Network error."); }
+    finally { setBusy(false); }
+  };
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur" onClick={close}>
+      <div onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md rounded-2xl border border-cyan-400/40 bg-gradient-to-br from-ink-900 to-cyan-950/40 p-6 shadow-2xl">
+        <div className="text-2xl">🧑‍🏫 <span className="text-cyan-300">+</span></div>
+        <h2 className="mt-2 font-display text-xl text-white">Add a coach</h2>
+        <p className="text-xs text-ink-400">Creates the account instantly. Copy the password + hand it to the coach; assign students to them from the students table.</p>
+        {creds ? (
+          <div className="mt-5 space-y-3">
+            <div className="rounded-xl border border-cyan-400/40 bg-cyan-500/10 p-4">
+              <div className="text-xs uppercase text-cyan-300">✅ Created</div>
+              <div className="mt-2 font-mono text-sm text-white">
+                <div>username: <b className="select-all">{creds.username}</b></div>
+                <div>password: <b className="select-all">{creds.password}</b></div>
+              </div>
+              <button onClick={() => navigator.clipboard?.writeText(`ChessGuru — Coach account\nusername: ${creds.username}\npassword: ${creds.password}\nlogin: ${window.location.origin}/login`)}
+                className="mt-3 rounded-md border border-cyan-400/40 bg-cyan-500/20 px-3 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/30">
+                📋 Copy credentials
+              </button>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={reset} className="flex-1 rounded-lg border border-ink-700 py-2 text-sm text-white hover:bg-ink-800">Add another</button>
+              <button onClick={close} className="flex-1 rounded-lg bg-brand-600 py-2 text-sm font-semibold text-white hover:bg-brand-500">Done</button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-5 space-y-3">
+            {err && <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-2.5 text-xs text-rose-200">{err}</div>}
+            <div>
+              <label className="mb-1 block text-xs uppercase text-ink-400">Coach name</label>
+              <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} autoFocus placeholder="Priya M"
+                className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-cyan-500 focus:outline-none" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs uppercase text-ink-400">Email <span className="text-ink-500">(optional)</span></label>
+              <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="coach@example.com"
+                className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-cyan-500 focus:outline-none" />
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button onClick={close} className="flex-1 rounded-lg border border-ink-700 py-2 text-sm text-white hover:bg-ink-800">Cancel</button>
+              <button disabled={busy || !displayName}
+                onClick={submit}
+                className="flex-1 rounded-lg bg-gradient-to-r from-cyan-500 to-sky-500 py-2 text-sm font-semibold text-white shadow hover:brightness-110 disabled:opacity-50">
+                {busy ? "Creating…" : "Create coach"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Owner-only reassign-coach dropdown per student row. Sits inline (small
+ *  select) so the owner can shift students between coaches without a modal. */
+function AssignCoachDropdown({ studentId, currentCoachId, coaches }: { studentId: string; currentCoachId?: string | null; coaches: any[] }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const change = async (coachId: string) => {
+    if (!coachId || coachId === currentCoachId) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/v2api/api/academy/students/${encodeURIComponent(studentId)}/assign-coach`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ coachId }),
+      });
+      const j = await r.json();
+      if (j?.ok) qc.invalidateQueries({ queryKey: ["academy-students"] });
+      else alert(j?.error || "Couldn't reassign coach.");
+    } catch (e: any) { alert(e?.message || "Network error."); }
+    finally { setBusy(false); }
+  };
+  return (
+    <select
+      value={currentCoachId || ""}
+      onChange={(e) => change(e.target.value)}
+      disabled={busy}
+      className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-2 py-1 text-xs text-brand-100 hover:bg-brand-500/20 disabled:opacity-60"
+      title="Reassign coach"
+    >
+      <option value="">— pick coach —</option>
+      {coaches.map((c) => (
+        <option key={c._id} value={c._id}>{c.username}{c.isOwner ? " · Owner" : ""}</option>
+      ))}
+    </select>
   );
 }
 
@@ -1533,6 +1656,7 @@ export default function AcademyDashboardPage() {
 
   // Homework + quick-add-student state (new — sits alongside invites, doesn't replace them)
   const [showAddStudent, setShowAddStudent] = useState(false);
+  const [showAddCoach, setShowAddCoach] = useState(false);
   const [showAssignHw, setShowAssignHw] = useState(false);
   const [oneClickMsg, setOneClickMsg] = useState<{ tone: "ok"|"err"; text: string }|null>(null);
   const { data: homework } = useQuery({
@@ -1617,10 +1741,12 @@ export default function AcademyDashboardPage() {
       {canManage && <StatsRow students={studentsShown} coaches={coaches ?? []} schedule={schedule} snaps={snaps} homework={homework ?? []} />}
       {canManage && <QuickActionsBar
         onAddStudent={() => setShowAddStudent(true)}
+        onAddCoach={() => setShowAddCoach(true)}
         onAssignHomework={() => setShowAssignHw(true)}
         onOneClick={() => oneClickHwMut.mutate()}
         oneClickBusy={oneClickHwMut.isPending}
         studentCount={studentsShown.length}
+        isOwner={isOwner}
       />}
       {canManage && oneClickMsg && (
         <div className={`rounded-xl border px-4 py-2.5 text-sm ${oneClickMsg.tone === "ok" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100" : "border-rose-500/40 bg-rose-500/10 text-rose-100"}`}>
@@ -1674,6 +1800,7 @@ export default function AcademyDashboardPage() {
       {canManage && <ClassNotesPanel />}
       {canManage && <StudyMaterialsPanel students={studentsShown} />}
       <AddStudentModal open={showAddStudent} onClose={() => setShowAddStudent(false)} coaches={coaches ?? []} isOwner={isOwner} />
+      <AddCoachModal open={showAddCoach} onClose={() => setShowAddCoach(false)} />
       <AssignHomeworkModal open={showAssignHw} onClose={() => setShowAssignHw(false)} students={studentsShown} isOwner={isOwner} />
 
       {canManage && <TodayStrip schedule={schedule} snaps={snaps} recordings={recordings} />}
@@ -1937,6 +2064,7 @@ export default function AcademyDashboardPage() {
                             <Link to={`/history?as=${encodeURIComponent(s.username)}`} className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-2 py-1 text-brand-100 hover:bg-brand-500/20">📜 History</Link>
                             <ResetPasswordButton studentId={s._id} name={s.name || s.username} />
                             <MarkAttendedButton studentId={s._id} name={s.name || s.username} />
+                            {isOwner && <AssignCoachDropdown studentId={s._id} currentCoachId={s.coachId} coaches={coaches ?? []} />}
                           </div>
                         </td>
                       </tr>

@@ -224,6 +224,70 @@ export class AcademyService {
     };
   }
 
+  /** Owner-only: quick-add a coach. Mirrors quickAddStudent (username sanitize,
+   *  password = <firstname>@123, bcrypt hash) but role="coach" + no coachId. */
+  async quickAddCoach(session: any, body: any): Promise<any> {
+    const g = this.ensureOwner(session);
+    const displayName = String(body?.displayName || "").trim().slice(0, 60);
+    const emailIn = String(body?.email || "").trim().toLowerCase();
+    if (emailIn) {
+      if (!emailIn.includes("@")) return { ok: false, error: "Email doesn't look right." };
+      const existing = await this.users().findOne({ email: emailIn });
+      if (existing) return { ok: false, error: "That email already has an account." };
+    }
+    const sanitize = (s: string) => s.toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 24);
+    let baseUid = sanitize(displayName);
+    if (baseUid.length < 2 && emailIn) baseUid = sanitize(emailIn.split("@")[0] || "");
+    if (baseUid.length < 2) return { ok: false, error: "Enter the coach's name (at least 2 letters)." };
+    let uid = baseUid, k = 2;
+    while (await this.users().findOne({
+      $or: [
+        { _id: uid as any },
+        { username: { $regex: new RegExp("^" + uid + "$", "i") } },
+      ],
+    } as any)) {
+      uid = `${baseUid}-${k++}`;
+      if (k > 999) return { ok: false, error: "Couldn't pick a free username — try a different name." };
+    }
+    const pwBase = ((displayName.split(/\s+/)[0] || uid).toLowerCase().replace(/[^a-z0-9]/g, "")) || uid.replace(/[^a-z0-9]/g, "") || "coach";
+    const password = `${pwBase}@123`;
+    const bcrypt = await import("bcryptjs");
+    const hash = await bcrypt.default.hash(password, 10);
+    const now = new Date();
+    const userDoc: any = {
+      _id: uid,
+      username: uid,
+      name: displayName || uid,
+      bpass: hash,
+      email: emailIn || null,
+      academyId: g.academyId,
+      role: "coach",
+      createdAt: now,
+      lastLogin: null,
+      createdBy: g.userId,
+    };
+    await this.users().insertOne(userDoc);
+    return {
+      ok: true,
+      coach: { _id: uid, username: userDoc.username, email: userDoc.email, createdAt: now },
+      credentials: { username: uid, password },
+    };
+  }
+
+  /** Owner-only: reassign a student to a different coach in this academy.
+   *  The new coach must be in the same academy and have role coach|owner. */
+  async assignStudentCoach(session: any, studentId: string, coachId: string): Promise<any> {
+    const g = this.ensureOwner(session);
+    const student: any = await this.users().findOne({ _id: studentId as any, academyId: g.academyId, role: "student" });
+    if (!student) return { ok: false, error: "That student isn't in this academy." };
+    const target = String(coachId || "").trim();
+    if (!target) return { ok: false, error: "Pick a coach." };
+    const coach: any = await this.users().findOne({ _id: target as any, academyId: g.academyId, role: { $in: ["coach", "academy_owner"] } });
+    if (!coach) return { ok: false, error: "That coach isn't in this academy." };
+    await this.users().updateOne({ _id: student._id }, { $set: { coachId: coach._id, coachAssignedAt: new Date(), coachAssignedBy: g.userId } });
+    return { ok: true };
+  }
+
   // ═══════════ BATCHES ═══════════
   // A batch is a named group of students within an academy. Coach owns their
   // batches (`coachUserId`); owner can see all batches in the academy. Coaches
