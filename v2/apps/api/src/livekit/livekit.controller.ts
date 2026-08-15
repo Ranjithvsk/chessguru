@@ -8,12 +8,17 @@
 // Any signed-in user can request a token for now; academy-role gating comes
 // once the coach/student roles from CHESSGURU-SAAS-VISION.md land in Q1.
 
-import { BadRequestException, Body, Controller, Get, Post, Query, Req, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpException, HttpStatus, Post, Query, Req, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
+import { InjectConnection } from "@nestjs/mongoose";
+import { Connection } from "mongoose";
 import { LivekitService } from "./livekit.service";
 
 @Controller("livekit")
 export class LivekitController {
-  constructor(private readonly svc: LivekitService) {}
+  constructor(
+    private readonly svc: LivekitService,
+    @InjectConnection() private readonly conn: Connection,
+  ) {}
 
   @Get("status")
   status() {
@@ -47,8 +52,22 @@ export class LivekitController {
     if (!/^[a-zA-Z0-9_-]{2,64}$/.test(roomName)) throw new BadRequestException("bad room");
     const role: "coach" | "student" = roleRaw === "coach" ? "coach" : "student";
     if (!this.svc.isConfigured()) throw new ServiceUnavailableException("LiveKit not configured");
-    // identity = userId; ensures "one participant per user per room" and lets
-    // us later attach a per-session avatar/rating badge server-side.
+    // TENANT ISOLATION: if the requested room maps to a scheduled class with
+    // an academyId, the caller's session must belong to that same academy.
+    // Blocks Harinitha (academy X) from joining a Guna Chess (academy Y) class
+    // by knowing the room URL. Ad-hoc rooms (no schedule row) fall through so
+    // legacy public meetings still work.
+    try {
+      const klass: any = await this.conn.db!.collection("classSchedules")
+        .findOne({ _id: roomName as any }, { projection: { academyId: 1 } });
+      if (klass?.academyId) {
+        const mine = req.session.academyId ?? null;
+        if (mine !== klass.academyId) throw new HttpException("not found", HttpStatus.NOT_FOUND);
+      }
+    } catch (e) {
+      if (e instanceof HttpException) throw e;
+      // swallow other errors — don't 500 the whole join flow if lookup fails
+    }
     const { token, url } = await this.svc.createToken({
       roomName,
       identity: req.session.userId,
