@@ -2018,8 +2018,11 @@ export default function AcademyPublicPage() {
         .cg-civ-hv-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
         .cg-civ-hv-card-name { position: absolute; left: 8px; right: 8px; bottom: 8px; background: rgba(0,0,0,0.65); color: #fff; padding: 4px 8px; border-radius: 6px; font-size: 0.7rem; font-weight: 700; letter-spacing: 1px; text-align: center; }
         /* Yellow star badge floating top-right of the portrait */
-        .cg-civ-hv-stars { position: absolute; top: 4%; right: 6%; background: linear-gradient(180deg,#ffdfa2,#f9a80a,#ffb82e); border-radius: 999px; padding: 6px 12px; box-shadow: 0 6px 16px rgba(249,168,10,0.4); display: flex; align-items: center; gap: 4px; font-weight: 800; font-size: 0.85rem; z-index: 3; letter-spacing: 1px; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.15); }
-        .cg-civ-hv-stars .st { font-size: 0.75rem; letter-spacing: -1px; }
+        /* FIDE rating badge — small "Highest" label + big 2312 number stack */
+        .cg-civ-hv-rating { position: absolute; top: 3%; right: 4%; background: linear-gradient(180deg,#ffdfa2,#f9a80a,#ffb82e); border-radius: 14px; padding: 6px 14px 8px; box-shadow: 0 8px 20px rgba(249,168,10,0.45); display: flex; flex-direction: column; align-items: center; z-index: 3; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.2); line-height: 1; }
+        .cg-civ-hv-rating .lbl { font-size: 0.6rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; opacity: 0.92; }
+        .cg-civ-hv-rating .num { font-family: "Clash Display", -apple-system, sans-serif; font-size: 2rem; font-weight: 800; letter-spacing: 0.02em; margin-top: 2px; }
+        .cg-civ-hv-rating .fide { font-size: 0.55rem; font-weight: 700; letter-spacing: 0.2em; margin-top: 1px; opacity: 0.9; }
         /* Quote card overlay bottom-right with diagonal stripes decoration */
         .cg-civ-hv-quote { position: absolute; right: 4%; bottom: 6%; width: 62%; background: #fff; border-radius: 12px; padding: 14px 14px 14px 44px; box-shadow: 0 12px 32px rgba(20,162,184,0.22); z-index: 3; font-size: 0.78rem; line-height: 1.45; color: #232323; letter-spacing: 1px; }
         .cg-civ-hv-quote::before { content: '“'; position: absolute; top: -2px; left: 10px; font-size: 3.4rem; line-height: 1; color: #14a2b8; font-family: Georgia, serif; }
@@ -2192,9 +2195,10 @@ export default function AcademyPublicPage() {
               FM Gunasekaran K
             </div>
           </div>
-          <div className="cg-civ-hv-stars">
-            <span className="st">★★★★★</span>
-            <span>4.9</span>
+          <div className="cg-civ-hv-rating">
+            <span className="lbl">Highest</span>
+            <span className="num">2312</span>
+            <span className="fide">FIDE Rating</span>
           </div>
           <div className="cg-civ-hv-quote">
             {(p.testimonials[0]?.quote || "Every class feels one-on-one. My son went from 800 to 1450 in nine months — the coaches don't just teach chess, they teach thinking.").slice(0, 150)}
