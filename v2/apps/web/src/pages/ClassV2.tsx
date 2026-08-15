@@ -641,6 +641,16 @@ export default function ClassV2Page() {
   const { data: me, isLoading: authLoading } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
   const navigate = useNavigate();
   const [endedMsg, setEndedMsg] = useState<string | null>(null);
+  // Per-user hide-video preference — audio-only mode for anyone who wants it
+  // (owner ask: coach + students can each hide their own view of video tiles).
+  // Persists per browser so bandwidth-constrained users don't have to re-toggle
+  // every time they join.
+  const [hideVideo, setHideVideo] = useState<boolean>(() => {
+    try { return localStorage.getItem("cg-hide-video") === "1"; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("cg-hide-video", hideVideo ? "1" : "0"); } catch {}
+  }, [hideVideo]);
 
   // Coach clicks Leave → tell the server to explicitly END the class:
   //   * wipes the live-now announcement (students don't see a stale link)
@@ -818,7 +828,7 @@ export default function ClassV2Page() {
                   </div>
                 </div>
               )}
-              <CameraPIPMaybe />
+              {!hideVideo && <CameraPIPMaybe />}
               <CoachWaitingOverlay room={room} role={role} />
               <HandsRoster />
               <ReactionOverlay />
@@ -836,6 +846,13 @@ export default function ClassV2Page() {
                 <div className="rounded-xl border border-ink-800 bg-ink-900 shadow">
                   <ControlBar variation="minimal" controls={{ microphone: true, camera: true, screenShare: true, chat: false, leave: false }} />
                 </div>
+                <button
+                  onClick={() => setHideVideo(v => !v)}
+                  title={hideVideo ? "Show video tiles" : "Hide video tiles (audio-only view)"}
+                  className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition-colors ${hideVideo ? "border-amber-500/60 bg-amber-500/20 text-amber-100 hover:bg-amber-500/30" : "border-ink-700 bg-ink-900 text-ink-100 hover:bg-ink-800"}`}
+                >
+                  {hideVideo ? "👁️‍🗨️ Show video" : "🙈 Hide video"}
+                </button>
                 <HandRaiseButton />
                 <ChatToggleButton />
                 <ReactionsBar />
