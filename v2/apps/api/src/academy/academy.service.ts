@@ -224,6 +224,34 @@ export class AcademyService {
     };
   }
 
+  /** Coach or owner resets a student's password. Coach can only reset students
+   *  they own; owner can reset anyone in the academy. Returns the new plain-text
+   *  password (single-use display) so the coach can hand it to the student in
+   *  person. Body: { newPassword?: string } — if omitted, generate <firstname>@123
+   *  like quickAddStudent does. */
+  async setStudentPassword(session: any, studentId: string, body: any): Promise<any> {
+    const g = this.ensureCoachOrOwner(session);
+    const target: any = await this.users().findOne({ _id: studentId as any, academyId: g.academyId, role: "student" });
+    if (!target) return { ok: false, error: "That student isn't in this academy." };
+    // Coach may only reset their own students; owner can reset any student.
+    if (g.role === "coach" && String(target.coachId || "") !== g.userId) {
+      return { ok: false, error: "That student isn't in your roster." };
+    }
+    let password = String(body?.newPassword || "").trim();
+    if (!password) {
+      const pwBase = ((String(target.name || target.username || "").split(/\s+/)[0] || target._id).toLowerCase().replace(/[^a-z0-9]/g, "")) || "student";
+      password = `${pwBase}@123`;
+    }
+    if (password.length < 4) return { ok: false, error: "Password must be at least 4 characters." };
+    const bcrypt = await import("bcryptjs");
+    const hash = await bcrypt.default.hash(password, 10);
+    await this.users().updateOne(
+      { _id: target._id },
+      { $set: { bpass: hash, passwordChangedAt: new Date(), passwordChangedBy: g.userId } },
+    );
+    return { ok: true, credentials: { username: target.username || target._id, password } };
+  }
+
   /** Owner OR coach: list students in this academy. Owner sees ALL; coach sees theirs.
    *  Enriches each row with:
    *    - puzzleRating (from userperfs.puzzle.gl.r)

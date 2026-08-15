@@ -85,6 +85,57 @@ function localDatetimeDefault() {
 }
 
 function fmtDate(d?: string|null) { return d ? new Date(d).toLocaleDateString(undefined, { day: "2-digit", month: "short" }) : "—"; }
+
+/** Reset-password action for a single student row. Prompts for an optional
+ *  custom password; empty submit → backend generates a memorable default
+ *  (<firstname>@123). Shows the new credentials in a copyable pill so the
+ *  coach can hand them to the student. */
+function ResetPasswordButton({ studentId, name }: { studentId: string; name: string }) {
+  const [busy, setBusy] = useState(false);
+  const [creds, setCreds] = useState<{ username: string; password: string } | null>(null);
+  const submit = async () => {
+    const raw = prompt(`Set a password for ${name}.\n\nLeave blank to auto-generate (${name.split(/\s+/)[0]?.toLowerCase().replace(/[^a-z0-9]/g, "") || "student"}@123):`, "");
+    if (raw === null) return; // cancelled
+    setBusy(true);
+    try {
+      const r = await fetch(`/v2api/api/academy/students/${encodeURIComponent(studentId)}/set-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ newPassword: raw.trim() }),
+      });
+      const j = await r.json();
+      if (j?.ok) setCreds(j.credentials);
+      else alert(j?.error || "Couldn't reset password.");
+    } catch (e: any) {
+      alert(e?.message || "Network error.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (creds) {
+    return (
+      <button
+        onClick={() => { navigator.clipboard?.writeText(`${creds.username} / ${creds.password}`).catch(() => {}); setCreds(null); }}
+        title="Click to copy + hide"
+        className="rounded-lg border border-emerald-500/50 bg-emerald-500/15 px-2 py-1 font-mono text-emerald-100 hover:bg-emerald-500/25"
+      >
+        {creds.username} / {creds.password}
+      </button>
+    );
+  }
+  return (
+    <button
+      onClick={submit}
+      disabled={busy}
+      className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-2 py-1 text-amber-100 hover:bg-amber-500/20 disabled:opacity-60"
+      title="Set or reset this student's password"
+    >
+      🔑 {busy ? "…" : "Password"}
+    </button>
+  );
+}
+
 function fmtAgo(d?: string|null) {
   if (!d) return "—";
   const s = Math.max(0, Math.round((Date.now() - new Date(d).getTime()) / 1000));
@@ -1683,6 +1734,7 @@ export default function AcademyDashboardPage() {
                           <div className="flex justify-end gap-2 text-xs">
                             <Link to={`/dashboard?as=${encodeURIComponent(s.username)}`} className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-2 py-1 text-brand-100 hover:bg-brand-500/20">📊 Perf</Link>
                             <Link to={`/history?as=${encodeURIComponent(s.username)}`} className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-2 py-1 text-brand-100 hover:bg-brand-500/20">📜 History</Link>
+                            <ResetPasswordButton studentId={s._id} name={s.name || s.username} />
                           </div>
                         </td>
                       </tr>

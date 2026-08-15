@@ -109,6 +109,14 @@ export class AcademyController {
     return this.svc.quickAddStudent(req.session, body);
   }
 
+  /** Coach/owner sets or resets a student's password. Body: {newPassword?:string}
+   *  If newPassword is omitted, backend generates <firstname>@123. Returns the
+   *  new plain-text credentials once (owner-request UX). */
+  @Post("students/:id/set-password")
+  setStudentPassword(@Req() req: any, @Param("id") id: string, @Body() body: any) {
+    return this.svc.setStudentPassword(req.session, id, body);
+  }
+
   // ── Fees + billing ──────────────────────────────────────────────
   @Get("fees/config")
   getFeesConfig(@Req() req: any) { return this.svc.getFeesConfig(req.session); }
