@@ -143,6 +143,32 @@ function ScrollProgress() {
   );
 }
 
+// Scroll-parallax hook — returns a translateY string that increases with
+// scroll position. Attach to element style for a subtle floating effect.
+function useParallax<T extends HTMLElement>(strength = 0.15): React.RefObject<T> {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let raf = 0;
+    const update = () => {
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const vh = window.innerHeight || 800;
+      const centerOffset = r.top + r.height / 2 - vh / 2;
+      const shift = -centerOffset * strength;
+      el.style.transform = `translateY(${shift.toFixed(1)}px)`;
+      raf = 0;
+    };
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(update); };
+    update();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => { window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onScroll); if (raf) cancelAnimationFrame(raf); };
+  }, [strength]);
+  return ref;
+}
+
 // Soft radial spotlight that follows the cursor inside a container.
 function CursorSpotlight() {
   const ref = useRef<HTMLDivElement>(null);
@@ -1221,11 +1247,21 @@ function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: bool
     <section className="cg-civ-band-b" style={{ padding: '5rem 1rem 3rem' }}>
       <style>{`
         /* Touch-scrollable auto-advance marquee — chessiverse swiper feel */
+        @keyframes cgCrFadeIn { from { opacity: 0; transform: translateY(16px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
         .cg-cr-viewport { overflow-x: auto; overflow-y: hidden; max-width: 1200px; margin: 2rem auto 0; mask-image: linear-gradient(to right, transparent 0, #000 4%, #000 96%, transparent 100%); -webkit-mask-image: linear-gradient(to right, transparent 0, #000 4%, #000 96%, transparent 100%); scrollbar-width: none; -webkit-overflow-scrolling: touch; touch-action: pan-x; cursor: grab; padding: .5rem 0; }
+        .cg-cr-card { animation: cgCrFadeIn 0.8s cubic-bezier(0.16,1,0.3,1) both; }
+        .cg-cr-card:nth-child(1) { animation-delay: 0.05s; }
+        .cg-cr-card:nth-child(2) { animation-delay: 0.15s; }
+        .cg-cr-card:nth-child(3) { animation-delay: 0.25s; }
+        .cg-cr-card:nth-child(4) { animation-delay: 0.35s; }
+        .cg-cr-card:nth-child(5) { animation-delay: 0.45s; }
         .cg-cr-viewport::-webkit-scrollbar { display: none; }
         .cg-cr-viewport:active { cursor: grabbing; }
         .cg-cr-track { display: flex; gap: 1rem; width: max-content; }
-        .cg-cr-card { flex: 0 0 180px; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 6px rgba(0,0,0,0.06); transition: all 0.2s ease-in-out; cursor: pointer; display: flex; flex-direction: column; text-decoration: none; color: inherit; user-select: none; }
+        .cg-cr-card { flex: 0 0 180px; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 6px rgba(0,0,0,0.06); transition: transform 0.35s cubic-bezier(0.16,1,0.3,1), box-shadow 0.35s cubic-bezier(0.16,1,0.3,1); display: flex; flex-direction: column; text-decoration: none; color: inherit; user-select: none; }
+        .cg-cr-card:hover { transform: translateY(-6px); box-shadow: 0 20px 40px rgba(20,162,184,0.22); }
+        .cg-cr-photo img { transition: transform 0.7s cubic-bezier(0.16,1,0.3,1); }
+        .cg-cr-card:hover .cg-cr-photo img { transform: scale(1.08); }
         @media (max-width: 559px) { .cg-cr-card { flex: 0 0 140px; } }
         .cg-cr-card:hover { transform: translateY(-4px); box-shadow: 0 10px 20px rgba(20,162,184,0.15); }
         .cg-cr-photo { position: relative; aspect-ratio: 1/1; overflow: hidden; background: #d9f5fc; }
@@ -1836,9 +1872,28 @@ export default function AcademyPublicPage() {
   });
 
   if (acadQ.isLoading || authQ.isLoading) {
+    // Animated splash — cycling chess pieces + shimmer text. Sits over the
+    // same cyan bg so the transition to the loaded page is seamless.
     return (
-      <div className="min-h-screen bg-[#faf6ef] grid place-items-center text-stone-400 text-sm tracking-widest uppercase">
-        Loading
+      <div className="min-h-screen grid place-items-center" style={{ background: '#c7edf5' }}>
+        <style>{`
+          @keyframes cgSplashSpin { 0% { transform: rotateY(0deg); } 100% { transform: rotateY(360deg); } }
+          @keyframes cgSplashFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+          @keyframes cgSplashShimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+          @keyframes cgSplashDots { 0%,20% { opacity: 0.2; } 50% { opacity: 1; } 100% { opacity: 0.2; } }
+          .cg-splash-piece { animation: cgSplashSpin 2.4s ease-in-out infinite, cgSplashFloat 3s ease-in-out infinite; display: inline-block; font-size: 5rem; line-height: 1; text-shadow: 0 8px 24px rgba(20,162,184,0.35); }
+          .cg-splash-text { background: linear-gradient(90deg, #14a2b8, #40bfd3 25%, #f9a80a 50%, #40bfd3 75%, #14a2b8); background-size: 200% auto; -webkit-background-clip: text; background-clip: text; color: transparent; animation: cgSplashShimmer 2s linear infinite; font-weight: 700; }
+          .cg-splash-dot { animation: cgSplashDots 1.4s ease-in-out infinite; }
+        `}</style>
+        <div className="flex flex-col items-center gap-6">
+          <div className="cg-splash-piece">♞</div>
+          <div className="flex items-baseline gap-1 text-xl md:text-2xl tracking-widest uppercase cg-splash-text">
+            <span>Guna Chess</span>
+            <span className="cg-splash-dot">·</span>
+            <span className="cg-splash-dot" style={{ animationDelay: '.2s' }}>·</span>
+            <span className="cg-splash-dot" style={{ animationDelay: '.4s' }}>·</span>
+          </div>
+        </div>
       </div>
     );
   }
@@ -2017,13 +2072,25 @@ export default function AcademyPublicPage() {
         .cg-civ-hv-card img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
         .cg-civ-hv-card-name { position: absolute; left: 8px; right: 8px; bottom: 8px; background: rgba(0,0,0,0.65); color: #fff; padding: 4px 8px; border-radius: 6px; font-size: 0.7rem; font-weight: 700; letter-spacing: 1px; text-align: center; }
         /* Yellow star badge floating top-right of the portrait */
+        /* Hero animations — staggered entry + parallax float */
+        @keyframes cgHeroEnter { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes cgHeroFloatSlow { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-6px) rotate(-0.4deg); } }
+        @keyframes cgBadgePop { 0% { opacity: 0; transform: scale(0.6) rotate(-8deg); } 60% { transform: scale(1.08) rotate(2deg); } 100% { opacity: 1; transform: scale(1) rotate(0deg); } }
+        @keyframes cgQuoteSlide { from { opacity: 0; transform: translate(12px,20px); } to { opacity: 1; transform: translate(0,0); } }
+        .cg-civ-hero-text > * { opacity: 0; animation: cgHeroEnter 0.8s cubic-bezier(0.16,1,0.3,1) forwards; }
+        .cg-civ-hero-text > *:nth-child(1) { animation-delay: 0.05s; }
+        .cg-civ-hero-text > *:nth-child(2) { animation-delay: 0.20s; }
+        .cg-civ-hero-text > *:nth-child(3) { animation-delay: 0.35s; }
+        .cg-civ-hero-text > *:nth-child(4) { animation-delay: 0.50s; }
+        .cg-civ-hero-visual { animation: cgHeroFloatSlow 8s ease-in-out infinite; }
+        .cg-civ-hv-card { animation: cgHeroEnter 1s cubic-bezier(0.16,1,0.3,1) 0.3s both; }
         /* FIDE rating badge — small "Highest" label + big 2312 number stack */
-        .cg-civ-hv-rating { position: absolute; top: 3%; right: 4%; background: linear-gradient(180deg,#ffdfa2,#f9a80a,#ffb82e); border-radius: 14px; padding: 6px 14px 8px; box-shadow: 0 8px 20px rgba(249,168,10,0.45); display: flex; flex-direction: column; align-items: center; z-index: 3; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.2); line-height: 1; }
+        .cg-civ-hv-rating { position: absolute; top: 3%; right: 4%; background: linear-gradient(180deg,#ffdfa2,#f9a80a,#ffb82e); border-radius: 14px; padding: 6px 14px 8px; box-shadow: 0 8px 20px rgba(249,168,10,0.45); display: flex; flex-direction: column; align-items: center; z-index: 3; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.2); line-height: 1; animation: cgBadgePop 0.9s cubic-bezier(0.34,1.56,0.64,1) 0.8s both; }
         .cg-civ-hv-rating .lbl { font-size: 0.6rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; opacity: 0.92; }
         .cg-civ-hv-rating .num { font-family: "Clash Display", -apple-system, sans-serif; font-size: 2rem; font-weight: 800; letter-spacing: 0.02em; margin-top: 2px; }
         .cg-civ-hv-rating .fide { font-size: 0.55rem; font-weight: 700; letter-spacing: 0.2em; margin-top: 1px; opacity: 0.9; }
         /* Quote card overlay bottom-right with diagonal stripes decoration */
-        .cg-civ-hv-quote { position: absolute; right: 4%; bottom: 6%; width: 62%; background: #fff; border-radius: 12px; padding: 14px 14px 14px 44px; box-shadow: 0 12px 32px rgba(20,162,184,0.22); z-index: 3; font-size: 0.78rem; line-height: 1.45; color: #232323; letter-spacing: 1px; }
+        .cg-civ-hv-quote { position: absolute; right: 4%; bottom: 6%; width: 62%; background: #fff; border-radius: 12px; padding: 14px 14px 14px 44px; box-shadow: 0 12px 32px rgba(20,162,184,0.22); z-index: 3; font-size: 0.78rem; line-height: 1.45; color: #232323; letter-spacing: 1px; animation: cgQuoteSlide 0.9s cubic-bezier(0.16,1,0.3,1) 1.1s both; }
         .cg-civ-hv-quote::before { content: '“'; position: absolute; top: -2px; left: 10px; font-size: 3.4rem; line-height: 1; color: #14a2b8; font-family: Georgia, serif; }
         .cg-civ-hv-quote .attrib { display: block; margin-top: 8px; font-size: 0.7rem; color: #5a5a5a; font-weight: 700; letter-spacing: 1px; }
         /* Decorative diagonal stripes on quote card corner */
