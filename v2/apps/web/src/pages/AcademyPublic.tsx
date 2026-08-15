@@ -1834,6 +1834,18 @@ export default function AcademyPublicPage() {
     return () => { document.title = prev; };
   }, [displayName]);
 
+  // Coach maintenance: any live-class rooms this coach forgot to end. Hooks
+  // MUST live above the early returns (React #310 rule); isOwner computed
+  // inline so acadQ.data isn't required yet.
+  const preIsOwner = !!authQ.data?.loggedIn && !!acadQ.data
+    && authQ.data.academyId === acadQ.data.academy._id;
+  const myOpenQ = useQuery({
+    queryKey: ["my-open-classes"],
+    queryFn: () => get<{ open: Array<{ _id: string; title: string; joinPath: string; startedAt: string }> }>("/api/class/my-open"),
+    enabled: preIsOwner,
+    refetchInterval: preIsOwner ? 30_000 : false,
+  });
+
   if (acadQ.isLoading || authQ.isLoading) {
     return (
       <div className="min-h-screen bg-[#faf6ef] grid place-items-center text-stone-400 text-sm tracking-widest uppercase">
@@ -1855,16 +1867,6 @@ export default function AcademyPublicPage() {
 
   const { academy, profile: p, coaches, upcomingClasses } = acadQ.data;
   const isOwner = !!authQ.data?.loggedIn && authQ.data.academyId === academy._id;
-
-  // Coach maintenance: any live-class rooms this coach forgot to end.
-  // Poll every 30s while the coach is signed in; renders a small banner near
-  // the top with a one-click End button per stale room.
-  const myOpenQ = useQuery({
-    queryKey: ["my-open-classes"],
-    queryFn: () => get<{ open: Array<{ _id: string; title: string; joinPath: string; startedAt: string }> }>("/api/class/my-open"),
-    enabled: isOwner,
-    refetchInterval: isOwner ? 30_000 : false,
-  });
   const myOpen = myOpenQ.data?.open ?? [];
   const endClass = async (id: string) => {
     try {
