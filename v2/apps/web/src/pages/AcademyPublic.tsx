@@ -2463,7 +2463,7 @@ export default function AcademyPublicPage() {
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M5 3l14 9-14 9V3z"/></svg>
               <span>Join the Best Chess Coach</span>
             </Link>
-            <div className="cg-civ-hero-cta-sub">Start playing in 30 seconds!</div>
+            <div className="cg-civ-hero-cta-sub">✨ Start Learning! 🎯</div>
           </div>
         </div>
         <div className="cg-civ-hero-visual">
