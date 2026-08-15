@@ -635,7 +635,7 @@ function TestimonialCarousel({ items }: { items: Testimonial[] }) {
 
 // ═════════════════════ INTERACTIVE MODULE 3 — Weekly Schedule Tabs ═════════════════════
 // Bucket upcomingClasses by weekday. Weekday pill selector filters the list.
-function WeeklySchedule({ items, joinHref, joinExternal }: { items: ClassRow[]; joinHref: string; joinExternal: boolean }) {
+function WeeklySchedule({ items, loginHref }: { items: ClassRow[]; joinHref?: string; joinExternal?: boolean; loginHref: string }) {
   const [active, setActive] = useState<number | null>(null);
   const buckets = useMemo(() => {
     const b: Record<number, ClassRow[]> = {};
@@ -704,13 +704,12 @@ function WeeklySchedule({ items, joinHref, joinExternal }: { items: ClassRow[]; 
                     {d.toLocaleString(undefined, { hour: '2-digit', minute: '2-digit' })} &middot; {cl.durationMin}min &middot; {cl.coach}
                   </div>
                 </div>
-                <a
-                  href={joinHref}
-                  {...(joinExternal ? { target: "_blank", rel: "noreferrer" } : {})}
+                <Link
+                  to={loginHref}
                   className="hidden sm:inline-flex items-center gap-1 px-4 py-2 rounded-full bg-stone-100 hover:bg-cyan-500 hover:text-white text-xs font-bold text-stone-700 transition-all"
                 >
                   RSVP &rarr;
-                </a>
+                </Link>
               </div>
             );
           })}
@@ -923,7 +922,7 @@ function CountdownCell({ n, label }: { n: number; label: string }) {
   );
 }
 
-function ClassCountdown({ items, joinHref, joinExternal }: { items: ClassRow[]; joinHref: string; joinExternal: boolean }) {
+function ClassCountdown({ items, loginHref }: { items: ClassRow[]; joinHref?: string; joinExternal?: boolean; loginHref: string }) {
   const next = useMemo(() => {
     const upcoming = items.filter(c => new Date(c.startAt).getTime() > Date.now()).sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
     return upcoming[0] || null;
@@ -951,14 +950,13 @@ function ClassCountdown({ items, joinHref, joinExternal }: { items: ClassRow[]; 
                   {new Date(next.startAt).toLocaleString(undefined, { weekday: 'long', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · {next.durationMin} min · {next.coach}
                 </div>
               </div>
-              <a
-                href={joinHref}
-                {...(joinExternal ? { target: "_blank", rel: "noreferrer" } : {})}
+              <Link
+                to={loginHref}
                 className="cg-breath inline-flex items-center gap-2 px-6 py-3 rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold shadow-lg hover:scale-105 transition-transform whitespace-nowrap"
               >
                 Reserve seat
                 <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
-              </a>
+              </Link>
             </div>
             <div className="mt-6 flex gap-3">
               <CountdownCell n={cd.days} label="Days" />
@@ -1249,14 +1247,14 @@ function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: bool
         <div ref={crRef} className="cg-cr-viewport">
           <div className="cg-cr-track">
             {[...CREATORS, ...CREATORS].map((c, i) => (
-              <a key={`${c.name}-${i}`} href={ctaHref} {...(ctaExt ? { target: "_blank", rel: "noreferrer" } : {})} className="cg-cr-card">
+              <div key={`${c.name}-${i}`} className="cg-cr-card">
                 <div className="cg-cr-photo">
                   <img src={c.img} alt={c.name} loading="lazy" />
                   <div className="cg-cr-diamond" style={{ background: c.badge }} />
                 </div>
                 <div className="cg-cr-name">{c.name}</div>
                 <div className="cg-cr-sub">{c.sub}</div>
-              </a>
+              </div>
             ))}
           </div>
         </div>
@@ -1746,7 +1744,7 @@ function ComparisonTable() {
 }
 
 // ═════════════════════ CHESSIVERSE MODULE H — 3-column Journey CTA (1:1) ═════════════════════
-function JourneyCTA({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: boolean; joinLabel: string }) {
+function JourneyCTA({ loginHref }: { ctaHref?: string; ctaExt?: boolean; joinLabel?: string; loginHref: string }) {
   const steps = [
     { n: "1", title: "Free assessment class",  desc: "Book a no-obligation trial. We'll gauge your level and match you with the right coach." },
     { n: "2", title: "Personalised plan",       desc: "Your coach designs a weekly programme — openings, tactics, endgames, tournament prep." },
@@ -1771,14 +1769,10 @@ function JourneyCTA({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: b
           ))}
         </div>
         <div style={{ textAlign: 'center' }}>
-          <a
-            href={ctaHref}
-            {...(ctaExt ? { target: "_blank", rel: "noreferrer" } : {})}
-            className="cg-civ-btn cg-civ-btn--accent cg-civ-btn--xl"
-          >
+          <Link to={loginHref} className="cg-civ-btn cg-civ-btn--accent cg-civ-btn--xl">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M5 3l14 9-14 9V3z"/></svg>
-            <span>{joinLabel} — it&apos;s free!</span>
-          </a>
+            <span>Join the Best Chess Coach</span>
+          </Link>
         </div>
       </div>
     </section>
@@ -1879,10 +1873,15 @@ export default function AcademyPublicPage() {
   const primaryContactHref = p.socials.whatsapp ? socialHref("whatsapp", p.socials.whatsapp)
     : p.socials.website ? socialHref("website", p.socials.website)
     : null;
+  // joinHref is now RESERVED for the "Chat with us" + "Get in touch" surfaces
+  // only. Every other CTA (Sign Up, hero "Join the Best Chess Coach", Reserve
+  // seat, RSVP, Journey CTA) routes to the tenant login page so a fresh visitor
+  // sees a real onboarding flow instead of a WhatsApp popup.
   const joinHref = primaryContactHref || "#coaches";
   const joinExternal = !!primaryContactHref;
   const joinLabel = primaryContactHref ? "Get in touch" : "Meet the coaches";
   const hasWhatsApp = !!p.socials.whatsapp;
+  const loginHref = `/a/${encodeURIComponent(academy.slug)}/login`;
 
   const yearsTeaching = coaches.reduce((mx, c) => Math.max(mx, c.coachProfile.yearsTeaching || 0), 0)
     || (p.foundedYear ? new Date().getFullYear() - p.foundedYear : 0);
@@ -2112,16 +2111,12 @@ export default function AcademyPublicPage() {
                 <span>Edit</span>
               </Link>
             )}
-            <Link to={`/a/${encodeURIComponent(academy.slug)}/login`} className="cg-civ-btn cg-civ-btn--outlined cg-civ-btn--sm">
+            <Link to={loginHref} className="cg-civ-btn cg-civ-btn--outlined cg-civ-btn--sm">
               <span>Log In</span>
             </Link>
-            <a
-              href={joinHref}
-              {...(joinExternal ? { target: "_blank", rel: "noreferrer" } : {})}
-              className="cg-civ-btn cg-civ-btn--accent cg-civ-btn--sm"
-            >
+            <Link to={loginHref} className="cg-civ-btn cg-civ-btn--accent cg-civ-btn--sm">
               <span>Sign Up</span>
-            </a>
+            </Link>
           </div>
         </div>
       </header>
@@ -2176,14 +2171,10 @@ export default function AcademyPublicPage() {
             </span>
           </div>
           <div className="cg-civ-hero-buttons">
-            <a
-              href={joinHref}
-              {...(joinExternal ? { target: "_blank", rel: "noreferrer" } : {})}
-              className="cg-civ-btn cg-civ-btn--accent cg-civ-btn--xl"
-            >
+            <Link to={loginHref} className="cg-civ-btn cg-civ-btn--accent cg-civ-btn--xl">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M5 3l14 9-14 9V3z"/></svg>
-              <span>Play now for Free!</span>
-            </a>
+              <span>Join the Best Chess Coach</span>
+            </Link>
             <div className="cg-civ-hero-cta-sub">Start playing in 30 seconds!</div>
           </div>
         </div>
@@ -2266,7 +2257,7 @@ export default function AcademyPublicPage() {
       </section>
 
       {/* ═══════════ JOURNEY CTA (chessiverse 3-step onboarding) ═══════════ */}
-      <JourneyCTA ctaHref={joinHref} ctaExt={joinExternal} joinLabel={joinLabel} />
+      <JourneyCTA loginHref={loginHref} />
 
       {/* ═══════════ CHESSIVERSE FOOTER ═══════════ */}
       <footer className="cg-civ-footer">
