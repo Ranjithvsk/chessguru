@@ -1211,16 +1211,11 @@ const BOT_ROSTER = [
 // 1:1 chessiverse "Featured by Leading Chess Creators" — 10 compact person cards
 // in a 2×5 grid with colored diamond badge + name label + role subtitle.
 const CREATORS = [
-  { img: "/academy/arch-01-attacker.webp",   name: "IM Kavya Rao",     sub: "IM · Chess Coach",       badge: "#22c55e" },
-  { img: "/academy/arch-02-strategist.webp", name: "GM Marcus Ström",  sub: "GM · YouTube Creator",   badge: "#ef4444" },
-  { img: "/academy/arch-03-tactician.webp",  name: "WGM Amara Okafor", sub: "WGM · Streamer",         badge: "#eab308" },
-  { img: "/academy/arch-04-endgame.webp",    name: "GM Henrik Larsen", sub: "GM · Endgame Coach",     badge: "#3b82f6" },
-  { img: "/academy/arch-05-universal.webp",  name: "WIM Sofia Mendes", sub: "WIM · Chess Author",     badge: "#a855f7" },
-  { img: "/academy/arch-06-rock.webp",       name: "IM Rahul Nair",    sub: "IM · Blitz Specialist",  badge: "#14a2b8" },
-  { img: "/academy/arch-07-gambit.webp",     name: "FM Elena Volkova", sub: "FM · Gambit Expert",     badge: "#ec4899" },
-  { img: "/academy/arch-08-positional.webp", name: "IM Kenji Tanaka",  sub: "IM · Positional Coach",  badge: "#64748b" },
-  { img: "/academy/arch-09-improver.webp",   name: "CM Diego Ríos",    sub: "CM · Rising Star",       badge: "#10b981" },
-  { img: "/academy/arch-10-prodigy.webp",    name: "Zara Ahmed",       sub: "U-10 · Prodigy",         badge: "#f97316" },
+  { img: "/academy/guna-01.webp", name: "Trophy Moment",               sub: "with GM Viswanathan Anand",       badge: "#f97316" },
+  { img: "/academy/guna-02.webp", name: "State Meet",                  sub: "with GM Praggnanandhaa",          badge: "#14a2b8" },
+  { img: "/academy/guna-03.webp", name: "Tamil Nadu State Association", sub: "State tournament — TN Chess Assn.", badge: "#eab308" },
+  { img: "/academy/guna-04.webp", name: "WestBridge Academy",          sub: "with GM Praggnanandhaa",          badge: "#22c55e" },
+  { img: "/academy/guna-05.webp", name: "Chess Family",                sub: "with the Praggnanandhaa family",  badge: "#ec4899" },
 ];
 function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: boolean; joinLabel: string }) {
   const crRef = useAutoScroll<HTMLDivElement>(28);
@@ -1245,11 +1240,11 @@ function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: bool
       <div className="cg-civ-container">
         <Reveal className="text-center">
           <h2 className="cg-civ-section-title">
-            <span style={{ color: '#f9a80a' }}>✦ </span>
-            <span>Featured by </span>
-            <span className="text-accent">Leading Chess Creators</span>
+            <span style={{ color: '#f9a80a' }}>🏆 </span>
+            <span>Achievements by </span>
+            <span className="text-accent">Gunasekaran</span>
           </h2>
-          <p className="cg-civ-section-sub">Challenge your favourite right away. Each coach&apos;s teaching style is modelled on thousands of their own games. <a href="#" style={{ color: '#14a2b8', fontWeight: 700 }}>View all coaches →</a></p>
+          <p className="cg-civ-section-sub">A chess life documented in moments — meeting grandmasters, tournament wins, and the community that made Guna Chess possible.</p>
         </Reveal>
         <div ref={crRef} className="cg-cr-viewport">
           <div className="cg-cr-track">
