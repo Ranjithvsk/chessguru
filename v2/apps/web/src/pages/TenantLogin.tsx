@@ -181,7 +181,7 @@ export default function TenantLoginPage() {
       </div>
 
       <p className="mt-6 text-center text-[11px] text-ink-500">
-        Powered by <a href="https://harinitharanjith.com" target="_blank" rel="noreferrer" className="underline hover:text-ink-300">ChessGuru</a>
+        Powered by <a href="https://harinitharanjith.com/signup-academy" target="_blank" rel="noreferrer" className="underline hover:text-ink-300">ChessGuru</a>
       </p>
     </div>
   );

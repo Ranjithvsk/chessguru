@@ -88,7 +88,7 @@ export default function App() {
        *  Clicking ChessGuru → /academy (the academy Resource Planner: batches,
        *  students, coaches, directives, homework). */}
       <footer className="mt-8 border-t border-ink-800/60 bg-ink-900/50 py-4 text-center text-xs text-ink-400">
-        Powered by <a href="https://harinitharanjith.com" target="_blank" rel="noreferrer" className="font-semibold text-brand-300 hover:text-brand-200 hover:underline">ChessGuru</a>
+        Powered by <a href="https://harinitharanjith.com/signup-academy" target="_blank" rel="noreferrer" className="font-semibold text-brand-300 hover:text-brand-200 hover:underline">ChessGuru</a>
       </footer>
 
       {/* Global "📷 Scan chess position" FAB. Fixed bottom-left so it's
