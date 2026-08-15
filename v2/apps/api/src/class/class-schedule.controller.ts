@@ -242,11 +242,12 @@ export class ClassScheduleController {
     const now = new Date();
     const me: string | null = req?.session?.userId ?? null;
     const myAcademy: string | null = req?.session?.academyId ?? null;
-    // Academy scoping: signed-in academy members see their academy's classes
-    // PLUS the legacy public rows (no academyId). Non-tenant users see only
-    // the public rows — mirrors today's behaviour for them.
+    // Academy scoping — STRICT: tenant members see ONLY their academy's classes.
+    // Previously the OR fallback included orphan-academyId rows too, which
+    // leaked cross-tenant classes (e.g. harinitharanjith's class showing up on
+    // gunachess.com). Non-tenant users (platform-only) still see orphan rows.
     const filter: any = myAcademy
-      ? { $or: [{ academyId: myAcademy }, { academyId: { $in: [null, undefined] } }] }
+      ? { academyId: myAcademy }
       : { academyId: { $in: [null, undefined] } };
     const rows = await this.col().find(filter, { sort: { startAt: 1 } }).limit(200).toArray();
     const live: (ScheduleDoc & { mine: boolean; attendedCount?: number })[] = [];
