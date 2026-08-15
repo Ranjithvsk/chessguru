@@ -1235,11 +1235,11 @@ const BOT_ROSTER = [
 // 1:1 chessiverse "Featured by Leading Chess Creators" — 10 compact person cards
 // in a 2×5 grid with colored diamond badge + name label + role subtitle.
 const CREATORS = [
-  { img: "/academy/guna-01.webp", name: "Chief Minister Trophy 2023", sub: "with GM Viswanathan Anand",          badge: "#f97316" },
-  { img: "/academy/guna-02.webp", name: "State Meet",                  sub: "with GM Praggnanandhaa",             badge: "#14a2b8" },
-  { img: "/academy/guna-03.webp", name: "Tamil Nadu State Open · 2003 & 2004", sub: "State Champion — TN Chess Assn.", badge: "#eab308" },
-  { img: "/academy/guna-04.webp", name: "WestBridge Academy",          sub: "with GM Praggnanandhaa",             badge: "#22c55e" },
-  { img: "/academy/guna-05.webp", name: "Chess Family",                sub: "with the Praggnanandhaa family",     badge: "#ec4899" },
+  { img: "/academy/guna-01.webp", name: "Tamil Nadu State Open · 2003 & 2004", sub: "with GM Viswanathan Anand",       badge: "#f97316" },
+  { img: "/academy/guna-02.webp", name: "State Meet",                          sub: "with GM Praggnanandhaa",          badge: "#14a2b8" },
+  { img: "/academy/guna-03.webp", name: "Chief Minister Trophy 2023",          sub: "with WGM R Vaishali",             badge: "#eab308" },
+  { img: "/academy/guna-04.webp", name: "WestBridge Academy",                  sub: "with GM Praggnanandhaa",          badge: "#22c55e" },
+  { img: "/academy/guna-05.webp", name: "Chess Family",                        sub: "with the Praggnanandhaa family",  badge: "#ec4899" },
 ];
 function BotGrid({ ctaHref, ctaExt, joinLabel }: { ctaHref: string; ctaExt: boolean; joinLabel: string }) {
   const crRef = useAutoScroll<HTMLDivElement>(28);
