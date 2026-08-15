@@ -236,6 +236,8 @@ function ScheduleBatchModal({ batch, onClose }: { batch: any; onClose: () => voi
   const [durationMin, setDurationMin] = useState(60);
   const [recurrence, setRecurrence] = useState<"none" | "weekly">("none");
   const [recurrenceCount, setRecurrenceCount] = useState(4);
+  const [weekdays, setWeekdays] = useState<number[]>([]);
+  const toggleDay = (d: number) => setWeekdays((prev) => prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort());
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const submit = async () => {
@@ -244,7 +246,7 @@ function ScheduleBatchModal({ batch, onClose }: { batch: any; onClose: () => voi
       const r = await fetch(`/v2api/api/academy/batches/${encodeURIComponent(batch._id)}/schedule`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title.trim(), startAt: new Date(startAt).toISOString(), durationMin, recurrence, recurrenceCount, roomKind: "meet" }),
+        body: JSON.stringify({ title: title.trim(), startAt: new Date(startAt).toISOString(), durationMin, recurrence, recurrenceCount, recurrenceWeekdays: weekdays, roomKind: "meet" }),
       });
       const j = await r.json();
       if (j?.ok) { setMsg(`Scheduled ${j.count} class${j.count > 1 ? "es" : ""} for ${batch.name}.`); setTimeout(onClose, 1400); }
@@ -272,10 +274,22 @@ function ScheduleBatchModal({ batch, onClose }: { batch: any; onClose: () => voi
           <label className="flex items-center gap-1.5 text-sm text-white"><input type="radio" checked={recurrence === "weekly"} onChange={() => setRecurrence("weekly")} /> Weekly</label>
         </div>
         {recurrence === "weekly" && (
-          <div className="mb-3">
-            <label className="mb-1 block text-xs uppercase text-ink-400">Weeks (max 52)</label>
-            <input type="number" min={1} max={52} value={recurrenceCount} onChange={(e) => setRecurrenceCount(Number(e.target.value))} className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
-          </div>
+          <>
+            <label className="mb-1 block text-xs uppercase text-ink-400">Days of week (blank = same weekday as Start)</label>
+            <div className="mb-3 flex flex-wrap gap-1.5">
+              {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((label, i) => (
+                <button
+                  key={i} onClick={() => toggleDay(i)}
+                  className={`rounded-full px-2.5 py-1 text-xs font-semibold ${weekdays.includes(i) ? "bg-brand-600 text-white" : "border border-ink-700 bg-ink-800 text-ink-300 hover:bg-ink-700"}`}
+                >{label}</button>
+              ))}
+            </div>
+            <div className="mb-3">
+              <label className="mb-1 block text-xs uppercase text-ink-400">How many classes total (max 52)</label>
+              <input type="number" min={1} max={52} value={recurrenceCount} onChange={(e) => setRecurrenceCount(Number(e.target.value))} className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
+              <p className="mt-1 text-[11px] text-ink-500">Pick weekdays above for Mon/Wed/Fri-style schedules — leave blank for one class per week on the Start day.</p>
+            </div>
+          </>
         )}
         {msg && <p className={`mb-2 text-xs ${msg.startsWith("Scheduled") ? "text-emerald-300" : "text-rose-300"}`}>{msg}</p>}
         <div className="flex justify-end gap-2">
