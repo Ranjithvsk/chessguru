@@ -60,6 +60,9 @@ import ExamCreatePage from "./pages/ExamCreate";
 import ExamEditPage from "./pages/ExamEdit";
 import ExamTakePage from "./pages/ExamTake";
 import ExamResultsPage from "./pages/ExamResults";
+import MyGamesListPage from "./pages/MyGamesList";
+import MyGamesImportPage from "./pages/MyGamesImport";
+import MyGameViewPage from "./pages/MyGameView";
 
 // Dispatch /login → tenant-branded login on custom domains (gunachess.com),
 // canonical ChessGuru login on harinitharanjith.com / localhost / bare IP.
@@ -163,6 +166,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="exams/:id/edit" element={<ExamEditPage />} />
             <Route path="exams/:id/take" element={<ExamTakePage />} />
             <Route path="exams/:id/results" element={<ExamResultsPage />} />
+            <Route path="my-games" element={<MyGamesListPage />} />
+            <Route path="my-games/import" element={<MyGamesImportPage />} />
+            <Route path="my-games/:id" element={<MyGameViewPage />} />
             <Route path="login" element={<SmartLoginRoute />} />
             <Route path="reset-password" element={<ResetPasswordPage />} />
             <Route path="signup-academy" element={<SignupAcademyPage />} />
