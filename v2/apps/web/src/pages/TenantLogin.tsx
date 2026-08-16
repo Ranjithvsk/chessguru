@@ -20,8 +20,19 @@ type Brand = {
   logoDataUrl: string | null;
 };
 
+// Infer tenant slug from the current custom domain (e.g. gunachess.com →
+// "gunachess"). Used when this page is mounted at /login on a tenant host
+// (no :slug in the URL) so the branded login still works.
+function slugFromHost(): string {
+  if (typeof window === "undefined") return "";
+  const h = window.location.hostname.toLowerCase();
+  if (/^(chessguru\.com|harinitharanjith\.com|localhost|127\.0\.0\.1|\d+\.\d+\.\d+\.\d+)$/.test(h)) return "";
+  return h.split(".")[0] || "";
+}
+
 export default function TenantLoginPage() {
-  const { slug = "" } = useParams<{ slug: string }>();
+  const { slug: paramSlug = "" } = useParams<{ slug: string }>();
+  const slug = paramSlug || slugFromHost();
   const [params] = useSearchParams();
   const [brand, setBrand] = useState<Brand | null>(null);
   const [notFound, setNotFound] = useState(false);

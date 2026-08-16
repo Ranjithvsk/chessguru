@@ -89,7 +89,7 @@ export default function AcceptInvitePage() {
           <b className="text-white">{inv.invitedByName || "The academy owner"}</b> invited{" "}
           <b className="text-white">{inv.email}</b> to join as a{" "}
           <span className="rounded-full bg-brand-500/20 px-2 py-0.5 text-xs font-semibold text-brand-100">{inv.role}</span>.
-          Pick a username + password below to create your ChessGuru account.
+          Pick a username + password below to create your account.
         </p>
 
         {err && <div className="mt-4 rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200">{err}</div>}

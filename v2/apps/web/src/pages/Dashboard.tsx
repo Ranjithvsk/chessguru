@@ -575,8 +575,8 @@ function PushRow() {
         <div className="text-white">Browser push notifications</div>
         <div className="text-xs text-ink-400">
           {blocked ? "Blocked in your browser settings — allow notifications for this site to re-enable."
-           : st.subscribed ? "On for this browser. You'll be notified when a class goes live, plus streak reminders — even when ChessGuru is closed."
-           : "Off. Turn on to get notified when your coach starts a live class (and streak reminders) even when ChessGuru is closed."}
+           : st.subscribed ? "On for this browser. You'll be notified when a class goes live, plus streak reminders — even when this app is closed."
+           : "Off. Turn on to get notified when your coach starts a live class (and streak reminders) even when this app is closed."}
           {testMsg && <span className={`ml-2 ${testMsg.startsWith("✓") ? "text-emerald-400" : "text-rose-400"}`}>{testMsg}</span>}
         </div>
       </div>

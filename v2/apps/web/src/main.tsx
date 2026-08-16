@@ -46,6 +46,17 @@ import AdminDomainsPage from "./pages/AdminDomains";
 import AcademyBrandingPage from "./pages/AcademyBranding";
 import TenantHomePage from "./pages/TenantHome";
 import TenantLoginPage from "./pages/TenantLogin";
+
+// Dispatch /login → tenant-branded login on custom domains (gunachess.com),
+// canonical ChessGuru login on harinitharanjith.com / localhost / bare IP.
+// Every "Sign in" link + auth-gate redirect (<Navigate to="/login">) flows
+// through here — one place, everyone stays on-brand.
+function SmartLoginRoute() {
+  if (typeof window === "undefined") return <LoginPage />;
+  const h = window.location.hostname.toLowerCase();
+  const isCanonical = /(^|\.)harinitharanjith\.com$/.test(h) || h === "localhost" || h === "127.0.0.1" || /^\d+\.\d+\.\d+\.\d+$/.test(h);
+  return isCanonical ? <LoginPage /> : <TenantLoginPage />;
+}
 import DailyPage from "./pages/Daily";
 import PlayPage from "./pages/Play";
 import FeedbackUITestPage from "./pages/FeedbackUITest";
@@ -125,7 +136,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="a/:slug" element={<TenantHomePage />} />
             <Route path="a/:slug/login" element={<TenantLoginPage />} />
             <Route path="daily" element={<DailyPage />} />
-            <Route path="login" element={<LoginPage />} />
+            <Route path="login" element={<SmartLoginRoute />} />
             <Route path="reset-password" element={<ResetPasswordPage />} />
             <Route path="signup-academy" element={<SignupAcademyPage />} />
             <Route path="academy" element={<AcademyDashboardPage />} />
