@@ -29,6 +29,7 @@ import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { randomBytes } from "crypto";
 import { Chess } from "chess.js";
+import { BooksService } from "../books/books.service";
 
 const MAX_TITLE = 140;
 const MAX_COMMENT = 4000;
@@ -36,7 +37,7 @@ const MAX_MOVES = 2000; // largest reasonable study chapter (deep opening prep)
 const MAX_CHAPTERS = 60;
 
 // Intent picker on the create-study screen — decides how the editor opens.
-const INTENTS = new Set(["game", "puzzle", "concept", "opening", "endgame", "notebook"]);
+const INTENTS = new Set(["game", "puzzle", "concept", "opening", "endgame", "notebook", "book"]);
 const VISIBILITIES = new Set(["private", "shared", "academy", "public"]);
 
 function shortId(bytes = 8): string {
@@ -63,15 +64,22 @@ export interface MoveNode {
   isMainLine: boolean;     // true when this node is on the main line
 }
 
+export interface SourceBook {
+  bookId: string;
+  chapterNumber?: number;
+  topicTags?: string[];  // snapshot of chapter.tags at link time, freezes intent even if book edits later
+}
+
 export interface StudyDoc {
   _id: string;
   ownerId: string;
   academyId: string | null;
   title: string;
-  intent: "game" | "puzzle" | "concept" | "opening" | "endgame" | "notebook";
+  intent: "game" | "puzzle" | "concept" | "opening" | "endgame" | "notebook" | "book";
   visibility: "private" | "shared" | "academy" | "public";
   sharedWithUserIds: string[];
   chapterCount: number;
+  sourceBook?: SourceBook;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -90,7 +98,10 @@ export interface ChapterDoc {
 
 @Injectable()
 export class StudiesService {
-  constructor(@InjectConnection() private readonly conn: Connection) {}
+  constructor(
+    @InjectConnection() private readonly conn: Connection,
+    private readonly books: BooksService,
+  ) {}
 
   private studies() { return this.conn.db!.collection<StudyDoc>("studies"); }
   private chapters() { return this.conn.db!.collection<ChapterDoc>("studyChapters"); }
@@ -163,6 +174,8 @@ export class StudiesService {
       headers = parsed.headers;
     }
 
+    const sourceBook = this.sanitizeSourceBook(b.sourceBook);
+
     await this.studies().insertOne({
       _id: studyId,
       ownerId: userId,
@@ -172,9 +185,13 @@ export class StudiesService {
       visibility: visibility as any,
       sharedWithUserIds: [],
       chapterCount: 1,
+      sourceBook,
       createdAt: now,
       updatedAt: now,
     });
+    if (sourceBook) {
+      try { await this.books.linkStudy(userId, sourceBook.bookId, studyId); } catch { /* non-fatal */ }
+    }
     await this.chapters().insertOne({
       _id: chapterId,
       studyId,
@@ -204,13 +221,39 @@ export class StudiesService {
     const s = await this.loadForWrite(studyId, userId);
     const b: any = body ?? {};
     const set: any = { updatedAt: new Date() };
+    const unset: any = {};
     if (typeof b.title === "string") set.title = b.title.trim().slice(0, MAX_TITLE) || s.title;
     if (VISIBILITIES.has(String(b.visibility))) set.visibility = b.visibility;
     if (Array.isArray(b.sharedWithUserIds)) {
       set.sharedWithUserIds = b.sharedWithUserIds.filter((x: any) => typeof x === "string").slice(0, 40);
     }
-    await this.studies().updateOne({ _id: s._id }, { $set: set });
+    // sourceBook: null → unlink; object → sanitize + link (and cross-write progress).
+    if ("sourceBook" in b) {
+      if (b.sourceBook === null) {
+        unset.sourceBook = "";
+      } else {
+        const sb = this.sanitizeSourceBook(b.sourceBook);
+        if (sb) {
+          set.sourceBook = sb;
+          try { await this.books.linkStudy(userId, sb.bookId, s._id); } catch { /* non-fatal */ }
+        }
+      }
+    }
+    const update: any = { $set: set };
+    if (Object.keys(unset).length) update.$unset = unset;
+    await this.studies().updateOne({ _id: s._id }, update);
     return { ok: true };
+  }
+
+  private sanitizeSourceBook(raw: any): SourceBook | undefined {
+    if (!raw || typeof raw !== "object") return undefined;
+    const bookId = String(raw.bookId || "").trim().slice(0, 60);
+    if (!bookId) return undefined;
+    const chapterNumber = Number.isFinite(Number(raw.chapterNumber)) ? Number(raw.chapterNumber) : undefined;
+    const topicTags = Array.isArray(raw.topicTags)
+      ? raw.topicTags.map((t: any) => String(t).trim().slice(0, 40)).filter(Boolean).slice(0, 20)
+      : undefined;
+    return { bookId, chapterNumber, topicTags };
   }
 
   async remove(session: any, studyId: string) {

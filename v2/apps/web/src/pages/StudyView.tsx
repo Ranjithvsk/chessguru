@@ -62,6 +62,17 @@ export default function StudyViewPage() {
     <div className="mx-auto max-w-3xl px-3 py-6">
       <Link to="/studies" className="mb-3 inline-block text-xs text-ink-400 hover:text-ink-200">← My studies</Link>
 
+      {/* Book link badge (if this study is tied to a book chapter) */}
+      {study.sourceBook && (
+        <Link to={`/books/${encodeURIComponent(study.sourceBook.bookId)}`}
+          className="mb-3 inline-flex items-center gap-2 rounded-full border border-brand-500/40 bg-brand-500/10 px-3 py-1 text-xs text-brand-100 hover:bg-brand-500/20">
+          📚 From book{study.sourceBook.chapterNumber ? ` — Ch ${study.sourceBook.chapterNumber}` : ""}
+          {study.sourceBook.topicTags && study.sourceBook.topicTags.length > 0 && (
+            <span className="text-ink-400">· {study.sourceBook.topicTags.slice(0, 3).join(", ")}</span>
+          )}
+        </Link>
+      )}
+
       {/* Title (click to rename) */}
       <div className="mb-4">
         {titleEdit === null ? (

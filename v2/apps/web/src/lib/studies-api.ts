@@ -3,8 +3,14 @@
 
 const BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
 
-export type Intent = "game" | "puzzle" | "concept" | "opening" | "endgame" | "notebook";
+export type Intent = "game" | "puzzle" | "concept" | "opening" | "endgame" | "notebook" | "book";
 export type Visibility = "private" | "shared" | "academy" | "public";
+
+export interface SourceBook {
+  bookId: string;
+  chapterNumber?: number;
+  topicTags?: string[];
+}
 
 export interface Shape {
   brush: "green" | "red" | "blue" | "yellow";
@@ -35,6 +41,7 @@ export interface StudySummary {
   visibility: Visibility;
   sharedWithUserIds: string[];
   chapterCount: number;
+  sourceBook?: SourceBook;
   createdAt: string;
   updatedAt: string;
 }
@@ -75,12 +82,13 @@ export const studiesApi = {
   create: (body: {
     title?: string; intent?: Intent; visibility?: Visibility;
     startingFen?: string; pgn?: string; chapterTitle?: string;
+    sourceBook?: SourceBook;
   }) => req<{ studyId: string; chapterId: string }>("POST", "/api/studies", body),
 
   get: (sid: string) =>
     req<{ study: StudySummary; chapters: ChapterSummary[] }>("GET", `/api/studies/${encodeURIComponent(sid)}`),
 
-  updateMeta: (sid: string, body: { title?: string; visibility?: Visibility; sharedWithUserIds?: string[] }) =>
+  updateMeta: (sid: string, body: { title?: string; visibility?: Visibility; sharedWithUserIds?: string[]; sourceBook?: SourceBook | null }) =>
     req<{ ok: boolean }>("PATCH", `/api/studies/${encodeURIComponent(sid)}`, body),
 
   remove: (sid: string) => req<{ ok: boolean }>("DELETE", `/api/studies/${encodeURIComponent(sid)}`),

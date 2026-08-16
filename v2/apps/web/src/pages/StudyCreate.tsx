@@ -4,17 +4,18 @@
 // Step 2: fill only the fields that intent needs (title + FEN/PGN as required).
 // Submit → POST /api/studies (creates study + first chapter) → navigate into editor.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { studiesApi, type Intent } from "../lib/studies-api";
+import { booksApi } from "../lib/books-api";
 
 interface Tile {
   intent: Intent;
   icon: string;
   title: string;
   blurb: string;
-  needs: ("pgn" | "fen" | "opening")[];
+  needs: ("pgn" | "fen" | "opening" | "book")[];
   chapterTitle: string;
 }
 
@@ -25,6 +26,7 @@ const TILES: Tile[] = [
   { intent: "opening",  icon: "📖", title: "Opening",           blurb: "Build a repertoire tree from your favourite lines.", needs: ["opening"], chapterTitle: "Line 1" },
   { intent: "endgame",  icon: "👑", title: "Endgame",           blurb: "Study or drill from a specific endgame position.",   needs: ["fen"],   chapterTitle: "Position" },
   { intent: "notebook", icon: "📝", title: "Class notebook",    blurb: "Free-form — add chapters as class progresses.",      needs: [],        chapterTitle: "Session 1" },
+  { intent: "book",     icon: "📚", title: "From a book",       blurb: "Link this study to a chapter of a chess book you own.", needs: ["book"], chapterTitle: "Chapter notes" },
 ];
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -36,7 +38,29 @@ export default function StudyCreatePage() {
   const [fen, setFen] = useState(START_FEN);
   const [pgn, setPgn] = useState("");
   const [openingMoves, setOpeningMoves] = useState("");
+  const [bookId, setBookId] = useState("");
+  const [chapterNumber, setChapterNumber] = useState<number | "">("");
+  const [bookSearch, setBookSearch] = useState("");
   const [err, setErr] = useState("");
+
+  // Only fetch books when the "book" tile is active — cheap and skips wasted network on other flows.
+  const booksQ = useQuery({
+    queryKey: ["books"],
+    queryFn: () => booksApi.list(),
+    enabled: tile?.intent === "book",
+  });
+  const bookDetailQ = useQuery({
+    queryKey: ["book", bookId],
+    queryFn: () => booksApi.get(bookId),
+    enabled: !!bookId && tile?.intent === "book",
+  });
+
+  const filteredBooks = useMemo(() => {
+    const arr = booksQ.data?.items ?? [];
+    if (!bookSearch.trim()) return arr.slice(0, 30);
+    const n = bookSearch.trim().toLowerCase();
+    return arr.filter((b) => b.title.toLowerCase().includes(n) || b.author.toLowerCase().includes(n)).slice(0, 30);
+  }, [booksQ.data, bookSearch]);
 
   const mut = useMutation({
     mutationFn: (body: any) => studiesApi.create(body),
@@ -58,6 +82,19 @@ export default function StudyCreatePage() {
     if (tile.needs.includes("opening") && openingMoves.trim()) {
       // Wrap the opening moves as a mini-PGN for the parser.
       body.pgn = `[SetUp "0"]\n\n${openingMoves.trim()} *`;
+    }
+    if (tile.needs.includes("book")) {
+      if (!bookId) { setErr("Pick a book"); return; }
+      const chap = bookDetailQ.data?.book.chapters.find((c) => c.number === chapterNumber);
+      body.sourceBook = {
+        bookId,
+        chapterNumber: chapterNumber || undefined,
+        topicTags: chap?.tags,
+      };
+      // Auto-fill title from book + chapter if user left blank.
+      if (!title.trim() && bookDetailQ.data) {
+        body.title = `${bookDetailQ.data.book.title}${chapterNumber ? ` — Ch ${chapterNumber}` : ""}${chap?.title ? `: ${chap.title}` : ""}`;
+      }
     }
     mut.mutate(body);
   };
@@ -129,6 +166,63 @@ export default function StudyCreatePage() {
                   placeholder="1. e4 c5 2. Nf3 d6"
                   className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 font-mono text-xs text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
                 <p className="mt-1 text-[10px] text-ink-500">The editor will open with the position after these moves.</p>
+              </div>
+            )}
+
+            {tile.needs.includes("book") && (
+              <div className="space-y-3">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-400">Book</label>
+                  {!bookId ? (
+                    <>
+                      <input value={bookSearch} onChange={(e) => setBookSearch(e.target.value)}
+                        placeholder="Search title or author…"
+                        className="mb-2 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
+                      <div className="max-h-56 overflow-y-auto rounded-lg border border-ink-700 bg-ink-800/50">
+                        {booksQ.isLoading && <div className="p-3 text-xs text-ink-400">Loading…</div>}
+                        {filteredBooks.length === 0 && !booksQ.isLoading && (
+                          <div className="p-3 text-xs text-ink-500">No matches. <a href="/books/new" className="text-brand-300 hover:underline">Add your own book</a>.</div>
+                        )}
+                        {filteredBooks.map((b) => (
+                          <button key={b._id} type="button" onClick={() => setBookId(b._id)}
+                            className="flex w-full items-center gap-2 border-b border-ink-800 px-3 py-2 text-left last:border-0 hover:bg-ink-800">
+                            <span className="text-lg">📚</span>
+                            <div className="flex-1">
+                              <div className="text-sm font-semibold text-white">{b.title}</div>
+                              <div className="text-[11px] text-ink-400">{b.author}</div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="rounded-lg border border-brand-500/40 bg-brand-500/5 p-3 text-sm text-white">
+                      📚 {bookDetailQ.data?.book.title || "…"} — <span className="text-ink-400">{bookDetailQ.data?.book.author}</span>
+                      <button type="button" onClick={() => { setBookId(""); setChapterNumber(""); }}
+                        className="ml-2 text-xs text-ink-400 hover:text-ink-200 underline">change</button>
+                    </div>
+                  )}
+                </div>
+
+                {bookId && bookDetailQ.data && (
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-400">Chapter (optional)</label>
+                    <select value={chapterNumber} onChange={(e) => setChapterNumber(e.target.value ? Number(e.target.value) : "")}
+                      className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none">
+                      <option value="">— pick a chapter —</option>
+                      {bookDetailQ.data.book.chapters.map((c) => (
+                        <option key={c.number} value={c.number}>
+                          {c.number}. {c.title}
+                        </option>
+                      ))}
+                    </select>
+                    {chapterNumber && (
+                      <p className="mt-1 text-[10px] text-ink-500">
+                        Tags: {bookDetailQ.data.book.chapters.find((c) => c.number === chapterNumber)?.tags.join(", ") || "(none)"}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

@@ -13,6 +13,7 @@ const INTENT_META: Record<string, { icon: string; label: string }> = {
   opening:  { icon: "📖", label: "Opening" },
   endgame:  { icon: "👑", label: "Endgame" },
   notebook: { icon: "📝", label: "Notebook" },
+  book:     { icon: "📚", label: "From a book" },
 };
 
 const VIS_LABEL: Record<string, string> = {
