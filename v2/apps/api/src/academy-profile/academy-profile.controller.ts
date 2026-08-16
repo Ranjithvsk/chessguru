@@ -10,7 +10,7 @@
 //               GET  /api/me/academy-profile/domain/status
 
 import {
-  BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, Req,
+  BadRequestException, Body, Controller, Get, Header, NotFoundException, Param, Post, Req, Res,
 } from "@nestjs/common";
 import { AcademyProfileService } from "./academy-profile.service";
 import { AcademyDomainService } from "./academy-domain.service";
@@ -27,6 +27,61 @@ export class AcademyPublicController {
     const hit = await this.domainSvc.lookupByDomain(domain);
     if (!hit) throw new NotFoundException("no academy with that domain");
     return hit;
+  }
+
+  /** Per-tenant PWA manifest — dynamically generated from academy profile.
+   *  Called via `<link rel="manifest">` on tenant custom domains. Falls back to
+   *  the default ChessGuru manifest if the host isn't a known tenant.
+   *  URL: GET /api/academy-page/manifest?host=<hostname>
+   *  Query param used because manifest fetches don't send session cookies. */
+  @Get("manifest")
+  @Header("Content-Type", "application/manifest+json")
+  @Header("Cache-Control", "public, max-age=300")
+  async manifest(@Req() req: any) {
+    const host = String(req.query?.host || req.headers?.host || "").toLowerCase().split(":")[0];
+    if (!host) throw new BadRequestException("bad host");
+    // Look up the tenant academy by custom domain OR by hostname first-label as
+    // fallback (gunachess.com → academy where ownerId="gunachess").
+    let hit: any = null;
+    try { hit = await this.domainSvc.lookupByDomain(host); } catch {}
+    if (!hit) {
+      // Fallback: hostname first-label as slug (works for tenant-native domains).
+      const slug = String(host.split(".")[0] || "");
+      if (slug) {
+        try { hit = { slug, data: await this.svc.getBySlug(slug) }; } catch { hit = null; }
+      }
+    }
+    let name = "ChessGuru";
+    let logoUrl = "/icons/icon-192.png";
+    let color = "#7c3aed";
+    if (hit) {
+      const data = hit.data || (await this.svc.getBySlug(hit.slug).catch(() => null));
+      if (data) {
+        name = data.profile?.displayName || data.academy?.name || name;
+        logoUrl = data.profile?.logoUrl || logoUrl;
+        color = "#14a2b8"; // tenant theme accent
+      }
+    }
+    const short = name.length > 12 ? name.split(/\s+/).slice(0, 2).join(" ") : name;
+    const ext = (logoUrl.match(/\.([a-z0-9]+)(?:\?|$)/i)?.[1] || "png").toLowerCase();
+    const iconType = ext === "png" ? "image/png" : ext === "svg" ? "image/svg+xml" : "image/webp";
+    return {
+      name,
+      short_name: short,
+      description: `${name} — chess training platform.`,
+      id: "/",
+      start_url: "/",
+      scope: "/",
+      display: "standalone",
+      orientation: "any",
+      background_color: "#c7edf5",
+      theme_color: color,
+      icons: [
+        { src: logoUrl, sizes: "192x192", type: iconType, purpose: "any" },
+        { src: logoUrl, sizes: "512x512", type: iconType, purpose: "any" },
+        { src: logoUrl, sizes: "512x512", type: iconType, purpose: "maskable" },
+      ],
+    };
   }
 
   @Get(":slug")

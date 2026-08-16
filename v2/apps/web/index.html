@@ -5,12 +5,47 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ChessGuru — Puzzle Trainer</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="theme-color" content="#7c3aed" />
-    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="manifest" id="cg-manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" id="cg-theme-color" content="#7c3aed" />
+    <link rel="apple-touch-icon" id="cg-apple-icon" href="/icons/icon-192.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="ChessGuru" />
+    <meta name="apple-mobile-web-app-title" id="cg-apple-title" content="ChessGuru" />
+    <script>
+      // Tenant-aware PWA. On non-canonical hosts (gunachess.com etc), redirect
+      // the manifest link to the backend endpoint that returns a per-tenant
+      // manifest with the academy's logo + name + theme, and swap the
+      // apple-touch-icon + iOS home-screen title so "Add to Home Screen"
+      // installs as the tenant's brand.
+      (function () {
+        try {
+          var host = location.hostname.toLowerCase();
+          var canonical = /(^|\.)harinitharanjith\.com$/.test(host) || host === "localhost" || /^\d+\.\d+\.\d+\.\d+$/.test(host);
+          if (canonical) return;
+          var manifestLink = document.getElementById("cg-manifest");
+          if (manifestLink) manifestLink.setAttribute("href", "/v2api/api/academy-page/manifest?host=" + encodeURIComponent(host));
+          fetch("/v2api/api/academy-page/by-domain/" + encodeURIComponent(host))
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (j) {
+              if (!j) return;
+              var name = (j.profile && j.profile.displayName) || (j.academy && j.academy.name);
+              var logo = j.profile && j.profile.logoUrl;
+              if (name) {
+                document.title = name;
+                var t = document.getElementById("cg-apple-title");
+                if (t) t.setAttribute("content", name);
+              }
+              if (logo) {
+                var i = document.getElementById("cg-apple-icon");
+                if (i) i.setAttribute("href", logo);
+              }
+              var tc = document.getElementById("cg-theme-color");
+              if (tc) tc.setAttribute("content", "#14a2b8");
+            })
+            .catch(function () { /* non-fatal */ });
+        } catch (e) { /* non-fatal */ }
+      })();
+    </script>
     <script>
       // Resolve theme BEFORE React renders so the page never flashes in the
       // wrong palette. Default (no saved choice) is LIGHT for every user.
