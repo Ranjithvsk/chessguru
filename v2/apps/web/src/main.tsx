@@ -64,6 +64,8 @@ import MyGamesListPage from "./pages/MyGamesList";
 import MyGamesImportPage from "./pages/MyGamesImport";
 import MyGameViewPage from "./pages/MyGameView";
 import MyInsightsPage, { StudentInsightsPage } from "./pages/MyInsights";
+import CoachBoardPage from "./pages/CoachBoard";
+import CoachClassPlanPage from "./pages/CoachClassPlan";
 
 // Dispatch /login → tenant-branded login on custom domains (gunachess.com),
 // canonical ChessGuru login on harinitharanjith.com / localhost / bare IP.
@@ -172,6 +174,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="my-games/:id" element={<MyGameViewPage />} />
             <Route path="my-insights" element={<MyInsightsPage />} />
             <Route path="insights/students/:userId" element={<StudentInsightsPage />} />
+            <Route path="coach-board" element={<CoachBoardPage />} />
+            <Route path="coach-board/plan/:tag" element={<CoachClassPlanPage />} />
             <Route path="login" element={<SmartLoginRoute />} />
             <Route path="reset-password" element={<ResetPasswordPage />} />
             <Route path="signup-academy" element={<SignupAcademyPage />} />

@@ -62,6 +62,7 @@ const GROUPS: Group[] = [
       { to: "/exams", label: "📝 Exams", desc: "Coach: test students. Student: take assigned exams" },
       { to: "/my-games", label: "🎮 My Games", desc: "Import + Stockfish-analyze your played games" },
       { to: "/my-insights", label: "🔍 My Insights", desc: "Your weaknesses + what to study to fix them" },
+      { to: "/coach-board", label: "🧑‍🏫 Class Board", desc: "Coach: student watchlist + class-plan generator" },
       { to: "/opening", label: "📖 Openings", desc: "Learn and drill openings" },
       { to: "/broadcasts", label: "📡 Broadcast games", desc: "Master tournament games" },
       { to: "/book", label: "📕 Book", desc: "Puzzles from the book games" },
