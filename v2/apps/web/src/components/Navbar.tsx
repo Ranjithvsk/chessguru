@@ -227,10 +227,35 @@ export default function Navbar({ rating, username, admin, onLogout }: Props) {
     </NavLink>
   );
 
+  // Lock body scroll while the drawer is open so touching the drawer doesn't
+  // scroll the page underneath (and desktop stays put too).
+  useEffect(() => {
+    if (!menuOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [menuOpen]);
+
+  // Esc closes the drawer.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenuOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
+
   return (
     <header className="sticky top-0 z-50 border-b border-ink-700/70 bg-ink-900/80 backdrop-blur">
-      <nav className="mx-auto flex h-14 max-w-6xl items-center gap-1 px-4">
-        <NavLink to="/" className="mr-2 flex items-center gap-2">
+      <nav className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4">
+        {/* Hamburger — ALWAYS visible now (was mobile-only). Opens left drawer. */}
+        <button
+          onClick={() => setMenuOpen(true)}
+          aria-label="Open menu" aria-expanded={menuOpen} aria-haspopup="menu"
+          className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-lg text-ink-200 hover:bg-ink-800">
+          <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+        </button>
+
+        <NavLink to="/" className="flex items-center gap-2">
           {tenantBrand?.logoUrl ? (
             <img src={tenantBrand.logoUrl} alt="" className="h-8 w-8 rounded-lg object-cover ring-1 ring-white/20" />
           ) : (
@@ -238,12 +263,6 @@ export default function Navbar({ rating, username, admin, onLogout }: Props) {
           )}
           <span className="font-display text-lg text-white">{tenantBrand?.name || "ChessGuru"}</span>
         </NavLink>
-
-        {/* Desktop: grouped dropdowns */}
-        <div className="hidden items-center gap-1 md:flex">
-          {GROUPS.map((g) => <Dropdown key={g.label} group={g} />)}
-          {admin && <>{adminLink("/admin/users", "Admin")}{adminLink("/admin/mail-log", "Mail")}{adminLink("/admin/domains", "Domains")}{adminLink("/admin", "Factory")}</>}
-        </div>
 
         <div className="ml-auto flex items-center gap-3 pl-2">
           <ThemeToggle />
@@ -261,60 +280,61 @@ export default function Navbar({ rating, username, admin, onLogout }: Props) {
           ) : (
             <NavLink to="/login" className="hidden rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white sm:inline-block">Sign in</NavLink>
           )}
-
-          {/* Mobile & tablet: hamburger toggles the grouped drawer (same organization as desktop) */}
-          <button
-            onClick={() => setMenuOpen((v) => !v)}
-            aria-label="Menu" aria-expanded={menuOpen} aria-haspopup="menu"
-            className="grid h-9 w-9 place-items-center rounded-lg text-ink-200 hover:bg-ink-800 md:hidden">
-            {menuOpen ? (
-              <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
-            ) : (
-              <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
-            )}
-          </button>
         </div>
       </nav>
 
-      {/* Mobile & tablet drawer — mirrors the desktop grouping (Puzzles / Play / Learn / Tools) */}
+      {/* Left slide-in drawer + dim backdrop. Renders when open so pathname-close
+          in the effect above still cleans up between routes. */}
       {menuOpen && (
-        <div className="md:hidden border-t border-ink-700/70 bg-ink-900/95 backdrop-blur">
-          <div className="mx-auto max-h-[calc(100dvh-3.5rem)] max-w-6xl overflow-y-auto px-4 py-3">
-            {GROUPS.map((g) => (
-              <div key={g.label} className="py-1.5">
-                <div className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-500">{g.label}</div>
-                <div className="grid gap-0.5 sm:grid-cols-2">
-                  {g.items.map((i) => (
-                    <NavLink key={i.to} to={i.to} end={i.end}
-                      className={({ isActive }) =>
-                        `flex flex-col rounded-lg px-3 py-2 transition ${isActive ? "bg-brand-600/20" : "hover:bg-ink-800"}`}>
-                      <span className="text-sm font-medium text-white">{i.label}</span>
-                      {i.desc && <span className="text-xs text-ink-400">{i.desc}</span>}
-                    </NavLink>
-                  ))}
-                </div>
-              </div>
-            ))}
-            {(admin || username || rating != null) && (
-              <div className="mt-1 flex flex-wrap items-center gap-2 border-t border-ink-800 pt-3">
-                {rating != null && (
-                  <span className="rounded-lg bg-ink-800 px-3 py-1.5 text-sm sm:hidden">
-                    <span className="text-ink-400">Rating </span><span className="font-semibold text-white">{rating}</span>
-                  </span>
-                )}
-                {admin && <>{adminLink("/admin/users", "Admin")}{adminLink("/admin/mail-log", "Mail")}{adminLink("/admin/domains", "Domains")}{adminLink("/admin", "Factory")}</>}
-                {username ? (
-                  <div className="ml-auto flex items-center gap-2 sm:hidden">
-                    <span className="text-sm font-medium text-white">{username}</span>
-                    <button onClick={onLogout} className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white">Sign out</button>
+        <>
+          <div className="fixed inset-0 top-14 z-40 bg-black/50 backdrop-blur-sm"
+            onClick={() => setMenuOpen(false)} aria-hidden="true" />
+          <aside className="fixed left-0 top-14 z-50 h-[calc(100dvh-3.5rem)] w-72 max-w-[85vw] overflow-y-auto border-r border-ink-700/70 bg-ink-900 shadow-2xl">
+            <div className="px-3 py-4">
+              {GROUPS.map((g) => (
+                <div key={g.label} className="mb-3">
+                  <div className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-500">{g.label}</div>
+                  <div className="flex flex-col gap-0.5">
+                    {g.items.map((i) => (
+                      <NavLink key={i.to} to={i.to} end={i.end}
+                        className={({ isActive }) =>
+                          `flex flex-col rounded-lg px-3 py-2 transition ${isActive ? "bg-brand-600/20" : "hover:bg-ink-800"}`}>
+                        <span className="text-sm font-medium text-white">{i.label}</span>
+                        {i.desc && <span className="text-xs text-ink-400">{i.desc}</span>}
+                      </NavLink>
+                    ))}
                   </div>
-                ) : (
-                  <NavLink to="/login" className="ml-auto rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white sm:hidden">Sign in</NavLink>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
+                </div>
+              ))}
+              {(admin || (!username && true) || (username && true)) && (
+                <div className="mt-2 border-t border-ink-800 pt-3">
+                  {admin && (
+                    <>
+                      <div className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-amber-400">Admin</div>
+                      <div className="flex flex-col gap-0.5">
+                        {adminLink("/admin/users", "Admin — Users")}
+                        {adminLink("/admin/mail-log", "Admin — Mail log")}
+                        {adminLink("/admin/domains", "Admin — Domains")}
+                        {adminLink("/admin", "Admin — Factory")}
+                      </div>
+                    </>
+                  )}
+                  {rating != null && (
+                    <div className="mt-2 px-1 text-xs text-ink-400">Rating <b className="text-white">{rating}</b></div>
+                  )}
+                  {username ? (
+                    <div className="mt-2 flex items-center justify-between px-1">
+                      <span className="text-sm font-medium text-white">{username}</span>
+                      <button onClick={onLogout} className="rounded-lg border border-ink-700 px-3 py-1 text-xs text-ink-300 hover:text-white">Sign out</button>
+                    </div>
+                  ) : (
+                    <NavLink to="/login" className="mt-2 block rounded-lg border border-ink-700 px-3 py-2 text-center text-sm text-ink-300 hover:text-white">Sign in</NavLink>
+                  )}
+                </div>
+              )}
+            </div>
+          </aside>
+        </>
       )}
     </header>
   );
