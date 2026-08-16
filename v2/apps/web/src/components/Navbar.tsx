@@ -32,6 +32,15 @@ type Group = { label: string; items: Item[] };
 
 const GROUPS: Group[] = [
   {
+    // Coach/owner tools — surfaced first so academy staff land here fast.
+    label: "Academy",
+    items: [
+      { to: "/academy", label: "🏛️ My Academy", desc: "Coaches, students, invites, batches" },
+      { to: "/coach-board", label: "🧑‍🏫 Class Board", desc: "Student watchlist + class-plan generator" },
+      { to: "/coach-board/reports", label: "📄 Parent reports", desc: "Monthly per-student progress reports" },
+    ],
+  },
+  {
     label: "Puzzles",
     items: [
       { to: "/", label: "🧩 Puzzle trainer", end: true, desc: "Rated tactics, all themes" },
@@ -40,7 +49,6 @@ const GROUPS: Group[] = [
       { to: "/dashboard", label: "📊 My performance", desc: "Ratings, strengths & progress" },
       { to: "/history", label: "📜 My history", desc: "Every puzzle you've solved" },
       { to: "/settings/accounts", label: "🔗 Linked accounts", desc: "Link Lichess + Chess.com" },
-      { to: "/academy", label: "🏛️ My Academy", desc: "Coaches, students, invites" },
     ],
   },
   {
@@ -78,7 +86,6 @@ const GROUPS: Group[] = [
       { to: "/exams", label: "📝 Exams", desc: "Coach: test students. Student: take assigned exams" },
       { to: "/my-games", label: "🎮 My Games", desc: "Import + Stockfish-analyze your played games" },
       { to: "/my-insights", label: "🔍 My Insights", desc: "Your weaknesses + what to study to fix them" },
-      { to: "/coach-board", label: "🧑‍🏫 Class Board", desc: "Coach: student watchlist + class-plan generator" },
     ],
   },
   {
