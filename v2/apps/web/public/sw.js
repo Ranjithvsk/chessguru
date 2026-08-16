@@ -1,5 +1,5 @@
 // ChessGuru PWA service worker.
-const VERSION = "cg-20260816055757";
+const VERSION = "cg-20260816060525";
 const BASE = self.location.pathname.replace(/sw\.js$/, "");
 const SHELL = [BASE, BASE + "manifest.webmanifest", BASE + "icons/icon-192.png", BASE + "icons/icon-512.png"];
 const STATIC_RE = /\.(?:js|css|mjs|wasm|svg|png|jpg|jpeg|webp|gif|woff2?|ttf|otf|ico)$/;

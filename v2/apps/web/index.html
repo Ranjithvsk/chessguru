@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ChessGuru — Puzzle Trainer</title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" id="cg-favicon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="manifest" id="cg-manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" id="cg-theme-color" content="#7c3aed" />
     <link rel="apple-touch-icon" id="cg-apple-icon" href="/icons/icon-192.png" />
@@ -38,6 +38,11 @@
             if (logo) {
               var i = document.getElementById("cg-apple-icon");
               if (i) i.setAttribute("href", logo);
+              // Browser-tab favicon. Setting href alone works in Chrome/Edge/
+              // Safari; also clear the type attr so the browser sniffs the
+              // real MIME (svg default → webp tenant logo would mismatch).
+              var fi = document.getElementById("cg-favicon");
+              if (fi) { fi.setAttribute("href", logo); fi.removeAttribute("type"); }
             }
             var tc = document.getElementById("cg-theme-color");
             if (tc) tc.setAttribute("content", "#14a2b8");
