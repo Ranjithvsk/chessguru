@@ -117,7 +117,8 @@ function Dropdown({ group }: { group: Group }) {
       </button>
       {open && (
         <div role="menu" className="absolute left-0 top-full z-50 w-64 pt-1">
-          <div className="overflow-hidden rounded-xl border border-ink-700 bg-ink-900 shadow-xl shadow-black/40">
+          {/* max-h caps the dropdown so long menus (Learn has ~17 items) stay on-screen; overflow-y-auto scrolls the rest. */}
+          <div className="max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain rounded-xl border border-ink-700 bg-ink-900 shadow-xl shadow-black/40">
             {group.items.map((i) => (
               <NavLink key={i.to} to={i.to} end={i.end} role="menuitem"
                 className={({ isActive }) =>
