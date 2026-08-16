@@ -33,6 +33,7 @@ import LoginPage from "./pages/Login";
 import ResetPasswordPage from "./pages/ResetPassword";
 import SignupAcademyPage from "./pages/SignupAcademy";
 import AcademyDashboardPage from "./pages/AcademyDashboard";
+import StudentsManagerPage from "./pages/StudentsManager";
 import AcceptInvitePage from "./pages/AcceptInvite";
 // CallRoomPage + ClassPage removed 2026-08-12 (Jitsi + WebRTC mesh retired).
 // Every live class URL funnels through /class-v2/ (Dream Meet).
@@ -156,6 +157,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="reset-password" element={<ResetPasswordPage />} />
             <Route path="signup-academy" element={<SignupAcademyPage />} />
             <Route path="academy" element={<AcademyDashboardPage />} />
+            <Route path="students" element={<StudentsManagerPage />} />
             <Route path="accept-invite" element={<AcceptInvitePage />} />
             <Route path="call/:room" element={<CallRoomRedirect />} />
             <Route path="settings/accounts" element={<AccountLinksPage />} />

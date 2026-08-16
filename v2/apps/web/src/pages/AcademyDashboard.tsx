@@ -2020,6 +2020,9 @@ export default function AcademyDashboardPage() {
             <code className="text-amber-300">/academy-page/{me.academyId}</code>
           </div>
           <div className="flex gap-2">
+            <Link to="/students" className="rounded-lg bg-brand-600 hover:bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white">
+              Manage students
+            </Link>
             <Link to="/academy-profile/edit" className="rounded-lg bg-amber-600 hover:bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
               Edit academy page
             </Link>

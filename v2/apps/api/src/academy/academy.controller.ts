@@ -135,6 +135,11 @@ export class AcademyController {
     return this.svc.markStudentAttended(req.session, id, body);
   }
 
+  @Post("students/:id/remove")
+  removeStudent(@Req() req: any, @Param("id") id: string) {
+    return this.svc.removeStudent(req.session, id);
+  }
+
   // ── Batches ──────────────────────────────────────────────
   @Get("batches")
   listBatches(@Req() req: any) { return this.svc.listBatches(req.session); }

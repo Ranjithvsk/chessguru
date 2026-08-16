@@ -434,6 +434,28 @@ export class AcademyService {
     return { ok: true };
   }
 
+  /** Owner-only: detach a student from this academy. Preserves the user
+   *  account + puzzle history + rating — the person can still log in and
+   *  solve puzzles as a non-academy user, and can be re-added to any academy
+   *  later. Removes the academy affiliation, coach assignment, and any batch
+   *  memberships so scheduling/attendance no longer includes them. */
+  async removeStudent(session: any, studentId: string): Promise<any> {
+    const g = this.ensureOwner(session);
+    const student: any = await this.users().findOne({ _id: studentId as any, academyId: g.academyId, role: "student" });
+    if (!student) return { ok: false, error: "That student isn't in this academy." };
+    // Detach from academy — keep user doc intact.
+    await this.users().updateOne(
+      { _id: student._id },
+      { $set: { role: "user", academyDetachedAt: new Date(), academyDetachedBy: g.userId }, $unset: { academyId: "", coachId: "", coachAssignedAt: "", coachAssignedBy: "" } },
+    );
+    // Drop from any batches so recurring-class scheduling doesn't drag them back.
+    await this.batches().updateMany(
+      { academyId: g.academyId, studentIds: student._id },
+      { $pull: { studentIds: student._id } as any },
+    );
+    return { ok: true };
+  }
+
   // ═══════════ BATCHES ═══════════
   // A batch is a named group of students within an academy. Coach owns their
   // batches (`coachUserId`); owner can see all batches in the academy. Coaches
