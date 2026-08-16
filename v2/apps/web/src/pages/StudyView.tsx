@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../lib/api";
 import { studiesApi, type Visibility } from "../lib/studies-api";
+import { revisionsApi } from "../lib/revisions-api";
 
 const VIS_OPTIONS: { value: Visibility; label: string; hint: string }[] = [
   { value: "private", label: "Private",         hint: "Only you can see this." },
@@ -44,6 +45,9 @@ export default function StudyViewPage() {
   const deleteChapter = useMutation({
     mutationFn: (cid: string) => studiesApi.deleteChapter(sid, cid),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["study", sid] }),
+  });
+  const addToQueue = useMutation({
+    mutationFn: () => revisionsApi.addStudy(sid),
   });
 
   if (auth && !auth.loggedIn) return <Navigate to={`/login?back=/studies/${encodeURIComponent(sid)}`} replace />;
@@ -113,6 +117,23 @@ export default function StudyViewPage() {
             ))}
           </div>
           <p className="mt-2 text-[10px] text-ink-500">{VIS_OPTIONS.find((v) => v.value === study.visibility)?.hint}</p>
+        </div>
+      )}
+
+      {/* Revision opt-in — only offered to non-owners viewing a shared study.
+          Owners auto-sync on chapter save. */}
+      {!isOwner && (
+        <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 flex items-center gap-3">
+          <span className="text-2xl">🎯</span>
+          <div className="flex-1 text-sm text-amber-100">
+            Add the ⭐ positions in this study to your daily revision queue.
+          </div>
+          <button onClick={() => addToQueue.mutate()} disabled={addToQueue.isPending || addToQueue.isSuccess}
+            className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-ink-900 hover:bg-amber-400 disabled:opacity-60">
+            {addToQueue.isPending ? "Adding…" :
+              addToQueue.isSuccess ? `Added ${addToQueue.data?.added ?? 0}` :
+              "Add to my queue"}
+          </button>
         </div>
       )}
 

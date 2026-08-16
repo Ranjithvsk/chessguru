@@ -53,6 +53,7 @@ import StudyChapterEditPage from "./pages/StudyChapterEdit";
 import BooksListPage from "./pages/BooksList";
 import BookDetailPage from "./pages/BookDetail";
 import BookCreatePage from "./pages/BookCreate";
+import RevisePage from "./pages/Revise";
 
 // Dispatch /login → tenant-branded login on custom domains (gunachess.com),
 // canonical ChessGuru login on harinitharanjith.com / localhost / bare IP.
@@ -150,6 +151,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="books" element={<BooksListPage />} />
             <Route path="books/new" element={<BookCreatePage />} />
             <Route path="books/:id" element={<BookDetailPage />} />
+            <Route path="revise" element={<RevisePage />} />
             <Route path="login" element={<SmartLoginRoute />} />
             <Route path="reset-password" element={<ResetPasswordPage />} />
             <Route path="signup-academy" element={<SignupAcademyPage />} />

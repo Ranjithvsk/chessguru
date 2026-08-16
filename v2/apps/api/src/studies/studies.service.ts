@@ -30,6 +30,7 @@ import { Connection } from "mongoose";
 import { randomBytes } from "crypto";
 import { Chess } from "chess.js";
 import { BooksService } from "../books/books.service";
+import { RevisionsService } from "../revisions/revisions.service";
 
 const MAX_TITLE = 140;
 const MAX_COMMENT = 4000;
@@ -101,6 +102,7 @@ export class StudiesService {
   constructor(
     @InjectConnection() private readonly conn: Connection,
     private readonly books: BooksService,
+    private readonly revisions: RevisionsService,
   ) {}
 
   private studies() { return this.conn.db!.collection<StudyDoc>("studies"); }
@@ -326,6 +328,11 @@ export class StudiesService {
     }
     await this.chapters().updateOne({ _id: chapterId, studyId }, { $set: set });
     await this.studies().updateOne({ _id: studyId }, { $set: { updatedAt: new Date() } });
+    // Sync owner's revision queue when moves change (⭐ flags may have flipped).
+    // Non-fatal: revision system is best-effort — never block the save.
+    try { await this.revisions.syncFromChapter(userId, studyId, chapterId); } catch (e) {
+      console.error("[studies] revision sync failed:", (e as any)?.message || e);
+    }
     return { ok: true };
   }
 
