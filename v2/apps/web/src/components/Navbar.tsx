@@ -150,9 +150,31 @@ function useTenantSlug(): string | null {
 
 interface Brand { name: string; logoUrl: string | null }
 const NAV_API_BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
+const BRAND_CACHE_KEY = "cg.tenant-brand";
+function readCachedBrand(slug: string): Brand | null {
+  try {
+    const raw = localStorage.getItem(BRAND_CACHE_KEY);
+    if (!raw) return null;
+    const cache = JSON.parse(raw);
+    const hit = cache?.[slug];
+    if (hit && typeof hit.name === "string") return { name: hit.name, logoUrl: hit.logoUrl ?? null };
+  } catch { /* ignore */ }
+  return null;
+}
+function writeCachedBrand(slug: string, brand: Brand) {
+  try {
+    const raw = localStorage.getItem(BRAND_CACHE_KEY);
+    const cache = raw ? JSON.parse(raw) : {};
+    cache[slug] = brand;
+    localStorage.setItem(BRAND_CACHE_KEY, JSON.stringify(cache));
+  } catch { /* ignore */ }
+}
 function useTenantBrand(): Brand | null {
   const slug = useTenantSlug();
-  const [brand, setBrand] = useState<Brand | null>(null);
+  // Hydrate synchronously from localStorage so repeat visits don't flash the
+  // default "ChessGuru" label while the fetch is in flight. First-visit users
+  // still see one flash, but every subsequent load is instant.
+  const [brand, setBrand] = useState<Brand | null>(() => slug ? readCachedBrand(slug) : null);
   useEffect(() => {
     if (!slug) { setBrand(null); return; }
     let cancelled = false;
@@ -162,9 +184,13 @@ function useTenantBrand(): Brand | null {
         if (cancelled) return;
         const name = j?.profile?.displayName || j?.academy?.name || "";
         const logoUrl = j?.profile?.logoUrl || null;
-        if (name) setBrand({ name, logoUrl });
+        if (name) {
+          const next = { name, logoUrl };
+          setBrand(next);
+          writeCachedBrand(slug, next);
+        }
       })
-      .catch(() => { if (!cancelled) setBrand(null); });
+      .catch(() => { /* keep cached brand if the refresh fails */ });
     return () => { cancelled = true; };
   }, [slug]);
   return brand;

@@ -12,35 +12,59 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" id="cg-apple-title" content="ChessGuru" />
     <script>
-      // Tenant-aware PWA. On non-canonical hosts (gunachess.com etc), redirect
-      // the manifest link to the backend endpoint that returns a per-tenant
-      // manifest with the academy's logo + name + theme, and swap the
-      // apple-touch-icon + iOS home-screen title so "Add to Home Screen"
-      // installs as the tenant's brand.
+      // Tenant-aware branding + PWA. On non-canonical hosts (gunachess.com etc):
+      //  1. SYNCHRONOUSLY apply cached brand from localStorage (title, apple
+      //     title, apple icon, theme color) so the browser tab never flashes
+      //     "ChessGuru" on repeat visits.
+      //  2. Swap <link rel="manifest"> to the tenant manifest endpoint.
+      //  3. Background-refresh the cache from /api/academy-page/by-domain so
+      //     next load picks up any tenant profile edits.
+      // Shares BRAND_CACHE_KEY with Navbar.useTenantBrand so the whole app
+      // agrees on the same tenant identity from one localStorage entry.
       (function () {
         try {
           var host = location.hostname.toLowerCase();
           var canonical = /(^|\.)harinitharanjith\.com$/.test(host) || host === "localhost" || /^\d+\.\d+\.\d+\.\d+$/.test(host);
           if (canonical) return;
+          var slug = host.split(".")[0];
           var manifestLink = document.getElementById("cg-manifest");
           if (manifestLink) manifestLink.setAttribute("href", "/v2api/api/academy-page/manifest?host=" + encodeURIComponent(host));
+          var applyBrand = function (name, logo) {
+            if (name) {
+              document.title = name;
+              var t = document.getElementById("cg-apple-title");
+              if (t) t.setAttribute("content", name);
+            }
+            if (logo) {
+              var i = document.getElementById("cg-apple-icon");
+              if (i) i.setAttribute("href", logo);
+            }
+            var tc = document.getElementById("cg-theme-color");
+            if (tc) tc.setAttribute("content", "#14a2b8");
+          };
+          // (1) Synchronous cache hit
+          try {
+            var raw = localStorage.getItem("cg.tenant-brand");
+            if (raw) {
+              var cache = JSON.parse(raw);
+              var hit = cache && cache[slug];
+              if (hit && hit.name) applyBrand(hit.name, hit.logoUrl);
+            }
+          } catch (e) { /* ignore */ }
+          // (3) Background refresh
           fetch("/v2api/api/academy-page/by-domain/" + encodeURIComponent(host))
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (j) {
               if (!j) return;
               var name = (j.profile && j.profile.displayName) || (j.academy && j.academy.name);
-              var logo = j.profile && j.profile.logoUrl;
-              if (name) {
-                document.title = name;
-                var t = document.getElementById("cg-apple-title");
-                if (t) t.setAttribute("content", name);
-              }
-              if (logo) {
-                var i = document.getElementById("cg-apple-icon");
-                if (i) i.setAttribute("href", logo);
-              }
-              var tc = document.getElementById("cg-theme-color");
-              if (tc) tc.setAttribute("content", "#14a2b8");
+              var logo = (j.profile && j.profile.logoUrl) || null;
+              if (name) applyBrand(name, logo);
+              try {
+                var raw2 = localStorage.getItem("cg.tenant-brand");
+                var cache2 = raw2 ? JSON.parse(raw2) : {};
+                cache2[slug] = { name: name || "", logoUrl: logo };
+                localStorage.setItem("cg.tenant-brand", JSON.stringify(cache2));
+              } catch (e) { /* ignore */ }
             })
             .catch(function () { /* non-fatal */ });
         } catch (e) { /* non-fatal */ }

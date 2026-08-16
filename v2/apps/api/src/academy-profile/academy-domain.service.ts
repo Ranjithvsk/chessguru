@@ -372,7 +372,14 @@ export class AcademyDomainService {
         return;
       }
 
-      const conf = this.buildNginxConf(domain, String(academyId));
+      // Pull displayName for the sub_filter that templates the tenant name
+      // into the served <title> — eliminates the "ChessGuru" flash on first
+      // visit before JS runs. Fall back to the academy slug if no profile yet.
+      const prof: any = await this.conn.db!
+        .collection("academyProfiles")
+        .findOne({ _id: academyId as any }, { projection: { displayName: 1 } });
+      const displayName = String(prof?.displayName || academyId).trim();
+      const conf = this.buildNginxConf(domain, String(academyId), displayName);
       const write = await this.runWithStdin(
         "sudo",
         ["-n", "/usr/bin/tee", `${NGINX_DIR}/${domain}.conf`],
@@ -429,10 +436,13 @@ export class AcademyDomainService {
     console.error(`[academy-domain] academy ${academyId}: ${msg}`);
   }
 
-  private buildNginxConf(domain: string, slug: string): string {
+  private buildNginxConf(domain: string, slug: string, displayName: string = ""): string {
     // Same SPA vhost shape as coach-domain, plus /academy-img/ alias. The SPA
     // shim in App.tsx will look up /v2api/academy-page/by-domain/<host> on
     // mount and navigate() to /academy-page/<slug>.
+    // Escape the tenant name for nginx string literal (backslash, dquote).
+    const safeName = String(displayName || slug)
+      .replace(/\\/g, "\\\\").replace(/"/g, "\\\"").slice(0, 120);
     return `# Auto-generated ${new Date().toISOString()} by academy-domain.service.
 # Academy custom-domain SSL vhost for ${domain}. Delete via /api/me/academy-profile/domain/remove.
 server {
@@ -461,7 +471,16 @@ server {
   # /v2/ prefix retired 2026-08-15 — legacy URLs 301 to root.
   location = /v2 { return 301 /; }
   location /v2/ { rewrite ^/v2/(.*)$ /$1 permanent; }
-  location / { try_files $uri /index.html; add_header Cache-Control "no-cache" always; }
+  # sub_filter templates the tenant name into the SERVED index.html so the
+  # browser tab never shows "ChessGuru" before JS runs. Applies only to
+  # text/html; asset responses are untouched.
+  location / {
+    try_files $uri /index.html;
+    add_header Cache-Control "no-cache" always;
+    sub_filter_once off;
+    sub_filter "<title>ChessGuru — Puzzle Trainer</title>" "<title>${safeName}</title>";
+    sub_filter "content=\\"ChessGuru\\"" "content=\\"${safeName}\\"";
+  }
   location /assets/ { try_files $uri =404; }
 
   location /coach-img/ {
