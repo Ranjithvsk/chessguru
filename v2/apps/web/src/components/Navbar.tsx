@@ -28,12 +28,21 @@ function ThemeToggle() {
 // Lichess-style grouped navigation (owner 2026-07-08). Desktop (md+) shows four
 // dropdown groups; small screens keep the proven flat scrollable row.
 type Item = { to: string; label: string; end?: boolean; desc?: string };
-type Group = { label: string; items: Item[] };
+type Group = { label: string; items: Item[]; accent: string; icon: string };
+
+/** Split an item label into "<emoji> <rest>" so the drawer can render the
+ *  emoji inside a colored badge instead of inline gray text. */
+function splitLabel(label: string): { icon: string; text: string } {
+  // Match one emoji (possibly grapheme-clustered) then a space then the rest.
+  const m = label.match(/^(\S+)\s+(.+)$/u);
+  if (m) return { icon: m[1]!, text: m[2]! };
+  return { icon: "•", text: label };
+}
 
 const GROUPS: Group[] = [
   {
     // Coach/owner tools — surfaced first so academy staff land here fast.
-    label: "Academy",
+    label: "Academy", accent: "amber", icon: "🏛️",
     items: [
       { to: "/academy", label: "🏛️ My Academy", desc: "Coaches, students, invites, batches" },
       { to: "/coach-board", label: "🧑‍🏫 Class Board", desc: "Student watchlist + class-plan generator" },
@@ -41,7 +50,7 @@ const GROUPS: Group[] = [
     ],
   },
   {
-    label: "Puzzles",
+    label: "Puzzles", accent: "brand", icon: "🧩",
     items: [
       { to: "/", label: "🧩 Puzzle trainer", end: true, desc: "Rated tactics, all themes" },
       { to: "/daily", label: "🎯 Puzzle of the day", desc: "One puzzle everyone gets today" },
@@ -52,7 +61,7 @@ const GROUPS: Group[] = [
     ],
   },
   {
-    label: "Play",
+    label: "Play", accent: "rose", icon: "♟️",
     items: [
       { to: "/play", label: "♟️ Play", desc: "Pass & play on one screen" },
       { to: "/engine-battle", label: "⚔️ Engine battle", desc: "Watch engines fight it out" },
@@ -62,7 +71,7 @@ const GROUPS: Group[] = [
   },
   {
     // Curated curriculum — prescribed content, drill-based.
-    label: "Learn",
+    label: "Learn", accent: "sky", icon: "📚",
     items: [
       { to: "/study", label: "📚 Study", desc: "Guided lessons & drills" },
       { to: "/opening", label: "📖 Openings", desc: "Learn and drill openings" },
@@ -78,7 +87,7 @@ const GROUPS: Group[] = [
   },
   {
     // User-generated retention loop (Slices 1–6): open-ended, personal.
-    label: "Notebook",
+    label: "Notebook", accent: "emerald", icon: "📓",
     items: [
       { to: "/studies", label: "📓 My Studies", desc: "Analyze games, teach concepts, opening notes" },
       { to: "/books", label: "📚 Books", desc: "Track chapters read, link studies to book positions" },
@@ -89,13 +98,24 @@ const GROUPS: Group[] = [
     ],
   },
   {
-    label: "Tools",
+    label: "Tools", accent: "slate", icon: "🛠️",
     items: [
       { to: "/board-editor", label: "📷 Scan position", desc: "Upload/paste/camera → auto-detect FEN (Server AI)" },
       { to: "/board-editor", label: "✏️ Board editor", desc: "Set up any position" },
     ],
   },
 ];
+
+/** Tailwind classes must be present as full literals so JIT can pick them up.
+ *  Add new accents here rather than composing strings dynamically. */
+const ACCENT: Record<string, { badgeBg: string; badgeText: string; itemBg: string; itemRing: string; activeBg: string }> = {
+  amber:   { badgeBg: "bg-amber-500/20",   badgeText: "text-amber-200",   itemBg: "bg-amber-500/10",   itemRing: "ring-amber-500/30",   activeBg: "bg-amber-500/25" },
+  brand:   { badgeBg: "bg-brand-500/20",   badgeText: "text-brand-200",   itemBg: "bg-brand-500/10",   itemRing: "ring-brand-500/30",   activeBg: "bg-brand-500/25" },
+  rose:    { badgeBg: "bg-rose-500/20",    badgeText: "text-rose-200",    itemBg: "bg-rose-500/10",    itemRing: "ring-rose-500/30",    activeBg: "bg-rose-500/25" },
+  sky:     { badgeBg: "bg-sky-500/20",     badgeText: "text-sky-200",     itemBg: "bg-sky-500/10",     itemRing: "ring-sky-500/30",     activeBg: "bg-sky-500/25" },
+  emerald: { badgeBg: "bg-emerald-500/20", badgeText: "text-emerald-200", itemBg: "bg-emerald-500/10", itemRing: "ring-emerald-500/30", activeBg: "bg-emerald-500/25" },
+  slate:   { badgeBg: "bg-slate-500/20",   badgeText: "text-slate-200",   itemBg: "bg-slate-500/10",   itemRing: "ring-slate-500/30",   activeBg: "bg-slate-500/25" },
+};
 
 /** Collapsible group inside the left drawer. Collapsed by default; auto-opens
  *  when the active route is inside this group so users see where they are. */
@@ -104,27 +124,36 @@ function DrawerGroup({ group, currentPath }: { group: Group; currentPath: string
   const [open, setOpen] = useState(active);
   // Re-open if the user navigates into this group externally.
   useEffect(() => { if (active) setOpen(true); }, [active]);
+  const a = ACCENT[group.accent] ?? ACCENT.slate!;
   return (
     <div className="mb-1">
       <button type="button" onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-ink-800/60">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">{group.label}</span>
+        <span className={`grid h-7 w-7 flex-shrink-0 place-items-center rounded-lg text-base ring-1 ${a.badgeBg} ${a.badgeText} ${a.itemRing}`}>{group.icon}</span>
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-200">{group.label}</span>
+        <span className="ml-1 rounded-full bg-ink-800 px-1.5 py-0.5 text-[10px] text-ink-500">{group.items.length}</span>
         <svg className={`ml-auto h-3.5 w-3.5 text-ink-500 transition-transform ${open ? "rotate-180" : ""}`}
           viewBox="0 0 12 12" fill="none">
           <path d="M2.5 4.5 6 8l3.5-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
       {open && (
-        <div className="mb-2 flex flex-col gap-0.5">
-          {group.items.map((i) => (
-            <NavLink key={i.to} to={i.to} end={i.end}
-              className={({ isActive }) =>
-                `flex flex-col rounded-lg px-3 py-2 transition ${isActive ? "bg-brand-600/20" : "hover:bg-ink-800"}`}>
-              <span className="text-sm font-medium text-white">{i.label}</span>
-              {i.desc && <span className="text-xs text-ink-400">{i.desc}</span>}
-            </NavLink>
-          ))}
+        <div className="mb-2 ml-1 flex flex-col gap-0.5 border-l border-ink-800 pl-2">
+          {group.items.map((i) => {
+            const { icon, text } = splitLabel(i.label);
+            return (
+              <NavLink key={i.to + i.label} to={i.to} end={i.end}
+                className={({ isActive }) =>
+                  `group flex items-start gap-2.5 rounded-lg px-2 py-2 transition ${isActive ? a.activeBg : "hover:bg-ink-800"}`}>
+                <span className={`mt-0.5 grid h-8 w-8 flex-shrink-0 place-items-center rounded-lg text-lg ring-1 ${a.itemBg} ${a.itemRing}`}>{icon}</span>
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-sm font-medium text-white">{text}</span>
+                  {i.desc && <span className="text-xs text-ink-400 line-clamp-2">{i.desc}</span>}
+                </span>
+              </NavLink>
+            );
+          })}
         </div>
       )}
     </div>
