@@ -90,6 +90,40 @@ const GROUPS: Group[] = [
   },
 ];
 
+/** Collapsible group inside the left drawer. Collapsed by default; auto-opens
+ *  when the active route is inside this group so users see where they are. */
+function DrawerGroup({ group, currentPath }: { group: Group; currentPath: string }) {
+  const active = groupIsActive(group, currentPath);
+  const [open, setOpen] = useState(active);
+  // Re-open if the user navigates into this group externally.
+  useEffect(() => { if (active) setOpen(true); }, [active]);
+  return (
+    <div className="mb-1">
+      <button type="button" onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-ink-800/60">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">{group.label}</span>
+        <svg className={`ml-auto h-3.5 w-3.5 text-ink-500 transition-transform ${open ? "rotate-180" : ""}`}
+          viewBox="0 0 12 12" fill="none">
+          <path d="M2.5 4.5 6 8l3.5-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div className="mb-2 flex flex-col gap-0.5">
+          {group.items.map((i) => (
+            <NavLink key={i.to} to={i.to} end={i.end}
+              className={({ isActive }) =>
+                `flex flex-col rounded-lg px-3 py-2 transition ${isActive ? "bg-brand-600/20" : "hover:bg-ink-800"}`}>
+              <span className="text-sm font-medium text-white">{i.label}</span>
+              {i.desc && <span className="text-xs text-ink-400">{i.desc}</span>}
+            </NavLink>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function groupIsActive(g: Group, path: string): boolean {
   return g.items.some((i) => (i.end ? path === i.to : path === i.to || path.startsWith(i.to + "/")));
 }
@@ -292,19 +326,7 @@ export default function Navbar({ rating, username, admin, onLogout }: Props) {
           <aside className="fixed left-0 top-14 z-50 h-[calc(100dvh-3.5rem)] w-72 max-w-[85vw] overflow-y-auto border-r border-ink-700/70 bg-ink-900 shadow-2xl">
             <div className="px-3 py-4">
               {GROUPS.map((g) => (
-                <div key={g.label} className="mb-3">
-                  <div className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-500">{g.label}</div>
-                  <div className="flex flex-col gap-0.5">
-                    {g.items.map((i) => (
-                      <NavLink key={i.to} to={i.to} end={i.end}
-                        className={({ isActive }) =>
-                          `flex flex-col rounded-lg px-3 py-2 transition ${isActive ? "bg-brand-600/20" : "hover:bg-ink-800"}`}>
-                        <span className="text-sm font-medium text-white">{i.label}</span>
-                        {i.desc && <span className="text-xs text-ink-400">{i.desc}</span>}
-                      </NavLink>
-                    ))}
-                  </div>
-                </div>
+                <DrawerGroup key={g.label} group={g} currentPath={pathname} />
               ))}
               {(admin || (!username && true) || (username && true)) && (
                 <div className="mt-2 border-t border-ink-800 pt-3">
