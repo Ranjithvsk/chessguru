@@ -53,16 +53,10 @@ const GROUPS: Group[] = [
     ],
   },
   {
+    // Curated curriculum — prescribed content, drill-based.
     label: "Learn",
     items: [
       { to: "/study", label: "📚 Study", desc: "Guided lessons & drills" },
-      { to: "/studies", label: "📓 My Studies", desc: "Analyze games, teach concepts, opening notes" },
-      { to: "/books", label: "📚 Books", desc: "Track chapters read, link studies to book positions" },
-      { to: "/revise", label: "🎯 Revise", desc: "Daily spaced-repetition drill of your ⭐ positions" },
-      { to: "/exams", label: "📝 Exams", desc: "Coach: test students. Student: take assigned exams" },
-      { to: "/my-games", label: "🎮 My Games", desc: "Import + Stockfish-analyze your played games" },
-      { to: "/my-insights", label: "🔍 My Insights", desc: "Your weaknesses + what to study to fix them" },
-      { to: "/coach-board", label: "🧑‍🏫 Class Board", desc: "Coach: student watchlist + class-plan generator" },
       { to: "/opening", label: "📖 Openings", desc: "Learn and drill openings" },
       { to: "/broadcasts", label: "📡 Broadcast games", desc: "Master tournament games" },
       { to: "/book", label: "📕 Book", desc: "Puzzles from the book games" },
@@ -72,6 +66,19 @@ const GROUPS: Group[] = [
       { to: "/study/opposition", label: "🤝 Opposition", desc: "Direct, distant & very distant" },
       { to: "/study/endgame", label: "🏁 Endgame trainer", desc: "Rule of the square, K+P vs K" },
       { to: "/study/key-squares", label: "🔑 Key squares", desc: "Tap the king's winning squares" },
+    ],
+  },
+  {
+    // User-generated retention loop (Slices 1–6): open-ended, personal.
+    label: "Notebook",
+    items: [
+      { to: "/studies", label: "📓 My Studies", desc: "Analyze games, teach concepts, opening notes" },
+      { to: "/books", label: "📚 Books", desc: "Track chapters read, link studies to book positions" },
+      { to: "/revise", label: "🎯 Revise", desc: "Daily spaced-repetition drill of your ⭐ positions" },
+      { to: "/exams", label: "📝 Exams", desc: "Coach: test students. Student: take assigned exams" },
+      { to: "/my-games", label: "🎮 My Games", desc: "Import + Stockfish-analyze your played games" },
+      { to: "/my-insights", label: "🔍 My Insights", desc: "Your weaknesses + what to study to fix them" },
+      { to: "/coach-board", label: "🧑‍🏫 Class Board", desc: "Coach: student watchlist + class-plan generator" },
     ],
   },
   {
