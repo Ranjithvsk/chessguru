@@ -66,14 +66,15 @@ export class AcademyPublicController {
     const ext = (logoUrl.match(/\.([a-z0-9]+)(?:\?|$)/i)?.[1] || "png").toLowerCase();
     const iconType = ext === "png" ? "image/png" : ext === "svg" ? "image/svg+xml" : "image/webp";
     // Prefer per-tenant sized icons if the logo follows the "<prefix>-logo.<ext>"
-    // convention (deployer generates <prefix>-192, <prefix>-512, <prefix>-maskable-512).
-    // Chrome validates declared sizes against real pixel dims — using one 512
-    // logo for both 192+512 slots causes it to silently drop the 192 icon.
+    // convention (uploadImage auto-generates <prefix>-192.webp, <prefix>-512.webp,
+    // <prefix>-maskable-512.webp via sharp). Chrome validates declared sizes
+    // against real pixel dims, so serving one 512 file as 192 silently drops
+    // the 192 icon and can fall back to generic install branding.
     const sizedPrefix = logoUrl.match(/^(.+?)-logo\.[a-z0-9]+$/i)?.[1];
     const icons = sizedPrefix ? [
-      { src: `${sizedPrefix}-192.${ext}`,           sizes: "192x192", type: iconType, purpose: "any" },
-      { src: `${sizedPrefix}-512.${ext}`,           sizes: "512x512", type: iconType, purpose: "any" },
-      { src: `${sizedPrefix}-maskable-512.${ext}`,  sizes: "512x512", type: iconType, purpose: "maskable" },
+      { src: `${sizedPrefix}-192.webp`,           sizes: "192x192", type: "image/webp", purpose: "any" },
+      { src: `${sizedPrefix}-512.webp`,           sizes: "512x512", type: "image/webp", purpose: "any" },
+      { src: `${sizedPrefix}-maskable-512.webp`,  sizes: "512x512", type: "image/webp", purpose: "maskable" },
     ] : [
       { src: logoUrl, sizes: "512x512", type: iconType, purpose: "any" },
       { src: logoUrl, sizes: "512x512", type: iconType, purpose: "maskable" },

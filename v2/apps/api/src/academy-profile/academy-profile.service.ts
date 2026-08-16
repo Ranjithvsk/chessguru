@@ -19,6 +19,7 @@ import { Connection } from "mongoose";
 import { promises as fs } from "fs";
 import { join } from "path";
 import { randomBytes } from "crypto";
+import sharp from "sharp";
 
 export const ACADEMY_IMAGES_DIR =
   process.env.CHESSGURU_ACADEMY_IMAGES_DIR ?? "/home/ubuntu/chessguru-academy-images";
@@ -251,13 +252,43 @@ export class AcademyProfileService {
     if (!this.isKnownKind(kind)) throw new BadRequestException("bad kind");
 
     await this.ensureDir();
+    // Logo uses a STABLE filename so the manifest endpoint's `<prefix>-logo.<ext>`
+    // convention can locate the PWA-sized siblings. Other kinds keep the
+    // timestamped filename (cache-buster on re-upload).
     const stamp = Date.now();
     const safeSub = subId ? subId.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 24) : "";
-    const filename = `${g.academyId}-${kind}${safeSub ? `-${safeSub}` : ""}-${stamp}.${ext}`;
-    await fs.writeFile(join(ACADEMY_IMAGES_DIR, filename), buf);
+    let filename: string;
+    if (kind === "logo") {
+      filename = `${g.academyId}-logo.${ext}`;
+      await fs.writeFile(join(ACADEMY_IMAGES_DIR, filename), buf);
+      await this.generatePwaIcons(g.academyId, buf);
+    } else {
+      filename = `${g.academyId}-${kind}${safeSub ? `-${safeSub}` : ""}-${stamp}.${ext}`;
+      await fs.writeFile(join(ACADEMY_IMAGES_DIR, filename), buf);
+    }
     const url = `/academy-img/${filename}`;
     await this.applyImageUrl(g.academyId, kind, subId, url);
     return { ok: true, url };
+  }
+
+  /** Generate 192/512/maskable-512 WebP siblings next to <academyId>-logo.<ext>
+   *  so the PWA manifest can serve correctly-sized icons for every tenant.
+   *  Maskable variant pads the logo to 70% of the frame on solid tenant-teal
+   *  so adaptive-icon cropping (Android/iOS) doesn't chop wordmark rings. */
+  private async generatePwaIcons(academyId: string, buf: Buffer): Promise<void> {
+    try {
+      const dir = ACADEMY_IMAGES_DIR;
+      const base = sharp(buf, { failOn: "none" });
+      await base.clone().resize(192, 192, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } })
+        .webp({ quality: 90 }).toFile(join(dir, `${academyId}-192.webp`));
+      await base.clone().resize(512, 512, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } })
+        .webp({ quality: 90 }).toFile(join(dir, `${academyId}-512.webp`));
+      // Maskable: inner 358x358 (~70% of 512) centered on solid teal frame.
+      const inner = await base.clone().resize(358, 358, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } }).png().toBuffer();
+      await sharp({ create: { width: 512, height: 512, channels: 4, background: { r: 20, g: 162, b: 184, alpha: 1 } } })
+        .composite([{ input: inner, gravity: "center" }])
+        .webp({ quality: 90 }).toFile(join(dir, `${academyId}-maskable-512.webp`));
+    } catch { /* logo save still succeeds; manifest falls back to single-file */ }
   }
 
   /** Text→image gen — supports Gemini 2.5-flash-image OR OpenAI gpt-image-1
@@ -342,8 +373,15 @@ export class AcademyProfileService {
     const stamp = Date.now();
     const safeSub = subId ? subId.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 24) : "";
     const filenameKind = subId ? kind.split(":")[0] : kind;
-    const filename = `${g.academyId}-${filenameKind}${safeSub ? `-${safeSub}` : ""}-${stamp}.png`;
-    await fs.writeFile(join(ACADEMY_IMAGES_DIR, filename), png);
+    let filename: string;
+    if (kind === "logo") {
+      filename = `${g.academyId}-logo.png`;
+      await fs.writeFile(join(ACADEMY_IMAGES_DIR, filename), png);
+      await this.generatePwaIcons(g.academyId, png);
+    } else {
+      filename = `${g.academyId}-${filenameKind}${safeSub ? `-${safeSub}` : ""}-${stamp}.png`;
+      await fs.writeFile(join(ACADEMY_IMAGES_DIR, filename), png);
+    }
     const publicUrl = `/academy-img/${filename}`;
     await this.applyImageUrl(g.academyId, kind, subId, publicUrl);
     return { ok: true, url: publicUrl };
