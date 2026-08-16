@@ -1,0 +1,42 @@
+// Parent Reports API.
+//
+//   POST   /api/parent-reports/preview       — { studentId, periodStart, periodEnd } → returns data only (no persist)
+//   POST   /api/parent-reports               — persist a report (creates a new record)
+//   GET    /api/parent-reports               — my saved reports (optionally ?studentId=)
+//   GET    /api/parent-reports/:id           — one report
+//   PATCH  /api/parent-reports/:id           — update coachNote / parentEmail
+//   POST   /api/parent-reports/:id/send      — mark as sent (Slice 6 MVP: sets sentAt only)
+//   DELETE /api/parent-reports/:id
+
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
+import { ParentReportsService } from "./parent-reports.service";
+
+@Controller("parent-reports")
+export class ParentReportsController {
+  constructor(private readonly svc: ParentReportsService) {}
+
+  @Post("preview")
+  preview(@Body() body: any, @Req() req: any) { return this.svc.preview(req?.session, body); }
+
+  @Post()
+  save(@Body() body: any, @Req() req: any) { return this.svc.save(req?.session, body); }
+
+  @Get()
+  list(@Query("studentId") studentId: string | undefined, @Req() req: any) {
+    return this.svc.list(req?.session, studentId);
+  }
+
+  @Get(":id")
+  get(@Param("id") id: string, @Req() req: any) { return this.svc.get(req?.session, id); }
+
+  @Patch(":id")
+  updateMeta(@Param("id") id: string, @Body() body: any, @Req() req: any) {
+    return this.svc.updateMeta(req?.session, id, body);
+  }
+
+  @Post(":id/send")
+  markSent(@Param("id") id: string, @Req() req: any) { return this.svc.markSent(req?.session, id); }
+
+  @Delete(":id")
+  remove(@Param("id") id: string, @Req() req: any) { return this.svc.remove(req?.session, id); }
+}

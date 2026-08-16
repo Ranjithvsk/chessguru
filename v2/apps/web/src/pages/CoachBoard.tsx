@@ -44,11 +44,16 @@ export default function CoachBoardPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-3 py-6">
-      <div className="mb-6">
-        <h1 className="font-display text-2xl text-white">Class Board</h1>
-        <p className="text-sm text-ink-400">
-          {d.studentCount} student{d.studentCount === 1 ? "" : "s"} · {red} needs attention · {amber} watch
-        </p>
+      <div className="mb-6 flex items-start justify-between gap-3">
+        <div>
+          <h1 className="font-display text-2xl text-white">Class Board</h1>
+          <p className="text-sm text-ink-400">
+            {d.studentCount} student{d.studentCount === 1 ? "" : "s"} · {red} needs attention · {amber} watch
+          </p>
+        </div>
+        <Link to="/coach-board/reports" className="rounded-lg border border-ink-700 px-3 py-2 text-xs text-ink-300 hover:bg-ink-800 hover:text-white">
+          📄 All reports
+        </Link>
       </div>
 
       {/* Class-wide weaknesses */}
@@ -104,27 +109,33 @@ function ClassWeaknessCard({ w, classSize }: { w: ClassWeakness; classSize: numb
 
 function StudentCard({ s }: { s: StudentRow }) {
   return (
-    <Link to={`/insights/students/${encodeURIComponent(s.userId)}`}
-      className={`flex flex-wrap items-center gap-3 rounded-xl border ${HEALTH_STYLES[s.health]} bg-ink-900 p-3 hover:bg-ink-800/60`}>
-      <div className="text-2xl">{HEALTH_DOT[s.health]}</div>
-      <div className="min-w-[140px] flex-1">
-        <div className="font-semibold text-white">{s.name || s.username}</div>
-        <div className="text-xs text-ink-500">{s.healthReason}</div>
-      </div>
-      <div className="grid grid-cols-4 gap-3 text-xs">
-        <StatCol label="Games" value={s.gamesAnalyzed} />
-        <StatCol label="Blunders" value={s.blunders} color={s.blunders > 0 ? "rose" : undefined} />
-        <StatCol label="Revise due" value={s.reviseDueNow} color={s.reviseDueNow > 5 ? "amber" : undefined} />
-        <StatCol label="Streak" value={s.reviseStreak} color={s.reviseStreak > 0 ? "emerald" : undefined} />
-      </div>
-      {s.topWeakness && (
-        <div className="hidden lg:block text-xs">
-          <div className="text-ink-500">Top weakness</div>
-          <div className="text-brand-200">{s.topWeakness.label} ({s.topWeakness.count})</div>
+    <div className={`flex flex-wrap items-center gap-3 rounded-xl border ${HEALTH_STYLES[s.health]} bg-ink-900 p-3`}>
+      <Link to={`/insights/students/${encodeURIComponent(s.userId)}`} className="flex flex-1 flex-wrap items-center gap-3 hover:opacity-90">
+        <div className="text-2xl">{HEALTH_DOT[s.health]}</div>
+        <div className="min-w-[140px] flex-1">
+          <div className="font-semibold text-white">{s.name || s.username}</div>
+          <div className="text-xs text-ink-500">{s.healthReason}</div>
         </div>
-      )}
-      {s.lastGameAt && <div className="hidden lg:block text-xs text-ink-500">Last game: {fmt(s.lastGameAt)}</div>}
-    </Link>
+        <div className="grid grid-cols-4 gap-3 text-xs">
+          <StatCol label="Games" value={s.gamesAnalyzed} />
+          <StatCol label="Blunders" value={s.blunders} color={s.blunders > 0 ? "rose" : undefined} />
+          <StatCol label="Revise due" value={s.reviseDueNow} color={s.reviseDueNow > 5 ? "amber" : undefined} />
+          <StatCol label="Streak" value={s.reviseStreak} color={s.reviseStreak > 0 ? "emerald" : undefined} />
+        </div>
+        {s.topWeakness && (
+          <div className="hidden lg:block text-xs">
+            <div className="text-ink-500">Top weakness</div>
+            <div className="text-brand-200">{s.topWeakness.label} ({s.topWeakness.count})</div>
+          </div>
+        )}
+        {s.lastGameAt && <div className="hidden lg:block text-xs text-ink-500">Last game: {fmt(s.lastGameAt)}</div>}
+      </Link>
+      <Link to={`/coach-board/reports/new/${encodeURIComponent(s.userId)}`}
+        title="Generate parent report"
+        className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-white">
+        📄 Report
+      </Link>
+    </div>
   );
 }
 
