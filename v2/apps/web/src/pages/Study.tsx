@@ -40,20 +40,42 @@ function StudyCard({ s, level }: { s: StudyDef; level?: StudyLevel }) {
 
 export default function StudyPage() {
   const [levels, setLevels] = useState<Record<string, StudyLevel>>({});
+  const [q, setQ] = useState("");
   useEffect(() => { studyLevels().then(setLevels).catch(() => { /* ratings optional */ }); }, []);
 
-  const memory = STUDIES.filter((s) => s.kind === "memory");
-  const rest = STUDIES.filter((s) => s.kind !== "memory");
+  const needle = q.trim().toLowerCase();
+  const matchStudy = (s: StudyDef) => !needle || [s.title, s.blurb, s.detail, s.mateIn, s.id].some((v) => (v || "").toLowerCase().includes(needle));
+  // Hardcoded cards live as JSX below; match them on any of their words.
+  const HARDCODED_TEXT: Record<string, string> = {
+    "promote-one-pawn": "Promote One Pawn pawn endings promotion rule square key squares floating exam",
+    "opposition": "Opposition direct distant very distant Neustadtl Mattison Drtina Dvoretsky king",
+    "rule-of-square": "Rule of the Square King Pawn catch tablebase double-step opposition key",
+    "key-squares": "Key Squares king winning tap rook pawn",
+  };
+  const matchHardcoded = (id: keyof typeof HARDCODED_TEXT) => !needle || HARDCODED_TEXT[id].toLowerCase().includes(needle);
+  const memory = STUDIES.filter((s) => s.kind === "memory" && matchStudy(s));
+  const rest = STUDIES.filter((s) => s.kind !== "memory" && matchStudy(s));
+  const anyHardcoded = matchHardcoded("promote-one-pawn") || matchHardcoded("opposition") || matchHardcoded("rule-of-square") || matchHardcoded("key-squares");
+  const totalMatches = memory.length + rest.length + (needle ? [matchHardcoded("promote-one-pawn"), matchHardcoded("opposition"), matchHardcoded("rule-of-square"), matchHardcoded("key-squares")].filter(Boolean).length : 4);
 
   return (
     <div className="space-y-10">
       <section className="space-y-6">
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-400">Part 1</div>
-          <h1 className="font-display text-2xl text-white">Studies</h1>
-          <p className="text-sm text-ink-400">Endgame technique trainers — you play the winning side, Stockfish defends at full strength. The ★ rating is each drills difficulty (calibrated from play).</p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-400">Part 1</div>
+            <h1 className="font-display text-2xl text-white">Studies</h1>
+            <p className="text-sm text-ink-400">Endgame technique trainers — you play the winning side, Stockfish defends at full strength. The ★ rating is each drills difficulty (calibrated from play).</p>
+          </div>
+          <div className="shrink-0">
+            <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search studies…" className="w-64 rounded-lg border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm text-white placeholder-ink-500 focus:border-brand-400 focus:outline-none" />
+            {needle && (
+              <div className="mt-1 text-right text-[11px] text-ink-500">{totalMatches} match{totalMatches === 1 ? "" : "es"}</div>
+            )}
+          </div>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
+          {matchHardcoded("promote-one-pawn") && (
           <Link to="/study/promote"
             className="group flex flex-col rounded-xl2 border border-ink-700 bg-ink-900 p-5 transition hover:border-brand-500 hover:bg-ink-800">
             <div className="flex items-center gap-3">
@@ -69,6 +91,8 @@ export default function StudyPage() {
               <span className="shrink-0 text-sm font-semibold text-brand-400 group-hover:text-brand-300">Start →</span>
             </div>
           </Link>
+          )}
+          {matchHardcoded("opposition") && (
           <Link to="/study/opposition"
             className="group flex flex-col rounded-xl2 border border-ink-700 bg-ink-900 p-5 transition hover:border-brand-500 hover:bg-ink-800">
             <div className="flex items-center gap-3">
@@ -84,6 +108,8 @@ export default function StudyPage() {
               <span className="shrink-0 text-sm font-semibold text-brand-400 group-hover:text-brand-300">Start →</span>
             </div>
           </Link>
+          )}
+          {matchHardcoded("rule-of-square") && (
           <Link to="/study/endgame"
             className="group flex flex-col rounded-xl2 border border-ink-700 bg-ink-900 p-5 transition hover:border-brand-500 hover:bg-ink-800">
             <div className="flex items-center gap-3">
@@ -99,6 +125,8 @@ export default function StudyPage() {
               <span className="shrink-0 text-sm font-semibold text-brand-400 group-hover:text-brand-300">Start →</span>
             </div>
           </Link>
+          )}
+          {matchHardcoded("key-squares") && (
           <Link to="/study/key-squares"
             className="group flex flex-col rounded-xl2 border border-ink-700 bg-ink-900 p-5 transition hover:border-brand-500 hover:bg-ink-800">
             <div className="flex items-center gap-3">
@@ -114,6 +142,7 @@ export default function StudyPage() {
               <span className="shrink-0 text-sm font-semibold text-brand-400 group-hover:text-brand-300">Start →</span>
             </div>
           </Link>
+          )}
           {rest.map((s) => <StudyCard key={s.id} s={s} level={levels[s.id]} />)}
         </div>
         <p className="text-xs text-ink-500">More studies coming — triangulation, corresponding squares…</p>
