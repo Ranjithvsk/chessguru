@@ -640,56 +640,53 @@ export default function BoardEditorPage() {
             onConfirm={async (corners: Corner[]) => {
               setAdjusterOpen(false);
               setServerBusy(true);
-              setServerMsg({ tone: "info", text: "✂ Re-warping with your corners + running Server AI…" });
+              setServerMsg({ tone: "info", text: "✂ Warping with your corners on the server…" });
               try {
-                // NB: crossOrigin removed — was breaking data: URL loading on
-                // iOS Safari, throwing before any HTTP request went out (user
-                // saw "manual warp failed" with no server log). data: URLs
-                // don't cross an origin so the attribute is meaningless here.
-                const img = new Image();
-                await new Promise<void>((res, rej) => {
-                  img.onload = () => res();
-                  img.onerror = () => rej(new Error("image reload"));
-                  img.src = rawUploadDataUrl;
+                const rawB64 = rawUploadDataUrl.replace(/^data:image\/[a-z]+;base64,/, "");
+                // SERVER-SIDE warp — replaces the 10 MB opencv.js download that
+                // was killing cellular users. Server does cv2 warp in ~200ms
+                // and returns a 512x512 board PNG we can classify.
+                const warpR = await fetch(`${API_BASE}/api/vision/warp-with-corners`, {
+                  method: "POST", credentials: "include",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ rawImagePngBase64: rawB64, corners }),
                 });
-                // 15-sec bail — if warp doesn't return by then, show real error
-                // instead of hanging in "Working…"
-                const warpPromise = warpWithCorners(img, corners);
-                const warpTimeout = new Promise<null>((_r, rej) =>
-                  setTimeout(() => rej(new Error("warp timeout 15s — opencv slow/broken")), 15000));
-                const warped = await Promise.race([warpPromise, warpTimeout]);
-                if (!warped) throw new Error("warp failed (opencv returned null — check /vendor/opencv-4.x.js loaded?)");
-                setVisionSnapshot((prev) => prev ? { ...prev, canvas: warped.canvas } : prev);
-                setVisionPreview(warped.canvas.toDataURL("image/png"));
-                // AWAIT the corner-label save (was fire-and-forget which iOS
-                // Safari dropped when the follow-up classify request dominated
-                // the network queue — 0 saves landed for a whole day). This
-                // sample is the training signal for the nightly retrain, so
-                // losing it silently was the reason auto-improvement stalled.
+                if (!warpR.ok) throw new Error(`server warp ${warpR.status}: ${(await warpR.text()).slice(0, 120)}`);
+                const warpJ = await warpR.json();
+                if (!warpJ?.boardPngBase64) throw new Error("server warp returned no board");
+                // Save corner labels for the nightly retrain (awaited so it
+                // doesn't get dropped by iOS Safari queue).
                 try {
-                  const rawB64 = rawUploadDataUrl.replace(/^data:image\/[a-z]+;base64,/, "");
                   const saveR = await fetch(`${API_BASE}/api/vision/save-corner-labels`, {
                     method: "POST", credentials: "include",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ rawImagePngBase64: rawB64, corners, sourceRef: "board-editor-adjust" }),
                   });
-                  if (saveR.ok) setServerMsg({ tone: "ok", text: "✓ Saved corners for nightly training. Classifying…" });
+                  if (saveR.ok) setServerMsg({ tone: "ok", text: "✓ Corners saved. Classifying…" });
                 } catch { /* save failure shouldn't block the classify below */ }
-                // Log the manually-warped result too (fire-and-forget, less
-                // critical than the raw+corners sample above).
-                try {
-                  const b64 = warped.canvas.toDataURL("image/png").replace(/^data:image\/[a-z]+;base64,/, "");
-                  void fetch(`${API_BASE}/api/vision/log-scan`, {
-                    method: "POST", credentials: "include",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ boardPngBase64: b64, source: "manual-warp" }),
-                  }).catch(() => {});
-                } catch { /* silent */ }
-                await runServerClassifyOnCanvas(warped.canvas);
+                // Set preview + classify using the server's warped board
+                setVisionPreview(`data:image/png;base64,${warpJ.boardPngBase64}`);
+                setServerMsg({ tone: "info", text: "🚀 Server AI classifying (2-8s)…" });
+                const classR = await fetch(`${API_BASE}/api/vision/classify-board-v2`, {
+                  method: "POST", credentials: "include",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ boardPngBase64: warpJ.boardPngBase64 }),
+                });
+                if (!classR.ok) throw new Error(`classify ${classR.status}: ${(await classR.text()).slice(0, 120)}`);
+                const classJ = await classR.json();
+                const placed = fp.loadPermissive(classJ.fen);
+                const legal = fp.load(classJ.fen);
+                const pieceCount = classJ.fen.split(" ")[0].replace(/[^KQRBNPkqrbnp]/g, "").length;
+                const avgConf = (classJ.squares.flat().reduce((s: number, sq: any) => s + sq.confidence, 0) / 64 * 100).toFixed(0);
+                setServerMsg({
+                  tone: placed ? "ok" : "err",
+                  text: placed
+                    ? `${legal ? "✓" : "⚠"} Loaded ${pieceCount} pieces (conf ${avgConf}%). ${legal ? "" : "Position illegal — fix wrong squares."}`
+                    : "Couldn't parse FEN.",
+                });
               } catch (e) {
-                setServerMsg({ tone: "err", text: `Manual warp failed: ${(e as Error).message.slice(0, 120)}` });
-                setServerBusy(false);
-              }
+                setServerMsg({ tone: "err", text: `Manual warp failed: ${(e as Error).message.slice(0, 160)}` });
+              } finally { setServerBusy(false); }
             }}
           />
         )}

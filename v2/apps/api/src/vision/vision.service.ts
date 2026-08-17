@@ -543,6 +543,28 @@ export class VisionService {
     const j = await r.json() as any;
     return { ...j, extractLatencyMs };
   }
+
+  /** Server-side warp with user-drawn corners. Proxies to Python /warp-with-corners
+   *  which does cv2.getPerspectiveTransform + warpPerspective. Client uses this
+   *  INSTEAD of downloading the 10 MB opencv.js WASM (which was killing mobile
+   *  users on cellular after they tapped Adjust Corners → wait 50s → freeze). */
+  async warpWithCorners(rawImagePngBase64: string, corners: Array<{ x: number; y: number }>) {
+    const rawB64 = rawImagePngBase64.replace(/^data:image\/[a-z]+;base64,/, "");
+    if (rawB64.length < 500 || rawB64.length > 20_000_000) {
+      throw new Error("raw image out of range (need 500B-20MB base64)");
+    }
+    logScanImage(Buffer.from(rawB64, "base64"), "warp-raw");
+    const r = await fetch("http://127.0.0.1:5100/warp-with-corners", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image_base64: rawB64, corners }),
+    });
+    if (!r.ok) {
+      const txt = await r.text().catch(() => r.statusText);
+      throw new Error(`warp service ${r.status}: ${txt.slice(0, 200)}`);
+    }
+    return await r.json();
+  }
 }
 
 /** Cosine similarity nearest-neighbour against L2-normed refs.

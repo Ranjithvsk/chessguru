@@ -124,6 +124,25 @@ export class VisionController {
     }
   }
 
+  /** Server-side warp with user-drawn corners. Client sends raw image +
+   *  4 corner coords (from CornerAdjuster); we proxy to the Python vision
+   *  service which does the perspective warp via cv2 and returns a 512x512
+   *  board PNG. Replaces the 10 MB opencv.js download that was killing
+   *  mobile users on cellular. */
+  @Post("warp-with-corners")
+  async warpWithCorners(
+    @Body() body: { rawImagePngBase64: string; corners: Array<{ x: number; y: number }> },
+  ) {
+    if (!body?.rawImagePngBase64 || body?.corners?.length !== 4) {
+      throw new BadRequestException("rawImagePngBase64 + 4 corners required");
+    }
+    try {
+      return await this.svc.warpWithCorners(body.rawImagePngBase64, body.corners);
+    } catch (e) {
+      throw new BadRequestException((e as Error).message);
+    }
+  }
+
   /** Save a user-adjusted set of 4 board corners (from the manual
    *  CornerAdjuster UI). Every save becomes a real ground-truth sample the
    *  nightly YOLO extractor retrain folds in — heavily weighted since it
