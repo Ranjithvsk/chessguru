@@ -122,6 +122,11 @@ export default function BoardEditorPage() {
   const [rawUploadDataUrl, setRawUploadDataUrl] = useState<string | null>(null);
   // Fetch the crowd-sourced reference bank on first mount. See loadServerRefsOnce.
   useEffect(() => { void loadServerRefsOnce(); }, []);
+  // NB: previously auto-preloaded OpenCV.js here to "warm the cache" for
+  // Adjust-Corners. Removed 2026-08-17 — the 10 MB <script> load runs the
+  // WASM init on the main thread and froze the tab for 5-10 sec on mobile
+  // right after upload. OpenCV now loads on-demand ONLY if the user opens
+  // Adjust Corners (which pays that cost visibly, not silently at mount).
   // Position-editor mode: when on, board clicks PLACE a piece (from palette)
   // or CLEAR the square. Uses a private Chess() so we can put/remove without
   // chess.js's move-legality guard rejecting arbitrary edits. Applying the
@@ -363,17 +368,17 @@ export default function BoardEditorPage() {
       });
       if (!r.ok) throw new Error(await r.text());
       const j = await r.json();
-      // Warp-quality gate: if the server graded the crop "bad" (mis-aligned to
-      // 8×8 grid, black-bar bleed, off-board scene) the FEN below is garbage.
-      // Skip placing pieces + auto-open CornerAdjuster so the user corrects it.
+      // Warp-quality gate: if the server graded the crop "bad", warn the user
+      // but STILL populate whatever the classifier returned — the "Adjust
+      // corners" button is available if they want to fix it manually. We
+      // no longer AUTO-OPEN the CornerAdjuster because on mobile the OpenCV
+      // WASM warp freezes the tab; users can hit the button explicitly.
       const wq = j.warpQuality as { quality?: string; score?: number } | undefined;
       if (wq?.quality === "bad") {
         setServerMsg({
           tone: "err",
-          text: `Auto-crop looked wrong (score ${wq.score ?? 0}). Drag the 4 corners to the board's edges.`,
+          text: `Auto-crop looked wrong (score ${wq.score ?? 0}). Result below is a best-guess — drag pieces to fix, or tap "✂ Adjust corners" for a manual re-crop.`,
         });
-        setAdjusterOpen(true);
-        return;
       }
       const placed = fp.loadPermissive(j.fen);
       const legal = fp.load(j.fen);
@@ -466,6 +471,16 @@ export default function BoardEditorPage() {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+      {/* Big top-of-screen status banner so users know a scan is in flight —
+       *  previous <11px badges got missed below the fold on mobile and users
+       *  reported "no response". Fixed to viewport top so it's always visible. */}
+      {serverBusy && (
+        <div className="fixed top-0 left-0 right-0 z-40 bg-brand-500 px-3 py-2 text-center text-sm font-semibold text-white shadow-lg">
+          <span className="inline-block animate-pulse">⏳</span>
+          {" "}
+          {serverMsg?.text || "Processing image…"}
+        </div>
+      )}
       <section>
         <Board fen={editorFen ?? fp.fen} orientation={fp.orientation} turnColor={fp.turnColor}
           movableColor={editMode ? undefined : "both"} dests={editMode ? new Map() : fp.dests}
