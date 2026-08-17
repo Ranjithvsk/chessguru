@@ -15,6 +15,7 @@ export interface Book {
   publisher?: string;
   year?: number;
   coverImageUrl?: string;
+  pdfUrl?: string;
   chapters: BookChapter[];
   isSeeded: boolean;
   addedByUserId?: string;
@@ -27,6 +28,8 @@ export interface BookSummary {
   publisher?: string;
   year?: number;
   isSeeded: boolean;
+  coverImageUrl?: string;
+  pdfUrl?: string;
 }
 
 export interface BookProgress {

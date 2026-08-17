@@ -497,6 +497,11 @@ server {
     add_header Cache-Control "public, max-age=86400";
     access_log off;
   }
+  location /book-files/ {
+    alias /home/ubuntu/chessguru-book-files/;
+    add_header Cache-Control "public, max-age=86400";
+    access_log off;
+  }
 
   location /v2api/ {
     proxy_pass http://localhost:4000/;

@@ -69,8 +69,28 @@ export default function BookDetailPage() {
       <Link to="/books" className="mb-3 inline-block text-xs text-ink-400 hover:text-ink-200">← Book library</Link>
 
       <div className="mb-4 rounded-xl2 border border-ink-700 bg-ink-900 p-4">
-        <div className="mb-1 text-xs text-ink-400">{book.author}{book.publisher ? ` · ${book.publisher}` : ""}{book.year ? ` · ${book.year}` : ""}</div>
-        <h1 className="font-display text-2xl text-white">{book.title}</h1>
+        <div className="flex gap-4">
+          {book.coverImageUrl && (
+            <img src={book.coverImageUrl} alt=""
+              className="h-32 w-24 flex-shrink-0 rounded border border-ink-700 object-cover" />
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="mb-1 text-xs text-ink-400">{book.author}{book.publisher ? ` · ${book.publisher}` : ""}{book.year ? ` · ${book.year}` : ""}</div>
+            <h1 className="font-display text-2xl text-white">{book.title}</h1>
+            {book.pdfUrl && (
+              <div className="mt-3 flex gap-2">
+                <a href={book.pdfUrl} target="_blank" rel="noreferrer"
+                  className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500">
+                  📖 Read PDF
+                </a>
+                <a href={book.pdfUrl} download
+                  className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-200 hover:bg-ink-800">
+                  ⬇ Download
+                </a>
+              </div>
+            )}
+          </div>
+        </div>
         <div className="mt-3 flex items-center gap-3">
           <div className="flex-1 h-2 rounded-full bg-ink-800 overflow-hidden">
             <div className="h-full bg-emerald-500" style={{ width: `${pct}%` }} />

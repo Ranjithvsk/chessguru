@@ -78,15 +78,24 @@ export default function BooksListPage() {
 function BookCard({ b }: { b: BookSummary }) {
   return (
     <Link to={`/books/${encodeURIComponent(b._id)}`}
-      className="group flex flex-col rounded-xl2 border border-ink-700 bg-ink-900 p-4 transition hover:border-brand-500/60 hover:shadow-glow">
-      <div className="mb-2 flex items-center gap-2 text-xs text-ink-400">
-        <span className="text-lg">📚</span>
-        <span>{b.author}</span>
-        {b.year && <span className="text-ink-500">· {b.year}</span>}
-        {!b.isSeeded && <span className="ml-auto rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] text-amber-200">Custom</span>}
+      className="group flex gap-3 rounded-xl2 border border-ink-700 bg-ink-900 p-4 transition hover:border-brand-500/60 hover:shadow-glow">
+      {b.coverImageUrl ? (
+        <img src={b.coverImageUrl} alt="" className="h-24 w-16 flex-shrink-0 rounded border border-ink-700 object-cover" />
+      ) : (
+        <div className="flex h-24 w-16 flex-shrink-0 items-center justify-center rounded border border-ink-700 bg-ink-800 text-3xl">📚</div>
+      )}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="mb-1 flex items-center gap-2 text-xs text-ink-400">
+          <span className="truncate">{b.author}</span>
+          {b.year && <span className="text-ink-500">· {b.year}</span>}
+          {!b.isSeeded && <span className="ml-auto rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] text-amber-200">Custom</span>}
+        </div>
+        <h3 className="line-clamp-3 flex-1 font-semibold text-white group-hover:text-brand-200">{b.title}</h3>
+        <div className="mt-2 flex items-center gap-2 text-[11px] text-ink-500">
+          {b.publisher && <span className="truncate">{b.publisher}</span>}
+          {b.pdfUrl && <span className="ml-auto rounded-full bg-brand-500/20 px-2 py-0.5 text-brand-200">📖 PDF</span>}
+        </div>
       </div>
-      <h3 className="line-clamp-3 flex-1 font-semibold text-white group-hover:text-brand-200">{b.title}</h3>
-      {b.publisher && <div className="mt-2 text-[11px] text-ink-500">{b.publisher}</div>}
     </Link>
   );
 }

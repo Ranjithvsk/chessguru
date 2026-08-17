@@ -19,6 +19,8 @@ export interface SeedBook {
   publisher?: string;
   year?: number;
   chapters: SeedChapter[];
+  pdfUrl?: string;
+  coverImageUrl?: string;
 }
 
 // A pragmatic starter set — 30 books coaches actually assign. Chapter data
@@ -86,6 +88,8 @@ export const SEED_BOOKS: SeedBook[] = [
     author: "Artur Yusupov",
     publisher: "Quality Chess",
     year: 2008,
+    pdfUrl: "/book-files/yusupov-build-up-1.pdf",
+    coverImageUrl: "/book-files/yusupov-build-up-1-cover.jpg",
     chapters: [
       { number: 1, title: "Mating motifs 1",         tags: ["mating patterns", "checkmate"] },
       { number: 2, title: "The value of the pieces", tags: ["material", "piece values"] },

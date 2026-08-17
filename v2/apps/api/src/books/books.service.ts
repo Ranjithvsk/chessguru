@@ -39,6 +39,7 @@ export interface BookDoc {
   publisher?: string;
   year?: number;
   coverImageUrl?: string;
+  pdfUrl?: string;               // static-served PDF, e.g. /book-files/<slug>.pdf
   chapters: Chapter[];
   isSeeded: boolean;
   addedByUserId?: string;
@@ -76,24 +77,21 @@ export class BooksService implements OnModuleInit {
   async onModuleInit() {
     try {
       for (const s of SEED_BOOKS) {
-        await this.books().updateOne(
-          { _id: s._id },
-          {
-            $set: {
-              title: s.title,
-              author: s.author,
-              publisher: s.publisher,
-              year: s.year,
-              chapters: s.chapters,
-              isSeeded: true,
-              updatedAt: new Date(),
-            },
-            $setOnInsert: {
-              createdAt: new Date(),
-            },
-          },
-          { upsert: true },
-        );
+        const set: any = {
+          title: s.title,
+          author: s.author,
+          publisher: s.publisher,
+          year: s.year,
+          chapters: s.chapters,
+          isSeeded: true,
+          updatedAt: new Date(),
+        };
+        const unset: any = {};
+        if (s.pdfUrl) set.pdfUrl = s.pdfUrl; else unset.pdfUrl = "";
+        if (s.coverImageUrl) set.coverImageUrl = s.coverImageUrl; else unset.coverImageUrl = "";
+        const update: any = { $set: set, $setOnInsert: { createdAt: new Date() } };
+        if (Object.keys(unset).length) update.$unset = unset;
+        await this.books().updateOne({ _id: s._id }, update, { upsert: true });
       }
     } catch (e) {
       console.error("[books] seed upsert failed:", (e as any)?.message || e);
