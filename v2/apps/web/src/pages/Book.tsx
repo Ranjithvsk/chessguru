@@ -21,11 +21,13 @@ type Puz = {
   goal?: "win" | "draw"; rating?: number; band?: string; emRate?: EmRate;
 };
 
-type Book = { slug: string; title: string; subtitle: string; mode: "pages"; pages: number; imgBase: string; initialPage: number; defaultAspect: string };
+type Book = { slug: string; title: string; subtitle: string; mode: "pages"; pages: number; imgBase: string; initialPage: number; defaultAspect: string; imgExt?: "png" | "jpg" };
 const BOOKS: Book[] = [
   { slug: "2000-tactical", title: "2000 Tactical Chess", subtitle: "Part 4: Chess Endings — preview (pp.1–10)", mode: "pages", pages: 10, imgBase: "bookimg/", initialPage: 9, defaultAspect: "750 / 1125" },
   { slug: "endgame-manual", title: "Dvoretsky's Endgame Manual", subtitle: "Chapter 1 · Pawn Endgames — flip through the book; click any diagram with a ▶ to play it (engine-verified, Maia-rated)", mode: "pages", pages: 120, imgBase: "bookimg/endgame-manual/", initialPage: 18, defaultAspect: "1240 / 1755" },
+  { slug: "yusupov-build-up-1", title: "Build Up Your Chess 1 — The Fundamentals", subtitle: "Artur Yusupov · full book (266 pages) — flip through; clickable diagrams coming via vision extractor", mode: "pages", pages: 266, imgBase: "book-files/yusupov-build-up-1/", initialPage: 1, defaultAspect: "900 / 1273", imgExt: "jpg" },
 ];
+const bookExt = (b: Book) => b.imgExt ?? "png";
 
 const PUZZLES: Record<number, Puz[]> = {
   9: [
@@ -556,9 +558,9 @@ export default function BookPage() {
   // Preload neighbouring pages so Prev/Next feels instant.
   useEffect(() => {
     for (const p of [page + 1, page + 2, page + 3, page - 1]) {
-      if (p >= 1 && p <= book.pages) { const im = new Image(); im.src = `${BASE}${book.imgBase}p${p}.png`; }
+      if (p >= 1 && p <= book.pages) { const im = new Image(); im.src = `${BASE}${book.imgBase}p${p}.${bookExt(book)}`; }
     }
-  }, [page, book.imgBase, book.pages]);
+  }, [page, book.imgBase, book.pages, book]);
 
   // Page-image loading + aspect (read from the actual image so the browser is common to
   // any book, whatever the page dimensions; keeps the box stable → no layout shift).
@@ -775,7 +777,7 @@ export default function BookPage() {
                 <button key={b.slug} onClick={() => openBook(b.slug)}
                   className="group flex flex-col overflow-hidden rounded-xl border border-ink-700 bg-ink-900 text-left shadow-lg transition hover:-translate-y-0.5 hover:border-brand-500 hover:shadow-brand-900/40">
                   <div className="relative aspect-[3/4] w-full overflow-hidden bg-white">
-                    <img src={`${BASE}${b.imgBase}p1.png`} alt={b.title} loading="lazy" className="h-full w-full object-cover" />
+                    <img src={`${BASE}${b.imgBase}p1.${bookExt(b)}`} alt={b.title} loading="lazy" className="h-full w-full object-cover" />
                     <span className="pointer-events-none absolute inset-y-0 left-0 w-2 bg-gradient-to-r from-black/45 to-transparent" />
                     <span className="absolute bottom-1 right-1 rounded bg-black/65 px-1.5 py-0.5 text-[10px] font-medium text-white">p{lp}/{b.pages}</span>
                   </div>
@@ -834,7 +836,7 @@ export default function BookPage() {
           {/* the page — full quality, fixed aspect so no layout shift, spinner while loading */}
           <div className="relative w-full overflow-hidden rounded-lg bg-white shadow-lg shadow-black/30" style={{ aspectRatio: aspect }}>
             {!imgLoaded && <div className="absolute inset-0 z-10 flex items-center justify-center bg-ink-900/10"><div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" /></div>}
-            <img ref={imgRef} key={page} src={`${BASE}${book.imgBase}p${page}.png`} alt={`page ${page}`}
+            <img ref={imgRef} key={page} src={`${BASE}${book.imgBase}p${page}.${bookExt(book)}`} alt={`page ${page}`}
               onLoad={onImg} className="absolute inset-0 h-full w-full object-contain" />
             {(bookPuzzles[page] || []).map((pz) => (
               <button key={pz.n} onClick={() => start(pz)} title={`Play ${pz.num ?? "#" + pz.n}`}
@@ -1014,7 +1016,7 @@ export default function BookPage() {
             <>
               <p className="mb-2 mt-4 text-xs text-ink-500">Book page {pp} — scroll to read; click any other diagram to switch:</p>
               <div className="relative mx-auto w-full max-w-xl">
-                <img src={`${BASE}${book.imgBase}p${pp}.png`} alt={`book page ${pp}`} className="w-full rounded-lg bg-white" />
+                <img src={`${BASE}${book.imgBase}p${pp}.${bookExt(book)}`} alt={`book page ${pp}`} className="w-full rounded-lg bg-white" />
                 {(bookPuzzles[pp] || []).map((pz) => (
                   <button key={pz.n} onClick={() => start(pz)} title={`Play ${pz.num ?? "#" + pz.n}`}
                     style={{ left: `${pz.bb![0]}%`, top: `${pz.bb![1]}%`, width: `${pz.bb![2]}%`, height: `${pz.bb![3]}%` }}
