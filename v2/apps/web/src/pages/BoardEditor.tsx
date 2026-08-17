@@ -278,66 +278,13 @@ export default function BoardEditorPage() {
     // returns warpQuality:"bad", the client-warp call overwrites with the good
     // result once it lands (~5-8s total).
     void runUltraScan(undefined, rawDataUrl);
-    try {
-      const res = await detectPositionFromImage(src);
-      const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
-      const shapes: Array<{ orig: string; brush: string }> = [];
-      let uncertain = 0;
-      for (let r = 0; r < 8; r++) {
-        for (let c = 0; c < 8; c++) {
-          const conf = res.confidence[r]?.[c] ?? 1;
-          if (conf < 0.6) {
-            uncertain++;
-            shapes.push({ orig: `${files[c]}${8 - r}`, brush: "yellow" });
-          }
-        }
-      }
-      setUncertainShapes(shapes);
-      setVisionPreview(res.imageDataUrl);
-      setVisionMeta({ w: res.meta.whiteCount, b: res.meta.blackCount, uncertain });
-      // Freeze the cropped board + per-square types so applyEditor can
-      // capture coach corrections against them for feedback upload.
-      try {
-        const cvs = await dataUrlToCanvas(res.imageDataUrl);
-        setVisionSnapshot({ types: res.types, canvas: cvs, renderMode: res.meta.renderMode });
-        // Also upload the WARPED/CROPPED board (not the raw phone photo) to
-        // the server log so we can debug pipeline steps separately.
-        try {
-          const warpedB64 = cvs.toDataURL("image/png").replace(/^data:image\/[a-z]+;base64,/, "");
-          void fetch(`${API_BASE}/api/vision/log-scan`, {
-            method: "POST", credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ boardPngBase64: warpedB64, source: "warped-crop" }),
-          }).catch(() => {});
-        } catch { /* silent */ }
-        // Re-fire Ultra AI now with the client-side OpenCV warp attached —
-        // this is the RELIABLE path (server skips its own extractor). The
-        // earlier upload-time call raced without the warp and often produced
-        // a "bad" quality warp when the server re-extractor misaligned. The
-        // second call overwrites the first result if it succeeds. Debounced
-        // by serverBusy guard inside runUltraScan → free no-op if the raw
-        // call is still in flight.
-        void runUltraScan(cvs);
-      } catch { /* corrections just won't be captured this run */ }
-      // Always populate: even an illegal FEN has many correct pieces the coach
-      // can keep and only fix the wrong squares. Never discard partial finds.
-      const ok = fp.loadPermissive(res.fen);
-      const legal = fp.load(res.fen); // for reporting; may fail while ok stays true
-      if (ok) {
-        const nudge = uncertain > 0
-          ? ` ⚠ ${uncertain} yellow-ringed square${uncertain === 1 ? "" : "s"} need a second look.`
-          : "";
-        const cropTag = res.autoDetected
-          ? `✓ Auto-found board (score ${res.autoScore}/64).`
-          : `⚠ Couldn't find a board — used the whole image. Crop tighter and re-upload for better results.`;
-        const modeTag = res.meta.renderMode === "print" ? " · book/print mode" : "";
-        const legalTag = legal ? "" : " · position illegal — fix the misread squares";
-        setVisionMsg({ tone: res.autoDetected ? "ok" : "info", text: `${cropTag} Loaded ${res.meta.whiteCount}W + ${res.meta.blackCount}B${modeTag}${legalTag}.${nudge}` });
-      }
-      else setVisionMsg({ tone: "err", text: "Couldn't parse FEN at all. Try a cleaner photo." });
-    } catch (e) {
-      setVisionMsg({ tone: "err", text: String((e as Error).message || e) });
-    } finally { setVisionBusy(false); }
+    // DISABLED heavy client-side detectPositionFromImage on the auto-upload
+    // path — it loads OpenCV.js (10 MB parse) + runs 64 onnxruntime-web
+    // inferences on the main thread, freezing the page for 7-10 seconds on
+    // mobile (users saw a blank page with no loading indicator). Ultra AI
+    // (server-side) delivers the same result without blocking. If the crop
+    // is bad, ENG-1's warpQuality gate auto-opens CornerAdjuster, and
+    // OpenCV.js only loads on-demand when the user hits Confirm.
   }
   /** Send the given cropped-board canvas to the v3.6 server classifier.
    *  Extracted from runServerClassify so we can auto-trigger it right

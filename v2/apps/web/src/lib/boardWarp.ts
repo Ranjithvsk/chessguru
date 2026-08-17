@@ -82,13 +82,22 @@ export async function warpWithCorners(
   try { cv = await loadOpenCV(); } catch { return null; }
   const sw = "naturalWidth" in source ? source.naturalWidth : source.width;
   const sh = "naturalHeight" in source ? source.naturalHeight : source.height;
+  // Pre-scale the source before OpenCV.warpPerspective — a 4032x3024
+  // phone photo takes 10+ seconds on mobile WASM main thread (froze the
+  // whole tab after "Confirm & re-classify"). Target ~1500px longest side;
+  // scale corner coords proportionally. Output is 480x480 so any source
+  // >1500px is wasted work.
+  const MAX_SIDE = 1500;
+  const scale = Math.min(1, MAX_SIDE / Math.max(sw, sh));
+  const drawW = Math.round(sw * scale);
+  const drawH = Math.round(sh * scale);
   const fullSrcCanvas = document.createElement("canvas");
-  fullSrcCanvas.width = sw; fullSrcCanvas.height = sh;
-  fullSrcCanvas.getContext("2d")!.drawImage(source, 0, 0);
+  fullSrcCanvas.width = drawW; fullSrcCanvas.height = drawH;
+  fullSrcCanvas.getContext("2d")!.drawImage(source, 0, 0, drawW, drawH);
   const fullSrc = cv.imread(fullSrcCanvas);
   const dst = new cv.Mat();
   const OUT = 480;
-  const ordered = orderCorners(corners);
+  const ordered = orderCorners(corners).map((p) => ({ x: p.x * scale, y: p.y * scale }));
   const srcPoints = cv.matFromArray(4, 1, cv.CV_32FC2,
     [ordered[0]!.x, ordered[0]!.y, ordered[1]!.x, ordered[1]!.y,
      ordered[2]!.x, ordered[2]!.y, ordered[3]!.x, ordered[3]!.y]);
