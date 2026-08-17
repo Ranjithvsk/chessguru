@@ -602,26 +602,24 @@ export default function BoardEditorPage() {
               )}
             </div>
           )}
-          {visionSnapshot && (
+          {rawUploadDataUrl && (
             <div className="mt-3 border-t border-brand-500/20 pt-2 flex flex-wrap gap-2 items-center">
-              <button onClick={runServerClassify} disabled={serverBusy}
-                className="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-500 disabled:cursor-wait disabled:bg-brand-800">
-                {serverBusy ? "🚀 Classifying…" : "🚀 Try Server AI (DINOv2)"}
+              {visionSnapshot && (
+                <button onClick={runServerClassify} disabled={serverBusy}
+                  className="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-500 disabled:cursor-wait disabled:bg-brand-800">
+                  {serverBusy ? "🚀 Classifying…" : "🚀 Try Server AI (DINOv2)"}
+                </button>
+              )}
+              <button onClick={() => runUltraScan()} disabled={serverBusy}
+                className="inline-flex items-center gap-1 rounded-lg bg-gradient-to-br from-fuchsia-600 to-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:from-fuchsia-500 hover:to-brand-500 disabled:cursor-wait disabled:opacity-60"
+                title="Ultra AI: YOLO segmentation extractor + ensemble classifier. Retries the scan.">
+                {serverBusy ? "✨ Working…" : "✨ Retry Ultra AI"}
               </button>
-              {rawUploadDataUrl && (
-                <button onClick={runUltraScan} disabled={serverBusy}
-                  className="inline-flex items-center gap-1 rounded-lg bg-gradient-to-br from-fuchsia-600 to-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:from-fuchsia-500 hover:to-brand-500 disabled:cursor-wait disabled:opacity-60"
-                  title="Ultra AI: YOLO segmentation extractor + DINOv2 classifier. Best for phone photos of book pages.">
-                  {serverBusy ? "✨ Working…" : "✨ Ultra AI"}
-                </button>
-              )}
-              {rawUploadDataUrl && (
-                <button onClick={() => setAdjusterOpen(true)}
-                  className="inline-flex items-center gap-1 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-500/20">
-                  ✂ Adjust corners
-                </button>
-              )}
-              <span className="text-[10px] text-ink-500 w-full">Server AI is slower but more accurate. Use "Adjust corners" if the crop is wrong.</span>
+              <button onClick={() => setAdjusterOpen(true)}
+                className="inline-flex items-center gap-1 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-500/20">
+                ✂ Adjust corners
+              </button>
+              <span className="text-[10px] text-ink-500 w-full">Auto-crop wrong? Tap "Adjust corners" to draw the board edges yourself.</span>
               {serverMsg && (
                 <div className={`mt-1 w-full rounded border px-2 py-1 text-[11px] ${serverMsg.tone === "ok" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"
                   : serverMsg.tone === "err" ? "border-rose-500/40 bg-rose-500/10 text-rose-100"
