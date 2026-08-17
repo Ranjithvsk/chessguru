@@ -11,7 +11,8 @@ export type ZugzwangPattern =
   | "rook"
   | "queen"
   | "middlegame"
-  | "study";
+  | "study"
+  | "domination";
 
 export interface ZugzwangPosition {
   id: string;
@@ -39,6 +40,7 @@ export const ZUGZWANG_PATTERNS: Array<{ id: ZugzwangPattern; label: string; blur
   { id: "queen",      label: "Queen endgame zugzwang",        blurb: "Q vs P wrong-rook draws, Q+P vs Q winning technique." },
   { id: "middlegame", label: "Middlegame zugzwang",           blurb: "The rarest and most famous — Sämisch, Fischer, Nimzowitsch, Alekhine." },
   { id: "study",      label: "Composition / study zugzwang",  blurb: "Réti, Saavedra — geometric zugzwang from problem chess." },
+  { id: "domination", label: "Domination zugzwang",           blurb: "A piece with many nominal moves — every one loses material. Rinck studies + Beliavsky–Korchnoi." },
 ];
 
 export const ZUGZWANG_POSITIONS: ZugzwangPosition[] = [
@@ -242,6 +244,31 @@ export const ZUGZWANG_POSITIONS: ZugzwangPosition[] = [
     mechanism: "NEGATIVE example. With a rook pawn on the 7th, White cannot approach without stalemating — zugzwang FAILS to break the fortress. Include to teach when the pattern doesn’t apply.",
     difficulty: 1200,
     outcome: "Draw.",
+  },
+  // ─────────────── domination ───────────────
+  {
+    id: "dom-01",
+    name: "Rinck 1920 — rook dominated with 14 free squares",
+    pattern: "domination",
+    fen: "8/2N5/8/8/4rk2/8/5K2/1N1B4 w - - 0 1",
+    bestMoveSan: "Nd2",
+    bestMoveUci: "b1d2",
+    source: "Henri Rinck, La Stratégie 1920; Wikipedia — Domination in chess.",
+    mechanism: "After 1.Nd2! the Black rook has fourteen squares on the board but every single one loses to a knight capture or a knight fork: 1…Re7 2.Nd5+; 1…Re3 2.Nd5+; 1…Rd4 2.Ne6+; 1…Rb4 2.Nd5+; only 1…Re5 delays. Continues 2.Nc4 Re4/Rf5, 3.Nd6 Re5, 4.Bf3! and eventually 5.Ne6+ wins the rook.",
+    difficulty: 2100,
+    outcome: "White wins.",
+  },
+  {
+    id: "dom-02",
+    name: "Beliavsky – Korchnoi 2004 — Qd3 dominates the knight",
+    pattern: "domination",
+    fen: "6k1/p4pp1/7p/2p5/2N4P/P1b1P1P1/5PQK/3q4 b - - 1 38",
+    bestMoveSan: "Qd3",
+    bestMoveUci: "d1d3",
+    source: "Beliavsky – Korchnoi, György Marx Memorial 2004 — position after White's blunder 38.Kh2? Wikipedia — Domination in chess.",
+    mechanism: "38…Qd3! dominates the knight on c4. It nominally has six squares (b2, d2, a5, e5, d6, b6) but ALL are covered: b2/d2/a5/e5 by the black bishop, d6 by the queen itself, b6 by the a-pawn. No white queen defence works either — every square the queen could shield from is guarded by the black queen.",
+    difficulty: 2200,
+    outcome: "Black wins.",
   },
   {
     id: "study-02",
