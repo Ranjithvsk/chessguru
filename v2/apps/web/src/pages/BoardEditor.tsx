@@ -272,10 +272,12 @@ export default function BoardEditorPage() {
     // when the client-side OpenCV.js branch hangs.
     setVisionMsg(null);
     setVisionBusy(false);
+    // Fire Ultra AI raw-only immediately as fast path. The reliable second
+    // call (with client warp attached) fires below after detectPositionFromImage
+    // completes. If server's raw extract works, user sees result in ~2s. If it
+    // returns warpQuality:"bad", the client-warp call overwrites with the good
+    // result once it lands (~5-8s total).
     void runUltraScan(undefined, rawDataUrl);
-    // In parallel, ALSO try the client-side OpenCV.js detector as a fast
-    // preview (finishes in ~1s if OpenCV loads). If it fails or hangs, we
-    // don't care — Ultra AI is already delivering the real answer.
     try {
       const res = await detectPositionFromImage(src);
       const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
@@ -394,7 +396,13 @@ export default function BoardEditorPage() {
     // is the "reliable path" (server skips its flaky extractor). Should
     // overwrite the earlier raw-only call if it's still in flight.
     if (serverBusy && !warpedCanvas) return;
-    setServerBusy(true); setServerMsg({ tone: "info", text: "✨ Ultra AI: extract + ensemble classify (1-3s)…" });
+    setServerBusy(true);
+    setServerMsg({
+      tone: "info",
+      text: warpedCanvas
+        ? "✨ Ultra AI (reliable): using client warp, skipping server extract…"
+        : "✨ Ultra AI: extract + ensemble classify (1-3s)…",
+    });
     try {
       const rawB64 = raw.replace(/^data:image\/[a-z]+;base64,/, "");
       const body: { rawImagePngBase64: string; warpedBoardPngBase64?: string } = { rawImagePngBase64: rawB64 };
@@ -671,15 +679,23 @@ export default function BoardEditorPage() {
               setServerBusy(true);
               setServerMsg({ tone: "info", text: "✂ Re-warping with your corners + running Server AI…" });
               try {
+                // NB: crossOrigin removed — was breaking data: URL loading on
+                // iOS Safari, throwing before any HTTP request went out (user
+                // saw "manual warp failed" with no server log). data: URLs
+                // don't cross an origin so the attribute is meaningless here.
                 const img = new Image();
-                img.crossOrigin = "anonymous";
                 await new Promise<void>((res, rej) => {
                   img.onload = () => res();
                   img.onerror = () => rej(new Error("image reload"));
                   img.src = rawUploadDataUrl;
                 });
-                const warped = await warpWithCorners(img, corners);
-                if (!warped) throw new Error("warp failed (opencv unavailable?)");
+                // 15-sec bail — if warp doesn't return by then, show real error
+                // instead of hanging in "Working…"
+                const warpPromise = warpWithCorners(img, corners);
+                const warpTimeout = new Promise<null>((_r, rej) =>
+                  setTimeout(() => rej(new Error("warp timeout 15s — opencv slow/broken")), 15000));
+                const warped = await Promise.race([warpPromise, warpTimeout]);
+                if (!warped) throw new Error("warp failed (opencv returned null — check /vendor/opencv-4.x.js loaded?)");
                 setVisionSnapshot((prev) => prev ? { ...prev, canvas: warped.canvas } : prev);
                 setVisionPreview(warped.canvas.toDataURL("image/png"));
                 // AWAIT the corner-label save (was fire-and-forget which iOS

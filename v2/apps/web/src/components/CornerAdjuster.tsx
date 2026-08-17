@@ -134,7 +134,7 @@ export function CornerAdjuster({ imageSrc, initialCorners, onCancel, onConfirm }
   const onUp = () => setDragging(null);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/85 p-4">
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-start overflow-y-auto bg-black/85 p-4">
       <div className="mb-3 text-center text-sm text-white">
         <div className="font-semibold">Drag the 4 handles to the corners of the chess board</div>
         <div className="text-ink-300 text-xs mt-1">Then tap Confirm to re-classify</div>
