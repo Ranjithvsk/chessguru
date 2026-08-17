@@ -7,7 +7,9 @@ export type ZugzwangPattern =
   | "reciprocal"
   | "trebuchet"
   | "opposition"
+  | "minor-piece"
   | "rook"
+  | "queen"
   | "middlegame"
   | "study";
 
@@ -32,7 +34,9 @@ export const ZUGZWANG_PATTERNS: Array<{ id: ZugzwangPattern; label: string; blur
   { id: "reciprocal", label: "Reciprocal (mutual) zugzwang", blurb: "Both sides would lose if it were their turn." },
   { id: "trebuchet",  label: "Trébuchet",                    blurb: "The K+P vs K+P mutual zugzwang — whoever moves loses their pawn." },
   { id: "opposition", label: "K+P opposition zugzwang",       blurb: "Classic king-and-pawn endings where the wrong-to-move king yields the key square." },
+  { id: "minor-piece",label: "Minor-piece endgame zugzwang",  blurb: "Bishop vs knight, 2 knights vs pawn — the Troitzky line, Fischer’s Taimanov demolitions." },
   { id: "rook",       label: "Rook endgame zugzwang",         blurb: "Lucena, Philidor, and the tempo-move breakthroughs of rook endings." },
+  { id: "queen",      label: "Queen endgame zugzwang",        blurb: "Q vs P wrong-rook draws, Q+P vs Q winning technique." },
   { id: "middlegame", label: "Middlegame zugzwang",           blurb: "The rarest and most famous — Sämisch, Fischer, Nimzowitsch, Alekhine." },
   { id: "study",      label: "Composition / study zugzwang",  blurb: "Réti, Saavedra — geometric zugzwang from problem chess." },
 ];
@@ -174,6 +178,69 @@ export const ZUGZWANG_POSITIONS: ZugzwangPosition[] = [
     source: "Réti, Kagans Neueste Schachnachrichten 1921.",
     mechanism: "1.Kg7! is the double-purpose diagonal march. Not pure zugzwang, but the drawing idea is that Black cannot simultaneously stop the c-pawn and shepherd the h-pawn — a form of geometric tempo zugzwang.",
     difficulty: 2000,
+    outcome: "Draw.",
+  },
+  // ─────────────── minor-piece ───────────────
+  {
+    id: "minor-01",
+    name: "Fischer – Taimanov 1971 g4 — bishop dominates knight",
+    pattern: "minor-piece",
+    fen: "8/8/K1k1n3/1p3p1p/P1P5/8/1P4p1/5b2 b - - 0 57",
+    bestMoveSan: "Ng7",
+    bestMoveUci: "e6g7",
+    source: "Fischer vs Taimanov, Candidates QF Vancouver 1971 game 4. FEN from Wikipedia diagram — may differ slightly from ChessBase.",
+    mechanism: "Classic B-vs-N zugzwang finale. Knight has almost no move that doesn’t drop to the bishop or the king; any king move loses pawns. Fischer’s later Be8 (a few moves on) sealed it.",
+    difficulty: 2000,
+    outcome: "White wins.",
+  },
+  {
+    id: "minor-02",
+    name: "Fischer – Taimanov 1971 g2 (adjournment)",
+    pattern: "minor-piece",
+    fen: "8/3k4/1pn2rp1/pBp2p1p/P4P1P/2P1RKP1/1P6/8 b - - 0 41",
+    bestMoveSan: "Rf7",
+    bestMoveUci: "f6f7",
+    source: "Fischer vs Taimanov, Vancouver 1971 game 2, adjournment position.",
+    mechanism: "Adjournment diagram that eventually collapses into a bishop-vs-knight zugzwang win with 85.Bf5 much later. Start here and play toward the finish; the drift is inevitable.",
+    difficulty: 2200,
+    outcome: "White wins (in the game).",
+  },
+  {
+    id: "minor-03",
+    name: "Two knights vs pawn — Troitzky-line motif",
+    pattern: "minor-piece",
+    fen: "8/7k/5K2/8/5N2/5p2/5N2/8 w - - 0 1",
+    bestMoveSan: "Nd3",
+    bestMoveUci: "f2d3",
+    source: "Troitzky, Collection of Chess Studies (1937), Two-Knight endings; the Troitzky line is the classical statement.",
+    mechanism: "White blocks the f-pawn with one knight, mates with the other. The pawn is Black’s only ‘safety valve’ — freeze it and the king is squeezed into zugzwang / mate.",
+    difficulty: 1900,
+    outcome: "White wins.",
+  },
+  // ─────────────── rook (2nd — Philidor draw as negative example) ───────────────
+  {
+    id: "rook-02",
+    name: "Philidor drawing position — no zugzwang possible",
+    pattern: "rook",
+    fen: "3k4/R7/4K3/4P3/8/8/r7/8 b - - 0 1",
+    bestMoveSan: "Ra6",
+    bestMoveUci: "a2a6",
+    source: "Philidor, Analyse du jeu des Echecs (1777); Wikipedia — Philidor position.",
+    mechanism: "NEGATIVE example. Defender’s rook sits on the 3rd rank (a2 here from Black’s POV); White has NO tempo move that breaks the fortress. Contrasts sharply with Lucena.",
+    difficulty: 1400,
+    outcome: "Draw.",
+  },
+  // ─────────────── queen ───────────────
+  {
+    id: "queen-01",
+    name: "Q vs P on 7th (rook pawn) — stalemate fortress",
+    pattern: "queen",
+    fen: "7k/7p/5KQ1/8/8/8/8/8 w - - 0 1",
+    bestMoveSan: "Kf7",
+    bestMoveUci: "f6f7",
+    source: "Wikipedia — Queen versus pawn endgame; Averbakh, Queen Endings.",
+    mechanism: "NEGATIVE example. With a rook pawn on the 7th, White cannot approach without stalemating — zugzwang FAILS to break the fortress. Include to teach when the pattern doesn’t apply.",
+    difficulty: 1200,
     outcome: "Draw.",
   },
   {
