@@ -26,6 +26,8 @@ export interface BoardProps {
   onMove?: (from: Key, to: Key) => void;
   onPremove?: (from: Key, to: Key) => void;
   premovable?: boolean;
+  /** Show chessground's legal-move dots when a piece is selected. Default false. */
+  showDests?: boolean;
   onSelect?: (key: Key) => void;
   className?: string;
 }
@@ -47,6 +49,7 @@ export default function Board({
   onPremove,
   premovable = false,
   onSelect,
+  showDests = false,
   className = "",
 }: BoardProps) {
   const el = useRef<HTMLDivElement>(null);
@@ -79,7 +82,7 @@ export default function Board({
         free: false,
         color: movableColor,
         dests,
-        showDests: false, // no legal-move dots when a piece is selected
+        showDests, // caller opts in (practice pages set true)
         events: { after: (from, to) => onMoveRef.current?.(from, to) },
       },
       premovable: {

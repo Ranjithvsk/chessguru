@@ -114,7 +114,7 @@ export default function ZugzwangStudyPage() {
               className={`px-3 py-1.5 ${mode === "study" ? "bg-brand-500/25 text-brand-100" : "bg-ink-900 text-ink-400 hover:bg-ink-800"}`}
             >📖 Study</button>
             <button
-              type="button" onClick={() => { setMode("practice"); setRevealed(false); setVerdict(null); }}
+              type="button" onClick={() => { setMode("practice"); setRevealed(false); setVerdict(null); setAttemptedUci(null); setLastDelta(null); }}
               className={`px-3 py-1.5 ${mode === "practice" ? "bg-emerald-500/25 text-emerald-100" : "bg-ink-900 text-ink-400 hover:bg-ink-800"}`}
             >🎯 Practice</button>
           </div>
@@ -161,7 +161,12 @@ export default function ZugzwangStudyPage() {
 
         {/* board + detail panel */}
         <div>
-          <div className="rounded-xl border border-ink-700 bg-ink-900 p-4">
+          <div className={`rounded-xl border-2 p-4 ${mode === "practice" ? (verdict === "correct" ? "border-emerald-500 bg-emerald-500/5" : verdict === "wrong" ? "border-rose-500 bg-rose-500/5" : "border-brand-500 bg-brand-500/5") : "border-ink-700 bg-ink-900"}`}>
+            {mode === "practice" && !verdict && (
+              <div className="mb-3 rounded-lg bg-brand-500/20 px-3 py-2 text-center text-sm font-bold text-brand-100">
+                🎯 Practice — {turn === "white" ? "White" : "Black"} to move. Drag a piece to answer.
+              </div>
+            )}
             <Board
               fen={active.fen}
               orientation={turn}
@@ -170,6 +175,7 @@ export default function ZugzwangStudyPage() {
               dests={dests}
               onMove={onUserMove}
               coordinates
+              showDests={mode === "practice"}
             />
             <div className="mt-3 flex items-center justify-between gap-3 text-xs">
               <span className="rounded-full bg-ink-800 px-2 py-1 text-ink-300">
