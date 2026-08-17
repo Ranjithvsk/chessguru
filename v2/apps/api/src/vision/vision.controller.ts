@@ -105,4 +105,62 @@ export class VisionController {
       throw new BadRequestException((e as Error).message);
     }
   }
+
+  /** "Ultra AI" — proxies to Python :5100 microservice (MIT YOLOv8n-seg
+   *  extractor + 3-model classifier ensemble: YOLOv8n-cls + DINOv2-small
+   *  + DINOv3-small with 4-rotation autopick + chess-rules validation).
+   *  If warpedBoardPngBase64 is supplied, microservice skips its extractor
+   *  and uses the client's tight OpenCV.js warp — needed for iPad/tablet
+   *  screen photos where the server extractor picks up UI chrome. */
+  @Post("classify-board-ultra")
+  async classifyBoardUltra(
+    @Body() body: { rawImagePngBase64: string; warpedBoardPngBase64?: string },
+  ) {
+    if (!body?.rawImagePngBase64) throw new BadRequestException("rawImagePngBase64 required");
+    try {
+      return await this.svc.classifyBoardUltra(body.rawImagePngBase64, body.warpedBoardPngBase64);
+    } catch (e) {
+      throw new BadRequestException((e as Error).message);
+    }
+  }
+
+  /** Save a user-adjusted set of 4 board corners (from the manual
+   *  CornerAdjuster UI). Every save becomes a real ground-truth sample the
+   *  nightly YOLO extractor retrain folds in — heavily weighted since it
+   *  represents a user-verified corner set on a hard photo. */
+  @Post("save-corner-labels")
+  async saveCornerLabels(
+    @Req() req: any,
+    @Body() body: { rawImagePngBase64: string; corners: Array<{ x: number; y: number }>; sourceRef?: string },
+  ) {
+    if (!body?.rawImagePngBase64 || body?.corners?.length !== 4) {
+      throw new BadRequestException("rawImagePngBase64 + 4 corners required");
+    }
+    try {
+      return await this.svc.saveCornerLabels(
+        req.session?.userId ? String(req.session.userId) : null,
+        body.rawImagePngBase64,
+        body.corners,
+        body.sourceRef,
+      );
+    } catch (e) {
+      throw new BadRequestException((e as Error).message);
+    }
+  }
+
+  /** "ChessVision AI" fallback/oracle — proxies to chessvision.dev.
+   *  Configured via env: CHESSVISION_API_URL, CHESSVISION_API_KEY,
+   *  CHESSVISION_API_AUTH_HEADER (default X-Api-Key), CHESSVISION_API_BODY_FIELD
+   *  (default image_base64). Meant to be shown SIDE-BY-SIDE with our own
+   *  Ultra AI result so the user picks the correct one (both training
+   *  signal AND ToS-compliant use of a paid oracle). */
+  @Post("classify-board-chessvision")
+  async classifyBoardChessVision(@Body() body: { rawImagePngBase64: string }) {
+    if (!body?.rawImagePngBase64) throw new BadRequestException("rawImagePngBase64 required");
+    try {
+      return await this.svc.classifyBoardChessVision(body.rawImagePngBase64);
+    } catch (e) {
+      throw new BadRequestException((e as Error).message);
+    }
+  }
 }

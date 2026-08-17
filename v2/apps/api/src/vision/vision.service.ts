@@ -433,6 +433,116 @@ export class VisionService {
       },
     };
   }
+
+  /** Save a user-adjusted set of 4 board corners for future YOLO retraining.
+   *  Client sends { rawImagePngBase64, corners: [{x,y}×4], sourceRef }.
+   *  We store the raw photo + corner coords in Mongo `visionCornerLabels`
+   *  so the nightly retrain can fold real user corrections into training. */
+  async saveCornerLabels(
+    userId: string | null,
+    rawImagePngBase64: string,
+    corners: Array<{ x: number; y: number }>,
+    sourceRef?: string,
+  ): Promise<{ ok: true; id: string }> {
+    const b64 = rawImagePngBase64.replace(/^data:image\/[a-z]+;base64,/, "");
+    if (b64.length < 500 || b64.length > 20_000_000) {
+      throw new Error("raw image out of range (need 500B-20MB base64)");
+    }
+    if (!Array.isArray(corners) || corners.length !== 4) {
+      throw new Error("need exactly 4 corners");
+    }
+    for (const c of corners) {
+      if (typeof c?.x !== "number" || typeof c?.y !== "number") throw new Error("corner {x,y} must be numbers");
+    }
+    logScanImage(Buffer.from(b64, "base64"), "corner-adjust");
+    const doc = {
+      userId,
+      rawImagePngBase64: b64,
+      corners,
+      sourceRef: sourceRef || null,
+      createdAt: new Date(),
+    };
+    const res = await this.conn.collection("visionCornerLabels").insertOne(doc as any);
+    return { ok: true, id: String(res.insertedId) };
+  }
+
+  /** "ChessVision AI" fallback — proxies to chessvision.dev commercial API.
+   *  Called when our own classifier has low confidence or returns illegal
+   *  FEN. Env-configured: CHESSVISION_API_URL (endpoint), CHESSVISION_API_KEY
+   *  (auth), CHESSVISION_API_AUTH_HEADER (default "X-Api-Key"), and
+   *  CHESSVISION_API_BODY_FIELD (default "image_base64" — some APIs use
+   *  "image" for multipart or "url" for a hosted URL). Adjust once we see
+   *  the actual API contract.
+   *
+   *  Never send more than 1 request every 2s (rate limit protection) and
+   *  never log the API key. Returns { fen, source: "chessvision.dev" }. */
+  async classifyBoardChessVision(rawImagePngBase64: string): Promise<{ fen: string; source: string; raw?: any }> {
+    const apiUrl    = process.env.CHESSVISION_API_URL  || "https://chessvision.dev/api/v1/predict";
+    const apiKey    = process.env.CHESSVISION_API_KEY  || "";
+    const authHdr   = process.env.CHESSVISION_API_AUTH_HEADER || "X-Api-Key";
+    const bodyField = process.env.CHESSVISION_API_BODY_FIELD  || "image_base64";
+    if (!apiKey) throw new Error("CHESSVISION_API_KEY not configured");
+
+    const b64 = rawImagePngBase64.replace(/^data:image\/[a-z]+;base64,/, "");
+    logScanImage(Buffer.from(b64, "base64"), "chessvision-raw");
+    const body: any = {};
+    body[bodyField] = b64;
+
+    const r = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        [authHdr]: apiKey,
+        // Some APIs also accept Bearer — leave as extra header if user configures both
+        ...(process.env.CHESSVISION_API_BEARER ? { Authorization: `Bearer ${apiKey}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      const txt = await r.text().catch(() => r.statusText);
+      throw new Error(`chessvision.dev ${r.status}: ${txt.slice(0, 200)}`);
+    }
+    const data = await r.json() as any;
+    // Response shape TBD — try common field names
+    const fen = data?.fen || data?.result?.fen || data?.data?.fen || data?.prediction || "";
+    if (!fen) throw new Error(`chessvision.dev: no FEN in response ${JSON.stringify(data).slice(0, 200)}`);
+    return { fen, source: "chessvision.dev", raw: data };
+  }
+
+  /** "Ultra AI" end-to-end: proxies to the local Python :5100 microservice
+   *  which runs the MIT YOLOv8n-seg extractor + 3-model classifier ensemble
+   *  (YOLOv8n-cls + DINOv2-small + DINOv3-small) with 4-rotation autopick.
+   *  If warpedBoardPngBase64 is supplied, the microservice uses that tight
+   *  crop and skips its own extractor — fixes iPad/tablet UI-chrome bleed
+   *  where the server-side YOLO picks up title bar + bezel and misaligns
+   *  the 8×8 tile split. Client already computed a tight OpenCV.js warp,
+   *  so trust it. */
+  async classifyBoardUltra(rawImagePngBase64: string, warpedBoardPngBase64?: string) {
+    const rawB64 = rawImagePngBase64.replace(/^data:image\/[a-z]+;base64,/, "");
+    if (rawB64.length < 500 || rawB64.length > 20_000_000) {
+      throw new Error("raw image out of range (need 500B-20MB base64)");
+    }
+    logScanImage(Buffer.from(rawB64, "base64"), "ultra-raw");
+    const body: { image_base64: string; warped_board_base64?: string } = { image_base64: rawB64 };
+    if (warpedBoardPngBase64) {
+      const wB64 = warpedBoardPngBase64.replace(/^data:image\/[a-z]+;base64,/, "");
+      body.warped_board_base64 = wB64;
+      logScanImage(Buffer.from(wB64, "base64"), "ultra-warp");
+    }
+    const t0 = Date.now();
+    const r = await fetch("http://127.0.0.1:5100/classify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const extractLatencyMs = Date.now() - t0;
+    if (!r.ok) {
+      const txt = await r.text().catch(() => r.statusText);
+      throw new Error(`ultra service ${r.status}: ${txt.slice(0, 200)}`);
+    }
+    const j = await r.json() as any;
+    return { ...j, extractLatencyMs };
+  }
 }
 
 /** Cosine similarity nearest-neighbour against L2-normed refs.

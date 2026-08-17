@@ -250,12 +250,32 @@ export default function BoardEditorPage() {
       }
       setRawUploadDataUrl(rawDataUrl);
       const b64 = rawDataUrl.replace(/^data:image\/[a-z]+;base64,/, "");
-      void fetch(`${API_BASE}/api/vision/log-scan`, {
-        method: "POST", credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ boardPngBase64: b64, source: "board-editor-upload" }),
-      }).catch(() => {});
+      // Guarantee the raw uncropped upload lands on the server, even if
+      // Ultra AI doesn't fire. Await so the request completes before any
+      // subsequent navigation. NOTE: cannot use `keepalive: true` — browsers
+      // cap keepalive-fetch bodies at 64 KB, and raw phone photos are >1 MB.
+      try {
+        await fetch(`${API_BASE}/api/vision/log-scan`, {
+          method: "POST", credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ boardPngBase64: b64, source: "board-editor-upload" }),
+        });
+      } catch { /* silent — best-effort */ }
     } catch { /* silent */ }
+    // Fire Ultra AI IMMEDIATELY on the raw image. This is the reliable
+    // path — server runs its own YOLOv8n-seg extractor + YOLOv8n-cls
+    // classifier + chess-rules validation. Works whether or not OpenCV.js
+    // loads on the client. Pass rawDataUrl directly since React state
+    // hasn't propagated yet. Clear the "Analysing image…" visionMsg —
+    // Ultra AI's own progress (serverMsg) takes over as the user-visible
+    // status. Prevents the "Analysing image…" spinner sticking forever
+    // when the client-side OpenCV.js branch hangs.
+    setVisionMsg(null);
+    setVisionBusy(false);
+    void runUltraScan(undefined, rawDataUrl);
+    // In parallel, ALSO try the client-side OpenCV.js detector as a fast
+    // preview (finishes in ~1s if OpenCV loads). If it fails or hangs, we
+    // don't care — Ultra AI is already delivering the real answer.
     try {
       const res = await detectPositionFromImage(src);
       const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
@@ -288,12 +308,9 @@ export default function BoardEditorPage() {
             body: JSON.stringify({ boardPngBase64: warpedB64, source: "warped-crop" }),
           }).catch(() => {});
         } catch { /* silent */ }
-        // AUTO-RUN Ultra AI right after the client detector's fast preview.
-        // Ultra AI is strictly better than the legacy /classify-board-v2
-        // (MIT YOLO extractor + Tandberg-quality classifier + chess-rules
-        // validation), so we prefer it as the default. Falls back to the
-        // legacy Server AI path only if Ultra AI errors out.
-        void runUltraScan().catch(() => runServerClassifyOnCanvas(cvs));
+        // Ultra AI already fired at the TOP of runVision on the raw image
+        // (line ~270). No need to fire it again here. Client warp only
+        // provides the fast preview + is used by manual "Adjust corners".
       } catch { /* corrections just won't be captured this run */ }
       // Always populate: even an illegal FEN has many correct pieces the coach
       // can keep and only fix the wrong squares. Never discard partial finds.
@@ -357,23 +374,44 @@ export default function BoardEditorPage() {
     if (!visionSnapshot) { setServerMsg({ tone: "err", text: "Upload a board image first." }); return; }
     await runServerClassifyOnCanvas(visionSnapshot.canvas);
   }
-  /** "Ultra AI" — sends the ORIGINAL phone photo (uncropped) to the server's
-   *  Tandberg YOLO extractor, then classifies via v3.6 DINOv2. Better than
-   *  the client-side warp on hard photos (book pages with text, angled
-   *  shots). Latency ~1-3s. */
-  async function runUltraScan() {
-    if (!rawUploadDataUrl) { setServerMsg({ tone: "err", text: "Upload an image first." }); return; }
+  /** "Ultra AI" — MIT YOLO extractor + 3-model classifier ensemble on the
+   *  server. If we already have a tight client-warped board (from OpenCV.js
+   *  detection), pass it in — the server will skip its extractor and use it.
+   *  This fixes iPad screen photos where the server extractor over-reaches
+   *  into UI chrome (title bar/bezel) and misaligns the 8×8 tile split.
+   *  Latency ~1-3s. */
+  async function runUltraScan(warpedCanvas?: HTMLCanvasElement, rawDataUrlOverride?: string) {
+    // rawDataUrlOverride lets runVision pass the raw synchronously (before
+    // React state has propagated). Falls back to state for the manual button.
+    const raw = rawDataUrlOverride || rawUploadDataUrl;
+    if (!raw) { setServerMsg({ tone: "err", text: "Upload an image first." }); return; }
     if (serverBusy) return;
-    setServerBusy(true); setServerMsg({ tone: "info", text: "✨ Ultra AI: YOLO extract + DINOv2 classify (1-3s)…" });
+    setServerBusy(true); setServerMsg({ tone: "info", text: "✨ Ultra AI: extract + ensemble classify (1-3s)…" });
     try {
-      const rawB64 = rawUploadDataUrl.replace(/^data:image\/[a-z]+;base64,/, "");
+      const rawB64 = raw.replace(/^data:image\/[a-z]+;base64,/, "");
+      const body: { rawImagePngBase64: string; warpedBoardPngBase64?: string } = { rawImagePngBase64: rawB64 };
+      if (warpedCanvas) {
+        body.warpedBoardPngBase64 = warpedCanvas.toDataURL("image/png").replace(/^data:image\/[a-z]+;base64,/, "");
+      }
       const r = await fetch(`${API_BASE}/api/vision/classify-board-ultra`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rawImagePngBase64: rawB64 }),
+        body: JSON.stringify(body),
       });
       if (!r.ok) throw new Error(await r.text());
       const j = await r.json();
+      // Warp-quality gate: if the server graded the crop "bad" (mis-aligned to
+      // 8×8 grid, black-bar bleed, off-board scene) the FEN below is garbage.
+      // Skip placing pieces + auto-open CornerAdjuster so the user corrects it.
+      const wq = j.warpQuality as { quality?: string; score?: number } | undefined;
+      if (wq?.quality === "bad") {
+        setServerMsg({
+          tone: "err",
+          text: `Auto-crop looked wrong (score ${wq.score ?? 0}). Drag the 4 corners to the board's edges.`,
+        });
+        setAdjusterOpen(true);
+        return;
+      }
       const placed = fp.loadPermissive(j.fen);
       const legal = fp.load(j.fen);
       const avgConf = (j.squares.flat().reduce((s: number, sq: any) => s + sq.confidence, 0) / 64 * 100).toFixed(0);
@@ -438,6 +476,30 @@ export default function BoardEditorPage() {
     setTimeout(() => setMsg(""), 1500);
   };
   const copyFen = () => { navigator.clipboard?.writeText(fp.fen); setMsg("FEN copied."); setTimeout(() => setMsg(""), 1500); };
+  /** Rotate the position 180° in-place. Used when a scan comes back with
+   *  pieces correctly identified but the board oriented upside-down — a
+   *  common failure for iPad/tablet photos where the coordinate labels
+   *  are cropped off and the classifier can't tell which way is "up". */
+  const rotate180 = () => {
+    const cur = fp.fen.split(" ")[0];
+    // Expand each rank to 8 chars, reverse, then re-collapse
+    const ranks = cur.split("/").map((rk) => {
+      let out = "";
+      for (const ch of rk) {
+        if (/\d/.test(ch)) out += ".".repeat(parseInt(ch, 10));
+        else out += ch;
+      }
+      return out.padEnd(8, ".").slice(0, 8);
+    });
+    // 180° rotation = reverse rank order AND reverse each rank left-right
+    const rotated = ranks.reverse().map((rk) => rk.split("").reverse().join(""));
+    // Collapse "." runs back to digits
+    const collapse = (rk: string) => rk.replace(/\.+/g, (m) => String(m.length));
+    const rest = fp.fen.split(" ").slice(1).join(" ") || "w - - 0 1";
+    const newFen = rotated.map(collapse).join("/") + " " + rest;
+    if (!fp.loadPermissive(newFen)) setMsg("Rotate failed."), setTimeout(() => setMsg(""), 1500);
+    else setMsg("Rotated 180°."), setTimeout(() => setMsg(""), 1200);
+  };
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -451,6 +513,7 @@ export default function BoardEditorPage() {
           <button onClick={fp.undo} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">◀ Undo</button>
           <button onClick={fp.reset} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">Reset</button>
           <button onClick={fp.flip} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">⇅ Flip</button>
+          <button onClick={rotate180} title="Rotate the position 180° — fixes upside-down scans (tablet in landscape, book at wrong angle, etc.)" className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">🔄 Rotate 180°</button>
           <button onClick={copyFen} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">Copy FEN</button>
           {uncertainShapes.length > 0 && (
             <button onClick={() => setUncertainShapes([])}
@@ -611,22 +674,28 @@ export default function BoardEditorPage() {
                 if (!warped) throw new Error("warp failed (opencv unavailable?)");
                 setVisionSnapshot((prev) => prev ? { ...prev, canvas: warped.canvas } : prev);
                 setVisionPreview(warped.canvas.toDataURL("image/png"));
-                // Log the manually-warped result + save the 4 hand-placed
-                // corners as a YOLO training sample (fire-and-forget).
+                // AWAIT the corner-label save (was fire-and-forget which iOS
+                // Safari dropped when the follow-up classify request dominated
+                // the network queue — 0 saves landed for a whole day). This
+                // sample is the training signal for the nightly retrain, so
+                // losing it silently was the reason auto-improvement stalled.
+                try {
+                  const rawB64 = rawUploadDataUrl.replace(/^data:image\/[a-z]+;base64,/, "");
+                  const saveR = await fetch(`${API_BASE}/api/vision/save-corner-labels`, {
+                    method: "POST", credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ rawImagePngBase64: rawB64, corners, sourceRef: "board-editor-adjust" }),
+                  });
+                  if (saveR.ok) setServerMsg({ tone: "ok", text: "✓ Saved corners for nightly training. Classifying…" });
+                } catch { /* save failure shouldn't block the classify below */ }
+                // Log the manually-warped result too (fire-and-forget, less
+                // critical than the raw+corners sample above).
                 try {
                   const b64 = warped.canvas.toDataURL("image/png").replace(/^data:image\/[a-z]+;base64,/, "");
                   void fetch(`${API_BASE}/api/vision/log-scan`, {
                     method: "POST", credentials: "include",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ boardPngBase64: b64, source: "manual-warp" }),
-                  }).catch(() => {});
-                } catch { /* silent */ }
-                try {
-                  const rawB64 = rawUploadDataUrl.replace(/^data:image\/[a-z]+;base64,/, "");
-                  void fetch(`${API_BASE}/api/vision/save-corner-labels`, {
-                    method: "POST", credentials: "include",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ rawImagePngBase64: rawB64, corners, sourceRef: "board-editor-adjust" }),
                   }).catch(() => {});
                 } catch { /* silent */ }
                 await runServerClassifyOnCanvas(warped.canvas);

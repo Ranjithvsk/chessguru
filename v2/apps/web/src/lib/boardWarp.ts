@@ -14,7 +14,10 @@
 
 import { detectBoardCorners } from "./neuralBoardDetect";
 
-const OPENCV_URL = "https://docs.opencv.org/4.10.0/opencv.js";
+// Self-hosted to avoid third-party CDN breakage (docs.opencv.org/4.10.0 went 404
+// on 2026-08-14, silently breaking every manual-warp attempt). Served from
+// /var/www/chessguru/vendor/ — bump filename if you upgrade the version.
+const OPENCV_URL = "/vendor/opencv-4.x.js";
 
 declare global {
   interface Window {
