@@ -6,10 +6,11 @@
 //   • Practice — hide answer, user plays a move on the board; correct = green,
 //     wrong = reveal the answer + mechanism.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Chess } from "chess.js";
 import type { Key } from "chessground/types";
 import Board, { destsFromChess } from "../components/Board";
+import { studyComplete, studyMe } from "../lib/api";
 import {
   ZUGZWANG_POSITIONS, ZUGZWANG_PATTERNS,
   type ZugzwangPattern, type ZugzwangPosition,
@@ -29,6 +30,14 @@ export default function ZugzwangStudyPage() {
   const [revealed, setRevealed] = useState(false);
   const [verdict, setVerdict] = useState<Verdict>(null);
   const [attemptedUci, setAttemptedUci] = useState<string | null>(null);
+  const [rating, setRating] = useState<number | null>(null);
+  const [ratingNb, setRatingNb] = useState<number>(0);
+  const [lastDelta, setLastDelta] = useState<number | null>(null);
+  const [guest, setGuest] = useState<boolean>(true);
+
+  useEffect(() => {
+    studyMe("zugzwang").then((r) => { setRating(r.rating); setRatingNb(r.nb); setGuest(r.guest); }).catch(() => { /* rating optional */ });
+  }, []);
 
   const filtered = useMemo(
     () => activePattern === "all"
@@ -50,6 +59,7 @@ export default function ZugzwangStudyPage() {
     setRevealed(false);
     setVerdict(null);
     setAttemptedUci(null);
+    setLastDelta(null);
   }
 
   function onUserMove(from: Key, to: Key) {
@@ -62,7 +72,19 @@ export default function ZugzwangStudyPage() {
     const target = active.bestMoveUci;
     const matches = uci === target || (target.length === 5 && uci === target.slice(0, 4));
     setVerdict(matches ? "correct" : "wrong");
-    if (!matches) setRevealed(true); // wrong → show answer + explanation
+    if (!matches) setRevealed(true);
+    // Submit result to Glicko rating engine (only in practice mode + only for
+    // signed-in users — guest rating drifts but is not persisted).
+    if (mode === "practice") {
+      const currentRating = rating ?? 1200;
+      studyComplete(active.id, matches, currentRating)
+        .then((res) => {
+          setLastDelta(res.ratingDiff);
+          setRating(res.rating);
+          setRatingNb((n) => n + 1);
+        })
+        .catch(() => { /* rating update optional — the UI still shows correct/wrong verdict */ });
+    }
   }
 
   const dests = mode === "practice" && verdict !== "correct" ? destsFromChess(chess) : new Map();
@@ -80,15 +102,22 @@ export default function ZugzwangStudyPage() {
             {' '}{ZUGZWANG_POSITIONS.length} positions across {ZUGZWANG_PATTERNS.length} pattern classes.
           </p>
         </div>
-        <div className="flex overflow-hidden rounded-lg border border-ink-700 text-xs font-semibold">
-          <button
-            type="button" onClick={() => setMode("study")}
-            className={`px-3 py-1.5 ${mode === "study" ? "bg-brand-500/25 text-brand-100" : "bg-ink-900 text-ink-400 hover:bg-ink-800"}`}
-          >📖 Study</button>
-          <button
-            type="button" onClick={() => { setMode("practice"); setRevealed(false); setVerdict(null); }}
-            className={`px-3 py-1.5 ${mode === "practice" ? "bg-emerald-500/25 text-emerald-100" : "bg-ink-900 text-ink-400 hover:bg-ink-800"}`}
-          >🎯 Practice</button>
+        <div className="flex items-center gap-3">
+          {rating != null && (
+            <div className="rounded-full bg-brand-500/15 px-3 py-1 text-xs font-semibold text-brand-100" title={`${ratingNb} attempts${guest ? " (guest — not saved)" : ""}`}>
+              ★ {rating}{lastDelta != null && <span className={`ml-1 ${lastDelta >= 0 ? "text-emerald-300" : "text-rose-300"}`}>({lastDelta >= 0 ? "+" : ""}{lastDelta})</span>}
+            </div>
+          )}
+          <div className="flex overflow-hidden rounded-lg border border-ink-700 text-xs font-semibold">
+            <button
+              type="button" onClick={() => setMode("study")}
+              className={`px-3 py-1.5 ${mode === "study" ? "bg-brand-500/25 text-brand-100" : "bg-ink-900 text-ink-400 hover:bg-ink-800"}`}
+            >📖 Study</button>
+            <button
+              type="button" onClick={() => { setMode("practice"); setRevealed(false); setVerdict(null); }}
+              className={`px-3 py-1.5 ${mode === "practice" ? "bg-emerald-500/25 text-emerald-100" : "bg-ink-900 text-ink-400 hover:bg-ink-800"}`}
+            >🎯 Practice</button>
+          </div>
         </div>
       </div>
 
