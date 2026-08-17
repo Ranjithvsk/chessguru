@@ -308,9 +308,14 @@ export default function BoardEditorPage() {
             body: JSON.stringify({ boardPngBase64: warpedB64, source: "warped-crop" }),
           }).catch(() => {});
         } catch { /* silent */ }
-        // Ultra AI already fired at the TOP of runVision on the raw image
-        // (line ~270). No need to fire it again here. Client warp only
-        // provides the fast preview + is used by manual "Adjust corners".
+        // Re-fire Ultra AI now with the client-side OpenCV warp attached —
+        // this is the RELIABLE path (server skips its own extractor). The
+        // earlier upload-time call raced without the warp and often produced
+        // a "bad" quality warp when the server re-extractor misaligned. The
+        // second call overwrites the first result if it succeeds. Debounced
+        // by serverBusy guard inside runUltraScan → free no-op if the raw
+        // call is still in flight.
+        void runUltraScan(cvs);
       } catch { /* corrections just won't be captured this run */ }
       // Always populate: even an illegal FEN has many correct pieces the coach
       // can keep and only fix the wrong squares. Never discard partial finds.
@@ -385,7 +390,10 @@ export default function BoardEditorPage() {
     // React state has propagated). Falls back to state for the manual button.
     const raw = rawDataUrlOverride || rawUploadDataUrl;
     if (!raw) { setServerMsg({ tone: "err", text: "Upload an image first." }); return; }
-    if (serverBusy) return;
+    // Bypass serverBusy guard when we have a client-side warp — that call
+    // is the "reliable path" (server skips its flaky extractor). Should
+    // overwrite the earlier raw-only call if it's still in flight.
+    if (serverBusy && !warpedCanvas) return;
     setServerBusy(true); setServerMsg({ tone: "info", text: "✨ Ultra AI: extract + ensemble classify (1-3s)…" });
     try {
       const rawB64 = raw.replace(/^data:image\/[a-z]+;base64,/, "");
