@@ -368,17 +368,20 @@ export default function BoardEditorPage() {
       });
       if (!r.ok) throw new Error(await r.text());
       const j = await r.json();
-      // Warp-quality gate: if the server graded the crop "bad", warn the user
-      // but STILL populate whatever the classifier returned — the "Adjust
-      // corners" button is available if they want to fix it manually. We
-      // no longer AUTO-OPEN the CornerAdjuster because on mobile the OpenCV
-      // WASM warp freezes the tab; users can hit the button explicitly.
+      // Warp-quality gate: if the server graded the crop "bad" (mis-aligned to
+      // 8x8 grid, black-bar bleed, off-board scene, app screenshot with UI
+      // chrome), skip populating the garbage FEN and auto-open the Adjust
+      // Corners modal so the user can draw the board edges. The OpenCV freeze
+      // that made us disable this earlier is fixed (pre-scale + no preload
+      // + only-on-demand load).
       const wq = j.warpQuality as { quality?: string; score?: number } | undefined;
       if (wq?.quality === "bad") {
         setServerMsg({
           tone: "err",
-          text: `Auto-crop looked wrong (score ${wq.score ?? 0}). Result below is a best-guess — drag pieces to fix, or tap "✂ Adjust corners" for a manual re-crop.`,
+          text: `Auto-crop looked wrong (score ${wq.score ?? 0}). Drag the 4 corners onto the true board edges, then tap Confirm.`,
         });
+        setAdjusterOpen(true);
+        return;
       }
       const placed = fp.loadPermissive(j.fen);
       const legal = fp.load(j.fen);
