@@ -583,6 +583,38 @@ export default function BookPage() {
   const [editBoard, setEditBoard] = useState("");         // board-part FEN being edited
   const [editSide, setEditSide] = useState<"w" | "b">("w");
 
+  /* ── auto-detected candidates: the pre-crop batch produced 339 candidate
+     diagrams for Yusupov Build-Up 1. Loaded from a static JSON; rendered as
+     amber "?" hotspots in annotate mode; click one → modal opens with the
+     pre-filled bbox + FEN so coach only has to accept/edit, not re-drag. */
+  interface Candidate { region: string; bbox_pct: [number, number, number, number]; fen: string; warp: number }
+  interface CandidatePage { page: number; diagrams: Candidate[] }
+  const [candidates, setCandidates] = useState<CandidatePage[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    // Only Yusupov has candidates today; other books get an empty list gracefully.
+    fetch(`${BASE}book-files/${bookSlug}-candidates.json`)
+      .then((r) => r.ok ? r.json() : [])
+      .then((j) => { if (!cancelled && Array.isArray(j)) setCandidates(j); })
+      .catch(() => { if (!cancelled) setCandidates([]); });
+    return () => { cancelled = true; };
+  }, [bookSlug]);
+  const pageCandidates = useMemo(() => {
+    const p = candidates.find((c) => c.page === page);
+    if (!p) return [];
+    // Filter out candidates whose bbox is already covered by a saved diagram
+    const savedForPage = saved.filter((s) => s.page === page);
+    return p.diagrams.filter((c) => {
+      return !savedForPage.some((s) => {
+        // overlap heuristic: centre within saved bbox
+        const cx = c.bbox_pct[0] + c.bbox_pct[2] / 2;
+        const cy = c.bbox_pct[1] + c.bbox_pct[3] / 2;
+        return cx >= s.bbox[0] && cx <= s.bbox[0] + s.bbox[2]
+            && cy >= s.bbox[1] && cy <= s.bbox[1] + s.bbox[3];
+      });
+    });
+  }, [candidates, page, saved]);
+
   /* ── coach-annotate mode ── drag a rectangle around any diagram on the
      current page, we crop it → vision → coach confirms FEN → save as a
      ▶ hotspot. Once saved it renders exactly like the hard-coded PUZZLES. */
@@ -647,6 +679,39 @@ export default function BookPage() {
     } finally {
       setAnnBusy(false);
       setDragBox(null);
+    }
+  };
+
+  /** Coach clicked an amber candidate — jump straight to the crop → vision
+   *  call, then open the modal pre-filled with the candidate's FEN. Faster
+   *  than re-drawing because we already have the bbox. */
+  const acceptCandidate = async (c: Candidate) => {
+    const imgEl = imgRef.current;
+    if (!imgEl) return;
+    setAnnBusy(true);
+    setAnnPreview({ bbox: c.bbox_pct, result: null, editedFen: c.fen, label: "" });
+    try {
+      // Crop from the actual displayed image + re-classify (batch was on the
+      // full-page → this crop may extract a cleaner board on the isolated region).
+      const nW = imgEl.naturalWidth, nH = imgEl.naturalHeight;
+      const cx = Math.round((c.bbox_pct[0] / 100) * nW);
+      const cy = Math.round((c.bbox_pct[1] / 100) * nH);
+      const cw = Math.round((c.bbox_pct[2] / 100) * nW);
+      const ch = Math.round((c.bbox_pct[3] / 100) * nH);
+      const canvas = document.createElement("canvas");
+      canvas.width = cw; canvas.height = ch;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("no 2d context");
+      ctx.drawImage(imgEl, cx, cy, cw, ch, 0, 0, cw, ch);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+      const r = await bookDiagramsApi.annotate(dataUrl);
+      // Prefer the fresh result's FEN if it's valid; otherwise keep candidate FEN
+      const bestFen = r.fenIsValid && r.fen ? r.fen : c.fen;
+      setAnnPreview({ bbox: c.bbox_pct, result: r, editedFen: bestFen, label: "" });
+    } catch (err: any) {
+      setAnnPreview({ bbox: c.bbox_pct, result: null, error: String(err?.message || err), editedFen: c.fen, label: "" });
+    } finally {
+      setAnnBusy(false);
     }
   };
 
@@ -963,7 +1028,11 @@ export default function BookPage() {
               {annotateMode ? "✏️ Annotate: ON — drag around a diagram" : "✏️ Annotate diagram"}
             </button>
             {annotateMode && (
-              <span className="text-[11px] text-ink-400">Click-and-drag a rectangle over any diagram, we'll auto-detect the FEN.</span>
+              <span className="text-[11px] text-ink-400">
+                {pageCandidates.length > 0
+                  ? <>Click any <span className="text-amber-300">? auto</span> box to review that suggestion, or drag a rectangle over one we missed.</>
+                  : <>Drag a rectangle over any diagram — we'll auto-detect the FEN.</>}
+              </span>
             )}
           </div>
 
@@ -983,6 +1052,16 @@ export default function BookPage() {
                 style={{ left: `${pz.bb![0]}%`, top: `${pz.bb![1]}%`, width: `${pz.bb![2]}%`, height: `${pz.bb![3]}%` }}
                 className="group absolute z-20 rounded-md border-2 border-brand-500/50 bg-brand-500/5 transition hover:border-brand-500 hover:bg-brand-500/25 disabled:opacity-40">
                 <span className="absolute left-1 top-1 rounded bg-brand-600 px-1.5 text-[11px] font-bold text-white shadow">▶ {pz.num ?? "#" + pz.n}</span>
+              </button>
+            ))}
+            {/* Auto-detected candidates (amber "?"). Only visible in annotate
+                mode so students don't see unvetted guesses on the reading UI. */}
+            {annotateMode && pageCandidates.map((c, idx) => (
+              <button key={idx} onClick={(e) => { e.stopPropagation(); acceptCandidate(c); }}
+                title={`Auto-suggestion (q=${c.warp}) — click to review`}
+                style={{ left: `${c.bbox_pct[0]}%`, top: `${c.bbox_pct[1]}%`, width: `${c.bbox_pct[2]}%`, height: `${c.bbox_pct[3]}%` }}
+                className="group absolute z-20 rounded-md border-2 border-dashed border-amber-400 bg-amber-400/10 transition hover:border-amber-300 hover:bg-amber-400/25">
+                <span className="absolute left-1 top-1 rounded bg-amber-500 px-1.5 text-[11px] font-bold text-ink-900 shadow">? auto</span>
               </button>
             ))}
             {/* Rubber-band while dragging */}
