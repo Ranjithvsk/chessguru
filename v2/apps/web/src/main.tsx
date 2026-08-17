@@ -34,6 +34,7 @@ import ResetPasswordPage from "./pages/ResetPassword";
 import SignupAcademyPage from "./pages/SignupAcademy";
 import AcademyDashboardPage from "./pages/AcademyDashboard";
 import StudentsManagerPage from "./pages/StudentsManager";
+import ZugzwangStudyPage from "./pages/ZugzwangStudy";
 import AcceptInvitePage from "./pages/AcceptInvite";
 // CallRoomPage + ClassPage removed 2026-08-12 (Jitsi + WebRTC mesh retired).
 // Every live class URL funnels through /class-v2/ (Dream Meet).
@@ -137,6 +138,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="study/promote" element={<PromoteLesson />} />
             <Route path="study/opposition" element={<OppositionTrainer />} />
             <Route path="study/memory-palace" element={<MemoryPalace />} />
+            <Route path="study/zugzwang" element={<ZugzwangStudyPage />} />
             <Route path="study/opening-memory" element={<OpeningMemory />} />
             <Route path="study/openings" element={<Openings />} />
             <Route path="study/openings/:slug" element={<OpeningDetail />} />

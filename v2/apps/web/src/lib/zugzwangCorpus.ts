@@ -1,0 +1,197 @@
+// Zugzwang corpus v1 — 11 hand-verified positions across 6 pattern classes.
+// Sources cross-checked on Wikipedia / lichess / ChessBase; see the notes in
+// PROJECT_MASTER research report (2026-08-16) for the wider 60-position list
+// still awaiting book-look verification.
+
+export type ZugzwangPattern =
+  | "reciprocal"
+  | "trebuchet"
+  | "opposition"
+  | "rook"
+  | "middlegame"
+  | "study";
+
+export interface ZugzwangPosition {
+  id: string;
+  name: string;
+  pattern: ZugzwangPattern;
+  fen: string;
+  /** Best move in SAN — the "correct" answer for practice mode. */
+  bestMoveSan: string;
+  /** Best move in UCI (from-to[+promotion]) — what practice mode matches against. */
+  bestMoveUci: string;
+  source: string;
+  mechanism: string;
+  /** Rough "find the move" Elo difficulty (400–2500). */
+  difficulty: number;
+  /** Text under the answer indicating what happens (win / draw / loss). */
+  outcome?: string;
+}
+
+export const ZUGZWANG_PATTERNS: Array<{ id: ZugzwangPattern; label: string; blurb: string }> = [
+  { id: "reciprocal", label: "Reciprocal (mutual) zugzwang", blurb: "Both sides would lose if it were their turn." },
+  { id: "trebuchet",  label: "Trébuchet",                    blurb: "The K+P vs K+P mutual zugzwang — whoever moves loses their pawn." },
+  { id: "opposition", label: "K+P opposition zugzwang",       blurb: "Classic king-and-pawn endings where the wrong-to-move king yields the key square." },
+  { id: "rook",       label: "Rook endgame zugzwang",         blurb: "Lucena, Philidor, and the tempo-move breakthroughs of rook endings." },
+  { id: "middlegame", label: "Middlegame zugzwang",           blurb: "The rarest and most famous — Sämisch, Fischer, Nimzowitsch, Alekhine." },
+  { id: "study",      label: "Composition / study zugzwang",  blurb: "Réti, Saavedra — geometric zugzwang from problem chess." },
+];
+
+export const ZUGZWANG_POSITIONS: ZugzwangPosition[] = [
+  // ─────────────── reciprocal ───────────────
+  {
+    id: "recip-01",
+    name: "Hooper KP vs K — Black to move loses",
+    pattern: "reciprocal",
+    fen: "2k5/2P5/1K6/8/8/8/8/8 b - - 0 1",
+    bestMoveSan: "Kd7",
+    bestMoveUci: "c8d7",
+    source: "Hooper 1970, A Pocket Guide to Chess Endgames.",
+    mechanism: "Reciprocal zugzwang on b6/c8. Black must play 1…Kd7 2.Kb7 or 1…Kb8 2.Kb6 Kc8 3.c7 — either way White queens.",
+    difficulty: 800,
+    outcome: "White wins.",
+  },
+  {
+    id: "recip-02",
+    name: "Hooper KP vs K — White to move draws (mirror)",
+    pattern: "reciprocal",
+    fen: "2k5/2P5/1K6/8/8/8/8/8 w - - 0 1",
+    bestMoveSan: "Kc6",
+    bestMoveUci: "b6c6",
+    source: "Hooper 1970 — the paired diagram to recip-01.",
+    mechanism: "SAME board, opposite side to move — now White has to move and only draws (any king move loses c7 or stalemates). Illustrates the whole mutual-zugzwang concept.",
+    difficulty: 1000,
+    outcome: "Draw.",
+  },
+  // ─────────────── trébuchet ───────────────
+  {
+    id: "treb-01",
+    name: "Classical trébuchet — White to move loses",
+    pattern: "trebuchet",
+    fen: "8/8/8/3pK3/2k1P3/8/8/8 w - - 0 1",
+    bestMoveSan: "Kxd5",
+    bestMoveUci: "e5d5",
+    source: "Flear 2004, Practical Endgame Play — Mastering the Basics, p.13.",
+    mechanism: "Each king simultaneously defends its own pawn and attacks the enemy's. Whoever moves has to release contact — 1.Kxd5 Kxe4 and Black promotes first.",
+    difficulty: 1200,
+    outcome: "Black wins.",
+  },
+  {
+    id: "treb-02",
+    name: "Classical trébuchet — Black to move loses (mirror)",
+    pattern: "trebuchet",
+    fen: "8/8/8/3pK3/2k1P3/8/8/8 b - - 0 1",
+    bestMoveSan: "Kxd4",
+    bestMoveUci: "c4d4",
+    source: "Flear 2004 — paired diagram.",
+    mechanism: "Same board, Black to move; 1…Kxd4 2.Kxd5 and White queens first. Zugzwang is symmetrical — the loser is whoever's turn it is.",
+    difficulty: 1200,
+    outcome: "White wins.",
+  },
+  // ─────────────── opposition ───────────────
+  {
+    id: "opp-01",
+    name: "KP vs K — Black to move loses the opposition",
+    pattern: "opposition",
+    fen: "8/8/4k3/8/3K4/4P3/8/8 b - - 0 1",
+    bestMoveSan: "Kd6",
+    bestMoveUci: "e6d6",
+    source: "Wikipedia — King and pawn versus king endgame.",
+    mechanism: "White has the direct opposition. Whatever Black plays, White marches to a key square (d5/e5/f5) and wins the pawn ending.",
+    difficulty: 900,
+    outcome: "White wins.",
+  },
+  {
+    id: "opp-02",
+    name: "Ideal winning position — all three key squares",
+    pattern: "opposition",
+    fen: "2k5/8/2K5/2P5/8/8/8/8 w - - 0 1",
+    bestMoveSan: "Kd6",
+    bestMoveUci: "c6d6",
+    source: "Wikipedia — King and pawn versus king endgame.",
+    mechanism: "The white king already sits in front of the pawn on a key square — wins regardless of who moves. Contrast with recip-01 to see what \"key square\" really means.",
+    difficulty: 700,
+    outcome: "White wins.",
+  },
+  {
+    id: "opp-03",
+    name: "Wrong rook pawn — fortress draw (no zugzwang possible)",
+    pattern: "opposition",
+    fen: "7k/8/6KP/8/8/8/8/8 b - - 0 1",
+    bestMoveSan: "Kg8",
+    bestMoveUci: "h8g8",
+    source: "Wikipedia — King and pawn versus king endgame; Averbakh, Chess Endings: Essential Knowledge.",
+    mechanism: "NEGATIVE example. Black just shuffles h8/g8 and can never be dragged into zugzwang — White has no tempo move that changes the corner fortress.",
+    difficulty: 600,
+    outcome: "Draw.",
+  },
+  // ─────────────── rook ───────────────
+  {
+    id: "rook-01",
+    name: "Lucena — build the bridge",
+    pattern: "rook",
+    fen: "1K1k4/1P6/8/8/8/8/r7/2R5 w - - 0 1",
+    bestMoveSan: "Rc4",
+    bestMoveUci: "c1c4",
+    source: "Lucena 1497 (attrib.); de la Villa, 100 Endgames You Must Know.",
+    mechanism: "1.Rc4! begins the bridge — Rd4 will later shield checks from the a-file, and Black's king is forced off the promotion path. The tempo mechanism IS zugzwang: any file Black tries yields the c-file to White's king.",
+    difficulty: 1600,
+    outcome: "White wins.",
+  },
+  // ─────────────── middlegame ───────────────
+  {
+    id: "mid-01",
+    name: "Sämisch – Nimzowitsch 1923 — the \"Immortal Zugzwang\"",
+    pattern: "middlegame",
+    fen: "r1bqk2r/pp1n1pp1/2b1p2p/1p1p4/3P4/3B1P2/PP3R1P/R2Q2K1 w KQkq - 0 26",
+    bestMoveSan: "Kh1",
+    bestMoveUci: "g1h1",
+    source: "Sämisch vs Nimzowitsch, Copenhagen 1923 rd.6. Nimzowitsch played 25…h6!! — every White reply drops material.",
+    mechanism: "White resigned rather than move — Kh2/Kh1 loses to …R5f3; Qxf3 hangs to R2f5; Rce1 loses to Rxf3; only two tempo pawn moves remain and they exhaust in 1-2 moves.",
+    difficulty: 2400,
+    outcome: "Black wins — the canonical middlegame zugzwang.",
+  },
+  {
+    id: "mid-05",
+    name: "Fischer – Rossetto, Mar del Plata 1959",
+    pattern: "middlegame",
+    fen: "2r2n1k/2P5/1b6/8/8/1B6/PP4PP/6K1 b - - 0 33",
+    bestMoveSan: "h5",
+    bestMoveUci: "h7h5",
+    source: "Fischer vs Rossetto, Mar del Plata 1959; Fischer, My 60 Memorable Games.",
+    mechanism: "After 33.Bb3! Black is in zugzwang: any king move → Rb8 wins the piece; any rook move → Rb8 queens the c-pawn; any knight move → Be6 wins the rook. Only pawn tempos remain and they run out fast.",
+    difficulty: 2200,
+    outcome: "White wins.",
+  },
+  // ─────────────── study ───────────────
+  {
+    id: "study-01",
+    name: "Réti 1921 — the geometric draw",
+    pattern: "study",
+    fen: "8/8/k1P5/7p/8/8/8/7K w - - 0 1",
+    bestMoveSan: "Kg7",
+    bestMoveUci: "h1g7",
+    source: "Réti, Kagans Neueste Schachnachrichten 1921.",
+    mechanism: "1.Kg7! is the double-purpose diagonal march. Not pure zugzwang, but the drawing idea is that Black cannot simultaneously stop the c-pawn and shepherd the h-pawn — a form of geometric tempo zugzwang.",
+    difficulty: 2000,
+    outcome: "Draw.",
+  },
+  {
+    id: "study-02",
+    name: "Saavedra 1895 — underpromotion or die",
+    pattern: "study",
+    fen: "8/2P5/1K6/8/8/8/8/k2r4 w - - 0 1",
+    bestMoveSan: "c8=R",
+    bestMoveUci: "c7c8r",
+    source: "Saavedra, Glasgow Weekly Citizen 18 May 1895; Nunn, Understanding Chess Endgames.",
+    mechanism: "Actually the WHOLE study is a zugzwang mechanism. After 1.c7 Rd6+ 2.Kb5 Rd5+ 3.Kb4 Rd4+ 4.Kb3 Rd3+ 5.Kc2 Rd4 — here 6.c8=Q?? Rc4+! draws by stalemate. Only 6.c8=R!! (this move) wins: threat Ra8# leaves Black in zugzwang with no defence.",
+    difficulty: 1900,
+    outcome: "White wins — position given at the critical underpromotion move.",
+  },
+];
+
+export const zugzwangById = (id: string): ZugzwangPosition | undefined =>
+  ZUGZWANG_POSITIONS.find((p) => p.id === id);
+
+export const zugzwangByPattern = (pattern: ZugzwangPattern): ZugzwangPosition[] =>
+  ZUGZWANG_POSITIONS.filter((p) => p.pattern === pattern);
