@@ -1,5 +1,5 @@
 // ChessGuru PWA service worker.
-const VERSION = "cg-20260817090958";
+const VERSION = "cg-20260817095817";
 const BASE = self.location.pathname.replace(/sw\.js$/, "");
 const SHELL = [BASE, BASE + "manifest.webmanifest", BASE + "icons/icon-192.png", BASE + "icons/icon-512.png"];
 const STATIC_RE = /\.(?:js|css|mjs|wasm|svg|png|jpg|jpeg|webp|gif|woff2?|ttf|otf|ico)$/;
@@ -29,9 +29,24 @@ self.addEventListener("fetch", (e) => {
   if (/^\/(v2api|api|auth|ws|ws-engine)(\/|$)/.test(url.pathname)) return;
 
   if (req.mode === "navigate") {
-    // network-first for pages so users always get the latest HTML with the
-    // latest bundle references + safety net
-    e.respondWith(fetch(req).catch(() => caches.match(BASE).then((r) => r || caches.match(req))));
+    // Stale-while-revalidate for pages: serve cache instantly (no blank
+    // screen on refresh), fetch fresh in background so next load is current.
+    // Users don't wait on network round-trip for the shell. Latest bundle
+    // references still flow through — hashed JS/CSS below is network-first,
+    // and cached HTML points at CURRENT hashed bundle names because vite
+    // rewrites the shell on each deploy.
+    e.respondWith(
+      caches.match(BASE).then((cached) => {
+        const fresh = fetch(req).then((res) => {
+          if (res.ok && res.type === "basic") {
+            const copy = res.clone();
+            caches.open(VERSION).then((c) => c.put(BASE, copy));
+          }
+          return res;
+        }).catch(() => cached);
+        return cached || fresh;
+      })
+    );
     return;
   }
 

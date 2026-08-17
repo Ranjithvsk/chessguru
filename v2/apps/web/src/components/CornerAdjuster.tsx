@@ -142,7 +142,7 @@ export function CornerAdjuster({ imageSrc, initialCorners, onCancel, onConfirm }
       {img && (
         <canvas
           ref={canvasRef}
-          className="rounded-lg border border-brand-500/40 touch-none select-none"
+          className="rounded-lg border border-brand-500/40 touch-pan-y select-none"
           onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
           onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
         />
