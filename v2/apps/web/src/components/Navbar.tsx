@@ -317,12 +317,17 @@ export default function Navbar({ rating, username, admin, onLogout }: Props) {
   return (
     <header className="sticky top-0 z-50 border-b border-ink-700/70 bg-ink-900/80 backdrop-blur">
       <nav className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4">
-        {/* Hamburger — ALWAYS visible now (was mobile-only). Opens left drawer. */}
+        {/* Hamburger — toggles the left drawer. Icon flips to ✕ when open so
+            a second tap on the same spot clearly closes. */}
         <button
-          onClick={() => setMenuOpen(true)}
-          aria-label="Open menu" aria-expanded={menuOpen} aria-haspopup="menu"
+          onClick={() => setMenuOpen((v) => !v)}
+          aria-label={menuOpen ? "Close menu" : "Open menu"} aria-expanded={menuOpen} aria-haspopup="menu"
           className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-lg text-ink-200 hover:bg-ink-800">
-          <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+          {menuOpen ? (
+            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+          ) : (
+            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+          )}
         </button>
 
         <NavLink to="/" className="flex items-center gap-2">
