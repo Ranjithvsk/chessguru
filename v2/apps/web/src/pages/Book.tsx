@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Chess } from "chess.js";
 import type { Key, Color } from "chessground/types";
 import Board, { destsFromChess } from "../components/Board";
+import { bookDiagramsApi, type Diagram as SavedDiagram, type AnnotateResult } from "../lib/book-diagrams-api";
 
 // "Book" tab — chess books rendered playable. Two books now:
 //  • 2000 Tactical Chess (pilot) — scanned pages with clickable diagram hotspots.
@@ -535,7 +536,35 @@ function setSquare(board: string, sq: string, piece: string): string {
 export default function BookPage() {
   const [bookSlug, setBookSlug] = useState(BOOKS[0]!.slug);
   const book = BOOKS.find((b) => b.slug === bookSlug)!;
-  const bookPuzzles = bookSlug === "endgame-manual" ? EM_BY_PAGE : PUZZLES;
+  const hardPuzzles = bookSlug === "endgame-manual" ? EM_BY_PAGE : PUZZLES;
+  // Coach-authored diagram annotations loaded from the server, merged with
+  // the hard-coded PUZZLES for rendering. Refetched when book changes.
+  const [saved, setSaved] = useState<SavedDiagram[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    bookDiagramsApi.list(bookSlug).then((r) => { if (!cancelled) setSaved(r.items); }).catch(() => null);
+    return () => { cancelled = true; };
+  }, [bookSlug]);
+  const bookPuzzles = useMemo(() => {
+    // Merge saved diagrams into the per-page map, formatted as Puz-lite so
+    // the existing hotspot renderer works without changes.
+    const merged: Record<number, Puz[]> = {};
+    for (const [pg, arr] of Object.entries(hardPuzzles)) merged[+pg] = [...arr];
+    let n = 10000;   // avoid clashing with hard-coded n values
+    for (const d of saved) {
+      const p = d.page;
+      const puz: Puz = {
+        n: n++, num: d.label || `d${d._id.slice(0, 4)}`, fen: d.fen, side: d.side,
+        diff: "Coach-annotated",
+        page: p, bb: d.bbox,
+        sol: [], sf: "", maia: "", idea: d.label || "Coach-annotated diagram", note: "",
+        rating: undefined, band: undefined,
+      };
+      merged[p] = merged[p] || [];
+      merged[p].push(puz);
+    }
+    return merged;
+  }, [hardPuzzles, saved]);
   const [page, setPage] = useState(BOOKS[0]!.initialPage);
   const [shelf, setShelf] = useState(true);   // true = on the bookshelf (library), false = a book is open
   const [cur, setCur] = useState<Puz | null>(null);
@@ -553,6 +582,100 @@ export default function BookPage() {
   const [bothSides, setBothSides] = useState(false);      // free two-sided play: move either colour, no auto-reply
   const [editBoard, setEditBoard] = useState("");         // board-part FEN being edited
   const [editSide, setEditSide] = useState<"w" | "b">("w");
+
+  /* ── coach-annotate mode ── drag a rectangle around any diagram on the
+     current page, we crop it → vision → coach confirms FEN → save as a
+     ▶ hotspot. Once saved it renders exactly like the hard-coded PUZZLES. */
+  const [annotateMode, setAnnotateMode] = useState(false);
+  const [dragBox, setDragBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const [annPreview, setAnnPreview] = useState<null | {
+    bbox: [number, number, number, number];   // percentages
+    result: AnnotateResult | null;
+    error?: string;
+    editedFen: string;
+    label: string;
+  }>(null);
+  const [annBusy, setAnnBusy] = useState(false);
+
+  const onPageMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!annotateMode) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    dragStartRef.current = { x, y };
+    setDragBox({ x, y, w: 0, h: 0 });
+  };
+  const onPageMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!annotateMode || !dragStartRef.current) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    const s = dragStartRef.current;
+    setDragBox({
+      x: Math.min(s.x, x), y: Math.min(s.y, y),
+      w: Math.abs(x - s.x), h: Math.abs(y - s.y),
+    });
+  };
+  const onPageMouseUp = async () => {
+    if (!annotateMode || !dragStartRef.current || !dragBox) return;
+    dragStartRef.current = null;
+    // Ignore tiny drags (accidental clicks)
+    if (dragBox.w < 3 || dragBox.h < 3) { setDragBox(null); return; }
+    // Crop the current page image using canvas
+    const imgEl = imgRef.current;
+    if (!imgEl) { setDragBox(null); return; }
+    const nW = imgEl.naturalWidth, nH = imgEl.naturalHeight;
+    const cx = Math.round((dragBox.x / 100) * nW);
+    const cy = Math.round((dragBox.y / 100) * nH);
+    const cw = Math.round((dragBox.w / 100) * nW);
+    const ch = Math.round((dragBox.h / 100) * nH);
+    const canvas = document.createElement("canvas");
+    canvas.width = cw; canvas.height = ch;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) { setDragBox(null); return; }
+    ctx.drawImage(imgEl, cx, cy, cw, ch, 0, 0, cw, ch);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+    const bbox: [number, number, number, number] = [+dragBox.x.toFixed(1), +dragBox.y.toFixed(1), +dragBox.w.toFixed(1), +dragBox.h.toFixed(1)];
+    setAnnBusy(true);
+    setAnnPreview({ bbox, result: null, editedFen: "", label: "" });
+    try {
+      const r = await bookDiagramsApi.annotate(dataUrl);
+      setAnnPreview({ bbox, result: r, editedFen: r.fen || "", label: "" });
+    } catch (err: any) {
+      setAnnPreview({ bbox, result: null, error: String(err?.message || err), editedFen: "", label: "" });
+    } finally {
+      setAnnBusy(false);
+      setDragBox(null);
+    }
+  };
+
+  const saveAnnotation = async () => {
+    if (!annPreview) return;
+    const fen = annPreview.editedFen.trim();
+    if (!fen) return;
+    // Try/catch to catch invalid FEN too
+    try {
+      new Chess(fen);   // will throw on invalid
+      await bookDiagramsApi.create({
+        bookSlug, page, bbox: annPreview.bbox, fen,
+        label: annPreview.label.trim() || undefined,
+      });
+      setAnnPreview(null);
+      // Reload saved list
+      const r = await bookDiagramsApi.list(bookSlug);
+      setSaved(r.items);
+    } catch (e: any) {
+      setAnnPreview({ ...annPreview, error: String(e?.message || e) });
+    }
+  };
+
+  const deleteSaved = async (id: string) => {
+    if (!confirm("Delete this diagram?")) return;
+    await bookDiagramsApi.remove(id);
+    const r = await bookDiagramsApi.list(bookSlug);
+    setSaved(r.items);
+  };
   const [editPiece, setEditPiece] = useState<string>("K"); // selected palette piece; "" = erase
 
   // Preload neighbouring pages so Prev/Next feels instant.
@@ -833,24 +956,113 @@ export default function BookPage() {
             </div>
           )}
 
+          {/* Annotate toolbar */}
+          <div className="mb-2 flex items-center gap-2">
+            <button onClick={() => { setAnnotateMode((v) => !v); setDragBox(null); }}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${annotateMode ? "border-emerald-500 bg-emerald-500/10 text-emerald-200" : "border-ink-700 text-ink-300 hover:bg-ink-800 hover:text-white"}`}>
+              {annotateMode ? "✏️ Annotate: ON — drag around a diagram" : "✏️ Annotate diagram"}
+            </button>
+            {annotateMode && (
+              <span className="text-[11px] text-ink-400">Click-and-drag a rectangle over any diagram, we'll auto-detect the FEN.</span>
+            )}
+          </div>
+
           {/* the page — full quality, fixed aspect so no layout shift, spinner while loading */}
-          <div className="relative w-full overflow-hidden rounded-lg bg-white shadow-lg shadow-black/30" style={{ aspectRatio: aspect }}>
+          <div className={`relative w-full overflow-hidden rounded-lg bg-white shadow-lg shadow-black/30 ${annotateMode ? "cursor-crosshair select-none" : ""}`}
+            style={{ aspectRatio: aspect }}
+            onMouseDown={onPageMouseDown}
+            onMouseMove={onPageMouseMove}
+            onMouseUp={onPageMouseUp}
+            onMouseLeave={() => { if (dragStartRef.current) { dragStartRef.current = null; setDragBox(null); } }}>
             {!imgLoaded && <div className="absolute inset-0 z-10 flex items-center justify-center bg-ink-900/10"><div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" /></div>}
             <img ref={imgRef} key={page} src={`${BASE}${book.imgBase}p${page}.${bookExt(book)}`} alt={`page ${page}`}
-              onLoad={onImg} className="absolute inset-0 h-full w-full object-contain" />
+              onLoad={onImg} draggable={false} className="pointer-events-none absolute inset-0 h-full w-full object-contain" />
             {(bookPuzzles[page] || []).map((pz) => (
-              <button key={pz.n} onClick={() => start(pz)} title={`Play ${pz.num ?? "#" + pz.n}`}
+              <button key={pz.n} onClick={() => !annotateMode && start(pz)} title={`Play ${pz.num ?? "#" + pz.n}`}
+                disabled={annotateMode}
                 style={{ left: `${pz.bb![0]}%`, top: `${pz.bb![1]}%`, width: `${pz.bb![2]}%`, height: `${pz.bb![3]}%` }}
-                className="group absolute z-20 rounded-md border-2 border-brand-500/50 bg-brand-500/5 transition hover:border-brand-500 hover:bg-brand-500/25">
+                className="group absolute z-20 rounded-md border-2 border-brand-500/50 bg-brand-500/5 transition hover:border-brand-500 hover:bg-brand-500/25 disabled:opacity-40">
                 <span className="absolute left-1 top-1 rounded bg-brand-600 px-1.5 text-[11px] font-bold text-white shadow">▶ {pz.num ?? "#" + pz.n}</span>
               </button>
             ))}
+            {/* Rubber-band while dragging */}
+            {annotateMode && dragBox && (
+              <div className="pointer-events-none absolute z-30 rounded border-2 border-emerald-400 bg-emerald-400/15"
+                style={{ left: `${dragBox.x}%`, top: `${dragBox.y}%`, width: `${dragBox.w}%`, height: `${dragBox.h}%` }} />
+            )}
           </div>
           <p className="mt-2 text-center text-xs text-ink-500">
             {(bookPuzzles[page]?.length ?? 0) > 0
               ? <span className="text-brand-400">▶ {bookPuzzles[page]!.length} playable diagram{bookPuzzles[page]!.length > 1 ? "s" : ""} on this page — click to solve</span>
               : "Flip with ‹ Prev / Next › or the arrow keys · use the chips above to jump to a playable diagram"}
           </p>
+        </div>
+      )}
+
+      {/* ── annotate preview modal ── shows the extracted board + editable FEN */}
+      {annPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setAnnPreview(null)}>
+          <div className="w-full max-w-lg rounded-xl2 border border-ink-700 bg-ink-900 p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-3 flex items-center gap-2">
+              <div className="text-sm font-semibold text-white">Annotate diagram</div>
+              <span className="text-xs text-ink-500">page {page}</span>
+              <button onClick={() => setAnnPreview(null)} className="ml-auto rounded px-2 py-1 text-xs text-ink-400 hover:text-white">×</button>
+            </div>
+            {annBusy && <div className="py-6 text-center text-sm text-ink-400">Analysing crop…</div>}
+            {!annBusy && annPreview.result && (
+              <>
+                <div className="mb-3 grid grid-cols-2 gap-3 text-xs">
+                  {annPreview.result.boardPngBase64 && (
+                    <div>
+                      <div className="mb-1 text-ink-500">Extracted board</div>
+                      <img src={`data:image/png;base64,${annPreview.result.boardPngBase64}`} alt="" className="w-full rounded border border-ink-700" />
+                    </div>
+                  )}
+                  <div className="flex flex-col gap-2">
+                    <div>
+                      <div className="text-ink-500">Warp quality</div>
+                      <div className={annPreview.result.warpQuality >= 0.85 ? "text-emerald-300" : annPreview.result.warpQuality >= 0.6 ? "text-amber-300" : "text-rose-300"}>
+                        {annPreview.result.warpQuality.toFixed(2)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-ink-500">Detected side</div>
+                      <div className="text-white">{annPreview.result.side === "w" ? "White to move" : "Black to move"}</div>
+                    </div>
+                  </div>
+                </div>
+                <div className="mb-2">
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-400">FEN (edit if wrong)</label>
+                  <textarea rows={2} value={annPreview.editedFen}
+                    onChange={(e) => setAnnPreview({ ...annPreview, editedFen: e.target.value })}
+                    className="w-full rounded border border-ink-700 bg-ink-800 px-2 py-1.5 font-mono text-xs text-white focus:border-brand-500 focus:outline-none" />
+                </div>
+                <div className="mb-3">
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-400">Label (optional)</label>
+                  <input value={annPreview.label} onChange={(e) => setAnnPreview({ ...annPreview, label: e.target.value })}
+                    placeholder="e.g. #M2 or Family fork" maxLength={80}
+                    className="w-full rounded border border-ink-700 bg-ink-800 px-2 py-1.5 text-xs text-white focus:border-brand-500 focus:outline-none" />
+                </div>
+                {annPreview.error && <div className="mb-2 rounded border border-rose-500/40 bg-rose-500/10 p-2 text-xs text-rose-200">{annPreview.error}</div>}
+                <div className="flex gap-2">
+                  <button onClick={saveAnnotation}
+                    className="flex-1 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-500">
+                    💾 Save diagram
+                  </button>
+                  <button onClick={() => setAnnPreview(null)}
+                    className="rounded-lg border border-ink-700 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800 hover:text-white">
+                    Cancel
+                  </button>
+                </div>
+              </>
+            )}
+            {!annBusy && annPreview.error && !annPreview.result && (
+              <>
+                <div className="rounded border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-200">{annPreview.error}</div>
+                <button onClick={() => setAnnPreview(null)} className="mt-3 w-full rounded-lg border border-ink-700 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800 hover:text-white">Close</button>
+              </>
+            )}
+          </div>
         </div>
       )}
 
