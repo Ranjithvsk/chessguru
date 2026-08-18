@@ -69,7 +69,8 @@ export function PeriodPerformanceTable({ scope }: { scope: Scope }) {
             <th className="px-3 py-2 text-left">Period</th>
             <th className="px-3 py-2 text-right">Rating end</th>
             <th className="px-3 py-2 text-right">Δ</th>
-            <th className="px-3 py-2 text-right">Puzzles (W-L)</th>
+            <th className="px-3 py-2 text-right">Puzzles</th>
+            <th className="px-3 py-2 text-right">W-L</th>
             <th className="px-3 py-2 text-right">Puzzle %</th>
             <th className="px-3 py-2 text-right">Games (W-D-L)</th>
             <th className="px-3 py-2 text-right">Game win %</th>
@@ -93,15 +94,18 @@ export function PeriodPerformanceTable({ scope }: { scope: Scope }) {
               <tr key={p.key} className="border-t border-ink-800">
                 <td className="px-3 py-2 font-medium text-white">{p.label}</td>
                 {q?.isLoading ? (
-                  <td colSpan={7} className="px-3 py-2 text-center text-xs text-ink-500">loading…</td>
+                  <td colSpan={8} className="px-3 py-2 text-center text-xs text-ink-500">loading…</td>
                 ) : q?.error ? (
-                  <td colSpan={7} className="px-3 py-2 text-center text-xs text-rose-300" title={String((q.error as any)?.message)}>load failed</td>
+                  <td colSpan={8} className="px-3 py-2 text-center text-xs text-rose-300" title={String((q.error as any)?.message)}>load failed</td>
                 ) : (
                   <>
                     <td className="px-3 py-2 text-right tabular-nums text-brand-200">{d?.rating.current ?? "—"}</td>
                     <td className={`px-3 py-2 text-right tabular-nums ${delta.cls}`}>{delta.text}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-white">
-                      {pPlayed === 0 ? <span className="text-ink-500">0</span> : `${pWon}-${pLost}`}
+                    <td className={`px-3 py-2 text-right tabular-nums font-semibold ${pPlayed === 0 ? "text-ink-500" : "text-white"}`}>
+                      {pPlayed}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-ink-300">
+                      {pPlayed === 0 ? <span className="text-ink-500">—</span> : `${pWon}-${pLost}`}
                     </td>
                     <td className={`px-3 py-2 text-right tabular-nums ${puzzleWin == null ? "text-ink-500" : puzzleWin >= 60 ? "text-emerald-300" : puzzleWin >= 40 ? "text-ink-300" : "text-rose-300"}`}>
                       {puzzleWin == null ? "—" : `${puzzleWin}%`}
