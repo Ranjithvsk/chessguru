@@ -1,77 +1,28 @@
-// ChessGuru PWA service worker. Bump VERSION to invalidate caches on deploy.
-const VERSION = "cg-20260818072349";
-// Derive base from this SW's own URL so it's correct for both "/" and "/v2/" deploys.
-const BASE = self.location.pathname.replace(/sw\.js$/, "");
-const SHELL = [BASE, BASE + "manifest.webmanifest", BASE + "icons/icon-192.png", BASE + "icons/icon-512.png"];
-const STATIC_RE = /\.(?:js|css|mjs|wasm|svg|png|jpg|jpeg|webp|gif|woff2?|ttf|otf|ico)$/;
-
+// ChessGuru KILL-SWITCH SW (2026-08-17): unregister self + clear all caches
+// so users stuck on stale bundles get a real fresh fetch. Root cause was
+// the SW cache serving old shell/JS after each deploy. This SW takes over
+// once, wipes everything, then does nothing on subsequent requests —
+// browser goes back to normal network fetches without SW involvement.
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL).catch(() => {})).then(() => self.skipWaiting()));
+  e.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener("activate", (e) => {
-  e.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k)))).then(() => self.clients.claim()),
-  );
-});
-
-self.addEventListener("fetch", (e) => {
-  const req = e.request;
-  if (req.method !== "GET") return;
-  const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return; // never touch cross-origin (WS gateway, etc.)
-
-  // NEVER cache dynamic endpoints — APIs are per-user and must hit the network.
-  if (/^\/(v2api|api|auth|ws|ws-engine)(\/|$)/.test(url.pathname)) return;
-
-  if (req.mode === "navigate") {
-    // network-first for pages; fall back to a cached shell only when offline
-    e.respondWith(fetch(req).catch(() => caches.match(BASE).then((r) => r || caches.match(req))));
-    return;
-  }
-
-  // cache-first ONLY for genuine static assets (Vite hashes filenames, so safe)
-  if (STATIC_RE.test(url.pathname)) {
-    e.respondWith(
-      caches.match(req).then((cached) => cached || fetch(req).then((res) => {
-        if (res.ok && res.type === "basic") { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(req, copy)); }
-        return res;
-      })),
-    );
-  }
-  // everything else: let the browser handle it normally (no SW caching)
-});
-
-// Phase 7m — Web Push. Backend sends JSON like:
-//   { title, body, url?, tag?, icon?, badge? }
-// tag = collapse key so successive streak reminders replace instead of stacking.
-self.addEventListener("push", (e) => {
-  let payload = { title: "ChessGuru", body: "" };
-  try { payload = e.data ? e.data.json() : payload; } catch { /* accept non-JSON payloads */ }
-  const options = {
-    body: payload.body || "",
-    tag: payload.tag || "cg-general",
-    icon: payload.icon || (BASE + "icons/icon-192.png"),
-    badge: payload.badge || (BASE + "icons/icon-192.png"),
-    data: { url: payload.url || "/" },
-  };
-  e.waitUntil(self.registration.showNotification(payload.title || "ChessGuru", options));
-});
-
-self.addEventListener("notificationclick", (e) => {
-  e.notification.close();
-  const target = (e.notification.data && e.notification.data.url) || "/";
-  const absolute = new URL(target, self.location.origin + BASE).href;
   e.waitUntil((async () => {
-    // Prefer focusing an existing window; only open a new one if none match.
-    const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-    for (const c of clients) {
-      if (c.url.startsWith(self.location.origin) && "focus" in c) {
-        await c.focus();
-        if ("navigate" in c) { try { await c.navigate(absolute); } catch { /* cross-origin nav */ } }
-        return;
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    } catch { /* ignore */ }
+    try {
+      await self.registration.unregister();
+    } catch { /* ignore */ }
+    try {
+      const clients = await self.clients.matchAll({ type: "window" });
+      for (const c of clients) {
+        try { c.navigate(c.url); } catch { /* cross-origin */ }
       }
-    }
-    await self.clients.openWindow(absolute);
+    } catch { /* ignore */ }
   })());
 });
+
+// No fetch handler — let all requests hit the network directly.
