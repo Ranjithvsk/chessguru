@@ -15,15 +15,17 @@ export interface StudyDef {
   // Omit for pure utility/dashboard entries where "difficulty" doesn't apply.
   range?: [number, number];
   // Game phase this trainer teaches. Drives the section grouping on /study
-  // (Opening / Middle game / End game). Owner-requested taxonomy 2026-08-18.
-  phase?: "opening" | "middle" | "end";
+  // (Opening / Middle game / End game). "memory" is a standalone bucket for
+  // general board-memory tools (Memory Palace) that don't belong to a specific
+  // phase — owner ask 2026-08-18. Owner-requested taxonomy overall.
+  phase?: "opening" | "middle" | "end" | "memory";
 }
 
 export const STUDIES: StudyDef[] = [
   { id: "coordinates", kind: "coordinate", icon: "a1", title: "Coordinate Training", blurb: "Place pieces by coordinate",
     detail: "A square + piece appears (e.g. \u201cBlack Rook \u2192 e7\u201d) and you tap that square to place it. Coordinates are hidden — the classic way to learn the board. 45-second sprint.", mateIn: "45s sprint", range: [400, 1200], phase: "opening" },
   { id: "memory-palace", kind: "memory", icon: "\ud83c\udff0", title: "Memory Palace", blurb: "A funny picture on every square",
-    detail: "The memory-champion trick: each of the 64 squares gets a silly, unforgettable scene (a1 = Ant on the Sun, h8 = Hedgehog that Ate too much). Pick from 11 picture sets \u2014 Easy, Animals, Mythology, Space, Ocean, Jungle, Fairy Tales, Superheroes, Cartoons, Vehicles, Food. Explore the board, then quiz yourself both ways.", mateIn: "11 sets \u00b7 no timer", range: [800, 1600], phase: "opening" },
+    detail: "The memory-champion trick: each of the 64 squares gets a silly, unforgettable scene (a1 = Ant on the Sun, h8 = Hedgehog that Ate too much). Pick from 11 picture sets \u2014 Easy, Animals, Mythology, Space, Ocean, Jungle, Fairy Tales, Superheroes, Cartoons, Vehicles, Food. Explore the board, then quiz yourself both ways.", mateIn: "11 sets \u00b7 no timer", range: [800, 1600], phase: "memory" },
   { id: "opening-memory", kind: "memory", icon: "\u265f\ufe0f", title: "Opening Memory", blurb: "Memorize an opening as a story",
     detail: "Learn an opening the memory-champion way: every move becomes a hero visiting a square\u2019s funny picture (its anchor). Step through the Italian, Ruy Lopez, Scotch or Queen\u2019s Gambit \u2014 or send a line over from the Opening explorer \u2014 in any of the 11 picture sets.", mateIn: "anchors \u00b7 step-through", range: [900, 1700], phase: "opening" },
   { id: "daily", kind: "memory", icon: "\ud83d\udd01", title: "Daily Study", blurb: "Your spaced-repetition review queue",

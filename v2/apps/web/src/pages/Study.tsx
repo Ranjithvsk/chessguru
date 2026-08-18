@@ -74,11 +74,12 @@ export default function StudyPage() {
   // dashboards etc.) falls into `other` and renders in an "Other" bucket only
   // if any exist. Owner-requested taxonomy 2026-08-18.
   const openingStudies = STUDIES.filter((s) => s.phase === "opening" && matchStudy(s));
+  const memoryStudies  = STUDIES.filter((s) => s.phase === "memory"  && matchStudy(s));
   const middleStudies  = STUDIES.filter((s) => s.phase === "middle"  && matchStudy(s));
   const endStudies     = STUDIES.filter((s) => s.phase === "end"     && matchStudy(s));
   const otherStudies   = STUDIES.filter((s) => !s.phase && matchStudy(s));
   const anyHardcoded = matchHardcoded("promote-one-pawn") || matchHardcoded("opposition") || matchHardcoded("rule-of-square") || matchHardcoded("key-squares");
-  const totalMatches = openingStudies.length + middleStudies.length + endStudies.length + otherStudies.length + (needle ? [matchHardcoded("promote-one-pawn"), matchHardcoded("opposition"), matchHardcoded("rule-of-square"), matchHardcoded("key-squares")].filter(Boolean).length : 4);
+  const totalMatches = openingStudies.length + memoryStudies.length + middleStudies.length + endStudies.length + otherStudies.length + (needle ? [matchHardcoded("promote-one-pawn"), matchHardcoded("opposition"), matchHardcoded("rule-of-square"), matchHardcoded("key-squares")].filter(Boolean).length : 4);
 
   return (
     <div className="space-y-10">
@@ -107,6 +108,20 @@ export default function StudyPage() {
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             {openingStudies.map((s) => <StudyCard key={s.id} s={s} level={levels[s.id]} />)}
+          </div>
+        </section>
+      )}
+
+      {/* ── Memory training (standalone — general board memory tools) ──────── */}
+      {memoryStudies.length > 0 && (
+        <section className="space-y-6 border-t border-ink-800 pt-8">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-accent-400">Memory training 🏰</div>
+            <h2 className="font-display text-xl text-white">Board memory (Memory Palace)</h2>
+            <p className="text-sm text-ink-400">Memory-champion technique for chess — give every square a funny picture, then never forget it.</p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {memoryStudies.map((s) => <StudyCard key={s.id} s={s} level={levels[s.id]} />)}
           </div>
         </section>
       )}
