@@ -30,6 +30,18 @@ function daysAgo(iso: string | null): string {
 }
 
 export function AcademyRecentMistakesPanel({ enabled = true }: { enabled?: boolean }) {
+  // Collapsed by default (owner ask 2026-08-18) so /academy/performance
+  // opens with the roster front-and-center; coach expands the reteach queue
+  // when they want it. Persisted per browser so a coach who prefers it open
+  // gets it open next time.
+  const [open, setOpenState] = useState<boolean>(() => {
+    try { return localStorage.getItem("cg.academy-mistakes.open") === "1"; }
+    catch { return false; }
+  });
+  const setOpen = (v: boolean) => {
+    setOpenState(v);
+    try { localStorage.setItem("cg.academy-mistakes.open", v ? "1" : "0"); } catch { /* */ }
+  };
   const [kind, setKind] = useState<"both" | "puzzle" | "study">("both");
   const [periodDays, setPeriodDays] = useState<7 | 30>(7);
   const period = useMemo(() => {
@@ -48,7 +60,9 @@ export function AcademyRecentMistakesPanel({ enabled = true }: { enabled?: boole
       periodStart: period.start.toISOString(),
       periodEnd: period.end.toISOString(),
     }),
-    enabled,
+    // Only fetch while expanded — no point spending server cycles for a
+    // panel the coach has folded away.
+    enabled: enabled && open,
     staleTime: 5_000,
     refetchOnWindowFocus: true,
   });
@@ -57,35 +71,48 @@ export function AcademyRecentMistakesPanel({ enabled = true }: { enabled?: boole
 
   return (
     <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
-      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-        <div>
-          <h2 className="text-sm font-semibold text-white">🎯 Recent mistakes across the academy <span className="ml-2 font-normal text-ink-400">({rows.length})</span></h2>
-          <p className="text-xs text-ink-500">Last {periodDays} days · newest first · click a card to reteach.</p>
+      {/* Clickable header — the whole strip toggles open/close so the coach
+          doesn't have to hunt for a chevron. Filter/refresh buttons stop
+          the click propagation so they operate normally. */}
+      <button type="button" onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className="-m-2 mb-1 flex w-full flex-wrap items-center gap-2 rounded-lg p-2 text-left hover:bg-ink-800/40">
+        <svg className={`h-4 w-4 shrink-0 text-ink-400 transition-transform ${open ? "rotate-90" : ""}`}
+          viewBox="0 0 12 12" fill="none">
+          <path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-sm font-semibold text-white">🎯 Recent mistakes across the academy <span className="ml-2 font-normal text-ink-400">{open ? `(${rows.length})` : "· click to open"}</span></h2>
+          {open && <p className="mt-0.5 text-xs text-ink-500">Last {periodDays} days · newest first · click a card to reteach.</p>}
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <div className="flex overflow-hidden rounded-lg border border-ink-700 text-[11px]">
-            {(["both", "puzzle", "study"] as const).map((k) => (
-              <button key={k} onClick={() => setKind(k)}
-                className={`px-2.5 py-1 font-medium ${kind === k ? "bg-brand-500 text-white" : "bg-ink-900 text-ink-300 hover:bg-ink-800"}`}>
-                {k === "both" ? "All" : k === "puzzle" ? "Puzzles" : "Studies"}
-              </button>
-            ))}
+        {open && (
+          <div className="flex flex-wrap items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex overflow-hidden rounded-lg border border-ink-700 text-[11px]">
+              {(["both", "puzzle", "study"] as const).map((k) => (
+                <button key={k} type="button" onClick={() => setKind(k)}
+                  className={`px-2.5 py-1 font-medium ${kind === k ? "bg-brand-500 text-white" : "bg-ink-900 text-ink-300 hover:bg-ink-800"}`}>
+                  {k === "both" ? "All" : k === "puzzle" ? "Puzzles" : "Studies"}
+                </button>
+              ))}
+            </div>
+            <div className="flex overflow-hidden rounded-lg border border-ink-700 text-[11px]">
+              {[7, 30].map((d) => (
+                <button key={d} type="button" onClick={() => setPeriodDays(d as 7 | 30)}
+                  className={`px-2.5 py-1 font-medium ${periodDays === d ? "bg-brand-500 text-white" : "bg-ink-900 text-ink-300 hover:bg-ink-800"}`}>
+                  {d}d
+                </button>
+              ))}
+            </div>
+            <button type="button" onClick={() => q.refetch()} disabled={q.isFetching}
+              className="rounded-md bg-ink-800 px-2 py-1 text-[11px] text-ink-200 hover:bg-ink-700 disabled:opacity-50"
+              title="Force-refresh">
+              {q.isFetching ? "…" : "🔄"}
+            </button>
           </div>
-          <div className="flex overflow-hidden rounded-lg border border-ink-700 text-[11px]">
-            {[7, 30].map((d) => (
-              <button key={d} onClick={() => setPeriodDays(d as 7 | 30)}
-                className={`px-2.5 py-1 font-medium ${periodDays === d ? "bg-brand-500 text-white" : "bg-ink-900 text-ink-300 hover:bg-ink-800"}`}>
-                {d}d
-              </button>
-            ))}
-          </div>
-          <button onClick={() => q.refetch()} disabled={q.isFetching}
-            className="rounded-md bg-ink-800 px-2 py-1 text-[11px] text-ink-200 hover:bg-ink-700 disabled:opacity-50"
-            title="Force-refresh">
-            {q.isFetching ? "…" : "🔄"}
-          </button>
-        </div>
-      </div>
+        )}
+      </button>
+      {!open ? null : (<>
+
       {q.isLoading ? (
         <div className="text-xs text-ink-500">Loading recent mistakes…</div>
       ) : q.error ? (
@@ -151,6 +178,7 @@ export function AcademyRecentMistakesPanel({ enabled = true }: { enabled?: boole
           })}
         </div>
       )}
+      </>)}
     </section>
   );
 }
