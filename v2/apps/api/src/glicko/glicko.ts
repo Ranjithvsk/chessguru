@@ -58,7 +58,12 @@ export function updatePuzzleRating(userPerf: Perf, puzzleGlicko: Glicko, win: bo
   const nP = computeGame(puzzleGlicko, uG, 1 - score);
   nU.r = Math.max(uG.r - MAX_RATING_DELTA, Math.min(uG.r + MAX_RATING_DELTA, nU.r));
   if (!sanity(nU)) nU.r = uG.r;
-  const recent = [nU.r, ...(userPerf.re || [])].slice(0, 12);
+  // Rating history kept per user. Bumped 12 → 100 on 2026-08-18 to power the
+  // coach performance-dashboard sparkline — 12 points was too short for the
+  // trend to be readable. 100 = ~a few months of daily solving for an active
+  // student; ~800 bytes per user (negligible storage). Existing users grow
+  // into it naturally; no migration needed.
+  const recent = [nU.r, ...(userPerf.re || [])].slice(0, 100);
   return {
     userPerf: { gl: { r: nU.r, d: liveDeviation({ gl: nU, la: new Date() }, true), v: nU.v }, nb: (userPerf.nb || 0) + 1, re: recent, la: new Date() },
     puzzleGlicko: nP,
