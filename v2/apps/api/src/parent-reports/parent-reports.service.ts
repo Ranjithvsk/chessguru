@@ -36,7 +36,7 @@ function shortId(bytes = 8): string { return randomBytes(bytes).toString("base64
 export interface ReportData {
   student: { userId: string; username: string; name?: string; role: string };
   period: { start: string; end: string };
-  rating: { current: number | null; change: number | null; historyPoints: number };
+  rating: { current: number | null; change: number | null; historyPoints: number; history?: number[] };
   games: { played: number; won: number; drawn: number; lost: number };
   puzzles: { solved: number };
   revision: { longestStreak: number; totalCards: number };
@@ -198,7 +198,17 @@ export class ParentReportsService {
     return {
       student: { userId: studentId, username: s.username, name: s.name, role: s.role },
       period: { start: start.toISOString(), end: end.toISOString() },
-      rating: { current: curRating, change: ratingChange, historyPoints: re.length },
+      // Expose the raw rating history in OLDEST→NEWEST order so the coach
+      // dashboard sparkline reads left-to-right. userperfs.puzzle.re is stored
+      // NEWEST-first (see ratingChange calc above which reads re[re.length-1]
+      // as the earliest), so we take the most-recent 200 (re.slice(0, 200))
+      // and reverse. Cap keeps the payload small (2026-08-18 owner ask).
+      rating: {
+        current: curRating,
+        change: ratingChange,
+        historyPoints: re.length,
+        history: (re.length > 200 ? re.slice(0, 200) : [...re]).reverse(),
+      },
       games: { played: gamesRaw.length, won, drawn, lost },
       puzzles: { solved: puzzlesSolved },
       revision: { longestStreak, totalCards: reviseRows.length },

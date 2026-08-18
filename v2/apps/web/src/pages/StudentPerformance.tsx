@@ -79,16 +79,59 @@ function AttendanceHeatmap({ days }: { days: boolean[] | undefined }) {
   );
 }
 
-/** Rating sparkline from the perf.puzzle.re history array.
- *  We only get `historyPoints` count in ReportData right now, not the array
- *  itself — so if there's <2 points we hide the graph. Owner: expose the
- *  raw array in a later API iteration if you want a real chart. */
-function RatingTrendPlaceholder({ points }: { points: number }) {
+/** Rating sparkline from the perf.puzzle.re history (oldest→newest).
+ *  glicko.ts caps re[] at 12 entries so this is a compact trend, not a
+ *  full history — perfect for at-a-glance "is this student climbing?".
+ *  Pure inline SVG so the bundle doesn't grow. */
+function RatingSparkline({ history, current }: { history: number[] | undefined; current: number | null }) {
+  const pts = (history || []).filter((n) => typeof n === "number" && !Number.isNaN(n));
+  if (pts.length < 2) {
+    return (
+      <div className="rounded-lg border border-dashed border-ink-700 bg-ink-900/40 p-3 text-center text-xs text-ink-500">
+        {pts.length === 0
+          ? "No rating history yet — puzzles need to be solved before a trend appears."
+          : "Only one rating point logged — solve more puzzles to see the trend."}
+      </div>
+    );
+  }
+  const W = 480, H = 90, PAD = 6;
+  const min = Math.min(...pts), max = Math.max(...pts);
+  const span = Math.max(1, max - min);
+  const stepX = (W - PAD * 2) / (pts.length - 1);
+  const yFor = (v: number) => H - PAD - ((v - min) / span) * (H - PAD * 2);
+  const path = pts.map((v, i) => `${i === 0 ? "M" : "L"}${(PAD + i * stepX).toFixed(1)},${yFor(v).toFixed(1)}`).join(" ");
+  const areaPath = `${path} L${(PAD + (pts.length - 1) * stepX).toFixed(1)},${H - PAD} L${PAD},${H - PAD} Z`;
+  const trend = pts[pts.length - 1]! - pts[0]!;
+  const trendClr = trend > 0 ? "text-emerald-300" : trend < 0 ? "text-rose-300" : "text-ink-300";
   return (
-    <div className="rounded-lg border border-dashed border-ink-700 bg-ink-900/40 p-3 text-center text-xs text-ink-500">
-      {points > 0
-        ? `${points} rating history points logged — full sparkline is on the roadmap (needs the raw re[] array on the API).`
-        : "No rating history yet — puzzles need to be solved before a trend appears."}
+    <div>
+      <div className="mb-1 flex items-baseline justify-between text-xs">
+        <span className="text-ink-400">last {pts.length} solves</span>
+        <span className={`font-semibold tabular-nums ${trendClr}`}>
+          {min} → {max} · {trend >= 0 ? "+" : ""}{trend}
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-24 w-full" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="rating-grad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgb(99 102 241)" stopOpacity="0.35" />
+            <stop offset="100%" stopColor="rgb(99 102 241)" stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+        <path d={areaPath} fill="url(#rating-grad)" />
+        <path d={path} fill="none" stroke="rgb(129 140 248)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        {pts.map((v, i) => (
+          <circle key={i} cx={PAD + i * stepX} cy={yFor(v)} r={i === pts.length - 1 ? 3 : 1.8}
+            fill={i === pts.length - 1 ? "rgb(255 255 255)" : "rgb(165 180 252)"}
+            stroke={i === pts.length - 1 ? "rgb(99 102 241)" : "none"} strokeWidth="1.5">
+            <title>{v}</title>
+          </circle>
+        ))}
+      </svg>
+      <div className="mt-1 flex justify-between text-[10px] text-ink-500">
+        <span>oldest</span>
+        <span>now {current != null && ` · ${current}`}</span>
+      </div>
     </div>
   );
 }
@@ -243,7 +286,7 @@ export default function StudentPerformancePage() {
 
           <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
             <h2 className="mb-3 text-sm font-semibold text-white">Rating trend</h2>
-            <RatingTrendPlaceholder points={r.rating.historyPoints} />
+            <RatingSparkline history={r.rating.history} current={r.rating.current} />
           </section>
 
           <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">

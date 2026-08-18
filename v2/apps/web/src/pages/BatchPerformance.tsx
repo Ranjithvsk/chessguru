@@ -35,7 +35,8 @@ type Batch = {
   students: { _id: string; name: string; username: string }[];
 };
 
-type SortKey = "name" | "rating" | "delta" | "puzzles" | "attendance" | "games";
+type SortKey = "name" | "rating" | "delta" | "puzzles" | "attendance" | "games" | "tier";
+type Tier = "topper" | "average" | "challenger" | "unrated";
 type Row = {
   studentId: string;
   name: string;
@@ -48,9 +49,57 @@ type Row = {
   winRate: number;
   lastActive: string | null;
   flagged: boolean;
+  tier: Tier;
   loading: boolean;
   error: string | null;
 };
+
+/** Assign each rated student a tier RELATIVE to the batch cohort:
+ *  Topper = top ~30% by rating, Challenger = bottom ~30% (the students who
+ *  need more coach attention — deliberately not "weaker" so the label is
+ *  motivating not shaming), everyone else Average. Unrated students (no
+ *  puzzles solved yet) stay in their own bucket. Tiers are peer-relative so
+ *  a 1400 in a beginners' batch is a topper while a 1400 in a strong batch
+ *  is average.
+ */
+function computeTiers(ratings: (number | null)[]): Tier[] {
+  const rated = ratings
+    .map((r, i) => ({ r, i }))
+    .filter((x) => typeof x.r === "number") as { r: number; i: number }[];
+  const out: Tier[] = ratings.map(() => "unrated");
+  if (rated.length < 3) {
+    // Too few rated students to split into three tiers meaningfully — call
+    // everyone "average" so the coach still sees the metric column populated.
+    rated.forEach(({ i }) => { out[i] = "average"; });
+    return out;
+  }
+  const sorted = [...rated].sort((a, b) => b.r - a.r); // highest first
+  const topCut = Math.max(1, Math.floor(sorted.length * 0.3));
+  const bottomCut = Math.max(1, Math.floor(sorted.length * 0.3));
+  sorted.forEach((x, idx) => {
+    if (idx < topCut) out[x.i] = "topper";
+    else if (idx >= sorted.length - bottomCut) out[x.i] = "challenger";
+    else out[x.i] = "average";
+  });
+  return out;
+}
+function tierBadge(t: Tier) {
+  switch (t) {
+    case "topper":  return { emoji: "🏆", label: "Topper",  cls: "bg-amber-500/20 text-amber-200" };
+    case "average": return { emoji: "📊", label: "Average", cls: "bg-brand-500/20 text-brand-200" };
+    case "challenger":  return { emoji: "🎯", label: "Challenger",  cls: "bg-rose-500/20 text-rose-200" };
+    case "unrated": return { emoji: "•",  label: "Unrated", cls: "bg-ink-800 text-ink-500" };
+  }
+}
+function tierRank(t: Tier): number { return t === "topper" ? 3 : t === "average" ? 2 : t === "challenger" ? 1 : 0; }
+function TierPill({ tier, count }: { tier: Tier; count: number }) {
+  const b = tierBadge(tier);
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${b.cls}`}>
+      <span>{b.emoji}</span><span>{b.label}</span><span className="tabular-nums opacity-70">{count}</span>
+    </span>
+  );
+}
 
 function periodDates(days: number): { start: Date; end: Date } {
   const end = new Date();
@@ -116,7 +165,8 @@ export default function BatchPerformancePage() {
 
   if (auth && !auth.loggedIn) return <Navigate to={`/login?back=/academy/batches/${encodeURIComponent(batchId)}/performance`} replace />;
 
-  const rows: Row[] = (batch?.students ?? []).map((s, i) => {
+  // First pass: build rows without tiers so we know each student's rating.
+  const preRows = (batch?.students ?? []).map((s, i) => {
     const q = reports[i];
     const roster = rosterById.get(s._id);
     const r: ReportData | undefined = q?.data;
@@ -142,6 +192,11 @@ export default function BatchPerformancePage() {
       error: (q?.error as any)?.message ?? null,
     };
   });
+  // Tier pass: compute peer-relative topper/average/weaker on the batch
+  // cohort's current ratings. Unrated students (no rating yet) stay separate
+  // so beginners aren't lumped with weaker performers.
+  const tiers = computeTiers(preRows.map((r) => r.rating));
+  const rows: Row[] = preRows.map((r, i) => ({ ...r, tier: tiers[i] || "unrated" }));
 
   const sortedRows = [...rows].sort((a, b) => {
     const dir = sortDir === "asc" ? 1 : -1;
@@ -159,8 +214,17 @@ export default function BatchPerformancePage() {
       case "puzzles":    return cmp(a.puzzles, b.puzzles);
       case "attendance": return cmp(a.attendanceCount, b.attendanceCount);
       case "games":      return cmp(a.games, b.games);
+      case "tier":       return cmp(tierRank(a.tier), tierRank(b.tier));
     }
   });
+
+  // Cohort counts for the header pill row.
+  const tierCounts = {
+    topper:  rows.filter((r) => r.tier === "topper").length,
+    average: rows.filter((r) => r.tier === "average").length,
+    weaker:  rows.filter((r) => r.tier === "challenger").length,
+    unrated: rows.filter((r) => r.tier === "unrated").length,
+  };
 
   const flaggedCount = rows.filter((r) => r.flagged).length;
   const anyLoading = reports.some((q) => q.isLoading);
@@ -190,6 +254,12 @@ export default function BatchPerformancePage() {
             {flaggedCount > 0 && <> · <span className="text-rose-300">{flaggedCount} needs attention</span></>}
             {anyLoading && <> · <span className="text-ink-500">loading metrics…</span></>}
           </div>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {tierCounts.topper > 0   && <TierPill tier="topper"     count={tierCounts.topper}   />}
+            {tierCounts.average > 0  && <TierPill tier="average"    count={tierCounts.average}  />}
+            {tierCounts.challenger > 0 && <TierPill tier="challenger" count={tierCounts.challenger} />}
+            {tierCounts.unrated > 0  && <TierPill tier="unrated"    count={tierCounts.unrated}  />}
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex overflow-hidden rounded-lg border border-ink-700 text-xs">
@@ -209,6 +279,7 @@ export default function BatchPerformancePage() {
           <thead className="bg-ink-800/70 text-xs uppercase tracking-wide text-ink-400">
             <tr>
               <th className="px-3 py-2 text-left"><button onClick={() => toggleSort("name")}>Student {arrow("name")}</button></th>
+              <th className="px-3 py-2 text-left"><button onClick={() => toggleSort("tier")}>Tier {arrow("tier")}</button></th>
               <th className="px-3 py-2 text-right"><button onClick={() => toggleSort("rating")}>Rating {arrow("rating")}</button></th>
               <th className="px-3 py-2 text-right"><button onClick={() => toggleSort("delta")}>Δ ({periodDays}d) {arrow("delta")}</button></th>
               <th className="px-3 py-2 text-right"><button onClick={() => toggleSort("puzzles")}>Puzzles {arrow("puzzles")}</button></th>
@@ -225,6 +296,13 @@ export default function BatchPerformancePage() {
                   <Link to={`/academy/students/${encodeURIComponent(row.studentId)}/performance`}
                     className="font-semibold text-white hover:text-brand-300">{row.name}</Link>
                   <div className="text-xs text-ink-500">@{row.username}</div>
+                </td>
+                <td className="px-3 py-2">
+                  {(() => { const b = tierBadge(row.tier); return (
+                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${b.cls}`}>
+                      <span>{b.emoji}</span><span>{b.label}</span>
+                    </span>
+                  ); })()}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums text-brand-200">{row.rating ?? "—"}</td>
                 <td className={`px-3 py-2 text-right tabular-nums ${row.delta == null ? "text-ink-500" : row.delta >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
@@ -245,7 +323,7 @@ export default function BatchPerformancePage() {
               </tr>
             ))}
             {sortedRows.length === 0 && (
-              <tr><td colSpan={8} className="px-3 py-6 text-center text-sm text-ink-500">No students in this batch yet.</td></tr>
+              <tr><td colSpan={9} className="px-3 py-6 text-center text-sm text-ink-500">No students in this batch yet.</td></tr>
             )}
           </tbody>
         </table>

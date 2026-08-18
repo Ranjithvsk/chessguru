@@ -5,7 +5,7 @@ const BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
 export interface ReportData {
   student: { userId: string; username: string; name?: string; role: string };
   period: { start: string; end: string };
-  rating: { current: number | null; change: number | null; historyPoints: number };
+  rating: { current: number | null; change: number | null; historyPoints: number; history?: number[] };
   games: { played: number; won: number; drawn: number; lost: number };
   puzzles: { solved: number };
   revision: { longestStreak: number; totalCards: number };
