@@ -19,6 +19,10 @@ export interface Engine {
   ready: Promise<void>;
   bestMove(fen: string, movetimeMs?: number): Promise<string>;
   analyse(fen: string, movetimeMs?: number): Promise<Analysis>;
+  /** Multi-line analysis — returns up to `multiPv` best lines, sorted by
+   *  strength (index 0 = best). Powers the "top 3 lines" panel on the
+   *  puzzle trainer (owner ask 2026-08-18). */
+  analyseMulti(fen: string, multiPv: number, movetimeMs?: number): Promise<Analysis[]>;
   quit(): void;
 }
 
@@ -82,7 +86,52 @@ export function createEngine(): Engine {
       send("go movetime " + movetimeMs);
     });
 
-  return { ready, bestMove, analyse, quit: () => w.terminate() };
+  /** MultiPV analysis. Sends `setoption name MultiPV value N` then parses
+   *  each `info ... multipv K ...` line, keeping the deepest snapshot per K.
+   *  Resolves with an array (length ≤ multiPv) sorted by K ascending so
+   *  index 0 = strongest line. */
+  const analyseMulti = (fen: string, multiPv: number, movetimeMs = 1200) =>
+    new Promise<Analysis[]>((resolve, reject) => {
+      const perLine = new Map<number, { scoreCp: number | null; mate: number | null; pv: string[]; depth: number }>();
+      const timer = setTimeout(() => { onLine = null; reject(new Error("engine timeout")); }, movetimeMs + 8000);
+      onLine = (l) => {
+        if (l.startsWith("info")) {
+          const multiM = /\bmultipv\s+(\d+)/.exec(l);
+          const k = multiM ? Number(multiM[1]) : 1;
+          if (k < 1 || k > multiPv) return;
+          const depthM = /\bdepth\s+(\d+)/.exec(l);
+          const cpM = /\bscore\s+cp\s+(-?\d+)/.exec(l);
+          const mM = /\bscore\s+mate\s+(-?\d+)/.exec(l);
+          const pvM = /\bpv\s+(.+)$/.exec(l);
+          const prior = perLine.get(k) || { scoreCp: null, mate: null, pv: [], depth: 0 };
+          if (depthM) prior.depth = Number(depthM[1]);
+          if (cpM) { prior.scoreCp = Number(cpM[1]); prior.mate = null; }
+          else if (mM) { prior.mate = Number(mM[1]); prior.scoreCp = null; }
+          if (pvM) prior.pv = pvM[1]!.trim().split(/\s+/);
+          perLine.set(k, prior);
+        } else if (l.startsWith("bestmove")) {
+          clearTimeout(timer); onLine = null;
+          const sorted: Analysis[] = [...perLine.entries()]
+            .sort((a, b) => a[0] - b[0])
+            .map(([, v]) => ({
+              scoreCp: v.scoreCp,
+              mate: v.mate,
+              bestUci: v.pv[0] || "",
+              pvUci: v.pv,
+              depth: v.depth,
+            }));
+          // Restore MultiPV=1 so subsequent bestMove()/analyse() calls
+          // aren't hobbled by lingering multipv state.
+          send("setoption name MultiPV value 1");
+          resolve(sorted);
+        }
+      };
+      send("setoption name MultiPV value " + Math.max(1, Math.min(5, multiPv)));
+      send("position fen " + fen);
+      send("go movetime " + movetimeMs);
+    });
+
+  return { ready, bestMove, analyse, analyseMulti, quit: () => w.terminate() };
 }
 
 /** Convert side-to-move CP to white-perspective CP (for display consistency). */

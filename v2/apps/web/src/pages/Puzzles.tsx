@@ -11,6 +11,7 @@ import { api, get } from "../lib/api";
 import { usePuzzleGame } from "../hooks/usePuzzleGame";
 import MilestoneOverlay from "../components/MilestoneOverlay";
 import { prettify } from "../lib/format";
+import { EngineAnalysisPanel } from "../components/EngineAnalysisPanel";
 
 type Ctx = { userId: string | null; rating: number };
 const DIFFS: Difficulty[] = ["easiest", "easier", "normal", "harder", "hardest"];
@@ -623,6 +624,13 @@ export default function PuzzlesPage() {
             {g.isFetching ? "Loading…" : "New puzzle"}
           </button>
         </div>
+
+        {/* Engine analysis — client-side Stockfish, top 3 lines with eval.
+            Sits at the bottom of the aside so it's the last thing in the
+            right rail on desktop and (thanks to the single-col grid on
+            mobile) the last panel below the board on phones. Owner ask
+            2026-08-18. */}
+        {g.fen && <EngineAnalysisPanel fen={g.fen} />}
       </aside>
     </div>
   );
