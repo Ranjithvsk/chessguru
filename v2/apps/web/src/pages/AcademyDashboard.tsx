@@ -390,16 +390,29 @@ function BatchesPanel({ students }: { students: any[] }) {
   const [newName, setNewName] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [scheduleFor, setScheduleFor] = useState<any | null>(null);
+  // Editing: when non-null, the same form is in edit mode. Stores the
+  // batch _id so save() knows which record to POST to.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const startEdit = (b: any) => {
+    setEditingId(b._id);
+    setCreating(false);
+    setNewName(b.name || "");
+    setPicked(new Set((b.students || []).map((s: any) => String(s._id))));
+  };
+  const cancelForm = () => { setCreating(false); setEditingId(null); setNewName(""); setPicked(new Set()); };
   const create = async () => {
     if (!newName.trim() || picked.size === 0) return;
-    const r = await fetch("/v2api/api/academy/batches", {
+    const url = editingId
+      ? `/v2api/api/academy/batches/${encodeURIComponent(editingId)}`
+      : "/v2api/api/academy/batches";
+    const r = await fetch(url, {
       method: "POST", credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: newName.trim(), studentIds: [...picked] }),
     });
     const j = await r.json();
-    if (j?.ok) { setCreating(false); setNewName(""); setPicked(new Set()); refetch(); }
-    else alert(j?.error || "Couldn't create batch.");
+    if (j?.ok) { cancelForm(); refetch(); }
+    else alert(j?.error || (editingId ? "Couldn't save changes." : "Couldn't create batch."));
   };
   const remove = async (id: string, name: string) => {
     if (!confirm(`Delete batch "${name}"? Existing scheduled classes stay.`)) return;
@@ -411,12 +424,15 @@ function BatchesPanel({ students }: { students: any[] }) {
     <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="font-display text-lg text-white">👥 Batches <span className="ml-2 text-xs font-normal text-ink-400">({(batches as any[]).length})</span></h2>
-        {!creating && (
+        {!creating && !editingId && (
           <button onClick={() => setCreating(true)} className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500">+ New batch</button>
         )}
       </div>
-      {creating && (
+      {(creating || editingId) && (
         <div className="mb-4 rounded-lg border border-brand-500/40 bg-brand-500/5 p-4">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-300">
+            {editingId ? "Edit batch" : "New batch"}
+          </div>
           <label className="mb-1 block text-xs uppercase text-ink-400">Batch name</label>
           <input
             value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Monday Advanced Kids"
@@ -440,8 +456,10 @@ function BatchesPanel({ students }: { students: any[] }) {
             ))}
           </div>
           <div className="flex gap-2">
-            <button onClick={create} disabled={!newName.trim() || picked.size === 0} className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-40">Create</button>
-            <button onClick={() => { setCreating(false); setNewName(""); setPicked(new Set()); }} className="rounded-lg bg-ink-800 px-3 py-1.5 text-sm text-ink-200 hover:bg-ink-700">Cancel</button>
+            <button onClick={create} disabled={!newName.trim() || picked.size === 0} className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-40">
+              {editingId ? "Save changes" : "Create"}
+            </button>
+            <button onClick={cancelForm} className="rounded-lg bg-ink-800 px-3 py-1.5 text-sm text-ink-200 hover:bg-ink-700">Cancel</button>
           </div>
         </div>
       )}
@@ -453,7 +471,11 @@ function BatchesPanel({ students }: { students: any[] }) {
           <div key={b._id} className="rounded-lg border border-ink-700 bg-ink-800 p-4">
             <div className="mb-1 flex items-center justify-between">
               <div className="font-display text-base text-ink-100">{b.name}</div>
-              <button onClick={() => remove(b._id, b.name)} title="Delete batch" className="text-xs text-ink-500 hover:text-rose-300">🗑</button>
+              <div className="flex items-center gap-1.5">
+                <button onClick={() => startEdit(b)} title="Rename batch or change its student list"
+                  className="text-xs text-ink-500 hover:text-brand-300">✏️</button>
+                <button onClick={() => remove(b._id, b.name)} title="Delete batch" className="text-xs text-ink-500 hover:text-rose-300">🗑</button>
+              </div>
             </div>
             <div className="mb-3 text-xs text-ink-400">{(b.students || []).length} students · {(b.students || []).slice(0, 4).map((s: any) => s.name).join(", ")}{(b.students || []).length > 4 ? "…" : ""}</div>
             <div className="flex flex-wrap gap-2">
