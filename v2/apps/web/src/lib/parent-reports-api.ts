@@ -52,6 +52,14 @@ export const parentReportsApi = {
     req<ReportData>("POST", "/api/parent-reports/preview-self", body),
   mistakes: (body: { studentId: string; periodStart?: string; periodEnd?: string; limit?: number }) =>
     req<Array<{ puzzleId: string; fen: string; solution: string[]; themes: string[]; rating: number | null; wrongMove: string | null; ratedAt: string | null }>>("POST", "/api/parent-reports/mistakes", body),
+  academyMistakes: (body: { periodStart?: string; periodEnd?: string; limit?: number; kind?: "puzzle" | "study" | "both" }) =>
+    req<Array<{
+      kind: "puzzle" | "study";
+      studentId: string; studentName: string; studentUsername: string;
+      puzzleId: string; fen: string; solution: string[]; themes: string[];
+      rating: number | null; wrongMove: string | null; ratedAt: string | null;
+      studyType?: string;
+    }>>("POST", "/api/parent-reports/academy-mistakes", body),
   save: (body: { studentId: string; periodStart?: string; periodEnd?: string; coachNote?: string; parentEmail?: string }) =>
     req<{ reportId: string }>("POST", "/api/parent-reports", body),
   list: (studentId?: string) =>

@@ -77,6 +77,8 @@ export class ParentReportsService {
   private examsCol() { return this.conn.db!.collection<any>("exams"); }
   private rounds() { return this.conn.db!.collection<any>("rounds"); }
   private puzzles() { return this.conn.db!.collection<any>("puzzles"); }
+  private studyRounds() { return this.conn.db!.collection<any>("study_rounds"); }
+  private studyPuzzles() { return this.conn.db!.collection<any>("study_puzzles"); }
 
   private async ensureCoach(session: any): Promise<{ userId: string; academyId: string; role: string }> {
     const userId = session?.userId;
@@ -305,6 +307,127 @@ export class ParentReportsService {
         ratedAt: r.d ? new Date(r.d).toISOString() : null,
       };
     });
+  }
+
+  /** Academy-wide reteach queue — most recent misses across every student in
+   *  the caller's academy (coach: only their assigned students; owner: all).
+   *  Combines PUZZLE misses (rounds w=false) and STUDY-drill misses
+   *  (study_rounds w=false), sorted newest-first, resolved to FEN/solution.
+   *  Powers the /academy/performance overview module so a coach sees the
+   *  whole academy's recent wrong-answers at a glance. Owner ask 2026-08-18:
+   *  "main page small module for coach to see all students study mistakes,
+   *  puzzle mistakes". */
+  async academyMistakes(session: any, body: any): Promise<Array<{
+    kind: "puzzle" | "study";
+    studentId: string;
+    studentName: string;
+    studentUsername: string;
+    puzzleId: string;
+    fen: string;
+    solution: string[];
+    themes: string[];
+    rating: number | null;
+    wrongMove: string | null;
+    ratedAt: string | null;
+    studyType?: string;
+  }>> {
+    const coach = await this.ensureCoach(session);
+    const limit = Math.max(1, Math.min(100, Number(body?.limit) || 20));
+    const start = body?.periodStart ? new Date(body.periodStart) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const end = body?.periodEnd ? new Date(body.periodEnd) : new Date();
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) throw new BadRequestException("bad dates");
+    const kind: "puzzle" | "study" | "both" = body?.kind === "puzzle" || body?.kind === "study" ? body.kind : "both";
+    // Roster: which students the caller can see. Coach sees own assignments
+    // (via coachId — matches ensureStudentInScope's older field name — plus
+    // assignedCoachId to be safe); owner sees the whole academy.
+    const studentFilter: any = { academyId: coach.academyId, role: "student" };
+    if (coach.role === "coach") {
+      studentFilter.$or = [{ coachId: coach.userId }, { assignedCoachId: coach.userId }];
+    }
+    const students = await this.users().find(studentFilter, { projection: { _id: 1, username: 1, name: 1 } }).toArray();
+    if (!students.length) return [];
+    const studentIds = students.map((s: any) => String(s._id));
+    const nameOf = (id: string) => {
+      const s = students.find((u: any) => String(u._id) === id);
+      return { name: (s?.name || s?.username || id) as string, username: (s?.username || id) as string };
+    };
+    // Puzzle misses: one $in on the _id range would over-scan; instead use $or
+    // of per-student range predicates. Cheap for ≤30 students, which is the
+    // realistic academy size before we introduce pagination server-side.
+    const puzzleQuery = kind === "study" ? [] : await this.rounds().find(
+      {
+        $or: studentIds.map((sid) => ({ _id: { $gte: `${sid}:`, $lt: `${sid};` } as any })),
+        w: false,
+        d: { $gte: start, $lte: end },
+      },
+      { projection: { d: 1, wr: 1, pr: 1, _id: 1 } },
+    ).sort({ d: -1 }).limit(limit).toArray();
+    // Study misses: same shape, different collection. No wr field on
+    // study_rounds so wrongMove will be null for these rows.
+    const studyQuery = kind === "puzzle" ? [] : await this.studyRounds().find(
+      {
+        $or: studentIds.map((sid) => ({ _id: { $gte: `${sid}:`, $lt: `${sid};` } as any })),
+        w: false,
+        d: { $gte: start, $lte: end },
+      },
+      { projection: { d: 1, t: 1, r: 1, _id: 1 } },
+    ).sort({ d: -1 }).limit(limit).toArray();
+    // Resolve puzzles in one batch each.
+    const puzIds = puzzleQuery.map((r: any) => String(r._id).split(":")[1]).filter(Boolean) as string[];
+    const studyPuzIds = studyQuery.map((r: any) => String(r._id).split(":")[1]).filter(Boolean) as string[];
+    const [puzDocs, studyDocs] = await Promise.all([
+      puzIds.length
+        ? this.puzzles().find({ $or: [{ puzzleId: { $in: puzIds } }, { _id: { $in: puzIds as any } }] }, { projection: { puzzleId: 1, _id: 1, fen: 1, solution: 1, themes: 1, rating: 1 } }).toArray()
+        : Promise.resolve([]),
+      // study_puzzles use ObjectId _id — decode from hex.
+      studyPuzIds.length
+        ? this.studyPuzzles().find({ _id: { $in: studyPuzIds.map((id) => { try { return new (require("mongodb").ObjectId)(id); } catch { return id; } }) as any } }, { projection: { _id: 1, fen: 1, solution: 1, type: 1, rating: 1 } }).toArray()
+        : Promise.resolve([]),
+    ]);
+    const puzMap = new Map<string, any>(puzDocs.map((p: any) => [String(p.puzzleId || p._id), p]));
+    const studyMap = new Map<string, any>(studyDocs.map((p: any) => [String(p._id), p]));
+
+    const puzzleRows = puzzleQuery.map((r: any) => {
+      const [sid, pid] = String(r._id).split(":");
+      const p = puzMap.get(pid || "");
+      const meta = nameOf(sid || "");
+      return {
+        kind: "puzzle" as const,
+        studentId: sid || "",
+        studentName: meta.name,
+        studentUsername: meta.username,
+        puzzleId: pid || "",
+        fen: p?.fen || "",
+        solution: Array.isArray(p?.solution) ? p.solution : (typeof p?.solution === "string" ? p.solution.split(/\s+/).filter(Boolean) : []),
+        themes: Array.isArray(p?.themes) ? p.themes : [],
+        rating: typeof r.pr === "number" ? r.pr : (typeof p?.rating === "number" ? p.rating : null),
+        wrongMove: typeof r.wr === "string" ? r.wr : null,
+        ratedAt: r.d ? new Date(r.d).toISOString() : null,
+      };
+    });
+    const studyRows = studyQuery.map((r: any) => {
+      const [sid, pid] = String(r._id).split(":");
+      const p = studyMap.get(pid || "");
+      const meta = nameOf(sid || "");
+      return {
+        kind: "study" as const,
+        studentId: sid || "",
+        studentName: meta.name,
+        studentUsername: meta.username,
+        puzzleId: pid || "",
+        fen: p?.fen || "",
+        solution: Array.isArray(p?.solution) ? p.solution : (typeof p?.solution === "string" ? p.solution.split(/\s+/).filter(Boolean) : []),
+        themes: [],
+        rating: typeof r.r === "number" ? r.r : (typeof p?.rating === "number" ? p.rating : null),
+        wrongMove: null,
+        ratedAt: r.d ? new Date(r.d).toISOString() : null,
+        studyType: (typeof r.t === "string" ? r.t : (p?.type || "")) as string,
+      };
+    });
+    // Merge, sort by date desc, cap to limit.
+    return [...puzzleRows, ...studyRows]
+      .sort((a, b) => (b.ratedAt || "").localeCompare(a.ratedAt || ""))
+      .slice(0, limit);
   }
 
   /** Self-scoped preview — same metric bundle, but for the CURRENT LOGGED-IN

@@ -31,6 +31,11 @@ export class ParentReportsController {
   @Post("mistakes")
   mistakes(@Body() body: any, @Req() req: any) { return this.svc.studentMistakes(req?.session, body); }
 
+  // Academy-wide reteach queue — recent misses across every student in
+  // the caller's academy (owner: all, coach: assigned students).
+  @Post("academy-mistakes")
+  academyMistakes(@Body() body: any, @Req() req: any) { return this.svc.academyMistakes(req?.session, body); }
+
   @Post()
   save(@Body() body: any, @Req() req: any) { return this.svc.save(req?.session, body); }
 

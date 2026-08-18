@@ -14,6 +14,7 @@ import { useMemo, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, get } from "../lib/api";
+import { AcademyRecentMistakesPanel } from "../components/AcademyRecentMistakesPanel";
 
 type Student = {
   _id: string;
@@ -196,6 +197,11 @@ export default function AcademyPerformancePage() {
           <Link to="/academy" className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs font-medium text-ink-300 hover:text-white">← Academy</Link>
         </div>
       </header>
+
+      {/* Academy-wide reteach queue — puzzle + study misses across every
+          student the caller can see. Sits above the roster table so the
+          coach lands on "who needs attention" before drilling into anyone. */}
+      <AcademyRecentMistakesPanel enabled={!!canManage} />
 
       <div className="overflow-x-auto rounded-xl border border-ink-700 bg-ink-900/40">
         <table className="min-w-full text-sm">
