@@ -8,15 +8,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { MiniFenBoard } from "./MiniFenBoard";
+import type { Key } from "chessground/types";
+import Board from "./Board";
 import { parentReportsApi } from "../lib/parent-reports-api";
 
 function fenSide(fen: string): "white" | "black" {
   return fen.split(" ")[1] === "b" ? "black" : "white";
 }
-function uciSquares(uci: string | null): [string, string] | undefined {
+function uciSquares(uci: string | null): [Key, Key] | undefined {
   if (!uci || uci.length < 4) return undefined;
-  return [uci.slice(0, 2), uci.slice(2, 4)];
+  return [uci.slice(0, 2) as Key, uci.slice(2, 4) as Key];
 }
 function daysAgo(iso: string | null): string {
   if (!iso) return "";
@@ -163,7 +164,8 @@ export function AcademyRecentMistakesPanel({ enabled = true }: { enabled?: boole
                 style={{ contentVisibility: "auto", containIntrinsicSize: "280px" } as any}
                 className="flex flex-col overflow-hidden rounded-xl border-2 border-rose-500/60 bg-ink-800/40 transition hover:border-rose-400">
                 {m.fen ? (
-                  <MiniFenBoard fen={m.fen} orientation={side} highlight={wrongSquares as [string, string] | undefined} />
+                  <Board fen={m.fen} orientation={side} lastMove={wrongSquares}
+                    viewOnly coordinates={false} className="mini" />
                 ) : (
                   <div className="aspect-square w-full grid place-items-center bg-ink-800 text-[11px] text-ink-500">FEN missing</div>
                 )}

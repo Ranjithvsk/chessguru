@@ -11,7 +11,8 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { MiniFenBoard } from "./MiniFenBoard";
+import type { Key } from "chessground/types";
+import Board from "./Board";
 import { parentReportsApi } from "../lib/parent-reports-api";
 
 type Props = {
@@ -28,9 +29,9 @@ function fenSide(fen: string): "white" | "black" {
   return parts[1] === "b" ? "black" : "white";
 }
 /** UCI ("e2e4" or "e7e8q") → [from, to] for chessground's lastMove highlight. */
-function uciSquares(uci: string | null): [string, string] | undefined {
+function uciSquares(uci: string | null): [Key, Key] | undefined {
   if (!uci || uci.length < 4) return undefined;
-  return [uci.slice(0, 2), uci.slice(2, 4)];
+  return [uci.slice(0, 2) as Key, uci.slice(2, 4) as Key];
 }
 function daysAgo(iso: string | null): string {
   if (!iso) return "";
@@ -112,10 +113,12 @@ export function StudentMistakesPanel({ studentId, studentUsername, periodDays }:
             const trainerHref = `/?puzzle=${encodeURIComponent(m.puzzleId)}${studentUsername ? `&as=${encodeURIComponent(studentUsername)}` : ""}`;
             return (
               <div key={m.puzzleId} className="flex flex-col overflow-hidden rounded-xl2 border-2 border-rose-500/60 bg-ink-800/40 transition hover:border-rose-400">
-                {/* Mini board — pure inline SVG (no Chessground mount cost).
-                    Wrong-move squares highlighted yellow. */}
+                {/* Mini board — same Chessground <Board> the /history page
+                    uses so pieces match the puzzle trainer exactly. Yellow
+                    lastMove squares mark where the student went wrong. */}
                 {m.fen ? (
-                  <MiniFenBoard fen={m.fen} orientation={side} highlight={wrongSquares as [string, string] | undefined} />
+                  <Board fen={m.fen} orientation={side} lastMove={wrongSquares}
+                    viewOnly coordinates={false} className="mini" />
                 ) : (
                   <div className="aspect-square w-full bg-ink-800 text-center text-xs text-ink-500 grid place-items-center">
                     puzzle FEN missing
