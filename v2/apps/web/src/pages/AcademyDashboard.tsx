@@ -378,17 +378,19 @@ function NewDirectiveModal({ coaches, students, onClose }: { coaches: any[]; stu
 /** Batch = named list of students. Coach picks students → creates a batch →
  *  schedules classes for that batch in one form (recurring supported). */
 /** Upcoming-classes strip inside a batch card. Groups a series into a
- *  compact recurrence label (e.g. "Mon+Wed 6:00 PM · 60min") when the
- *  batch has multiple classes on the same weekday+time, otherwise lists
- *  the next 3 as individual rows. Owner ask 2026-08-18: "if class
- *  scheduled, show it on the batch tile — time, day of the week". */
-function BatchClassStrip({ classes }: { classes: ClassRow[] }) {
+ *  compact recurrence label (e.g. "Mon 6:00 PM · 60min ×12") and offers
+ *  a ✕ button per row to cancel that class (single) or the whole future
+ *  series. Owner ask 2026-08-18: "if class scheduled, show it on the
+ *  batch tile — time, day of the week" + "show remove option in schedule". */
+function BatchClassStrip({ classes, onChanged }: { classes: ClassRow[]; onChanged?: () => void }) {
   if (!classes.length) {
     return <div className="mb-3 rounded border border-dashed border-ink-700 px-2 py-1.5 text-[11px] text-ink-500">No classes scheduled yet — hit 📅 below to add one.</div>;
   }
-  // Group by (weekday, HH:MM, durationMin) so a Mon 6pm recurring series
-  // reads as a single row with a count instead of 12 separate lines.
-  const groups = new Map<string, { label: string; count: number; nextAt: Date }>();
+  // Group by (weekday, HH:MM, durationMin) — a recurring series lands on
+  // the same weekday+time so this collapses cleanly. Keep a representative
+  // ClassRow per group so the ✕ button knows which _id or seriesId to
+  // cancel (single classes cancel by _id, real series cancel by seriesId).
+  const groups = new Map<string, { label: string; count: number; nextAt: Date; rep: ClassRow }>();
   const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   for (const c of classes) {
     const d = new Date(c.startAt);
@@ -396,17 +398,43 @@ function BatchClassStrip({ classes }: { classes: ClassRow[] }) {
     const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
     const label = `${WEEKDAY[d.getDay()]} ${time} · ${c.durationMin}min`;
     const g = groups.get(key);
-    if (!g) groups.set(key, { label, count: 1, nextAt: d });
-    else { g.count += 1; if (d < g.nextAt) g.nextAt = d; }
+    if (!g) groups.set(key, { label, count: 1, nextAt: d, rep: c });
+    else {
+      g.count += 1;
+      if (d < g.nextAt) { g.nextAt = d; g.rep = c; }
+    }
   }
   const rows = [...groups.values()].sort((a, b) => a.nextAt.getTime() - b.nextAt.getTime());
+
+  const cancelGroup = async (g: { count: number; label: string; rep: ClassRow }) => {
+    const isSeries = g.count > 1 && !!g.rep.seriesId;
+    const msg = isSeries
+      ? `Cancel every FUTURE class in this "${g.label}" series (${g.count} classes)? Past classes are kept as history.`
+      : `Cancel this class ("${g.label}")?`;
+    if (!confirm(msg)) return;
+    const url = isSeries
+      ? `/v2api/api/class/schedule/series/${encodeURIComponent(g.rep.seriesId!)}`
+      : `/v2api/api/class/schedule/${encodeURIComponent(g.rep._id)}`;
+    const r = await fetch(url, { method: "DELETE", credentials: "include" });
+    if (r.ok) onChanged?.();
+    else {
+      const j = await r.json().catch(() => ({}));
+      alert(j?.message || "Couldn't cancel.");
+    }
+  };
+
   return (
     <div className="mb-3 space-y-1 rounded border border-ink-700 bg-ink-900/60 px-2 py-1.5">
       {rows.slice(0, 3).map((g) => (
         <div key={g.label} className="flex items-center gap-2 text-[11px]">
           <span className="rounded-full bg-emerald-500/20 px-1.5 py-0.5 font-semibold text-emerald-200">📅</span>
-          <span className="text-ink-200">{g.label}</span>
+          <span className="flex-1 text-ink-200">{g.label}</span>
           {g.count > 1 && <span className="text-[10px] tabular-nums text-ink-500">×{g.count}</span>}
+          <button onClick={() => cancelGroup(g)}
+            title={g.count > 1 ? "Cancel all future classes in this series" : "Cancel this class"}
+            className="ml-0.5 rounded px-1 py-0.5 text-[10px] text-ink-500 hover:bg-rose-500/15 hover:text-rose-300">
+            ✕
+          </button>
         </div>
       ))}
       {rows.length > 3 && (
@@ -517,7 +545,8 @@ function BatchesPanel({ students, classes = [] }: { students: any[]; classes?: C
               </div>
             </div>
             <div className="mb-3 text-xs text-ink-400">{(b.students || []).length} students · {(b.students || []).slice(0, 4).map((s: any) => s.name).join(", ")}{(b.students || []).length > 4 ? "…" : ""}</div>
-            <BatchClassStrip classes={classes.filter((c) => c.batchId === b._id)} />
+            <BatchClassStrip classes={classes.filter((c) => c.batchId === b._id)}
+              onChanged={() => qc.invalidateQueries({ queryKey: ["academy-schedule"] })} />
             <div className="flex flex-wrap gap-2">
               <button onClick={() => setScheduleFor(b)} className="rounded-lg border border-cyan-500/50 bg-cyan-500/15 px-3 py-1.5 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/25">📅 Schedule class</button>
               <Link to={`/academy/batches/${encodeURIComponent(b._id)}/performance`}
