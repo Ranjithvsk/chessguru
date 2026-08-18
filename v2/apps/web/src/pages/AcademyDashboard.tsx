@@ -456,7 +456,13 @@ function BatchesPanel({ students }: { students: any[] }) {
               <button onClick={() => remove(b._id, b.name)} title="Delete batch" className="text-xs text-ink-500 hover:text-rose-300">🗑</button>
             </div>
             <div className="mb-3 text-xs text-ink-400">{(b.students || []).length} students · {(b.students || []).slice(0, 4).map((s: any) => s.name).join(", ")}{(b.students || []).length > 4 ? "…" : ""}</div>
-            <button onClick={() => setScheduleFor(b)} className="rounded-lg border border-cyan-500/50 bg-cyan-500/15 px-3 py-1.5 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/25">📅 Schedule class</button>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => setScheduleFor(b)} className="rounded-lg border border-cyan-500/50 bg-cyan-500/15 px-3 py-1.5 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/25">📅 Schedule class</button>
+              <Link to={`/academy/batches/${encodeURIComponent(b._id)}/performance`}
+                className="rounded-lg border border-sky-500/50 bg-sky-500/15 px-3 py-1.5 text-sm font-semibold text-sky-100 hover:bg-sky-500/25">
+                📊 Batch report
+              </Link>
+            </div>
           </div>
         ))}
       </div>

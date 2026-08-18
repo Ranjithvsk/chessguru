@@ -248,6 +248,10 @@ export default function StudentsManagerPage() {
                   <td className="px-3 py-2 text-ink-400 text-xs">{fmtDate(s.lastAttendedAt || s.lastLogin)}</td>
                   <td className="px-3 py-2 text-right">
                     <div className="inline-flex gap-1.5">
+                      <Link to={`/academy/students/${encodeURIComponent(s._id)}/performance`}
+                        title="Open the performance dashboard"
+                        className="rounded-md bg-sky-500/20 px-2 py-1 text-xs font-semibold text-sky-100 hover:bg-sky-500/30"
+                      >📊 Report</Link>
                       <button
                         type="button" title="Mark attended today"
                         onClick={() => attendM.mutate(s._id)}
