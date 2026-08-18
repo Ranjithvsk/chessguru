@@ -1,15 +1,18 @@
 // Coach reteach queue — the puzzles a student got WRONG in the current
-// period. Each row shows the puzzle rating, themes and the wrong move
-// they played, with two coach-side jump-off buttons:
-//   - 🎯 Open in trainer — /?puzzle=<id>&as=<username> for a live session
+// period. Each miss renders as a card with a mini board (like /history)
+// so the coach can eyeball the position at a glance, then jump into:
+//   - 🎯 Reteach — /?puzzle=<id>&as=<username> for a live session
 //   - 📷 Board editor — /board-editor?fen=<fen>&orientation=<w|b> to teach
-//     the position (add arrows, walk them through the correct idea).
+//     the position (add arrows, walk through the correct idea).
 //
-// Added 2026-08-18 (owner: "coach can reteach and teach them the technique").
+// Added 2026-08-18 (owner: "coach can reteach and teach them the technique"
+// + "if there is a small board like my history, it'll be useful").
 // Backend endpoint: POST /api/parent-reports/mistakes.
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import type { Key } from "chessground/types";
+import Board from "./Board";
 import { parentReportsApi } from "../lib/parent-reports-api";
 
 type Props = {
@@ -24,6 +27,11 @@ type Props = {
 function fenSide(fen: string): "white" | "black" {
   const parts = fen.split(" ");
   return parts[1] === "b" ? "black" : "white";
+}
+/** UCI ("e2e4" or "e7e8q") → [from, to] for chessground's lastMove highlight. */
+function uciSquares(uci: string | null): [Key, Key] | undefined {
+  if (!uci || uci.length < 4) return undefined;
+  return [uci.slice(0, 2) as Key, uci.slice(2, 4) as Key];
 }
 function daysAgo(iso: string | null): string {
   if (!iso) return "";
@@ -56,9 +64,8 @@ export function StudentMistakesPanel({ studentId, studentUsername, periodDays }:
       limit,
     }),
     enabled: !!studentId,
-    // Short TTL — the coach opens this panel to react to something the student
-    // JUST did, so we can't sit on 30s-stale cache. Also refetch on focus so
-    // switching back to the tab pulls the newest miss automatically.
+    // Short TTL — coaches open this to react to something the student just
+    // did, so we can't sit on 30s-stale cache. Refetch on tab focus too.
     staleTime: 5_000,
     refetchOnWindowFocus: true,
   });
@@ -70,7 +77,7 @@ export function StudentMistakesPanel({ studentId, studentUsername, periodDays }:
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
         <div>
           <h2 className="text-sm font-semibold text-white">🎯 Puzzles this student missed <span className="ml-2 font-normal text-ink-400">({rows.length}{q.data && rows.length === limit ? "+" : ""})</span></h2>
-          <p className="text-xs text-ink-500">Newest wrong-answer first · last {periodDays} days · use the buttons to reteach the position.</p>
+          <p className="text-xs text-ink-500">Newest wrong-answer first · last {periodDays} days · yellow squares = their wrong move.</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => q.refetch()} disabled={q.isFetching}
@@ -95,64 +102,75 @@ export function StudentMistakesPanel({ studentId, studentUsername, periodDays }:
           🎉 No misses in this period — solid work. Try a longer window or a different theme filter.
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-ink-700">
-          <table className="min-w-full text-sm">
-            <thead className="bg-ink-800/70 text-xs uppercase tracking-wide text-ink-400">
-              <tr>
-                <th className="px-3 py-2 text-left">Puzzle</th>
-                <th className="px-3 py-2 text-right">Rating</th>
-                <th className="px-3 py-2 text-left">Themes</th>
-                <th className="px-3 py-2 text-left">Their move</th>
-                <th className="px-3 py-2 text-left">Correct</th>
-                <th className="px-3 py-2 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((m) => {
-                const side = m.fen ? fenSide(m.fen) : "white";
-                const correctFirst = m.solution?.[0] || "—";
-                const editorHref = m.fen
-                  ? `/board-editor?fen=${encodeURIComponent(m.fen)}&orientation=${side}`
-                  : null;
-                const trainerHref = `/?puzzle=${encodeURIComponent(m.puzzleId)}${studentUsername ? `&as=${encodeURIComponent(studentUsername)}` : ""}`;
-                return (
-                  <tr key={m.puzzleId} className="border-t border-ink-800 hover:bg-ink-800/40">
-                    <td className="px-3 py-2">
-                      <div className="font-mono text-xs text-white">#{m.puzzleId}</div>
-                      {m.ratedAt && <div className="text-[10px] text-ink-500">{daysAgo(m.ratedAt)}</div>}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-brand-200">{m.rating ?? "—"}</td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-wrap gap-1">
-                        {m.themes.slice(0, 3).map((t) => (
-                          <span key={t} className="rounded-full bg-ink-800 px-1.5 py-0.5 text-[10px] text-ink-300">{t}</span>
-                        ))}
-                        {m.themes.length > 3 && <span className="text-[10px] text-ink-500">+{m.themes.length - 3}</span>}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 font-mono text-xs text-rose-300">{m.wrongMove || "—"}</td>
-                    <td className="px-3 py-2 font-mono text-xs text-emerald-300">{correctFirst}</td>
-                    <td className="px-3 py-2 text-right">
-                      <div className="inline-flex gap-1.5">
-                        {editorHref && (
-                          <Link to={editorHref}
-                            title="Open in board editor — draw arrows and walk through the correct plan"
-                            className="rounded-md bg-brand-500/20 px-2 py-1 text-xs font-semibold text-brand-100 hover:bg-brand-500/30">
-                            📷 Board
-                          </Link>
-                        )}
-                        <Link to={trainerHref}
-                          title="Open in the puzzle trainer to solve it live with the student"
-                          className="rounded-md bg-emerald-500/20 px-2 py-1 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/30">
-                          🎯 Reteach
-                        </Link>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {rows.map((m) => {
+            const side = m.fen ? fenSide(m.fen) : "white";
+            const correctFirst = m.solution?.[0] || null;
+            const wrongSquares = uciSquares(m.wrongMove);
+            const editorHref = m.fen
+              ? `/board-editor?fen=${encodeURIComponent(m.fen)}&orientation=${side}`
+              : null;
+            const trainerHref = `/?puzzle=${encodeURIComponent(m.puzzleId)}${studentUsername ? `&as=${encodeURIComponent(studentUsername)}` : ""}`;
+            return (
+              <div key={m.puzzleId} className="flex flex-col overflow-hidden rounded-xl2 border-2 border-rose-500/60 bg-ink-800/40 transition hover:border-rose-400">
+                {/* Mini board — read-only, wrong-move squares highlighted yellow.
+                    Same visual language as the /history solved strip. */}
+                {m.fen ? (
+                  <Board fen={m.fen} orientation={side} lastMove={wrongSquares}
+                    viewOnly coordinates={false} className="mini" />
+                ) : (
+                  <div className="aspect-square w-full bg-ink-800 text-center text-xs text-ink-500 grid place-items-center">
+                    puzzle FEN missing
+                  </div>
+                )}
+
+                <div className="flex flex-1 flex-col gap-2 p-3">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="font-mono text-[11px] text-ink-400">#{m.puzzleId}</span>
+                    <div className="flex items-center gap-2 text-[11px]">
+                      {m.rating != null && (
+                        <span className="rounded-full bg-brand-500/15 px-2 py-0.5 font-semibold tabular-nums text-brand-200">★ {m.rating}</span>
+                      )}
+                      <span className="text-ink-500">{daysAgo(m.ratedAt)}</span>
+                    </div>
+                  </div>
+
+                  {/* Themes */}
+                  {m.themes.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {m.themes.slice(0, 4).map((t) => (
+                        <span key={t} className="rounded-full bg-ink-800 px-1.5 py-0.5 text-[10px] text-ink-300">{t}</span>
+                      ))}
+                      {m.themes.length > 4 && <span className="text-[10px] text-ink-500 self-center">+{m.themes.length - 4}</span>}
+                    </div>
+                  )}
+
+                  {/* Their move vs correct — compact one-liner. */}
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
+                    <span><span className="text-ink-500">Their move:</span> <span className="font-mono font-semibold text-rose-300">{m.wrongMove || "—"}</span></span>
+                    {correctFirst && (
+                      <span><span className="text-ink-500">Correct:</span> <span className="font-mono font-semibold text-emerald-300">{correctFirst}</span></span>
+                    )}
+                  </div>
+
+                  <div className="mt-auto flex gap-1.5 pt-1">
+                    {editorHref && (
+                      <Link to={editorHref}
+                        title="Open in board editor — draw arrows and walk through the correct plan"
+                        className="flex-1 rounded-md bg-brand-500/20 px-2 py-1.5 text-center text-xs font-semibold text-brand-100 hover:bg-brand-500/30">
+                        📷 Board
+                      </Link>
+                    )}
+                    <Link to={trainerHref}
+                      title="Open in the puzzle trainer to solve it live with the student"
+                      className="flex-1 rounded-md bg-emerald-500/20 px-2 py-1.5 text-center text-xs font-semibold text-emerald-100 hover:bg-emerald-500/30">
+                      🎯 Reteach
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </section>
