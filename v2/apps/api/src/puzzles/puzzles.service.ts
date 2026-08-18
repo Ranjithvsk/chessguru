@@ -50,7 +50,7 @@ export class PuzzlesService {
     return out;
   }
 
-  async random(theme: string, difficulty: string, rating: number, maxPc?: number, userId?: string | null, section?: string, player?: string, mode?: string) {
+  async random(theme: string, difficulty: string, rating: number, maxPc?: number, userId?: string | null, section?: string, player?: string, mode?: string, exactRating?: number) {
     // CL-9156b: use the user's CURRENT puzzle rating from userperfs as the base,
     // not the client-passed `rating` (which lags — frozen near page load — so as
     // the user climbs during a session, puzzles were served ~100-150 below).
@@ -72,7 +72,12 @@ export class PuzzlesService {
       const tp = themed ? (up as any)?.[themeNs]?.[theme] : null;
       if (tp && typeof tp.gl?.r === "number" && (tp.nb ?? 0) >= 3) baseRating = tp.gl.r;
     }
-    const target = clamp(baseRating + (DIFF[difficulty] ?? 0), 400, 3000);
+    // Curriculum step: caller-specified exact rating wins over both the
+    // live-rating override AND the difficulty offset. Used by the weakness
+    // curriculum's ratchet so each step lands on a known target rating.
+    const target = typeof exactRating === "number" && exactRating > 0
+      ? clamp(exactRating, 400, 3000)
+      : clamp(baseRating + (DIFF[difficulty] ?? 0), 400, 3000);
     const played = userId ? await this.playedIds(userId) : [];
     const playedSet = new Set(played);
 

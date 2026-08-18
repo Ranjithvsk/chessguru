@@ -12,6 +12,7 @@ import { usePuzzleGame } from "../hooks/usePuzzleGame";
 import MilestoneOverlay from "../components/MilestoneOverlay";
 import { prettify } from "../lib/format";
 import { EngineAnalysisPanel } from "../components/EngineAnalysisPanel";
+import { WeaknessCurriculumCard } from "../components/WeaknessCurriculumCard";
 
 type Ctx = { userId: string | null; rating: number };
 const DIFFS: Difficulty[] = ["easiest", "easier", "normal", "harder", "hardest"];
@@ -161,7 +162,39 @@ export default function PuzzlesPage() {
   // time by the coach's one-click flow); otherwise use the student's own
   // rating from the outlet context.
   const effectiveRating = inHwMode && urlRating > 0 ? urlRating : rating;
-  const g = usePuzzleGame({ theme, difficulty, userId, initialRating: effectiveRating, section, player });
+
+  // Weakness-curriculum override: when the user is on their active-course
+  // theme, feed the current step's exact rating into the puzzle picker so
+  // the ratchet actually happens (backend bypasses live-rating + difficulty
+  // offset). Read the raw localStorage each render — it's tiny and the
+  // WeaknessCurriculumCard writes to the same key.
+  const curriculum = (() => {
+    if (inHwMode) return null; // homework locks the theme; curriculum sleeps
+    try {
+      const raw = localStorage.getItem("cg.weakness-curriculum.v1");
+      if (!raw) return null;
+      const j = JSON.parse(raw) as { theme: string; ratings: number[]; stepIndex: number; completedAt?: string };
+      if (!j?.theme || !Array.isArray(j?.ratings) || j.completedAt) return null;
+      return j;
+    } catch { return null; }
+  })();
+  const curriculumExact = curriculum && curriculum.theme === theme
+    ? curriculum.ratings[Math.min(curriculum.stepIndex, curriculum.ratings.length - 1)]
+    : undefined;
+
+  const g = usePuzzleGame({ theme, difficulty, userId, initialRating: effectiveRating, section, player, exactRating: curriculumExact });
+
+  // Solve counter — bumps every time a puzzle completes (solveMs transitions
+  // from null to a number). WeaknessCurriculumCard watches this to advance
+  // the course step.
+  const [solveCounter, setSolveCounter] = useState(0);
+  const prevSolveMs = useRef<number | null>(null);
+  useEffect(() => {
+    if (prevSolveMs.current == null && g.solveMs != null) {
+      setSolveCounter((n) => n + 1);
+    }
+    prevSolveMs.current = g.solveMs;
+  }, [g.solveMs]);
 
   // Fetch student's homework list to pull progress + target for the active
   // task. Only runs in homework mode; served from /api/me/homework which the
@@ -612,6 +645,16 @@ export default function PuzzlesPage() {
           </div>
         )}
 
+        <WeaknessCurriculumCard
+          currentTheme={theme}
+          solveCounter={solveCounter}
+          onSolveNext={(t) => {
+            try { localStorage.setItem("cg_theme", t); localStorage.removeItem("cg_puzzle"); } catch { /* */ }
+            setTheme(t);
+            // Fresh puzzle if we're already on this theme (theme change auto-fetches otherwise).
+            if (theme === t) g.next();
+          }}
+        />
         <SuggestedThemesRow current={theme} setTheme={(t) => { try { localStorage.setItem("cg_theme", t); localStorage.removeItem("cg_puzzle"); } catch { /* */ } setTheme(t); }} disabled={inHwMode} />
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
           <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-400">Theme</label>

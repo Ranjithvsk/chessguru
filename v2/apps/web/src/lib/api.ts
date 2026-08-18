@@ -36,6 +36,9 @@ export function classRoomPath(_kind: string | null | undefined, id: string, role
 }
 
 export interface RandomPuzzleOpts { theme: string; rating: number; difficulty: Difficulty; maxPc?: number; userId?: string | null; section?: string; player?: string;   mode?: string;
+  /** Curriculum override — exact target rating, bypasses live-rating +
+   *  difficulty offset. Used by the weakness-curriculum ratchet. */
+  exactRating?: number;
 }
 export interface MasterPlayer { name: string; count: number; }
 export interface CompleteBody { win: boolean; hint: boolean; difficulty: Difficulty; userId: string | null; mode?: "puzzle" | "blindfold"; rating?: number; deviation?: number; theme?: string; ms?: number; wrong?: string; daily?: boolean; }
@@ -85,6 +88,7 @@ export const api = {
     if (opts.section) p.set("section", opts.section);
     if (opts.player) p.set("player", opts.player);
     if (opts.mode) p.set("mode", opts.mode); // blindfold serves from its own rating
+    if (opts.exactRating) p.set("exactRating", String(opts.exactRating));
     return get<Puzzle>(`/api/puzzles/random?${p.toString()}`);
   },
   puzzleById: (id: string) => get<Puzzle>(`/api/puzzles/${encodeURIComponent(id)}`),

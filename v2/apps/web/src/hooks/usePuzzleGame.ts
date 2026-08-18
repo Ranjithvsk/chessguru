@@ -18,11 +18,15 @@ export interface UsePuzzleGameOpts {
   maxPc?: number;
   section?: string;
   player?: string;
+  /** Curriculum override: when set, the fetch asks for a puzzle at exactly
+   *  this rating, bypassing both the live-rating auto and the difficulty
+   *  offset. Powers the weakness-curriculum ratchet. */
+  exactRating?: number;
 }
 
 /** Shared puzzle-solving engine used by Puzzles, Theme and Blindfold pages. */
 export function usePuzzleGame(opts: UsePuzzleGameOpts) {
-  const { theme, difficulty, userId, initialRating, mode = "puzzle", maxPc, section, player } = opts;
+  const { theme, difficulty, userId, initialRating, mode = "puzzle", maxPc, section, player, exactRating } = opts;
   const [nonce, setNonce] = useState(0);
   const [reviewId, setReviewId] = useState<string | null>(null); // reviewing a past solve (from the solved strip)
   const reviewIdRef = useRef<string | null>(null);
@@ -31,7 +35,9 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   const STORE_KEY = mode === "blindfold" ? "cg_puzzle_bf" : section === "masters" ? "cg_puzzle_masters" : "cg_puzzle";
 
   const { data: puzzle, isFetching } = useQuery({
-    queryKey: ["puzzle", mode, section ?? "normal", player ?? "", theme, difficulty, maxPc ?? 0, userId ?? "guest", reviewId ?? "", nonce],
+    // exactRating goes in the queryKey so a curriculum step-change (e.g.
+    // 1200 → 1230) triggers a fresh fetch instead of reusing the cache.
+    queryKey: ["puzzle", mode, section ?? "normal", player ?? "", theme, difficulty, maxPc ?? 0, userId ?? "guest", reviewId ?? "", exactRating ?? 0, nonce],
     queryFn: () => {
       if (reviewId) return api.puzzleById(reviewId); // reviewing a past solve from the strip
       // Resume the saved (unsolved) puzzle whenever one is stored. Read it live
@@ -51,7 +57,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
           } else rid = raw; // legacy format
         }
       } catch { /* */ }
-      const rand = () => api.randomPuzzle({ theme, rating: initialRating, difficulty, maxPc, userId, section, player, mode });
+      const rand = () => api.randomPuzzle({ theme, rating: initialRating, difficulty, maxPc, userId, section, player, mode, exactRating });
       return rid ? api.puzzleById(rid).catch(rand) : rand();
     },
   });

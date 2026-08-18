@@ -21,8 +21,13 @@ export class PuzzlesController {
     @Query("section") section?: string,
     @Query("player") player?: string,
     @Query("mode") mode?: string,
+    // Curriculum override — when set, the picker uses this exact target
+    // rating and bypasses both the userperfs live-rating override AND the
+    // difficulty offset. Powers the weakness-curriculum ratchet where each
+    // step in the course targets a specific rating.
+    @Query("exactRating") exactRating?: string,
   ) {
-    const p = await this.svc.random(theme, difficulty, Number(rating) || 1500, maxPc ? Number(maxPc) : undefined, userId || null, section || undefined, player || undefined, mode || undefined);
+    const p = await this.svc.random(theme, difficulty, Number(rating) || 1500, maxPc ? Number(maxPc) : undefined, userId || null, section || undefined, player || undefined, mode || undefined, exactRating ? Number(exactRating) : undefined);
     if (!p) throw new NotFoundException("no puzzle");
     return p;
   }
