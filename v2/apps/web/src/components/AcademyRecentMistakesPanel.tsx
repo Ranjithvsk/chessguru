@@ -5,7 +5,7 @@
 //
 // Owner ask 2026-08-18: "main page small module for coach to see all
 // students study mistakes, puzzle mistakes".
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { Key } from "chessground/types";
@@ -56,18 +56,30 @@ export function AcademyRecentMistakesPanel({ enabled = true }: { enabled?: boole
     queryKey: ["academy-mistakes", kind, periodDays],
     queryFn: () => parentReportsApi.academyMistakes({
       kind,
-      limit: 12,
+      // Fetch 200 in one shot — client paginates 25/page so page-flips are
+      // instant with zero backend hits (owner ask: "should be instant, no
+      // loading" even across 1000s of puzzles). Backend caps at 500 as a
+      // hard ceiling; when we hit that we'll switch to true server paging.
+      limit: 200,
       periodStart: period.start.toISOString(),
       periodEnd: period.end.toISOString(),
     }),
-    // Only fetch while expanded — no point spending server cycles for a
-    // panel the coach has folded away.
     enabled: enabled && open,
-    staleTime: 5_000,
+    // Longer TTL — data is stable for the coach's session; the "🔄" button
+    // is the escape hatch when they need a fresh fetch.
+    staleTime: 60_000,
     refetchOnWindowFocus: true,
   });
 
-  const rows = q.data ?? [];
+  const allRows = q.data ?? [];
+  const PAGE_SIZE = 25;
+  const [page, setPage] = useState(1);
+  // Reset to page 1 whenever the filter set or period changes so a coach
+  // switching filters doesn't stay stranded on page 5 of a smaller result.
+  useEffect(() => { setPage(1); }, [kind, periodDays, allRows.length]);
+  const pageCount = Math.max(1, Math.ceil(allRows.length / PAGE_SIZE));
+  const clampedPage = Math.min(page, pageCount);
+  const rows = allRows.slice((clampedPage - 1) * PAGE_SIZE, clampedPage * PAGE_SIZE);
 
   return (
     <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
@@ -176,6 +188,18 @@ export function AcademyRecentMistakesPanel({ enabled = true }: { enabled?: boole
               </div>
             );
           })}
+        </div>
+      )}
+      {open && !q.isLoading && !q.error && allRows.length > PAGE_SIZE && (
+        <div className="mt-3 flex items-center justify-between text-xs text-ink-400">
+          <span>Showing <span className="font-semibold text-white">{(clampedPage - 1) * PAGE_SIZE + 1}–{Math.min(clampedPage * PAGE_SIZE, allRows.length)}</span> of {allRows.length}{allRows.length === 200 ? "+" : ""}</span>
+          <div className="flex items-center gap-1">
+            <button type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={clampedPage <= 1}
+              className="rounded-md bg-ink-800 px-2 py-1 text-ink-200 hover:bg-ink-700 disabled:opacity-40">← Prev</button>
+            <span className="px-2 tabular-nums">Page {clampedPage} / {pageCount}</span>
+            <button type="button" onClick={() => setPage((p) => Math.min(pageCount, p + 1))} disabled={clampedPage >= pageCount}
+              className="rounded-md bg-ink-800 px-2 py-1 text-ink-200 hover:bg-ink-700 disabled:opacity-40">Next →</button>
+          </div>
         </div>
       )}
       </>)}

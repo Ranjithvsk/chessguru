@@ -332,7 +332,10 @@ export class ParentReportsService {
     studyType?: string;
   }>> {
     const coach = await this.ensureCoach(session);
-    const limit = Math.max(1, Math.min(100, Number(body?.limit) || 20));
+    // Cap at 500 — client paginates 25/page so 500 covers 20 pages of scroll
+    // without a re-fetch. Indexes on {w:1, d:-1} keep this <100ms even at
+    // 100k rounds.
+    const limit = Math.max(1, Math.min(500, Number(body?.limit) || 200));
     const start = body?.periodStart ? new Date(body.periodStart) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const end = body?.periodEnd ? new Date(body.periodEnd) : new Date();
     if (isNaN(start.getTime()) || isNaN(end.getTime())) throw new BadRequestException("bad dates");
