@@ -63,6 +63,48 @@ const THEME_GROUPS: ThemeGroup[] = [
 ];
 const CLASSIFIED = new Set(THEME_GROUPS.flatMap((g) => g.themes));
 
+/** Smart theme-suggestion chips — weakness/strength/new mix. Backed by
+ *  /api/puzzles/suggested-themes so a beginner sees "starter" chips and an
+ *  established user sees their biggest gaps + confidence-builders. Owner
+ *  ask 2026-08-18: "not always tough topics — easy and tough should be
+ *  there". */
+function SuggestedThemesRow({ current, setTheme, disabled }: { current: string; setTheme: (t: string) => void; disabled?: boolean }) {
+  const { data } = useQuery({ queryKey: ["suggested-themes"], queryFn: api.suggestedThemes, staleTime: 5 * 60_000 });
+  if (!data || !data.items.length) return null;
+  return (
+    <div className="mb-3 rounded-xl2 border border-ink-700 bg-ink-900 p-4">
+      <div className="mb-2 flex items-baseline justify-between">
+        <div className="text-xs font-semibold uppercase tracking-wide text-ink-400">🎯 Suggested for you</div>
+        <div className="text-[10px] text-ink-500">Your rating <span className="tabular-nums text-ink-300">{data.global}</span></div>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {data.items.map((s) => {
+          const chosen = current === s.theme;
+          const badge = s.reason === "weakness"
+            ? { emoji: "🔴", tip: "Weakness — focus here" }
+            : s.reason === "strength"
+              ? { emoji: "🟢", tip: "Strong — build confidence" }
+              : s.reason === "new"
+                ? { emoji: "✨", tip: "Untried — try something new" }
+                : { emoji: "•", tip: "Starter" };
+          const label = prettify(s.theme);
+          const sub = s.yourRating != null
+            ? `${badge.emoji} ${label} · ${s.yourRating}${s.delta != null ? ` (${s.delta >= 0 ? "+" : ""}${s.delta})` : ""}`
+            : `${badge.emoji} ${label}`;
+          return (
+            <button key={s.theme} type="button" disabled={disabled}
+              onClick={() => setTheme(s.theme)}
+              title={`${badge.tip}${s.solves ? ` · ${s.solves} solves` : ""}`}
+              className={`rounded-full px-2.5 py-1 text-xs transition ${chosen ? "bg-brand-600 text-white" : "bg-ink-800 text-ink-200 hover:bg-ink-700"} ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}>
+              {sub}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // Pick the puzzle's OWN representative theme (skip broad/length tags) — used to label the
 // header while reviewing so it reflects the opened puzzle, not the leftover theme selector.
 const REVIEW_GENERIC = new Set(["short", "long", "veryLong", "oneMove", "middlegame", "opening", "endgame", "master", "masterVsMaster", "superGM", "crushing", "advantage", "equality", "mate"]);
@@ -570,6 +612,7 @@ export default function PuzzlesPage() {
           </div>
         )}
 
+        <SuggestedThemesRow current={theme} setTheme={(t) => { try { localStorage.setItem("cg_theme", t); localStorage.removeItem("cg_puzzle"); } catch { /* */ } setTheme(t); }} disabled={inHwMode} />
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
           <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-400">Theme</label>
           <select

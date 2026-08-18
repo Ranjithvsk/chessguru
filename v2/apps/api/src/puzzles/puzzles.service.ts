@@ -509,6 +509,130 @@ export class PuzzlesService {
     };
   }
 
+  /** Curated "Suggested for you" theme list — a MIX of weaknesses (biggest
+   *  rating gap below global), strengths (build confidence), and untried
+   *  themes (variety). Powers the smart-suggestion chips on the Puzzles
+   *  page. Owner ask 2026-08-18: "make theme suggestion smarter based on
+   *  my weaknesses and not always tough topics; easy and tough should be
+   *  there".
+   *
+   *  Design (see the /puzzles page for user-facing explanation):
+   *   - Guests: fixed starter mix (mate patterns + basic tactics).
+   *   - Signed-in users with < 20 solves: same starter mix + no per-theme
+   *     data yet.
+   *   - Established users: rank themes by (a) weakness = biggest negative
+   *     delta from your global rating that has ≥5 solves, (b) strength =
+   *     biggest positive delta with ≥5 solves, (c) new = never-played
+   *     themes to keep variety. Interleave so the strip mixes easy and
+   *     tough rather than piling on the worst ones. */
+  async suggestedThemes(userId: string | null): Promise<{
+    global: number;
+    items: Array<{ theme: string; yourRating: number | null; delta: number | null; solves: number; reason: "weakness" | "strength" | "new" | "starter" }>;
+  }> {
+    // Themes worth suggesting — meta/length/level tags are filtered so we
+    // never suggest "long" or "master". This mirrors the front-end trainer's
+    // classifier categories.
+    const CANDIDATE_THEMES = [
+      // Endgames
+      "pawnEndgame", "rookEndgame", "bishopEndgame", "knightEndgame", "queenEndgame", "queenRookEndgame",
+      // Mate patterns
+      "mateIn1", "mateIn2", "mateIn3", "mateIn4", "mateIn5", "backRankMate", "smotheredMate",
+      "anastasiaMate", "arabianMate", "bodenMate", "hookMate", "operaMate",
+      // Tactics
+      "pin", "fork", "skewer", "discoveredAttack", "discoveredCheck", "doubleCheck",
+      "deflection", "attraction", "clearance", "interference", "intermezzo",
+      "sacrifice", "xRayAttack", "trappedPiece", "capturingDefender", "quietMove", "zugzwang",
+      // Attacks
+      "attackingF2F7", "kingsideAttack", "queensideAttack", "exposedKing", "hangingPiece", "defensiveMove",
+      // Pawn play
+      "advancedPawn", "promotion", "underPromotion", "enPassant", "castling",
+    ];
+
+    // Guests / very-new users get the starter mix — beginner-friendly tactics
+    // plus mate-in-1/2 for early wins.
+    const STARTER = ["mateIn1", "mateIn2", "fork", "pin", "hangingPiece", "skewer", "backRankMate"];
+
+    if (!userId) {
+      return {
+        global: 1500,
+        items: STARTER.map((theme) => ({ theme, yourRating: null, delta: null, solves: 0, reason: "starter" as const })),
+      };
+    }
+    const perf: any = await this.conn.db!.collection("userperfs").findOne({ _id: userId as any });
+    const globalR = Math.round(perf?.puzzle?.gl?.r ?? 1500);
+    const totalSolves = perf?.puzzle?.nb ?? 0;
+    const themes = perf?.themes ?? {};
+
+    if (totalSolves < 20) {
+      // Not enough data to trust per-theme numbers. Mix STARTER with any few
+      // themes they've already played (so the strip feels personal even at 5
+      // solves) but tag them all as "starter".
+      const seen = Object.keys(themes).filter((t) => (themes[t]?.nb ?? 0) > 0).slice(0, 3);
+      const merged = [...new Set([...seen, ...STARTER])].slice(0, 7);
+      return {
+        global: globalR,
+        items: merged.map((theme) => ({
+          theme,
+          yourRating: themes[theme] ? Math.round(themes[theme].gl?.r ?? globalR) : null,
+          delta: themes[theme] ? Math.round((themes[theme].gl?.r ?? globalR) - globalR) : null,
+          solves: themes[theme]?.nb ?? 0,
+          reason: "starter" as const,
+        })),
+      };
+    }
+
+    // Established-user path: classify each candidate theme by our per-theme
+    // rating delta. MIN_SOLVES gates flimsy 2-solve deltas so we don't
+    // hyper-suggest something the user barely touched.
+    const MIN_SOLVES = 5;
+    type Row = { theme: string; yourRating: number | null; delta: number | null; solves: number; reason: "weakness" | "strength" | "new" | "starter" };
+    const rows: Row[] = CANDIDATE_THEMES.map((theme) => {
+      const tp = themes[theme];
+      const nb = tp?.nb ?? 0;
+      if (nb >= MIN_SOLVES) {
+        const r = Math.round(tp.gl?.r ?? globalR);
+        const d = r - globalR;
+        return { theme, yourRating: r, delta: d, solves: nb, reason: d <= -50 ? "weakness" : d >= 50 ? "strength" : "starter" as const };
+      }
+      return { theme, yourRating: nb > 0 ? Math.round(tp.gl?.r ?? globalR) : null, delta: null, solves: nb, reason: "new" as const };
+    });
+
+    // Pick 3 biggest weaknesses (most negative delta), 2 strengths (biggest
+    // positive delta — build confidence), 2 untried themes (variety), then
+    // interleave to mix easy + tough. Cap total at 7 so the chip strip fits
+    // in one line on desktop. If a bucket is short, other buckets grow to
+    // keep the total.
+    const weaknesses = rows.filter((r) => r.reason === "weakness").sort((a, b) => (a.delta ?? 0) - (b.delta ?? 0)).slice(0, 3);
+    const strengths = rows.filter((r) => r.reason === "strength").sort((a, b) => (b.delta ?? 0) - (a.delta ?? 0)).slice(0, 2);
+    const untried = rows.filter((r) => r.reason === "new").sort(() => Math.random() - 0.5).slice(0, 2);
+    // Interleave: weakness1, strength1, new1, weakness2, ..., so the chip
+    // strip alternates rather than piling weaknesses first.
+    const zipped: Row[] = [];
+    for (let i = 0; i < Math.max(weaknesses.length, strengths.length, untried.length); i++) {
+      if (weaknesses[i]) zipped.push(weaknesses[i]!);
+      if (strengths[i]) zipped.push(strengths[i]!);
+      if (untried[i]) zipped.push(untried[i]!);
+    }
+    // Guarantee at least 5 items even if the user has few weaknesses/strengths
+    // by padding from the starter mix (dedup'd).
+    const seen = new Set(zipped.map((r) => r.theme));
+    for (const t of STARTER) {
+      if (zipped.length >= 7) break;
+      if (seen.has(t)) continue;
+      const tp = themes[t];
+      const nb = tp?.nb ?? 0;
+      zipped.push({
+        theme: t,
+        yourRating: nb > 0 ? Math.round(tp.gl?.r ?? globalR) : null,
+        delta: nb > 0 ? Math.round((tp.gl?.r ?? globalR) - globalR) : null,
+        solves: nb,
+        reason: "starter",
+      });
+      seen.add(t);
+    }
+    return { global: globalR, items: zipped.slice(0, 7) };
+  }
+
   /** Phase 8c: bump the user's daily-puzzle attendance streak if this solve
    *  really was TODAY's daily puzzle. Server-verified against dailyPuzzles so
    *  a client-side `daily: true` hint can't pad someone's streak with random

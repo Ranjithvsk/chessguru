@@ -40,6 +40,14 @@ export class PuzzlesController {
     return this.svc.masterPlayers();
   }
 
+  // "Suggested for you" theme chips on the trainer — weakness/strength/new
+  // mix, based on the caller's per-theme Glicko ratings.
+  @Get("suggested-themes")
+  async suggestedThemes(@Req() req: any) {
+    const uid: string | null = req?.session?.userId ?? null;
+    return this.svc.suggestedThemes(uid);
+  }
+
   @Get("daily")
   async daily(@Req() req: any) {
     const userId: string | null = req?.session?.userId ?? null;

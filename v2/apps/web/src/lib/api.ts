@@ -74,6 +74,10 @@ export const api = {
     get<HistoryReport>(`/api/me/history?offset=${offset}${as ? `&as=${encodeURIComponent(as)}` : ""}`),
   myRound: (pid: string) => get<{ round: MyRound | null }>(`/api/me/round/${encodeURIComponent(pid)}`),
   themes: () => get<{ themes: string[] }>("/api/themes"),
+  suggestedThemes: () => get<{
+    global: number;
+    items: Array<{ theme: string; yourRating: number | null; delta: number | null; solves: number; reason: "weakness" | "strength" | "new" | "starter" }>;
+  }>("/api/puzzles/suggested-themes"),
   randomPuzzle: (opts: RandomPuzzleOpts) => {
     const p = new URLSearchParams({ theme: opts.theme, rating: String(opts.rating), difficulty: opts.difficulty });
     if (opts.maxPc) p.set("maxPc", String(opts.maxPc));
