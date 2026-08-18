@@ -444,7 +444,7 @@ function BatchClassStrip({ classes, onChanged }: { classes: ClassRow[]; onChange
   );
 }
 
-function BatchesPanel({ students, classes = [] }: { students: any[]; classes?: ClassRow[] }) {
+function BatchesPanel({ students, coaches = [], isOwner = false, classes = [] }: { students: any[]; coaches?: any[]; isOwner?: boolean; classes?: ClassRow[] }) {
   const qc = useQueryClient();
   const { data: batches = [], refetch } = useQuery({
     queryKey: ["academy-batches"],
@@ -456,30 +456,38 @@ function BatchesPanel({ students, classes = [] }: { students: any[]; classes?: C
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  // Owner-only: which coach owns this batch. All students in the batch
+  // are re-assigned to this coach on save (owner ask 2026-08-18).
+  const [batchCoachId, setBatchCoachId] = useState("");
   const [scheduleFor, setScheduleFor] = useState<any | null>(null);
-  // Editing: when non-null, the same form is in edit mode. Stores the
-  // batch _id so save() knows which record to POST to.
   const [editingId, setEditingId] = useState<string | null>(null);
   const startEdit = (b: any) => {
     setEditingId(b._id);
     setCreating(false);
     setNewName(b.name || "");
     setPicked(new Set((b.students || []).map((s: any) => String(s._id))));
+    setBatchCoachId(String(b.coachUserId || ""));
   };
-  const cancelForm = () => { setCreating(false); setEditingId(null); setNewName(""); setPicked(new Set()); };
+  const cancelForm = () => { setCreating(false); setEditingId(null); setNewName(""); setPicked(new Set()); setBatchCoachId(""); };
   const create = async () => {
     if (!newName.trim() || picked.size === 0) return;
     const url = editingId
       ? `/v2api/api/academy/batches/${encodeURIComponent(editingId)}`
       : "/v2api/api/academy/batches";
+    const body: any = { name: newName.trim(), studentIds: [...picked] };
+    if (isOwner && batchCoachId) body.coachUserId = batchCoachId;
     const r = await fetch(url, {
       method: "POST", credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newName.trim(), studentIds: [...picked] }),
+      body: JSON.stringify(body),
     });
     const j = await r.json();
-    if (j?.ok) { cancelForm(); refetch(); }
-    else alert(j?.error || (editingId ? "Couldn't save changes." : "Couldn't create batch."));
+    if (j?.ok) {
+      cancelForm();
+      refetch();
+      // Students' coachId also changed on the server — refresh the roster.
+      qc.invalidateQueries({ queryKey: ["academy-students"] });
+    } else alert(j?.error || (editingId ? "Couldn't save changes." : "Couldn't create batch."));
   };
   const remove = async (id: string, name: string) => {
     if (!confirm(`Delete batch "${name}"? Existing scheduled classes stay.`)) return;
@@ -505,6 +513,23 @@ function BatchesPanel({ students, classes = [] }: { students: any[]; classes?: C
             value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Monday Advanced Kids"
             className="mb-3 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 placeholder-ink-500"
           />
+          {isOwner && (
+            <>
+              <label className="mb-1 block text-xs uppercase text-ink-400">
+                Coach for this batch
+                <span className="ml-2 text-[10px] font-normal normal-case text-ink-500">every student in the batch is assigned to this coach on save</span>
+              </label>
+              <select
+                value={batchCoachId} onChange={(e) => setBatchCoachId(e.target.value)}
+                className="mb-3 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100"
+              >
+                <option value="">— pick a coach —</option>
+                {coaches.map((c: any) => (
+                  <option key={c._id} value={c._id}>{c.name || c.username}{c.isOwner ? " · Owner" : ""}</option>
+                ))}
+              </select>
+            </>
+          )}
           <label className="mb-1 block text-xs uppercase text-ink-400">Pick students ({picked.size}/{students.length})</label>
           <div className="mb-3 max-h-40 overflow-y-auto rounded-lg border border-ink-700 bg-ink-800 p-2">
             {students.map((s) => (
@@ -2505,7 +2530,7 @@ export default function AcademyDashboardPage() {
       {canManage && <DirectivesPanel isOwner={isOwner} coaches={coaches ?? []} students={students} />}
 
       {/* ── Batches (coach schedules classes for a saved student group) ── */}
-      {canManage && <BatchesPanel students={students} classes={[...(schedule?.live ?? []), ...(schedule?.upcoming ?? [])]} />}
+      {canManage && <BatchesPanel students={students} coaches={coaches ?? []} isOwner={isOwner} classes={[...(schedule?.live ?? []), ...(schedule?.upcoming ?? [])]} />}
 
       {/* ── Upcoming + live classes ── */}
       <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">

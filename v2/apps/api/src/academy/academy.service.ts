@@ -568,6 +568,17 @@ export class AcademyService {
       createdBy: g.userId,
     };
     await this.batches().insertOne(doc as any);
+    // Every student in the batch gets that coach assigned. Owner ask
+    // 2026-08-18: "students under that batch also come under that coach".
+    // Skip if coachId is the caller (redundant no-op for the coach-creating-
+    // their-own-batch path); still bump updatedAt so anyone watching sees
+    // the change fan-out cleanly.
+    if (validIds.length) {
+      await this.users().updateMany(
+        { _id: { $in: validIds as any } },
+        { $set: { coachId, updatedAt: now } },
+      );
+    }
     return { ok: true, batch: doc };
   }
 
@@ -578,6 +589,14 @@ export class AcademyService {
     if (g.role === "coach" && String(existing.coachUserId) !== g.userId) return { ok: false, error: "Not your batch." };
     const patch: any = { updatedAt: new Date() };
     if (typeof body?.name === "string") patch.name = body.name.trim().slice(0, 80);
+    // Owner-only: reassign the whole batch (and its students) to a
+    // different coach. Coaches can't hand their batch off — that's an
+    // owner action.
+    if (g.role === "academy_owner" && typeof body?.coachUserId === "string" && body.coachUserId) {
+      const nextCoach: any = await this.users().findOne({ _id: body.coachUserId as any, academyId: g.academyId, role: { $in: ["coach", "academy_owner"] } });
+      if (!nextCoach) return { ok: false, error: "New coach must be an existing coach in this academy." };
+      patch.coachUserId = String(nextCoach._id);
+    }
     if (Array.isArray(body?.studentIds)) {
       const roster = await this.users().find(
         { academyId: g.academyId, role: "student", _id: { $in: body.studentIds as any } },
@@ -588,6 +607,18 @@ export class AcademyService {
         .map((u: any) => String(u._id));
     }
     await this.batches().updateOne({ _id: batchId as any }, { $set: patch });
+    // Fan-out coach re-assignment to every student in the (possibly new)
+    // roster whenever coachUserId OR studentIds changed. Uses the freshest
+    // values: patched coachUserId if we changed it, else the existing one;
+    // patched studentIds if we changed them, else the existing list.
+    const finalCoachId = String(patch.coachUserId ?? existing.coachUserId);
+    const finalStudentIds: string[] = patch.studentIds ?? existing.studentIds ?? [];
+    if (finalStudentIds.length && (patch.coachUserId || patch.studentIds)) {
+      await this.users().updateMany(
+        { _id: { $in: finalStudentIds as any } },
+        { $set: { coachId: finalCoachId, updatedAt: new Date() } },
+      );
+    }
     return { ok: true };
   }
 
