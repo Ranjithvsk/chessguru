@@ -32,6 +32,36 @@ const NOISE_THEMES = new Set<string>([
   "master", "masterVsMaster", "superGM",
 ]);
 
+// ChessBase-style theme grouping for the trainer's Theme <select>. Themes are
+// dropped into their group in the order below; anything not classified falls
+// into "Other" so a new upstream theme still surfaces. Owner ask 2026-08-18:
+// "classify endgame puzzle themes, mate puzzle themes and others like in
+// chessbase, with a header".
+type ThemeGroup = { label: string; themes: string[] };
+const THEME_GROUPS: ThemeGroup[] = [
+  { label: "Phase", themes: ["opening", "middlegame", "endgame"] },
+  { label: "Endgames", themes: ["pawnEndgame", "rookEndgame", "bishopEndgame", "knightEndgame", "queenEndgame", "queenRookEndgame"] },
+  { label: "Mate patterns", themes: [
+    "mate", "mateIn1", "mateIn2", "mateIn3", "mateIn4", "mateIn5",
+    "backRankMate", "smotheredMate", "anastasiaMate", "arabianMate", "balestraMate",
+    "blindSwineMate", "bodenMate", "cornerMate", "doubleBishopMate", "dovetailMate",
+    "epauletteMate", "hookMate", "killBoxMate", "morphysMate", "operaMate",
+    "pillsburysMate", "swallowstailMate", "triangleMate", "vukovicMate",
+  ] },
+  { label: "Tactics", themes: [
+    "pin", "fork", "skewer", "discoveredAttack", "discoveredCheck", "doubleCheck",
+    "deflection", "attraction", "clearance", "interference", "intermezzo",
+    "sacrifice", "xRayAttack", "trappedPiece", "capturingDefender", "quietMove",
+    "collinearMove", "zugzwang",
+  ] },
+  { label: "Attacks", themes: ["attackingF2F7", "kingsideAttack", "queensideAttack", "exposedKing", "hangingPiece", "defensiveMove"] },
+  { label: "Pawn play", themes: ["advancedPawn", "promotion", "underPromotion", "enPassant", "castling"] },
+  { label: "Puzzle length", themes: ["oneMove", "short", "long", "veryLong"] },
+  { label: "Puzzle level", themes: ["master", "masterVsMaster", "superGM"] },
+  { label: "Outcome", themes: ["crushing", "advantage", "equality"] },
+];
+const CLASSIFIED = new Set(THEME_GROUPS.flatMap((g) => g.themes));
+
 // Pick the puzzle's OWN representative theme (skip broad/length tags) — used to label the
 // header while reviewing so it reflects the opened puzzle, not the leftover theme selector.
 const REVIEW_GENERIC = new Set(["short", "long", "veryLong", "oneMove", "middlegame", "opening", "endgame", "master", "masterVsMaster", "superGM", "crushing", "advantage", "equality", "mate"]);
@@ -548,7 +578,32 @@ export default function PuzzlesPage() {
             onChange={(e) => { const t = e.target.value; try { localStorage.setItem("cg_theme", t); localStorage.removeItem("cg_puzzle"); } catch { /* */ } setTheme(t); }}
             className={`mb-3 w-full rounded-lg border border-ink-600 bg-ink-800 px-3 py-2 text-sm text-white ${inHwMode ? "cursor-not-allowed opacity-60" : ""}`}>
             <option value="mix">All themes</option>
-            {(themes?.themes ?? []).filter((t) => t !== "mix").map((t) => <option key={t} value={t}>{prettify(t)}</option>)}
+            {(() => {
+              // Only show groups whose themes actually exist in the current
+              // theme list (in case the server drops one) and only show themes
+              // the server knows about. Anything server-side that isn't in
+              // any group falls into "Other" so a fresh theme still surfaces.
+              const available = new Set((themes?.themes ?? []).filter((t) => t !== "mix"));
+              const nodes: React.ReactNode[] = [];
+              for (const g of THEME_GROUPS) {
+                const gts = g.themes.filter((t) => available.has(t));
+                if (!gts.length) continue;
+                nodes.push(
+                  <optgroup key={g.label} label={g.label}>
+                    {gts.map((t) => <option key={t} value={t}>{prettify(t)}</option>)}
+                  </optgroup>
+                );
+              }
+              const other = [...available].filter((t) => !CLASSIFIED.has(t)).sort();
+              if (other.length) {
+                nodes.push(
+                  <optgroup key="Other" label="Other">
+                    {other.map((t) => <option key={t} value={t}>{prettify(t)}</option>)}
+                  </optgroup>
+                );
+              }
+              return nodes;
+            })()}
           </select>
           {theme !== "mix" && dashLite?.loggedIn && (
             <p className="mb-3 flex items-baseline justify-between rounded-lg bg-ink-800 px-3 py-2 text-sm">
