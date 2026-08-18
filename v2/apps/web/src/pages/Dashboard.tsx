@@ -5,6 +5,7 @@ import { get } from "../lib/api";
 import { prettify } from "../lib/format";
 import * as push from "../lib/push";
 import { PeriodPerformanceTable } from "../components/PeriodPerformanceTable";
+import { MyMistakesPanel } from "../components/MyMistakesPanel";
 
 // Phase 8a: Puzzle of the Day card. Sits at the very top of the dashboard so
 // it's the first thing you see when you log in — the daily anchor for a habit.
@@ -1183,6 +1184,10 @@ export default function DashboardPage() {
           <PeriodPerformanceTable scope={{ kind: "self" }} />
         </section>
       )}
+
+      {/* Revise-your-mistakes queue — self-scoped version of the coach
+          reteach panel. Collapsed by default, click to open. */}
+      {!viewedAs && <MyMistakesPanel />}
 
       {!viewedAs && <StudentLiveClassCard />}
       {!viewedAs && <HomeworkCard />}

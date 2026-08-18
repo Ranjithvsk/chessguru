@@ -267,20 +267,52 @@ export class ParentReportsService {
     const { studentId, start, end } = this.parseInput(body);
     await this.assertStudentInScope(coach, studentId);
     const limit = Math.max(1, Math.min(200, Number(body?.limit) || 50));
-    // rounds._id = "<userId>:<puzzleId>" — range-scan on _id then filter to
-    // wins=false in the period. Sort by d desc so newest mistake surfaces.
+    return this.buildMistakesFor(studentId, start, end, limit);
+  }
+
+  /** Self-scoped mistakes list — the CURRENT logged-in user's most recent
+   *  wrong-answer puzzles, so they can revise the ones they missed. Same
+   *  shape as studentMistakes but no coach-scope check (a user is always
+   *  allowed to see their own history). Owner ask 2026-08-18: "in my
+   *  performance also show the mistaken puzzle to revise". */
+  async selfMistakes(session: any, body: any): Promise<Array<{
+    puzzleId: string;
+    fen: string;
+    solution: string[];
+    themes: string[];
+    rating: number | null;
+    wrongMove: string | null;
+    ratedAt: string | null;
+  }>> {
+    const userId: string | undefined = session?.userId;
+    if (!userId) throw new ForbiddenException("sign in first");
+    const start = body?.periodStart ? new Date(String(body.periodStart)) : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    const end = body?.periodEnd ? new Date(String(body.periodEnd)) : new Date();
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) throw new BadRequestException("bad dates");
+    const limit = Math.max(1, Math.min(200, Number(body?.limit) || 50));
+    return this.buildMistakesFor(String(userId), start, end, limit);
+  }
+
+  /** Shared implementation used by studentMistakes (coach view) and
+   *  selfMistakes (own view). Kept here so both endpoints stay in sync. */
+  private async buildMistakesFor(userId: string, start: Date, end: Date, limit: number): Promise<Array<{
+    puzzleId: string;
+    fen: string;
+    solution: string[];
+    themes: string[];
+    rating: number | null;
+    wrongMove: string | null;
+    ratedAt: string | null;
+  }>> {
     const missRows = await this.rounds().find(
       {
-        _id: { $gte: `${studentId}:`, $lt: `${studentId};` } as any,
+        _id: { $gte: `${userId}:`, $lt: `${userId};` } as any,
         w: false,
         d: { $gte: start, $lte: end },
       },
       { projection: { d: 1, wr: 1, pr: 1, _id: 1 } },
     ).sort({ d: -1 }).limit(limit).toArray();
     if (!missRows.length) return [];
-    // Resolve puzzles in one batch. Puzzle IDs are Lichess-style (short
-    // strings), stored on the puzzles collection as `puzzleId` (the round's
-    // suffix). We keep both possible fields for robustness.
     const pids = missRows.map((r: any) => String(r._id).split(":")[1]).filter(Boolean) as string[];
     const puzDocs = await this.puzzles().find(
       { $or: [{ puzzleId: { $in: pids } }, { _id: { $in: pids as any } }] },
@@ -291,10 +323,7 @@ export class ParentReportsService {
       const key = String(p.puzzleId || p._id);
       byId.set(key, p);
     }
-    return missRows.map((r: any): {
-      puzzleId: string; fen: string; solution: string[]; themes: string[];
-      rating: number | null; wrongMove: string | null; ratedAt: string | null;
-    } => {
+    return missRows.map((r: any) => {
       const pid = String(r._id).split(":")[1] || "";
       const p = byId.get(pid);
       return {
