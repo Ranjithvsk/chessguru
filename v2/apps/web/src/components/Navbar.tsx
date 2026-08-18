@@ -73,16 +73,10 @@ const GROUPS: Group[] = [
     // Curated curriculum — prescribed content, drill-based.
     label: "Learn", accent: "sky", icon: "📚",
     items: [
-      { to: "/study", label: "📚 Study", desc: "Guided lessons & drills" },
+      { to: "/study", label: "📚 Study", desc: "Endgames, coordinates, memory palace, drills" },
       { to: "/opening", label: "📖 Openings", desc: "Learn and drill openings" },
       { to: "/broadcasts", label: "📡 Broadcast games", desc: "Master tournament games" },
       { to: "/book", label: "📕 Book", desc: "Puzzles from the book games" },
-      { to: "/study/coordinates", label: "🎯 Coordinates", desc: "Name squares at speed" },
-      { to: "/study/memory-palace", label: "🏛️ Memory palace", desc: "Board memory training" },
-      { to: "/study/promote", label: "👑 Promote One Pawn", desc: "Guided endgame course" },
-      { to: "/study/opposition", label: "🤝 Opposition", desc: "Direct, distant & very distant" },
-      { to: "/study/endgame", label: "🏁 Endgame trainer", desc: "Rule of the square, K+P vs K" },
-      { to: "/study/key-squares", label: "🔑 Key squares", desc: "Tap the king's winning squares" },
     ],
   },
   {
