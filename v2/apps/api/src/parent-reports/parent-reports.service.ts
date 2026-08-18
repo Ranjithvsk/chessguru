@@ -76,6 +76,7 @@ export class ParentReportsService {
   private userperfs() { return this.conn.db!.collection<any>("userperfs"); }
   private examsCol() { return this.conn.db!.collection<any>("exams"); }
   private rounds() { return this.conn.db!.collection<any>("rounds"); }
+  private puzzles() { return this.conn.db!.collection<any>("puzzles"); }
 
   private async ensureCoach(session: any): Promise<{ userId: string; academyId: string; role: string }> {
     const userId = session?.userId;
@@ -243,6 +244,67 @@ export class ParentReportsService {
     const { studentId, start, end } = this.parseInput(body);
     await this.assertStudentInScope(coach, studentId);
     return this.buildData(studentId, start, end);
+  }
+
+  /** Puzzles a student got WRONG in a period, newest-first. Each row is
+   *  resolved from the rounds collection (wr = wrong move UCI stored on
+   *  miss) to the actual puzzle document so the coach can view the FEN,
+   *  see the correct solution, and jump to /board-editor or /?puzzle=…
+   *  to reteach the position. Owner ask 2026-08-18: "puzzle solved
+   *  mistake, coach can reteach". */
+  async studentMistakes(session: any, body: any): Promise<Array<{
+    puzzleId: string;
+    fen: string;
+    solution: string[];
+    themes: string[];
+    rating: number | null;
+    wrongMove: string | null;
+    ratedAt: string | null;
+  }>> {
+    const coach = await this.ensureCoach(session);
+    const { studentId, start, end } = this.parseInput(body);
+    await this.assertStudentInScope(coach, studentId);
+    const limit = Math.max(1, Math.min(200, Number(body?.limit) || 50));
+    // rounds._id = "<userId>:<puzzleId>" — range-scan on _id then filter to
+    // wins=false in the period. Sort by d desc so newest mistake surfaces.
+    const missRows = await this.rounds().find(
+      {
+        _id: { $gte: `${studentId}:`, $lt: `${studentId};` } as any,
+        w: false,
+        d: { $gte: start, $lte: end },
+      },
+      { projection: { d: 1, wr: 1, pr: 1, _id: 1 } },
+    ).sort({ d: -1 }).limit(limit).toArray();
+    if (!missRows.length) return [];
+    // Resolve puzzles in one batch. Puzzle IDs are Lichess-style (short
+    // strings), stored on the puzzles collection as `puzzleId` (the round's
+    // suffix). We keep both possible fields for robustness.
+    const pids = missRows.map((r: any) => String(r._id).split(":")[1]).filter(Boolean) as string[];
+    const puzDocs = await this.puzzles().find(
+      { $or: [{ puzzleId: { $in: pids } }, { _id: { $in: pids as any } }] },
+      { projection: { puzzleId: 1, _id: 1, fen: 1, solution: 1, themes: 1, rating: 1 } },
+    ).toArray();
+    const byId = new Map<string, any>();
+    for (const p of puzDocs) {
+      const key = String(p.puzzleId || p._id);
+      byId.set(key, p);
+    }
+    return missRows.map((r: any): {
+      puzzleId: string; fen: string; solution: string[]; themes: string[];
+      rating: number | null; wrongMove: string | null; ratedAt: string | null;
+    } => {
+      const pid = String(r._id).split(":")[1] || "";
+      const p = byId.get(pid);
+      return {
+        puzzleId: pid,
+        fen: p?.fen || "",
+        solution: Array.isArray(p?.solution) ? p.solution : (typeof p?.solution === "string" ? p.solution.split(/\s+/).filter(Boolean) : []),
+        themes: Array.isArray(p?.themes) ? p.themes : [],
+        rating: typeof r.pr === "number" ? r.pr : (typeof p?.rating === "number" ? p.rating : null),
+        wrongMove: typeof r.wr === "string" ? r.wr : null,
+        ratedAt: r.d ? new Date(r.d).toISOString() : null,
+      };
+    });
   }
 
   /** Self-scoped preview — same metric bundle, but for the CURRENT LOGGED-IN

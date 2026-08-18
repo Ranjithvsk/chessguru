@@ -13,6 +13,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, get } from "../lib/api";
 import { parentReportsApi, type ReportData } from "../lib/parent-reports-api";
 import { PeriodPerformanceTable } from "../components/PeriodPerformanceTable";
+import { StudentMistakesPanel } from "../components/StudentMistakesPanel";
 
 type Student = {
   _id: string;
@@ -386,6 +387,11 @@ export default function StudentPerformancePage() {
         </div>
         <PeriodPerformanceTable scope={{ kind: "student", studentId }} />
       </section>
+
+      {/* Coach reteach queue — puzzles the student got wrong in the same
+          period as the top-line stats. Newest miss first with links to
+          board editor + trainer. */}
+      <StudentMistakesPanel studentId={studentId} studentUsername={r.student.username} periodDays={periodDays} />
 
       <div className="text-center text-[11px] text-ink-500">
         Period toggle above scopes the top-line stats · the per-period table is fixed to weekly through lifetime.

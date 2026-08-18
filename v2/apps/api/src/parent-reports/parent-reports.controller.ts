@@ -25,6 +25,12 @@ export class ParentReportsController {
   @Post("preview-self")
   previewSelf(@Body() body: any, @Req() req: any) { return this.svc.previewSelf(req?.session, body); }
 
+  // Coach-scoped list of puzzles a student missed in a period. Body:
+  // { studentId, periodStart, periodEnd, limit? }. Returns rows with FEN +
+  // solution so the coach can jump to the position and reteach the tactic.
+  @Post("mistakes")
+  mistakes(@Body() body: any, @Req() req: any) { return this.svc.studentMistakes(req?.session, body); }
+
   @Post()
   save(@Body() body: any, @Req() req: any) { return this.svc.save(req?.session, body); }
 
