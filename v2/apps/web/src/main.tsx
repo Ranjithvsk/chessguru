@@ -36,6 +36,7 @@ import AcademyDashboardPage from "./pages/AcademyDashboard";
 import StudentsManagerPage from "./pages/StudentsManager";
 import StudentPerformancePage from "./pages/StudentPerformance";
 import BatchPerformancePage from "./pages/BatchPerformance";
+import AcademyPerformancePage from "./pages/AcademyPerformance";
 import ZugzwangStudyPage from "./pages/ZugzwangStudy";
 import AcceptInvitePage from "./pages/AcceptInvite";
 // CallRoomPage + ClassPage removed 2026-08-12 (Jitsi + WebRTC mesh retired).
@@ -191,6 +192,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="signup-academy" element={<SignupAcademyPage />} />
             <Route path="academy" element={<AcademyDashboardPage />} />
             <Route path="students" element={<StudentsManagerPage />} />
+            <Route path="academy/performance" element={<AcademyPerformancePage />} />
             <Route path="academy/students/:studentId/performance" element={<StudentPerformancePage />} />
             <Route path="academy/batches/:batchId/performance" element={<BatchPerformancePage />} />
             <Route path="accept-invite" element={<AcceptInvitePage />} />

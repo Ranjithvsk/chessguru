@@ -45,6 +45,7 @@ const GROUPS: Group[] = [
     label: "Academy", accent: "amber", icon: "🏛️",
     items: [
       { to: "/academy", label: "🏛️ My Academy", desc: "Coaches, students, invites, batches" },
+      { to: "/academy/performance", label: "📊 Student performance", desc: "Rating, tier, attendance dashboard per student" },
       { to: "/coach-board", label: "🧑‍🏫 Class Board", desc: "Student watchlist + class-plan generator" },
       { to: "/coach-board/reports", label: "📄 Parent reports", desc: "Monthly per-student progress reports" },
     ],

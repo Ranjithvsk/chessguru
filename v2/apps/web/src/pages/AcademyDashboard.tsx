@@ -471,64 +471,6 @@ function BatchesPanel({ students }: { students: any[] }) {
   );
 }
 
-/** Compact roster + per-student "📊 Report" launcher. Sits on /academy so
- *  coaches don't need to navigate to /students to open a performance
- *  dashboard (owner ask 2026-08-18: "in academy, i can't see it"). Shows
- *  the top-20 by activity — for the full roster use the /students page. */
-function StudentReportsPanel({ students }: { students: any[] }) {
-  const [q, setQ] = useState("");
-  const needle = q.trim().toLowerCase();
-  const filtered = (students || []).filter((s: any) => {
-    if (!needle) return true;
-    return `${s.name || ""} ${s.username || ""} ${s.email || ""}`.toLowerCase().includes(needle);
-  });
-  // Sort by most-recent activity so the students the coach cares about today
-  // bubble up. Falls back to name.
-  const sorted = [...filtered].sort((a: any, b: any) => {
-    const ta = new Date(a.lastAttendedAt || a.lastLogin || 0).getTime();
-    const tb = new Date(b.lastAttendedAt || b.lastLogin || 0).getTime();
-    if (tb !== ta) return tb - ta;
-    return String(a.name || a.username).localeCompare(String(b.name || b.username));
-  });
-  const show = sorted.slice(0, 20);
-  return (
-    <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-display text-lg text-white">📊 Student performance <span className="ml-2 text-xs font-normal text-ink-400">({(students || []).length})</span></h2>
-        <div className="flex items-center gap-2">
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search students…"
-            className="w-48 rounded-lg border border-ink-700 bg-ink-800 px-3 py-1.5 text-sm text-white placeholder-ink-500 focus:border-brand-400 focus:outline-none" />
-          <Link to="/students" className="text-xs text-brand-300 hover:underline">Full roster →</Link>
-        </div>
-      </div>
-      {(students || []).length === 0 ? (
-        <p className="text-sm text-ink-400">No students yet. Add them from the <Link to="/students" className="text-brand-300 underline">roster page</Link>.</p>
-      ) : (
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {show.map((s: any) => (
-            <Link key={s._id} to={`/academy/students/${encodeURIComponent(s._id)}/performance`}
-              className="group flex items-center justify-between gap-3 rounded-lg border border-ink-700 bg-ink-800/60 px-3 py-2 transition hover:border-brand-500 hover:bg-ink-800">
-              <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-white">{s.name || s.username}</div>
-                <div className="truncate text-[11px] text-ink-500">@{s.username}</div>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <span className="rounded-full bg-brand-500/15 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-brand-200">{s.puzzleRating ?? "—"}</span>
-                <span className="text-xs text-brand-400 group-hover:text-brand-300">📊 Report →</span>
-              </div>
-            </Link>
-          ))}
-          {sorted.length > show.length && (
-            <Link to="/students" className="col-span-full mt-1 text-center text-xs text-ink-400 hover:text-brand-300">
-              + {sorted.length - show.length} more student{sorted.length - show.length === 1 ? "" : "s"} on the full roster page →
-            </Link>
-          )}
-        </div>
-      )}
-    </section>
-  );
-}
-
 function ScheduleBatchModal({ batch, onClose }: { batch: any; onClose: () => void }) {
   const [title, setTitle] = useState(`${batch.name} class`);
   const [startAt, setStartAt] = useState(() => {
@@ -2470,10 +2412,6 @@ export default function AcademyDashboardPage() {
       {/* ── Master Coach directives (owner instructs coaches on topics /
               homework / student notes; coach sees their inbox) ── */}
       {canManage && <DirectivesPanel isOwner={isOwner} coaches={coaches ?? []} students={students} />}
-
-      {/* ── Student performance (per-student "Report" launchers — the
-              full performance dashboard lives at /academy/students/:id) ── */}
-      {canManage && <StudentReportsPanel students={students} />}
 
       {/* ── Batches (coach schedules classes for a saved student group) ── */}
       {canManage && <BatchesPanel students={students} />}
