@@ -12,6 +12,7 @@ import { Link, Navigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, get } from "../lib/api";
 import { parentReportsApi, type ReportData } from "../lib/parent-reports-api";
+import { PeriodPerformanceTable } from "../components/PeriodPerformanceTable";
 
 type Student = {
   _id: string;
@@ -366,8 +367,18 @@ export default function StudentPerformancePage() {
         </div>
       </div>
 
+      {/* Per-period breakdown — Weekly / Monthly / 3mo / 6mo / 1y / YTD /
+          Lifetime. Same metric bundle rendered per row (owner ask 2026-08-18). */}
+      <section className="space-y-3">
+        <div>
+          <h2 className="font-display text-lg text-white">Performance by period</h2>
+          <p className="text-xs text-ink-400">Rating, puzzles, games and revision streak for each time window. Δ is the rating change since the earliest of the last 100 solves that fall in the window.</p>
+        </div>
+        <PeriodPerformanceTable scope={{ kind: "student", studentId }} />
+      </section>
+
       <div className="text-center text-[11px] text-ink-500">
-        Period: {fmtDate(r.period.start)} → {fmtDate(r.period.end)} · Data live from your academy's collections.
+        Period toggle above scopes the top-line stats · the per-period table is fixed to weekly through lifetime.
       </div>
     </div>
   );

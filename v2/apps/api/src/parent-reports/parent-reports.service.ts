@@ -228,6 +228,20 @@ export class ParentReportsService {
     return this.buildData(studentId, start, end);
   }
 
+  /** Self-scoped preview — same metric bundle, but for the CURRENT LOGGED-IN
+   *  user. Powers the "My performance" dashboard's period table so a student
+   *  can see their own rating/puzzles/games broken down by weekly/monthly/etc.
+   *  No coach-scope check because studentId is derived from the session, not
+   *  passed in — a user is always allowed to see their own data. */
+  async previewSelf(session: any, body: any): Promise<ReportData> {
+    const userId: string | undefined = session?.userId;
+    if (!userId) throw new ForbiddenException("sign in first");
+    const start = body?.periodStart ? new Date(String(body.periodStart)) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const end = body?.periodEnd ? new Date(String(body.periodEnd)) : new Date();
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) throw new BadRequestException("bad period dates");
+    return this.buildData(String(userId), start, end);
+  }
+
   async save(session: any, body: any) {
     const coach = await this.ensureCoach(session);
     const { studentId, start, end } = this.parseInput(body);

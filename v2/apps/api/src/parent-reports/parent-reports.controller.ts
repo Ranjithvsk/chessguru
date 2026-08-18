@@ -18,6 +18,13 @@ export class ParentReportsController {
   @Post("preview")
   preview(@Body() body: any, @Req() req: any) { return this.svc.preview(req?.session, body); }
 
+  // Self-scoped preview — the logged-in user's own metric bundle. Powers the
+  // "My performance" period table without needing coach authority. Added
+  // 2026-08-18 (owner ask: period-based ratings on My performance + Student
+  // performance).
+  @Post("preview-self")
+  previewSelf(@Body() body: any, @Req() req: any) { return this.svc.previewSelf(req?.session, body); }
+
   @Post()
   save(@Body() body: any, @Req() req: any) { return this.svc.save(req?.session, body); }
 

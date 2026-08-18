@@ -47,6 +47,9 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 export const parentReportsApi = {
   preview: (body: { studentId: string; periodStart?: string; periodEnd?: string }) =>
     req<ReportData>("POST", "/api/parent-reports/preview", body),
+  // Self-scoped (current logged-in user, no coach check needed).
+  previewSelf: (body: { periodStart?: string; periodEnd?: string }) =>
+    req<ReportData>("POST", "/api/parent-reports/preview-self", body),
   save: (body: { studentId: string; periodStart?: string; periodEnd?: string; coachNote?: string; parentEmail?: string }) =>
     req<{ reportId: string }>("POST", "/api/parent-reports", body),
   list: (studentId?: string) =>

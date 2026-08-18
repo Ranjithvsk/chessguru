@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { get } from "../lib/api";
 import { prettify } from "../lib/format";
 import * as push from "../lib/push";
+import { PeriodPerformanceTable } from "../components/PeriodPerformanceTable";
 
 // Phase 8a: Puzzle of the Day card. Sits at the very top of the dashboard so
 // it's the first thing you see when you log in — the daily anchor for a habit.
@@ -1166,6 +1167,18 @@ export default function DashboardPage() {
         </div>
       )}
       <h1 className="font-display text-2xl text-white">{viewedAs ? `${viewedAs}'s performance` : "📊 My performance"}</h1>
+
+      {/* Per-period performance snapshot — weekly through lifetime. Only for
+          the current user (admin "view as" is not wired to preview-self yet). */}
+      {!viewedAs && (
+        <section className="space-y-2 rounded-xl2 border border-ink-700 bg-ink-900 p-5">
+          <div>
+            <h2 className="font-display text-lg text-white">Performance by period</h2>
+            <p className="text-xs text-ink-400">Rating, puzzles, games and revision streak for each time window.</p>
+          </div>
+          <PeriodPerformanceTable scope={{ kind: "self" }} />
+        </section>
+      )}
 
       {!viewedAs && <StudentLiveClassCard />}
       {!viewedAs && <HomeworkCard />}
