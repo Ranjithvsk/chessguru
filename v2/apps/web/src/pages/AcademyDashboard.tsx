@@ -90,6 +90,48 @@ function fmtDate(d?: string|null) { return d ? new Date(d).toLocaleDateString(un
  *  custom password; empty submit → backend generates a memorable default
  *  (<firstname>@123). Shows the new credentials in a copyable pill so the
  *  coach can hand them to the student. */
+/** 🔀 Merge — fold an empty quick-added duplicate student into an existing
+ *  platform account (preserves the real account's puzzle history). Owner ask
+ *  2026-08-18: "build option to merge new created with existing account". */
+function MergeStudentButton({ studentId, name }: { studentId: string; name: string }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    const target = prompt(
+      `Merge "${name}" into an existing account.\n\nEnter the username or email of the REAL account (with existing puzzle history). "${name}" will be deleted and any batch that referenced them will point at the real account instead.\n\nRefuses to merge if "${name}" already has real solves.`,
+      "",
+    );
+    if (target == null) return;
+    if (!target.trim()) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/v2api/api/academy/students/${encodeURIComponent(studentId)}/merge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ targetUsernameOrEmail: target.trim() }),
+      });
+      const j = await r.json();
+      if (j?.ok) {
+        alert(`Merged. ${j.target?.username || target} is now the student in your academy — the empty ${name} row was removed.`);
+        qc.invalidateQueries({ queryKey: ["academy-students"] });
+        qc.invalidateQueries({ queryKey: ["academy-batches"] });
+      } else {
+        alert(j?.error || "Couldn't merge.");
+      }
+    } catch (e: any) {
+      alert(e?.message || "Network error.");
+    } finally { setBusy(false); }
+  };
+  return (
+    <button onClick={submit} disabled={busy}
+      className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-2 py-1 text-brand-100 hover:bg-brand-500/20 disabled:opacity-60"
+      title="Merge this row into an existing platform account">
+      {busy ? "…" : "🔀 Merge"}
+    </button>
+  );
+}
+
 function ResetPasswordButton({ studentId, name }: { studentId: string; name: string }) {
   const [busy, setBusy] = useState(false);
   const [creds, setCreds] = useState<{ username: string; password: string } | null>(null);
@@ -821,10 +863,16 @@ function AddStudentModal({ open, onClose, coaches, isOwner }: {
   open: boolean; onClose: () => void; coaches: any[]; isOwner: boolean;
 }) {
   const qc = useQueryClient();
+  // Mode toggle — create a brand-new account vs attach someone who
+  // already has a ChessGuru account. Owner ask 2026-08-18: bring the
+  // /students "Add existing user" flow into the /academy modal too.
+  const [mode, setMode] = useState<"new" | "existing">("new");
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
+  const [handle, setHandle] = useState("");   // for "existing" mode
   const [coachId, setCoachId] = useState("");
   const [creds, setCreds] = useState<{ username: string; password: string }|null>(null);
+  const [attachedName, setAttachedName] = useState<string | null>(null);
   const [err, setErr] = useState<string|null>(null);
   const addMut = useMutation({
     mutationFn: () => post<any>("/api/academy/students/quick-add", { displayName, email, coachId: isOwner ? coachId : undefined }),
@@ -835,7 +883,16 @@ function AddStudentModal({ open, onClose, coaches, isOwner }: {
     },
     onError: (e: any) => setErr(String(e?.message ?? e)),
   });
-  const reset = () => { setDisplayName(""); setEmail(""); setCoachId(""); setCreds(null); setErr(null); };
+  const attachMut = useMutation({
+    mutationFn: () => post<any>("/api/academy/students/attach-existing", { usernameOrEmail: handle.trim(), coachId: isOwner ? coachId : undefined }),
+    onSuccess: (r: any) => {
+      if (!r.ok) { setErr(r.error || "Failed."); return; }
+      setAttachedName(r.student?.username || handle);
+      qc.invalidateQueries({ queryKey: ["academy-students"] });
+    },
+    onError: (e: any) => setErr(String(e?.message ?? e)),
+  });
+  const reset = () => { setDisplayName(""); setEmail(""); setHandle(""); setCoachId(""); setCreds(null); setAttachedName(null); setErr(null); };
   const close = () => { reset(); onClose(); };
   if (!open) return null;
   return (
@@ -844,8 +901,35 @@ function AddStudentModal({ open, onClose, coaches, isOwner }: {
         className="w-full max-w-md rounded-2xl border border-emerald-400/40 bg-gradient-to-br from-ink-900 to-emerald-950/40 p-6 shadow-2xl">
         <div className="text-2xl">👦 <span className="text-emerald-300">+</span></div>
         <h2 className="mt-2 font-display text-xl text-white">Add a student</h2>
-        <p className="text-xs text-ink-400">Creates the account instantly. Copy the password and hand it to the student.</p>
-        {creds ? (
+        {!creds && !attachedName && (
+          <div className="mt-3 flex overflow-hidden rounded-lg border border-ink-700 text-xs">
+            <button type="button" onClick={() => { setMode("new"); setErr(null); }}
+              className={`flex-1 px-3 py-1.5 font-medium ${mode === "new" ? "bg-emerald-500 text-white" : "bg-ink-900 text-ink-300 hover:bg-ink-800"}`}>
+              🆕 Create new
+            </button>
+            <button type="button" onClick={() => { setMode("existing"); setErr(null); }}
+              className={`flex-1 px-3 py-1.5 font-medium ${mode === "existing" ? "bg-emerald-500 text-white" : "bg-ink-900 text-ink-300 hover:bg-ink-800"}`}>
+              🔗 Add existing user
+            </button>
+          </div>
+        )}
+        <p className="mt-2 text-xs text-ink-400">
+          {mode === "new"
+            ? "Creates the account instantly. Copy the password and hand it to the student."
+            : "Pull in someone who already has a ChessGuru account. Their puzzle history + rating are preserved."}
+        </p>
+        {attachedName ? (
+          <div className="mt-5 space-y-3">
+            <div className="rounded-xl border border-emerald-400/40 bg-emerald-500/10 p-4">
+              <div className="text-xs uppercase text-emerald-300">✅ Attached</div>
+              <div className="mt-1 text-sm text-white"><b className="select-all">{attachedName}</b> is now a student in your academy — puzzle history + password unchanged.</div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={reset} className="flex-1 rounded-lg border border-ink-700 py-2 text-sm text-white hover:bg-ink-800">Attach another</button>
+              <button onClick={close} className="flex-1 rounded-lg bg-brand-600 py-2 text-sm font-semibold text-white hover:bg-brand-500">Done</button>
+            </div>
+          </div>
+        ) : creds ? (
           <div className="mt-5 space-y-3">
             <div className="rounded-xl border border-emerald-400/40 bg-emerald-500/10 p-4">
               <div className="text-xs uppercase text-emerald-300">✅ Created</div>
@@ -866,16 +950,27 @@ function AddStudentModal({ open, onClose, coaches, isOwner }: {
         ) : (
           <div className="mt-5 space-y-3">
             {err && <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-2.5 text-xs text-rose-200">{err}</div>}
-            <div>
-              <label className="mb-1 block text-xs uppercase text-ink-400">Student name</label>
-              <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} autoFocus placeholder="Aarav K"
-                className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-emerald-500 focus:outline-none" />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs uppercase text-ink-400">Email <span className="text-ink-500">(optional)</span></label>
-              <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="parent@example.com"
-                className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-emerald-500 focus:outline-none" />
-            </div>
+            {mode === "new" ? (
+              <>
+                <div>
+                  <label className="mb-1 block text-xs uppercase text-ink-400">Student name</label>
+                  <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} autoFocus placeholder="Aarav K"
+                    className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-emerald-500 focus:outline-none" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs uppercase text-ink-400">Email <span className="text-ink-500">(optional)</span></label>
+                  <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="parent@example.com"
+                    className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-emerald-500 focus:outline-none" />
+                </div>
+              </>
+            ) : (
+              <div>
+                <label className="mb-1 block text-xs uppercase text-ink-400">Existing username or email</label>
+                <input value={handle} onChange={(e) => setHandle(e.target.value)} autoFocus placeholder="harinitharanjith"
+                  className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-emerald-500 focus:outline-none" />
+                <p className="mt-1 text-[10px] text-ink-500">Case-insensitive. Won't work if the user is already in another academy.</p>
+              </div>
+            )}
             {isOwner && (
               <div>
                 <label className="mb-1 block text-xs uppercase text-ink-400">Assign to coach</label>
@@ -888,11 +983,19 @@ function AddStudentModal({ open, onClose, coaches, isOwner }: {
             )}
             <div className="flex gap-2 pt-2">
               <button onClick={close} className="flex-1 rounded-lg border border-ink-700 py-2 text-sm text-white hover:bg-ink-800">Cancel</button>
-              <button disabled={addMut.isPending || !displayName || (isOwner && !coachId)}
-                onClick={() => addMut.mutate()}
-                className="flex-1 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 py-2 text-sm font-semibold text-white shadow hover:brightness-110 disabled:opacity-50">
-                {addMut.isPending ? "Creating…" : "Create student"}
-              </button>
+              {mode === "new" ? (
+                <button disabled={addMut.isPending || !displayName || (isOwner && !coachId)}
+                  onClick={() => addMut.mutate()}
+                  className="flex-1 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 py-2 text-sm font-semibold text-white shadow hover:brightness-110 disabled:opacity-50">
+                  {addMut.isPending ? "Creating…" : "Create student"}
+                </button>
+              ) : (
+                <button disabled={attachMut.isPending || !handle.trim() || (isOwner && !coachId)}
+                  onClick={() => attachMut.mutate()}
+                  className="flex-1 rounded-lg bg-gradient-to-r from-brand-500 to-purple-500 py-2 text-sm font-semibold text-white shadow hover:brightness-110 disabled:opacity-50">
+                  {attachMut.isPending ? "Attaching…" : "Attach to academy"}
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -2428,6 +2531,7 @@ export default function AcademyDashboardPage() {
                             <Link to={`/history?as=${encodeURIComponent(s.username)}`} className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-2 py-1 text-brand-100 hover:bg-brand-500/20">📜 History</Link>
                             <ResetPasswordButton studentId={s._id} name={s.name || s.username} />
                             <MarkAttendedButton studentId={s._id} name={s.name || s.username} />
+                            <MergeStudentButton studentId={s._id} name={s.name || s.username} />
                             {isOwner && <AssignCoachDropdown studentId={s._id} currentCoachId={s.coachId} coaches={coaches ?? []} />}
                           </div>
                         </td>

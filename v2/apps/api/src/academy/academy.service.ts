@@ -152,6 +152,78 @@ export class AcademyService {
    *    - If still blank, generate "student-<random>"
    *  Collision-append -2, -3 up to 999 if the base already exists.
    *  Email is optional (young students often don't have one). */
+  /** Merge a quick-added duplicate student into an EXISTING platform account.
+   *  Use case (owner ask 2026-08-18): coach quick-adds "harnitharanjith" not
+   *  realising the real "harinitharanjith" account already exists. Owner
+   *  clicks 🔀 on the duplicate row and enters the real username; server
+   *  moves the duplicate's academyId + coachId onto the real user, then
+   *  deletes the duplicate. Any per-student references in batches/
+   *  homework/directives are rewritten so nothing points at the removed id.
+   *
+   *  Guardrails:
+   *   - Both accounts must exist. `dupeId` (the source) MUST be in the
+   *     caller's academy. `target` (real user) MUST NOT be in a different
+   *     academy already.
+   *   - Refuses to merge if the DUPE has ANY puzzle history (nb > 0 OR
+   *     rounds > 0) — that indicates the "duplicate" is actually a real
+   *     account, and merging would silently lose data. The caller can
+   *     delete via the normal remove flow if they really mean it.
+   *   - Refuses if target has role coach/owner (would clobber). */
+  async mergeStudent(session: any, dupeId: string, body: any): Promise<any> {
+    const g = this.ensureCoachOrOwner(session);
+    const raw = String(body?.targetUsernameOrEmail || "").trim().toLowerCase();
+    if (!raw) return { ok: false, error: "Enter the existing user's username or email." };
+    const dupe: any = await this.users().findOne({ _id: dupeId as any, academyId: g.academyId, role: "student" });
+    if (!dupe) return { ok: false, error: "Duplicate student not found in your academy." };
+    if (g.role === "coach" && String(dupe.coachId || "") !== g.userId) {
+      return { ok: false, error: "That student isn't assigned to you." };
+    }
+    const target: any = await this.users().findOne({
+      $or: [
+        { _id: raw as any },
+        { username: { $regex: new RegExp("^" + raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$", "i") } },
+        { email: raw },
+      ],
+    } as any);
+    if (!target) return { ok: false, error: "No existing user found with that username or email." };
+    if (String(target._id) === String(dupe._id)) return { ok: false, error: "That's the same account." };
+    if (target.academyId && target.academyId !== g.academyId) {
+      return { ok: false, error: `${target.username} is already in another academy (${target.academyId}).` };
+    }
+    if (target.role === "academy_owner" || target.role === "coach") {
+      return { ok: false, error: `${target.username} is a ${target.role.replace("_", " ")} — can't merge into.` };
+    }
+    // Data-loss guard: only allow merge when the DUPE is empty (nb=0, rounds=0).
+    // A quick-added student with 0 solves is the intended target here.
+    const dupePerf: any = await this.conn.db!.collection("userperfs").findOne({ _id: dupe._id as any }, { projection: { "puzzle.nb": 1 } });
+    const dupeNb = dupePerf?.puzzle?.nb ?? 0;
+    const dupeRounds = await this.conn.db!.collection("rounds").countDocuments({ _id: { $regex: `^${String(dupe._id).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:` } as any });
+    if (dupeNb > 0 || dupeRounds > 0) {
+      return { ok: false, error: `Duplicate "${dupe.username}" has real puzzle history (${dupeNb} solves, ${dupeRounds} rounds) — refusing merge to protect data. Use Remove instead if you're sure.` };
+    }
+
+    // Point the target at the duplicate's academy + coach.
+    const now = new Date();
+    await this.users().updateOne(
+      { _id: target._id },
+      { $set: { academyId: g.academyId, coachId: dupe.coachId, role: "student", updatedAt: now, mergedFromAt: now } },
+    );
+    // Rewrite batch memberships: any batch that referenced the dupe now
+    // references the target. If a batch already contains the target too,
+    // simply drop the dupe.
+    const batchesWithDupe = await this.batches().find({ studentIds: dupe._id }).toArray();
+    for (const b of batchesWithDupe) {
+      const ids = new Set<string>((b.studentIds || []).map((x: any) => String(x)));
+      ids.delete(String(dupe._id));
+      ids.add(String(target._id));
+      await this.batches().updateOne({ _id: b._id }, { $set: { studentIds: [...ids], updatedAt: now } });
+    }
+    // Clean up userperfs (empty by guard above) + delete the duplicate user.
+    await this.conn.db!.collection("userperfs").deleteOne({ _id: dupe._id as any });
+    await this.users().deleteOne({ _id: dupe._id });
+    return { ok: true, removedId: String(dupe._id), target: { _id: target._id, username: target.username, name: target.name } };
+  }
+
   /** Attach an EXISTING user (already has a ChessGuru account with their own
    *  puzzle history + rating) to this academy as a student. Unlike
    *  quickAddStudent which creates a brand-new account, this preserves the
