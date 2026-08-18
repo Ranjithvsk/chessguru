@@ -259,6 +259,10 @@ export class ClassScheduleController {
     for (const r of rows) {
       const endAt = new Date(r.startAt.getTime() + r.durationMin * 60_000);
       if (endAt <= now) continue;
+      // Coach hit End (see POST /api/class/:id/end) — treat as over even if the
+      // scheduled window hasn't closed yet, so the "live now" banner clears
+      // immediately instead of springing back on the next 5s poll.
+      if ((r as any).endedAt) continue;
       const mine = !!me && r.createdByUserId === me;
       if (mine) mineIds.push(r._id);
       const flagged = { ...r, mine };

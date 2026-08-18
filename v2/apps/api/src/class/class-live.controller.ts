@@ -115,6 +115,14 @@ export class ClassLiveController {
     if (doc && doc.coachUserId && doc.coachUserId !== me) return { ok: false, reason: "not-your-class" };
 
     await this.conn.db!.collection("classLiveAnnouncements").deleteOne({ _id: id as any });
+    // Also stamp the schedule row (if this id maps to one) so the /schedule
+    // list stops surfacing it as live — otherwise a coach who ends inside the
+    // startAt..endAt window watches the "🔴 live now" banner spring back up on
+    // the next 5s poll (owner-reported 2026-08-18: "clicked but didn't close").
+    await this.conn.db!.collection("classSchedules").updateOne(
+      { _id: id as any },
+      { $set: { endedAt: new Date(), endedByUserId: me } },
+    ).catch(() => {});
     const { closed } = closeClassRoom(id, "coach_left");
     return { ok: true, kicked: closed };
   }
