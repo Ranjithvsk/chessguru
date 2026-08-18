@@ -646,6 +646,7 @@ type Dash = {
   themesBf?: ThemeRow[];
   days?: { day: string; solves: number; wins: number; rating: number }[];
   bands?: { lo: number; hi: number; attempted: number; solved: number; accuracy: number }[];
+  study?: { total: number; byType: { type: string; nb: number; rating: number }[] };
   themeSpeeds?: { theme: string; medianMs: number; n: number; trend?: "faster" | "slower" | "steady" | "new" }[];
   byHour?: { hour: number; n: number; wins: number; medianMs: number | null }[];
   lastSession?: { count: number; wins: number; ratingDelta: number; startAt: string; endAt: string } | null;
@@ -1149,9 +1150,12 @@ export default function DashboardPage() {
   const max = themes.length ? Math.max(...themes.map((t) => t.rating)) : 1500;
   const min = themes.length ? Math.min(...themes.map((t) => t.rating)) : 1500;
 
+  const studyTotal = data.study?.total ?? 0;
+  const studyTop = data.study?.byType?.[0];
   const cards = [
     { label: "Puzzle rating", value: data.global?.rating ?? 1500, sub: `${data.global?.games ?? 0} rated solves`, hero: true },
-    { label: "Accuracy", value: `${data.totals?.accuracy ?? 0}%`, sub: `${data.totals?.wins ?? 0} of ${data.totals?.attempted ?? 0} solved` },
+    { label: "Total puzzles solved", value: data.global?.games ?? 0, sub: `${data.totals?.wins ?? 0} correct · ${data.totals?.accuracy ?? 0}% accuracy` },
+    { label: "Total study drills solved", value: studyTotal, sub: studyTop ? `Most: ${prettify(studyTop.type)} (${studyTop.nb})` : "Try Rule of the Square, Queen Mate, Coordinate…" },
     { label: "Themes trained", value: themes.length, sub: `${rated.length} with reliable ratings` },
     ...(data.blindfold ? [{ label: "Blindfold rating", value: data.blindfold.rating, sub: `${data.blindfold.games} solves` }] : []),
   ];

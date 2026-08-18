@@ -480,11 +480,24 @@ export class PuzzlesService {
       }
       byHour.push({ hour: h, n: b.n, wins: b.wins, medianMs: medMs });
     }
+    // Lifetime study-drill totals — sum of per-study `nb` counters kept under
+    // userperfs.study.<type>.nb by StudyService.complete. Broken down by type
+    // so the dashboard can show "Rule of the Square 42 · Queen Mate 18 · …"
+    // when we want it later; grand total drives the headline stat card.
+    // Added 2026-08-18 (owner: "total no of study solved" on My performance).
+    const studyPerf: Record<string, any> = p.study || {};
+    const studyByType = Object.entries(studyPerf)
+      .map(([type, sp]: [string, any]) => ({ type, nb: sp?.nb ?? 0, rating: Math.round(sp?.gl?.r ?? 0) }))
+      .filter((s) => s.nb > 0)
+      .sort((a, b) => b.nb - a.nb);
+    const studyTotal = studyByType.reduce((s, x) => s + x.nb, 0);
+
     return {
       loggedIn: true,
       global: { rating: Math.round(p.puzzle?.gl?.r ?? 1500), rd: Math.round(p.puzzle?.gl?.d ?? 500), games: p.puzzle?.nb ?? 0 },
       blindfold: p.blindfold ? { rating: Math.round(p.blindfold.gl?.r ?? 800), games: p.blindfold.nb ?? 0 } : null,
       totals: { attempted: puzzleRounds.length, wins, accuracy: puzzleRounds.length ? Math.round((wins / puzzleRounds.length) * 100) : 0 },
+      study: { total: studyTotal, byType: studyByType },
       themes,
       themesBf,
       days,
