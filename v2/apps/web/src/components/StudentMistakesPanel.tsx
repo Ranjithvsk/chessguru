@@ -56,7 +56,11 @@ export function StudentMistakesPanel({ studentId, studentUsername, periodDays }:
       limit,
     }),
     enabled: !!studentId,
-    staleTime: 30_000,
+    // Short TTL — the coach opens this panel to react to something the student
+    // JUST did, so we can't sit on 30s-stale cache. Also refetch on focus so
+    // switching back to the tab pulls the newest miss automatically.
+    staleTime: 5_000,
+    refetchOnWindowFocus: true,
   });
 
   const rows = q.data ?? [];
@@ -68,10 +72,17 @@ export function StudentMistakesPanel({ studentId, studentUsername, periodDays }:
           <h2 className="text-sm font-semibold text-white">🎯 Puzzles this student missed <span className="ml-2 font-normal text-ink-400">({rows.length}{q.data && rows.length === limit ? "+" : ""})</span></h2>
           <p className="text-xs text-ink-500">Newest wrong-answer first · last {periodDays} days · use the buttons to reteach the position.</p>
         </div>
-        {rows.length === limit && (
-          <button onClick={() => setLimit((n) => Math.min(200, n + 20))}
-            className="rounded-md bg-ink-800 px-2 py-1 text-xs text-ink-200 hover:bg-ink-700">Load more</button>
-        )}
+        <div className="flex items-center gap-2">
+          <button onClick={() => q.refetch()} disabled={q.isFetching}
+            className="rounded-md bg-ink-800 px-2 py-1 text-xs text-ink-200 hover:bg-ink-700 disabled:opacity-50"
+            title="Force-refresh — miss just happened but not showing?">
+            {q.isFetching ? "…" : "🔄 Refresh"}
+          </button>
+          {rows.length === limit && (
+            <button onClick={() => setLimit((n) => Math.min(200, n + 20))}
+              className="rounded-md bg-ink-800 px-2 py-1 text-xs text-ink-200 hover:bg-ink-700">Load more</button>
+          )}
+        </div>
       </div>
       {q.isLoading ? (
         <div className="text-xs text-ink-500">Loading missed puzzles…</div>
