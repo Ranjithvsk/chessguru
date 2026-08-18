@@ -13,17 +13,11 @@
 // the bottleneck was Chessground mount cost, not the API. This component
 // cuts ~50ms/board to ~1ms/board.
 
+import { CBURNETT_PIECES } from "./cburnett-pieces";
+
 const LIGHT = "#ffffff";
 const DARK = "#668cb2";
 const HIGHLIGHT = "rgba(255, 235, 59, 0.55)";
-
-// Unicode filled chess glyphs, one per FEN letter (uppercase = white,
-// lowercase = black). We colour them via fill in the <text> element rather
-// than using the outline glyphs so they read from a distance.
-const GLYPH: Record<string, string> = {
-  K: "♔", Q: "♕", R: "♖", B: "♗", N: "♘", P: "♙",
-  k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟",
-};
 
 /** FEN piece-placement (rank 8→1) → per-square array indexed 0..63,
  *  starting a8 = 0 (from white's perspective, a-file on the left). */
@@ -78,24 +72,16 @@ export function MiniFenBoard({
         const col = rendered % 8;
         const isLight = (row + col) % 2 === 0;
         const isHighlight = highlightIdxs.has(idx);
-        const glyph = piece ? GLYPH[piece] : null;
-        const isWhite = piece != null && piece === piece.toUpperCase();
+        // cburnett SVG data URI — same piece design as the full <Board> so
+        // the mini tiles are visually identical to what the coach sees on
+        // /history or the puzzle trainer.
+        const pieceHref = piece ? CBURNETT_PIECES[piece] : null;
         return (
           <g key={idx}>
             <rect x={col} y={row} width={1} height={1} fill={isLight ? LIGHT : DARK} />
             {isHighlight && <rect x={col} y={row} width={1} height={1} fill={HIGHLIGHT} />}
-            {glyph && (
-              // Unicode glyph — filled for both colours, stroked black outline
-              // on white pieces + white outline on black for legibility on
-              // both light and dark squares. fontSize 0.9 fits nicely inside
-              // the 1×1 cell with a hair of padding.
-              <text x={col + 0.5} y={row + 0.5} textAnchor="middle" dominantBaseline="central"
-                fontSize="0.9" fontFamily="'Segoe UI Symbol', 'Apple Symbols', 'Noto Sans Symbols2', 'DejaVu Sans', sans-serif"
-                fill={isWhite ? "#ffffff" : "#111111"}
-                stroke={isWhite ? "#111111" : "#f5f5f5"}
-                strokeWidth={0.03} paintOrder="stroke">
-                {glyph}
-              </text>
+            {pieceHref && (
+              <image href={pieceHref} x={col} y={row} width={1} height={1} preserveAspectRatio="xMidYMid meet" />
             )}
           </g>
         );
