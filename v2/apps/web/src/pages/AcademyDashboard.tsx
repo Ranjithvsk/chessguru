@@ -60,7 +60,7 @@ function AttendanceStrip({ days }: { days?: boolean[] }) {
     </div>
   );
 }
-interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; attendedCount?: number; academyId?: string|null; summarySentAt?: string|null; autoSummary?: boolean; autoSummaryNote?: string; seriesId?: string|null; seriesIndex?: number; seriesTotal?: number; autoSummaryFailedAt?: string|null; autoSummaryFailedCount?: number; autoSummaryFailedError?: string; topics?: string[]; notes?: string; roomKind?: "call"|"meet" }
+interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; attendedCount?: number; academyId?: string|null; summarySentAt?: string|null; autoSummary?: boolean; autoSummaryNote?: string; seriesId?: string|null; seriesIndex?: number; seriesTotal?: number; autoSummaryFailedAt?: string|null; autoSummaryFailedCount?: number; autoSummaryFailedError?: string; topics?: string[]; notes?: string; roomKind?: "call"|"meet"; batchId?: string | null }
 interface FeesConfig { monthlyFeePaise: number; upiVpa: string; upiPayeeName: string; canEdit: boolean }
 interface Invoice { _id: string; academyId: string; studentId: string; studentUsername: string; period: string; amountPaise: number; status: "pending"|"paid"|"waived"; generatedAt: string; paidAt?: string; paymentMethod?: string }
 function rupees(paise: number) { return (paise / 100).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }); }
@@ -377,7 +377,46 @@ function NewDirectiveModal({ coaches, students, onClose }: { coaches: any[]; stu
 
 /** Batch = named list of students. Coach picks students → creates a batch →
  *  schedules classes for that batch in one form (recurring supported). */
-function BatchesPanel({ students }: { students: any[] }) {
+/** Upcoming-classes strip inside a batch card. Groups a series into a
+ *  compact recurrence label (e.g. "Mon+Wed 6:00 PM · 60min") when the
+ *  batch has multiple classes on the same weekday+time, otherwise lists
+ *  the next 3 as individual rows. Owner ask 2026-08-18: "if class
+ *  scheduled, show it on the batch tile — time, day of the week". */
+function BatchClassStrip({ classes }: { classes: ClassRow[] }) {
+  if (!classes.length) {
+    return <div className="mb-3 rounded border border-dashed border-ink-700 px-2 py-1.5 text-[11px] text-ink-500">No classes scheduled yet — hit 📅 below to add one.</div>;
+  }
+  // Group by (weekday, HH:MM, durationMin) so a Mon 6pm recurring series
+  // reads as a single row with a count instead of 12 separate lines.
+  const groups = new Map<string, { label: string; count: number; nextAt: Date }>();
+  const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  for (const c of classes) {
+    const d = new Date(c.startAt);
+    const key = `${d.getDay()}|${d.getHours()}:${d.getMinutes()}|${c.durationMin}`;
+    const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    const label = `${WEEKDAY[d.getDay()]} ${time} · ${c.durationMin}min`;
+    const g = groups.get(key);
+    if (!g) groups.set(key, { label, count: 1, nextAt: d });
+    else { g.count += 1; if (d < g.nextAt) g.nextAt = d; }
+  }
+  const rows = [...groups.values()].sort((a, b) => a.nextAt.getTime() - b.nextAt.getTime());
+  return (
+    <div className="mb-3 space-y-1 rounded border border-ink-700 bg-ink-900/60 px-2 py-1.5">
+      {rows.slice(0, 3).map((g) => (
+        <div key={g.label} className="flex items-center gap-2 text-[11px]">
+          <span className="rounded-full bg-emerald-500/20 px-1.5 py-0.5 font-semibold text-emerald-200">📅</span>
+          <span className="text-ink-200">{g.label}</span>
+          {g.count > 1 && <span className="text-[10px] tabular-nums text-ink-500">×{g.count}</span>}
+        </div>
+      ))}
+      {rows.length > 3 && (
+        <div className="pt-0.5 text-[10px] text-ink-500">+ {rows.length - 3} more series</div>
+      )}
+    </div>
+  );
+}
+
+function BatchesPanel({ students, classes = [] }: { students: any[]; classes?: ClassRow[] }) {
   const qc = useQueryClient();
   const { data: batches = [], refetch } = useQuery({
     queryKey: ["academy-batches"],
@@ -478,6 +517,7 @@ function BatchesPanel({ students }: { students: any[] }) {
               </div>
             </div>
             <div className="mb-3 text-xs text-ink-400">{(b.students || []).length} students · {(b.students || []).slice(0, 4).map((s: any) => s.name).join(", ")}{(b.students || []).length > 4 ? "…" : ""}</div>
+            <BatchClassStrip classes={classes.filter((c) => c.batchId === b._id)} />
             <div className="flex flex-wrap gap-2">
               <button onClick={() => setScheduleFor(b)} className="rounded-lg border border-cyan-500/50 bg-cyan-500/15 px-3 py-1.5 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/25">📅 Schedule class</button>
               <Link to={`/academy/batches/${encodeURIComponent(b._id)}/performance`}
@@ -2436,7 +2476,7 @@ export default function AcademyDashboardPage() {
       {canManage && <DirectivesPanel isOwner={isOwner} coaches={coaches ?? []} students={students} />}
 
       {/* ── Batches (coach schedules classes for a saved student group) ── */}
-      {canManage && <BatchesPanel students={students} />}
+      {canManage && <BatchesPanel students={students} classes={[...(schedule?.live ?? []), ...(schedule?.upcoming ?? [])]} />}
 
       {/* ── Upcoming + live classes ── */}
       <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
