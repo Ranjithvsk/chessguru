@@ -450,9 +450,9 @@ function BatchesPanel({ students }: { students: any[] }) {
       )}
       <div className="grid gap-3 sm:grid-cols-2">
         {(batches as any[]).map((b: any) => (
-          <div key={b._id} className="rounded-lg border border-ink-700 bg-ink-800/50 p-4">
+          <div key={b._id} className="rounded-lg border border-ink-700 bg-ink-800 p-4">
             <div className="mb-1 flex items-center justify-between">
-              <div className="font-display text-base text-white">{b.name}</div>
+              <div className="font-display text-base text-ink-100">{b.name}</div>
               <button onClick={() => remove(b._id, b.name)} title="Delete batch" className="text-xs text-ink-500 hover:text-rose-300">🗑</button>
             </div>
             <div className="mb-3 text-xs text-ink-400">{(b.students || []).length} students · {(b.students || []).slice(0, 4).map((s: any) => s.name).join(", ")}{(b.students || []).length > 4 ? "…" : ""}</div>
