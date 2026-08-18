@@ -123,6 +123,7 @@ function daysAgo(iso: string | null | undefined): string {
 export default function BatchPerformancePage() {
   const { batchId = "" } = useParams<{ batchId: string }>();
   const { data: auth } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
+  const canManage = auth?.loggedIn && (auth.role === "academy_owner" || auth.role === "coach");
   const [periodDays, setPeriodDays] = useState<7 | 30 | 90>(7);
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -132,7 +133,7 @@ export default function BatchPerformancePage() {
   const batchesQ = useQuery({
     queryKey: ["academy-batches"],
     queryFn: () => get<Batch[]>("/api/academy/batches"),
-    enabled: !!auth?.loggedIn,
+    enabled: !!canManage,
     staleTime: 60_000,
   });
   const batch: Batch | undefined = batchesQ.data?.find((b) => b._id === batchId);
@@ -140,7 +141,7 @@ export default function BatchPerformancePage() {
   const rosterQ = useQuery({
     queryKey: ["academy-students"],
     queryFn: () => get<Student[]>("/api/academy/students"),
-    enabled: !!auth?.loggedIn,
+    enabled: !!canManage,
     staleTime: 30_000,
   });
   const rosterById = useMemo(() => new Map((rosterQ.data ?? []).map((s) => [s._id, s])), [rosterQ.data]);
@@ -158,12 +159,21 @@ export default function BatchPerformancePage() {
         periodStart: period.start.toISOString(),
         periodEnd: period.end.toISOString(),
       }),
-      enabled: !!auth?.loggedIn && !!batch,
+      enabled: !!canManage && !!batch,
       staleTime: 30_000,
     })),
   });
 
   if (auth && !auth.loggedIn) return <Navigate to={`/login?back=/academy/batches/${encodeURIComponent(batchId)}/performance`} replace />;
+  if (auth && !canManage) return (
+    <div className="mx-auto max-w-3xl space-y-3 px-3 py-8">
+      <div className="rounded border border-amber-500/40 bg-amber-500/10 p-4">
+        <div className="text-sm font-semibold text-amber-100">Coach or owner only</div>
+        <p className="mt-1 text-xs text-amber-200">Batch performance dashboards are for academy owners and coaches. Your account is signed in as <b>{auth.role || "a student"}</b>.</p>
+      </div>
+      <Link to="/dashboard" className="inline-block text-sm text-brand-300 hover:underline">← Your dashboard</Link>
+    </div>
+  );
 
   // First pass: build rows without tiers so we know each student's rating.
   const preRows = (batch?.students ?? []).map((s, i) => {

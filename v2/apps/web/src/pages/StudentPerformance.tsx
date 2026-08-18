@@ -178,6 +178,7 @@ function BarList({ items }: { items: { label: string; count: number }[] }) {
 export default function StudentPerformancePage() {
   const { studentId = "" } = useParams<{ studentId: string }>();
   const { data: auth } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
+  const canManage = auth?.loggedIn && (auth.role === "academy_owner" || auth.role === "coach");
   const [periodDays, setPeriodDays] = useState<30 | 90 | 365>(30);
 
   // Full metric bundle — same shape ParentReport uses. Refetch when the
@@ -190,7 +191,7 @@ export default function StudentPerformancePage() {
       periodStart: period.start.toISOString(),
       periodEnd: period.end.toISOString(),
     }),
-    enabled: !!auth?.loggedIn && !!studentId,
+    enabled: !!canManage && !!studentId,
   });
 
   // Roster row for attendance stats + heatmap. Cached so navigating between
@@ -198,12 +199,21 @@ export default function StudentPerformancePage() {
   const rosterQ = useQuery({
     queryKey: ["academy-students"],
     queryFn: () => get<Student[]>("/api/academy/students"),
-    enabled: !!auth?.loggedIn,
+    enabled: !!canManage,
     staleTime: 30_000,
   });
   const student: Student | undefined = rosterQ.data?.find((s) => s._id === studentId);
 
   if (auth && !auth.loggedIn) return <Navigate to={`/login?back=/academy/students/${encodeURIComponent(studentId)}/performance`} replace />;
+  if (auth && !canManage) return (
+    <div className="mx-auto max-w-3xl space-y-3 px-3 py-8">
+      <div className="rounded border border-amber-500/40 bg-amber-500/10 p-4">
+        <div className="text-sm font-semibold text-amber-100">Coach or owner only</div>
+        <p className="mt-1 text-xs text-amber-200">Per-student performance dashboards are for academy owners and coaches. Your account is signed in as <b>{auth.role || "a student"}</b>.</p>
+      </div>
+      <Link to="/dashboard" className="inline-block text-sm text-brand-300 hover:underline">← Your dashboard</Link>
+    </div>
+  );
   if (reportQ.isLoading) return <div className="mx-auto max-w-5xl px-3 py-8 text-sm text-ink-400">Loading performance…</div>;
   if (reportQ.error || !reportQ.data) {
     const msg = (reportQ.error as any)?.message || "Could not load this student's performance.";

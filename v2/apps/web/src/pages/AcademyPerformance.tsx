@@ -79,10 +79,14 @@ function daysAgo(iso: string | null | undefined): string {
 
 export default function AcademyPerformancePage() {
   const { data: auth } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
+  // Roster endpoint is coach/owner-only. Gate the query on role — a plain
+  // logged-in student would 403 and we'd render a confusing error card.
+  // Mirrors the `canManage` pattern used in AcademyDashboard.
+  const canManage = auth?.loggedIn && (auth.role === "academy_owner" || auth.role === "coach");
   const q = useQuery({
     queryKey: ["academy-students"],
     queryFn: () => get<Student[]>("/api/academy/students"),
-    enabled: !!auth?.loggedIn,
+    enabled: !!canManage,
     staleTime: 30_000,
   });
   const [needle, setNeedle] = useState("");
@@ -143,6 +147,15 @@ export default function AcademyPerformancePage() {
   const arrow = (k: SortKey) => (sortKey === k ? (sortDir === "asc" ? "▲" : "▼") : "");
 
   if (auth && !auth.loggedIn) return <Navigate to="/login?back=/academy/performance" replace />;
+  if (auth && !canManage) return (
+    <div className="mx-auto max-w-3xl space-y-3 px-3 py-8">
+      <div className="rounded border border-amber-500/40 bg-amber-500/10 p-4">
+        <div className="text-sm font-semibold text-amber-100">Coach or owner only</div>
+        <p className="mt-1 text-xs text-amber-200">This page is for academy owners and coaches. Your account is signed in as <b>{auth.role || "a student"}</b> — ask your academy owner to give you coach access.</p>
+      </div>
+      <Link to="/dashboard" className="inline-block text-sm text-brand-300 hover:underline">← Your dashboard</Link>
+    </div>
+  );
   if (q.isLoading) return <div className="mx-auto max-w-6xl px-3 py-8 text-sm text-ink-400">Loading students…</div>;
   if (q.error) return (
     <div className="mx-auto max-w-6xl px-3 py-8 space-y-3">
