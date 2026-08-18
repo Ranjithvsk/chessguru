@@ -420,12 +420,12 @@ function BatchesPanel({ students }: { students: any[] }) {
           <label className="mb-1 block text-xs uppercase text-ink-400">Batch name</label>
           <input
             value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Monday Advanced Kids"
-            className="mb-3 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white"
+            className="mb-3 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 placeholder-ink-500"
           />
           <label className="mb-1 block text-xs uppercase text-ink-400">Pick students ({picked.size}/{students.length})</label>
           <div className="mb-3 max-h-40 overflow-y-auto rounded-lg border border-ink-700 bg-ink-800 p-2">
             {students.map((s) => (
-              <label key={s._id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm text-white hover:bg-ink-700">
+              <label key={s._id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm text-ink-100 hover:bg-ink-700">
                 <input
                   type="checkbox"
                   checked={picked.has(s._id)}
