@@ -69,37 +69,49 @@ export function PeriodPerformanceTable({ scope }: { scope: Scope }) {
             <th className="px-3 py-2 text-left">Period</th>
             <th className="px-3 py-2 text-right">Rating end</th>
             <th className="px-3 py-2 text-right">Δ</th>
-            <th className="px-3 py-2 text-right">Puzzles</th>
+            <th className="px-3 py-2 text-right">Puzzles (W-L)</th>
+            <th className="px-3 py-2 text-right">Puzzle %</th>
             <th className="px-3 py-2 text-right">Games (W-D-L)</th>
-            <th className="px-3 py-2 text-right">Win rate</th>
-            <th className="px-3 py-2 text-right">Streak</th>
+            <th className="px-3 py-2 text-right">Game win %</th>
           </tr>
         </thead>
         <tbody>
           {PERIODS.map((p, i) => {
             const q = queries[i];
             const d: ReportData | undefined = q?.data;
-            const winRate = d && d.games.played > 0 ? Math.round((d.games.won / d.games.played) * 100) : null;
+            const gWon = d?.games.won ?? 0;
+            const gDrawn = d?.games.drawn ?? 0;
+            const gLost = d?.games.lost ?? 0;
+            const gPlayed = d?.games.played ?? 0;
+            const gameWin = gPlayed > 0 ? Math.round((gWon / gPlayed) * 100) : null;
+            const pWon = d?.puzzles.wonInPeriod ?? 0;
+            const pLost = d?.puzzles.lostInPeriod ?? 0;
+            const pPlayed = d?.puzzles.inPeriod ?? 0;
+            const puzzleWin = pPlayed > 0 ? Math.round((pWon / pPlayed) * 100) : null;
             const delta = fmtRatingDelta(d?.rating.change);
             return (
               <tr key={p.key} className="border-t border-ink-800">
                 <td className="px-3 py-2 font-medium text-white">{p.label}</td>
                 {q?.isLoading ? (
-                  <td colSpan={6} className="px-3 py-2 text-center text-xs text-ink-500">loading…</td>
+                  <td colSpan={7} className="px-3 py-2 text-center text-xs text-ink-500">loading…</td>
                 ) : q?.error ? (
-                  <td colSpan={6} className="px-3 py-2 text-center text-xs text-rose-300" title={String((q.error as any)?.message)}>load failed</td>
+                  <td colSpan={7} className="px-3 py-2 text-center text-xs text-rose-300" title={String((q.error as any)?.message)}>load failed</td>
                 ) : (
                   <>
                     <td className="px-3 py-2 text-right tabular-nums text-brand-200">{d?.rating.current ?? "—"}</td>
                     <td className={`px-3 py-2 text-right tabular-nums ${delta.cls}`}>{delta.text}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-white">{d?.puzzles.solved ?? 0}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-white">
+                      {pPlayed === 0 ? <span className="text-ink-500">0</span> : `${pWon}-${pLost}`}
+                    </td>
+                    <td className={`px-3 py-2 text-right tabular-nums ${puzzleWin == null ? "text-ink-500" : puzzleWin >= 60 ? "text-emerald-300" : puzzleWin >= 40 ? "text-ink-300" : "text-rose-300"}`}>
+                      {puzzleWin == null ? "—" : `${puzzleWin}%`}
+                    </td>
                     <td className="px-3 py-2 text-right tabular-nums text-ink-300">
-                      {d ? `${d.games.won}-${d.games.drawn}-${d.games.lost}` : "—"}
+                      {gPlayed === 0 ? <span className="text-ink-500">—</span> : `${gWon}-${gDrawn}-${gLost}`}
                     </td>
-                    <td className={`px-3 py-2 text-right tabular-nums ${winRate == null ? "text-ink-500" : winRate >= 60 ? "text-emerald-300" : winRate >= 40 ? "text-ink-300" : "text-rose-300"}`}>
-                      {winRate == null ? "—" : `${winRate}%`}
+                    <td className={`px-3 py-2 text-right tabular-nums ${gameWin == null ? "text-ink-500" : gameWin >= 60 ? "text-emerald-300" : gameWin >= 40 ? "text-ink-300" : "text-rose-300"}`}>
+                      {gameWin == null ? "—" : `${gameWin}%`}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-amber-200">{d?.revision.longestStreak ?? 0}d</td>
                   </>
                 )}
               </tr>

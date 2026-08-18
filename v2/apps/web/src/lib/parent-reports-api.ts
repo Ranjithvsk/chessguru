@@ -7,7 +7,7 @@ export interface ReportData {
   period: { start: string; end: string };
   rating: { current: number | null; change: number | null; historyPoints: number; history?: number[] };
   games: { played: number; won: number; drawn: number; lost: number };
-  puzzles: { solved: number };
+  puzzles: { solved: number; inPeriod?: number; wonInPeriod?: number; lostInPeriod?: number };
   revision: { longestStreak: number; totalCards: number };
   weaknesses: { tag: string; label: string; count: number }[];
   studies: { studyId: string; title: string; chapterCount: number }[];

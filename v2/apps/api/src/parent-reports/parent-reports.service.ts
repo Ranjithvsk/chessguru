@@ -38,7 +38,7 @@ export interface ReportData {
   period: { start: string; end: string };
   rating: { current: number | null; change: number | null; historyPoints: number; history?: number[] };
   games: { played: number; won: number; drawn: number; lost: number };
-  puzzles: { solved: number };
+  puzzles: { solved: number; inPeriod?: number; wonInPeriod?: number; lostInPeriod?: number };
   revision: { longestStreak: number; totalCards: number };
   weaknesses: { tag: string; label: string; count: number }[];
   studies: { studyId: string; title: string; chapterCount: number }[];
@@ -75,6 +75,7 @@ export class ParentReportsService {
   private studies() { return this.conn.db!.collection<any>("studies"); }
   private userperfs() { return this.conn.db!.collection<any>("userperfs"); }
   private examsCol() { return this.conn.db!.collection<any>("exams"); }
+  private rounds() { return this.conn.db!.collection<any>("rounds"); }
 
   private async ensureCoach(session: any): Promise<{ userId: string; academyId: string; role: string }> {
     const userId = session?.userId;
@@ -102,7 +103,14 @@ export class ParentReportsService {
     const s = await this.users().findOne({ _id: studentId as any });
     if (!s) throw new NotFoundException("no such student");
 
-    const [perf, gamesRaw, analysesRaw, reviseRows, examAttemptRows, bookProgs, studyRows] = await Promise.all([
+    // Round._id is "<userId>:<puzzleId>"; range-scan on the indexed _id
+    // brackets exactly this user's rounds. Filter by d (solved date) to get
+    // the puzzles actually solved in the period — the lifetime nb counter
+    // on userperfs can't tell us that. Added 2026-08-18 so the period-
+    // performance table doesn't show identical puzzle counts for every row.
+    const roundsFrom = `${studentId}:`;
+    const roundsTo   = `${studentId};`;
+    const [perf, gamesRaw, analysesRaw, reviseRows, examAttemptRows, bookProgs, studyRows, roundsInPeriod] = await Promise.all([
       this.userperfs().findOne({ _id: studentId as any }),
       this.games().find({ ownerId: studentId, createdAt: { $gte: start, $lte: end } }).toArray(),
       this.analysis().find({ ownerId: studentId, updatedAt: { $gte: start, $lte: end } }).toArray(),
@@ -110,6 +118,7 @@ export class ParentReportsService {
       this.examAttempts().find({ userId: studentId, submittedAt: { $gte: start, $lte: end } }).toArray(),
       this.bookProgress().find({ userId: studentId }).toArray(),
       this.studies().find({ ownerId: studentId, updatedAt: { $gte: start, $lte: end } }, { projection: { title: 1, chapterCount: 1 } }).toArray(),
+      this.rounds().find({ _id: { $gte: roundsFrom, $lt: roundsTo } as any, d: { $gte: start, $lte: end } }, { projection: { w: 1 } }).toArray(),
     ]);
 
     // Rating
@@ -122,6 +131,9 @@ export class ParentReportsService {
       ratingChange = curRating - earliest;
     }
     const puzzlesSolved = perf?.puzzle?.nb ?? 0;
+    const puzzlesInPeriod = roundsInPeriod.length;
+    const puzzlesWonInPeriod = roundsInPeriod.filter((r: any) => !!r.w).length;
+    const puzzlesLostInPeriod = puzzlesInPeriod - puzzlesWonInPeriod;
 
     // Games W/D/L based on ourColor + Result
     let won = 0, drawn = 0, lost = 0;
@@ -210,7 +222,12 @@ export class ParentReportsService {
         history: (re.length > 200 ? re.slice(0, 200) : [...re]).reverse(),
       },
       games: { played: gamesRaw.length, won, drawn, lost },
-      puzzles: { solved: puzzlesSolved },
+      puzzles: {
+        solved: puzzlesSolved,
+        inPeriod: puzzlesInPeriod,
+        wonInPeriod: puzzlesWonInPeriod,
+        lostInPeriod: puzzlesLostInPeriod,
+      },
       revision: { longestStreak, totalCards: reviseRows.length },
       weaknesses,
       studies: studyRows.map((s) => ({ studyId: s._id, title: s.title, chapterCount: s.chapterCount || 0 })),
