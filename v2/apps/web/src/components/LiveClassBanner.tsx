@@ -10,7 +10,7 @@
 // Dismissible PER CLASS (sessionStorage keyed by class id): × hides THIS class,
 // but a different class later still shows. Hidden on the room / class pages
 // themselves, where it would just be noise.
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { get, api, classRoomPath } from "../lib/api";
@@ -18,6 +18,43 @@ import { get, api, classRoomPath } from "../lib/api";
 type SchedRow = { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; roomKind?: "call"|"meet" };
 type Sched = { live: SchedRow[]; upcoming: SchedRow[] };
 const DISMISS_KEY = "cg_live_class_dismissed";
+
+/** "End class" button on the LiveClassBanner — visible only when the class
+ *  belongs to the current user (SchedRow.mine === true). Hits the existing
+ *  POST /api/class/:id/end so a coach can close an abandoned class WITHOUT
+ *  re-entering the room. Owner ask 2026-08-18: "for coach, we need option
+ *  to close floating class". */
+function EndClassButton({ classId }: { classId: string }) {
+  const qc = useQueryClient();
+  const m = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`/v2api/api/class/${encodeURIComponent(classId)}/end`, {
+        method: "POST", credentials: "include",
+      });
+      return r.json();
+    },
+    onSuccess: (j: any) => {
+      if (j?.ok) {
+        qc.invalidateQueries({ queryKey: ["schedule-live"] });
+        qc.invalidateQueries({ queryKey: ["class-live-now"] });
+        qc.invalidateQueries({ queryKey: ["academy-schedule"] });
+      } else {
+        alert(j?.reason === "not-your-class" ? "Only the coach who started this class can end it." : "Couldn't end class.");
+      }
+    },
+  });
+  const run = () => {
+    if (!confirm("End this class now? Everyone still in the room is kicked out.")) return;
+    m.mutate();
+  };
+  return (
+    <button type="button" onClick={run} disabled={m.isPending}
+      className="rounded-lg border border-rose-400/40 bg-rose-500/20 px-3 py-1.5 text-xs font-semibold text-rose-100 hover:bg-rose-500/30 disabled:opacity-60"
+      title="End this class now (only visible because you started it)">
+      {m.isPending ? "Ending…" : "End class"}
+    </button>
+  );
+}
 
 export default function LiveClassBanner() {
   const loc = useLocation();
@@ -139,6 +176,7 @@ export default function LiveClassBanner() {
         >
           Join now →
         </Link>
+        {live.mine && <EndClassButton classId={live._id} />}
         <button
           type="button"
           onClick={dismiss}
