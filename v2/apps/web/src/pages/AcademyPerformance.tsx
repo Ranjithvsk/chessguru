@@ -21,7 +21,7 @@ type Student = {
   username: string;
   email?: string;
   puzzleRating?: number | null;
-  dailyPuzzleStreak?: number | null;
+  dailyStreakCurrent?: number | null;
   attendedTotal?: number | null;
   attendedThisWeek?: number | null;
   lastAttendedAt?: string | null;
@@ -125,7 +125,7 @@ export default function AcademyPerformancePage() {
       case "attendance": return cmp(a.attendanceCount, b.attendanceCount);
       case "lastActive": return cmp(a.lastActive ? new Date(a.lastActive).getTime() : null, b.lastActive ? new Date(b.lastActive).getTime() : null);
       case "tier":       return cmp(tierRank(a.tier), tierRank(b.tier));
-      case "streak":     return cmp(a.student.dailyPuzzleStreak ?? 0, b.student.dailyPuzzleStreak ?? 0);
+      case "streak":     return cmp(a.student.dailyStreakCurrent ?? 0, b.student.dailyStreakCurrent ?? 0);
     }
   });
 
@@ -214,7 +214,7 @@ export default function AcademyPerformancePage() {
                     </span>
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums text-brand-200">{s.puzzleRating ?? "—"}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-amber-200">{s.dailyPuzzleStreak ?? 0}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-amber-200">{s.dailyStreakCurrent ?? 0}</td>
                   <td className="px-3 py-2 text-right">
                     <span className={`tabular-nums ${r.attendanceCount === 0 ? "text-rose-300" : "text-emerald-200"}`}>{r.attendanceCount}</span>
                     <span className="text-ink-500">/30</span>

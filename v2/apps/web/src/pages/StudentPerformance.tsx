@@ -19,7 +19,7 @@ type Student = {
   username: string;
   email?: string;
   puzzleRating?: number | null;
-  dailyPuzzleStreak?: number | null;
+  dailyStreakCurrent?: number | null;
   attendedTotal?: number | null;
   attendedThisWeek?: number | null;
   lastAttendedAt?: string | null;
@@ -256,7 +256,7 @@ export default function StudentPerformancePage() {
       {/* Top-line stats */}
       <div className="grid gap-3 sm:grid-cols-4">
         <Stat label="Puzzle rating" value={r.rating.current ?? "—"} sub={r.rating.change != null ? `${r.rating.change >= 0 ? "+" : ""}${r.rating.change} in period` : "no change data"} tone="brand" />
-        <Stat label="Puzzles solved" value={r.puzzles.solved} sub={`Streak ${student?.dailyPuzzleStreak ?? 0}d`} tone="brand" />
+        <Stat label="Puzzles solved" value={r.puzzles.solved} sub={`Streak ${student?.dailyStreakCurrent ?? 0}d`} tone="brand" />
         <Stat label="Games (W-D-L)" value={`${r.games.won}-${r.games.drawn}-${r.games.lost}`} sub={totalGames === 0 ? "no games in period" : `${winRate}% win`} tone="accent" />
         <Stat label="Attendance" value={`${attendanceCount}/30`} sub={`Last: ${daysAgo(student?.lastAttendedAt)}`} tone={attendanceCount === 0 ? "rose" : "accent"} />
       </div>

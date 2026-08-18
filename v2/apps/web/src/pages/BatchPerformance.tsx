@@ -26,7 +26,7 @@ type Student = {
   lastAttendedAt?: string | null;
   lastLogin?: string | null;
   attendance30d?: boolean[];
-  dailyPuzzleStreak?: number | null;
+  dailyStreakCurrent?: number | null;
 };
 type Batch = {
   _id: string;

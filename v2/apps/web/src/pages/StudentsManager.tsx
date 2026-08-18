@@ -32,7 +32,7 @@ type Student = {
   coachId?: string | null;
   createdAt?: string | null;
   lastLogin?: string | null;
-  dailyPuzzleStreak?: number | null;
+  dailyStreakCurrent?: number | null;
   puzzleRating?: number | null;
   attendedTotal?: number | null;
   attendedThisWeek?: number | null;
@@ -243,7 +243,7 @@ export default function StudentsManagerPage() {
                   </td>
                   <td className="px-3 py-2 text-ink-300">{coachName(s.coachId)}</td>
                   <td className="px-3 py-2 text-right text-brand-200 tabular-nums">{s.puzzleRating ?? "—"}</td>
-                  <td className="px-3 py-2 text-right text-amber-200 tabular-nums">{s.dailyPuzzleStreak ?? 0}</td>
+                  <td className="px-3 py-2 text-right text-amber-200 tabular-nums">{s.dailyStreakCurrent ?? 0}</td>
                   <td className="px-3 py-2 text-right text-emerald-200 tabular-nums">{s.attendedThisWeek ?? 0}</td>
                   <td className="px-3 py-2 text-ink-400 text-xs">{fmtDate(s.lastAttendedAt || s.lastLogin)}</td>
                   <td className="px-3 py-2 text-right">
