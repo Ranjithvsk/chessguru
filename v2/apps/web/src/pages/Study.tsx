@@ -69,26 +69,72 @@ export default function StudyPage() {
     "key-squares": "Key Squares king winning tap rook pawn",
   };
   const matchHardcoded = (id: keyof typeof HARDCODED_TEXT) => !needle || HARDCODED_TEXT[id].toLowerCase().includes(needle);
-  const memory = STUDIES.filter((s) => s.kind === "memory" && matchStudy(s));
-  const rest = STUDIES.filter((s) => s.kind !== "memory" && matchStudy(s));
+  // Split STUDIES by game-phase so the /study page reads like a chess curriculum
+  // (Opening / Middle game / End game). Any entry lacking `phase` (utility
+  // dashboards etc.) falls into `other` and renders in an "Other" bucket only
+  // if any exist. Owner-requested taxonomy 2026-08-18.
+  const openingStudies = STUDIES.filter((s) => s.phase === "opening" && matchStudy(s));
+  const middleStudies  = STUDIES.filter((s) => s.phase === "middle"  && matchStudy(s));
+  const endStudies     = STUDIES.filter((s) => s.phase === "end"     && matchStudy(s));
+  const otherStudies   = STUDIES.filter((s) => !s.phase && matchStudy(s));
   const anyHardcoded = matchHardcoded("promote-one-pawn") || matchHardcoded("opposition") || matchHardcoded("rule-of-square") || matchHardcoded("key-squares");
-  const totalMatches = memory.length + rest.length + (needle ? [matchHardcoded("promote-one-pawn"), matchHardcoded("opposition"), matchHardcoded("rule-of-square"), matchHardcoded("key-squares")].filter(Boolean).length : 4);
+  const totalMatches = openingStudies.length + middleStudies.length + endStudies.length + otherStudies.length + (needle ? [matchHardcoded("promote-one-pawn"), matchHardcoded("opposition"), matchHardcoded("rule-of-square"), matchHardcoded("key-squares")].filter(Boolean).length : 4);
 
   return (
     <div className="space-y-10">
-      <section className="space-y-6">
-        <div className="flex items-start justify-between gap-4">
+      {/* Page header + search — spans all three phase sections below. */}
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-400">Studies</div>
+          <h1 className="font-display text-2xl text-white">Study by game phase</h1>
+          <p className="text-sm text-ink-400">Every concept, sorted by where it applies in the game. The ★ chip shows each concept's curated difficulty range; a green "you: ~XXXX" appears once you've played enough for a personal estimate.</p>
+        </div>
+        <div className="shrink-0">
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search studies…" className="w-64 rounded-lg border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm text-white placeholder-ink-500 focus:border-brand-400 focus:outline-none" />
+          {needle && (
+            <div className="mt-1 text-right text-[11px] text-ink-500">{totalMatches} match{totalMatches === 1 ? "" : "es"}</div>
+          )}
+        </div>
+      </header>
+
+      {/* ── Opening ─────────────────────────────────────────────────────────── */}
+      {openingStudies.length > 0 && (
+        <section className="space-y-6">
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-400">Part 1</div>
-            <h1 className="font-display text-2xl text-white">Studies</h1>
-            <p className="text-sm text-ink-400">Endgame technique trainers — you play the winning side, Stockfish defends at full strength. The ★ chip shows each concept's curated rating range; a green "you: ~XXXX" appears once you've played enough for a personal estimate.</p>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-sky-400">Opening 📖</div>
+            <h2 className="font-display text-xl text-white">Openings &amp; board mastery</h2>
+            <p className="text-sm text-ink-400">Learn openings, memorise variations, know the board — the foundations before move 15.</p>
           </div>
-          <div className="shrink-0">
-            <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search studies…" className="w-64 rounded-lg border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm text-white placeholder-ink-500 focus:border-brand-400 focus:outline-none" />
-            {needle && (
-              <div className="mt-1 text-right text-[11px] text-ink-500">{totalMatches} match{totalMatches === 1 ? "" : "es"}</div>
-            )}
+          <div className="grid gap-4 sm:grid-cols-2">
+            {openingStudies.map((s) => <StudyCard key={s.id} s={s} level={levels[s.id]} />)}
           </div>
+        </section>
+      )}
+
+      {/* ── Middle game ─────────────────────────────────────────────────────── */}
+      <section className="space-y-6 border-t border-ink-800 pt-8">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-400">Middle game ⚔️</div>
+          <h2 className="font-display text-xl text-white">Tactics, plans &amp; attacks</h2>
+          <p className="text-sm text-ink-400">Middle-game trainers are on the roadmap — for now, drill patterns in the <Link to="/" className="text-brand-400 underline">Puzzle trainer</Link>.</p>
+        </div>
+        {middleStudies.length > 0 ? (
+          <div className="grid gap-4 sm:grid-cols-2">
+            {middleStudies.map((s) => <StudyCard key={s.id} s={s} level={levels[s.id]} />)}
+          </div>
+        ) : (
+          <div className="rounded-xl2 border border-dashed border-ink-700 bg-ink-900/50 p-6 text-center">
+            <p className="text-sm text-ink-400">Coming soon — pin attacks, discovered attacks, forks, skewers, sacrifice patterns, king-safety drills.</p>
+          </div>
+        )}
+      </section>
+
+      {/* ── End game ────────────────────────────────────────────────────────── */}
+      <section className="space-y-6 border-t border-ink-800 pt-8">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-400">End game 🏁</div>
+          <h2 className="font-display text-xl text-white">Endgame technique &amp; mates</h2>
+          <p className="text-sm text-ink-400">Guided lessons + rated drills. You play the winning side, Stockfish defends at full strength.</p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           {matchHardcoded("promote-one-pawn") && (
@@ -171,20 +217,20 @@ export default function StudyPage() {
             </div>
           </Link>
           )}
-          {rest.map((s) => <StudyCard key={s.id} s={s} level={levels[s.id]} />)}
+          {endStudies.map((s) => <StudyCard key={s.id} s={s} level={levels[s.id]} />)}
         </div>
-        <p className="text-xs text-ink-500">More studies coming — triangulation, corresponding squares…</p>
+        <p className="text-xs text-ink-500">More endgame studies coming — triangulation, corresponding squares…</p>
       </section>
 
-      {memory.length > 0 && (
+      {/* ── Other (utility/dashboard entries lacking a phase) ───────────────── */}
+      {otherStudies.length > 0 && (
         <section className="space-y-6 border-t border-ink-800 pt-8">
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-accent-400">Part 2</div>
-            <h1 className="font-display text-2xl text-white">Memory Training 🏰</h1>
-            <p className="text-sm text-ink-400">Memory-champion technique for chess — give every square a funny picture, then never forget it.</p>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">Other</div>
+            <h2 className="font-display text-xl text-white">Utilities &amp; tools</h2>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
-            {memory.map((s) => <StudyCard key={s.id} s={s} level={levels[s.id]} />)}
+            {otherStudies.map((s) => <StudyCard key={s.id} s={s} level={levels[s.id]} />)}
           </div>
         </section>
       )}
