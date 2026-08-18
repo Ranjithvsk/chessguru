@@ -53,12 +53,14 @@ function computeTiers(ratings: (number | null | undefined)[]): Tier[] {
   });
   return out;
 }
-function tierBadge(t: Tier) {
+function tierBadge(t: Tier | undefined): { emoji: string; label: string; cls: string } {
   switch (t) {
     case "topper":     return { emoji: "🏆", label: "Topper",     cls: "bg-amber-500/20 text-amber-200" };
     case "average":    return { emoji: "📊", label: "Average",    cls: "bg-brand-500/20 text-brand-200" };
     case "challenger": return { emoji: "🎯", label: "Challenger", cls: "bg-rose-500/20 text-rose-200" };
     case "unrated":    return { emoji: "•",  label: "Unrated",    cls: "bg-ink-800 text-ink-500" };
+    // Defensive fallback — never white-screen if a bad tier value slips through.
+    default:           return { emoji: "•",  label: "Unknown",    cls: "bg-ink-800 text-ink-500" };
   }
 }
 function tierRank(t: Tier): number { return t === "topper" ? 3 : t === "average" ? 2 : t === "challenger" ? 1 : 0; }

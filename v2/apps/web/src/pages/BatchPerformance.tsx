@@ -222,7 +222,7 @@ export default function BatchPerformancePage() {
   const tierCounts = {
     topper:  rows.filter((r) => r.tier === "topper").length,
     average: rows.filter((r) => r.tier === "average").length,
-    weaker:  rows.filter((r) => r.tier === "challenger").length,
+    challenger: rows.filter((r) => r.tier === "challenger").length,
     unrated: rows.filter((r) => r.tier === "unrated").length,
   };
 

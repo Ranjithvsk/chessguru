@@ -37,6 +37,7 @@ import StudentsManagerPage from "./pages/StudentsManager";
 import StudentPerformancePage from "./pages/StudentPerformance";
 import BatchPerformancePage from "./pages/BatchPerformance";
 import AcademyPerformancePage from "./pages/AcademyPerformance";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import ZugzwangStudyPage from "./pages/ZugzwangStudy";
 import AcceptInvitePage from "./pages/AcceptInvite";
 // CallRoomPage + ClassPage removed 2026-08-12 (Jitsi + WebRTC mesh retired).
@@ -192,9 +193,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="signup-academy" element={<SignupAcademyPage />} />
             <Route path="academy" element={<AcademyDashboardPage />} />
             <Route path="students" element={<StudentsManagerPage />} />
-            <Route path="academy/performance" element={<AcademyPerformancePage />} />
-            <Route path="academy/students/:studentId/performance" element={<StudentPerformancePage />} />
-            <Route path="academy/batches/:batchId/performance" element={<BatchPerformancePage />} />
+            <Route path="academy/performance" element={<ErrorBoundary label="Student performance"><AcademyPerformancePage /></ErrorBoundary>} />
+            <Route path="academy/students/:studentId/performance" element={<ErrorBoundary label="Student performance"><StudentPerformancePage /></ErrorBoundary>} />
+            <Route path="academy/batches/:batchId/performance" element={<ErrorBoundary label="Batch performance"><BatchPerformancePage /></ErrorBoundary>} />
             <Route path="accept-invite" element={<AcceptInvitePage />} />
             <Route path="call/:room" element={<CallRoomRedirect />} />
             <Route path="settings/accounts" element={<AccountLinksPage />} />
