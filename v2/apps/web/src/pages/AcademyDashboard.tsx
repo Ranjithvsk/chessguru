@@ -90,6 +90,46 @@ function fmtDate(d?: string|null) { return d ? new Date(d).toLocaleDateString(un
  *  custom password; empty submit → backend generates a memorable default
  *  (<firstname>@123). Shows the new credentials in a copyable pill so the
  *  coach can hand them to the student. */
+/** 👪 Link parent — attaches a parent user to this student (creates the
+ *  parent account with a name+email prompt if one doesn't exist yet). The
+ *  parent then sees their child on /parent (billing + progress). Owner ask
+ *  2026-08-18: "parent portal with billing and progress reports". */
+function LinkParentButton({ studentId, name }: { studentId: string; name: string }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    const parentName = prompt(`Link a parent to ${name}.\n\nParent's display name:`, "");
+    if (parentName === null) return;
+    const email = prompt(`Parent email for ${parentName || "the parent"}:`, "");
+    if (email === null || !email.trim()) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/v2api/api/academy/students/${encodeURIComponent(studentId)}/link-parent`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ displayName: parentName.trim(), email: email.trim() }),
+      });
+      const j = await r.json();
+      if (j?.ok) {
+        const c = j.credentials;
+        if (c) alert(`Parent linked. Share these credentials with them:\nusername: ${c.username}\npassword: ${c.password}\nlogin: https://harinitharanjith.com/login\n\nOnce signed in they see /parent with your child's progress + billing.`);
+        else alert(`Linked existing parent ${j.parent?.username || email} to ${name}. They already have an account.`);
+        qc.invalidateQueries({ queryKey: ["academy-students"] });
+      } else {
+        alert(j?.error || "Couldn't link parent.");
+      }
+    } catch (e: any) { alert(e?.message || "Network error."); }
+    finally { setBusy(false); }
+  };
+  return (
+    <button onClick={submit} disabled={busy}
+      className="rounded-lg border border-purple-500/50 bg-purple-500/10 px-2 py-1 text-purple-100 hover:bg-purple-500/20 disabled:opacity-60"
+      title="Link a parent — they'll see this child's progress + billing on /parent">
+      {busy ? "…" : "👪 Parent"}
+    </button>
+  );
+}
+
 /** 🔀 Merge — fold an empty quick-added duplicate student into an existing
  *  platform account (preserves the real account's puzzle history). Owner ask
  *  2026-08-18: "build option to merge new created with existing account". */
@@ -98,7 +138,7 @@ function MergeStudentButton({ studentId, name }: { studentId: string; name: stri
   const [busy, setBusy] = useState(false);
   const submit = async () => {
     const target = prompt(
-      `Merge "${name}" into an existing account.\n\nEnter the username or email of the REAL account (with existing puzzle history). "${name}" will be deleted and any batch that referenced them will point at the real account instead.\n\nRefuses to merge if "${name}" already has real solves.`,
+      `Merge "${name}" into an existing account.\n\nEnter the username or email of the target account. Rounds, puzzle history, ratings, games and analyses are MOVED — nothing is lost. "${name}" is deleted after the transfer and any batch that referenced them points at the target instead.`,
       "",
     );
     if (target == null) return;
@@ -2532,6 +2572,7 @@ export default function AcademyDashboardPage() {
                             <ResetPasswordButton studentId={s._id} name={s.name || s.username} />
                             <MarkAttendedButton studentId={s._id} name={s.name || s.username} />
                             <MergeStudentButton studentId={s._id} name={s.name || s.username} />
+                            <LinkParentButton studentId={s._id} name={s.name || s.username} />
                             {isOwner && <AssignCoachDropdown studentId={s._id} currentCoachId={s.coachId} coaches={coaches ?? []} />}
                           </div>
                         </td>

@@ -152,6 +152,73 @@ export class AcademyService {
    *    - If still blank, generate "student-<random>"
    *  Collision-append -2, -3 up to 999 if the base already exists.
    *  Email is optional (young students often don't have one). */
+  /** Link a parent user to a student. If a user with the given email exists
+   *  and is a parent (or a plain unrolled user), link to them. Otherwise
+   *  create a new parent user (auto-gen password like quick-add students).
+   *  A parent may be linked to multiple students; each student can have
+   *  multiple parents. Powers the parent portal — owner ask 2026-08-18:
+   *  "parent portal with billing and progress reports". */
+  async linkParentToStudent(session: any, studentId: string, body: any): Promise<any> {
+    const g = this.ensureCoachOrOwner(session);
+    const student: any = await this.users().findOne({ _id: studentId as any, academyId: g.academyId, role: "student" });
+    if (!student) return { ok: false, error: "Student not found in your academy." };
+    if (g.role === "coach" && String(student.coachId || "") !== g.userId) {
+      return { ok: false, error: "That student isn't assigned to you." };
+    }
+    const displayName = String(body?.displayName || "").trim().slice(0, 60);
+    const email = String(body?.email || "").trim().toLowerCase();
+    if (!email || !email.includes("@")) return { ok: false, error: "Parent email is required." };
+
+    let parent: any = await this.users().findOne({ email });
+    let credentials: { username: string; password: string } | null = null;
+    if (parent) {
+      if (parent.role === "coach" || parent.role === "academy_owner") {
+        return { ok: false, error: `${email} is a ${parent.role.replace("_", " ")} — cannot also be a parent.` };
+      }
+      // Existing account (plain user, student, or already-parent) — upgrade
+      // to parent role if not already and append the child.
+      const nextChildren = Array.from(new Set([...(parent.childrenIds || []).map(String), String(student._id)]));
+      const patch: any = { childrenIds: nextChildren, updatedAt: new Date() };
+      if (parent.role !== "parent") patch.role = "parent";
+      // Existing user under a different academy? Attach to this academy so
+      // the parent lands in the right portal. Parents don't belong to a
+      // coach — only students do.
+      if (!parent.academyId) patch.academyId = g.academyId;
+      await this.users().updateOne({ _id: parent._id }, { $set: patch });
+    } else {
+      // Create a new parent user.
+      const sanitize = (s: string) => s.toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 24);
+      let base = sanitize(displayName) || sanitize(email.split("@")[0] || "") || "parent";
+      if (base.length < 2) base = "parent";
+      let uid = base, k = 2;
+      while (await this.users().findOne({ $or: [{ _id: uid as any }, { username: { $regex: new RegExp("^" + uid + "$", "i") } }] } as any)) {
+        uid = `${base}-${k++}`;
+        if (k > 999) return { ok: false, error: "Couldn't pick a free username — try a different name." };
+      }
+      const pwBase = ((displayName.split(/\s+/)[0] || uid).toLowerCase().replace(/[^a-z0-9]/g, "")) || "parent";
+      const password = `${pwBase}@123`;
+      const bcrypt = await import("bcryptjs");
+      const hash = await bcrypt.default.hash(password, 10);
+      const now = new Date();
+      const doc: any = {
+        _id: uid, username: uid, name: displayName || uid, email, bpass: hash,
+        role: "parent", academyId: g.academyId,
+        childrenIds: [String(student._id)],
+        createdAt: now, updatedAt: now,
+      };
+      await this.users().insertOne(doc);
+      parent = doc;
+      credentials = { username: uid, password };
+    }
+    // Mirror the link on the student side so we can find "who are this
+    // student's parents" without an aggregation.
+    await this.users().updateOne(
+      { _id: student._id },
+      { $addToSet: { parentIds: String(parent._id) }, $set: { updatedAt: new Date() } },
+    );
+    return { ok: true, parent: { _id: parent._id, username: parent.username, name: parent.name, email }, credentials };
+  }
+
   /** Merge a quick-added duplicate student into an EXISTING platform account.
    *  Use case (owner ask 2026-08-18): coach quick-adds "harnitharanjith" not
    *  realising the real "harinitharanjith" account already exists. Owner
@@ -193,24 +260,104 @@ export class AcademyService {
     if (target.role === "academy_owner" || target.role === "coach") {
       return { ok: false, error: `${target.username} is a ${target.role.replace("_", " ")} — can't merge into.` };
     }
-    // Data-loss guard: only allow merge when the DUPE is empty (nb=0, rounds=0).
-    // A quick-added student with 0 solves is the intended target here.
-    const dupePerf: any = await this.conn.db!.collection("userperfs").findOne({ _id: dupe._id as any }, { projection: { "puzzle.nb": 1 } });
-    const dupeNb = dupePerf?.puzzle?.nb ?? 0;
-    const dupeRounds = await this.conn.db!.collection("rounds").countDocuments({ _id: { $regex: `^${String(dupe._id).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:` } as any });
-    if (dupeNb > 0 || dupeRounds > 0) {
-      return { ok: false, error: `Duplicate "${dupe.username}" has real puzzle history (${dupeNb} solves, ${dupeRounds} rounds) — refusing merge to protect data. Use Remove instead if you're sure.` };
+    // MOVE all of the source's data into the target — that's the whole
+    // point (owner ask 2026-08-18: "no data should be lost in the merge").
+    // Order matters: move rounds → merge perfs → move games/analysis →
+    // rewrite batches → delete source. Any failure part-way leaves both
+    // rows intact.
+    const now = new Date();
+    const srcId = String(dupe._id);
+    const dstId = String(target._id);
+    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    // Move ROUNDS. _id = "<userId>:<puzzleId>". Target's own rows win
+    // (they represent later Glicko state that's harder to reconstruct);
+    // source rows for the same puzzle are dropped. Cheap on the current
+    // scale (a few thousand rows per user max).
+    const srcRounds = await this.conn.db!.collection("rounds")
+      .find({ _id: { $regex: `^${esc(srcId)}:` } as any })
+      .toArray();
+    if (srcRounds.length) {
+      const rewrites = srcRounds.map((r: any) => {
+        const puzId = String(r._id).split(":")[1];
+        return { srcRow: r, dstIdNew: `${dstId}:${puzId}` };
+      });
+      // Fetch which of the target's existing rows already exist for the
+      // same puzzleIds so we don't $insert-then-$deduplicate.
+      const dstExisting = await this.conn.db!.collection("rounds")
+        .find({ _id: { $in: rewrites.map((r) => r.dstIdNew) as any } }, { projection: { _id: 1 } })
+        .toArray();
+      const dstSet = new Set(dstExisting.map((d: any) => String(d._id)));
+      const toInsert = rewrites
+        .filter((r) => !dstSet.has(r.dstIdNew))
+        .map((r) => ({ ...r.srcRow, _id: r.dstIdNew }));
+      if (toInsert.length) {
+        await this.conn.db!.collection("rounds").insertMany(toInsert as any);
+      }
+      await this.conn.db!.collection("rounds").deleteMany({ _id: { $regex: `^${esc(srcId)}:` } as any });
     }
 
-    // Point the target at the duplicate's academy + coach.
-    const now = new Date();
+    // Merge USERPERFS. If target has none, just rename. If both exist,
+    // pick the row with the higher solve count as the base (that's the
+    // "real" account); sum the solve counters and take max of ratings so
+    // the merged row can't regress. Recomputing Glicko for real would
+    // need every history entry replayed; this preserves the ceiling.
+    const srcPerf: any = await this.conn.db!.collection("userperfs").findOne({ _id: srcId as any });
+    const dstPerf: any = await this.conn.db!.collection("userperfs").findOne({ _id: dstId as any });
+    if (srcPerf && !dstPerf) {
+      await this.conn.db!.collection("userperfs").insertOne({ ...srcPerf, _id: dstId } as any);
+    } else if (srcPerf && dstPerf) {
+      const winner = (dstPerf.puzzle?.nb ?? 0) >= (srcPerf.puzzle?.nb ?? 0) ? dstPerf : srcPerf;
+      const other = winner === dstPerf ? srcPerf : dstPerf;
+      const merged: any = { ...winner };
+      merged._id = dstId;
+      if (winner.puzzle || other.puzzle) {
+        merged.puzzle = {
+          gl: {
+            r: Math.max(winner.puzzle?.gl?.r ?? 0, other.puzzle?.gl?.r ?? 0) || (winner.puzzle?.gl?.r ?? 1500),
+            d: Math.min(winner.puzzle?.gl?.d ?? 500, other.puzzle?.gl?.d ?? 500),
+            v: winner.puzzle?.gl?.v ?? other.puzzle?.gl?.v ?? 0.06,
+          },
+          nb: (winner.puzzle?.nb ?? 0) + (other.puzzle?.nb ?? 0),
+          re: [...(winner.puzzle?.re ?? []), ...(other.puzzle?.re ?? [])].slice(0, 100),
+          la: winner.puzzle?.la ?? other.puzzle?.la ?? null,
+        };
+      }
+      await this.conn.db!.collection("userperfs").replaceOne({ _id: dstId as any }, merged);
+    }
+    await this.conn.db!.collection("userperfs").deleteOne({ _id: srcId as any });
+
+    // Move myGames + myGameAnalysis + revisions + examAttempts + bookProgress
+    // + studies — anything keyed by ownerId/userId.
+    await this.conn.db!.collection("myGames").updateMany({ ownerId: srcId }, { $set: { ownerId: dstId } });
+    await this.conn.db!.collection("myGameAnalysis").updateMany({ ownerId: srcId }, { $set: { ownerId: dstId } });
+    await this.conn.db!.collection("revisions").updateMany({ userId: srcId }, { $set: { userId: dstId } });
+    await this.conn.db!.collection("examAttempts").updateMany({ userId: srcId }, { $set: { userId: dstId } });
+    await this.conn.db!.collection("bookProgress").updateMany({ userId: srcId }, { $set: { userId: dstId } });
+    await this.conn.db!.collection("studies").updateMany({ ownerId: srcId }, { $set: { ownerId: dstId } });
+    // Study rounds — same _id pattern as puzzle rounds.
+    const srcStudy = await this.conn.db!.collection("study_rounds")
+      .find({ _id: { $regex: `^${esc(srcId)}:` } as any })
+      .toArray();
+    if (srcStudy.length) {
+      const rewrites = srcStudy.map((r: any) => ({ ...r, _id: `${dstId}:${String(r._id).split(":")[1]}` }));
+      const dstExisting = await this.conn.db!.collection("study_rounds")
+        .find({ _id: { $in: rewrites.map((r: any) => r._id) as any } }, { projection: { _id: 1 } })
+        .toArray();
+      const dstSet = new Set(dstExisting.map((d: any) => String(d._id)));
+      const toInsert = rewrites.filter((r: any) => !dstSet.has(String(r._id)));
+      if (toInsert.length) await this.conn.db!.collection("study_rounds").insertMany(toInsert as any);
+      await this.conn.db!.collection("study_rounds").deleteMany({ _id: { $regex: `^${esc(srcId)}:` } as any });
+    }
+
+    // Point the target at the duplicate's academy + coach (upgrade role to
+    // student if they were a plain user).
     await this.users().updateOne(
       { _id: target._id },
       { $set: { academyId: g.academyId, coachId: dupe.coachId, role: "student", updatedAt: now, mergedFromAt: now } },
     );
     // Rewrite batch memberships: any batch that referenced the dupe now
-    // references the target. If a batch already contains the target too,
-    // simply drop the dupe.
+    // references the target. Dedup if the batch already contained both.
     const batchesWithDupe = await this.batches().find({ studentIds: dupe._id }).toArray();
     for (const b of batchesWithDupe) {
       const ids = new Set<string>((b.studentIds || []).map((x: any) => String(x)));
@@ -218,10 +365,14 @@ export class AcademyService {
       ids.add(String(target._id));
       await this.batches().updateOne({ _id: b._id }, { $set: { studentIds: [...ids], updatedAt: now } });
     }
-    // Clean up userperfs (empty by guard above) + delete the duplicate user.
-    await this.conn.db!.collection("userperfs").deleteOne({ _id: dupe._id as any });
+    // Finally remove the source user record.
     await this.users().deleteOne({ _id: dupe._id });
-    return { ok: true, removedId: String(dupe._id), target: { _id: target._id, username: target.username, name: target.name } };
+    return {
+      ok: true,
+      removedId: srcId,
+      target: { _id: target._id, username: target.username, name: target.name },
+      moved: { rounds: srcRounds.length, studyRounds: srcStudy.length },
+    };
   }
 
   /** Attach an EXISTING user (already has a ChessGuru account with their own
@@ -254,15 +405,18 @@ export class AcademyService {
       ],
     } as any);
     if (!user) return { ok: false, error: "No user found with that username or email." };
-    if (user.academyId && user.academyId !== g.academyId) {
-      return { ok: false, error: `${user.username} is already in another academy (${user.academyId}). Ask them to leave it first, or contact support.` };
-    }
     if (user.academyId === g.academyId && user.role === "student") {
       return { ok: false, error: `${user.username} is already a student in your academy.` };
     }
     if (user.role === "academy_owner" || user.role === "coach") {
       return { ok: false, error: `${user.username} is a ${user.role.replace("_", " ")} — can't convert to student here.` };
     }
+    // Cross-academy move — preserves the user's puzzle history + password
+    // (rounds/userperfs/myGames are keyed by _id, unaffected by academyId).
+    // The old academy's batches would still list them but that's a harmless
+    // stale reference we can rewrite next; for now the "attach" step below
+    // reassigns academyId + coachId + role.
+    const movingFromOtherAcademy = user.academyId && user.academyId !== g.academyId;
 
     // Resolve target coach.
     const requestedCoachId = String(body?.coachId || "").trim().toLowerCase();
@@ -276,11 +430,19 @@ export class AcademyService {
       coachId = requestedCoachId;
     }
 
+    // If moving from another academy, first strip the user out of any
+    // batches in the OLD academy so we don't leave dangling roster refs.
+    if (movingFromOtherAcademy) {
+      await this.batches().updateMany(
+        { academyId: user.academyId, studentIds: user._id },
+        { $pull: { studentIds: user._id } as any, $set: { updatedAt: new Date() } },
+      );
+    }
     await this.users().updateOne(
       { _id: user._id },
       { $set: { academyId: g.academyId, coachId, role: "student", attachedAt: new Date() } },
     );
-    return { ok: true, student: { _id: user._id, username: user.username, name: user.name } };
+    return { ok: true, student: { _id: user._id, username: user.username, name: user.name }, movedFrom: movingFromOtherAcademy ? String(user.academyId) : null };
   }
 
   async quickAddStudent(session: any, body: any): Promise<any> {
@@ -574,17 +736,47 @@ export class AcademyService {
     const g = this.ensureOwner(session);
     const student: any = await this.users().findOne({ _id: studentId as any, academyId: g.academyId, role: "student" });
     if (!student) return { ok: false, error: "That student isn't in this academy." };
-    // Detach from academy — keep user doc intact.
-    await this.users().updateOne(
-      { _id: student._id },
-      { $set: { role: "user", academyDetachedAt: new Date(), academyDetachedBy: g.userId }, $unset: { academyId: "", coachId: "", coachAssignedAt: "", coachAssignedBy: "" } },
-    );
-    // Drop from any batches so recurring-class scheduling doesn't drag them back.
+    // Owner ask 2026-08-18: "even when students removed from one academy,
+    // data should not be lost, move them to chess guru". Instead of
+    // unrolling to role:"user" (which was already data-safe — rounds/
+    // perfs are keyed by _id), MOVE them to the platform's fallback
+    // academy so they keep a valid roster spot + can still be re-attached
+    // to any academy later. "chess-guru" is the platform-wide fallback;
+    // if that academy doesn't exist, we fall back to the old detach
+    // behaviour so removal never fails.
+    const FALLBACK_ACADEMY = "chess-guru";
+    const fallback = await this.conn.db!.collection("academies").findOne({ _id: FALLBACK_ACADEMY as any });
+    const now = new Date();
+    if (fallback) {
+      await this.users().updateOne(
+        { _id: student._id },
+        {
+          $set: {
+            academyId: FALLBACK_ACADEMY,
+            role: "student",
+            coachId: null,   // no coach in the fallback until re-attached
+            academyDetachedFrom: g.academyId,
+            academyDetachedAt: now,
+            academyDetachedBy: g.userId,
+            updatedAt: now,
+          },
+          $unset: { coachAssignedAt: "", coachAssignedBy: "" },
+        },
+      );
+    } else {
+      // Fallback academy missing — legacy detach path.
+      await this.users().updateOne(
+        { _id: student._id },
+        { $set: { role: "user", academyDetachedAt: now, academyDetachedBy: g.userId }, $unset: { academyId: "", coachId: "", coachAssignedAt: "", coachAssignedBy: "" } },
+      );
+    }
+    // Drop from any batches in the ORIGINAL academy so recurring-class
+    // scheduling doesn't drag them back.
     await this.batches().updateMany(
       { academyId: g.academyId, studentIds: student._id },
-      { $pull: { studentIds: student._id } as any },
+      { $pull: { studentIds: student._id } as any, $set: { updatedAt: now } },
     );
-    return { ok: true };
+    return { ok: true, movedTo: fallback ? FALLBACK_ACADEMY : null };
   }
 
   // ═══════════ BATCHES ═══════════

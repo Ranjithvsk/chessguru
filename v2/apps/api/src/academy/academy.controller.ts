@@ -123,6 +123,13 @@ export class AcademyController {
     return this.svc.mergeStudent(req.session, id, body);
   }
 
+  /** Link a parent to a student (creates the parent account if needed).
+   *  Body: { displayName, email }. Returns credentials when new. */
+  @Post("students/:id/link-parent")
+  linkParent(@Req() req: any, @Param("id") id: string, @Body() body: any) {
+    return this.svc.linkParentToStudent(req.session, id, body);
+  }
+
   /** Owner-only: quick-add a coach (mirrors student quick-add). */
   @Post("coaches/quick-add")
   quickAddCoach(@Req() req: any, @Body() body: any) {
