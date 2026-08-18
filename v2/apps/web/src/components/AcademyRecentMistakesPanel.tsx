@@ -165,7 +165,7 @@ export function AcademyRecentMistakesPanel({ enabled = true }: { enabled?: boole
                 className="flex flex-col overflow-hidden rounded-xl border-2 border-rose-500/60 bg-ink-800/40 transition hover:border-rose-400">
                 {m.fen ? (
                   <Board fen={m.fen} orientation={side} lastMove={wrongSquares}
-                    viewOnly coordinates={false} className="mini" />
+                    viewOnly coordinates className="mini" />
                 ) : (
                   <div className="aspect-square w-full grid place-items-center bg-ink-800 text-[11px] text-ink-500">FEN missing</div>
                 )}
@@ -179,6 +179,12 @@ export function AcademyRecentMistakesPanel({ enabled = true }: { enabled?: boole
                     {m.rating != null && (
                       <span className="rounded-full bg-brand-500/15 px-1.5 py-0.5 font-semibold tabular-nums text-brand-200">★ {m.rating}</span>
                     )}
+                    {/* Puzzle themes (mateIn2, pin, fork, etc.) — first 3 fit
+                        on the compact card; overflow chip for the rest. */}
+                    {m.themes.slice(0, 3).map((t) => (
+                      <span key={t} className="rounded-full bg-ink-800 px-1.5 py-0.5 text-ink-300">{t}</span>
+                    ))}
+                    {m.themes.length > 3 && <span className="text-ink-500 self-center">+{m.themes.length - 3}</span>}
                   </div>
                   {(m.wrongMove || m.solution?.[0]) && (
                     <div className="flex flex-wrap gap-x-2 text-[10px]">

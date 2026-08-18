@@ -118,7 +118,7 @@ export function StudentMistakesPanel({ studentId, studentUsername, periodDays }:
                     lastMove squares mark where the student went wrong. */}
                 {m.fen ? (
                   <Board fen={m.fen} orientation={side} lastMove={wrongSquares}
-                    viewOnly coordinates={false} className="mini" />
+                    viewOnly coordinates className="mini" />
                 ) : (
                   <div className="aspect-square w-full bg-ink-800 text-center text-xs text-ink-500 grid place-items-center">
                     puzzle FEN missing
