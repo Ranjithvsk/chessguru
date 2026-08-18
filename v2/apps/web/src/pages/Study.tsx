@@ -9,6 +9,21 @@ function tier(avg: number) {
   if (avg < 1800) return "Advanced";
   return "Expert";
 }
+// Curated concept range → chip label. Spanning label ("Beginner–Intermediate")
+// when the range's endpoints fall in different tiers so wide-reach trainers
+// (e.g. Coordinates 400–1200) don't undersell their accessibility.
+function tierLabel(range: [number, number]): string {
+  const t1 = tier(range[0]), t2 = tier(range[1]);
+  return t1 === t2 ? t1 : `${t1}–${t2}`;
+}
+function RangeChip({ range }: { range: [number, number] }) {
+  return (
+    <span className="rounded-full bg-brand-500/15 px-2.5 py-1 text-[11px] font-semibold text-brand-300"
+      title={`Curated difficulty ${range[0]}–${range[1]}`}>
+      ★ {range[0]}–{range[1]} · {tierLabel(range)}
+    </span>
+  );
+}
 
 function StudyCard({ s, level }: { s: StudyDef; level?: StudyLevel }) {
   return (
@@ -25,10 +40,11 @@ function StudyCard({ s, level }: { s: StudyDef; level?: StudyLevel }) {
       <div className="mt-4 flex items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full bg-ink-800 px-2.5 py-1 text-[11px] font-medium text-ink-300">{s.mateIn}</span>
+          {s.range && <RangeChip range={s.range} />}
           {level && level.n > 0 && (
-            <span className="rounded-full bg-brand-500/15 px-2.5 py-1 text-[11px] font-semibold text-brand-300"
-              title={`${level.n} rated puzzles · ${level.min}–${level.max}`}>
-              ★ ~{level.avg} · {tier(level.avg)}
+            <span className="rounded-full bg-accent-500/15 px-2.5 py-1 text-[11px] font-semibold text-accent-400"
+              title={`${level.n} rated puzzles · ${level.min}–${level.max} (your play data)`}>
+              you: ~{level.avg}
             </span>
           )}
         </div>
@@ -65,7 +81,7 @@ export default function StudyPage() {
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-400">Part 1</div>
             <h1 className="font-display text-2xl text-white">Studies</h1>
-            <p className="text-sm text-ink-400">Endgame technique trainers — you play the winning side, Stockfish defends at full strength. The ★ rating is each drills difficulty (calibrated from play).</p>
+            <p className="text-sm text-ink-400">Endgame technique trainers — you play the winning side, Stockfish defends at full strength. The ★ chip shows each concept's curated rating range; a green "you: ~XXXX" appears once you've played enough for a personal estimate.</p>
           </div>
           <div className="shrink-0">
             <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search studies…" className="w-64 rounded-lg border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm text-white placeholder-ink-500 focus:border-brand-400 focus:outline-none" />
@@ -87,7 +103,10 @@ export default function StudyPage() {
             </div>
             <p className="mt-3 flex-1 text-sm text-ink-400">Six short chapters that teach pawn endings from zero — promotion, the rule of the square, key squares, draw-or-win verdicts, a play-it-out exam against a perfect defender, and the floating square: one king vs two pawns.</p>
             <div className="mt-4 flex items-center justify-between gap-2">
-              <span className="rounded-full bg-ink-800 px-2.5 py-1 text-[11px] font-medium text-ink-300">Lesson course</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-ink-800 px-2.5 py-1 text-[11px] font-medium text-ink-300">Lesson course</span>
+                <RangeChip range={[700, 1200]} />
+              </div>
               <span className="shrink-0 text-sm font-semibold text-brand-400 group-hover:text-brand-300">Start →</span>
             </div>
           </Link>
@@ -104,7 +123,10 @@ export default function StudyPage() {
             </div>
             <p className="mt-3 flex-1 text-sm text-ink-400">The kings' duel: whoever must move loses the argument. Four chapters — direct opposition, distant, very distant — and the book classics (Neustadtl, Mattison, Drtina, Dvoretsky's holds) played out on the board.</p>
             <div className="mt-4 flex items-center justify-between gap-2">
-              <span className="rounded-full bg-ink-800 px-2.5 py-1 text-[11px] font-medium text-ink-300">Lesson course + books</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-ink-800 px-2.5 py-1 text-[11px] font-medium text-ink-300">Lesson course + books</span>
+                <RangeChip range={[1000, 1500]} />
+              </div>
               <span className="shrink-0 text-sm font-semibold text-brand-400 group-hover:text-brand-300">Start →</span>
             </div>
           </Link>
@@ -121,7 +143,10 @@ export default function StudyPage() {
             </div>
             <p className="mt-3 flex-1 text-sm text-ink-400">Can the king catch the pawn? Answer yes/no, see the square drawn as proof, then play it out against a perfect tablebase — the square, the double-step, opposition &amp; key squares.</p>
             <div className="mt-4 flex items-center justify-between gap-2">
-              <span className="rounded-full bg-ink-800 px-2.5 py-1 text-[11px] font-medium text-ink-300">Q&amp;A + play-it-out</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-ink-800 px-2.5 py-1 text-[11px] font-medium text-ink-300">Q&amp;A + play-it-out</span>
+                <RangeChip range={[500, 900]} />
+              </div>
               <span className="shrink-0 text-sm font-semibold text-brand-400 group-hover:text-brand-300">Start →</span>
             </div>
           </Link>
@@ -138,7 +163,10 @@ export default function StudyPage() {
             </div>
             <p className="mt-3 flex-1 text-sm text-ink-400">Tap every key square of the pawn — the squares where the king promotes it no matter whose move it is. Rook pawns are the trick: they have none. Separate rating, matched to your level.</p>
             <div className="mt-4 flex items-center justify-between gap-2">
-              <span className="rounded-full bg-ink-800 px-2.5 py-1 text-[11px] font-medium text-ink-300">Tap-the-squares</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-ink-800 px-2.5 py-1 text-[11px] font-medium text-ink-300">Tap-the-squares</span>
+                <RangeChip range={[1100, 1500]} />
+              </div>
               <span className="shrink-0 text-sm font-semibold text-brand-400 group-hover:text-brand-300">Start →</span>
             </div>
           </Link>
