@@ -8,16 +8,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import type { Key } from "chessground/types";
-import Board from "./Board";
+import { MiniFenBoard } from "./MiniFenBoard";
 import { parentReportsApi } from "../lib/parent-reports-api";
 
 function fenSide(fen: string): "white" | "black" {
   return fen.split(" ")[1] === "b" ? "black" : "white";
 }
-function uciSquares(uci: string | null): [Key, Key] | undefined {
+function uciSquares(uci: string | null): [string, string] | undefined {
   if (!uci || uci.length < 4) return undefined;
-  return [uci.slice(0, 2) as Key, uci.slice(2, 4) as Key];
+  return [uci.slice(0, 2), uci.slice(2, 4)];
 }
 function daysAgo(iso: string | null): string {
   if (!iso) return "";
@@ -64,9 +63,12 @@ export function AcademyRecentMistakesPanel({ enabled = true }: { enabled?: boole
       periodStart: period.start.toISOString(),
       periodEnd: period.end.toISOString(),
     }),
-    enabled: enabled && open,
-    // Longer TTL — data is stable for the coach's session; the "🔄" button
-    // is the escape hatch when they need a fresh fetch.
+    // Prefetch on page mount even while collapsed — owner: "even with 2
+    // puzzles still loading so much". If we wait for click-to-open the
+    // coach sees a 200-500ms empty state on first expand. Fetching in the
+    // background costs ONE cheap request per page load; the panel then
+    // renders instantly the moment the coach clicks the header.
+    enabled: enabled,
     staleTime: 60_000,
     refetchOnWindowFocus: true,
   });
@@ -97,7 +99,7 @@ export function AcademyRecentMistakesPanel({ enabled = true }: { enabled?: boole
           <path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
         <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-semibold text-white">🎯 Recent mistakes across the academy <span className="ml-2 font-normal text-ink-400">{open ? `(${rows.length})` : "· click to open"}</span></h2>
+          <h2 className="text-sm font-semibold text-white">🎯 Recent mistakes across the academy <span className="ml-2 font-normal text-ink-400">{allRows.length > 0 ? `(${allRows.length})` : q.isFetching ? "· loading" : "· click to open"}</span></h2>
           {open && <p className="mt-0.5 text-xs text-ink-500">Last {periodDays} days · newest first · click a card to reteach.</p>}
         </div>
         {open && (
@@ -161,8 +163,7 @@ export function AcademyRecentMistakesPanel({ enabled = true }: { enabled?: boole
                 style={{ contentVisibility: "auto", containIntrinsicSize: "280px" } as any}
                 className="flex flex-col overflow-hidden rounded-xl border-2 border-rose-500/60 bg-ink-800/40 transition hover:border-rose-400">
                 {m.fen ? (
-                  <Board fen={m.fen} orientation={side} lastMove={wrongSquares}
-                    viewOnly coordinates={false} className="mini" />
+                  <MiniFenBoard fen={m.fen} orientation={side} highlight={wrongSquares as [string, string] | undefined} />
                 ) : (
                   <div className="aspect-square w-full grid place-items-center bg-ink-800 text-[11px] text-ink-500">FEN missing</div>
                 )}
