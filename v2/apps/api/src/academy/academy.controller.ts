@@ -109,6 +109,13 @@ export class AcademyController {
     return this.svc.quickAddStudent(req.session, body);
   }
 
+  /** Attach an EXISTING platform user as a student — preserves their
+   *  puzzle history + rating. Body: { usernameOrEmail, coachId? }. */
+  @Post("students/attach-existing")
+  attachExistingStudent(@Req() req: any, @Body() body: any) {
+    return this.svc.attachExistingStudent(req.session, body);
+  }
+
   /** Owner-only: quick-add a coach (mirrors student quick-add). */
   @Post("coaches/quick-add")
   quickAddCoach(@Req() req: any, @Body() body: any) {

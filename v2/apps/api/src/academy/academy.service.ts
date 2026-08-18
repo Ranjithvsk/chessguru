@@ -152,6 +152,65 @@ export class AcademyService {
    *    - If still blank, generate "student-<random>"
    *  Collision-append -2, -3 up to 999 if the base already exists.
    *  Email is optional (young students often don't have one). */
+  /** Attach an EXISTING user (already has a ChessGuru account with their own
+   *  puzzle history + rating) to this academy as a student. Unlike
+   *  quickAddStudent which creates a brand-new account, this preserves the
+   *  user's identity, password, rating, solve history — only the academy
+   *  membership fields (academyId, coachId, role) are set.
+   *
+   *  Guardrails:
+   *   - Owner: can attach any user not currently in another academy; must
+   *     supply coachId (existing coach in this academy).
+   *   - Coach: attaches under themselves (coachId auto-set to caller).
+   *   - Target user must NOT already be in a different academy — moving
+   *     someone across academies is a separate operation we don't do here.
+   *   - Attaching an existing "academy_owner" or "coach" would clobber
+   *     their role — reject unless force flag (not exposed via API).
+   *
+   *  Owner ask 2026-08-18: "how can i add existing users as student". */
+  async attachExistingStudent(session: any, body: any): Promise<any> {
+    const g = this.ensureCoachOrOwner(session);
+    const raw = String(body?.usernameOrEmail || "").trim().toLowerCase();
+    if (!raw) return { ok: false, error: "Enter the user's username or email." };
+    // Look up by _id (chosen username) OR case-insensitive username field
+    // OR email — mirrors how sign-in accepts any of the three.
+    const user = await this.users().findOne({
+      $or: [
+        { _id: raw as any },
+        { username: { $regex: new RegExp("^" + raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$", "i") } },
+        { email: raw },
+      ],
+    } as any);
+    if (!user) return { ok: false, error: "No user found with that username or email." };
+    if (user.academyId && user.academyId !== g.academyId) {
+      return { ok: false, error: `${user.username} is already in another academy (${user.academyId}). Ask them to leave it first, or contact support.` };
+    }
+    if (user.academyId === g.academyId && user.role === "student") {
+      return { ok: false, error: `${user.username} is already a student in your academy.` };
+    }
+    if (user.role === "academy_owner" || user.role === "coach") {
+      return { ok: false, error: `${user.username} is a ${user.role.replace("_", " ")} — can't convert to student here.` };
+    }
+
+    // Resolve target coach.
+    const requestedCoachId = String(body?.coachId || "").trim().toLowerCase();
+    let coachId: string;
+    if (g.role === "coach") {
+      coachId = g.userId;
+    } else {
+      if (!requestedCoachId) return { ok: false, error: "Pick a coach to assign this student to." };
+      const coach = await this.users().findOne({ _id: requestedCoachId as any, academyId: g.academyId, role: { $in: ["coach", "academy_owner"] } });
+      if (!coach) return { ok: false, error: "That coach isn't in this academy." };
+      coachId = requestedCoachId;
+    }
+
+    await this.users().updateOne(
+      { _id: user._id },
+      { $set: { academyId: g.academyId, coachId, role: "student", attachedAt: new Date() } },
+    );
+    return { ok: true, student: { _id: user._id, username: user.username, name: user.name } };
+  }
+
   async quickAddStudent(session: any, body: any): Promise<any> {
     const g = this.ensureCoachOrOwner(session);
     const displayName = String(body?.displayName || "").trim().slice(0, 60);

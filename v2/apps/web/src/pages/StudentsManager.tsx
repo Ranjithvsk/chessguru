@@ -91,6 +91,22 @@ export default function StudentsManagerPage() {
       qc.invalidateQueries({ queryKey: ["academy-students"] });
     },
   });
+
+  // Attach-existing flow: pull an EXISTING platform user into the academy
+  // as a student, preserving their puzzle rating + history. Separate form
+  // + mutation so it can't be confused with the create-new flow.
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [attachHandle, setAttachHandle] = useState("");
+  const [attachCoachId, setAttachCoachId] = useState("");
+  const attachM = useMutation({
+    mutationFn: (body: any) => post("/api/academy/students/attach-existing", body),
+    onSuccess: (res: any) => {
+      if (res?.ok === false) { setFlash({ kind: "err", text: String(res.error || "Attach failed.") }); return; }
+      setAttachHandle(""); setAttachOpen(false);
+      setFlash({ kind: "ok", text: `Attached ${res?.student?.username || "user"} — their existing puzzle history is preserved.` });
+      qc.invalidateQueries({ queryKey: ["academy-students"] });
+    },
+  });
   const attendM = useMutation({
     mutationFn: (id: string) => post(`/api/academy/students/${encodeURIComponent(id)}/mark-attended`, {}),
     onSuccess: (res: any, id: string) => {
@@ -165,9 +181,14 @@ export default function StudentsManagerPage() {
             style={{ minWidth: 260 }}
           />
           <button
-            type="button" onClick={() => setAddOpen((v) => !v)}
+            type="button" onClick={() => { setAddOpen((v) => !v); if (!addOpen) setAttachOpen(false); }}
             className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500"
           >+ Add student</button>
+          <button
+            type="button" onClick={() => { setAttachOpen((v) => !v); if (!attachOpen) setAddOpen(false); }}
+            className="rounded-lg border border-brand-500 bg-brand-500/15 px-3 py-1.5 text-sm font-semibold text-brand-100 hover:bg-brand-500/25"
+            title="Pull in an existing ChessGuru user (preserves their puzzle history)."
+          >+ Add existing user</button>
         </div>
       </div>
 
@@ -209,6 +230,36 @@ export default function StudentsManagerPage() {
             type="submit" disabled={addM.isPending || !addName.trim()}
             className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50 hover:bg-emerald-500"
           >{addM.isPending ? "Adding…" : "Create student"}</button>
+        </form>
+      )}
+
+      {attachOpen && (
+        <form
+          className="mb-4 rounded-xl border border-brand-500/40 bg-brand-500/5 p-4 grid gap-3 md:grid-cols-4"
+          onSubmit={(e) => { e.preventDefault(); attachM.mutate({ usernameOrEmail: attachHandle.trim(), coachId: attachCoachId }); }}
+        >
+          <input
+            type="text" placeholder="Existing username or email (required)" value={attachHandle}
+            onChange={(e) => setAttachHandle(e.target.value)}
+            className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder-ink-500 md:col-span-2"
+            required
+          />
+          <select
+            value={attachCoachId} onChange={(e) => setAttachCoachId(e.target.value)}
+            className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white"
+          >
+            <option value="">— assign coach —</option>
+            {(coachesQ.data ?? []).map((c) => (
+              <option key={c._id} value={c._id}>{c.name || c.username}</option>
+            ))}
+          </select>
+          <button
+            type="submit" disabled={attachM.isPending || !attachHandle.trim()}
+            className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50 hover:bg-brand-500"
+          >{attachM.isPending ? "Attaching…" : "Attach to academy"}</button>
+          <div className="md:col-span-4 text-xs text-ink-400">
+            Preserves the user's existing puzzle rating, solve history, and password. They keep their same login. Won't work if they're already in another academy.
+          </div>
         </form>
       )}
 
