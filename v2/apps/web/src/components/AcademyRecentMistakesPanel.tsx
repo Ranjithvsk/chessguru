@@ -72,7 +72,10 @@ export function AcademyRecentMistakesPanel({ enabled = true }: { enabled?: boole
   });
 
   const allRows = q.data ?? [];
-  const PAGE_SIZE = 25;
+  // 12/page = one screen of 4-col × 3-row cards on desktop, keeps
+  // Chessground initialisation cost inside a single frame (~500ms → ~200ms
+  // budget). content-visibility below covers the rest.
+  const PAGE_SIZE = 12;
   const [page, setPage] = useState(1);
   // Reset to page 1 whenever the filter set or period changes so a coach
   // switching filters doesn't stay stranded on page 5 of a smaller result.
@@ -150,6 +153,12 @@ export function AcademyRecentMistakesPanel({ enabled = true }: { enabled?: boole
               : { emoji: "📚", label: m.studyType || "Study", cls: "bg-amber-500/20 text-amber-200" };
             return (
               <div key={`${m.kind}-${m.studentId}-${m.puzzleId}-${i}`}
+                // content-visibility:auto lets the browser skip layout+paint
+                // for cards below the fold — Chessground still mounts but
+                // its layout cost is deferred until scroll. contain-intrinsic-
+                // size reserves ~280px so the scroll bar doesn't jump when
+                // off-screen cards materialise.
+                style={{ contentVisibility: "auto", containIntrinsicSize: "280px" } as any}
                 className="flex flex-col overflow-hidden rounded-xl border-2 border-rose-500/60 bg-ink-800/40 transition hover:border-rose-400">
                 {m.fen ? (
                   <Board fen={m.fen} orientation={side} lastMove={wrongSquares}
