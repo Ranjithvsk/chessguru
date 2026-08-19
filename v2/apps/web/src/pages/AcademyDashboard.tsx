@@ -15,6 +15,7 @@ import QRCode from "qrcode";
 import Board from "../components/Board";
 import { api, classRoomPath } from "../lib/api";
 import { LiveStudentsPanel } from "../components/LiveStudentsPanel";
+import { LeaderboardPanel } from "../components/LeaderboardPanel";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -2263,17 +2264,10 @@ export default function AcademyDashboardPage() {
           NOW and what they're doing. Grouped by activity so the coach can
           see "5 solving puzzles, 2 in openings, 1 in a game" at a glance. */}
       {canManage && <LiveStudentsPanel enabled={canManage} />}
-      {/* Leaderboard CTA — visible to everyone in the academy (coach + student). */}
-      <Link to="/academy/leaderboard"
-        className="block rounded-xl2 border border-amber-500/40 bg-gradient-to-r from-amber-900/40 via-brand-900/30 to-fuchsia-900/40 px-4 py-3 hover:from-amber-900/60 hover:via-brand-900/50 hover:to-fuchsia-900/60 transition">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-300">🏆 Academy leaderboard</div>
-            <div className="mt-0.5 text-sm text-white">See rank, ChessGuru Score, champions of the week — students + coach.</div>
-          </div>
-          <span className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-amber-950 hover:bg-amber-400">Open →</span>
-        </div>
-      </Link>
+      {/* Leaderboard — embedded top-10 preview with period toggle. Full page
+          lives at /academy/leaderboard for detailed columns, podium, and
+          all champion callouts. */}
+      <LeaderboardPanel />
       {canManage && (
         <div className="rounded-xl2 border border-cyan-500/40 bg-gradient-to-r from-cyan-900/40 to-ink-900/60 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
           <div className="text-sm text-cyan-100">
