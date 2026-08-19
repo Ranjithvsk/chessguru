@@ -3,85 +3,159 @@ import { Chess } from "chess.js";
 import type { Key } from "chessground/types";
 import { destsFromChess } from "../components/Board";
 
-/** Free-play board state (both sides movable) — shared by Opening & Board Editor.
- *  Records a FULL move list independent of the current viewing position so a
- *  user can rewind with ◀/▶ without losing "future" moves (Lichess analysis
- *  semantics). Playing a NEW move while rewound truncates the future and
- *  branches. `history` is the moves currently applied to the board
- *  (= line.slice(0, ply)); consumers that only care about the on-screen
- *  position keep using it. */
+/** One SAN move in the recorded tree. `children[0]` is the mainline
+ *  continuation from THIS node; additional children are branch variations. */
+export interface MoveNode {
+  san: string;
+  children: MoveNode[];
+}
+
+/** Free-play board state (both sides movable) with Lichess-analysis semantics:
+ *  * a MoveNode TREE (not a flat list) so playing a new move while rewound
+ *    creates a variation branch instead of truncating the future
+ *  * a cursor `path` = array of child indices from root, e.g. [0,0,1] means
+ *    "mainline → mainline → 2nd sibling" (the branch)
+ *  * derived `history` / `line` compat fields so downstream consumers
+ *    (opening-name matcher, Memorize handoff, BoardEditor) don't need changes.
+ *  Shared by Opening Explorer & Board Editor. */
 export function useFreePlay(initialFen?: string) {
   const game = useRef(initialFen ? new Chess(initialFen) : new Chess());
   const [fen, setFen] = useState(game.current.fen());
   const [orientation, setOrientation] = useState<"white" | "black">("white");
-  const [line, setLine] = useState<string[]>([]);         // full recorded move list
-  const [ply, setPly] = useState(0);                       // current viewing position (0..line.length)
-  const history = useMemo(() => line.slice(0, ply), [line, ply]);
+  const [tree, setTree] = useState<MoveNode[]>([]);        // root's children
+  const [path, setPath] = useState<number[]>([]);          // cursor
+
+  // Walk the tree along `path`, collecting the SAN moves currently applied
+  // to the board. Also returns the node objects for downstream rendering.
+  const walk = (root: MoveNode[], p: number[]) => {
+    const sans: string[] = [];
+    const nodes: MoveNode[] = [];
+    let cur = root;
+    for (const idx of p) {
+      const n = cur[idx];
+      if (!n) break;
+      sans.push(n.san);
+      nodes.push(n);
+      cur = n.children;
+    }
+    return { sans, nodes };
+  };
+  const history = useMemo(() => walk(tree, path).sans, [tree, path]);
+  const ply = path.length;
+
+  // The FULL mainline (first-child at every step) from root — used for the
+  // ⏭ "jump to end" button and any legacy consumer that still reads `line`
+  // as a flat move list.
+  const line = useMemo(() => {
+    const out: string[] = [];
+    let cur = tree;
+    while (cur.length > 0) { out.push(cur[0]!.san); cur = cur[0]!.children; }
+    return out;
+  }, [tree]);
 
   const dests = useMemo(() => destsFromChess(game.current as any), [fen]);
   const turnColor: "white" | "black" = game.current.turn() === "w" ? "white" : "black";
 
-  // Replay the first `n` moves of `sans` onto a fresh chess instance and sync
-  // fen state. Used by every navigation entry point (goTo, load, loadSans).
-  const applyPly = (sans: string[], n: number) => {
+  // Replay a SAN move list from scratch and sync the fen + chess ref.
+  const applySans = (sans: string[]) => {
     game.current.reset();
-    for (let i = 0; i < Math.min(n, sans.length); i++) {
-      try { if (!game.current.move(sans[i]!)) break; } catch { break; }
-    }
+    for (const s of sans) { try { if (!game.current.move(s)) break; } catch { break; } }
     setFen(game.current.fen());
   };
 
+  // Pull the children list at the cursor's position — helper for onMove /
+  // hasNext / goNext.
+  const childrenAtCursor = (t: MoveNode[], p: number[]): { parentRef: MoveNode[]; children: MoveNode[] } => {
+    let parent = t;
+    let cur = t;
+    for (const idx of p) {
+      const n = cur[idx];
+      if (!n) return { parentRef: parent, children: [] };
+      parent = n.children;
+      cur = n.children;
+    }
+    return { parentRef: parent, children: cur };
+  };
+
   const onMove = (from: Key, to: Key) => {
-    // Case 1: rewound and the played move matches the "next" recorded move —
-    // just advance the cursor, don't touch `line`. Keeps the redo path alive.
-    const next = line[ply];
+    // Play the move on a fresh clone at the cursor position to compute SAN.
+    const rewind = new Chess();
+    for (const s of history) rewind.move(s);
+    let san: string;
     try {
-      const test = new Chess();
-      for (let i = 0; i < ply; i++) test.move(line[i]!);
-      const mv = test.move({ from, to, promotion: "q" });
-      if (!mv) return;                                     // illegal
-      if (next && mv.san === next) {
-        setPly(ply + 1);
-        applyPly(line, ply + 1);
-        return;
+      const mv = rewind.move({ from, to, promotion: "q" });
+      if (!mv) return;
+      san = mv.san;
+    } catch { return; }
+
+    // If a child at this node already has this SAN, just descend into it —
+    // no duplicate branch.
+    const { children } = childrenAtCursor(tree, path);
+    const existingIdx = children.findIndex((c) => c.san === san);
+    if (existingIdx !== -1) {
+      const nextPath = [...path, existingIdx];
+      setPath(nextPath);
+      applySans([...history, san]);
+      return;
+    }
+    // Otherwise APPEND a new child to the cursor node (branch or extension —
+    // same code path). Structural clone along the path so React sees a new
+    // tree reference at every ancestor.
+    const cloneAppend = (nodes: MoveNode[], depth: number): MoveNode[] => {
+      if (depth === path.length) {
+        return [...nodes, { san, children: [] }];
       }
-      // Case 2: NEW move — truncate future, append, advance.
-      const nextLine = line.slice(0, ply).concat(mv.san);
-      setLine(nextLine);
-      setPly(ply + 1);
-      applyPly(nextLine, ply + 1);
-    } catch { /* illegal */ }
+      const idx = path[depth]!;
+      const next = [...nodes];
+      const child = next[idx]!;
+      next[idx] = { san: child.san, children: cloneAppend(child.children, depth + 1) };
+      return next;
+    };
+    const nextTree = cloneAppend(tree, 0);
+    const newChildIdx = childrenAtCursor(nextTree, path).children.length - 1;
+    const nextPath = [...path, newChildIdx];
+    setTree(nextTree);
+    setPath(nextPath);
+    applySans([...history, san]);
   };
-  const goTo = (n: number) => {
-    const clamped = Math.max(0, Math.min(line.length, n));
-    setPly(clamped);
-    applyPly(line, clamped);
+
+  const goTo = (nextPath: number[]) => {
+    // Validate the path by walking the tree — if any step is missing, stop
+    // where we lose track so goTo can't strand the cursor on a phantom node.
+    const clean: number[] = [];
+    let cur = tree;
+    for (const idx of nextPath) {
+      const n = cur[idx];
+      if (!n) break;
+      clean.push(idx);
+      cur = n.children;
+    }
+    setPath(clean);
+    applySans(walk(tree, clean).sans);
   };
-  const goPrev = () => goTo(ply - 1);
-  const goNext = () => goTo(ply + 1);
-  // Legacy undo — kept for callers that expect "step back one move". Lichess
-  // analysis behaves the same: undo doesn't discard, it just rewinds.
+  const goPrev = () => goTo(path.slice(0, -1));
+  const goNext = () => {
+    const { children } = childrenAtCursor(tree, path);
+    if (!children.length) return;
+    goTo([...path, 0]);                                    // first-child = mainline
+  };
+  // Legacy undo — was "step back one move" (still is; doesn't discard).
   const undo = () => goPrev();
   const reset = () => {
     game.current.reset();
     setFen(game.current.fen());
-    setLine([]);
-    setPly(0);
+    setTree([]);
+    setPath([]);
   };
   const load = (f: string): boolean => {
     try {
       game.current.load(f);
       setFen(game.current.fen());
-      setLine([]);
-      setPly(0);
+      setTree([]);
+      setPath([]);
       return true;
     } catch { return false; }
   };
-  // Force-populate the board even from an illegal FEN (no king, two kings same
-  // side, etc.). Vision pipelines often produce partially-wrong FENs; instead
-  // of discarding, we lay down every recognised piece so the coach only fixes
-  // the wrong squares. Strict load first (keeps turn/castling metadata when
-  // valid); otherwise placement via chess.js put() which bypasses legality.
   const loadPermissive = (f: string): boolean => {
     if (load(f)) return true;
     const boardPart = (f || "").split(" ")[0] || "";
@@ -102,24 +176,39 @@ export function useFreePlay(initialFen?: string) {
         }
       }
       setFen(game.current.fen());
-      setLine([]);
-      setPly(0);
+      setTree([]);
+      setPath([]);
       return true;
     } catch { return false; }
   };
   const flip = () => setOrientation((o) => (o === "white" ? "black" : "white"));
-  // Replay a SAN move list from the start position — used by the Openings hub
-  // when the user picks a variation from the finder tree; keeps `history`
-  // populated so the "🧠 Memorize" handoff still knows what line was reached.
+  // Replay a SAN move list from the start position — replaces the whole
+  // recorded tree with a single mainline. Used when the Openings finder
+  // picks a variation.
   const loadSans = (sans: string[]): boolean => {
-    setLine(sans);
-    setPly(sans.length);
-    applyPly(sans, sans.length);
+    // Build a linear tree from the sans list.
+    let root: MoveNode[] = [];
+    if (sans.length) {
+      let cur: MoveNode | null = null;
+      for (const s of sans) {
+        const node: MoveNode = { san: s, children: [] };
+        if (!cur) root = [node];
+        else cur.children = [node];
+        cur = node;
+      }
+    }
+    const newPath = sans.map((_, i) => (i === 0 ? 0 : 0));
+    setTree(root);
+    setPath(newPath);
+    applySans(sans);
     return true;
   };
+  // Convenience: does the cursor have somewhere to go forward?
+  const hasNext = childrenAtCursor(tree, path).children.length > 0;
 
   return {
-    game, fen, orientation, turnColor, history, line, ply,
+    game, fen, orientation, turnColor,
+    tree, path, history, line, ply, hasNext,
     dests, onMove, undo, goPrev, goNext, goTo, reset, load, loadPermissive, loadSans, flip,
   };
 }

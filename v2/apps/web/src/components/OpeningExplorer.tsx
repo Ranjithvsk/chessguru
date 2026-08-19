@@ -11,7 +11,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { Key } from "chessground/types";
 import Board from "./Board";
-import { useFreePlay } from "../hooks/useFreePlay";
+import { useFreePlay, type MoveNode } from "../hooks/useFreePlay";
 import { fetchExplorer } from "../lib/explorer";
 import { OPENING_HANDOFF_KEY } from "../lib/openingMemory";
 
@@ -107,59 +107,46 @@ export default function OpeningExplorer(
             recorded line (Lichess analysis semantics — rewinding doesn't
             discard the future). */}
         <div className="mt-3 flex flex-wrap gap-2">
-          <button onClick={() => fp.goTo(0)} disabled={fp.ply === 0}
+          <button onClick={() => fp.goTo([])} disabled={fp.ply === 0}
             className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800 disabled:opacity-40"
             title="Jump to start">⏮</button>
           <button onClick={fp.goPrev} disabled={fp.ply === 0}
             className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800 disabled:opacity-40"
             title="Previous move (←)">◀</button>
-          <button onClick={fp.goNext} disabled={fp.ply >= fp.line.length}
+          <button onClick={fp.goNext} disabled={!fp.hasNext}
             className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800 disabled:opacity-40"
             title="Next move (→)">▶</button>
-          <button onClick={() => fp.goTo(fp.line.length)} disabled={fp.ply >= fp.line.length}
+          <button onClick={() => {
+            // Walk first-child from cursor to leaf, extend path with each 0.
+            const to = [...fp.path];
+            let cur = fp.tree;
+            for (const idx of fp.path) cur = cur[idx]!.children;
+            while (cur.length > 0) { to.push(0); cur = cur[0]!.children; }
+            fp.goTo(to);
+          }} disabled={!fp.hasNext}
             className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800 disabled:opacity-40"
             title="Jump to end">⏭</button>
           <button onClick={fp.reset} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">Reset</button>
           <button onClick={fp.flip} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">⇅ Flip</button>
-          <button onClick={memorize} disabled={!fp.line.length}
+          <button onClick={memorize} disabled={!fp.tree.length}
             className="ml-auto rounded-lg bg-accent-600 px-3 py-2 text-sm font-semibold text-white hover:bg-accent-500 disabled:opacity-40"
             title="Send this line to the Memory Training opening trainer">🧠 Memorize</button>
         </div>
 
-        {/* Clickable PGN move list — each SAN button jumps the board to that
-            ply (Lichess analysis /analysis/pgn/... behaviour). The current
-            ply is highlighted; playing a new move while rewound branches
-            (see useFreePlay.onMove). Owner ask 2026-08-19. */}
+        {/* Clickable PGN move list with variations. When the user rewinds and
+            plays a new move, useFreePlay branches instead of truncating —
+            here we render each sibling from a given position as a
+            parenthesised variation, mainline continues after it. Path is the
+            array of child-indices from root; clicking a move jumps the board
+            to that exact node. Owner ask 2026-08-19: "when in previous move
+            new move plays, make it as sub division in notation, like a
+            tree". */}
         <div className="mt-3 rounded-lg border border-ink-700 bg-ink-950 px-3 py-2">
           <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-500">Moves</div>
-          {fp.line.length === 0 ? (
+          {fp.tree.length === 0 ? (
             <div className="font-mono text-xs text-ink-500">Play a move on the board to start the line…</div>
           ) : (
-            <div className="flex flex-wrap items-baseline gap-x-1 gap-y-0.5 font-mono text-sm">
-              {Array.from({ length: Math.ceil(fp.line.length / 2) }).map((_, i) => {
-                const wIdx = i * 2, bIdx = i * 2 + 1;
-                const w = fp.line[wIdx], b = fp.line[bIdx];
-                const wActive = fp.ply === wIdx + 1;
-                const bActive = fp.ply === bIdx + 1;
-                return (
-                  <span key={i} className="whitespace-nowrap">
-                    <span className="text-ink-500">{i + 1}.</span>{" "}
-                    {w && (
-                      <button onClick={() => fp.goTo(wIdx + 1)}
-                        className={`rounded px-1 ${wActive ? "bg-brand-500/40 text-white" : "text-ink-100 hover:bg-ink-800"}`}>
-                        {w}
-                      </button>
-                    )}
-                    {b && (
-                      <button onClick={() => fp.goTo(bIdx + 1)}
-                        className={`rounded px-1 ${bActive ? "bg-brand-500/40 text-white" : "text-ink-100 hover:bg-ink-800"}`}>
-                        {b}
-                      </button>
-                    )}
-                  </span>
-                );
-              })}
-            </div>
+            <MoveTreeLine children={fp.tree} startPly={0} path={[]} cursor={fp.path} onPick={fp.goTo} />
           )}
         </div>
       </section>
@@ -221,4 +208,64 @@ export default function OpeningExplorer(
       </aside>
     </div>
   );
+}
+
+/** Recursive PGN move-tree renderer with variations in parentheses.
+ *  At each ply we render the mainline (children[0]) inline, then any sibling
+ *  variations inside "(…)" before continuing along the mainline. */
+function MoveTreeLine({
+  children, startPly, path, cursor, onPick, inVariation = false,
+}: {
+  children: MoveNode[]; startPly: number; path: number[]; cursor: number[];
+  onPick: (path: number[]) => void; inVariation?: boolean;
+}) {
+  const out: React.ReactNode[] = [];
+  let ply = startPly;
+  let cur = children;
+  let acc = path;
+  let firstMove = true;
+  while (cur.length > 0) {
+    const mainPath = [...acc, 0];
+    const isWhite = ply % 2 === 0;
+    const moveNo = Math.floor(ply / 2) + 1;
+    // Move-number prefix rules:
+    //   * always before a white move
+    //   * before a black move only if it's the FIRST rendered in this line
+    //     (either the variation opens with black-to-move, or after a variation
+    //     block we resume the mainline on black)
+    if (isWhite) {
+      out.push(<span key={`n${mainPath.join(".")}`} className="text-ink-500">{moveNo}.</span>);
+    } else if (firstMove) {
+      out.push(<span key={`n${mainPath.join(".")}`} className="text-ink-500">{moveNo}…</span>);
+    }
+    const active = pathsEqual(mainPath, cursor);
+    out.push(
+      <button key={`m${mainPath.join(".")}`} onClick={() => onPick(mainPath)}
+        className={`rounded px-1 ${active ? "bg-brand-500/40 text-white" : (inVariation ? "text-ink-300" : "text-ink-100")} hover:bg-ink-800`}>
+        {cur[0]!.san}
+      </button>
+    );
+    // Variations from THIS ply (siblings of mainline) — render each as a
+    // parenthesised sub-line. Recurse into MoveTreeLine passing the sibling
+    // as a single-child list so it renders its own mainline properly.
+    for (let vi = 1; vi < cur.length; vi++) {
+      const vPath = [...acc, vi];
+      out.push(
+        <span key={`v${vPath.join(".")}`} className="ml-1 text-ink-400">
+          (<MoveTreeLine children={[cur[vi]!]} startPly={ply} path={acc} cursor={cursor} onPick={onPick} inVariation />)
+        </span>
+      );
+    }
+    ply++;
+    acc = mainPath;
+    cur = cur[0]!.children;
+    firstMove = false;
+  }
+  return <div className="flex flex-wrap items-baseline gap-x-1 gap-y-0.5 font-mono text-sm">{out}</div>;
+}
+
+function pathsEqual(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
