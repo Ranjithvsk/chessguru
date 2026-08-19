@@ -134,14 +134,37 @@ function NameFinder({ onPick, activeSlug }: { onPick: (o: Opening) => void; acti
 
   // Scroll the currently-active row to the TOP of the finder viewport so the
   // expanded children (Sicilian → Najdorf/Sveshnikov/Alapin/…) are visible
-  // BELOW the highlighted family, not hidden past a centered scroll (owner
-  // ask 2026-08-19). Leaves a tiny 4px breathing room.
+  // BELOW the highlighted family. Uses getBoundingClientRect deltas because
+  // offsetTop is relative to the row's offsetParent — which is NOT the box
+  // once you nest through <ul>/<div> wrappers — so scrolling by offsetTop
+  // landed above/below the target (owner report 2026-08-19: "focus ok, but
+  // scrolled away, I have to scroll up to see Sicilian").
+  //
+  // Deferred to a microtask + rAF so the DOM has committed the newly-
+  // expanded rows before we measure — otherwise the row height reported
+  // includes only the collapsed state.
   useEffect(() => {
-    if (!activeSlug || !activeRef.current || !listRef.current) return;
-    const row = activeRef.current;
-    const box = listRef.current;
-    const rowTop = row.offsetTop;
-    box.scrollTo({ top: Math.max(0, rowTop - 4), behavior: "smooth" });
+    if (!activeSlug) return;
+    const scroll = () => {
+      const row = activeRef.current;
+      const box = listRef.current;
+      if (!row || !box) return;
+      const rowRect = row.getBoundingClientRect();
+      const boxRect = box.getBoundingClientRect();
+      const rowTopInBox = rowRect.top - boxRect.top + box.scrollTop;
+      box.scrollTo({ top: Math.max(0, rowTopInBox - 4), behavior: "smooth" });
+    };
+    // Two rAFs: one for React commit → layout, one for the browser to
+    // paint the expanded tree so heights settle before we scroll.
+    const r1 = requestAnimationFrame(() => {
+      const r2 = requestAnimationFrame(scroll);
+      (scroll as any)._r2 = r2;
+    });
+    return () => {
+      cancelAnimationFrame(r1);
+      const r2 = (scroll as any)._r2;
+      if (r2) cancelAnimationFrame(r2);
+    };
   }, [activeSlug, activeAncestors]);
 
   const matches = (n: NameNode): boolean => {
