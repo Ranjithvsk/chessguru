@@ -52,7 +52,8 @@ export default function OpeningTree() {
         <h1 className="text-2xl font-bold">Opening tree</h1>
         <p className="mt-1 text-sm text-ink-500">
           The 500-corpus arranged as one big move-tree. Click ▶ to expand a branch, or click any move to
-          preview the position. Leaves are openings — tap to read.
+          preview the position. Leaves are openings — tap to read.{" "}
+          <Link to="/study/openings-by-name" className="text-brand-400 hover:underline">Prefer browsing by name ›</Link>
         </p>
       </header>
 

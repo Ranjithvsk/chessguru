@@ -22,6 +22,8 @@ export interface StudyDef {
 }
 
 export const STUDIES: StudyDef[] = [
+  { id: "openings-by-name", kind: "memory", icon: "🗂️", title: "Browse by opening name", blurb: "Family → Opening → Variation",
+    detail: "3-column drilldown of every opening in the corpus, grouped by name. Pick the family (Sicilian, King's Indian…), then a variation, then a sub-line — and see the live position on the right. Complements the SAN move-tree at /study/tree.", mateIn: "drilldown · live board", phase: "opening" },
   { id: "notation", kind: "notation", icon: "♞", title: "Chess Notation", blurb: "Read the language of chess",
     detail: "Every opening line, every game score, every book: written in this notation. Learn the alphabet (K/Q/R/B/N/pawn), captures (x), check/mate (+/#), castling (O-O), promotion (=Q) and disambiguation — then drill on 10 real opening positions per round.", mateIn: "10-question round", range: [200, 900], phase: "opening" },
   { id: "coordinates", kind: "coordinate", icon: "a1", title: "Coordinate Training", blurb: "Place pieces by coordinate",
