@@ -74,6 +74,16 @@ export default function Openings() {
         </span>
       </header>
 
+      {/* Notation primer — a first-time learner sees "1.e4 c5 2.Nf3" everywhere
+          below and needs the alphabet before any of it makes sense. Compact chip
+          so returning users can ignore it. */}
+      <div className="mb-3 flex items-center gap-2 rounded-lg border border-brand-500/30 bg-brand-500/5 px-3 py-2 text-xs text-brand-200">
+        <span>📖 New to <span className="font-mono">Nf3</span>, <span className="font-mono">Bxc4</span>, <span className="font-mono">O-O</span>?</span>
+        <Link to="/study/notation" className="ml-auto rounded-full bg-brand-500 px-3 py-0.5 font-semibold text-white hover:bg-brand-400">
+          Learn chess notation →
+        </Link>
+      </div>
+
       {/* Repertoire nudge — appears above the search when a user has (or hasn't) built one. */}
       <div className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm">
         {repertoire ? (

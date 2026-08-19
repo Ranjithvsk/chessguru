@@ -11,6 +11,7 @@ import DashboardPage from "./pages/Dashboard";
 import StudyPage from "./pages/Study";
 import StudyTrainer from "./pages/StudyTrainer";
 import CoordinateTrainer from "./pages/CoordinateTrainer";
+import NotationTrainer from "./pages/NotationTrainer";
 import EndgameTrainer from "./pages/EndgameTrainer";
 import KeySquaresTrainer from "./pages/KeySquaresTrainer";
 import PromoteLesson from "./pages/PromoteLesson";
@@ -138,6 +139,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="study" element={<StudyPage />} />
             <Route path="study/coordinates" element={<CoordinateTrainer />} />
+            <Route path="study/notation" element={<NotationTrainer />} />
             <Route path="study/endgame" element={<EndgameTrainer />} />
             <Route path="study/key-squares" element={<KeySquaresTrainer />} />
             <Route path="study/promote" element={<PromoteLesson />} />

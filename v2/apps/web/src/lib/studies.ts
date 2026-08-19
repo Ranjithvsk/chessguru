@@ -1,4 +1,4 @@
-export type StudyKind = "mate" | "stopPawn" | "pawnEnd" | "coordinate" | "memory";
+export type StudyKind = "mate" | "stopPawn" | "pawnEnd" | "coordinate" | "memory" | "notation";
 export interface StudyDef {
   id: string;
   kind: StudyKind;
@@ -22,6 +22,8 @@ export interface StudyDef {
 }
 
 export const STUDIES: StudyDef[] = [
+  { id: "notation", kind: "notation", icon: "♞", title: "Chess Notation", blurb: "Read the language of chess",
+    detail: "Every opening line, every game score, every book: written in this notation. Learn the alphabet (K/Q/R/B/N/pawn), captures (x), check/mate (+/#), castling (O-O), promotion (=Q) and disambiguation — then drill on 10 real opening positions per round.", mateIn: "10-question round", range: [200, 900], phase: "opening" },
   { id: "coordinates", kind: "coordinate", icon: "a1", title: "Coordinate Training", blurb: "Place pieces by coordinate",
     detail: "A square + piece appears (e.g. \u201cBlack Rook \u2192 e7\u201d) and you tap that square to place it. Coordinates are hidden — the classic way to learn the board. 45-second sprint.", mateIn: "45s sprint", range: [400, 1200], phase: "opening" },
   { id: "memory-palace", kind: "memory", icon: "\ud83c\udff0", title: "Memory Palace", blurb: "A funny picture on every square",
