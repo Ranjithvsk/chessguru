@@ -6,6 +6,7 @@ import StreakAtRiskBanner from "./components/StreakAtRiskBanner";
 import LiveClassBanner from "./components/LiveClassBanner";
 import HomeworkPendingBanner from "./components/HomeworkPendingBanner";
 import { api } from "./lib/api";
+import { usePresenceHeartbeat } from "./hooks/usePresenceHeartbeat";
 
 // Hostnames that always render the main ChessGuru site (never redirect to a
 // coach page). Anything else triggers the custom-domain shim below.
@@ -26,6 +27,10 @@ export default function App() {
   const { data: auth } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
   const { data: rating } = useQuery({ queryKey: ["me-rating"], queryFn: api.myRating });
   const shimRan = useRef(false);
+  // Presence beacon — pings /api/academy/heartbeat every 60s + on route
+  // change so coaches see who is online and what page they're on. Only
+  // fires for signed-in users (anonymous pings would just 401).
+  usePresenceHeartbeat(!!auth?.loggedIn);
 
   // Custom-domain shim — on mount, if the hostname isn't ours AND we're at the
   // root path, look up which coach owns this domain and route to their page.

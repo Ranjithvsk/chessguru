@@ -102,6 +102,31 @@ export class AcademyController {
     return this.svc.listStudents(req.session);
   }
 
+  /** Presence heartbeat — any signed-in user pings this every ~60s (and on
+   *  route change). Body: { path }. Updates users.lastSeen + currentPath so
+   *  coaches see who is online right now on the /academy dashboard. */
+  @Post("heartbeat")
+  heartbeat(@Req() req: any, @Body() body: any) {
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) throw new UnauthorizedException();
+    return this.svc.heartbeat(userId, String(body?.path || "/"));
+  }
+
+  /** Owner/coach only: live presence roster — who's online right now and
+   *  where they are. Called by the /academy dashboard on a short poll. */
+  @Get("presence")
+  livePresence(@Req() req: any) {
+    return this.svc.listLivePresence(req.session);
+  }
+
+  /** Owner/coach only: per-student activity (puzzles + revisions) in a
+   *  rolling window. `days` picks the window — 7 / 30 / 90 / 180 / 365 are
+   *  the presets the /academy/performance page offers. */
+  @Get("students/activity")
+  studentActivity(@Req() req: any, @Query("days") days: string) {
+    return this.svc.listStudentActivity(req.session, Number(days) || 7);
+  }
+
   /** Direct-add a student — no email round-trip. Returns the credentials the
    *  coach hands to the student in person / paper. */
   @Post("students/quick-add")

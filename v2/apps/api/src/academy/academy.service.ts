@@ -1741,6 +1741,91 @@ export class AcademyService {
     return out;
   }
 
+  /** Owner-or-coach: per-student activity counts scoped to a rolling window
+   *  (days). Returns puzzles solved (rounds in the window) and opening/
+   *  study cards revised (revision docs whose lastReviewedAt lands in the
+   *  window) — the two engagement metrics the coach uses on
+   *  /academy/performance to see "who's actually training". Two small
+   *  aggregations, both scoped to this academy's students. */
+  async listStudentActivity(session: any, days: number) {
+    const g = this.ensureCoachOrOwner(session);
+    const d = Math.max(1, Math.min(3650, Math.floor(Number(days) || 7)));
+    const filter: any = { academyId: g.academyId, role: "student" };
+    if (g.role === "coach") filter.coachId = g.userId;
+    const rows = await this.users().find(filter, { projection: { _id: 1 } }).toArray();
+    const ids = rows.map((r: any) => String(r._id));
+    if (ids.length === 0) return { days: d, activity: [] as any[] };
+    const cutoff = new Date(Date.now() - d * 24 * 60 * 60 * 1000);
+
+    const puzzleRows: any[] = await this.conn.db!.collection("rounds").aggregate([
+      { $match: { d: { $gte: cutoff } } },
+      { $project: { u: { $arrayElemAt: [{ $split: ["$_id", ":"] }, 0] } } },
+      { $match: { u: { $in: ids } } },
+      { $group: { _id: "$u", puzzles: { $sum: 1 } } },
+    ]).toArray();
+    const pmap: Record<string, number> = {};
+    for (const p of puzzleRows) pmap[String(p._id)] = p.puzzles ?? 0;
+
+    // Cards touched (reviewed) in the window — a revision doc's
+    // lastReviewedAt is bumped every time the student reviews the card,
+    // so "cards reviewed in period" is a proxy for revision activity.
+    const revRows: any[] = await this.conn.db!.collection("revisions").aggregate([
+      { $match: { userId: { $in: ids }, lastReviewedAt: { $gte: cutoff } } },
+      { $group: { _id: "$userId", openings: { $sum: 1 } } },
+    ]).toArray();
+    const rmap: Record<string, number> = {};
+    for (const r of revRows) rmap[String(r._id)] = r.openings ?? 0;
+
+    return {
+      days: d,
+      activity: ids.map((id) => ({
+        studentId: id,
+        puzzles: pmap[id] ?? 0,
+        openings: rmap[id] ?? 0,
+      })),
+    };
+  }
+
+  /** Presence heartbeat — any signed-in user pings this every ~60s (and on
+   *  route change) so coaches can see "who's online right now, and what are
+   *  they doing". Stored inline on the user doc: cheap to write, cheap to
+   *  read alongside the roster. No new collection. Path is capped at 200
+   *  chars and stripped of query strings to avoid leaking hash-only state
+   *  like `?back=…&token=…`. */
+  async heartbeat(userId: string, rawPath: string) {
+    if (!userId) return { ok: false };
+    const clean = String(rawPath || "/").split("?", 1)[0] ?? "/";
+    const path = (clean.split("#", 1)[0] ?? "/").slice(0, 200) || "/";
+    await this.users().updateOne(
+      { _id: userId as any },
+      { $set: { lastSeen: new Date(), currentPath: path } },
+    );
+    return { ok: true };
+  }
+
+  /** Owner-or-coach: which of MY students are online right now (lastSeen
+   *  within the freshness window) and what page are they on. Shape mirrors
+   *  the presence panel on /academy — the roster query is scoped by role
+   *  (owner sees ALL, coach sees theirs) exactly like listStudents. */
+  async listLivePresence(session: any, freshMs = 3 * 60_000) {
+    const g = this.ensureCoachOrOwner(session);
+    const cutoff = new Date(Date.now() - freshMs);
+    const filter: any = { academyId: g.academyId, role: "student", lastSeen: { $gte: cutoff } };
+    if (g.role === "coach") filter.coachId = g.userId;
+    const rows = await this.users()
+      .find(filter, { projection: { _id: 1, username: 1, name: 1, lastSeen: 1, currentPath: 1 } })
+      .sort({ lastSeen: -1 })
+      .limit(200)
+      .toArray();
+    return rows.map((r: any) => ({
+      _id: r._id,
+      username: r.username,
+      name: r.name || null,
+      lastSeen: r.lastSeen,
+      currentPath: r.currentPath || "/",
+    }));
+  }
+
   /** Flat list of the coach's outbound snap-shares for CSV export. Newest
    *  first, capped at 500 rows so the response stays lean. */
   async snapShareListFor(userId: string) {

@@ -14,6 +14,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
 import Board from "../components/Board";
 import { api, classRoomPath } from "../lib/api";
+import { LiveStudentsPanel } from "../components/LiveStudentsPanel";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -2258,6 +2259,10 @@ export default function AcademyDashboardPage() {
           <button onClick={() => setOneClickMsg(null)} className="float-right text-xs text-ink-400 hover:text-white">×</button>
         </div>
       )}
+      {/* Live presence — who from the coach's roster is on ChessGuru RIGHT
+          NOW and what they're doing. Grouped by activity so the coach can
+          see "5 solving puzzles, 2 in openings, 1 in a game" at a glance. */}
+      {canManage && <LiveStudentsPanel enabled={canManage} />}
       {canManage && (
         <div className="rounded-xl2 border border-cyan-500/40 bg-gradient-to-r from-cyan-900/40 to-ink-900/60 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
           <div className="text-sm text-cyan-100">

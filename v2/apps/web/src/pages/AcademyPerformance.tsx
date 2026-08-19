@@ -32,7 +32,18 @@ type Student = {
 };
 
 type Tier = "topper" | "average" | "challenger" | "unrated";
-type SortKey = "name" | "rating" | "attendance" | "lastActive" | "tier" | "streak";
+type SortKey = "name" | "rating" | "attendance" | "lastActive" | "tier" | "streak" | "puzzles" | "openings";
+
+type PeriodDays = 7 | 30 | 90 | 180 | 365;
+const PERIOD_CHOICES: { days: PeriodDays; label: string }[] = [
+  { days: 7,   label: "7 days" },
+  { days: 30,  label: "1 month" },
+  { days: 90,  label: "3 months" },
+  { days: 180, label: "6 months" },
+  { days: 365, label: "1 year" },
+];
+
+type ActivityMap = Record<string, { puzzles: number; openings: number }>;
 
 /** Assign each rated student a tier RELATIVE to the whole academy roster:
  *  Topper = top 30% by rating, Challenger = bottom 30% (kept motivational
@@ -94,6 +105,23 @@ export default function AcademyPerformancePage() {
   const [sortKey, setSortKey] = useState<SortKey>("tier");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [tierFilter, setTierFilter] = useState<Tier | "all">("all");
+  const [periodDays, setPeriodDays] = useState<PeriodDays>(7);
+
+  // Puzzles + openings activity in the selected rolling window. Separate
+  // endpoint from the roster so the (heavier) aggregations only run when
+  // the coach picks a period, and the roster query stays cache-warm.
+  const activityQ = useQuery({
+    queryKey: ["academy-students-activity", periodDays],
+    queryFn: () => get<{ days: number; activity: { studentId: string; puzzles: number; openings: number }[] }>(
+      `/api/academy/students/activity?days=${periodDays}`),
+    enabled: !!canManage,
+    staleTime: 60_000,
+  });
+  const activity: ActivityMap = useMemo(() => {
+    const m: ActivityMap = {};
+    for (const a of activityQ.data?.activity ?? []) m[a.studentId] = { puzzles: a.puzzles, openings: a.openings };
+    return m;
+  }, [activityQ.data]);
 
   const students = q.data ?? [];
   const tiers = useMemo(() => computeTiers(students.map((s) => s.puzzleRating)), [students]);
@@ -101,11 +129,14 @@ export default function AcademyPerformancePage() {
   const rows = students
     .map((s, i) => {
       const attendanceCount = (s.attendance30d ?? []).filter(Boolean).length;
+      const act = activity[s._id];
       return {
         student: s,
         tier: tiers[i] || "unrated",
         attendanceCount,
         lastActive: s.lastAttendedAt || s.lastLogin || null,
+        puzzles: act?.puzzles ?? 0,
+        openings: act?.openings ?? 0,
       };
     })
     .filter((r) => tierFilter === "all" || r.tier === tierFilter)
@@ -131,6 +162,8 @@ export default function AcademyPerformancePage() {
       case "lastActive": return cmp(a.lastActive ? new Date(a.lastActive).getTime() : null, b.lastActive ? new Date(b.lastActive).getTime() : null);
       case "tier":       return cmp(tierRank(a.tier), tierRank(b.tier));
       case "streak":     return cmp(a.student.dailyStreakCurrent ?? 0, b.student.dailyStreakCurrent ?? 0);
+      case "puzzles":    return cmp(a.puzzles, b.puzzles);
+      case "openings":   return cmp(a.openings, b.openings);
     }
   });
 
@@ -191,6 +224,14 @@ export default function AcademyPerformancePage() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <div className="flex overflow-hidden rounded-lg border border-ink-700 text-xs" role="tablist" aria-label="Activity window">
+            {PERIOD_CHOICES.map((p) => (
+              <button key={p.days} type="button" onClick={() => setPeriodDays(p.days)}
+                className={`px-2.5 py-1.5 font-medium transition ${periodDays === p.days ? "bg-brand-500 text-white" : "bg-ink-900 text-ink-300 hover:bg-ink-800"}`}>
+                {p.label}
+              </button>
+            ))}
+          </div>
           <input value={needle} onChange={(e) => setNeedle(e.target.value)} placeholder="Search…"
             className="w-52 rounded-lg border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm text-white placeholder-ink-500 focus:border-brand-400 focus:outline-none" />
           <Link to="/students" className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs font-medium text-ink-300 hover:text-white">Full roster</Link>
@@ -203,56 +244,88 @@ export default function AcademyPerformancePage() {
           coach lands on "who needs attention" before drilling into anyone. */}
       <AcademyRecentMistakesPanel enabled={!!canManage} />
 
-      <div className="overflow-x-auto rounded-xl border border-ink-700 bg-ink-900/40">
-        <table className="min-w-full text-sm">
-          <thead className="bg-ink-800/70 text-xs uppercase tracking-wide text-ink-400">
-            <tr>
-              <th className="px-3 py-2 text-left"><button onClick={() => toggleSort("name")}>Student {arrow("name")}</button></th>
-              <th className="px-3 py-2 text-left"><button onClick={() => toggleSort("tier")}>Tier {arrow("tier")}</button></th>
-              <th className="px-3 py-2 text-right"><button onClick={() => toggleSort("rating")}>Rating {arrow("rating")}</button></th>
-              <th className="px-3 py-2 text-right"><button onClick={() => toggleSort("streak")}>Streak {arrow("streak")}</button></th>
-              <th className="px-3 py-2 text-right"><button onClick={() => toggleSort("attendance")}>Attend (30d) {arrow("attendance")}</button></th>
-              <th className="px-3 py-2 text-left"><button onClick={() => toggleSort("lastActive")}>Last active {arrow("lastActive")}</button></th>
-              <th className="px-3 py-2 text-right">Report</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((r) => {
-              const b = tierBadge(r.tier);
-              const s = r.student;
-              return (
-                <tr key={s._id} className={`border-t border-ink-800 hover:bg-ink-800/40 ${r.tier === "challenger" ? "bg-rose-500/5" : ""}`}>
-                  <td className="px-3 py-2">
-                    <Link to={`/academy/students/${encodeURIComponent(s._id)}/performance`}
-                      className="font-semibold text-white hover:text-brand-300">{s.name || s.username}</Link>
-                    <div className="text-xs text-ink-500">@{s.username}</div>
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${b.cls}`}>
-                      <span>{b.emoji}</span><span>{b.label}</span>
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-brand-200">{s.puzzleRating ?? "—"}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-amber-200">{s.dailyStreakCurrent ?? 0}</td>
-                  <td className="px-3 py-2 text-right">
-                    <span className={`tabular-nums ${r.attendanceCount === 0 ? "text-rose-300" : "text-emerald-200"}`}>{r.attendanceCount}</span>
-                    <span className="text-ink-500">/30</span>
-                  </td>
-                  <td className="px-3 py-2 text-ink-400 text-xs">{daysAgo(r.lastActive)}</td>
-                  <td className="px-3 py-2 text-right">
-                    <Link to={`/academy/students/${encodeURIComponent(s._id)}/performance`}
-                      className="rounded-md bg-sky-500/20 px-2 py-1 text-xs font-semibold text-sky-100 hover:bg-sky-500/30">📊 Open</Link>
-                  </td>
-                </tr>
-              );
-            })}
-            {sorted.length === 0 && (
-              <tr><td colSpan={7} className="px-3 py-8 text-center text-sm text-ink-500">
-                {students.length === 0 ? "No students yet — add them from the roster page." : "No students match the current filter."}
-              </td></tr>
-            )}
-          </tbody>
-        </table>
+      {/* Roster table — sticky header, scrollable body capped at ~20 rows so
+          the coach can scan without the page becoming a mile long. On <sm,
+          low-priority columns collapse into the Student cell so the row fits
+          without horizontal scroll (mobile users saw rating/attendance clipped
+          past the right edge). Above sm the full column set returns.
+          Row height ~44px × 20 = ~880px table area. */}
+      <div className="rounded-xl border border-ink-700 bg-ink-900/40">
+        <div className="flex items-baseline justify-between border-b border-ink-800 px-3 py-2 text-[11px] text-ink-500">
+          <span>
+            Showing {Math.min(sorted.length, 20)} of {sorted.length} — scroll for the rest.
+          </span>
+          <span>Puzzles / Openings for last <b className="text-ink-300">{PERIOD_CHOICES.find((p) => p.days === periodDays)?.label}</b></span>
+        </div>
+        <div className="max-h-[880px] overflow-y-auto overflow-x-auto overscroll-contain">
+          <table className="min-w-full text-sm">
+            <thead className="sticky top-0 z-10 bg-ink-800/95 text-xs uppercase tracking-wide text-ink-400 backdrop-blur">
+              <tr>
+                <th className="px-3 py-2 text-left"><button onClick={() => toggleSort("name")}>Student {arrow("name")}</button></th>
+                <th className="px-3 py-2 text-left"><button onClick={() => toggleSort("tier")}>Tier {arrow("tier")}</button></th>
+                <th className="px-3 py-2 text-right"><button onClick={() => toggleSort("rating")}>Rating {arrow("rating")}</button></th>
+                <th className="hidden sm:table-cell px-3 py-2 text-right"><button onClick={() => toggleSort("puzzles")} title="Puzzles solved in selected window">🧩 Puzzles {arrow("puzzles")}</button></th>
+                <th className="hidden sm:table-cell px-3 py-2 text-right"><button onClick={() => toggleSort("openings")} title="Opening / study cards revised in selected window">📚 Openings {arrow("openings")}</button></th>
+                <th className="hidden md:table-cell px-3 py-2 text-right"><button onClick={() => toggleSort("streak")}>Streak {arrow("streak")}</button></th>
+                <th className="hidden md:table-cell px-3 py-2 text-right"><button onClick={() => toggleSort("attendance")}>Attend (30d) {arrow("attendance")}</button></th>
+                <th className="hidden md:table-cell px-3 py-2 text-left"><button onClick={() => toggleSort("lastActive")}>Last active {arrow("lastActive")}</button></th>
+                <th className="hidden sm:table-cell px-3 py-2 text-right">Report</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((r) => {
+                const b = tierBadge(r.tier);
+                const s = r.student;
+                return (
+                  <tr key={s._id} className={`border-t border-ink-800 hover:bg-ink-800/40 ${r.tier === "challenger" ? "bg-rose-500/5" : ""}`}>
+                    <td className="px-3 py-2">
+                      <Link to={`/academy/students/${encodeURIComponent(s._id)}/performance`}
+                        className="font-semibold text-white hover:text-brand-300">{s.name || s.username}</Link>
+                      <div className="text-xs text-ink-500">@{s.username}</div>
+                      {/* Mobile-only inline meta — the collapsed columns re-surface
+                          as a compact sub-line so nothing is lost below `md`. */}
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-ink-400 sm:hidden">
+                        <span>🧩 <span className={`tabular-nums ${r.puzzles === 0 ? "text-ink-500" : "text-emerald-300"}`}>{r.puzzles}</span></span>
+                        <span>📚 <span className={`tabular-nums ${r.openings === 0 ? "text-ink-500" : "text-sky-300"}`}>{r.openings}</span></span>
+                        <span>🔥 <span className="tabular-nums text-amber-200">{s.dailyStreakCurrent ?? 0}</span></span>
+                        <span>📅 <span className={`tabular-nums ${r.attendanceCount === 0 ? "text-rose-300" : "text-emerald-200"}`}>{r.attendanceCount}</span><span className="text-ink-500">/30</span></span>
+                        <span>·</span>
+                        <span>{daysAgo(r.lastActive)}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${b.cls}`}>
+                        <span>{b.emoji}</span><span>{b.label}</span>
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-brand-200">{s.puzzleRating ?? "—"}</td>
+                    <td className="hidden sm:table-cell px-3 py-2 text-right tabular-nums">
+                      <span className={r.puzzles === 0 ? "text-ink-500" : "text-emerald-300"}>{r.puzzles}</span>
+                    </td>
+                    <td className="hidden sm:table-cell px-3 py-2 text-right tabular-nums">
+                      <span className={r.openings === 0 ? "text-ink-500" : "text-sky-300"}>{r.openings}</span>
+                    </td>
+                    <td className="hidden md:table-cell px-3 py-2 text-right tabular-nums text-amber-200">{s.dailyStreakCurrent ?? 0}</td>
+                    <td className="hidden md:table-cell px-3 py-2 text-right">
+                      <span className={`tabular-nums ${r.attendanceCount === 0 ? "text-rose-300" : "text-emerald-200"}`}>{r.attendanceCount}</span>
+                      <span className="text-ink-500">/30</span>
+                    </td>
+                    <td className="hidden md:table-cell px-3 py-2 text-ink-400 text-xs">{daysAgo(r.lastActive)}</td>
+                    <td className="hidden sm:table-cell px-3 py-2 text-right">
+                      <Link to={`/academy/students/${encodeURIComponent(s._id)}/performance`}
+                        className="rounded-md bg-sky-500/20 px-2 py-1 text-xs font-semibold text-sky-100 hover:bg-sky-500/30">📊 Open</Link>
+                    </td>
+                  </tr>
+                );
+              })}
+              {sorted.length === 0 && (
+                <tr><td colSpan={9} className="px-3 py-8 text-center text-sm text-ink-500">
+                  {students.length === 0 ? "No students yet — add them from the roster page." : "No students match the current filter."}
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
