@@ -73,7 +73,10 @@ export default function OpeningExplorer(
       </section>
 
       <aside className="flex flex-col gap-4">
-        {asideExtra}
+        {/* Explorer moves table on top, then the "Find an opening" tree
+            (asideExtra). Halved max-height on the moves table so both fit
+            side-by-side without either scrolling for pages. Owner ask
+            2026-08-19: "half size, opening explorer on top". */}
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-display text-xl text-white">Opening explorer</h2>
@@ -102,7 +105,7 @@ export default function OpeningExplorer(
           {isFetching && <p className="text-sm text-ink-400">Loading…</p>}
           {isError && <p className="text-sm text-rose-400">Explorer unavailable.</p>}
 
-          <div className="max-h-[440px] divide-y divide-ink-800/70 overflow-y-auto">
+          <div className="max-h-[220px] divide-y divide-ink-800/70 overflow-y-auto">
             {(data?.moves ?? []).map((m) => {
               const t = m.white + m.draws + m.black;
               return (
@@ -122,6 +125,7 @@ export default function OpeningExplorer(
             )}
           </div>
         </div>
+        {asideExtra}
       </aside>
     </div>
   );

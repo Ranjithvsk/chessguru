@@ -155,7 +155,7 @@ function NameFinder({ onPick, activeSlug }: { onPick: (o: Opening) => void; acti
         placeholder="Search — Sicilian, B90, Najdorf…"
         className="w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm text-white placeholder-ink-500 focus:border-brand-400 focus:outline-none"
       />
-      <div ref={listRef} className="max-h-[420px] overflow-y-auto rounded-lg border border-ink-800 bg-ink-950 p-1">
+      <div ref={listRef} className="max-h-[220px] overflow-y-auto rounded-lg border border-ink-800 bg-ink-950 p-1">
         {sortedNameChildren(root).filter(matches).map((fam) => (
           <TreeRow key={fam.key} node={fam} depth={0}
             onPick={onPick} activeSlug={activeSlug} activeRef={activeRef}
