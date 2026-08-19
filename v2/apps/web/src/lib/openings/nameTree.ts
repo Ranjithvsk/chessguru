@@ -74,6 +74,36 @@ export function buildNameTree(): NameNode {
   };
   sortNode(root);
 
+  // Post-process: re-parent siblings whose LABEL starts with another
+  // sibling's label + a space. Lichess writes many variations as own-line
+  // names ("Smith-Morra Gambit Accepted") rather than comma-nested
+  // ("Smith-Morra Gambit, Accepted"), which the plain parser above puts
+  // as siblings under the family. Fix owner report 2026-08-19: "in
+  // smith-morra gambit i don't see any tree".
+  const reparentByPrefix = (n: NameNode) => {
+    // Sort children shortest-label-first so parents are seen before their
+    // would-be children. Then walk each child and if its label starts with
+    // an earlier sibling's label + " ", move it under that sibling.
+    const kids = [...n.children.values()].sort((a, b) => a.label.length - b.label.length);
+    const seen: NameNode[] = [];
+    for (const c of kids) {
+      const parent = seen.find((p) => c.label.startsWith(p.label + " "));
+      if (parent) {
+        // Trim parent's prefix off the child's label so the row shows just
+        // the delta (e.g. "Accepted" instead of "Smith-Morra Gambit Accepted").
+        const newLabel = c.label.slice(parent.label.length + 1).trim();
+        n.children.delete(c.label);
+        c.label = newLabel;
+        c.key = `${parent.key} / ${newLabel}`;
+        parent.children.set(newLabel, c);
+      } else {
+        seen.push(c);
+      }
+    }
+    for (const c of n.children.values()) reparentByPrefix(c);
+  };
+  reparentByPrefix(root);
+
   cached = root;
   return root;
 }
