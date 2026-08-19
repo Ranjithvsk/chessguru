@@ -132,18 +132,16 @@ function NameFinder({ onPick, activeSlug }: { onPick: (o: Opening) => void; acti
     (autoExpand ? autoExpand.has(key) : expanded.has(key)) || activeAncestors.has(key)
   );
 
-  // Scroll the currently-active row into view whenever the active opening
-  // changes (i.e. the board moved). Only scroll inside the finder's own
-  // scroll container so the page itself doesn't jump.
+  // Scroll the currently-active row to the TOP of the finder viewport so the
+  // expanded children (Sicilian → Najdorf/Sveshnikov/Alapin/…) are visible
+  // BELOW the highlighted family, not hidden past a centered scroll (owner
+  // ask 2026-08-19). Leaves a tiny 4px breathing room.
   useEffect(() => {
     if (!activeSlug || !activeRef.current || !listRef.current) return;
     const row = activeRef.current;
     const box = listRef.current;
     const rowTop = row.offsetTop;
-    const rowBottom = rowTop + row.offsetHeight;
-    if (rowTop < box.scrollTop || rowBottom > box.scrollTop + box.clientHeight) {
-      box.scrollTo({ top: rowTop - box.clientHeight / 2 + row.offsetHeight / 2, behavior: "smooth" });
-    }
+    box.scrollTo({ top: Math.max(0, rowTop - 4), behavior: "smooth" });
   }, [activeSlug, activeAncestors]);
 
   const matches = (n: NameNode): boolean => {
