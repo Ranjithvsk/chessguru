@@ -33,7 +33,7 @@ export function OpeningIdeaPanel({ opening, compact = false }: { opening: Openin
           {opening.name}
         </h3>
         {compact && (
-          <Link to={`/openings/${opening.slug}`} className="shrink-0 text-[11px] font-semibold text-brand-300 hover:underline">
+          <Link to={`/study/openings/${opening.slug}`} className="shrink-0 text-[11px] font-semibold text-brand-300 hover:underline">
             Study this opening →
           </Link>
         )}
