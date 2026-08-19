@@ -38,7 +38,7 @@ export default function OpeningExplorer(
   const ownFp = useFreePlay();
   const fp = externalFp ?? ownFp;
   const navigate = useNavigate();
-  const { data, isFetching, isError } = useQuery({
+  const { data, isError } = useQuery({
     queryKey: ["explorer", fp.fen],
     queryFn: () => fetchExplorer(fp.fen, "masters"),
     // Keep the previous position's moves visible while the new position's
@@ -228,7 +228,6 @@ export default function OpeningExplorer(
             <span>Black {total ? Math.round((data!.black / total) * 100) : 0}%</span>
           </div>
 
-          {isFetching && <p className="text-sm text-ink-400">Loading…</p>}
           {isError && <p className="text-sm text-rose-400">Explorer unavailable.</p>}
 
           <div className="max-h-[220px] divide-y divide-ink-800/70 overflow-y-auto">
