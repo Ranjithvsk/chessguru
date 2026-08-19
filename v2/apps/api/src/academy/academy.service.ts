@@ -17,6 +17,20 @@ import { sendMail } from "../lib/mail";
 
 const INVITE_TTL_DAYS = 7;
 
+/** ChessGuru Score weights — sum to 1.0. Percentile-based dimensions so the
+ *  ranking is fair inside the academy (not gated by absolute chess-strength).
+ *  Tuning knob for the coach: swap these to bias toward e.g. more accuracy or
+ *  more attendance. Kept as a module-level export so the leaderboard response
+ *  can echo them back for transparency in the UI. */
+const WEIGHTS = {
+  rating: 0.25,
+  puzzles: 0.25,
+  accuracy: 0.15,
+  streak: 0.15,
+  themes: 0.10,
+  attendance: 0.10,
+} as const;
+
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const escHtml = (s: string) => String(s).replace(/[&<>"']/g, (c) => (
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c] as string)));
@@ -1739,6 +1753,252 @@ export class AcademyService {
     const out: Record<string, number> = {};
     for (const r of rows) out[String(r._id)] = Number(r.n);
     return out;
+  }
+
+  /** Academy leaderboard — visible to any academy member (students too, so
+   *  they can see themselves ranked). Percentile-based ChessGuru Score keeps
+   *  it fair inside the academy (relative, not absolute). Six dimensions:
+   *    - Rating percentile        25%   long-term skill
+   *    - Puzzles solved (period)  25%   log-scaled recent effort
+   *    - Accuracy % (period)      15%   quality
+   *    - Streak                   15%   consistency (sqrt of current, cap 60)
+   *    - Theme diversity          10%   breadth (period distinct themes / 20)
+   *    - Attendance (30d)         10%   class engagement
+   *
+   *  Period options: today | 7d | 30d | 180d | 365d | lifetime. Some
+   *  columns (current rating, peak rating, streak, longestStreak) are
+   *  period-independent; the rest are windowed. */
+  async buildLeaderboard(session: any, periodRaw: string) {
+    const academyId = session?.academyId;
+    const userId = session?.userId;
+    if (!userId || !academyId) throw new ForbiddenException("sign in first");
+
+    const period = ["today", "7d", "30d", "180d", "365d", "lifetime"].includes(periodRaw) ? periodRaw : "7d";
+    const now = Date.now();
+    const IST_OFFSET_MIN = 330;
+    const nowIst = new Date(now + IST_OFFSET_MIN * 60_000);
+    const todayIstStartUtc = Date.UTC(nowIst.getUTCFullYear(), nowIst.getUTCMonth(), nowIst.getUTCDate())
+      - IST_OFFSET_MIN * 60_000;
+    const dayMs = 24 * 60 * 60 * 1000;
+    const cutoff: Date | null =
+      period === "lifetime" ? null :
+      period === "today"    ? new Date(todayIstStartUtc) :
+      period === "7d"       ? new Date(now -  7 * dayMs) :
+      period === "30d"      ? new Date(now - 30 * dayMs) :
+      period === "180d"     ? new Date(now - 180 * dayMs) :
+                              new Date(now - 365 * dayMs);
+
+    // Roster — every student in the academy
+    const students: any[] = await this.users()
+      .find({ academyId, role: "student" }, { projection: { _id: 1, username: 1, name: 1, coachId: 1, dailyPuzzleStreak: 1 } })
+      .toArray();
+    if (students.length === 0) {
+      return { period, computedAt: new Date().toISOString(), academyId, studentCount: 0, weights: WEIGHTS, rows: [], champions: {} };
+    }
+    const ids = students.map((s) => String(s._id));
+
+    // Current + blindfold ratings (from userperfs) + a best-effort peak
+    // = max of the last-N history in `re[]`. True lifetime peak would need
+    // per-round scanning; peak-from-history covers 12 most-recent solves
+    // which is what the coach cards already show.
+    const perfs: any[] = await this.conn.db!.collection("userperfs")
+      .find({ _id: { $in: ids as any } }, { projection: { _id: 1, puzzle: 1, blindfold: 1 } })
+      .toArray();
+    const perfMap = new Map<string, any>();
+    for (const p of perfs) perfMap.set(String(p._id), p);
+
+    // Puzzles + blindfold aggregation — one scan with a $facet: period counts,
+    // period accuracy, period avg solve time, period distinct themes, plus
+    // lifetime totals and peak `pr` (user rating at time of solve).
+    // Rounds `_id` is `userId:puzzleId`; split to bucket by user.
+    const roundMatch: any = { };
+    if (cutoff) roundMatch.d = { $gte: cutoff };
+    // We aggregate ALL rounds (periods + lifetime) in a single pipeline so
+    // we don't scan the collection multiple times.
+    const scanMatch = { d: { $gte: cutoff ?? new Date(0) } };
+
+    const roundAgg = await this.conn.db!.collection("rounds").aggregate([
+      // Fast pre-filter on date if we have a cutoff (index-friendly).
+      ...(cutoff ? [{ $match: scanMatch }] : []),
+      { $project: {
+          u: { $arrayElemAt: [{ $split: ["$_id", ":"] }, 0] },
+          w: 1, ms: 1, th: 1, k: 1, d: 1,
+      } },
+      { $match: { u: { $in: ids } } },
+      { $group: {
+          _id: "$u",
+          puzzles: { $sum: 1 },
+          wins: { $sum: { $cond: ["$w", 1, 0] } },
+          blindfoldPuzzles: { $sum: { $cond: [{ $eq: ["$k", "blindfold"] }, 1, 0] } },
+          themes: { $addToSet: { $cond: [{ $isArray: "$th" }, "$th", []] } }, // array of arrays
+          totalMs: { $sum: { $ifNull: ["$ms", 0] } },
+          timedCount: { $sum: { $cond: [{ $gt: ["$ms", 0] }, 1, 0] } },
+      } },
+    ]).toArray();
+    const roundMap = new Map<string, any>();
+    for (const r of roundAgg) {
+      const themeFlat = new Set<string>();
+      for (const arr of (r.themes || [])) for (const t of arr) if (typeof t === "string") themeFlat.add(t);
+      roundMap.set(String(r._id), {
+        puzzles: r.puzzles ?? 0,
+        wins: r.wins ?? 0,
+        blindfoldPuzzles: r.blindfoldPuzzles ?? 0,
+        themesCount: themeFlat.size,
+        themes: [...themeFlat].slice(0, 12),
+        avgSolveMs: r.timedCount > 0 ? Math.round(r.totalMs / r.timedCount) : null,
+      });
+    }
+
+    // Lifetime totals + peak rating — separate no-date-filter aggregation.
+    // Skip it if the period is already lifetime (roundMap = lifetime already).
+    let lifetimeMap = new Map<string, { puzzlesLifetime: number; peakRating: number | null }>();
+    if (period !== "lifetime") {
+      const life = await this.conn.db!.collection("rounds").aggregate([
+        { $project: {
+            u: { $arrayElemAt: [{ $split: ["$_id", ":"] }, 0] },
+            pr: 1,
+        } },
+        { $match: { u: { $in: ids } } },
+        { $group: {
+            _id: "$u",
+            puzzlesLifetime: { $sum: 1 },
+            peakRating: { $max: "$pr" },
+        } },
+      ]).toArray();
+      for (const l of life) lifetimeMap.set(String(l._id), {
+        puzzlesLifetime: l.puzzlesLifetime ?? 0,
+        peakRating: l.peakRating ?? null,
+      });
+    } else {
+      // Lifetime IS the period — reuse counts, still need peakRating
+      const life = await this.conn.db!.collection("rounds").aggregate([
+        { $project: { u: { $arrayElemAt: [{ $split: ["$_id", ":"] }, 0] }, pr: 1 } },
+        { $match: { u: { $in: ids } } },
+        { $group: { _id: "$u", peakRating: { $max: "$pr" } } },
+      ]).toArray();
+      for (const l of life) lifetimeMap.set(String(l._id), {
+        puzzlesLifetime: roundMap.get(String(l._id))?.puzzles ?? 0,
+        peakRating: l.peakRating ?? null,
+      });
+    }
+
+    // Attendance (30d, capped at 30) — reuse the same shape used elsewhere.
+    const heatStart = new Date(now - 29 * dayMs);
+    heatStart.setUTCHours(0, 0, 0, 0);
+    const attRows: any[] = await this.conn.db!.collection("classAttendance").aggregate([
+      { $match: { userId: { $in: ids }, joinedAt: { $gte: heatStart } } },
+      { $group: { _id: "$userId", days: { $addToSet: {
+          $dateToString: { format: "%Y-%m-%d", date: "$joinedAt", timezone: "Asia/Kolkata" },
+      } } } },
+    ]).toArray();
+    const attMap = new Map<string, number>();
+    for (const a of attRows) attMap.set(String(a._id), (a.days || []).length);
+
+    // Streak — from users.dailyPuzzleStreak. Alive iff lastDate is today or
+    // yesterday (matches the rule in listStudents).
+    const todayIst = nowIst.toISOString().slice(0, 10);
+    const yestIst = new Date(nowIst.getTime() - dayMs).toISOString().slice(0, 10);
+    const aliveStreak = (s: any): { current: number; longest: number } => {
+      const st = s?.dailyPuzzleStreak;
+      if (!st) return { current: 0, longest: 0 };
+      const alive = st.lastDate === todayIst || st.lastDate === yestIst;
+      return { current: alive ? (st.current || 0) : 0, longest: st.longest || 0 };
+    };
+
+    // Assemble raw rows (no rank/score yet).
+    const raw = students.map((s: any) => {
+      const p = perfMap.get(String(s._id));
+      const r = roundMap.get(String(s._id));
+      const l = lifetimeMap.get(String(s._id));
+      const streak = aliveStreak(s);
+      const puzzles = r?.puzzles ?? 0;
+      const wins = r?.wins ?? 0;
+      const accuracy = puzzles > 0 ? wins / puzzles : 0;
+      return {
+        studentId: String(s._id),
+        username: s.username,
+        name: s.name || null,
+        coachId: s.coachId || null,
+        currentRating: Math.round(p?.puzzle?.gl?.r ?? 1500),
+        blindfoldRating: p?.blindfold?.gl?.r ? Math.round(p.blindfold.gl.r) : null,
+        peakRating: l?.peakRating ?? Math.round(p?.puzzle?.gl?.r ?? 1500),
+        puzzles,
+        blindfoldPuzzles: r?.blindfoldPuzzles ?? 0,
+        puzzlesLifetime: l?.puzzlesLifetime ?? puzzles,
+        accuracy,
+        mistakesRatio: puzzles > 0 ? 1 - accuracy : 0,
+        avgSolveMs: r?.avgSolveMs ?? null,
+        themesCount: r?.themesCount ?? 0,
+        themes: r?.themes ?? [],
+        streak: streak.current,
+        longestStreak: streak.longest,
+        attendance30d: attMap.get(String(s._id)) ?? 0,
+      };
+    });
+
+    // ── Score & rank ──
+    // Each dimension normalized to 0..1 within THIS academy (percentile-ish).
+    // Then weighted sum × 100 for the ChessGuru Score.
+    const norm = (val: number, min: number, max: number) => max <= min ? 0 : Math.max(0, Math.min(1, (val - min) / (max - min)));
+    const ratings = raw.map((r) => r.currentRating);
+    const minR = Math.min(...ratings), maxR = Math.max(...ratings);
+    const puzzlesArr = raw.map((r) => Math.log1p(r.puzzles));
+    const minP = 0, maxP = Math.max(...puzzlesArr, 0.1);
+    // Streak scaling — sqrt & cap so a 300-day streak isn't 10× a 30-day.
+    const streakScore = (n: number) => Math.min(1, Math.sqrt(Math.min(n, 60)) / Math.sqrt(60));
+    const rows = raw.map((r) => {
+      const parts = {
+        rating:     norm(r.currentRating, minR, maxR),
+        puzzles:    norm(Math.log1p(r.puzzles), minP, maxP),
+        accuracy:   r.puzzles >= 5 ? r.accuracy : 0, // <5 rounds = not enough signal
+        streak:     streakScore(r.streak),
+        themes:     Math.min(1, r.themesCount / 20),
+        attendance: Math.min(1, r.attendance30d / 30),
+      };
+      const score =
+        parts.rating     * WEIGHTS.rating +
+        parts.puzzles    * WEIGHTS.puzzles +
+        parts.accuracy   * WEIGHTS.accuracy +
+        parts.streak     * WEIGHTS.streak +
+        parts.themes     * WEIGHTS.themes +
+        parts.attendance * WEIGHTS.attendance;
+      return { ...r, score: Math.round(score * 10) / 10, scoreParts: parts };
+    });
+    rows.sort((a, b) => b.score - a.score);
+    rows.forEach((r: any, i) => { r.rank = i + 1; });
+
+    // Micro-champions — highest achiever in each dimension for the header.
+    const champion = (fn: (r: any) => number, minVal = 1) => {
+      const winner = [...rows].sort((a, b) => fn(b) - fn(a))[0];
+      if (!winner || fn(winner) < minVal) return null;
+      return { studentId: winner.studentId, username: winner.username, name: winner.name, value: fn(winner) };
+    };
+    const champions = {
+      overall:      rows[0] ? { studentId: rows[0].studentId, username: rows[0].username, name: rows[0].name, value: rows[0].score } : null,
+      mostPuzzles:  champion((r) => r.puzzles),
+      bestAccuracy: rows.some((r) => r.puzzles >= 5) ? champion((r) => Math.round(r.accuracy * 1000) / 10, 1) : null,
+      // Fastest — lowest avgSolveMs (invert). Require ≥5 timed solves.
+      fastest: (() => {
+        const timed = rows.filter((r) => r.avgSolveMs && r.puzzles >= 5);
+        if (timed.length === 0) return null;
+        timed.sort((a, b) => (a.avgSolveMs || 0) - (b.avgSolveMs || 0));
+        const w = timed[0]!;
+        return { studentId: w.studentId, username: w.username, name: w.name, value: w.avgSolveMs! };
+      })(),
+      longestStreak: champion((r) => r.streak),
+      mostThemes:    champion((r) => r.themesCount),
+      blindfoldKing: champion((r) => r.blindfoldPuzzles),
+    };
+
+    return {
+      period,
+      computedAt: new Date().toISOString(),
+      academyId,
+      studentCount: rows.length,
+      weights: WEIGHTS,
+      rows,
+      champions,
+    };
   }
 
   /** Owner-or-coach: per-student activity counts scoped to a rolling window

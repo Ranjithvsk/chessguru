@@ -40,6 +40,7 @@ import StudentsManagerPage from "./pages/StudentsManager";
 import StudentPerformancePage from "./pages/StudentPerformance";
 import BatchPerformancePage from "./pages/BatchPerformance";
 import AcademyPerformancePage from "./pages/AcademyPerformance";
+import LeaderboardPage from "./pages/Leaderboard";
 import ParentPortalPage from "./pages/ParentPortal";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import ZugzwangStudyPage from "./pages/ZugzwangStudy";
@@ -201,6 +202,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="academy" element={<AcademyDashboardPage />} />
             <Route path="students" element={<StudentsManagerPage />} />
             <Route path="academy/performance" element={<ErrorBoundary label="Student performance"><AcademyPerformancePage /></ErrorBoundary>} />
+            <Route path="academy/leaderboard" element={<ErrorBoundary label="Academy leaderboard"><LeaderboardPage /></ErrorBoundary>} />
             <Route path="parent" element={<ErrorBoundary label="Parent portal"><ParentPortalPage /></ErrorBoundary>} />
             <Route path="academy/students/:studentId/performance" element={<ErrorBoundary label="Student performance"><StudentPerformancePage /></ErrorBoundary>} />
             <Route path="academy/batches/:batchId/performance" element={<ErrorBoundary label="Batch performance"><BatchPerformancePage /></ErrorBoundary>} />

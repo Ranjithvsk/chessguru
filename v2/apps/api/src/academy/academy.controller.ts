@@ -127,6 +127,15 @@ export class AcademyController {
     return this.svc.listStudentActivity(req.session, Number(days) || 7);
   }
 
+  /** Academy-wide leaderboard — visible to any academy member (student too,
+   *  so they can see themselves ranked). Period: today | 7d | 30d | 180d |
+   *  365d | lifetime. Returns rows with ChessGuru Score + rank + micro-
+   *  champion callouts. */
+  @Get("leaderboard")
+  leaderboard(@Req() req: any, @Query("period") period: string) {
+    return this.svc.buildLeaderboard(req.session, String(period || "7d"));
+  }
+
   /** Direct-add a student — no email round-trip. Returns the credentials the
    *  coach hands to the student in person / paper. */
   @Post("students/quick-add")
