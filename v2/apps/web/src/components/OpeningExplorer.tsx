@@ -27,8 +27,12 @@ function WdlBar({ w, d, b, className = "" }: { w: number; d: number; b: number; 
   );
 }
 
-export default function OpeningExplorer() {
-  const fp = useFreePlay();
+/** Optional prop lets the Openings hub share ONE freeplay state between the
+ *  Explorer and the Family/Opening/Variation drilldown — picking a variation
+ *  updates the board here without a second useFreePlay instance. */
+export default function OpeningExplorer({ fp: externalFp }: { fp?: ReturnType<typeof useFreePlay> } = {}) {
+  const ownFp = useFreePlay();
+  const fp = externalFp ?? ownFp;
   const navigate = useNavigate();
   const { data, isFetching, isError } = useQuery({
     queryKey: ["explorer", fp.fen],

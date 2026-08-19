@@ -56,6 +56,15 @@ export function useFreePlay(initialFen?: string) {
     } catch { return false; }
   };
   const flip = () => setOrientation((o) => (o === "white" ? "black" : "white"));
+  // Replay a SAN move list from the start position — used by the Openings hub
+  // when the user picks a variation from the name drilldown; keeps `history`
+  // populated so the "🧠 Memorize" handoff still knows what line was reached.
+  const loadSans = (sans: string[]): boolean => {
+    game.current.reset();
+    for (const s of sans) { try { if (!game.current.move(s)) { break; } } catch { break; } }
+    sync();
+    return true;
+  };
 
-  return { game, fen, orientation, turnColor, history, dests, onMove, undo, reset, load, loadPermissive, flip };
+  return { game, fen, orientation, turnColor, history, dests, onMove, undo, reset, load, loadPermissive, loadSans, flip };
 }
