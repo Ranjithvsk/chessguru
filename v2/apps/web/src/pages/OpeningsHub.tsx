@@ -16,8 +16,9 @@ import { Link } from "react-router-dom";
 import { STUDIES, type StudyDef } from "../lib/studies";
 import { studyLevels, type StudyLevel } from "../lib/api";
 import OpeningExplorer from "../components/OpeningExplorer";
+import MyRepertoirePanel from "../components/MyRepertoirePanel";
 import { useFreePlay } from "../hooks/useFreePlay";
-import { OPENINGS } from "../lib/openings";
+import { OPENINGS, openingBySlug } from "../lib/openings";
 import { buildNameTree, sortedNameChildren, subtreeOpeningCount, type NameNode } from "../lib/openings/nameTree";
 import type { Opening } from "../lib/openings/types";
 
@@ -296,6 +297,7 @@ export default function OpeningsHub() {
           drilldown, owner ask 2026-08-19). */}
       <section>
         <OpeningExplorer fp={fp} asideExtra={
+          <>
           <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-4">
             <div className="mb-2 flex items-baseline justify-between gap-2">
               <h2 className="font-display text-sm font-semibold text-white">🗂️ Find an opening</h2>
@@ -303,6 +305,22 @@ export default function OpeningsHub() {
             </div>
             <NameFinder onPick={pickOpening} activeSlug={activeSlug} />
           </div>
+          <MyRepertoirePanel
+            history={fp.history}
+            activeOpening={activeSlug ? (() => {
+              const o = openingBySlug.get(activeSlug);
+              return o ? { slug: o.slug, name: o.name, eco: o.eco } : null;
+            })() : null}
+            onLoad={(entry) => {
+              if (entry.slug) {
+                const o = openingBySlug.get(entry.slug);
+                if (o) pickOpening(o);
+              } else if (entry.sans) {
+                fp.loadSans(entry.sans);
+              }
+            }}
+          />
+          </>
         } />
       </section>
 
