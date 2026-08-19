@@ -4,7 +4,7 @@
 // AcademyService.buildLeaderboard for the exact weighting.
 //
 // Route: /academy/leaderboard
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, get } from "../lib/api";
@@ -86,6 +86,17 @@ const BUCKETS: { key: Bucket; label: string; range: string }[] = [
   { key: "advanced",  label: "Advanced",    range: "1600–1899" },
   { key: "expert",    label: "Expert",      range: "1900+" },
 ];
+
+/** Map a rating to its bucket. Kept in sync with the server-side ranges in
+ *  academy.service.ts `inBucket`. */
+function bucketForRating(r: number | undefined | null): Bucket {
+  if (r == null) return "all";
+  if (r < 1000) return "beginner";
+  if (r < 1300) return "novice";
+  if (r < 1600) return "improver";
+  if (r < 1900) return "advanced";
+  return "expert";
+}
 
 function fmtMs(ms: number | null): string {
   if (ms == null) return "—";
@@ -349,11 +360,27 @@ function StartBoostModal({ open, onClose, onSubmit, submitting }: {
 
 export default function LeaderboardPage() {
   const { data: auth } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
+  const { data: myRating } = useQuery({ queryKey: ["me-rating"], queryFn: api.myRating });
   const qc = useQueryClient();
   const [period, setPeriod] = useState<Period>("7d");
   const [bucket, setBucket] = useState<Bucket>("all");
   const [showBoost, setShowBoost] = useState(false);
   const canManage = !!auth?.loggedIn && (auth.role === "academy_owner" || auth.role === "coach");
+  // Students land on their own rating-bucket by default so they see peers
+  // near their level. Coach/owner keep "all" so they see the whole roster.
+  // Fired once — after that, the coach/student can freely switch tabs.
+  const bucketDefaulted = useRef(false);
+  useEffect(() => {
+    if (bucketDefaulted.current) return;
+    if (!auth?.loggedIn) return;
+    if (auth.role === "student" && typeof myRating?.rating === "number") {
+      bucketDefaulted.current = true;
+      setBucket(bucketForRating(myRating.rating));
+    } else if (auth.role) {
+      // Non-students — leave bucket = "all" and mark as defaulted.
+      bucketDefaulted.current = true;
+    }
+  }, [auth?.loggedIn, auth?.role, myRating?.rating]);
   const q = useQuery({
     queryKey: ["academy-leaderboard", period, bucket],
     queryFn: () => get<LeaderboardResp>(`/api/academy/leaderboard?period=${period}${bucket !== "all" ? `&bucket=${bucket}` : ""}`),
