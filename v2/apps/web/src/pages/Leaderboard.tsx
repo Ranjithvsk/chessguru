@@ -376,16 +376,20 @@ export default function LeaderboardPage() {
   const canManage = !!auth?.loggedIn && (auth.role === "academy_owner" || auth.role === "coach");
   // Students land on their own rating-bucket by default so they see peers
   // near their level. Coach/owner keep "all" so they see the whole roster.
-  // Fired once — after that, the coach/student can freely switch tabs.
+  // Fires exactly once — after that, the user can freely switch tabs.
+  // For students, we WAIT for myRating to arrive before defaulting; we
+  // must not mark "defaulted" early or the switch never happens.
   const bucketDefaulted = useRef(false);
   useEffect(() => {
     if (bucketDefaulted.current) return;
-    if (!auth?.loggedIn) return;
-    if (auth.role === "student" && typeof myRating?.rating === "number") {
+    if (!auth?.loggedIn || !auth?.role) return;
+    if (auth.role === "student") {
+      // Wait for rating to load before we can pick a bucket.
+      if (typeof myRating?.rating !== "number") return;
       bucketDefaulted.current = true;
       setBucket(bucketForRating(myRating.rating));
-    } else if (auth.role) {
-      // Non-students — leave bucket = "all" and mark as defaulted.
+    } else {
+      // Coach / owner — keep "all" and stop the effect from re-firing.
       bucketDefaulted.current = true;
     }
   }, [auth?.loggedIn, auth?.role, myRating?.rating]);
