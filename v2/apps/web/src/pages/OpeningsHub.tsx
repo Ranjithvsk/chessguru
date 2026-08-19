@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { STUDIES, type StudyDef } from "../lib/studies";
 import { studyLevels, type StudyLevel } from "../lib/api";
+import OpeningExplorer from "../components/OpeningExplorer";
 
 function tier(avg: number) {
   if (avg < 1000) return "Beginner";
@@ -64,36 +65,6 @@ function StudyCard({ s, level }: { s: StudyDef; level?: StudyLevel }) {
   );
 }
 
-// Hard-coded cards for tools that DON'T live in STUDIES but belong in this hub
-// (the free-play Opening Explorer at /opening — different from /study/openings
-// which is the Memory Master corpus browse). Kept out of STUDIES because it's
-// a free-form tool, not a rated trainer with a phase/range.
-function ExplorerCard() {
-  return (
-    <Link to="/opening"
-      className="group flex flex-col rounded-xl2 border border-ink-700 bg-ink-900 p-5 transition hover:border-brand-500 hover:bg-ink-800">
-      <div className="flex items-center gap-3">
-        <span className="grid h-12 w-12 place-items-center rounded-lg bg-brand-gradient text-2xl leading-none text-white">🔍</span>
-        <div>
-          <h2 className="font-display text-lg text-white">Opening Explorer</h2>
-          <p className="text-xs text-ink-400">Free-play + Lichess masters DB</p>
-        </div>
-      </div>
-      <p className="mt-3 flex-1 text-sm text-ink-400">
-        Move the pieces freely and see what masters played from any position — win/draw/loss stats,
-        the most common replies, and the name of the opening you've reached. Hand the line over to
-        the Opening Memory trainer to lock it in.
-      </p>
-      <div className="mt-4 flex items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full bg-ink-800 px-2.5 py-1 text-[11px] font-medium text-ink-300">explore · handoff</span>
-        </div>
-        <span className="shrink-0 text-sm font-semibold text-brand-400 group-hover:text-brand-300">Open →</span>
-      </div>
-    </Link>
-  );
-}
-
 export default function OpeningsHub() {
   const [levels, setLevels] = useState<Record<string, StudyLevel>>({});
   const [q, setQ] = useState("");
@@ -123,9 +94,17 @@ export default function OpeningsHub() {
         </div>
       </header>
 
+      {/* Explorer inline — the primary surface. Play any moves and see the
+          masters DB update live; hand a line off to Memory with the button.
+          Kept above the trainer grid so a landing user gets a real board, not
+          a wall of cards (owner ask 2026-08-19). */}
+      <section>
+        <OpeningExplorer />
+      </section>
+
       <section className="space-y-4">
+        <h2 className="font-display text-lg text-white">All opening trainers</h2>
         <div className="grid gap-4 sm:grid-cols-2">
-          <ExplorerCard />
           {openingStudies.map((s) => <StudyCard key={s.id} s={s} level={levels[s.id]} />)}
         </div>
         {openingStudies.length === 0 && !needle && (
