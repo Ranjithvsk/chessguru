@@ -41,6 +41,10 @@ export default function OpeningExplorer(
   const { data, isFetching, isError } = useQuery({
     queryKey: ["explorer", fp.fen],
     queryFn: () => fetchExplorer(fp.fen, "masters"),
+    // Keep the previous position's moves visible while the new position's
+    // moves are being fetched — otherwise the table blanks for ~200ms on
+    // every click and looks like a flicker (owner report 2026-08-19).
+    placeholderData: (prev) => prev,
   });
 
   const [opening, setOpening] = useState<{ eco: string; name: string } | null>(null);
