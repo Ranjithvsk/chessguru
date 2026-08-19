@@ -193,8 +193,9 @@ function TreeRow({
   return (
     <div>
       <div ref={active ? activeRef : undefined}
-        className={`group flex items-center gap-1 rounded px-1 py-0.5 text-xs ${
-        active ? "bg-brand-500/25 text-white" : "hover:bg-ink-800/70"}`}
+        className={`group flex items-center gap-1 rounded border-l-4 py-0.5 pr-1 text-xs ${
+        active ? "border-brand-400 bg-brand-500/40 font-semibold text-white ring-1 ring-brand-400/60"
+               : "border-transparent hover:bg-ink-800/70"}`}
         style={{ paddingLeft: `${depth * 12 + 4}px` }}>
         {hasChildren ? (
           <button

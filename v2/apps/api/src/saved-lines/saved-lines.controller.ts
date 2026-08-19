@@ -25,6 +25,7 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Req } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection, Types } from "mongoose";
+import { PushService } from "../push/push.service";
 
 const NAME_MAX = 80;
 const NOTES_MAX = 1000;
@@ -73,7 +74,42 @@ function buildEntry(body: any): { kind: "corpus" | "line"; slug?: string; sans?:
 
 @Controller("my/repertoire")
 export class SavedLinesController {
-  constructor(@InjectConnection() private readonly conn: Connection) {}
+  constructor(
+    @InjectConnection() private readonly conn: Connection,
+    private readonly push: PushService,
+  ) {}
+
+  /** Fan-out web push + persist a small notification row so students see a
+   *  bell / inbox entry the next time they open the app (owner ask
+   *  2026-08-19: "when coach shares, notify the student"). Fire-and-forget
+   *  — a push hiccup shouldn't roll back the share itself. */
+  private async notifyRecipients(recipientIds: string[], coachName: string, entryName: string) {
+    if (!recipientIds.length) return;
+    // Web push (best-effort — students who granted permission see a real toast)
+    await Promise.all(recipientIds.map((sid) =>
+      this.push.sendToUser(sid, {
+        title: `\u{1F393} ${coachName} shared an opening`,
+        body: `${entryName} was added to your Repertoire — tap to open.`,
+        url: "/openings",
+        tag: `cg-rep-share-${sid}`,
+      }).catch(() => { /* silent */ })
+    ));
+    // Durable in-app record — students see it in their notifications feed
+    // even if push is denied / offline at share time.
+    const now = new Date();
+    await this.conn.db!.collection("userNotifications").insertMany(
+      recipientIds.map((sid) => ({
+        _id: new Types.ObjectId().toHexString(),
+        userId: sid,
+        kind: "repertoire-share",
+        title: `${coachName} shared an opening`,
+        body: `${entryName} was added to your Repertoire.`,
+        url: "/openings",
+        createdAt: now,
+        readAt: null,
+      })) as any,
+    ).catch(() => { /* silent — feed absence is not fatal */ });
+  }
 
   private col() { return this.conn.db!.collection("myRepertoire"); }
 
@@ -154,6 +190,11 @@ export class SavedLinesController {
       sharedFrom: me.userId,
     }));
     await this.col().insertMany(copies as any);
+    const coach: any = await this.conn.db!.collection("users").findOne(
+      { _id: me.userId as any }, { projection: { name: 1, username: 1 } },
+    );
+    const coachName = coach?.name || coach?.username || "Your coach";
+    await this.notifyRecipients(validIds, coachName, src.name);
     return { ok: true, shared: copies.length };
   }
 
@@ -161,7 +202,7 @@ export class SavedLinesController {
    *  POST /my/repertoire but the entry lands in the STUDENT's repertoire.
    *  Owner ask: "coach can also add openings to students repertoire". */
   @Post("push/:studentId")
-  async push(@Req() req: any, @Param("studentId") studentId: string, @Body() body: any) {
+  async pushToStudent(@Req() req: any, @Param("studentId") studentId: string, @Body() body: any) {
     const me = requireLogin(req);
     if (me.role !== "coach" && me.role !== "academy_owner") {
       throw new BadRequestException("coach-only");
@@ -181,6 +222,11 @@ export class SavedLinesController {
       sharedFrom: me.userId,
     };
     await this.col().insertOne(doc);
+    const coach: any = await this.conn.db!.collection("users").findOne(
+      { _id: me.userId as any }, { projection: { name: 1, username: 1 } },
+    );
+    const coachName = coach?.name || coach?.username || "Your coach";
+    await this.notifyRecipients([studentId], coachName, entry.name);
     return { ok: true, entry: doc };
   }
 }
