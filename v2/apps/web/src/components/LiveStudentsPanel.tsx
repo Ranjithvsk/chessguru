@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { get } from "../lib/api";
@@ -9,6 +9,11 @@ type LiveStudent = {
   name?: string | null;
   lastSeen: string;
   currentPath: string;
+};
+type PresenceResp = {
+  now: LiveStudent[];
+  recent: LiveStudent[];
+  todayCount: number;
 };
 
 /** Map a client-side route to a human-readable "what are they doing" label
@@ -45,7 +50,7 @@ function activityFor(path: string): { emoji: string; label: string } {
   return { emoji: "•", label: p };
 }
 
-function secondsAgo(iso: string): string {
+function timeAgo(iso: string): string {
   const sec = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
   if (sec < 60) return `${sec}s ago`;
   const min = Math.floor(sec / 60);
@@ -53,50 +58,83 @@ function secondsAgo(iso: string): string {
   return `${Math.floor(min / 60)}h ago`;
 }
 
+function groupByActivity(rows: LiveStudent[]) {
+  const byActivity = new Map<string, { emoji: string; label: string; students: LiveStudent[] }>();
+  for (const s of rows) {
+    const a = activityFor(s.currentPath);
+    const key = a.label;
+    if (!byActivity.has(key)) byActivity.set(key, { emoji: a.emoji, label: a.label, students: [] });
+    byActivity.get(key)!.students.push(s);
+  }
+  return [...byActivity.values()].sort((a, b) => b.students.length - a.students.length);
+}
+
 /** Coach-facing "who's online right now" panel for /academy. Reads
- *  /api/academy/presence — freshness window is 3 minutes on the server. */
+ *  /api/academy/presence — three buckets (now / recent / today total). */
 export function LiveStudentsPanel({ enabled }: { enabled: boolean }) {
   const q = useQuery({
     queryKey: ["academy-presence"],
-    queryFn: () => get<LiveStudent[]>("/api/academy/presence"),
+    queryFn: () => get<PresenceResp>("/api/academy/presence"),
     enabled,
     refetchInterval: 30_000,
     staleTime: 15_000,
   });
-  const rows = q.data ?? [];
-  const grouped = useMemo(() => {
-    const byActivity = new Map<string, { emoji: string; label: string; students: LiveStudent[] }>();
-    for (const s of rows) {
-      const a = activityFor(s.currentPath);
-      const key = a.label;
-      if (!byActivity.has(key)) byActivity.set(key, { emoji: a.emoji, label: a.label, students: [] });
-      byActivity.get(key)!.students.push(s);
-    }
-    return [...byActivity.values()].sort((a, b) => b.students.length - a.students.length);
-  }, [rows]);
+  const nowRows = q.data?.now ?? [];
+  const recentRows = q.data?.recent ?? [];
+  const todayCount = q.data?.todayCount ?? 0;
+  const grouped = useMemo(() => groupByActivity(nowRows), [nowRows]);
+  const [showRecent, setShowRecent] = useState(false);
 
   return (
     <section className="rounded-xl2 border border-emerald-500/30 bg-gradient-to-br from-emerald-950/40 to-ink-900/60 p-5">
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className="relative flex h-2.5 w-2.5">
-            <span className={`absolute inline-flex h-full w-full rounded-full ${rows.length > 0 ? "animate-ping bg-emerald-400 opacity-75" : ""}`} />
-            <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${rows.length > 0 ? "bg-emerald-500" : "bg-ink-600"}`} />
+            <span className={`absolute inline-flex h-full w-full rounded-full ${nowRows.length > 0 ? "animate-ping bg-emerald-400 opacity-75" : ""}`} />
+            <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${nowRows.length > 0 ? "bg-emerald-500" : "bg-ink-600"}`} />
           </span>
           <h2 className="font-display text-lg text-white">Students online now</h2>
-          <span className="tabular-nums text-sm text-emerald-300">{rows.length}</span>
+          <span className="tabular-nums text-sm text-emerald-300">{nowRows.length}</span>
         </div>
         <span className="text-[11px] text-ink-500">refreshed every 30s</span>
       </div>
 
-      {q.isLoading && rows.length === 0 && (
+      {/* Two chip stats — recent + today's unique visitors. Tap "recent"
+          to expand the roster below. */}
+      <div className="mb-3 flex flex-wrap gap-2 text-xs">
+        <button
+          type="button"
+          onClick={() => setShowRecent((v) => !v)}
+          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium transition ${
+            showRecent
+              ? "border-amber-500/40 bg-amber-500/20 text-amber-100"
+              : "border-ink-700 bg-ink-900/60 text-ink-300 hover:bg-ink-800"
+          }`}
+          title="Students seen in the last hour but not online right now"
+        >
+          <span>🕒</span>
+          <span>Recent (last hour)</span>
+          <span className="tabular-nums opacity-80">{recentRows.length}</span>
+          <span className={`text-[10px] transition-transform ${showRecent ? "rotate-180" : ""}`}>▾</span>
+        </button>
+        <div
+          className="inline-flex items-center gap-1.5 rounded-full border border-sky-500/40 bg-sky-500/10 px-2.5 py-1 text-sky-100"
+          title="Unique students seen today (since 00:00 IST)"
+        >
+          <span>📅</span>
+          <span>Online today</span>
+          <span className="tabular-nums font-semibold">{todayCount}</span>
+        </div>
+      </div>
+
+      {q.isLoading && nowRows.length === 0 && recentRows.length === 0 && (
         <div className="text-xs text-ink-500">Checking…</div>
       )}
-      {!q.isLoading && rows.length === 0 && (
+      {!q.isLoading && nowRows.length === 0 && (
         <div className="text-xs text-ink-400">No students online right now. They'll show up here as soon as someone opens the site.</div>
       )}
 
-      {rows.length > 0 && (
+      {nowRows.length > 0 && (
         <div className="space-y-3">
           {grouped.map((g) => (
             <div key={g.label}>
@@ -114,12 +152,47 @@ export function LiveStudentsPanel({ enabled }: { enabled: boolean }) {
                     >
                       {s.name || s.username}
                     </Link>
-                    <span className="shrink-0 text-[11px] tabular-nums text-ink-400">{secondsAgo(s.lastSeen)}</span>
+                    <span className="shrink-0 text-[11px] tabular-nums text-ink-400">{timeAgo(s.lastSeen)}</span>
                   </li>
                 ))}
               </ul>
             </div>
           ))}
+        </div>
+      )}
+
+      {showRecent && (
+        <div className="mt-4 border-t border-ink-700/60 pt-3">
+          <div className="mb-2 flex items-baseline gap-2 text-xs uppercase tracking-wide text-amber-300">
+            <span>🕒</span><span>Recent (last hour)</span>
+            <span className="tabular-nums text-amber-400/70">{recentRows.length}</span>
+          </div>
+          {recentRows.length === 0 ? (
+            <div className="text-xs text-ink-500">Nobody in the last hour beyond who's online right now.</div>
+          ) : (
+            <ul className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+              {recentRows.map((s) => {
+                const a = activityFor(s.currentPath);
+                return (
+                  <li key={s._id} className="flex items-baseline justify-between gap-2 rounded-lg border border-ink-700/60 bg-ink-900/40 px-2.5 py-1.5">
+                    <div className="min-w-0 flex-1">
+                      <Link
+                        to={`/academy/students/${encodeURIComponent(s._id)}/performance`}
+                        className="block truncate text-sm font-medium text-ink-200 hover:text-brand-300"
+                        title={`@${s.username} · last on ${s.currentPath}`}
+                      >
+                        {s.name || s.username}
+                      </Link>
+                      <div className="text-[11px] text-ink-500">
+                        <span>{a.emoji} {a.label}</span>
+                      </div>
+                    </div>
+                    <span className="shrink-0 text-[11px] tabular-nums text-ink-400">{timeAgo(s.lastSeen)}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
       )}
     </section>

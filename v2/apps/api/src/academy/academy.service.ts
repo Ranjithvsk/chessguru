@@ -1803,27 +1803,50 @@ export class AcademyService {
     return { ok: true };
   }
 
-  /** Owner-or-coach: which of MY students are online right now (lastSeen
-   *  within the freshness window) and what page are they on. Shape mirrors
-   *  the presence panel on /academy — the roster query is scoped by role
-   *  (owner sees ALL, coach sees theirs) exactly like listStudents. */
-  async listLivePresence(session: any, freshMs = 3 * 60_000) {
+  /** Owner-or-coach: presence buckets for the coach's roster.
+   *   - `now`       : lastSeen within 3 min (actually online)
+   *   - `recent`    : lastSeen 3–60 min (was here recently, may be back)
+   *   - `todayCount`: unique students seen since 00:00 IST today
+   *  Grouping by role scope (owner=all, coach=own students) matches
+   *  listStudents. One collection scan, in-memory bucketing. */
+  async listLivePresence(session: any) {
     const g = this.ensureCoachOrOwner(session);
-    const cutoff = new Date(Date.now() - freshMs);
-    const filter: any = { academyId: g.academyId, role: "student", lastSeen: { $gte: cutoff } };
+    const now = Date.now();
+    const nowCutoff = new Date(now - 3 * 60_000);
+    const recentCutoff = new Date(now - 60 * 60_000);
+    // "Today" is India Standard Time (UTC+5:30) — the audience is Indian
+    // academies, so the boundary that matches their "today" is IST midnight,
+    // not UTC midnight. Compute the current IST calendar date's 00:00 as a
+    // UTC instant.
+    const IST_OFFSET_MIN = 330;
+    const nowIst = new Date(now + IST_OFFSET_MIN * 60_000);
+    const todayIstStart = Date.UTC(nowIst.getUTCFullYear(), nowIst.getUTCMonth(), nowIst.getUTCDate())
+      - IST_OFFSET_MIN * 60_000;
+    const todayCutoff = new Date(todayIstStart);
+
+    const filter: any = { academyId: g.academyId, role: "student", lastSeen: { $gte: todayCutoff } };
     if (g.role === "coach") filter.coachId = g.userId;
     const rows = await this.users()
       .find(filter, { projection: { _id: 1, username: 1, name: 1, lastSeen: 1, currentPath: 1 } })
       .sort({ lastSeen: -1 })
-      .limit(200)
+      .limit(500)
       .toArray();
-    return rows.map((r: any) => ({
+
+    const shape = (r: any) => ({
       _id: r._id,
       username: r.username,
       name: r.name || null,
       lastSeen: r.lastSeen,
       currentPath: r.currentPath || "/",
-    }));
+    });
+    const nowList: any[] = [];
+    const recentList: any[] = [];
+    for (const r of rows) {
+      const t = new Date(r.lastSeen).getTime();
+      if (t >= nowCutoff.getTime()) nowList.push(shape(r));
+      else if (t >= recentCutoff.getTime()) recentList.push(shape(r));
+    }
+    return { now: nowList, recent: recentList, todayCount: rows.length };
   }
 
   /** Flat list of the coach's outbound snap-shares for CSV export. Newest
