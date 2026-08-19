@@ -10,10 +10,19 @@ type LiveStudent = {
   lastSeen: string;
   currentPath: string;
 };
+type StreakAtRiskStudent = {
+  _id: string;
+  username: string;
+  name?: string | null;
+  streakDays: number;
+  lastDate: string | null;
+};
 type PresenceResp = {
   now: LiveStudent[];
   recent: LiveStudent[];
   todayCount: number;
+  streakAtRisk: StreakAtRiskStudent[];
+  todayIst?: string;
 };
 
 /** Map a client-side route to a human-readable "what are they doing" label
@@ -82,8 +91,10 @@ export function LiveStudentsPanel({ enabled }: { enabled: boolean }) {
   const nowRows = q.data?.now ?? [];
   const recentRows = q.data?.recent ?? [];
   const todayCount = q.data?.todayCount ?? 0;
+  const streakAtRisk = q.data?.streakAtRisk ?? [];
   const grouped = useMemo(() => groupByActivity(nowRows), [nowRows]);
   const [showRecent, setShowRecent] = useState(false);
+  const [showAtRisk, setShowAtRisk] = useState(false);
 
   return (
     <section className="rounded-xl2 border border-emerald-500/30 bg-gradient-to-br from-emerald-950/40 to-ink-900/60 p-5">
@@ -125,6 +136,23 @@ export function LiveStudentsPanel({ enabled }: { enabled: boolean }) {
           <span>Online today</span>
           <span className="tabular-nums font-semibold">{todayCount}</span>
         </div>
+        {streakAtRisk.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowAtRisk((v) => !v)}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium transition ${
+              showAtRisk
+                ? "border-rose-500/60 bg-rose-500/20 text-rose-100"
+                : "border-rose-500/40 bg-rose-500/10 text-rose-100 hover:bg-rose-500/20"
+            }`}
+            title="Students with an active daily-puzzle streak who haven't solved today yet — one more no-solve day and the streak resets."
+          >
+            <span>⚠️</span>
+            <span>Streak at risk</span>
+            <span className="tabular-nums font-semibold">{streakAtRisk.length}</span>
+            <span className={`text-[10px] transition-transform ${showAtRisk ? "rotate-180" : ""}`}>▾</span>
+          </button>
+        )}
       </div>
 
       {q.isLoading && nowRows.length === 0 && recentRows.length === 0 && (
@@ -158,6 +186,30 @@ export function LiveStudentsPanel({ enabled }: { enabled: boolean }) {
               </ul>
             </div>
           ))}
+        </div>
+      )}
+
+      {showAtRisk && streakAtRisk.length > 0 && (
+        <div className="mt-4 border-t border-rose-500/30 pt-3">
+          <div className="mb-2 flex items-baseline gap-2 text-xs uppercase tracking-wide text-rose-300">
+            <span>⚠️</span><span>Streak at risk today</span>
+            <span className="tabular-nums text-rose-400/70">{streakAtRisk.length}</span>
+            <span className="ml-auto text-[10px] normal-case tracking-normal text-ink-500">nudge them before midnight IST</span>
+          </div>
+          <ul className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+            {streakAtRisk.map((s) => (
+              <li key={s._id} className="flex items-baseline justify-between gap-2 rounded-lg border border-rose-500/30 bg-rose-500/5 px-2.5 py-1.5">
+                <Link
+                  to={`/academy/students/${encodeURIComponent(s._id)}/performance`}
+                  className="truncate text-sm font-medium text-white hover:text-brand-300"
+                  title={`@${s.username} · last solve ${s.lastDate || "unknown"}`}
+                >
+                  {s.name || s.username}
+                </Link>
+                <span className="shrink-0 whitespace-nowrap text-[11px] tabular-nums text-amber-200">🔥 {s.streakDays}d</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

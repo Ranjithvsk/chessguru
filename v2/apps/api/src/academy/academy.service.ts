@@ -1846,7 +1846,40 @@ export class AcademyService {
       if (t >= nowCutoff.getTime()) nowList.push(shape(r));
       else if (t >= recentCutoff.getTime()) recentList.push(shape(r));
     }
-    return { now: nowList, recent: recentList, todayCount: rows.length };
+
+    // Streak-at-risk — students whose streak is still alive but they haven't
+    // solved TODAY yet. lastDate === yesterday means one more no-solve day
+    // resets the streak to 0. Coach can DM them before midnight IST.
+    // ISO day is the same YYYY-MM-DD format the puzzles service writes.
+    const todayIst = nowIst.toISOString().slice(0, 10);
+    const yestIst = new Date(nowIst.getTime() - 24 * 60 * 60_000).toISOString().slice(0, 10);
+    const streakFilter: any = {
+      academyId: g.academyId,
+      role: "student",
+      "dailyPuzzleStreak.current": { $gt: 0 },
+      "dailyPuzzleStreak.lastDate": yestIst,
+    };
+    if (g.role === "coach") streakFilter.coachId = g.userId;
+    const streakRows = await this.users()
+      .find(streakFilter, { projection: { _id: 1, username: 1, name: 1, dailyPuzzleStreak: 1 } })
+      .sort({ "dailyPuzzleStreak.current": -1 })
+      .limit(200)
+      .toArray();
+    const streakAtRisk = streakRows.map((r: any) => ({
+      _id: r._id,
+      username: r.username,
+      name: r.name || null,
+      streakDays: r.dailyPuzzleStreak?.current || 0,
+      lastDate: r.dailyPuzzleStreak?.lastDate || null,
+    }));
+
+    return {
+      now: nowList,
+      recent: recentList,
+      todayCount: rows.length,
+      streakAtRisk,
+      todayIst,
+    };
   }
 
   /** Flat list of the coach's outbound snap-shares for CSV export. Newest
