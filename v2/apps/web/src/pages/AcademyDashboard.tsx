@@ -2244,6 +2244,11 @@ export default function AcademyDashboardPage() {
 
       <AcademyHero name={academyMeta?.name || me.academyId} roleLabel={roleLabel} username={me.username || ""} trialEndsAt={academyMeta?.trialEndsAt} />
 
+      {/* Leaderboard — pulled to the very top of the dashboard so students
+          + coach see the competition the moment they land, not after
+          scrolling past stats + presence. Full page at /academy/leaderboard. */}
+      <LeaderboardPanel />
+
       {canManage && <StatsRow students={studentsShown} coaches={coaches ?? []} schedule={schedule} snaps={snaps} homework={homework ?? []} />}
       {canManage && <QuickActionsBar
         onAddStudent={() => setShowAddStudent(true)}
@@ -2264,10 +2269,6 @@ export default function AcademyDashboardPage() {
           NOW and what they're doing. Grouped by activity so the coach can
           see "5 solving puzzles, 2 in openings, 1 in a game" at a glance. */}
       {canManage && <LiveStudentsPanel enabled={canManage} />}
-      {/* Leaderboard — embedded top-10 preview with period toggle. Full page
-          lives at /academy/leaderboard for detailed columns, podium, and
-          all champion callouts. */}
-      <LeaderboardPanel />
       {canManage && (
         <div className="rounded-xl2 border border-cyan-500/40 bg-gradient-to-r from-cyan-900/40 to-ink-900/60 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
           <div className="text-sm text-cyan-100">
