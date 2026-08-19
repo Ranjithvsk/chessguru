@@ -155,12 +155,6 @@ export class AcademyController {
     return this.svc.endActiveBoost(req.session);
   }
 
-  /** Head-to-head compare: any academy member can read stats + badges for
-   *  any two students in the academy. */
-  @Get("compare")
-  compare(@Req() req: any, @Query("a") a: string, @Query("b") b: string) {
-    return this.svc.compareStudents(req.session, String(a || ""), String(b || ""));
-  }
 
   /** Direct-add a student — no email round-trip. Returns the credentials the
    *  coach hands to the student in person / paper. */

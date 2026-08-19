@@ -424,9 +424,6 @@ export default function LeaderboardPage() {
               🎯 Start boost
             </button>
           )}
-          <Link to="/academy/compare" className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs font-medium text-ink-300 hover:text-white">
-            ⚔️ Compare
-          </Link>
           <Link to="/academy" className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs font-medium text-ink-300 hover:text-white">← Academy</Link>
         </div>
       </header>

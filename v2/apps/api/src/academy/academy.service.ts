@@ -2492,68 +2492,6 @@ export class AcademyService {
     return { ok: true };
   }
 
-  // ─────────────────────────────────────────────────────────────────────
-  //  HEAD-TO-HEAD COMPARE
-  // ─────────────────────────────────────────────────────────────────────
-
-  /** Side-by-side stats for two students. Any academy member can view. */
-  async compareStudents(session: any, aId: string, bId: string) {
-    if (!session?.userId || !session?.academyId) throw new ForbiddenException("sign in first");
-    const [a, b] = await Promise.all([aId, bId].map((id) => this.users().findOne(
-      { _id: id as any, academyId: session.academyId, role: "student" },
-      { projection: { _id: 1, username: 1, name: 1, coachId: 1, dailyPuzzleStreak: 1 } },
-    )));
-    if (!a || !b) throw new BadRequestException("both students must be in your academy");
-    const [perfA, perfB, ach_a, ach_b] = await Promise.all([
-      this.conn.db!.collection("userperfs").findOne({ _id: aId as any }, { projection: { puzzle: 1, blindfold: 1 } }),
-      this.conn.db!.collection("userperfs").findOne({ _id: bId as any }, { projection: { puzzle: 1, blindfold: 1 } }),
-      this.evaluateAchievements(aId),
-      this.evaluateAchievements(bId),
-    ]);
-    const stats30d = async (id: string) => {
-      const rows = await this.conn.db!.collection("rounds").aggregate([
-        { $match: { d: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60_000) } } },
-        { $project: { u: { $arrayElemAt: [{ $split: ["$_id", ":"] }, 0] }, w: 1, ms: 1, k: 1, th: 1 } },
-        { $match: { u: id } },
-        { $group: { _id: null,
-            puzzles: { $sum: 1 },
-            wins: { $sum: { $cond: ["$w", 1, 0] } },
-            blindfold: { $sum: { $cond: [{ $eq: ["$k", "blindfold"] }, 1, 0] } },
-            totalMs: { $sum: { $ifNull: ["$ms", 0] } },
-            timedCount: { $sum: { $cond: [{ $gt: ["$ms", 0] }, 1, 0] } },
-            themes: { $addToSet: "$th" },
-        } },
-      ]).toArray();
-      const r = rows[0];
-      if (!r) return { puzzles: 0, wins: 0, blindfold: 0, avgMs: null as number | null, accuracy: 0, themesCount: 0 };
-      const themeFlat = new Set<string>();
-      for (const arr of (r.themes || [])) for (const t of arr) if (typeof t === "string") themeFlat.add(t);
-      return {
-        puzzles: r.puzzles ?? 0,
-        wins: r.wins ?? 0,
-        blindfold: r.blindfold ?? 0,
-        avgMs: r.timedCount > 0 ? Math.round(r.totalMs / r.timedCount) : null,
-        accuracy: r.puzzles > 0 ? r.wins / r.puzzles : 0,
-        themesCount: themeFlat.size,
-      };
-    };
-    const [statA, statB] = await Promise.all([stats30d(aId), stats30d(bId)]);
-    const shape = (u: any, perf: any, s: any, ach: any[]) => ({
-      _id: u._id,
-      username: u.username,
-      name: u.name || null,
-      currentRating: Math.round(perf?.puzzle?.gl?.r ?? 1500),
-      blindfoldRating: perf?.blindfold?.gl?.r ? Math.round(perf.blindfold.gl.r) : null,
-      streak: u?.dailyPuzzleStreak?.current || 0,
-      longestStreak: u?.dailyPuzzleStreak?.longest || 0,
-      stats30d: s,
-      badgesUnlocked: ach.filter((a) => a.unlocked).length,
-      badgesTotal: ach.length,
-      unlockedBadges: ach.filter((a) => a.unlocked).map((a) => ({ id: a.id, name: a.name, emoji: a.emoji, tier: a.tier })),
-    });
-    return { a: shape(a, perfA, statA, ach_a), b: shape(b, perfB, statB, ach_b) };
-  }
-
   /** Flat list of the coach's outbound snap-shares for CSV export. Newest
    *  first, capped at 500 rows so the response stays lean. */
   async snapShareListFor(userId: string) {
