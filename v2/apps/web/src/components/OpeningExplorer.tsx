@@ -29,8 +29,12 @@ function WdlBar({ w, d, b, className = "" }: { w: number; d: number; b: number; 
 
 /** Optional prop lets the Openings hub share ONE freeplay state between the
  *  Explorer and the Family/Opening/Variation drilldown — picking a variation
- *  updates the board here without a second useFreePlay instance. */
-export default function OpeningExplorer({ fp: externalFp }: { fp?: ReturnType<typeof useFreePlay> } = {}) {
+ *  updates the board here without a second useFreePlay instance.
+ *  `asideExtra` renders ABOVE the masters table (used by the hub to slot the
+ *  name drilldown into the right rail so the board stays Lichess-analysis-big). */
+export default function OpeningExplorer(
+  { fp: externalFp, asideExtra }: { fp?: ReturnType<typeof useFreePlay>; asideExtra?: React.ReactNode } = {},
+) {
   const ownFp = useFreePlay();
   const fp = externalFp ?? ownFp;
   const navigate = useNavigate();
@@ -69,6 +73,7 @@ export default function OpeningExplorer({ fp: externalFp }: { fp?: ReturnType<ty
       </section>
 
       <aside className="flex flex-col gap-4">
+        {asideExtra}
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-display text-xl text-white">Opening explorer</h2>
