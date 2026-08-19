@@ -6,7 +6,7 @@
 // The standalone route /opening still uses this component — it just wraps it
 // in a page layout.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { Key } from "chessground/types";
@@ -57,6 +57,28 @@ export default function OpeningExplorer(
   const total = data ? data.white + data.draws + data.black : 0;
   const playUci = (uci: string) => fp.onMove(uci.slice(0, 2) as Key, uci.slice(2, 4) as Key);
 
+  // Mouse-wheel over the board scrubs the move list (Lichess analysis
+  // convention — scroll up = prev, scroll down = next). Throttled at 120 ms
+  // so a single trackpad flick doesn't jump five moves. Uses a native
+  // non-passive listener so preventDefault actually blocks page scroll —
+  // React's synthetic onWheel is passive by default.
+  const boardBoxRef = useRef<HTMLDivElement>(null);
+  const lastWheelTs = useRef(0);
+  useEffect(() => {
+    const el = boardBoxRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) < 4) return;
+      const now = Date.now();
+      if (now - lastWheelTs.current < 120) { e.preventDefault(); return; }
+      lastWheelTs.current = now;
+      e.preventDefault();
+      if (e.deltaY > 0) fp.goNext(); else fp.goPrev();
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [fp]);
+
   // Left/Right arrow keys navigate the move list — matches Lichess analysis.
   // Ignored while an input/textarea has focus so typing in the finder search
   // doesn't accidentally scrub the board.
@@ -76,8 +98,10 @@ export default function OpeningExplorer(
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
       <section>
-        <Board fen={fp.fen} orientation={fp.orientation} turnColor={fp.turnColor}
-          movableColor="both" dests={fp.dests} onMove={fp.onMove} />
+        <div ref={boardBoxRef}>
+          <Board fen={fp.fen} orientation={fp.orientation} turnColor={fp.turnColor}
+            movableColor="both" dests={fp.dests} onMove={fp.onMove} />
+        </div>
         {/* Nav row: ⏮ start · ◀ prev · ▶ next · ⏭ end · Reset · Flip · Memorize.
             Prev/Next are enabled only when there's somewhere to go on the
             recorded line (Lichess analysis semantics — rewinding doesn't
