@@ -179,8 +179,20 @@ export default function OpeningExplorer(
             {fp.tree.length === 0 ? (
               <div className="font-mono text-xs text-ink-500">Play a move on the board to start the line…</div>
             ) : (
-              <MoveTreeLine children={fp.tree} startPly={0} path={[]} cursor={fp.path}
-                onPick={fp.goTo} activeRef={activeMoveRef} />
+              <>
+                {/* First child = root mainline. Any additional root siblings
+                    (branches played from the very first move) render as
+                    top-level variation blocks. */}
+                <MoveTreeLine startNode={fp.tree[0]!} startNodePath={[0]}
+                  startPly={0} cursor={fp.path} onPick={fp.goTo} activeRef={activeMoveRef} />
+                {fp.tree.slice(1).map((n, i) => (
+                  <div key={i} className="my-1 border-l-2 border-ink-700 pl-2 text-[13px]">
+                    <MoveTreeLine startNode={n} startNodePath={[i + 1]}
+                      startPly={0} cursor={fp.path} onPick={fp.goTo}
+                      depth={1} activeRef={activeMoveRef} />
+                  </div>
+                ))}
+              </>
             )}
           </div>
         </div>
@@ -254,65 +266,70 @@ export default function OpeningExplorer(
  *  Deeper nested variations get progressively deeper indentation.
  *  Every SAN is a clickable button that jumps the board to that node. */
 function MoveTreeLine({
-  children, startPly, path, cursor, onPick, depth = 0, activeRef,
+  startNode, startNodePath, startPly, cursor, onPick, depth = 0, activeRef,
 }: {
-  children: MoveNode[]; startPly: number; path: number[]; cursor: number[];
+  startNode: MoveNode; startNodePath: number[]; startPly: number; cursor: number[];
   onPick: (path: number[]) => void; depth?: number;
   activeRef?: React.RefObject<HTMLButtonElement | null>;
 }) {
-  // Walk the mainline, emitting: main move · (indented blocks for each variation) · next main move …
-  // Variations render before their spawn move's continuation, so a reader
-  // scans them in the natural "here's a side line at THIS move" order.
+  // Walk the mainline starting at startNode. At each ply: emit the move,
+  // then emit any sibling variations that spawn from the same POSITION as
+  // this move's children[0] mainline (i.e., additional children beyond
+  // children[0] of the CURRENT node). Variations recurse with their own
+  // known path so clicks always jump to the exact node.
   const parts: React.ReactNode[] = [];
   let ply = startPly;
-  let cur = children;
-  let acc = path;
-  let openedWithVariationBlock = false;                    // controls whether black needs "N..." prefix
-  while (cur.length > 0) {
-    const mainPath = [...acc, 0];
+  let curNode: MoveNode | undefined = startNode;
+  let curPath = startNodePath;
+  let openedWithVariationBlock = false;                    // whether next black move needs "N..." prefix
+  while (curNode) {
     const isWhite = ply % 2 === 0;
     const moveNo = Math.floor(ply / 2) + 1;
     const needsMoveNo = isWhite || openedWithVariationBlock;
-    const active = pathsEqual(mainPath, cursor);
+    const active = pathsEqual(curPath, cursor);
     parts.push(
-      <span key={`m${mainPath.join(".")}`} className="inline-flex items-baseline">
+      <span key={`m${curPath.join(".")}`} className="inline-flex items-baseline">
         {needsMoveNo && (
           <span className="mr-0.5 text-ink-500">{moveNo}{isWhite ? "." : "…"}</span>
         )}
-        <button ref={active ? activeRef : undefined} onClick={() => onPick(mainPath)}
+        <button ref={active ? activeRef : undefined} onClick={() => onPick(curPath)}
           className={`rounded px-1.5 py-0.5 transition ${active
             ? "bg-brand-500/60 text-white"
             : depth === 0 ? "text-ink-100 hover:bg-ink-800" : "text-ink-300 hover:bg-ink-800"}`}>
-          {cur[0]!.san}
+          {curNode.san}
         </button>
       </span>
     );
     openedWithVariationBlock = false;
 
-    // Variations from THIS ply — one indented block per sibling.
-    for (let vi = 1; vi < cur.length; vi++) {
-      const vPath = [...acc, vi];
+    // Variations spawn from the position AFTER curNode was played — i.e.,
+    // from curNode.children[1..]. children[0] is the mainline continuation
+    // we'll descend into next.
+    const kids = curNode.children;
+    for (let vi = 1; vi < kids.length; vi++) {
+      const vPath = [...curPath, vi];
       parts.push(
         <div key={`v${vPath.join(".")}`}
           className="my-1 border-l-2 border-ink-700 pl-2 text-[13px]"
           style={{ marginLeft: `${Math.min(depth + 1, 3) * 8}px` }}>
-          <MoveTreeLine children={[cur[vi]!]} startPly={ply} path={acc}
-            cursor={cursor} onPick={onPick} depth={depth + 1} activeRef={activeRef} />
+          <MoveTreeLine startNode={kids[vi]!} startNodePath={vPath}
+            startPly={ply + 1} cursor={cursor} onPick={onPick}
+            depth={depth + 1} activeRef={activeRef} />
         </div>
       );
-      // After a block-level variation, the next mainline move (if black) must
-      // print its "N..." because a block break interrupted the flow.
-      openedWithVariationBlock = true;
+      openedWithVariationBlock = true;                     // next black move must print "N..."
     }
 
+    // Descend to mainline continuation.
+    const nextMain = kids[0];
+    if (!nextMain) break;
+    curPath = [...curPath, 0];
+    curNode = nextMain;
     ply++;
-    acc = mainPath;
-    cur = cur[0]!.children;
   }
   return (
     <div className={`font-mono ${depth === 0 ? "text-sm" : ""} leading-relaxed`}>
       {parts.map((p, i) => (
-        // Space between inline moves; block variations bring their own margin.
         <span key={i}>{p}{typeof p === "object" && (p as any).type === "span" ? " " : ""}</span>
       ))}
     </div>
