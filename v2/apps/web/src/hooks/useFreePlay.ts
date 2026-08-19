@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Chess } from "chess.js";
 import type { Key } from "chessground/types";
 import { destsFromChess } from "../components/Board";
@@ -8,6 +8,27 @@ import { destsFromChess } from "../components/Board";
 export interface MoveNode {
   san: string;
   children: MoveNode[];
+}
+
+// LocalStorage key for the free-play move tree + cursor. Namespaced per key so
+// different callers (default explorer, board editor, …) can keep separate
+// state — omit the arg for the shared default. Empty tree = don't persist
+// (avoids a stale empty write clobbering a real session on quick remounts).
+const STORAGE_KEY = "cg_freeplay_v1";
+function loadPersisted(): { tree: MoveNode[]; path: number[] } | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const j = JSON.parse(raw);
+    if (!Array.isArray(j?.tree) || !Array.isArray(j?.path)) return null;
+    return { tree: j.tree, path: j.path };
+  } catch { return null; }
+}
+function savePersisted(tree: MoveNode[], path: number[]) {
+  try {
+    if (tree.length === 0 && path.length === 0) { localStorage.removeItem(STORAGE_KEY); return; }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ tree, path }));
+  } catch { /* quota / disabled — silent */ }
 }
 
 /** Free-play board state (both sides movable) with Lichess-analysis semantics:
@@ -20,10 +41,29 @@ export interface MoveNode {
  *  Shared by Opening Explorer & Board Editor. */
 export function useFreePlay(initialFen?: string) {
   const game = useRef(initialFen ? new Chess(initialFen) : new Chess());
-  const [fen, setFen] = useState(game.current.fen());
+  // Rehydrate persisted tree/path on first mount — only when there's no
+  // caller-supplied initialFen (that's how the BoardEditor seeds a specific
+  // position and it must WIN over stale saved play). Owner report 2026-08-19:
+  // "when i refresh, all the moves vanishes". Now they don't.
+  const persisted = useMemo(() => (initialFen ? null : loadPersisted()), [initialFen]);
+  const [fen, setFen] = useState(() => {
+    if (!persisted) return game.current.fen();
+    // Replay the persisted path so fen matches the saved cursor position.
+    for (let i = 0; i < persisted.path.length; i++) {
+      const idx = persisted.path[i]!;
+      let cur = persisted.tree;
+      for (let j = 0; j < i; j++) cur = cur[persisted.path[j]!]!.children;
+      const node = cur[idx];
+      if (!node) break;
+      try { if (!game.current.move(node.san)) break; } catch { break; }
+    }
+    return game.current.fen();
+  });
   const [orientation, setOrientation] = useState<"white" | "black">("white");
-  const [tree, setTree] = useState<MoveNode[]>([]);        // root's children
-  const [path, setPath] = useState<number[]>([]);          // cursor
+  const [tree, setTree] = useState<MoveNode[]>(persisted?.tree ?? []);
+  const [path, setPath] = useState<number[]>(persisted?.path ?? []);
+  // Persist on every tree/path change (fire-and-forget, quota-safe).
+  useEffect(() => { savePersisted(tree, path); }, [tree, path]);
 
   // Walk the tree along `path`, collecting the SAN moves currently applied
   // to the board. Also returns the node objects for downstream rendering.
@@ -137,7 +177,18 @@ export function useFreePlay(initialFen?: string) {
   const goNext = () => {
     const { children } = childrenAtCursor(tree, path);
     if (!children.length) return;
-    goTo([...path, 0]);                                    // first-child = mainline
+    goTo([...path, 0]);                                    // first-child = mainline of current line
+  };
+  // Cycle between sibling branches at the CURRENT ply — Lichess ↑/↓ keys.
+  // If cursor is at [0,0,1] (branch), goSibling(+1) tries [0,0,2] etc; wraps.
+  const goSibling = (dir: 1 | -1) => {
+    if (path.length === 0) return;
+    const parent = path.slice(0, -1);
+    const { children } = childrenAtCursor(tree, parent);
+    if (children.length < 2) return;
+    const curIdx = path[path.length - 1]!;
+    const nextIdx = (curIdx + dir + children.length) % children.length;
+    goTo([...parent, nextIdx]);
   };
   // Legacy undo — was "step back one move" (still is; doesn't discard).
   const undo = () => goPrev();
@@ -209,6 +260,6 @@ export function useFreePlay(initialFen?: string) {
   return {
     game, fen, orientation, turnColor,
     tree, path, history, line, ply, hasNext,
-    dests, onMove, undo, goPrev, goNext, goTo, reset, load, loadPermissive, loadSans, flip,
+    dests, onMove, undo, goPrev, goNext, goTo, goSibling, reset, load, loadPermissive, loadSans, flip,
   };
 }

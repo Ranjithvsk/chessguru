@@ -63,7 +63,23 @@ export default function OpeningExplorer(
   // non-passive listener so preventDefault actually blocks page scroll —
   // React's synthetic onWheel is passive by default.
   const boardBoxRef = useRef<HTMLDivElement>(null);
+  const moveListBoxRef = useRef<HTMLDivElement>(null);
+  const activeMoveRef = useRef<HTMLButtonElement>(null);
   const lastWheelTs = useRef(0);
+
+  // Scroll the currently-active move into view whenever the cursor changes
+  // (keyboard nav, wheel scroll, or a click elsewhere). Only scrolls the move
+  // list's own scroll container so the page itself doesn't jump.
+  useEffect(() => {
+    const row = activeMoveRef.current;
+    const box = moveListBoxRef.current;
+    if (!row || !box) return;
+    const rowTop = row.offsetTop - (box.offsetTop || 0);
+    const rowBottom = rowTop + row.offsetHeight;
+    if (rowTop < box.scrollTop || rowBottom > box.scrollTop + box.clientHeight) {
+      box.scrollTo({ top: rowTop - box.clientHeight / 2, behavior: "smooth" });
+    }
+  }, [fp.path]);
   useEffect(() => {
     const el = boardBoxRef.current;
     if (!el) return;
@@ -87,8 +103,17 @@ export default function OpeningExplorer(
     if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement | null)?.isContentEditable) return;
     if (e.key === "ArrowLeft")  { e.preventDefault(); fp.goPrev(); }
     if (e.key === "ArrowRight") { e.preventDefault(); fp.goNext(); }
-    if (e.key === "Home") { e.preventDefault(); fp.goTo(0); }
-    if (e.key === "End")  { e.preventDefault(); fp.goTo(fp.line.length); }
+    if (e.key === "ArrowUp")    { e.preventDefault(); fp.goSibling(-1); }
+    if (e.key === "ArrowDown")  { e.preventDefault(); fp.goSibling(1); }
+    if (e.key === "Home") { e.preventDefault(); fp.goTo([]); }
+    if (e.key === "End")  {
+      e.preventDefault();
+      const to = [...fp.path];
+      let cur = fp.tree;
+      for (const idx of fp.path) cur = cur[idx]!.children;
+      while (cur.length > 0) { to.push(0); cur = cur[0]!.children; }
+      fp.goTo(to);
+    }
   }, [fp]);
   useEffect(() => {
     window.addEventListener("keydown", onKey);
@@ -142,12 +167,18 @@ export default function OpeningExplorer(
             new move plays, make it as sub division in notation, like a
             tree". */}
         <div className="mt-3 rounded-lg border border-ink-700 bg-ink-950 px-3 py-2">
-          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-500">Moves</div>
-          {fp.tree.length === 0 ? (
-            <div className="font-mono text-xs text-ink-500">Play a move on the board to start the line…</div>
-          ) : (
-            <MoveTreeLine children={fp.tree} startPly={0} path={[]} cursor={fp.path} onPick={fp.goTo} />
-          )}
+          <div className="mb-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-ink-500">
+            <span>Moves</span>
+            <span className="normal-case tracking-normal text-ink-600">← → walk · ↑ ↓ switch branch</span>
+          </div>
+          <div ref={moveListBoxRef} className="max-h-[240px] overflow-y-auto pr-1">
+            {fp.tree.length === 0 ? (
+              <div className="font-mono text-xs text-ink-500">Play a move on the board to start the line…</div>
+            ) : (
+              <MoveTreeLine children={fp.tree} startPly={0} path={[]} cursor={fp.path}
+                onPick={fp.goTo} activeRef={activeMoveRef} />
+            )}
+          </div>
         </div>
       </section>
 
@@ -219,10 +250,11 @@ export default function OpeningExplorer(
  *  Deeper nested variations get progressively deeper indentation.
  *  Every SAN is a clickable button that jumps the board to that node. */
 function MoveTreeLine({
-  children, startPly, path, cursor, onPick, depth = 0,
+  children, startPly, path, cursor, onPick, depth = 0, activeRef,
 }: {
   children: MoveNode[]; startPly: number; path: number[]; cursor: number[];
   onPick: (path: number[]) => void; depth?: number;
+  activeRef?: React.RefObject<HTMLButtonElement | null>;
 }) {
   // Walk the mainline, emitting: main move · (indented blocks for each variation) · next main move …
   // Variations render before their spawn move's continuation, so a reader
@@ -243,9 +275,9 @@ function MoveTreeLine({
         {needsMoveNo && (
           <span className="mr-0.5 text-ink-500">{moveNo}{isWhite ? "." : "…"}</span>
         )}
-        <button onClick={() => onPick(mainPath)}
-          className={`rounded px-1 transition ${active
-            ? "bg-brand-500/40 text-white"
+        <button ref={active ? activeRef : undefined} onClick={() => onPick(mainPath)}
+          className={`rounded px-1.5 py-0.5 transition ${active
+            ? "bg-brand-500/60 text-white"
             : depth === 0 ? "text-ink-100 hover:bg-ink-800" : "text-ink-300 hover:bg-ink-800"}`}>
           {cur[0]!.san}
         </button>
@@ -261,7 +293,7 @@ function MoveTreeLine({
           className="my-1 border-l-2 border-ink-700 pl-2 text-[13px]"
           style={{ marginLeft: `${Math.min(depth + 1, 3) * 8}px` }}>
           <MoveTreeLine children={[cur[vi]!]} startPly={ply} path={acc}
-            cursor={cursor} onPick={onPick} depth={depth + 1} />
+            cursor={cursor} onPick={onPick} depth={depth + 1} activeRef={activeRef} />
         </div>
       );
       // After a block-level variation, the next mainline move (if black) must
