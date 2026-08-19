@@ -73,13 +73,13 @@ export default function StudyPage() {
   // (Opening / Middle game / End game). Any entry lacking `phase` (utility
   // dashboards etc.) falls into `other` and renders in an "Other" bucket only
   // if any exist. Owner-requested taxonomy 2026-08-18.
-  const openingStudies = STUDIES.filter((s) => s.phase === "opening" && matchStudy(s));
+  // Opening trainers live at /openings now — exclude them here.
   const memoryStudies  = STUDIES.filter((s) => s.phase === "memory"  && matchStudy(s));
   const middleStudies  = STUDIES.filter((s) => s.phase === "middle"  && matchStudy(s));
   const endStudies     = STUDIES.filter((s) => s.phase === "end"     && matchStudy(s));
   const otherStudies   = STUDIES.filter((s) => !s.phase && matchStudy(s));
   const anyHardcoded = matchHardcoded("promote-one-pawn") || matchHardcoded("opposition") || matchHardcoded("rule-of-square") || matchHardcoded("key-squares");
-  const totalMatches = openingStudies.length + memoryStudies.length + middleStudies.length + endStudies.length + otherStudies.length + (needle ? [matchHardcoded("promote-one-pawn"), matchHardcoded("opposition"), matchHardcoded("rule-of-square"), matchHardcoded("key-squares")].filter(Boolean).length : 4);
+  const totalMatches = memoryStudies.length + middleStudies.length + endStudies.length + otherStudies.length + (needle ? [matchHardcoded("promote-one-pawn"), matchHardcoded("opposition"), matchHardcoded("rule-of-square"), matchHardcoded("key-squares")].filter(Boolean).length : 4);
 
   return (
     <div className="space-y-10">
@@ -98,20 +98,8 @@ export default function StudyPage() {
         </div>
       </header>
 
-      {/* ── Opening: moved to Learn → Openings (/openings) 2026-08-19 ──────── */}
-      <section className="space-y-3 rounded-xl2 border border-dashed border-ink-700 bg-ink-900/50 p-5">
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-sky-400">Opening 📖</div>
-          <h2 className="font-display text-xl text-white">Opening trainers moved</h2>
-          <p className="text-sm text-ink-400">
-            Every opening tool now lives together under Learn → Openings — Chess Notation, Memory Master 500,
-            the corpus tree, name drilldown, personal repertoire, daily review, PGN import, and the free-play Explorer.
-          </p>
-        </div>
-        <Link to="/openings" className="inline-block rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-400">
-          Open the Openings hub →
-        </Link>
-      </section>
+      {/* Opening trainers relocated to Learn → Openings (/openings) 2026-08-19 —
+          no redirect banner here since the nav already surfaces the new home. */}
 
       {/* ── Memory training (standalone — general board memory tools) ──────── */}
       {memoryStudies.length > 0 && (
