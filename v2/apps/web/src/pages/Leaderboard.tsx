@@ -81,15 +81,15 @@ const PERIODS: { key: Period; label: string }[] = [
 // under-800, r800..r1800 for 200-wide bands, r2000 for 2000+).
 type Bucket = "all" | "u800" | "r800" | "r1000" | "r1200" | "r1400" | "r1600" | "r1800" | "r2000";
 const BUCKETS: { key: Bucket; label: string; range: string }[] = [
-  { key: "all",   label: "All",     range: "every level" },
-  { key: "u800",  label: "< 800",   range: "under 800" },
-  { key: "r800",  label: "800",     range: "800–999" },
-  { key: "r1000", label: "1000",    range: "1000–1199" },
-  { key: "r1200", label: "1200",    range: "1200–1399" },
-  { key: "r1400", label: "1400",    range: "1400–1599" },
-  { key: "r1600", label: "1600",    range: "1600–1799" },
-  { key: "r1800", label: "1800",    range: "1800–1999" },
-  { key: "r2000", label: "2000+",   range: "2000 and up" },
+  { key: "all",   label: "All",           range: "every level" },
+  { key: "u800",  label: "🐣 Rookie",       range: "< 800" },
+  { key: "r800",  label: "🧒 Beginner",     range: "800–999" },
+  { key: "r1000", label: "📗 Novice",       range: "1000–1199" },
+  { key: "r1200", label: "🌱 Improver",     range: "1200–1399" },
+  { key: "r1400", label: "⚡ Intermediate", range: "1400–1599" },
+  { key: "r1600", label: "🎯 Advanced",     range: "1600–1799" },
+  { key: "r1800", label: "💎 Expert",       range: "1800–1999" },
+  { key: "r2000", label: "👑 Master",       range: "2000+" },
 ];
 
 /** Map a rating to its 200-point bucket. Kept in sync with the server-side
