@@ -11,12 +11,13 @@
 // Review, PGN Import, Progress, Prep-test, Opening Memory, tree, coordinates)
 // live as tiles BELOW the integrated explorer.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { STUDIES, type StudyDef } from "../lib/studies";
 import { studyLevels, type StudyLevel } from "../lib/api";
 import OpeningExplorer from "../components/OpeningExplorer";
 import { useFreePlay } from "../hooks/useFreePlay";
+import { OPENINGS } from "../lib/openings";
 import { buildNameTree, sortedNameChildren, subtreeOpeningCount, type NameNode } from "../lib/openings/nameTree";
 import type { Opening } from "../lib/openings/types";
 
@@ -78,6 +79,8 @@ function NameFinder({ onPick, activeSlug }: { onPick: (o: Opening) => void; acti
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [q, setQ] = useState("");
   const needle = q.trim().toLowerCase();
+  const listRef = useRef<HTMLDivElement>(null);
+  const activeRef = useRef<HTMLDivElement>(null);
 
   // While a search is active, collect the keys of every branch containing a
   // matching leaf so we can auto-expand them. Empty search: honour whatever
@@ -98,10 +101,42 @@ function NameFinder({ onPick, activeSlug }: { onPick: (o: Opening) => void; acti
     return keys;
   }, [root, needle]);
 
+  // Ancestor keys of the currently-active opening — auto-expanded so the
+  // board→tree sync scrolls the highlighted row into view instead of hiding
+  // it inside a collapsed branch.
+  const activeAncestors = useMemo<Set<string>>(() => {
+    const keys = new Set<string>();
+    if (!activeSlug) return keys;
+    const walk = (n: NameNode, path: NameNode[]): boolean => {
+      let found = n.openings.some((o) => o.slug === activeSlug);
+      for (const c of n.children.values()) if (walk(c, [...path, n])) found = true;
+      if (found) for (const p of path) keys.add(p.key);
+      return found;
+    };
+    for (const f of sortedNameChildren(root)) walk(f, [root]);
+    return keys;
+  }, [root, activeSlug]);
+
   const toggle = (key: string) => {
     setExpanded((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
   };
-  const isOpen = (key: string) => (autoExpand ? autoExpand.has(key) : expanded.has(key));
+  const isOpen = (key: string) => (
+    (autoExpand ? autoExpand.has(key) : expanded.has(key)) || activeAncestors.has(key)
+  );
+
+  // Scroll the currently-active row into view whenever the active opening
+  // changes (i.e. the board moved). Only scroll inside the finder's own
+  // scroll container so the page itself doesn't jump.
+  useEffect(() => {
+    if (!activeSlug || !activeRef.current || !listRef.current) return;
+    const row = activeRef.current;
+    const box = listRef.current;
+    const rowTop = row.offsetTop;
+    const rowBottom = rowTop + row.offsetHeight;
+    if (rowTop < box.scrollTop || rowBottom > box.scrollTop + box.clientHeight) {
+      box.scrollTo({ top: rowTop - box.clientHeight / 2 + row.offsetHeight / 2, behavior: "smooth" });
+    }
+  }, [activeSlug, activeAncestors]);
 
   const matches = (n: NameNode): boolean => {
     if (!needle) return true;
@@ -120,10 +155,10 @@ function NameFinder({ onPick, activeSlug }: { onPick: (o: Opening) => void; acti
         placeholder="Search — Sicilian, B90, Najdorf…"
         className="w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm text-white placeholder-ink-500 focus:border-brand-400 focus:outline-none"
       />
-      <div className="max-h-[420px] overflow-y-auto rounded-lg border border-ink-800 bg-ink-950 p-1">
+      <div ref={listRef} className="max-h-[420px] overflow-y-auto rounded-lg border border-ink-800 bg-ink-950 p-1">
         {sortedNameChildren(root).filter(matches).map((fam) => (
           <TreeRow key={fam.key} node={fam} depth={0}
-            onPick={onPick} activeSlug={activeSlug}
+            onPick={onPick} activeSlug={activeSlug} activeRef={activeRef}
             isOpen={isOpen} toggle={toggle} matches={matches} />
         ))}
       </div>
@@ -135,10 +170,11 @@ function NameFinder({ onPick, activeSlug }: { onPick: (o: Opening) => void; acti
 }
 
 function TreeRow({
-  node, depth, onPick, activeSlug, isOpen, toggle, matches,
+  node, depth, onPick, activeSlug, activeRef, isOpen, toggle, matches,
 }: {
   node: NameNode; depth: number;
   onPick: (o: Opening) => void; activeSlug?: string;
+  activeRef?: React.RefObject<HTMLDivElement | null>;
   isOpen: (key: string) => boolean; toggle: (key: string) => void;
   matches: (n: NameNode) => boolean;
 }) {
@@ -150,7 +186,8 @@ function TreeRow({
 
   return (
     <div>
-      <div className={`group flex items-center gap-1 rounded px-1 py-0.5 text-xs ${
+      <div ref={active ? activeRef : undefined}
+        className={`group flex items-center gap-1 rounded px-1 py-0.5 text-xs ${
         active ? "bg-brand-500/25 text-white" : "hover:bg-ink-800/70"}`}
         style={{ paddingLeft: `${depth * 12 + 4}px` }}>
         {hasChildren ? (
@@ -180,11 +217,37 @@ function TreeRow({
       </div>
       {open && children.map((c) => (
         <TreeRow key={c.key} node={c} depth={depth + 1}
-          onPick={onPick} activeSlug={activeSlug}
+          onPick={onPick} activeSlug={activeSlug} activeRef={activeRef}
           isOpen={isOpen} toggle={toggle} matches={matches} />
       ))}
     </div>
   );
+}
+
+// Index openings by their canonical SAN move string so the reverse lookup
+// (board history → best opening match) is O(1) per suffix — no linear scan
+// of 3810 arrays on every move. Built once.
+const OPENING_BY_MOVES = (() => {
+  const m = new Map<string, Opening>();
+  for (const o of OPENINGS) {
+    const key = o.pgnStart.join(" ");
+    // If two openings share the same move sequence, keep the LOWEST-tier one
+    // (pillars > tier-2 > tier-3 > tier-4) so "1.e4 c5" points at Sicilian
+    // Defense, not some obscure named sub-line.
+    const prev = m.get(key);
+    if (!prev || o.tier < prev.tier) m.set(key, o);
+  }
+  return m;
+})();
+
+/** Find the DEEPEST corpus opening whose move-list is a prefix of history. */
+function findOpeningFromHistory(history: string[]): Opening | null {
+  for (let i = history.length; i > 0; i--) {
+    const key = history.slice(0, i).join(" ");
+    const hit = OPENING_BY_MOVES.get(key);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 export default function OpeningsHub() {
@@ -192,15 +255,25 @@ export default function OpeningsHub() {
   useEffect(() => { studyLevels().then(setLevels).catch(() => { /* ratings optional */ }); }, []);
 
   // Shared freeplay drives BOTH the explorer's board+table AND the name
-  // drilldown's picks. Picking a variation on the left rewrites the board;
-  // playing a move on the board keeps the same fp so history + memorize
-  // handoff stay coherent.
+  // finder's picks. Picking a variation rewrites the board; playing a move
+  // on the board keeps the same fp so history + memorize handoff stay
+  // coherent.
   const fp = useFreePlay();
   const [activeSlug, setActiveSlug] = useState<string | undefined>(undefined);
   const pickOpening = (o: Opening) => {
     setActiveSlug(o.slug);
     fp.loadSans(o.pgnStart);
   };
+
+  // Board → finder sync: every time the move history changes (user played /
+  // undid a move on the board, or the explorer table was clicked), figure
+  // out which corpus opening the current position matches and highlight it
+  // in the tree. Owner ask 2026-08-19: "find an opening also changes when
+  // the move in board changes".
+  useEffect(() => {
+    const hit = findOpeningFromHistory(fp.history);
+    setActiveSlug(hit?.slug);
+  }, [fp.history]);
 
   // The "openings-by-name" study card is integrated into this hub — hide it
   // from the trainer grid below so it doesn't appear twice.
