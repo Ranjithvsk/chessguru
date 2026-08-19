@@ -98,19 +98,20 @@ export default function StudyPage() {
         </div>
       </header>
 
-      {/* ── Opening ─────────────────────────────────────────────────────────── */}
-      {openingStudies.length > 0 && (
-        <section className="space-y-6">
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-sky-400">Opening 📖</div>
-            <h2 className="font-display text-xl text-white">Openings &amp; board mastery</h2>
-            <p className="text-sm text-ink-400">Learn openings, memorise variations, know the board — the foundations before move 15.</p>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            {openingStudies.map((s) => <StudyCard key={s.id} s={s} level={levels[s.id]} />)}
-          </div>
-        </section>
-      )}
+      {/* ── Opening: moved to Learn → Openings (/openings) 2026-08-19 ──────── */}
+      <section className="space-y-3 rounded-xl2 border border-dashed border-ink-700 bg-ink-900/50 p-5">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-sky-400">Opening 📖</div>
+          <h2 className="font-display text-xl text-white">Opening trainers moved</h2>
+          <p className="text-sm text-ink-400">
+            Every opening tool now lives together under Learn → Openings — Chess Notation, Memory Master 500,
+            the corpus tree, name drilldown, personal repertoire, daily review, PGN import, and the free-play Explorer.
+          </p>
+        </div>
+        <Link to="/openings" className="inline-block rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-400">
+          Open the Openings hub →
+        </Link>
+      </section>
 
       {/* ── Memory training (standalone — general board memory tools) ──────── */}
       {memoryStudies.length > 0 && (

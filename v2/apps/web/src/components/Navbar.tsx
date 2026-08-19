@@ -76,7 +76,7 @@ const GROUPS: Group[] = [
     label: "Learn", accent: "sky", icon: "📚",
     items: [
       { to: "/study", label: "📚 Study", desc: "Endgames, coordinates, memory palace, drills" },
-      { to: "/opening", label: "📖 Openings", desc: "Learn and drill openings" },
+      { to: "/openings", label: "📖 Openings", desc: "Notation, corpus, tree, repertoire, explorer" },
       { to: "/broadcasts", label: "📡 Broadcast games", desc: "Master tournament games" },
       { to: "/book", label: "📕 Book", desc: "Puzzles from the book games" },
     ],

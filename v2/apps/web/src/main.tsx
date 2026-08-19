@@ -27,6 +27,7 @@ import ImportGame from "./pages/ImportGame";
 import PrepTest from "./pages/PrepTest";
 import OpeningTree from "./pages/OpeningTree";
 import OpeningNames from "./pages/OpeningNames";
+import OpeningsHub from "./pages/OpeningsHub";
 import BlindfoldPage from "./pages/Blindfold";
 import OpeningPage from "./pages/Opening";
 import EngineBattlePage from "./pages/EngineBattle";
@@ -159,6 +160,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="study/openings-by-name" element={<OpeningNames />} />
             <Route path="study/:id" element={<StudyTrainer />} />
             <Route path="opening" element={<OpeningPage />} />
+            <Route path="openings" element={<OpeningsHub />} />
             <Route path="engine-battle" element={<EngineBattlePage />} />
             <Route path="board-editor" element={<BoardEditorPage />} />
             <Route path="admin" element={<AdminPage />} />
