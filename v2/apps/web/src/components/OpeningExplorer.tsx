@@ -278,36 +278,43 @@ function MoveTreeLine({
   // children[0] of the CURRENT node). Variations recurse with their own
   // known path so clicks always jump to the exact node.
   const parts: React.ReactNode[] = [];
-  let ply = startPly;
-  let curNode: MoveNode | undefined = startNode;
-  let curPath = startNodePath;
+  let iterPly = startPly;
+  let iterNode: MoveNode | undefined = startNode;
+  let iterPath = startNodePath;
   let openedWithVariationBlock = false;                    // whether next black move needs "N..." prefix
-  while (curNode) {
+  while (iterNode) {
+    // Per-iteration `const`s — the closures below capture THESE, not the
+    // outer `let`s (which get reassigned each loop). Without this, every
+    // mainline button's onClick would fire with the LAST iteration's path
+    // (owner report 2026-08-19: "clicking sub-variation shows last move").
+    const nodePath = iterPath;
+    const node = iterNode;
+    const ply = iterPly;
     const isWhite = ply % 2 === 0;
     const moveNo = Math.floor(ply / 2) + 1;
     const needsMoveNo = isWhite || openedWithVariationBlock;
-    const active = pathsEqual(curPath, cursor);
+    const active = pathsEqual(nodePath, cursor);
     parts.push(
-      <span key={`m${curPath.join(".")}`} className="inline-flex items-baseline">
+      <span key={`m${nodePath.join(".")}`} className="inline-flex items-baseline">
         {needsMoveNo && (
           <span className="mr-0.5 text-ink-500">{moveNo}{isWhite ? "." : "…"}</span>
         )}
-        <button ref={active ? activeRef : undefined} onClick={() => onPick(curPath)}
+        <button ref={active ? activeRef : undefined} onClick={() => onPick(nodePath)}
           className={`rounded px-1.5 py-0.5 transition ${active
             ? "bg-brand-500/60 text-white"
             : depth === 0 ? "text-ink-100 hover:bg-ink-800" : "text-ink-300 hover:bg-ink-800"}`}>
-          {curNode.san}
+          {node.san}
         </button>
       </span>
     );
     openedWithVariationBlock = false;
 
     // Variations spawn from the position AFTER curNode was played — i.e.,
-    // from curNode.children[1..]. children[0] is the mainline continuation
+    // from node.children[1..]. children[0] is the mainline continuation
     // we'll descend into next.
-    const kids = curNode.children;
+    const kids = node.children;
     for (let vi = 1; vi < kids.length; vi++) {
-      const vPath = [...curPath, vi];
+      const vPath = [...nodePath, vi];
       parts.push(
         <div key={`v${vPath.join(".")}`}
           className="my-1 border-l-2 border-ink-700 pl-2 text-[13px]"
@@ -323,9 +330,9 @@ function MoveTreeLine({
     // Descend to mainline continuation.
     const nextMain = kids[0];
     if (!nextMain) break;
-    curPath = [...curPath, 0];
-    curNode = nextMain;
-    ply++;
+    iterPath = [...nodePath, 0];
+    iterNode = nextMain;
+    iterPly = ply + 1;
   }
   return (
     <div className={`font-mono ${depth === 0 ? "text-sm" : ""} leading-relaxed`}>
