@@ -6,7 +6,7 @@
 // The standalone route /opening still uses this component — it just wraps it
 // in a page layout.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { Key } from "chessground/types";
@@ -14,6 +14,8 @@ import Board from "./Board";
 import { useFreePlay, type MoveNode } from "../hooks/useFreePlay";
 import { fetchExplorer } from "../lib/explorer";
 import { OPENING_HANDOFF_KEY } from "../lib/openingMemory";
+import { findOpeningForLine } from "../lib/openings";
+import { OpeningIdeaPanel } from "./OpeningIdeaPanel";
 
 function WdlBar({ w, d, b, className = "" }: { w: number; d: number; b: number; className?: string }) {
   const t = w + d + b || 1;
@@ -50,6 +52,13 @@ export default function OpeningExplorer(
   const [opening, setOpening] = useState<{ eco: string; name: string } | null>(null);
   useEffect(() => { if (data?.opening) setOpening(data.opening); }, [data?.opening]);
   useEffect(() => { if (fp.fen.startsWith("rnbqkbnr/pppppppp")) setOpening(null); }, [fp.fen]);
+
+  // Wiki-book panel: the longest-prefix match against our corpus tells us
+  // which named opening the current line falls under, so the panel can show
+  // the curated idea (pillars) or Wikibooks excerpt (generated) from ply 1
+  // onward — matches the Lichess analysis-page book behaviour the owner
+  // asked for on 2026-08-19. Empty line (starting position) → no panel.
+  const bookOpening = useMemo(() => (fp.history.length ? findOpeningForLine(fp.history) : null), [fp.history]);
 
   const memorize = () => {
     if (!fp.history.length) return;
@@ -250,6 +259,15 @@ export default function OpeningExplorer(
             )}
           </div>
         </div>
+
+        {/* Inline wiki-book panel — ECO name + curated idea / Wikibooks
+            excerpt + White/Black plans. Appears from ply 1 onward, updates
+            on every move (findOpeningForLine keeps the longest-prefix
+            match). Compact variant so the aside stays scannable. */}
+        {bookOpening && (
+          <OpeningIdeaPanel opening={bookOpening} compact />
+        )}
+
         {asideExtra}
       </aside>
     </div>
