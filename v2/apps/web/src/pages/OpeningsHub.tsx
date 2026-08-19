@@ -104,14 +104,21 @@ function NameFinder({ onPick, activeSlug }: { onPick: (o: Opening) => void; acti
 
   // Ancestor keys of the currently-active opening — auto-expanded so the
   // board→tree sync scrolls the highlighted row into view instead of hiding
-  // it inside a collapsed branch.
+  // it inside a collapsed branch. ALSO marks the matching node itself so its
+  // own children (deeper variations) are revealed — e.g. playing 1.e4 c5
+  // opens Sicilian Defense AND expands the family's variations underneath
+  // (owner ask 2026-08-19).
   const activeAncestors = useMemo<Set<string>>(() => {
     const keys = new Set<string>();
     if (!activeSlug) return keys;
     const walk = (n: NameNode, path: NameNode[]): boolean => {
-      let found = n.openings.some((o) => o.slug === activeSlug);
+      const selfMatch = n.openings.some((o) => o.slug === activeSlug);
+      let found = selfMatch;
       for (const c of n.children.values()) if (walk(c, [...path, n])) found = true;
-      if (found) for (const p of path) keys.add(p.key);
+      if (found) {
+        for (const p of path) keys.add(p.key);
+        keys.add(n.key);
+      }
       return found;
     };
     for (const f of sortedNameChildren(root)) walk(f, [root]);
