@@ -74,24 +74,62 @@ export function buildNameTree(): NameNode {
   };
   sortNode(root);
 
-  // Post-process: re-parent siblings whose LABEL starts with another
-  // sibling's label + a space. Lichess writes many variations as own-line
-  // names ("Smith-Morra Gambit Accepted") rather than comma-nested
-  // ("Smith-Morra Gambit, Accepted"), which the plain parser above puts
-  // as siblings under the family. Fix owner report 2026-08-19: "in
-  // smith-morra gambit i don't see any tree".
+  // Two-part post-process:
+  //
+  // (1) At ROOT, MERGE families that differ only by a "type suffix"
+  //     (Defense/Defence/Opening/Attack/Game/System/Variation). Our
+  //     hand-written pillars use short names ("Sicilian", "French") while
+  //     the generated ECO corpus uses long canonical names ("Sicilian
+  //     Defense", "French Defense") — without this merge they'd appear as
+  //     two separate families at the top level. Long name wins.
+  //
+  // (2) Then at EVERY level, re-parent siblings whose label starts with
+  //     another sibling's label + a space, SKIPPING the type-suffix cases
+  //     (which are name variants, not sub-variations). Lichess writes many
+  //     variations as own-line names ("Smith-Morra Gambit Accepted")
+  //     rather than comma-nested ("Smith-Morra Gambit, Accepted"), so this
+  //     pulls them under their real parent.
+  //
+  // Fix owner report 2026-08-19: "sicilian defence into sicilian, defence
+  // which is wrong, but smith-morra gambit tree is correct".
+  const TYPE_SUFFIXES = new Set(["Defense", "Defence", "Opening", "Attack", "Game", "System", "Variation"]);
+
+  const mergeAtRoot = (r: NameNode) => {
+    const kids = [...r.children.values()].sort((a, b) => a.label.length - b.label.length);
+    for (const shortNode of kids) {
+      // Find a longer sibling that starts with this + " " + one type suffix.
+      const longMatch = kids.find((k) =>
+        k !== shortNode
+        && k.label.length > shortNode.label.length
+        && k.label.startsWith(shortNode.label + " ")
+        && TYPE_SUFFIXES.has(k.label.slice(shortNode.label.length + 1)),
+      );
+      if (!longMatch) continue;
+      // Merge shortNode INTO longMatch (canonical wins).
+      for (const o of shortNode.openings) longMatch.openings.push(o);
+      for (const [k, v] of shortNode.children) {
+        if (!longMatch.children.has(k)) {
+          v.key = `${longMatch.key} / ${k}`;
+          longMatch.children.set(k, v);
+        }
+        // Duplicate child key at both parents — skip; keep the canonical
+        // parent's version so we don't accidentally lose curated data.
+      }
+      r.children.delete(shortNode.label);
+    }
+  };
+  mergeAtRoot(root);
+
   const reparentByPrefix = (n: NameNode) => {
-    // Sort children shortest-label-first so parents are seen before their
-    // would-be children. Then walk each child and if its label starts with
-    // an earlier sibling's label + " ", move it under that sibling.
     const kids = [...n.children.values()].sort((a, b) => a.label.length - b.label.length);
     const seen: NameNode[] = [];
     for (const c of kids) {
       const parent = seen.find((p) => c.label.startsWith(p.label + " "));
       if (parent) {
-        // Trim parent's prefix off the child's label so the row shows just
-        // the delta (e.g. "Accepted" instead of "Smith-Morra Gambit Accepted").
         const newLabel = c.label.slice(parent.label.length + 1).trim();
+        // Skip type-suffix "reparents" — these are just name variants and
+        // would collapse two peers instead of creating a real hierarchy.
+        if (TYPE_SUFFIXES.has(newLabel)) { seen.push(c); continue; }
         n.children.delete(c.label);
         c.label = newLabel;
         c.key = `${parent.key} / ${newLabel}`;
