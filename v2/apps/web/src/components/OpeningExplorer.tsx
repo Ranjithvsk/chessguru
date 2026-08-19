@@ -210,58 +210,77 @@ export default function OpeningExplorer(
   );
 }
 
-/** Recursive PGN move-tree renderer with variations in parentheses.
- *  At each ply we render the mainline (children[0]) inline, then any sibling
- *  variations inside "(…)" before continuing along the mainline. */
+/** Lichess-style PGN move-tree renderer.
+ *
+ *  Mainline flows inline as wrapping text. When a ply has additional
+ *  siblings, each sibling variation renders as its own INDENTED BLOCK
+ *  below the mainline move that spawned it — bordered on the left,
+ *  darker text — matching how lichess.org/analysis displays PGN.
+ *  Deeper nested variations get progressively deeper indentation.
+ *  Every SAN is a clickable button that jumps the board to that node. */
 function MoveTreeLine({
-  children, startPly, path, cursor, onPick, inVariation = false,
+  children, startPly, path, cursor, onPick, depth = 0,
 }: {
   children: MoveNode[]; startPly: number; path: number[]; cursor: number[];
-  onPick: (path: number[]) => void; inVariation?: boolean;
+  onPick: (path: number[]) => void; depth?: number;
 }) {
-  const out: React.ReactNode[] = [];
+  // Walk the mainline, emitting: main move · (indented blocks for each variation) · next main move …
+  // Variations render before their spawn move's continuation, so a reader
+  // scans them in the natural "here's a side line at THIS move" order.
+  const parts: React.ReactNode[] = [];
   let ply = startPly;
   let cur = children;
   let acc = path;
-  let firstMove = true;
+  let openedWithVariationBlock = false;                    // controls whether black needs "N..." prefix
   while (cur.length > 0) {
     const mainPath = [...acc, 0];
     const isWhite = ply % 2 === 0;
     const moveNo = Math.floor(ply / 2) + 1;
-    // Move-number prefix rules:
-    //   * always before a white move
-    //   * before a black move only if it's the FIRST rendered in this line
-    //     (either the variation opens with black-to-move, or after a variation
-    //     block we resume the mainline on black)
-    if (isWhite) {
-      out.push(<span key={`n${mainPath.join(".")}`} className="text-ink-500">{moveNo}.</span>);
-    } else if (firstMove) {
-      out.push(<span key={`n${mainPath.join(".")}`} className="text-ink-500">{moveNo}…</span>);
-    }
+    const needsMoveNo = isWhite || openedWithVariationBlock;
     const active = pathsEqual(mainPath, cursor);
-    out.push(
-      <button key={`m${mainPath.join(".")}`} onClick={() => onPick(mainPath)}
-        className={`rounded px-1 ${active ? "bg-brand-500/40 text-white" : (inVariation ? "text-ink-300" : "text-ink-100")} hover:bg-ink-800`}>
-        {cur[0]!.san}
-      </button>
+    parts.push(
+      <span key={`m${mainPath.join(".")}`} className="inline-flex items-baseline">
+        {needsMoveNo && (
+          <span className="mr-0.5 text-ink-500">{moveNo}{isWhite ? "." : "…"}</span>
+        )}
+        <button onClick={() => onPick(mainPath)}
+          className={`rounded px-1 transition ${active
+            ? "bg-brand-500/40 text-white"
+            : depth === 0 ? "text-ink-100 hover:bg-ink-800" : "text-ink-300 hover:bg-ink-800"}`}>
+          {cur[0]!.san}
+        </button>
+      </span>
     );
-    // Variations from THIS ply (siblings of mainline) — render each as a
-    // parenthesised sub-line. Recurse into MoveTreeLine passing the sibling
-    // as a single-child list so it renders its own mainline properly.
+    openedWithVariationBlock = false;
+
+    // Variations from THIS ply — one indented block per sibling.
     for (let vi = 1; vi < cur.length; vi++) {
       const vPath = [...acc, vi];
-      out.push(
-        <span key={`v${vPath.join(".")}`} className="ml-1 text-ink-400">
-          (<MoveTreeLine children={[cur[vi]!]} startPly={ply} path={acc} cursor={cursor} onPick={onPick} inVariation />)
-        </span>
+      parts.push(
+        <div key={`v${vPath.join(".")}`}
+          className="my-1 border-l-2 border-ink-700 pl-2 text-[13px]"
+          style={{ marginLeft: `${Math.min(depth + 1, 3) * 8}px` }}>
+          <MoveTreeLine children={[cur[vi]!]} startPly={ply} path={acc}
+            cursor={cursor} onPick={onPick} depth={depth + 1} />
+        </div>
       );
+      // After a block-level variation, the next mainline move (if black) must
+      // print its "N..." because a block break interrupted the flow.
+      openedWithVariationBlock = true;
     }
+
     ply++;
     acc = mainPath;
     cur = cur[0]!.children;
-    firstMove = false;
   }
-  return <div className="flex flex-wrap items-baseline gap-x-1 gap-y-0.5 font-mono text-sm">{out}</div>;
+  return (
+    <div className={`font-mono ${depth === 0 ? "text-sm" : ""} leading-relaxed`}>
+      {parts.map((p, i) => (
+        // Space between inline moves; block variations bring their own margin.
+        <span key={i}>{p}{typeof p === "object" && (p as any).type === "span" ? " " : ""}</span>
+      ))}
+    </div>
+  );
 }
 
 function pathsEqual(a: number[], b: number[]): boolean {
