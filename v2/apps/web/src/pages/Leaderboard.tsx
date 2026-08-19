@@ -77,25 +77,33 @@ const PERIODS: { key: Period; label: string }[] = [
   { key: "lifetime", label: "Lifetime" },
 ];
 
-type Bucket = "all" | "beginner" | "novice" | "improver" | "advanced" | "expert";
+// Uniform 200-point rating bands. Key = server bucket id (u800 for
+// under-800, r800..r1800 for 200-wide bands, r2000 for 2000+).
+type Bucket = "all" | "u800" | "r800" | "r1000" | "r1200" | "r1400" | "r1600" | "r1800" | "r2000";
 const BUCKETS: { key: Bucket; label: string; range: string }[] = [
-  { key: "all",       label: "All levels",  range: "" },
-  { key: "beginner",  label: "Beginner",    range: "< 1000" },
-  { key: "novice",    label: "Novice",      range: "1000–1299" },
-  { key: "improver",  label: "Improver",    range: "1300–1599" },
-  { key: "advanced",  label: "Advanced",    range: "1600–1899" },
-  { key: "expert",    label: "Expert",      range: "1900+" },
+  { key: "all",   label: "All",     range: "every level" },
+  { key: "u800",  label: "< 800",   range: "under 800" },
+  { key: "r800",  label: "800",     range: "800–999" },
+  { key: "r1000", label: "1000",    range: "1000–1199" },
+  { key: "r1200", label: "1200",    range: "1200–1399" },
+  { key: "r1400", label: "1400",    range: "1400–1599" },
+  { key: "r1600", label: "1600",    range: "1600–1799" },
+  { key: "r1800", label: "1800",    range: "1800–1999" },
+  { key: "r2000", label: "2000+",   range: "2000 and up" },
 ];
 
-/** Map a rating to its bucket. Kept in sync with the server-side ranges in
- *  academy.service.ts `inBucket`. */
+/** Map a rating to its 200-point bucket. Kept in sync with the server-side
+ *  ranges in academy.service.ts `inBucket`. */
 function bucketForRating(r: number | undefined | null): Bucket {
   if (r == null) return "all";
-  if (r < 1000) return "beginner";
-  if (r < 1300) return "novice";
-  if (r < 1600) return "improver";
-  if (r < 1900) return "advanced";
-  return "expert";
+  if (r < 800) return "u800";
+  if (r < 1000) return "r800";
+  if (r < 1200) return "r1000";
+  if (r < 1400) return "r1200";
+  if (r < 1600) return "r1400";
+  if (r < 1800) return "r1600";
+  if (r < 2000) return "r1800";
+  return "r2000";
 }
 
 function fmtMs(ms: number | null): string {

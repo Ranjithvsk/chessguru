@@ -1777,7 +1777,9 @@ export class AcademyService {
     if (!userId || !academyId) throw new ForbiddenException("sign in first");
 
     const period = ["today", "7d", "30d", "180d", "365d", "lifetime"].includes(periodRaw) ? periodRaw : "7d";
-    const bucket = opts.bucket && ["beginner", "novice", "improver", "advanced", "expert"].includes(opts.bucket) ? opts.bucket : null;
+    // Rating buckets — uniform 200-point intervals, keyed by the lower
+    // bound (`u800` = under 800, `r800`..`r1800` = 200-wide bands, `r2000` = 2000+).
+    const bucket = opts.bucket && ["u800", "r800", "r1000", "r1200", "r1400", "r1600", "r1800", "r2000"].includes(opts.bucket) ? opts.bucket : null;
     const now = Date.now();
     const IST_OFFSET_MIN = 330;
     const nowIst = new Date(now + IST_OFFSET_MIN * 60_000);
@@ -1968,16 +1970,19 @@ export class AcademyService {
       };
     });
 
-    // Rating-bucket filter — beginner <1000, novice 1000-1299, improver
-    // 1300-1599, advanced 1600-1899, expert 1900+. Applied here so score
-    // percentiles below are computed WITHIN the bucket (fair peer comparison).
+    // Rating-bucket filter — uniform 200-point intervals so buckets are
+    // fair peer groups. Applied here so score percentiles below are
+    // computed WITHIN the bucket.
     if (bucket) {
       const inBucket = (r: number) =>
-        bucket === "beginner" ? r < 1000 :
-        bucket === "novice"   ? r >= 1000 && r < 1300 :
-        bucket === "improver" ? r >= 1300 && r < 1600 :
-        bucket === "advanced" ? r >= 1600 && r < 1900 :
-        bucket === "expert"   ? r >= 1900 : true;
+        bucket === "u800"  ? r < 800 :
+        bucket === "r800"  ? r >= 800  && r < 1000 :
+        bucket === "r1000" ? r >= 1000 && r < 1200 :
+        bucket === "r1200" ? r >= 1200 && r < 1400 :
+        bucket === "r1400" ? r >= 1400 && r < 1600 :
+        bucket === "r1600" ? r >= 1600 && r < 1800 :
+        bucket === "r1800" ? r >= 1800 && r < 2000 :
+        bucket === "r2000" ? r >= 2000 : true;
       raw = raw.filter((r) => inBucket(r.currentRating));
     }
 
