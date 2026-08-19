@@ -102,45 +102,91 @@ export default function MyRepertoirePanel({ history, activeOpening, onLoad }: Pr
         )}
       </div>
 
-      {/* Entries list */}
-      <div className="max-h-[240px] overflow-y-auto rounded-lg border border-ink-800 bg-ink-950">
-        {entries.length === 0 ? (
-          <div className="p-3 text-center text-xs text-ink-500">
-            Nothing saved yet. Play a line or pick an opening, then use the buttons above.
+      {/* Entries list — split into coach-suggested vs my-own for students so
+          the two feeds don't blur together. Coaches (who don't receive shared
+          entries themselves) just see one list. Owner ask 2026-08-19: "for
+          students, in My Repertoire, coach suggested opening show separate". */}
+      {(() => {
+        const suggested = entries.filter((e) => !!e.sharedFrom);
+        const mine = entries.filter((e) => !e.sharedFrom);
+        if (entries.length === 0) {
+          return (
+            <div className="rounded-lg border border-ink-800 bg-ink-950 p-3 text-center text-xs text-ink-500">
+              Nothing saved yet. Play a line or pick an opening, then use the buttons above.
+            </div>
+          );
+        }
+        return (
+          <div className="space-y-3">
+            {suggested.length > 0 && (
+              <Section title={`🎓 Coach-suggested (${suggested.length})`} tone="indigo">
+                <List entries={suggested} onLoad={onLoad} onDelete={(id) => delMut.mutate(id)} isCoach={isCoach} onShare={() => { /* recipient can't re-share */ }} />
+              </Section>
+            )}
+            <Section title={`✏️ ${suggested.length ? "My own" : "Saved"} (${mine.length})`} tone="brand">
+              {mine.length === 0 ? (
+                <div className="px-2 py-3 text-center text-xs text-ink-500">Nothing saved on your own yet.</div>
+              ) : (
+                <List entries={mine} onLoad={onLoad} onDelete={(id) => delMut.mutate(id)} isCoach={isCoach} onShare={(e) => setShareTarget(e)} />
+              )}
+            </Section>
           </div>
-        ) : (
-          <ul className="divide-y divide-ink-800/60">
-            {entries.map((e) => (
-              <li key={e._id} className="group flex items-center gap-2 px-2 py-1.5 hover:bg-ink-900">
-                <button
-                  onClick={() => onLoad(e.kind === "corpus" ? { slug: e.slug } : { sans: e.sans })}
-                  className="min-w-0 flex-1 truncate text-left text-xs text-ink-100 hover:text-white">
-                  <span className="mr-1">{e.kind === "corpus" ? "📖" : "✏️"}</span>
-                  {e.name}
-                  {e.sharedFromName && (
-                    <span className="ml-1 text-[10px] font-semibold text-indigo-300"> · shared by {e.sharedFromName}</span>
-                  )}
-                </button>
-                {isCoach && !e.sharedFrom && (
-                  <button
-                    onClick={() => setShareTarget(e)}
-                    className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-brand-300"
-                    title="Share with students">🎓</button>
-                )}
-                <button
-                  onClick={() => { if (confirm(`Remove "${e.name}"?`)) delMut.mutate(e._id); }}
-                  className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-ink-500 hover:bg-rose-500/20 hover:text-rose-300"
-                  title="Delete">🗑</button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+        );
+      })()}
 
       {shareTarget && (
         <ShareModal entry={shareTarget} onClose={() => setShareTarget(null)} onDone={() => { setShareTarget(null); invalidate(); }} />
       )}
     </div>
+  );
+}
+
+function Section({ title, tone, children }: { title: string; tone: "indigo" | "brand"; children: React.ReactNode }) {
+  const border = tone === "indigo" ? "border-indigo-500/40" : "border-ink-800";
+  const header = tone === "indigo" ? "text-indigo-300" : "text-ink-400";
+  return (
+    <div className={`rounded-lg border ${border} bg-ink-950`}>
+      <div className={`border-b border-ink-800 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${header}`}>{title}</div>
+      <div className="max-h-[200px] overflow-y-auto">{children}</div>
+    </div>
+  );
+}
+
+function List({
+  entries, onLoad, onDelete, isCoach, onShare,
+}: {
+  entries: RepertoireEntry[];
+  onLoad: (entry: { sans?: string[]; slug?: string }) => void;
+  onDelete: (id: string) => void;
+  isCoach: boolean;
+  onShare: (entry: RepertoireEntry) => void;
+}) {
+  return (
+    <ul className="divide-y divide-ink-800/60">
+      {entries.map((e) => (
+        <li key={e._id} className="group flex items-center gap-2 px-2 py-1.5 hover:bg-ink-900">
+          <button
+            onClick={() => onLoad(e.kind === "corpus" ? { slug: e.slug } : { sans: e.sans })}
+            className="min-w-0 flex-1 truncate text-left text-xs text-ink-100 hover:text-white">
+            <span className="mr-1">{e.kind === "corpus" ? "📖" : "✏️"}</span>
+            {e.name}
+            {e.sharedFromName && (
+              <span className="ml-1 text-[10px] font-semibold text-indigo-300"> · from {e.sharedFromName}</span>
+            )}
+          </button>
+          {isCoach && !e.sharedFrom && (
+            <button
+              onClick={() => onShare(e)}
+              className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-brand-300"
+              title="Share with students">🎓</button>
+          )}
+          <button
+            onClick={() => { if (confirm(`Remove "${e.name}"?`)) onDelete(e._id); }}
+            className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-ink-500 hover:bg-rose-500/20 hover:text-rose-300"
+            title="Delete">🗑</button>
+        </li>
+      ))}
+    </ul>
   );
 }
 
