@@ -6,7 +6,7 @@
 // The standalone route /opening still uses this component — it just wraps it
 // in a page layout.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { Key } from "chessground/types";
@@ -57,37 +57,81 @@ export default function OpeningExplorer(
   const total = data ? data.white + data.draws + data.black : 0;
   const playUci = (uci: string) => fp.onMove(uci.slice(0, 2) as Key, uci.slice(2, 4) as Key);
 
+  // Left/Right arrow keys navigate the move list — matches Lichess analysis.
+  // Ignored while an input/textarea has focus so typing in the finder search
+  // doesn't accidentally scrub the board.
+  const onKey = useCallback((e: KeyboardEvent) => {
+    const tag = (e.target as HTMLElement | null)?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement | null)?.isContentEditable) return;
+    if (e.key === "ArrowLeft")  { e.preventDefault(); fp.goPrev(); }
+    if (e.key === "ArrowRight") { e.preventDefault(); fp.goNext(); }
+    if (e.key === "Home") { e.preventDefault(); fp.goTo(0); }
+    if (e.key === "End")  { e.preventDefault(); fp.goTo(fp.line.length); }
+  }, [fp]);
+  useEffect(() => {
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onKey]);
+
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
       <section>
         <Board fen={fp.fen} orientation={fp.orientation} turnColor={fp.turnColor}
           movableColor="both" dests={fp.dests} onMove={fp.onMove} />
-        <div className="mt-3 flex gap-2">
-          <button onClick={fp.undo} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">◀ Undo</button>
+        {/* Nav row: ⏮ start · ◀ prev · ▶ next · ⏭ end · Reset · Flip · Memorize.
+            Prev/Next are enabled only when there's somewhere to go on the
+            recorded line (Lichess analysis semantics — rewinding doesn't
+            discard the future). */}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button onClick={() => fp.goTo(0)} disabled={fp.ply === 0}
+            className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800 disabled:opacity-40"
+            title="Jump to start">⏮</button>
+          <button onClick={fp.goPrev} disabled={fp.ply === 0}
+            className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800 disabled:opacity-40"
+            title="Previous move (←)">◀</button>
+          <button onClick={fp.goNext} disabled={fp.ply >= fp.line.length}
+            className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800 disabled:opacity-40"
+            title="Next move (→)">▶</button>
+          <button onClick={() => fp.goTo(fp.line.length)} disabled={fp.ply >= fp.line.length}
+            className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800 disabled:opacity-40"
+            title="Jump to end">⏭</button>
           <button onClick={fp.reset} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">Reset</button>
           <button onClick={fp.flip} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">⇅ Flip</button>
-          <button onClick={memorize} disabled={!fp.history.length}
+          <button onClick={memorize} disabled={!fp.line.length}
             className="ml-auto rounded-lg bg-accent-600 px-3 py-2 text-sm font-semibold text-white hover:bg-accent-500 disabled:opacity-40"
             title="Send this line to the Memory Training opening trainer">🧠 Memorize</button>
         </div>
 
-        {/* PGN-style move list — the notation of every move played on the
-            board so far ("1. e4 e5 2. Nf3 Nc6"). Owner ask 2026-08-19. Empty
-            state prompts the first move so the strip doesn't sit as a blank
-            box. Grouped by move number; the newest move stays visible with
-            an auto-scroll on the container. */}
+        {/* Clickable PGN move list — each SAN button jumps the board to that
+            ply (Lichess analysis /analysis/pgn/... behaviour). The current
+            ply is highlighted; playing a new move while rewound branches
+            (see useFreePlay.onMove). Owner ask 2026-08-19. */}
         <div className="mt-3 rounded-lg border border-ink-700 bg-ink-950 px-3 py-2">
           <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-500">Moves</div>
-          {fp.history.length === 0 ? (
+          {fp.line.length === 0 ? (
             <div className="font-mono text-xs text-ink-500">Play a move on the board to start the line…</div>
           ) : (
-            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 font-mono text-sm text-ink-100">
-              {Array.from({ length: Math.ceil(fp.history.length / 2) }).map((_, i) => {
-                const white = fp.history[i * 2];
-                const black = fp.history[i * 2 + 1];
+            <div className="flex flex-wrap items-baseline gap-x-1 gap-y-0.5 font-mono text-sm">
+              {Array.from({ length: Math.ceil(fp.line.length / 2) }).map((_, i) => {
+                const wIdx = i * 2, bIdx = i * 2 + 1;
+                const w = fp.line[wIdx], b = fp.line[bIdx];
+                const wActive = fp.ply === wIdx + 1;
+                const bActive = fp.ply === bIdx + 1;
                 return (
                   <span key={i} className="whitespace-nowrap">
-                    <span className="text-ink-500">{i + 1}.</span> {white}{black ? ` ${black}` : ""}
+                    <span className="text-ink-500">{i + 1}.</span>{" "}
+                    {w && (
+                      <button onClick={() => fp.goTo(wIdx + 1)}
+                        className={`rounded px-1 ${wActive ? "bg-brand-500/40 text-white" : "text-ink-100 hover:bg-ink-800"}`}>
+                        {w}
+                      </button>
+                    )}
+                    {b && (
+                      <button onClick={() => fp.goTo(bIdx + 1)}
+                        className={`rounded px-1 ${bActive ? "bg-brand-500/40 text-white" : "text-ink-100 hover:bg-ink-800"}`}>
+                        {b}
+                      </button>
+                    )}
                   </span>
                 );
               })}
