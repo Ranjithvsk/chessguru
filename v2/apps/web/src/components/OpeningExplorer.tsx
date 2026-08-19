@@ -70,6 +70,30 @@ export default function OpeningExplorer(
             className="ml-auto rounded-lg bg-accent-600 px-3 py-2 text-sm font-semibold text-white hover:bg-accent-500 disabled:opacity-40"
             title="Send this line to the Memory Training opening trainer">🧠 Memorize</button>
         </div>
+
+        {/* PGN-style move list — the notation of every move played on the
+            board so far ("1. e4 e5 2. Nf3 Nc6"). Owner ask 2026-08-19. Empty
+            state prompts the first move so the strip doesn't sit as a blank
+            box. Grouped by move number; the newest move stays visible with
+            an auto-scroll on the container. */}
+        <div className="mt-3 rounded-lg border border-ink-700 bg-ink-950 px-3 py-2">
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-500">Moves</div>
+          {fp.history.length === 0 ? (
+            <div className="font-mono text-xs text-ink-500">Play a move on the board to start the line…</div>
+          ) : (
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 font-mono text-sm text-ink-100">
+              {Array.from({ length: Math.ceil(fp.history.length / 2) }).map((_, i) => {
+                const white = fp.history[i * 2];
+                const black = fp.history[i * 2 + 1];
+                return (
+                  <span key={i} className="whitespace-nowrap">
+                    <span className="text-ink-500">{i + 1}.</span> {white}{black ? ` ${black}` : ""}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </section>
 
       <aside className="flex flex-col gap-4">
