@@ -2007,7 +2007,15 @@ function HomeworkPanel({ homework }: { homework: any[] }) {
               <div className="flex items-baseline justify-between gap-2">
                 <div className="flex-1 min-w-0">
                   <div className="truncate text-sm font-medium text-white">{h.title}</div>
-                  <div className="mt-0.5 text-xs text-ink-400">→ {h.studentName}</div>
+                  <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-ink-400">
+                    <span>→ {h.studentName}</span>
+                    {h.assignedByName && (
+                      <span className="text-[11px] text-ink-500">
+                        · by <span className={h.assignedByRole === "academy_owner" ? "text-amber-300" : "text-brand-300"}>{h.assignedByName}</span>
+                        {h.assignedByRole === "academy_owner" && <span className="ml-0.5 text-[9px] uppercase tracking-wider text-amber-400/80">owner</span>}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className={`shrink-0 text-xs font-semibold ${dueColor}`}>{dueLabel}</div>
               </div>

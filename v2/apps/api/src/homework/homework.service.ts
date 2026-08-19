@@ -239,16 +239,25 @@ export class HomeworkService {
     const filter: any = { academyId: g.academyId };
     if (g.role === "coach") filter.coachId = g.userId;
     const rows = await this.col().find(filter).sort({ assignedAt: -1 }).limit(500).toArray();
-    // Batch student username lookup for display.
+    // Batch student + assigner (coach/owner) name lookup for display.
     const sids = Array.from(new Set(rows.map((r: any) => String(r.studentId))));
-    const su = sids.length ? await this.users().find({ _id: { $in: sids } as any }, { projection: { _id: 1, username: 1 } }).toArray() : [];
-    const uMap: Record<string, string> = {};
-    for (const u of su as any[]) uMap[String(u._id)] = u.username || String(u._id);
-    return rows.map((r: any) => ({
-      _id: String(r._id), studentId: r.studentId, studentName: uMap[r.studentId] || r.studentId,
-      title: r.title, tasks: r.tasks, dueAt: r.dueAt, assignedAt: r.assignedAt,
-      status: r.status, progress: r.progress, completedAt: r.completedAt ?? null,
-    }));
+    const cids = Array.from(new Set(rows.map((r: any) => r.coachId ? String(r.coachId) : null).filter(Boolean) as string[]));
+    const allIds = Array.from(new Set([...sids, ...cids]));
+    const su = allIds.length ? await this.users().find({ _id: { $in: allIds } as any }, { projection: { _id: 1, username: 1, name: 1, role: 1 } }).toArray() : [];
+    const uMap: Record<string, { username: string; name: string | null; role: string }> = {};
+    for (const u of su as any[]) uMap[String(u._id)] = { username: u.username || String(u._id), name: u.name || null, role: u.role || "" };
+    return rows.map((r: any) => {
+      const c = r.coachId ? uMap[String(r.coachId)] : null;
+      return {
+        _id: String(r._id), studentId: r.studentId,
+        studentName: uMap[r.studentId]?.username || r.studentId,
+        title: r.title, tasks: r.tasks, dueAt: r.dueAt, assignedAt: r.assignedAt,
+        status: r.status, progress: r.progress, completedAt: r.completedAt ?? null,
+        assignedById: r.coachId || null,
+        assignedByName: c?.name || c?.username || null,
+        assignedByRole: c?.role || null,
+      };
+    });
   }
 
   /** Student view: their assigned homework. */
