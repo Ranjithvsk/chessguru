@@ -14,6 +14,7 @@ import { api, get } from "../lib/api";
 import { parentReportsApi, type ReportData } from "../lib/parent-reports-api";
 import { PeriodPerformanceTable } from "../components/PeriodPerformanceTable";
 import { StudentMistakesPanel } from "../components/StudentMistakesPanel";
+import { AchievementsGallery } from "../components/AchievementsGallery";
 
 type Student = {
   _id: string;
@@ -387,6 +388,11 @@ export default function StudentPerformancePage() {
         </div>
         <PeriodPerformanceTable scope={{ kind: "student", studentId }} />
       </section>
+
+      {/* Achievement gallery — real chess-skill milestones. Each unlocked
+          badge means the student has trained a pattern (fork/pin/mate) to
+          the point it should fire in a real game. */}
+      <AchievementsGallery studentId={studentId} />
 
       {/* Coach reteach queue — puzzles the student got wrong in the same
           period as the top-line stats. Newest miss first with links to

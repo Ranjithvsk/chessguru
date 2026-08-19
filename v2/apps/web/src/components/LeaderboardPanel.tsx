@@ -12,11 +12,13 @@ type Row = {
   name: string | null;
   rank: number;
   score: number;
+  deltaRank?: number | null;
   currentRating: number;
   puzzles: number;
   blindfoldPuzzles: number;
   accuracy: number;
   streak: number;
+  badgesUnlocked?: number;
 };
 type LeaderboardResp = {
   period: string;
@@ -121,7 +123,16 @@ export function LeaderboardPanel() {
                                  "";
                 return (
                   <tr key={r.studentId} className={`border-t border-ink-800/60 transition hover:bg-ink-800/40 ${isMe ? "bg-brand-900/25" : rowClass}`}>
-                    <td className="px-3 py-2"><RankPill rank={r.rank} /></td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-1.5">
+                        <RankPill rank={r.rank} />
+                        {typeof r.deltaRank === "number" && r.deltaRank !== 0 && (
+                          <span className={`text-[10px] font-semibold ${r.deltaRank > 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                            {r.deltaRank > 0 ? "▲" : "▼"}{Math.abs(r.deltaRank)}
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-3 py-2">
                       <Link to={`/academy/students/${encodeURIComponent(r.studentId)}/performance`}
                         className="font-semibold text-white hover:text-brand-300">{r.name || r.username}</Link>

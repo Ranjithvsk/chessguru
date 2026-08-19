@@ -6,8 +6,10 @@
 // Route: /academy/leaderboard
 import { useState } from "react";
 import { Link, Navigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, get } from "../lib/api";
+
+const BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
 
 type Row = {
   studentId: string;
@@ -16,10 +18,13 @@ type Row = {
   coachId: string | null;
   rank: number;
   score: number;
+  prevRank?: number | null;
+  deltaRank?: number | null;
   currentRating: number;
   peakRating: number;
   blindfoldRating: number | null;
   puzzles: number;
+  boostedPuzzles?: number;
   blindfoldPuzzles: number;
   puzzlesLifetime: number;
   accuracy: number;
@@ -30,11 +35,13 @@ type Row = {
   streak: number;
   longestStreak: number;
   attendance30d: number;
+  badgesUnlocked?: number;
 };
 
 type Champion = { studentId: string; username: string; name: string | null; value: number } | null;
 type LeaderboardResp = {
   period: string;
+  bucket: string | null;
   computedAt: string;
   academyId: string;
   studentCount: number;
@@ -48,6 +55,15 @@ type LeaderboardResp = {
     longestStreak: Champion;
     mostThemes: Champion;
     blindfoldKing: Champion;
+    comeback?: Champion;
+  };
+  activeBoost: null | {
+    theme: string;
+    multiplier: number;
+    startAt: string;
+    endAt: string;
+    byName: string;
+    note: string;
   };
 };
 
@@ -59,6 +75,16 @@ const PERIODS: { key: Period; label: string }[] = [
   { key: "180d",     label: "6 months" },
   { key: "365d",     label: "1 year" },
   { key: "lifetime", label: "Lifetime" },
+];
+
+type Bucket = "all" | "beginner" | "novice" | "improver" | "advanced" | "expert";
+const BUCKETS: { key: Bucket; label: string; range: string }[] = [
+  { key: "all",       label: "All levels",  range: "" },
+  { key: "beginner",  label: "Beginner",    range: "< 1000" },
+  { key: "novice",    label: "Novice",      range: "1000–1299" },
+  { key: "improver",  label: "Improver",    range: "1300–1599" },
+  { key: "advanced",  label: "Advanced",    range: "1600–1899" },
+  { key: "expert",    label: "Expert",      range: "1900+" },
 ];
 
 function fmtMs(ms: number | null): string {
@@ -186,14 +212,166 @@ function ChampionCard({ emoji, title, subtitle, champion, formatValue, tone = "b
   );
 }
 
+/** Rank-delta arrow: ▲n / ▼n / • (new). Colored by direction. */
+function RankDelta({ delta }: { delta: number | null | undefined }) {
+  if (delta == null) return <span className="text-[10px] text-ink-600" title="new to leaderboard">•</span>;
+  if (delta === 0) return <span className="text-[10px] text-ink-500">—</span>;
+  if (delta > 0) return <span className="text-[10px] font-semibold text-emerald-400" title={`up ${delta}`}>▲{delta}</span>;
+  return <span className="text-[10px] font-semibold text-rose-400" title={`down ${-delta}`}>▼{-delta}</span>;
+}
+
+const COMMON_BOOST_THEMES = [
+  { theme: "endgame",       label: "♚ Endgame Week",     desc: "Force training on real-game conversion" },
+  { theme: "mate",          label: "☠️ Mate Week",        desc: "Master checkmating patterns" },
+  { theme: "fork",          label: "🍴 Fork Week",        desc: "Sharpen double-attack vision" },
+  { theme: "pin",           label: "📌 Pin Week",         desc: "Punish immobile pieces" },
+  { theme: "sacrifice",     label: "💥 Sacrifice Week",   desc: "Learn to invest material for advantage" },
+  { theme: "defensiveMove", label: "🛡️ Defence Week",     desc: "Hold worse positions and swindle draws" },
+  { theme: "attraction",    label: "🧲 Attraction Week",  desc: "Lure kings and queens onto bad squares" },
+  { theme: "blindfold",     label: "🙈 Blindfold Week",   desc: "Visualisation — the master's edge" },
+];
+
+function BoostBanner({ boost, canManage, onEnd }: { boost: LeaderboardResp["activeBoost"]; canManage: boolean; onEnd: () => void }) {
+  if (!boost) return null;
+  const daysLeft = Math.max(0, Math.ceil((new Date(boost.endAt).getTime() - Date.now()) / (24 * 60 * 60_000)));
+  return (
+    <div className="relative overflow-hidden rounded-xl2 border border-fuchsia-500/40 bg-gradient-to-r from-fuchsia-900/40 via-purple-900/40 to-brand-900/40 p-4">
+      <div className="pointer-events-none absolute -top-6 -right-6 h-32 w-32 rounded-full bg-fuchsia-500/20 blur-[80px]" />
+      <div className="relative flex flex-wrap items-baseline gap-3">
+        <span className="text-2xl">🎯</span>
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-fuchsia-300">Academy boost active · {daysLeft}d left</div>
+          <div className="mt-0.5 text-lg font-display text-white">
+            <b className="capitalize">{boost.theme}</b>
+            <span className="ml-2 rounded-full bg-white/10 px-2 py-0.5 text-sm tabular-nums">{boost.multiplier.toFixed(1)}× score</span>
+          </div>
+          <div className="mt-1 text-xs text-fuchsia-200">
+            Every {boost.theme === "blindfold" ? "blindfold" : `"${boost.theme}"`} puzzle you solve counts {boost.multiplier}× on the leaderboard.
+            {boost.note && <span className="ml-1 italic text-white/70">— {boost.note}</span>}
+          </div>
+          <div className="mt-0.5 text-[10px] text-ink-400">Set by {boost.byName}</div>
+        </div>
+        {canManage && (
+          <button type="button" onClick={onEnd}
+            className="ml-auto rounded-lg border border-white/20 px-2.5 py-1 text-[11px] text-white/80 hover:bg-white/10">
+            End boost
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StartBoostModal({ open, onClose, onSubmit, submitting }: {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: (b: { theme: string; multiplier: number; days: number; note: string }) => void;
+  submitting: boolean;
+}) {
+  const [theme, setTheme] = useState("endgame");
+  const [customTheme, setCustomTheme] = useState("");
+  const [multiplier, setMultiplier] = useState(1.5);
+  const [days, setDays] = useState(7);
+  const [note, setNote] = useState("");
+  if (!open) return null;
+  const chosen = theme === "__custom" ? customTheme.trim() : theme;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-2xl border border-fuchsia-500/40 bg-ink-900 p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 className="font-display text-lg text-white">🎯 Start a boost week</h2>
+          <button onClick={onClose} className="text-ink-400 hover:text-white">×</button>
+        </div>
+        <p className="mt-1 text-xs text-ink-400">
+          Pick a theme to spotlight — every matching puzzle students solve will count {multiplier}× on the leaderboard for {days} days. Great for driving directed practice on a real chess weakness.
+        </p>
+        <div className="mt-4 space-y-3">
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">Boost theme</label>
+            <div className="mt-1 grid gap-1.5 sm:grid-cols-2">
+              {COMMON_BOOST_THEMES.map((t) => (
+                <label key={t.theme} className={`flex cursor-pointer items-start gap-2 rounded-lg border p-2 text-xs transition ${theme === t.theme ? "border-fuchsia-500/70 bg-fuchsia-900/30 text-white" : "border-ink-700 bg-ink-800/40 text-ink-300 hover:bg-ink-800"}`}>
+                  <input type="radio" name="theme" value={t.theme} checked={theme === t.theme}
+                    onChange={() => setTheme(t.theme)} className="mt-0.5 accent-fuchsia-500" />
+                  <div>
+                    <div className="font-semibold">{t.label}</div>
+                    <div className="text-[10px] opacity-80">{t.desc}</div>
+                  </div>
+                </label>
+              ))}
+              <label className={`flex cursor-pointer items-center gap-2 rounded-lg border p-2 text-xs transition ${theme === "__custom" ? "border-fuchsia-500/70 bg-fuchsia-900/30 text-white" : "border-ink-700 bg-ink-800/40 text-ink-300 hover:bg-ink-800"}`}>
+                <input type="radio" name="theme" value="__custom" checked={theme === "__custom"}
+                  onChange={() => setTheme("__custom")} className="accent-fuchsia-500" />
+                <input value={customTheme} onChange={(e) => setCustomTheme(e.target.value)} placeholder="Custom theme (e.g. skewer)"
+                  className="flex-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 text-white placeholder:text-ink-500"
+                  onFocus={() => setTheme("__custom")} />
+              </label>
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">Multiplier</label>
+              <div className="mt-1 flex items-center gap-2">
+                <input type="range" min="1.2" max="3" step="0.1" value={multiplier}
+                  onChange={(e) => setMultiplier(Number(e.target.value))} className="flex-1 accent-fuchsia-500" />
+                <span className="w-12 rounded bg-ink-800 px-2 py-1 text-center text-sm tabular-nums text-white">{multiplier.toFixed(1)}×</span>
+              </div>
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">Duration (days)</label>
+              <div className="mt-1 flex items-center gap-2">
+                <input type="range" min="1" max="30" step="1" value={days}
+                  onChange={(e) => setDays(Number(e.target.value))} className="flex-1 accent-fuchsia-500" />
+                <span className="w-12 rounded bg-ink-800 px-2 py-1 text-center text-sm tabular-nums text-white">{days}d</span>
+              </div>
+            </div>
+          </div>
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">Note to students (optional)</label>
+            <input value={note} onChange={(e) => setNote(e.target.value)}
+              placeholder="e.g. focus on K+P endings this week"
+              className="mt-1 w-full rounded border border-ink-700 bg-ink-900 px-2 py-1.5 text-sm text-white placeholder:text-ink-500" />
+          </div>
+        </div>
+        <div className="mt-4 flex items-center justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white">Cancel</button>
+          <button
+            disabled={!chosen || submitting}
+            onClick={() => onSubmit({ theme: chosen, multiplier, days, note })}
+            className="rounded-lg bg-fuchsia-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-fuchsia-500 disabled:opacity-50">
+            {submitting ? "Starting…" : `Start ${chosen ? `"${chosen}"` : ""} boost →`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function LeaderboardPage() {
   const { data: auth } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
+  const qc = useQueryClient();
   const [period, setPeriod] = useState<Period>("7d");
+  const [bucket, setBucket] = useState<Bucket>("all");
+  const [showBoost, setShowBoost] = useState(false);
+  const canManage = !!auth?.loggedIn && (auth.role === "academy_owner" || auth.role === "coach");
   const q = useQuery({
-    queryKey: ["academy-leaderboard", period],
-    queryFn: () => get<LeaderboardResp>(`/api/academy/leaderboard?period=${period}`),
+    queryKey: ["academy-leaderboard", period, bucket],
+    queryFn: () => get<LeaderboardResp>(`/api/academy/leaderboard?period=${period}${bucket !== "all" ? `&bucket=${bucket}` : ""}`),
     enabled: !!auth?.loggedIn && !!auth?.academyId,
     staleTime: 60_000,
+  });
+  const startBoostMut = useMutation({
+    mutationFn: (body: { theme: string; multiplier: number; days: number; note: string }) =>
+      fetch(`${BASE}/api/academy/boost`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then((r) => r.json()),
+    onSuccess: () => { setShowBoost(false); qc.invalidateQueries({ queryKey: ["academy-leaderboard"] }); },
+  });
+  const endBoostMut = useMutation({
+    mutationFn: () => fetch(`${BASE}/api/academy/boost/end`, { method: "POST", credentials: "include" }).then((r) => r.json()),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["academy-leaderboard"] }); },
   });
 
   if (auth && !auth.loggedIn) return <Navigate to="/login?back=/academy/leaderboard" replace />;
@@ -240,9 +418,35 @@ export default function LeaderboardPage() {
               </button>
             ))}
           </div>
+          {canManage && !q.data?.activeBoost && (
+            <button type="button" onClick={() => setShowBoost(true)}
+              className="rounded-lg bg-fuchsia-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-fuchsia-500">
+              🎯 Start boost
+            </button>
+          )}
+          <Link to="/academy/compare" className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs font-medium text-ink-300 hover:text-white">
+            ⚔️ Compare
+          </Link>
           <Link to="/academy" className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs font-medium text-ink-300 hover:text-white">← Academy</Link>
         </div>
       </header>
+
+      {/* Active boost banner — driven by the coach; multiplies matching-theme
+          puzzles for real training focus this week. */}
+      <BoostBanner boost={q.data?.activeBoost ?? null} canManage={canManage} onEnd={() => endBoostMut.mutate()} />
+
+      {/* Rating-bucket tabs — beginners compete inside their bucket, not
+          against the whole roster. Fair fights = motivation for improvers. */}
+      <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-ink-800 bg-ink-950/40 p-1.5">
+        {BUCKETS.map((b) => (
+          <button key={b.key} type="button" onClick={() => setBucket(b.key)}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${bucket === b.key ? "bg-brand-600 text-white shadow" : "bg-transparent text-ink-300 hover:bg-ink-800"}`}
+            title={b.range || "Every student in your academy"}>
+            {b.label}
+            {b.range && <span className="ml-1 text-[10px] opacity-70">{b.range}</span>}
+          </button>
+        ))}
+      </div>
 
       {q.isLoading && <div className="text-sm text-ink-400">Loading leaderboard…</div>}
       {q.error && (
@@ -270,6 +474,9 @@ export default function LeaderboardPage() {
           <ChampionCard tone="rose"    emoji="🔥" title="Longest streak" subtitle="days in a row" champion={champs.longestStreak} formatValue={(v) => `${v}d`} />
           <ChampionCard tone="brand"   emoji="🎨" title="Most theme variety" subtitle="distinct themes" champion={champs.mostThemes} formatValue={(v) => String(v)} />
           <ChampionCard tone="fuchsia" emoji="🙈" title="Blindfold king" subtitle="blindfold puzzles" champion={champs.blindfoldKing} formatValue={(v) => String(v)} />
+          {champs.comeback && (
+            <ChampionCard tone="rose" emoji="🚀" title="Comeback of the period" subtitle="ranks moved up" champion={champs.comeback} formatValue={(v) => `+${v}`} />
+          )}
         </div>
       )}
 
@@ -326,11 +533,22 @@ export default function LeaderboardPage() {
                                  "";
                 return (
                   <tr key={r.studentId} className={`border-t border-ink-800 transition hover:bg-ink-800/40 ${isMe ? "bg-brand-900/20" : topClass}`}>
-                    <td className={`sticky left-0 z-10 px-3 py-2 ${isMe ? "bg-brand-900/30" : "bg-ink-900/60"}`}><RankBadge rank={r.rank} pulse /></td>
+                    <td className={`sticky left-0 z-10 px-3 py-2 ${isMe ? "bg-brand-900/30" : "bg-ink-900/60"}`}>
+                      <div className="flex flex-col items-center gap-0.5">
+                        <RankBadge rank={r.rank} pulse />
+                        <RankDelta delta={r.deltaRank} />
+                      </div>
+                    </td>
                     <td className="px-3 py-2">
                       <Link to={`/academy/students/${encodeURIComponent(r.studentId)}/performance`}
                         className="font-semibold text-white hover:text-brand-300">{r.name || r.username}</Link>
-                      <div className="text-xs text-ink-500">@{r.username}{isMe && <span className="ml-1 text-brand-300">· you</span>}</div>
+                      <div className="text-xs text-ink-500">
+                        @{r.username}
+                        {isMe && <span className="ml-1 text-brand-300">· you</span>}
+                        {(r.badgesUnlocked ?? 0) > 0 && (
+                          <span className="ml-2 rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-200" title="Achievements unlocked">🎖️ {r.badgesUnlocked}</span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-3 py-2 text-right min-w-[110px]">
                       <span className="tabular-nums font-bold text-brand-200">{r.score.toFixed(1)}</span>
@@ -384,6 +602,13 @@ export default function LeaderboardPage() {
         Score is normalised inside your academy (percentile-based) so a rising star doesn't need to catch the top rating to move up.
         Accuracy requires ≥5 puzzles in the period to count.
       </div>
+
+      <StartBoostModal
+        open={showBoost}
+        onClose={() => setShowBoost(false)}
+        onSubmit={(b) => startBoostMut.mutate(b)}
+        submitting={startBoostMut.isPending}
+      />
     </div>
   );
 }

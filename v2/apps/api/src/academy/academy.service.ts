@@ -14,6 +14,7 @@ import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { randomBytes } from "crypto";
 import { sendMail } from "../lib/mail";
+import { ACHIEVEMENTS, type Achievement } from "./achievements.catalog";
 
 const INVITE_TTL_DAYS = 7;
 
@@ -42,6 +43,8 @@ export class AcademyService {
   private invites() { return this.conn.db!.collection("academyInvites"); }
   private users()   { return this.conn.db!.collection("users"); }
   private academies(){return this.conn.db!.collection("academies"); }
+  private badges()  { return this.conn.db!.collection("academyBadges"); }
+  private boosts()  { return this.conn.db!.collection("academyBoosts"); }
 
   /** Owner-only guard: session must have role=academy_owner + academyId. */
   private ensureOwner(session: any): { academyId: string; userId: string; username: string } {
@@ -1768,12 +1771,13 @@ export class AcademyService {
    *  Period options: today | 7d | 30d | 180d | 365d | lifetime. Some
    *  columns (current rating, peak rating, streak, longestStreak) are
    *  period-independent; the rest are windowed. */
-  async buildLeaderboard(session: any, periodRaw: string) {
+  async buildLeaderboard(session: any, periodRaw: string, opts: { bucket?: string; withDelta?: boolean } = {}) {
     const academyId = session?.academyId;
     const userId = session?.userId;
     if (!userId || !academyId) throw new ForbiddenException("sign in first");
 
     const period = ["today", "7d", "30d", "180d", "365d", "lifetime"].includes(periodRaw) ? periodRaw : "7d";
+    const bucket = opts.bucket && ["beginner", "novice", "improver", "advanced", "expert"].includes(opts.bucket) ? opts.bucket : null;
     const now = Date.now();
     const IST_OFFSET_MIN = 330;
     const nowIst = new Date(now + IST_OFFSET_MIN * 60_000);
@@ -1789,9 +1793,14 @@ export class AcademyService {
                               new Date(now - 365 * dayMs);
 
     // Roster — every student in the academy
-    const students: any[] = await this.users()
+    let students: any[] = await this.users()
       .find({ academyId, role: "student" }, { projection: { _id: 1, username: 1, name: 1, coachId: 1, dailyPuzzleStreak: 1 } })
       .toArray();
+    // Active boost — 1.5× multiplier on puzzles solved that match the theme
+    // (or `k=blindfold` special case) for the current period ONLY. So a coach
+    // saying "this week is endgame week" actually re-shuffles the ranking
+    // toward students who did endgame puzzles.
+    const activeBoost = await this.getActiveBoost(academyId);
     if (students.length === 0) {
       return { period, computedAt: new Date().toISOString(), academyId, studentCount: 0, weights: WEIGHTS, rows: [], champions: {} };
     }
@@ -1817,6 +1826,8 @@ export class AcademyService {
     // we don't scan the collection multiple times.
     const scanMatch = { d: { $gte: cutoff ?? new Date(0) } };
 
+    const boostTheme = activeBoost?.theme || null;
+    const boostIsBlindfold = boostTheme === "blindfold";
     const roundAgg = await this.conn.db!.collection("rounds").aggregate([
       // Fast pre-filter on date if we have a cutoff (index-friendly).
       ...(cutoff ? [{ $match: scanMatch }] : []),
@@ -1824,12 +1835,25 @@ export class AcademyService {
           u: { $arrayElemAt: [{ $split: ["$_id", ":"] }, 0] },
           w: 1, ms: 1, th: 1, k: 1, d: 1,
       } },
-      { $match: { u: { $in: ids } } },
+      { $match: { u: { $in: ids as any } } },
       { $group: {
           _id: "$u",
           puzzles: { $sum: 1 },
           wins: { $sum: { $cond: ["$w", 1, 0] } },
           blindfoldPuzzles: { $sum: { $cond: [{ $eq: ["$k", "blindfold"] }, 1, 0] } },
+          // Count puzzles that match the active boost — theme or blindfold-mode.
+          boostedPuzzles: {
+            $sum: {
+              $cond: [
+                boostTheme
+                  ? (boostIsBlindfold
+                      ? { $eq: ["$k", "blindfold"] }
+                      : { $in: [boostTheme, { $ifNull: ["$th", []] }] })
+                  : false,
+                1, 0,
+              ],
+            },
+          },
           themes: { $addToSet: { $cond: [{ $isArray: "$th" }, "$th", []] } }, // array of arrays
           totalMs: { $sum: { $ifNull: ["$ms", 0] } },
           timedCount: { $sum: { $cond: [{ $gt: ["$ms", 0] }, 1, 0] } },
@@ -1843,6 +1867,7 @@ export class AcademyService {
         puzzles: r.puzzles ?? 0,
         wins: r.wins ?? 0,
         blindfoldPuzzles: r.blindfoldPuzzles ?? 0,
+        boostedPuzzles: r.boostedPuzzles ?? 0,
         themesCount: themeFlat.size,
         themes: [...themeFlat].slice(0, 12),
         avgSolveMs: r.timedCount > 0 ? Math.round(r.totalMs / r.timedCount) : null,
@@ -1906,7 +1931,8 @@ export class AcademyService {
     };
 
     // Assemble raw rows (no rank/score yet).
-    const raw = students.map((s: any) => {
+    const boostMul = activeBoost?.multiplier ?? 1;
+    let raw = students.map((s: any) => {
       const p = perfMap.get(String(s._id));
       const r = roundMap.get(String(s._id));
       const l = lifetimeMap.get(String(s._id));
@@ -1914,6 +1940,10 @@ export class AcademyService {
       const puzzles = r?.puzzles ?? 0;
       const wins = r?.wins ?? 0;
       const accuracy = puzzles > 0 ? wins / puzzles : 0;
+      const boostedPuzzles = r?.boostedPuzzles ?? 0;
+      // Boost-adjusted puzzle count feeds the scoring dimension. Original
+      // `puzzles` stays honest for display.
+      const puzzlesForScore = puzzles + Math.max(0, boostMul - 1) * boostedPuzzles;
       return {
         studentId: String(s._id),
         username: s.username,
@@ -1923,6 +1953,8 @@ export class AcademyService {
         blindfoldRating: p?.blindfold?.gl?.r ? Math.round(p.blindfold.gl.r) : null,
         peakRating: l?.peakRating ?? Math.round(p?.puzzle?.gl?.r ?? 1500),
         puzzles,
+        boostedPuzzles,
+        puzzlesForScore,
         blindfoldPuzzles: r?.blindfoldPuzzles ?? 0,
         puzzlesLifetime: l?.puzzlesLifetime ?? puzzles,
         accuracy,
@@ -1936,20 +1968,33 @@ export class AcademyService {
       };
     });
 
+    // Rating-bucket filter — beginner <1000, novice 1000-1299, improver
+    // 1300-1599, advanced 1600-1899, expert 1900+. Applied here so score
+    // percentiles below are computed WITHIN the bucket (fair peer comparison).
+    if (bucket) {
+      const inBucket = (r: number) =>
+        bucket === "beginner" ? r < 1000 :
+        bucket === "novice"   ? r >= 1000 && r < 1300 :
+        bucket === "improver" ? r >= 1300 && r < 1600 :
+        bucket === "advanced" ? r >= 1600 && r < 1900 :
+        bucket === "expert"   ? r >= 1900 : true;
+      raw = raw.filter((r) => inBucket(r.currentRating));
+    }
+
     // ── Score & rank ──
     // Each dimension normalized to 0..1 within THIS academy (percentile-ish).
     // Then weighted sum × 100 for the ChessGuru Score.
     const norm = (val: number, min: number, max: number) => max <= min ? 0 : Math.max(0, Math.min(1, (val - min) / (max - min)));
     const ratings = raw.map((r) => r.currentRating);
     const minR = Math.min(...ratings), maxR = Math.max(...ratings);
-    const puzzlesArr = raw.map((r) => Math.log1p(r.puzzles));
+    const puzzlesArr = raw.map((r) => Math.log1p(r.puzzlesForScore));
     const minP = 0, maxP = Math.max(...puzzlesArr, 0.1);
     // Streak scaling — sqrt & cap so a 300-day streak isn't 10× a 30-day.
     const streakScore = (n: number) => Math.min(1, Math.sqrt(Math.min(n, 60)) / Math.sqrt(60));
     const rows = raw.map((r) => {
       const parts = {
         rating:     norm(r.currentRating, minR, maxR),
-        puzzles:    norm(Math.log1p(r.puzzles), minP, maxP),
+        puzzles:    norm(Math.log1p(r.puzzlesForScore), minP, maxP),
         accuracy:   r.puzzles >= 5 ? r.accuracy : 0, // <5 rounds = not enough signal
         streak:     streakScore(r.streak),
         themes:     Math.min(1, r.themesCount / 20),
@@ -1966,6 +2011,61 @@ export class AcademyService {
     });
     rows.sort((a, b) => b.score - a.score);
     rows.forEach((r: any, i) => { r.rank = i + 1; });
+
+    // ── Rank delta — compare current-period rank against the previous
+    // period of the same length (7d → previous 7d, lifetime = skip).
+    // Only for non-lifetime periods; opts.withDelta gates the extra scan.
+    if (opts.withDelta !== false && period !== "lifetime" && cutoff) {
+      const prevEnd = cutoff;
+      const windowMs = now - cutoff.getTime();
+      const prevStart = new Date(prevEnd.getTime() - windowMs);
+      const prevRoundAgg = await this.conn.db!.collection("rounds").aggregate([
+        { $match: { d: { $gte: prevStart, $lt: prevEnd } } },
+        { $project: { u: { $arrayElemAt: [{ $split: ["$_id", ":"] }, 0] }, w: 1 } },
+        { $match: { u: { $in: ids as any } } },
+        { $group: { _id: "$u", puzzles: { $sum: 1 }, wins: { $sum: { $cond: ["$w", 1, 0] } } } },
+      ]).toArray();
+      const prevMap = new Map<string, { puzzles: number; wins: number }>();
+      for (const r of prevRoundAgg) prevMap.set(String(r._id), { puzzles: r.puzzles ?? 0, wins: r.wins ?? 0 });
+      // Prev-period score uses SAME weights but with prev-period puzzle+accuracy;
+      // rating/streak/themes/attendance are current (approximation — good enough
+      // to detect week-over-week movement).
+      const prevRaw = raw.map((r: any) => {
+        const p = prevMap.get(r.studentId);
+        const puzzles = p?.puzzles ?? 0;
+        const accuracy = puzzles > 0 ? (p?.wins ?? 0) / puzzles : 0;
+        const parts = {
+          rating:     norm(r.currentRating, minR, maxR),
+          puzzles:    norm(Math.log1p(puzzles), 0, Math.max(...raw.map((rr: any) => Math.log1p(prevMap.get(rr.studentId)?.puzzles ?? 0)), 0.1)),
+          accuracy:   puzzles >= 5 ? accuracy : 0,
+          streak:     streakScore(r.streak),
+          themes:     Math.min(1, r.themesCount / 20),
+          attendance: Math.min(1, r.attendance30d / 30),
+        };
+        const score =
+          parts.rating * WEIGHTS.rating + parts.puzzles * WEIGHTS.puzzles +
+          parts.accuracy * WEIGHTS.accuracy + parts.streak * WEIGHTS.streak +
+          parts.themes * WEIGHTS.themes + parts.attendance * WEIGHTS.attendance;
+        return { studentId: r.studentId, score };
+      });
+      prevRaw.sort((a, b) => b.score - a.score);
+      const prevRankMap = new Map<string, number>();
+      prevRaw.forEach((r, i) => prevRankMap.set(r.studentId, i + 1));
+      for (const r of rows as any[]) {
+        const pr = prevRankMap.get(r.studentId);
+        r.prevRank = pr ?? null;
+        r.deltaRank = pr ? pr - r.rank : null; // positive = moved UP
+      }
+    }
+
+    // ── Badges — count per student, cheap join against the roster ids.
+    const badgeRows: any[] = await this.badges().aggregate([
+      { $match: { academyId, userId: { $in: ids } } },
+      { $group: { _id: "$userId", count: { $sum: 1 } } },
+    ]).toArray();
+    const badgeMap = new Map<string, number>();
+    for (const b of badgeRows) badgeMap.set(String(b._id), b.count);
+    for (const r of rows as any[]) r.badgesUnlocked = badgeMap.get(r.studentId) ?? 0;
 
     // Micro-champions — highest achiever in each dimension for the header.
     const champion = (fn: (r: any) => number, minVal = 1) => {
@@ -1990,14 +2090,32 @@ export class AcademyService {
       blindfoldKing: champion((r) => r.blindfoldPuzzles),
     };
 
+    // Comeback of the period — biggest positive deltaRank.
+    let comeback: any = null;
+    if (opts.withDelta !== false && period !== "lifetime") {
+      const withDelta = (rows as any[]).filter((r) => typeof r.deltaRank === "number" && r.deltaRank > 0);
+      withDelta.sort((a, b) => (b.deltaRank || 0) - (a.deltaRank || 0));
+      const c = withDelta[0];
+      if (c) comeback = { studentId: c.studentId, username: c.username, name: c.name, value: c.deltaRank };
+    }
+
     return {
       period,
+      bucket,
       computedAt: new Date().toISOString(),
       academyId,
       studentCount: rows.length,
       weights: WEIGHTS,
       rows,
-      champions,
+      champions: { ...champions, comeback },
+      activeBoost: activeBoost ? {
+        theme: activeBoost.theme,
+        multiplier: activeBoost.multiplier,
+        startAt: activeBoost.startAt,
+        endAt: activeBoost.endAt,
+        byName: activeBoost.byName,
+        note: activeBoost.note || "",
+      } : null,
     };
   }
 
@@ -2140,6 +2258,300 @@ export class AcademyService {
       streakAtRisk,
       todayIst,
     };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  ACHIEVEMENTS
+  // ─────────────────────────────────────────────────────────────────────
+
+  /** Evaluate a student's raw activity against the achievement catalog and
+   *  return `{ unlocked, progress }`. Idempotent — the actual persistence
+   *  (writing to `academyBadges`) happens in a separate step so this can
+   *  also be called for preview (before persistence). */
+  async evaluateAchievements(studentId: string): Promise<Array<Achievement & { unlocked: boolean; progress: number; progressLabel: string }>> {
+    if (!studentId) return [];
+    const [user, perf, roundAgg, themeAgg, weekAgg] = await Promise.all([
+      this.users().findOne({ _id: studentId as any }, { projection: { dailyPuzzleStreak: 1 } }),
+      this.conn.db!.collection("userperfs").findOne({ _id: studentId as any }, { projection: { puzzle: 1, blindfold: 1 } }),
+      // Overall counts + peak rating
+      this.conn.db!.collection("rounds").aggregate([
+        { $match: { _id: { $regex: `^${studentId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:` } as any } },
+        { $group: {
+            _id: null,
+            total: { $sum: 1 },
+            blindfold: { $sum: { $cond: [{ $eq: ["$k", "blindfold"] }, 1, 0] } },
+            peakPr: { $max: "$pr" },
+            themes: { $addToSet: "$th" },
+        } },
+      ]).toArray().then((rows) => rows[0] || null),
+      // Theme mastery — per-theme count + accuracy (lifetime).
+      this.conn.db!.collection("rounds").aggregate([
+        { $match: { _id: { $regex: `^${studentId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:` } as any } },
+        { $project: { th: 1, w: 1 } },
+        { $unwind: { path: "$th", preserveNullAndEmptyArrays: false } },
+        { $group: {
+            _id: "$th",
+            n: { $sum: 1 },
+            wins: { $sum: { $cond: ["$w", 1, 0] } },
+        } },
+      ]).toArray(),
+      // Speed + accuracy for special badges — last 7d only.
+      this.conn.db!.collection("rounds").aggregate([
+        { $match: {
+            _id: { $regex: `^${studentId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:` } as any,
+            d: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60_000) },
+        } },
+        { $group: {
+            _id: null,
+            n: { $sum: 1 },
+            wins: { $sum: { $cond: ["$w", 1, 0] } },
+            fast: { $sum: { $cond: [{ $and: [{ $gt: ["$ms", 0] }, { $lt: ["$ms", 10_000] }] }, 1, 0] } },
+        } },
+      ]).toArray().then((rows) => rows[0] || null),
+    ]);
+
+    const themeMap = new Map<string, { n: number; wins: number }>();
+    for (const t of themeAgg) themeMap.set(String(t._id), { n: t.n, wins: t.wins });
+    // Distinct-themes count = flatten th sets from roundAgg.
+    const distinctThemes = new Set<string>();
+    for (const arr of (roundAgg?.themes || [])) for (const t of (arr || [])) if (typeof t === "string") distinctThemes.add(t);
+
+    const totalRounds     = roundAgg?.total ?? 0;
+    const blindRounds     = roundAgg?.blindfold ?? 0;
+    const peakRating      = roundAgg?.peakPr ?? Math.round(perf?.puzzle?.gl?.r ?? 1500);
+    const currentRating   = Math.round(perf?.puzzle?.gl?.r ?? 1500);
+    const streakCurrent   = user?.dailyPuzzleStreak?.current ?? 0;
+    const streakLongest   = user?.dailyPuzzleStreak?.longest ?? 0;
+    const week            = weekAgg;
+
+    return ACHIEVEMENTS.map((a) => {
+      let unlocked = false, progress = 0, target = a.n ?? 1;
+      let progressLabel = "";
+      switch (a.kind) {
+        case "count-rounds": {
+          progress = totalRounds;
+          unlocked = totalRounds >= target;
+          progressLabel = `${totalRounds}/${target} puzzles`;
+          break;
+        }
+        case "count-blindfold": {
+          progress = blindRounds;
+          unlocked = blindRounds >= target;
+          progressLabel = `${blindRounds}/${target} blindfold puzzles`;
+          break;
+        }
+        case "current-rating": {
+          progress = currentRating;
+          unlocked = currentRating >= target;
+          progressLabel = `${currentRating} / ${target} rating`;
+          break;
+        }
+        case "peak-rating": {
+          progress = peakRating;
+          unlocked = peakRating >= target;
+          progressLabel = `peak ${peakRating} / ${target}`;
+          break;
+        }
+        case "theme-mastery": {
+          const t = themeMap.get(a.theme || "");
+          const n = t?.n ?? 0;
+          const acc = t && t.n > 0 ? (t.wins / t.n) : 0;
+          progress = n;
+          unlocked = n >= (a.n || 0) && acc >= (a.accuracy || 0);
+          progressLabel = `${n}/${a.n} ${a.theme} @ ${Math.round(acc*100)}% (need ${Math.round((a.accuracy||0)*100)}%)`;
+          break;
+        }
+        case "current-streak": {
+          progress = streakCurrent;
+          unlocked = streakCurrent >= target;
+          progressLabel = `${streakCurrent}/${target}d streak`;
+          break;
+        }
+        case "longest-streak": {
+          progress = streakLongest;
+          unlocked = streakLongest >= target;
+          progressLabel = `longest ${streakLongest}/${target}d`;
+          break;
+        }
+        case "speed-week": {
+          progress = week?.fast ?? 0;
+          unlocked = (week?.fast ?? 0) >= target;
+          progressLabel = `${week?.fast ?? 0}/${target} fast solves in 7d`;
+          break;
+        }
+        case "accuracy-week": {
+          const n = week?.n ?? 0;
+          const acc = n > 0 ? ((week?.wins ?? 0) / n) : 0;
+          progress = n;
+          unlocked = n >= target && acc >= (a.accuracy || 0);
+          progressLabel = `${n}/${target} solves in 7d @ ${Math.round(acc*100)}% (need ${Math.round((a.accuracy||0)*100)}%)`;
+          break;
+        }
+        case "theme-variety": {
+          progress = distinctThemes.size;
+          unlocked = distinctThemes.size >= target;
+          progressLabel = `${distinctThemes.size}/${target} distinct themes`;
+          break;
+        }
+      }
+      return { ...a, unlocked, progress, progressLabel };
+    });
+  }
+
+  /** Persist newly-unlocked badges for a student and return the list of
+   *  newly-awarded ids (so a "just unlocked" toast can fire). */
+  async awardAchievements(academyId: string, studentId: string): Promise<string[]> {
+    const results = await this.evaluateAchievements(studentId);
+    const unlocked = results.filter((r) => r.unlocked).map((r) => r.id);
+    if (unlocked.length === 0) return [];
+    const existing = await this.badges().find(
+      { userId: studentId, academyId, achievementId: { $in: unlocked } },
+      { projection: { achievementId: 1 } },
+    ).toArray();
+    const existingIds = new Set(existing.map((r: any) => r.achievementId));
+    const toInsert = unlocked.filter((id) => !existingIds.has(id));
+    if (toInsert.length === 0) return [];
+    const now = new Date();
+    await this.badges().insertMany(toInsert.map((id) => ({
+      userId: studentId, academyId, achievementId: id, unlockedAt: now,
+    })));
+    return toInsert;
+  }
+
+  /** Public read for the achievement gallery. Any academy member can see
+   *  any other member's achievements — public wall of fame within the
+   *  academy. Also auto-awards on read so the DB stays fresh. */
+  async listAchievementsFor(session: any, studentId: string) {
+    if (!session?.userId || !session?.academyId) throw new ForbiddenException("sign in first");
+    const student: any = await this.users().findOne({ _id: studentId as any, academyId: session.academyId }, { projection: { _id: 1, username: 1, name: 1 } });
+    if (!student) throw new BadRequestException("no such student in your academy");
+    const newly = await this.awardAchievements(session.academyId, studentId);
+    const catalog = await this.evaluateAchievements(studentId);
+    const persisted: any[] = await this.badges().find({ userId: studentId, academyId: session.academyId }).toArray();
+    const persistedMap = new Map<string, Date>();
+    for (const p of persisted) persistedMap.set(p.achievementId, p.unlockedAt);
+    const rows = catalog.map((a) => ({
+      ...a,
+      unlockedAt: persistedMap.get(a.id) || null,
+    }));
+    return {
+      student: { _id: student._id, username: student.username, name: student.name || null },
+      newly,
+      unlockedCount: rows.filter((r) => r.unlocked).length,
+      total: rows.length,
+      achievements: rows,
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  COACH BOOSTS — "Endgame Week" style training focus
+  // ─────────────────────────────────────────────────────────────────────
+
+  /** Coach/owner starts a boost — 1.5× (or custom) multiplier on puzzles
+   *  matching a theme (or `k=blindfold` mode) for a bounded window. Only
+   *  one active boost per academy at a time; creating a new one supersedes
+   *  the previous. */
+  async createBoost(session: any, body: any) {
+    const g = this.ensureCoachOrOwner(session);
+    const theme = String(body?.theme || "").trim().slice(0, 40);
+    const multiplier = Math.max(1, Math.min(3, Number(body?.multiplier) || 1.5));
+    const days = Math.max(1, Math.min(30, Math.floor(Number(body?.days) || 7)));
+    const note = String(body?.note || "").slice(0, 140);
+    if (!theme) throw new BadRequestException("theme required");
+    const startAt = new Date();
+    const endAt = new Date(startAt.getTime() + days * 24 * 60 * 60_000);
+    // Deactivate any active boost first (endAt <= now).
+    await this.boosts().updateMany(
+      { academyId: g.academyId, endAt: { $gt: startAt } },
+      { $set: { endAt: startAt } },
+    );
+    const doc = {
+      academyId: g.academyId,
+      theme, multiplier, note,
+      startAt, endAt,
+      byUserId: g.userId, byName: g.username,
+      createdAt: startAt,
+    };
+    const r = await this.boosts().insertOne(doc);
+    return { ok: true, id: String(r.insertedId), boost: { ...doc, _id: r.insertedId } };
+  }
+
+  /** Active boost for a session's academy (if any). */
+  async getActiveBoost(academyId: string) {
+    const now = new Date();
+    return await this.boosts().findOne({ academyId, startAt: { $lte: now }, endAt: { $gt: now } });
+  }
+
+  /** End the current boost immediately. Owner/coach only. */
+  async endActiveBoost(session: any) {
+    const g = this.ensureCoachOrOwner(session);
+    await this.boosts().updateMany(
+      { academyId: g.academyId, endAt: { $gt: new Date() } },
+      { $set: { endAt: new Date() } },
+    );
+    return { ok: true };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  HEAD-TO-HEAD COMPARE
+  // ─────────────────────────────────────────────────────────────────────
+
+  /** Side-by-side stats for two students. Any academy member can view. */
+  async compareStudents(session: any, aId: string, bId: string) {
+    if (!session?.userId || !session?.academyId) throw new ForbiddenException("sign in first");
+    const [a, b] = await Promise.all([aId, bId].map((id) => this.users().findOne(
+      { _id: id as any, academyId: session.academyId, role: "student" },
+      { projection: { _id: 1, username: 1, name: 1, coachId: 1, dailyPuzzleStreak: 1 } },
+    )));
+    if (!a || !b) throw new BadRequestException("both students must be in your academy");
+    const [perfA, perfB, ach_a, ach_b] = await Promise.all([
+      this.conn.db!.collection("userperfs").findOne({ _id: aId as any }, { projection: { puzzle: 1, blindfold: 1 } }),
+      this.conn.db!.collection("userperfs").findOne({ _id: bId as any }, { projection: { puzzle: 1, blindfold: 1 } }),
+      this.evaluateAchievements(aId),
+      this.evaluateAchievements(bId),
+    ]);
+    const stats30d = async (id: string) => {
+      const rows = await this.conn.db!.collection("rounds").aggregate([
+        { $match: { d: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60_000) } } },
+        { $project: { u: { $arrayElemAt: [{ $split: ["$_id", ":"] }, 0] }, w: 1, ms: 1, k: 1, th: 1 } },
+        { $match: { u: id } },
+        { $group: { _id: null,
+            puzzles: { $sum: 1 },
+            wins: { $sum: { $cond: ["$w", 1, 0] } },
+            blindfold: { $sum: { $cond: [{ $eq: ["$k", "blindfold"] }, 1, 0] } },
+            totalMs: { $sum: { $ifNull: ["$ms", 0] } },
+            timedCount: { $sum: { $cond: [{ $gt: ["$ms", 0] }, 1, 0] } },
+            themes: { $addToSet: "$th" },
+        } },
+      ]).toArray();
+      const r = rows[0];
+      if (!r) return { puzzles: 0, wins: 0, blindfold: 0, avgMs: null as number | null, accuracy: 0, themesCount: 0 };
+      const themeFlat = new Set<string>();
+      for (const arr of (r.themes || [])) for (const t of arr) if (typeof t === "string") themeFlat.add(t);
+      return {
+        puzzles: r.puzzles ?? 0,
+        wins: r.wins ?? 0,
+        blindfold: r.blindfold ?? 0,
+        avgMs: r.timedCount > 0 ? Math.round(r.totalMs / r.timedCount) : null,
+        accuracy: r.puzzles > 0 ? r.wins / r.puzzles : 0,
+        themesCount: themeFlat.size,
+      };
+    };
+    const [statA, statB] = await Promise.all([stats30d(aId), stats30d(bId)]);
+    const shape = (u: any, perf: any, s: any, ach: any[]) => ({
+      _id: u._id,
+      username: u.username,
+      name: u.name || null,
+      currentRating: Math.round(perf?.puzzle?.gl?.r ?? 1500),
+      blindfoldRating: perf?.blindfold?.gl?.r ? Math.round(perf.blindfold.gl.r) : null,
+      streak: u?.dailyPuzzleStreak?.current || 0,
+      longestStreak: u?.dailyPuzzleStreak?.longest || 0,
+      stats30d: s,
+      badgesUnlocked: ach.filter((a) => a.unlocked).length,
+      badgesTotal: ach.length,
+      unlockedBadges: ach.filter((a) => a.unlocked).map((a) => ({ id: a.id, name: a.name, emoji: a.emoji, tier: a.tier })),
+    });
+    return { a: shape(a, perfA, statA, ach_a), b: shape(b, perfB, statB, ach_b) };
   }
 
   /** Flat list of the coach's outbound snap-shares for CSV export. Newest

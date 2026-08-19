@@ -132,8 +132,34 @@ export class AcademyController {
    *  365d | lifetime. Returns rows with ChessGuru Score + rank + micro-
    *  champion callouts. */
   @Get("leaderboard")
-  leaderboard(@Req() req: any, @Query("period") period: string) {
-    return this.svc.buildLeaderboard(req.session, String(period || "7d"));
+  leaderboard(@Req() req: any, @Query("period") period: string, @Query("bucket") bucket: string) {
+    return this.svc.buildLeaderboard(req.session, String(period || "7d"), { bucket: bucket || undefined });
+  }
+
+  /** Achievement gallery for a student — any academy member can read.
+   *  Auto-awards new unlocks on read so the persistence stays fresh. */
+  @Get("achievements/:studentId")
+  achievements(@Req() req: any, @Param("studentId") studentId: string) {
+    return this.svc.listAchievementsFor(req.session, studentId);
+  }
+
+  /** Coach/owner: start (or replace) an academy-wide "boost" — 1.5× score
+   *  weight on puzzles matching the given theme for N days. Body:
+   *  { theme, multiplier?, days?, note? } */
+  @Post("boost")
+  createBoost(@Req() req: any, @Body() body: any) {
+    return this.svc.createBoost(req.session, body);
+  }
+  @Post("boost/end")
+  endBoost(@Req() req: any) {
+    return this.svc.endActiveBoost(req.session);
+  }
+
+  /** Head-to-head compare: any academy member can read stats + badges for
+   *  any two students in the academy. */
+  @Get("compare")
+  compare(@Req() req: any, @Query("a") a: string, @Query("b") b: string) {
+    return this.svc.compareStudents(req.session, String(a || ""), String(b || ""));
   }
 
   /** Direct-add a student — no email round-trip. Returns the credentials the
