@@ -17,7 +17,7 @@ import { STUDIES, type StudyDef } from "../lib/studies";
 import { studyLevels, type StudyLevel } from "../lib/api";
 import OpeningExplorer from "../components/OpeningExplorer";
 import { useFreePlay } from "../hooks/useFreePlay";
-import { OPENINGS } from "../lib/openings";
+import { buildNameTree, sortedNameChildren, subtreeOpeningCount, type NameNode } from "../lib/openings/nameTree";
 import type { Opening } from "../lib/openings/types";
 
 function tier(avg: number) {
@@ -68,33 +68,48 @@ function StudyCard({ s, level }: { s: StudyDef; level?: StudyLevel }) {
   );
 }
 
-/** Single flat searchable list — replaces the previous 3-column tree
- *  (owner ask 2026-08-19: "3 boxes looks bad"). Every opening is one row,
- *  showing ECO + full "Family: variation, sub-variation" hierarchy. Type to
- *  filter by name, family, or ECO — click to load onto the board. */
+/** One collapsible tree — Family → Opening → Variation → Sub-variation, all
+ *  in a single indented list (owner ask 2026-08-19: "need tree like"). Rows
+ *  with children show a ▸ chevron; every row is also clickable to load its
+ *  representative opening on the board. Typing in the search auto-expands
+ *  branches whose descendants match. */
 function NameFinder({ onPick, activeSlug }: { onPick: (o: Opening) => void; activeSlug?: string }) {
+  const root = useMemo(() => buildNameTree(), []);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [q, setQ] = useState("");
   const needle = q.trim().toLowerCase();
 
-  // Sort once: pillars first, then by frequency desc — the popular openings
-  // land at the top when the search is empty.
-  const sorted = useMemo(() => {
-    return [...OPENINGS].sort((a, b) => {
-      if (a.tier !== b.tier) return a.tier - b.tier;
-      const fd = (b.frequencyBps ?? 0) - (a.frequencyBps ?? 0);
-      if (fd) return fd;
-      return a.name.localeCompare(b.name);
-    });
-  }, []);
+  // While a search is active, collect the keys of every branch containing a
+  // matching leaf so we can auto-expand them. Empty search: honour whatever
+  // the user manually toggled.
+  const autoExpand = useMemo<Set<string> | null>(() => {
+    if (!needle) return null;
+    const keys = new Set<string>();
+    const walk = (n: NameNode, path: NameNode[]): boolean => {
+      const selfMatch =
+        n.label.toLowerCase().includes(needle) ||
+        n.openings.some((o) => o.name.toLowerCase().includes(needle) || o.eco.toLowerCase().includes(needle));
+      let childMatch = false;
+      for (const c of n.children.values()) if (walk(c, [...path, n])) childMatch = true;
+      if (selfMatch || childMatch) for (const p of path) keys.add(p.key);
+      return selfMatch || childMatch;
+    };
+    for (const f of sortedNameChildren(root)) walk(f, [root]);
+    return keys;
+  }, [root, needle]);
 
-  const filtered = useMemo(() => {
-    if (!needle) return sorted.slice(0, 400);
-    return sorted.filter((o) =>
-      o.name.toLowerCase().includes(needle) ||
-      o.ecoName.toLowerCase().includes(needle) ||
-      o.eco.toLowerCase().includes(needle),
-    ).slice(0, 400);
-  }, [sorted, needle]);
+  const toggle = (key: string) => {
+    setExpanded((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+  };
+  const isOpen = (key: string) => (autoExpand ? autoExpand.has(key) : expanded.has(key));
+
+  const matches = (n: NameNode): boolean => {
+    if (!needle) return true;
+    if (n.label.toLowerCase().includes(needle)) return true;
+    if (n.openings.some((o) => o.name.toLowerCase().includes(needle) || o.eco.toLowerCase().includes(needle))) return true;
+    for (const c of n.children.values()) if (matches(c)) return true;
+    return false;
+  };
 
   return (
     <div className="space-y-2">
@@ -102,37 +117,72 @@ function NameFinder({ onPick, activeSlug }: { onPick: (o: Opening) => void; acti
         type="search"
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Search 3810 openings — name, ECO, family…"
+        placeholder="Search — Sicilian, B90, Najdorf…"
         className="w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm text-white placeholder-ink-500 focus:border-brand-400 focus:outline-none"
       />
-      <div className="max-h-[360px] overflow-y-auto rounded-lg border border-ink-800 bg-ink-950">
-        {filtered.length === 0 ? (
-          <div className="p-3 text-center text-xs text-ink-500">No openings match "{q}".</div>
-        ) : (
-          <ul className="divide-y divide-ink-800/60">
-            {filtered.map((o) => {
-              const on = o.slug === activeSlug;
-              return (
-                <li key={o.slug}>
-                  <button
-                    onClick={() => onPick(o)}
-                    className={`group flex w-full items-center gap-2 px-3 py-1.5 text-left transition ${
-                      on ? "bg-brand-500/25 text-white" : "hover:bg-ink-800"}`}>
-                    <span className="w-10 shrink-0 rounded bg-ink-800 px-1 py-0.5 text-center font-mono text-[10px] font-bold text-brand-300">
-                      {o.eco}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-xs text-ink-100">{o.ecoName}</span>
-                    {o.tier === 1 && <span className="shrink-0 text-[9px] font-bold uppercase text-amber-400">Pillar</span>}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+      <div className="max-h-[420px] overflow-y-auto rounded-lg border border-ink-800 bg-ink-950 p-1">
+        {sortedNameChildren(root).filter(matches).map((fam) => (
+          <TreeRow key={fam.key} node={fam} depth={0}
+            onPick={onPick} activeSlug={activeSlug}
+            isOpen={isOpen} toggle={toggle} matches={matches} />
+        ))}
       </div>
       <div className="text-[10px] text-ink-500">
-        Showing {filtered.length}{needle ? "" : " of 3810"} · click to load onto the board.
+        {needle ? "matching branches auto-expanded" : "▸ expand · click any name to load"}
       </div>
+    </div>
+  );
+}
+
+function TreeRow({
+  node, depth, onPick, activeSlug, isOpen, toggle, matches,
+}: {
+  node: NameNode; depth: number;
+  onPick: (o: Opening) => void; activeSlug?: string;
+  isOpen: (key: string) => boolean; toggle: (key: string) => void;
+  matches: (n: NameNode) => boolean;
+}) {
+  const children = sortedNameChildren(node).filter(matches);
+  const hasChildren = children.length > 0;
+  const open = hasChildren && isOpen(node.key);
+  const leaf: Opening | null = node.openings[0] ?? null;
+  const active = leaf && leaf.slug === activeSlug;
+
+  return (
+    <div>
+      <div className={`group flex items-center gap-1 rounded px-1 py-0.5 text-xs ${
+        active ? "bg-brand-500/25 text-white" : "hover:bg-ink-800/70"}`}
+        style={{ paddingLeft: `${depth * 12 + 4}px` }}>
+        {hasChildren ? (
+          <button
+            onClick={() => toggle(node.key)}
+            className="h-4 w-4 shrink-0 text-ink-500 hover:text-white"
+            aria-label={open ? "collapse" : "expand"}>
+            {open ? "▾" : "▸"}
+          </button>
+        ) : (
+          <span className="h-4 w-4 shrink-0" />
+        )}
+        <button
+          onClick={() => leaf && onPick(leaf)}
+          disabled={!leaf}
+          className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-left disabled:cursor-default disabled:opacity-70">
+          {leaf && (
+            <span className="w-9 shrink-0 rounded bg-ink-800 px-1 text-center font-mono text-[9px] font-bold text-brand-300">
+              {leaf.eco}
+            </span>
+          )}
+          <span className={`truncate ${leaf ? "text-ink-100" : "text-ink-300"}`}>{node.label}</span>
+          {hasChildren && (
+            <span className="ml-auto shrink-0 text-[10px] text-ink-500">{subtreeOpeningCount(node)}</span>
+          )}
+        </button>
+      </div>
+      {open && children.map((c) => (
+        <TreeRow key={c.key} node={c} depth={depth + 1}
+          onPick={onPick} activeSlug={activeSlug}
+          isOpen={isOpen} toggle={toggle} matches={matches} />
+      ))}
     </div>
   );
 }
