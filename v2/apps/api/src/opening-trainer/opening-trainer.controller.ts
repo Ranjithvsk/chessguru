@@ -171,6 +171,160 @@ export class OpeningTrainerController {
     };
   }
 
+  /** GET /api/opening-trainer/academy-leaderboard — ranked list of every
+   *  student in the caller's academy by Opening-Trainer discipline score.
+   *  Any academy member can view (matches the puzzles leaderboard). */
+  @Get("academy-leaderboard")
+  async academyLeaderboard(@Req() req: any) {
+    const me = this.requireLogin(req);
+    if (!me.academyId) return { rows: [], academyStudentCount: 0 };
+    const students = await this.users()
+      .find(
+        { academyId: me.academyId, role: "student" },
+        { projection: { _id: 1, name: 1, username: 1 } },
+      )
+      .toArray();
+    if (students.length === 0) return { rows: [], academyStudentCount: 0 };
+
+    const now = new Date();
+    const dayMs = 24 * 60 * 60 * 1000;
+    const since30 = new Date(now.getTime() - 30 * dayMs);
+    const since7  = new Date(now.getTime() - 7 * dayMs);
+    const userIds = students.map((u: any) => String(u._id));
+
+    // One aggregation over the whole academy — much cheaper than N per-user
+    // rollups. We only need per-user 30-day totals + streak seed.
+    const per30: Array<{
+      _id: string;
+      sessions: number; moves: number; correct: number;
+      strongSlugs: string[];
+      lastDay: string;
+    }> = await this.sessions().aggregate([
+      { $match: { userId: { $in: userIds }, finishedAt: { $gte: since30 } } },
+      { $group: {
+        _id: "$userId",
+        sessions: { $sum: 1 },
+        moves: { $sum: "$totalMoves" },
+        correct: { $sum: "$correctFirstTry" },
+        // Distinct slugs where scorePct >= 90 in-period — "strong" openings.
+        strongSlugs: { $addToSet: { $cond: [{ $gte: ["$scorePct", 90] }, "$slug", "$$REMOVE"] } },
+        // Days seen so we can compute streak below (approx — client re-uses
+        // /rollup/mine for exact IST streaks; server just needs a proxy).
+        lastDay: { $max: "$finishedAt" },
+      } },
+    ]).toArray() as any;
+
+    // 7-day slice per user — cheap second aggregation.
+    const per7: Array<{ _id: string; sessions: number; moves: number; correct: number }>
+      = await this.sessions().aggregate([
+      { $match: { userId: { $in: userIds }, finishedAt: { $gte: since7 } } },
+      { $group: {
+        _id: "$userId",
+        sessions: { $sum: 1 },
+        moves: { $sum: "$totalMoves" },
+        correct: { $sum: "$correctFirstTry" },
+      } },
+    ]).toArray() as any;
+    const p7Map = new Map(per7.map((r) => [String(r._id), r]));
+
+    // Coach-assigned load per user — read myRepertoire once academy-wide.
+    const rep = this.conn.db!.collection("myRepertoire");
+    const assignedDocs: any[] = await rep.find(
+      { ownerId: { $in: userIds }, forceTrain: true },
+      { projection: { ownerId: 1, slug: 1, kind: 1, _id: 1 } },
+    ).toArray();
+    const assignedByUser = new Map<string, string[]>();
+    for (const d of assignedDocs) {
+      const slug = d.kind === "corpus" && d.slug ? d.slug : `line:${d._id}`;
+      const arr = assignedByUser.get(String(d.ownerId)) ?? [];
+      arr.push(slug);
+      assignedByUser.set(String(d.ownerId), arr);
+    }
+    // Which of each user's assigned slugs was drilled in last 7d.
+    const assignedDrilled: Array<{ _id: { userId: string; slug: string } }>
+      = await this.sessions().aggregate([
+      { $match: { userId: { $in: userIds }, finishedAt: { $gte: since7 } } },
+      { $group: { _id: { userId: "$userId", slug: "$slug" } } },
+    ]).toArray() as any;
+    const drilledSet = new Set(assignedDrilled.map((d) => `${d._id.userId}:${d._id.slug}`));
+
+    // Streak = consecutive IST days with ≥1 session (max 30 for scoring).
+    // Cheap: per-user pull day-keys, walk backward from today.
+    const dayKey = (d: Date) => {
+      const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000);
+      return ist.toISOString().slice(0, 10);
+    };
+    const perUserDays: Record<string, Set<string>> = {};
+    const dayRows: Array<{ _id: { userId: string; day: string } }> = await this.sessions().aggregate([
+      { $match: { userId: { $in: userIds }, finishedAt: { $gte: new Date(now.getTime() - 60 * dayMs) } } },
+      { $project: { userId: 1, finishedAt: 1 } },
+    ]).toArray().then((rows: any[]) => rows.map((r) => ({ _id: { userId: String(r.userId), day: dayKey(r.finishedAt) } }))) as any;
+    for (const d of dayRows) {
+      const s = perUserDays[d._id.userId] ??= new Set();
+      s.add(d._id.day);
+    }
+    const streakFor = (userId: string): number => {
+      const s = perUserDays[userId];
+      if (!s) return 0;
+      let streak = 0;
+      for (let i = 0; i < 60; i++) {
+        const k = dayKey(new Date(now.getTime() - i * dayMs));
+        if (s.has(k)) streak++; else break;
+      }
+      return streak;
+    };
+
+    const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
+
+    const rows = students.map((s: any) => {
+      const uid = String(s._id);
+      const r30 = per30.find((x) => String(x._id) === uid);
+      const r7  = p7Map.get(uid);
+      const successPct7  = r7  && r7.moves  > 0 ? Math.round((r7.correct  / r7.moves)  * 100) : 0;
+      const successPct30 = r30 && r30.moves > 0 ? Math.round((r30.correct / r30.moves) * 100) : 0;
+      const strongOpenings30 = r30 ? new Set(r30.strongSlugs ?? []).size : 0;
+      const assignedList = assignedByUser.get(uid) ?? [];
+      const assignedDone = assignedList.filter((slug) => drilledSet.has(`${uid}:${slug}`)).length;
+      const streak = streakFor(uid);
+      // Discipline score 0-100:
+      //   40 % success (7d if you have activity, else 30d),
+      //   25 % streak  (linear, capped at 30 days),
+      //   15 % activity (sessions in last 7 days, capped at 20),
+      //   20 % compliance (assignedDone / assignedTotal, or successPct30 as
+      //                    fallback when no assignments).
+      const successForScore = r7 && r7.moves > 0 ? successPct7 : successPct30;
+      const streakScore = clamp(streak / 30 * 100, 0, 100);
+      const activityScore = clamp((r7?.sessions ?? 0) / 20 * 100, 0, 100);
+      const complianceScore = assignedList.length > 0
+        ? Math.round((assignedDone / assignedList.length) * 100)
+        : successPct30;
+      const disciplineScore = Math.round(
+        successForScore * 0.40 +
+        streakScore     * 0.25 +
+        activityScore   * 0.15 +
+        complianceScore * 0.20,
+      );
+      return {
+        userId: uid,
+        name: s.name || s.username,
+        username: s.username,
+        sessions7: r7?.sessions ?? 0,
+        sessions30: r30?.sessions ?? 0,
+        successPct7,
+        successPct30,
+        streak,
+        strongOpenings30,
+        assignedTotal: assignedList.length,
+        assignedDone,
+        disciplineScore,
+      };
+    });
+
+    rows.sort((a: any, b: any) => b.disciplineScore - a.disciplineScore);
+    for (let i = 0; i < rows.length; i++) (rows as any)[i].rank = i + 1;
+    return { rows, academyStudentCount: students.length };
+  }
+
   /** Coach-compliance percentage: of force-assigned openings this user is
    *  currently activated on, how many were drilled in the last 7 days at
    *  least once. Returns { assigned, done, pct } or null if the user

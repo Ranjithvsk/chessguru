@@ -47,3 +47,24 @@ export function getMyTrainerRollup(): Promise<TrainerRollup> {
 export function getStudentTrainerRollup(studentId: string): Promise<TrainerRollup> {
   return jf(`/api/opening-trainer/rollup/${encodeURIComponent(studentId)}`);
 }
+
+export interface AcademyOpeningLeaderboardRow {
+  userId: string;
+  name: string;
+  username: string;
+  sessions7: number;
+  sessions30: number;
+  successPct7: number;
+  successPct30: number;
+  streak: number;
+  strongOpenings30: number;
+  assignedTotal: number;
+  assignedDone: number;
+  disciplineScore: number;
+  rank: number;
+}
+
+export function getAcademyOpeningLeaderboard(): Promise<{ rows: AcademyOpeningLeaderboardRow[]; academyStudentCount: number }> {
+  return jf("/api/opening-trainer/academy-leaderboard");
+}
+

@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, get } from "../lib/api";
+import { getAcademyOpeningLeaderboard, type AcademyOpeningLeaderboardRow } from "../lib/opening-trainer-api";
 
 const BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
 
@@ -639,6 +640,11 @@ export default function LeaderboardPage() {
         Accuracy requires ≥5 puzzles in the period to count.
       </div>
 
+      {/* Openings leaderboard — rollout step 4 of the Openings Dashboard
+          plan. Same visual language as the puzzles section above so the
+          two feeds read as one page. */}
+      <OpeningsLeaderboardSection />
+
       <StartBoostModal
         open={showBoost}
         onClose={() => setShowBoost(false)}
@@ -648,3 +654,142 @@ export default function LeaderboardPage() {
     </div>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Openings leaderboard section — rollout step 4. Ranks every student in
+// the academy by Opening-Trainer discipline score (success, streak,
+// activity, coach-compliance). Server aggregates in one shot; we just
+// render.
+// ─────────────────────────────────────────────────────────────────────
+function OpeningsLeaderboardSection() {
+  const q = useQuery({
+    queryKey: ["academy-openings-leaderboard"],
+    queryFn: getAcademyOpeningLeaderboard,
+    staleTime: 60_000,
+  });
+  const rows = q.data?.rows ?? [];
+  const top10 = rows.slice(0, 10);
+  const podium = top10.slice(0, 3);
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-fuchsia-500/30 bg-gradient-to-br from-fuchsia-950/40 via-brand-950/40 to-amber-950/20 p-5">
+      <div className="pointer-events-none absolute -right-20 -top-20 h-52 w-52 rounded-full bg-fuchsia-500/15 blur-3xl" />
+      <div className="pointer-events-none absolute -left-20 bottom-0 h-52 w-52 rounded-full bg-amber-500/10 blur-3xl" />
+      <div className="relative">
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-fuchsia-300">Openings · discipline</div>
+            <h2 className="bg-gradient-to-r from-amber-300 via-fuchsia-300 to-brand-300 bg-clip-text font-display text-2xl font-bold text-transparent">
+              🎓 Opening Trainer Leaderboard
+            </h2>
+          </div>
+          <div className="text-[11px] text-ink-300">
+            Score = 40% success · 25% streak · 15% activity · 20% coach-compliance
+          </div>
+        </div>
+
+        {q.isLoading && <div className="text-sm text-ink-400">Loading openings leaderboard…</div>}
+        {q.error && (
+          <div className="rounded border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200">
+            {String((q.error as any)?.message || "Could not load openings leaderboard.")}
+          </div>
+        )}
+        {!q.isLoading && rows.length === 0 && (
+          <div className="rounded-xl border border-dashed border-fuchsia-500/30 bg-ink-950/40 p-6 text-center text-sm text-ink-300">
+            No opening drills recorded yet. Have a coach share an opening with the "Force-add" checkbox — every drill fills this board.
+          </div>
+        )}
+
+        {/* Podium */}
+        {podium.length > 0 && (
+          <div className="mb-3 grid grid-cols-3 gap-2 sm:gap-3">
+            {podium.map((r) => {
+              const cls =
+                r.rank === 1 ? "from-amber-300 via-yellow-400 to-yellow-600 text-amber-950 ring-2 ring-amber-300/60 shadow-[0_0_20px_rgba(251,191,36,0.35)]" :
+                r.rank === 2 ? "from-slate-100 via-slate-300 to-slate-500 text-slate-900 ring-2 ring-slate-300/60 shadow-lg" :
+                               "from-orange-300 via-orange-500 to-orange-700 text-orange-950 ring-2 ring-orange-400/60 shadow-lg";
+              const height = r.rank === 1 ? "h-32 sm:h-36" : "h-24 sm:h-28";
+              return (
+                <div key={r.userId} className={`flex flex-col items-center justify-end rounded-t-2xl bg-gradient-to-b ${cls} ${height} px-2 py-3`}>
+                  <div className="text-lg font-bold">#{r.rank}</div>
+                  <div className="line-clamp-1 text-center text-xs font-semibold">{r.name}</div>
+                  <div className="mt-1 tabular-nums text-xl font-black drop-shadow">{r.disciplineScore}</div>
+                  <div className="text-[10px] font-semibold opacity-80">🔥 {r.streak}d · {r.successPct7}%</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Full table (top 10) */}
+        {top10.length > 0 && (
+          <div className="overflow-x-auto rounded-xl border border-ink-800/60 bg-ink-950/50">
+            <table className="min-w-full text-xs sm:text-sm">
+              <thead className="bg-ink-800/80 text-[10px] uppercase tracking-wide text-ink-400">
+                <tr>
+                  <th className="px-2 py-2 text-left sm:px-3">#</th>
+                  <th className="px-2 py-2 text-left sm:px-3">Student</th>
+                  <th className="px-2 py-2 text-right sm:px-3">Score</th>
+                  <th className="hidden px-2 py-2 text-right sm:table-cell sm:px-3" title="Consecutive days with ≥1 drill">🔥 Streak</th>
+                  <th className="px-2 py-2 text-right sm:px-3" title="First-try correct % (last 7 days)">🎯 7d</th>
+                  <th className="hidden px-2 py-2 text-right sm:table-cell sm:px-3" title="Drill sessions in last 7 days">🎲 Sessions</th>
+                  <th className="hidden px-2 py-2 text-right md:table-cell sm:px-3" title="Distinct openings scored ≥90% in last 30 days">🏆 Strong</th>
+                  <th className="px-2 py-2 text-right sm:px-3" title="Coach-assigned openings drilled this week">🎓 Assigned</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-800/60">
+                {top10.map((r) => {
+                  const rowBg =
+                    r.rank === 1 ? "bg-gradient-to-r from-amber-500/10 to-transparent" :
+                    r.rank === 2 ? "bg-gradient-to-r from-slate-400/10 to-transparent" :
+                    r.rank === 3 ? "bg-gradient-to-r from-orange-500/10 to-transparent" : "";
+                  return (
+                    <tr key={r.userId} className={`${rowBg} hover:bg-ink-800/40`}>
+                      <td className="px-2 py-2 text-left tabular-nums sm:px-3">
+                        <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold ${
+                          r.rank === 1 ? "bg-amber-400 text-amber-950" :
+                          r.rank === 2 ? "bg-slate-200 text-slate-900" :
+                          r.rank === 3 ? "bg-orange-400 text-orange-950" :
+                                          "bg-ink-800 text-ink-300"
+                        }`}>{r.rank}</span>
+                      </td>
+                      <td className="px-2 py-2 text-left sm:px-3">
+                        <div className="line-clamp-1 font-semibold text-white">{r.name}</div>
+                        <div className="text-[10px] text-ink-500">@{r.username}</div>
+                      </td>
+                      <td className="px-2 py-2 text-right tabular-nums sm:px-3">
+                        <span className="text-lg font-bold text-fuchsia-200">{r.disciplineScore}</span>
+                        <span className="text-[10px] text-ink-500">/100</span>
+                      </td>
+                      <td className="hidden px-2 py-2 text-right tabular-nums sm:table-cell sm:px-3">
+                        <span className={r.streak > 0 ? "text-amber-300" : "text-ink-500"}>{r.streak}d</span>
+                      </td>
+                      <td className="px-2 py-2 text-right tabular-nums sm:px-3">
+                        <span className={r.successPct7 >= 80 ? "text-emerald-300" : r.successPct7 >= 50 ? "text-amber-300" : "text-ink-400"}>
+                          {r.successPct7 > 0 ? `${r.successPct7}%` : "—"}
+                        </span>
+                      </td>
+                      <td className="hidden px-2 py-2 text-right tabular-nums text-ink-300 sm:table-cell sm:px-3">{r.sessions7}</td>
+                      <td className="hidden px-2 py-2 text-right tabular-nums text-emerald-200 md:table-cell sm:px-3">{r.strongOpenings30}</td>
+                      <td className="px-2 py-2 text-right tabular-nums sm:px-3">
+                        {r.assignedTotal > 0 ? (
+                          <span className={r.assignedDone === r.assignedTotal ? "text-emerald-300" : "text-amber-300"}>
+                            {r.assignedDone}/{r.assignedTotal}
+                          </span>
+                        ) : <span className="text-ink-600">—</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="mt-2 text-[10px] text-ink-500">
+          🏆 Strong = openings scored ≥90% first-try in the last 30 days.
+          🎓 Assigned counts coach force-added openings drilled at least once in the last 7 days.
+        </p>
+      </div>
+    </div>
+  );
+}
+
