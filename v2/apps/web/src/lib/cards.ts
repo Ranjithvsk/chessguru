@@ -21,7 +21,7 @@
 import { Chess } from "chess.js";
 import { openingBySlug } from "./openings";
 import type { Opening } from "./openings/types";
-import { newCard, isDue, type FsrsState } from "./fsrs";
+import { newCard, isDue, grade as fsrsGrade, type FsrsState, type Grade } from "./fsrs";
 import { loadRepertoire, repertoireRoleOf } from "./repertoire";
 
 export type CardKind = "next-move" | "plan-white" | "plan-black" | "structure";
@@ -296,6 +296,96 @@ export function dueCards(now: Date = new Date(), newLimit = 10): Card[] {
   news.sort(prioritise);
   revs.sort(prioritise);
   return [...revs, ...news.slice(0, newLimit)];
+}
+
+/** Pick the opening the student should drill next: whichever activated
+ *  opening has the earliest due (or new) next-move card. Returns null when
+ *  the whole queue is empty. Used by the interactive drill mode
+ *  (owner ask 2026-08-20 — "allow them to freely play the opening in
+ *  opening trainer, give them a score, resuggest like Ankidroid"). */
+export function nextOpeningToStudy(now: Date = new Date()): { slug: string; name: string; sans: string[] } | null {
+  const store = loadAllStates();
+  const active = activatedSlugs();
+  let best: { slug: string; dueAt: number } | null = null;
+  for (const id of Object.keys(store)) {
+    const slug = slugFromCardId(id);
+    if (!slug || !active.has(slug)) continue;
+    // Only next-move cards drive the drill — plans/structure cards are
+    // still reviewed one-off elsewhere (not surfaced in the drill).
+    if (!id.includes(":nm:")) continue;
+    const s = store[id];
+    if (!s) continue;
+    if (!isDue(s, now) && s.state !== "new") continue;
+    const dueMs = new Date(s.due).getTime();
+    if (!best || dueMs < best.dueAt) best = { slug, dueAt: dueMs };
+  }
+  if (!best) return null;
+  const data = lineDataFor(best.slug);
+  if (!data || data.sans.length === 0) return null;
+  return { slug: best.slug, name: data.name, sans: data.sans };
+}
+
+/** After a drill session, persist FSRS state for every ply the student
+ *  played. `results[i]` is the grade for ply (i+1). Missing/undefined grades
+ *  leave the card alone (student may have quit early). */
+export function applyDrillResults(slug: string, results: Array<Grade | undefined>) {
+  const store = loadAllStates();
+  for (let i = 0; i < results.length; i++) {
+    const g = results[i];
+    if (!g) continue;
+    const cardId = `${slug}:nm:${i + 1}`;
+    const prior = store[cardId] ?? newCard();
+    store[cardId] = fsrsGrade(prior, g);
+  }
+  writeAllStates(store);
+}
+
+/** Opening-level review summary — used for the "next review" hint on the
+ *  scorecard and the "Upcoming" panel on the trainer page. Aggregates every
+ *  next-move card of the opening: earliest due, average due, count. */
+export interface OpeningReviewSummary {
+  slug: string;
+  name: string;
+  totalCards: number;
+  earliestDue: Date;                                     // when the FIRST card comes back
+  latestDue: Date;                                       // when the LAST card comes back
+  averageStabilityDays: number;                          // ~how long the opening is "stable"
+}
+export function openingReviewSummary(slug: string): OpeningReviewSummary | null {
+  const data = lineDataFor(slug);
+  if (!data) return null;
+  const store = loadAllStates();
+  const prefix = `${slug}:nm:`;
+  const cards = Object.keys(store).filter((id) => id.startsWith(prefix)).map((id) => store[id]!);
+  if (cards.length === 0) return null;
+  let earliest = Infinity;
+  let latest = -Infinity;
+  let stabilitySum = 0;
+  for (const c of cards) {
+    const t = new Date(c.due).getTime();
+    if (t < earliest) earliest = t;
+    if (t > latest) latest = t;
+    stabilitySum += c.stability || 0;
+  }
+  return {
+    slug,
+    name: data.name,
+    totalCards: cards.length,
+    earliestDue: new Date(earliest),
+    latestDue: new Date(latest),
+    averageStabilityDays: stabilitySum / cards.length,
+  };
+}
+
+/** Top-N openings by earliest due-date — used to render an "Upcoming" list
+ *  so the student can see the spaced-repetition schedule at a glance. */
+export function upcomingOpenings(limit = 5): OpeningReviewSummary[] {
+  const active = [...activatedSlugs()];
+  const summaries = active
+    .map((s) => openingReviewSummary(s))
+    .filter((x): x is OpeningReviewSummary => x !== null)
+    .sort((a, b) => a.earliestDue.getTime() - b.earliestDue.getTime());
+  return summaries.slice(0, limit);
 }
 
 /** Summary counts for the dashboard: how many due now, how many new, total. */
