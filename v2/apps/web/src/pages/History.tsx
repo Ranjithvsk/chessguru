@@ -298,7 +298,7 @@ function TabBar({ active, onSwitch }: { active: "puzzles"|"external"; onSwitch: 
 export default function HistoryPage() {
   const { rating } = useOutletContext<Ctx>();
   const [sp, setSp] = useSearchParams();
-  const as = sp.get("as") || null;   // admin-only: view another user's history
+  const as = sp.get("as") || null;   // admin / academy_owner / coach: view another user's history (resolveViewedUser gates it server-side)
   const tab = (sp.get("tab") === "external" ? "external" : "puzzles") as "puzzles"|"external";
   const switchTab = (t: "puzzles"|"external") => {
     const next = new URLSearchParams(sp);

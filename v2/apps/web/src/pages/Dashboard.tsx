@@ -1135,7 +1135,7 @@ function OpeningTrainerCard() {
 export default function DashboardPage() {
   const nav = useNavigate();
   const [sp] = useSearchParams();
-  const as = sp.get("as") || null;   // admin-only: view another user's dashboard
+  const as = sp.get("as") || null;   // admin / academy_owner / coach: view another user's dashboard (resolveViewedUser gates it server-side)
   const { data, isLoading } = useQuery({
     queryKey: ["dashboard", as],
     queryFn: () => get<Dash>(`/api/puzzles/dashboard${as ? `?as=${encodeURIComponent(as)}` : ""}`),

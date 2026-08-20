@@ -268,6 +268,16 @@ export default function StudentPerformancePage() {
               </button>
             ))}
           </div>
+          <Link to={`/dashboard?as=${encodeURIComponent(studentId)}`}
+            className="rounded-lg border border-brand-500/40 bg-brand-500/10 px-3 py-1.5 text-xs font-semibold text-brand-200 hover:bg-brand-500 hover:text-white"
+            title="Open this student's full performance dashboard">
+            📊 My performance
+          </Link>
+          <Link to={`/history?as=${encodeURIComponent(studentId)}`}
+            className="rounded-lg border border-fuchsia-500/40 bg-fuchsia-500/10 px-3 py-1.5 text-xs font-semibold text-fuchsia-200 hover:bg-fuchsia-500 hover:text-white"
+            title="Open this student's puzzle history">
+            🧩 Puzzle history
+          </Link>
           <Link to={`/coach-board/reports/new/${encodeURIComponent(studentId)}`}
             className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-500">
             📝 Generate parent report
