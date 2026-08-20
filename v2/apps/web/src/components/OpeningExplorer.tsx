@@ -146,7 +146,12 @@ export default function OpeningExplorer(
     }
   }, [fp.path]);
   useEffect(() => {
-    const el = boardBoxRef.current;
+    // Attach the scrub listener to the actual .cg-board-wrap square, not
+    // the wrapping div — otherwise wheeling over the empty slack next to
+    // the board (visible in the 3-col layout when the board is left-
+    // aligned) also scrubs, which surprised the owner (2026-08-20:
+    // "scroll should move pieces only cursor inside the board").
+    const el = boardBoxRef.current?.querySelector(".cg-board-wrap") as HTMLElement | null;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       if (Math.abs(e.deltaY) < 4) return;
@@ -186,14 +191,15 @@ export default function OpeningExplorer(
   }, [onKey]);
 
   // 3-col layout: give the finder more room (owner report 2026-08-20:
-  // "find the opening is small, names only half visible") and tighten
-  // the gap so the board doesn't feel isolated. Math on 1280 viewport with
-  // the OpeningsHub escape-hatch (available 1248): 280 + 552 + 360 + 32
-  // gap = 1224 ≤ 1248, so the board still hits its 552px CSS cap.
+  // "find the opening is small, names only half visible") and cap the
+  // middle column at the board's own 552px CSS cap so the right aside
+  // sits flush next to the board with just the grid-gap between them.
+  // `minmax(0, 552px)` lets the middle shrink on narrower lg viewports
+  // (the board follows via its 100% width).
   const gridCols = preBoardExtra
-    ? "lg:grid-cols-[280px_minmax(0,1fr)_360px]"
+    ? "lg:grid-cols-[280px_minmax(0,552px)_360px]"
     : "lg:grid-cols-[minmax(0,1fr)_400px]";
-  const gap = preBoardExtra ? "gap-4" : "gap-6";
+  const gap = preBoardExtra ? "gap-2" : "gap-6";
   return (
     <div className={`grid ${gap} ${gridCols}`}>
       {preBoardExtra && (
@@ -202,7 +208,13 @@ export default function OpeningExplorer(
         </aside>
       )}
       <section>
-        <div ref={boardBoxRef}>
+        {/* In the 3-col hub layout, left-align the board within its column
+            so the visible gap between the Find-opening card and the board
+            is just the grid gap (no extra centering slack). Without this,
+            `.cg-board-wrap { margin-inline: auto }` splits the leftover
+            slack in half and adds ~12px on each side. Owner report
+            2026-08-20: "so much gap between board and left/right panel". */}
+        <div ref={boardBoxRef} className={preBoardExtra ? "[&>.cg-board-wrap]:mx-0" : ""}>
           <Board fen={fp.fen} orientation={fp.orientation} turnColor={fp.turnColor}
             movableColor="both" dests={fp.dests} onMove={fp.onMove} />
         </div>
