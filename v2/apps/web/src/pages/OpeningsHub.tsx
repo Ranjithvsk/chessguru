@@ -320,37 +320,47 @@ export default function OpeningsHub() {
         </p>
       </header>
 
-      {/* Explorer keeps its Lichess-analysis layout (big board on the left,
-          ~400px rail on the right). The name FINDER slots into that right rail
-          via `asideExtra` — one clean search-first list (no three-column
-          drilldown, owner ask 2026-08-19). */}
-      <section>
-        <OpeningExplorer fp={fp} asideExtra={
-          <>
-          <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-4">
-            <div className="mb-2 flex items-baseline justify-between gap-2">
-              <h2 className="font-display text-sm font-semibold text-white">🗂️ Find an opening</h2>
-              <span className="text-[10px] text-ink-500">3810 total</span>
+      {/* Three-column layout on lg+: Find-opening finder | board+moves | explorer+repertoire.
+          The app shell caps content at max-w-6xl, which would shrink the
+          board when a new left column is added. Break out of the shell on
+          lg+ via the `mx-[calc(50%-50vw)] w-screen` trick so the section
+          uses the full viewport width; the board's CSS `min(100%, calc(100dvh - 10.5rem))`
+          then keeps its original 552px cap intact. Owner asks (2026-08-20):
+          "moves in right before opening explorer" (handled inside explorer)
+          and "move find the opening left to the board, board size same". */}
+      <section className="lg:mx-[calc(50%-50vw)] lg:w-screen lg:px-4">
+        <OpeningExplorer fp={fp}
+          preBoardExtra={
+            <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-4">
+              <div className="mb-2 flex items-baseline justify-between gap-2">
+                <h2 className="font-display text-sm font-semibold text-white">🗂️ Find an opening</h2>
+                <span className="text-[10px] text-ink-500">3810 total</span>
+              </div>
+              <NameFinder onPick={pickOpening} activeSlug={activeSlug} />
             </div>
-            <NameFinder onPick={pickOpening} activeSlug={activeSlug} />
-          </div>
-          <MyRepertoirePanel
-            history={fp.history}
-            activeOpening={activeSlug ? (() => {
-              const o = openingBySlug.get(activeSlug);
-              return o ? { slug: o.slug, name: o.name, eco: o.eco } : null;
-            })() : null}
-            onLoad={(entry) => {
-              if (entry.slug) {
-                const o = openingBySlug.get(entry.slug);
-                if (o) pickOpening(o);
-              } else if (entry.sans) {
-                fp.loadSans(entry.sans);
-              }
-            }}
-          />
-          </>
-        } />
+          }
+          asideExtra={
+            <MyRepertoirePanel
+              history={fp.history}
+              tree={fp.tree}
+              activeOpening={activeSlug ? (() => {
+                const o = openingBySlug.get(activeSlug);
+                return o ? { slug: o.slug, name: o.name, eco: o.eco } : null;
+              })() : null}
+              onLoad={(entry) => {
+                if (entry.slug) {
+                  const o = openingBySlug.get(entry.slug);
+                  if (o) pickOpening(o);
+                } else if (entry.tree && entry.tree.length) {
+                  // Sideline-preserving load — restores every branch the
+                  // student recorded when the entry was saved (2026-08-19).
+                  fp.loadTree(entry.tree);
+                } else if (entry.sans) {
+                  fp.loadSans(entry.sans);
+                }
+              }}
+            />
+          } />
       </section>
 
       <section className="space-y-4">

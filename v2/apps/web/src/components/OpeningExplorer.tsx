@@ -32,10 +32,19 @@ function WdlBar({ w, d, b, className = "" }: { w: number; d: number; b: number; 
 /** Optional prop lets the Openings hub share ONE freeplay state between the
  *  Explorer and the Family/Opening/Variation drilldown — picking a variation
  *  updates the board here without a second useFreePlay instance.
- *  `asideExtra` renders ABOVE the masters table (used by the hub to slot the
- *  name drilldown into the right rail so the board stays Lichess-analysis-big). */
+ *  * `preBoardExtra` renders in a NEW LEFT column BEFORE the board (owner
+ *    ask 2026-08-20 — used by the hub to slot "Find an opening" left of
+ *    the board). Board size is preserved because the board's CSS caps it
+ *    at `min(100%, calc(100dvh - 10.5rem))`, and the 3-col layout still
+ *    gives the middle column enough room on desktop widths.
+ *  * `asideExtra` renders in the RIGHT rail below the Opening explorer
+ *    (Repertoire panel etc.). */
 export default function OpeningExplorer(
-  { fp: externalFp, asideExtra }: { fp?: ReturnType<typeof useFreePlay>; asideExtra?: React.ReactNode } = {},
+  { fp: externalFp, asideExtra, preBoardExtra }: {
+    fp?: ReturnType<typeof useFreePlay>;
+    asideExtra?: React.ReactNode;
+    preBoardExtra?: React.ReactNode;
+  } = {},
 ) {
   const ownFp = useFreePlay();
   const fp = externalFp ?? ownFp;
@@ -176,8 +185,16 @@ export default function OpeningExplorer(
     return () => window.removeEventListener("keydown", onKey);
   }, [onKey]);
 
+  const gridCols = preBoardExtra
+    ? "lg:grid-cols-[240px_minmax(0,1fr)_400px]"
+    : "lg:grid-cols-[minmax(0,1fr)_400px]";
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
+    <div className={`grid gap-6 ${gridCols}`}>
+      {preBoardExtra && (
+        <aside className="flex flex-col gap-4">
+          {preBoardExtra}
+        </aside>
+      )}
       <section>
         <div ref={boardBoxRef}>
           <Board fen={fp.fen} orientation={fp.orientation} turnColor={fp.turnColor}
@@ -234,8 +251,8 @@ export default function OpeningExplorer(
               <div className="font-mono text-xs text-ink-500">Play a move on the board to start the line…</div>
             ) : (
               <>
-                <MoveTreeLine startNode={fp.tree[0]!} startNodePath={[0]}
-                  startPly={0} cursor={fp.path} onPick={fp.goTo} onContext={openMoveMenu}
+                <MainMoveTable root={fp.tree[0]!} rootPath={[0]}
+                  cursor={fp.path} onPick={fp.goTo} onContext={openMoveMenu}
                   activeRef={activeMoveRef} />
                 {fp.tree.slice(1).map((n, i) => (
                   <div key={i} className="my-1 border-l-2 border-ink-700 pl-2 text-[13px]">
@@ -362,6 +379,121 @@ export default function OpeningExplorer(
           </div>
         );
       })()}
+    </div>
+  );
+}
+
+/** Lichess-analysis-style two-column notation table for the MAINLINE.
+ *
+ *  Rows are `[moveNo, white, black]`. Any variations that branch off a
+ *  mainline move (extra siblings at `node.children[1..]`) render as an
+ *  indented block ON THE ROW BELOW the ply that spawned them, spanning
+ *  both move columns — matching lichess.org/analysis (white left, black
+ *  right, variations flow inline underneath).
+ *
+ *  Nested/deeper variations keep using `MoveTreeLine` (inline flow), so
+ *  only the top-level mainline gets the table treatment — sub-variations
+ *  read more naturally as wrapping prose. Owner ask 2026-08-20. */
+function MainMoveTable({
+  root, rootPath, cursor, onPick, onContext, activeRef,
+}: {
+  root: MoveNode; rootPath: number[]; cursor: number[];
+  onPick: (path: number[]) => void;
+  onContext: (nodePath: number[], clientX: number, clientY: number) => void;
+  activeRef?: React.RefObject<HTMLButtonElement | null>;
+}) {
+  // Walk the mainline once, collecting per-row data. rootPath[0] indexes
+  // into the outer tree array (usually [0] for the primary mainline).
+  type Cell = { node: MoveNode; path: number[]; vars: { node: MoveNode; path: number[] }[] } | null;
+  type Row = { moveNo: number; white: Cell; black: Cell };
+  const rows: Row[] = [];
+  let iterNode: MoveNode | undefined = root;
+  let iterPath = rootPath;
+  let iterPly = 0;
+  let curRow: Row | null = null;
+  while (iterNode) {
+    const node = iterNode;
+    const nodePath = iterPath;
+    const ply = iterPly;
+    const isWhite = ply % 2 === 0;
+    const vars: { node: MoveNode; path: number[] }[] = [];
+    for (let vi = 1; vi < node.children.length; vi++) {
+      vars.push({ node: node.children[vi]!, path: [...nodePath, vi] });
+    }
+    if (isWhite) {
+      curRow = { moveNo: Math.floor(ply / 2) + 1, white: { node, path: nodePath, vars }, black: null };
+      rows.push(curRow);
+    } else {
+      if (!curRow) {
+        // Line starts on black — pad with an empty white cell so the columns still line up.
+        curRow = { moveNo: Math.floor(ply / 2) + 1, white: null, black: { node, path: nodePath, vars } };
+        rows.push(curRow);
+      } else {
+        curRow.black = { node, path: nodePath, vars };
+      }
+    }
+    const nextMain = node.children[0];
+    if (!nextMain) break;
+    iterPath = [...nodePath, 0];
+    iterNode = nextMain;
+    iterPly = ply + 1;
+  }
+
+  const cellClass = (active: boolean, side: "w" | "b") =>
+    `rounded px-1.5 py-0.5 text-left font-mono text-sm transition ${active
+      ? "bg-brand-500/60 text-white"
+      : side === "w"
+        ? "text-ink-100 hover:bg-ink-800"
+        : "text-ink-200 hover:bg-ink-800"}`;
+
+  return (
+    <div>
+      {rows.map((row, i) => {
+        const wActive = row.white ? pathsEqual(row.white.path, cursor) : false;
+        const bActive = row.black ? pathsEqual(row.black.path, cursor) : false;
+        return (
+          <div key={i}>
+            <div className="grid grid-cols-[2rem_1fr_1fr] items-baseline gap-1">
+              <span className="text-right font-mono text-[11px] text-ink-500">{row.moveNo}.</span>
+              {row.white ? (
+                <button ref={wActive ? activeRef : undefined}
+                  onClick={() => onPick(row.white!.path)}
+                  onContextMenu={(e) => { e.preventDefault(); onContext(row.white!.path, e.clientX, e.clientY); }}
+                  className={cellClass(wActive, "w")}>
+                  {row.white.node.san}
+                </button>
+              ) : <span />}
+              {row.black ? (
+                <button ref={bActive ? activeRef : undefined}
+                  onClick={() => onPick(row.black!.path)}
+                  onContextMenu={(e) => { e.preventDefault(); onContext(row.black!.path, e.clientX, e.clientY); }}
+                  className={cellClass(bActive, "b")}>
+                  {row.black.node.san}
+                </button>
+              ) : <span />}
+            </div>
+            {/* Variations spawning from white's move (Black-to-move sidelines):
+                render on the row underneath, spanning both move columns. */}
+            {row.white?.vars.map((v, vi) => (
+              <div key={`wv${vi}`} className="col-span-3 my-1 ml-8 border-l-2 border-ink-700 pl-2 text-[13px]">
+                <MoveTreeLine startNode={v.node} startNodePath={v.path}
+                  startPly={(row.moveNo - 1) * 2 + 1} cursor={cursor}
+                  onPick={onPick} onContext={onContext}
+                  depth={1} activeRef={activeRef} />
+              </div>
+            ))}
+            {/* Variations spawning from black's move (White-to-move sidelines). */}
+            {row.black?.vars.map((v, vi) => (
+              <div key={`bv${vi}`} className="col-span-3 my-1 ml-8 border-l-2 border-ink-700 pl-2 text-[13px]">
+                <MoveTreeLine startNode={v.node} startNodePath={v.path}
+                  startPly={row.moveNo * 2} cursor={cursor}
+                  onPick={onPick} onContext={onContext}
+                  depth={1} activeRef={activeRef} />
+              </div>
+            ))}
+          </div>
+        );
+      })}
     </div>
   );
 }
