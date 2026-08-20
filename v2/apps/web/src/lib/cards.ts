@@ -27,10 +27,13 @@ import { loadRepertoire, repertoireRoleOf } from "./repertoire";
 export type CardKind = "next-move" | "plan-white" | "plan-black" | "structure";
 
 export interface Card {
-  id: string;           // "<slug>:<kind>:<optional-ply>"
+  id: string;           // "<slug>:<kind>:<key>"
   slug: string;         // opening slug
   kind: CardKind;
-  ply?: number;         // 1-based, only for next-move
+  ply?: number;         // 1-based, ONLY for legacy flat next-move cards
+  /** Tree path (child indices from root) for full-tree line entries.
+   *  Present iff the card was generated from a saved tree. */
+  treePath?: number[];
   fsrs: FsrsState;
 }
 
@@ -49,7 +52,11 @@ export function isCustomLineSlug(slug: string): boolean {
   return slug.startsWith(LINE_SLUG_PREFIX);
 }
 
-interface CustomLine { name: string; sans: string[] }
+/** Repertoire tree node — { san, children[] } — same structure as
+ *  MyRepertoirePanel's RepMoveNode / useFreePlay's MoveNode. */
+export interface RepTreeNode { san: string; children: RepTreeNode[] }
+
+interface CustomLine { name: string; sans: string[]; tree?: RepTreeNode[] }
 function loadCustomLines(): Record<string, CustomLine> {
   try {
     const raw = localStorage.getItem(K_CUSTOM_LINES);
@@ -114,96 +121,78 @@ export function activateOpening(slug: string): number {
   return generated.length;
 }
 
-interface RepTreeNode { san: string; children: RepTreeNode[] }
-
-/** Extract every complete root-to-leaf line from a repertoire tree, ordered:
- *   * index 0 = the tree's own mainline (first-child chain from tree[0])
- *   * index 1..N = every other complete line (branches), depth-first
- *  Each line's `sans` array is the SANs walked from root to leaf; each
- *  variation carries the ply at which it diverges from the mainline so we
- *  can label it "after 3...Nf6" etc. */
-function extractLines(tree: RepTreeNode[]): Array<{ sans: string[]; divergesAt: number }> {
-  const out: Array<{ sans: string[]; divergesAt: number }> = [];
-  const walk = (nodes: RepTreeNode[], prefix: string[], pathIndices: number[]) => {
+/** Enumerate every tree node in DFS order, along with the dot-separated path
+ *  from root ("0", "0.0", "0.1", "0.0.0", …). Used to key one FSRS card per
+ *  move node so a full-tree drill can grade each move independently. */
+export function enumerateTreeNodes(tree: RepTreeNode[]): Array<{ path: string; san: string }> {
+  const out: Array<{ path: string; san: string }> = [];
+  const walk = (nodes: RepTreeNode[], prefix: number[]) => {
     for (let i = 0; i < nodes.length; i++) {
       const n = nodes[i]!;
-      const nextPrefix = [...prefix, n.san];
-      const nextIndices = [...pathIndices, i];
-      if (n.children.length === 0) {
-        // Leaf — record this line. divergesAt = first index in pathIndices > 0.
-        let divergesAt = -1;
-        for (let j = 0; j < nextIndices.length; j++) {
-          if (nextIndices[j]! > 0) { divergesAt = j; break; }
-        }
-        out.push({ sans: nextPrefix, divergesAt });
-      } else {
-        walk(n.children, nextPrefix, nextIndices);
-      }
+      const p = [...prefix, i];
+      out.push({ path: p.join("."), san: n.san });
+      walk(n.children, p);
     }
   };
-  walk(tree, [], []);
-  // Put the mainline (divergesAt === -1) first, then variations in tree order.
-  out.sort((a, b) => {
-    if (a.divergesAt === -1 && b.divergesAt !== -1) return -1;
-    if (a.divergesAt !== -1 && b.divergesAt === -1) return 1;
-    return 0;
-  });
+  walk(tree, []);
   return out;
 }
 
 /** Add a custom line (kind==="line" repertoire entry) to the study queue.
- *  When `tree` is provided AND has variations, each complete root-to-leaf
- *  line becomes its own drillable slug — so a student who saved an opening
- *  with sidelines can drill the mainline first, then each sub-line
- *  separately (owner ask 2026-08-20 — "first play mainline, then option
- *  to play sub-line"). Returns total card count across all sub-lines.
- *  Idempotent. */
+ *  ONE slug per entry (`line:<_id>`). If `tree` is provided we store it and
+ *  generate one card per tree node keyed by path (`line:<id>:nm:0.1.0`);
+ *  otherwise we fall back to the flat sans list (`line:<id>:nm:<ply>`).
+ *  Owner ask 2026-08-20 — full-tree drill: mainline first, at each junction
+ *  ask for alternatives. Idempotent. */
 export function activateLineEntry(entry: { _id: string; name: string; sans: string[]; tree?: RepTreeNode[] }): number {
+  const slug = LINE_SLUG_PREFIX + entry._id;
   const set = activatedSlugs();
   const map = loadCustomLines();
   const store = loadAllStates();
-  let cardsAdded = 0;
+  if (set.has(slug)) return cardsForOpening(slug).length;
 
-  const register = (slug: string, name: string, sans: string[]) => {
-    if (set.has(slug) || sans.length === 0) return;
-    map[slug] = { name, sans };
+  if (entry.tree && entry.tree.length > 0) {
+    const nodes = enumerateTreeNodes(entry.tree);
+    if (nodes.length === 0) return 0;
+    // Store the tree AND a mainline-sans convenience so display helpers
+    // that only need the mainline don't have to walk the tree.
+    const mainlineSans = mainlineFromTree(entry.tree);
+    map[slug] = { name: entry.name, sans: mainlineSans, tree: entry.tree };
     set.add(slug);
-    for (let i = 0; i < sans.length; i++) {
-      const id = `${slug}:nm:${i + 1}`;
+    for (const n of nodes) {
+      const id = `${slug}:nm:${n.path}`;
       if (!store[id]) store[id] = newCard();
     }
-    cardsAdded += sans.length;
-  };
-
-  const baseSlug = LINE_SLUG_PREFIX + entry._id;
-  if (entry.tree && entry.tree.length > 0) {
-    const lines = extractLines(entry.tree);
-    if (lines.length === 0) {
-      // No leaves — fall back to sans (shouldn't happen with a valid tree).
-      register(baseSlug, entry.name, entry.sans || []);
-    } else {
-      // First line = mainline of the tree (children[0] chain from tree[0]).
-      register(baseSlug, entry.name, lines[0]!.sans);
-      // Remaining lines = variations. Label each with the divergence ply so
-      // the training queue reads "Italian · variation after 3...Nf6".
-      for (let i = 1; i < lines.length; i++) {
-        const v = lines[i]!;
-        const slug = `${baseSlug}:v${i}`;
-        const divMove = v.sans[v.divergesAt]!;
-        const moveNo = Math.floor(v.divergesAt / 2) + 1;
-        const suffix = v.divergesAt % 2 === 0 ? "." : "...";
-        register(slug, `${entry.name} · after ${moveNo}${suffix}${divMove}`, v.sans);
-      }
-    }
-  } else {
-    // Legacy path: no tree, just a flat sans list.
-    register(baseSlug, entry.name, entry.sans || []);
+    writeCustomLines(map);
+    writeActivated(set);
+    writeAllStates(store);
+    return nodes.length;
   }
 
+  // Legacy: no tree, flat sans list.
+  const sans = entry.sans || [];
+  if (sans.length === 0) return 0;
+  map[slug] = { name: entry.name, sans };
+  set.add(slug);
+  for (let i = 0; i < sans.length; i++) {
+    const id = `${slug}:nm:${i + 1}`;
+    if (!store[id]) store[id] = newCard();
+  }
   writeCustomLines(map);
   writeActivated(set);
   writeAllStates(store);
-  return cardsAdded;
+  return sans.length;
+}
+
+/** Extract the tree's mainline SANs — children[0] chain from tree[0]. */
+function mainlineFromTree(tree: RepTreeNode[]): string[] {
+  const out: string[] = [];
+  let cur: RepTreeNode | undefined = tree[0];
+  while (cur) {
+    out.push(cur.san);
+    cur = cur.children[0];
+  }
+  return out;
 }
 
 /** Dispatch helper: activate a repertoire entry regardless of kind. */
@@ -214,28 +203,23 @@ export function activateRepertoireEntry(entry: { _id: string; kind: "corpus" | "
   }
   return 0;
 }
-/** Predicate that mirrors `activateRepertoireEntry`. Considers the entry
- *  activated when ANY of its derived slugs (mainline + variations) is in
- *  the activated set — deactivating clears them all together. */
+/** Predicate that mirrors `activateRepertoireEntry`. */
 export function isRepertoireEntryActivated(entry: { _id: string; kind: "corpus" | "line"; slug?: string }): boolean {
-  if (entry.kind === "corpus") {
-    return !!entry.slug && isActivated(entry.slug);
-  }
-  const base = LINE_SLUG_PREFIX + entry._id;
-  const set = activatedSlugs();
-  for (const s of set) {
-    if (s === base || s.startsWith(base + ":v")) return true;
-  }
-  return false;
+  const s = trainerSlugFor(entry);
+  return !!s && isActivated(s);
 }
-/** Remove every slug derived from a repertoire entry (mainline + variations). */
+/** Remove the slug derived from a repertoire entry. */
 export function deactivateRepertoireEntry(entry: { _id: string; kind: "corpus" | "line"; slug?: string }): void {
-  if (entry.kind === "corpus" && entry.slug) { deactivateOpening(entry.slug); return; }
-  const base = LINE_SLUG_PREFIX + entry._id;
-  const set = activatedSlugs();
-  const toDrop: string[] = [];
-  for (const s of set) if (s === base || s.startsWith(base + ":v")) toDrop.push(s);
-  for (const s of toDrop) deactivateOpening(s);
+  const s = trainerSlugFor(entry);
+  if (s) deactivateOpening(s);
+}
+
+/** Look up the tree for an activated line slug (null if the slug is
+ *  corpus-backed or the tree wasn't saved). Used by the tree-drill UI. */
+export function treeFor(slug: string): RepTreeNode[] | null {
+  if (!isCustomLineSlug(slug)) return null;
+  const map = loadCustomLines();
+  return map[slug]?.tree ?? null;
 }
 
 /** Remove opening from study queue and drop its cards. Also cleans up the
@@ -333,6 +317,13 @@ export function hydrateCard(cardId: string, state?: FsrsState): Card | null {
   if (!lineData) return null;
   const fsrs = state ?? loadAllStates()[cardId] ?? newCard();
   if (kind === "nm") {
+    // Tree-path key: dot-separated child indices (line entries with tree).
+    if (plyStr && plyStr.includes(".")) {
+      const treePath = plyStr.split(".").map((n) => Number(n));
+      if (treePath.some((n) => Number.isNaN(n))) return null;
+      return { id: cardId, slug, kind: "next-move", treePath, fsrs };
+    }
+    // Legacy numeric ply (corpus openings + pre-tree line entries).
     const ply = plyStr ? Number(plyStr) : undefined;
     if (!ply) return null;
     return { id: cardId, slug, kind: "next-move", ply, fsrs };
@@ -395,13 +386,17 @@ export function dueCards(now: Date = new Date(), newLimit = 10): Card[] {
   return [...revs, ...news.slice(0, newLimit)];
 }
 
-/** Resolve a slug into a drillable {slug,name,sans} bundle. Returns null
- *  when the slug is unknown (activated opening was removed from the corpus
- *  or its custom-line record was wiped). Used by the trainer's picker. */
-export function resolveDrill(slug: string): { slug: string; name: string; sans: string[] } | null {
+/** Resolve a slug into a drillable bundle. `tree` is present for line
+ *  entries that saved a full tree (see activateLineEntry); when present,
+ *  the DrillSession walks the tree in DFS and prompts for alternatives at
+ *  branch points. */
+export function resolveDrill(slug: string): { slug: string; name: string; sans: string[]; tree?: RepTreeNode[] } | null {
   const data = lineDataFor(slug);
   if (!data || data.sans.length === 0) return null;
-  return { slug, name: data.name, sans: data.sans };
+  const bundle: { slug: string; name: string; sans: string[]; tree?: RepTreeNode[] } = { slug, name: data.name, sans: data.sans };
+  const t = treeFor(slug);
+  if (t) bundle.tree = t;
+  return bundle;
 }
 
 /** Pick the opening the student should drill next: whichever activated
@@ -431,15 +426,14 @@ export function nextOpeningToStudy(now: Date = new Date()): { slug: string; name
   return { slug: best.slug, name: data.name, sans: data.sans };
 }
 
-/** After a drill session, persist FSRS state for every ply the student
- *  played. `results[i]` is the grade for ply (i+1). Missing/undefined grades
- *  leave the card alone (student may have quit early). */
-export function applyDrillResults(slug: string, results: Array<Grade | undefined>) {
+/** After a drill session, persist FSRS state for every card the student
+ *  played. `results` maps the card KEY (ply-str for legacy flat cards or
+ *  tree-path-str for tree cards) to the grade. Cards absent from `results`
+ *  are left alone (student may have quit early). */
+export function applyDrillResults(slug: string, results: Record<string, Grade>) {
   const store = loadAllStates();
-  for (let i = 0; i < results.length; i++) {
-    const g = results[i];
-    if (!g) continue;
-    const cardId = `${slug}:nm:${i + 1}`;
+  for (const [key, g] of Object.entries(results)) {
+    const cardId = `${slug}:nm:${key}`;
     const prior = store[cardId] ?? newCard();
     store[cardId] = fsrsGrade(prior, g);
   }

@@ -32,26 +32,107 @@ import {
   resolveDrill,
   upcomingOpenings,
   type OpeningReviewSummary,
+  type RepTreeNode,
 } from "../lib/cards";
 import type { Grade } from "../lib/fsrs";
 import MyRepertoirePanel from "../components/MyRepertoirePanel";
 
 /** Per-ply result the drill tracks; feeds applyDrillResults() at session end.
- *  Correctness is derived from (attempts, peeked) at grading time — see
- *  `gradeFor()` — so we don't have to re-derive it inside the drill loop.
- *  fenBefore/correctSan/correctFrom/correctTo are captured so the scorecard
- *  can spotlight every ply the student missed (Bjork's "immediate
- *  re-encoding" — spotlight the mistake at the moment the schedule updates,
- *  not on next review). */
+ *  `cardKey` is the FSRS card sub-key (numeric ply for flat sans, dotted
+ *  tree path for tree entries) — so the same drill loop grades both
+ *  linear and tree openings. Correctness is derived from (attempts, peeked)
+ *  at grading time — see `gradeFor()`. */
 interface PlyOutcome {
+  cardKey: string;                                     // "5" or "0.1.0"
   peeked: boolean;
   attempts: number;
   fenBefore: string;
   correctSan: string;
   correctFrom: string;
   correctTo: string;
-  moveNo: number;                                      // 1-based (ceil(ply/2))
+  moveNo: number;                                      // 1-based
   sideToMove: "w" | "b";
+  isAlternative: boolean;                              // branch alt vs mainline
+}
+
+/** Post-move FEN — replay the visit's SAN on its fenBefore. Used to decide
+ *  whether the next visit is a mainline continuation (arrow shown) or a
+ *  backtracked alternative (no arrow, would be misleading). */
+function fenAfter(v: Visit): string {
+  const g = new Chess(v.fenBefore);
+  try { g.move(v.san); } catch { /* invalid saved SAN, drop */ }
+  return g.fen();
+}
+
+/** A single unit of work in a drill — one move to play. Precomputed once
+ *  per drill so the runtime loop is just "consume the next visit". */
+interface Visit {
+  cardKey: string;                                     // matches PlyOutcome.cardKey
+  san: string;
+  fenBefore: string;
+  sideToMove: "w" | "b";
+  moveNo: number;                                      // 1-based
+  from: string;                                        // for feedback arrow
+  to: string;
+  isAlternative: boolean;                              // sibling index > 0
+}
+
+/** Build a visit plan from either a flat sans list or a full move-tree.
+ *  Tree walk is DFS with mainline priority: at each node we visit the
+ *  mainline (children[0]) subtree first, THEN the alternative siblings
+ *  (children[1..]) in tree order — each alternative sits at the SAME parent
+ *  position as the mainline it competes with. Matches the classical Anki-
+ *  style "play mainline, at each junction the trainer asks: what were your
+ *  alternatives here?" flow. */
+function planVisits(drill: { sans: string[]; tree?: RepTreeNode[] }): Visit[] {
+  const out: Visit[] = [];
+  if (drill.tree && drill.tree.length > 0) {
+    const walk = (nodes: RepTreeNode[], pathPrefix: number[], parentFen: string, parentPly: number) => {
+      // Mainline first (index 0), then alternatives (index 1..).
+      const ordered = nodes.map((n, i) => ({ n, i })).sort((a, b) => a.i - b.i);
+      for (const { n, i } of ordered) {
+        const g = new Chess(parentFen);
+        let move: { from: string; to: string; san: string } | null = null;
+        try { move = g.move(n.san) as any; } catch { /* illegal SAN in saved tree — skip */ }
+        if (!move) continue;
+        const pathArr = [...pathPrefix, i];
+        out.push({
+          cardKey: pathArr.join("."),
+          san: n.san,
+          fenBefore: parentFen,
+          sideToMove: parentPly % 2 === 0 ? "w" : "b",
+          moveNo: Math.floor(parentPly / 2) + 1,
+          from: move.from,
+          to: move.to,
+          isAlternative: i > 0,
+        });
+        walk(n.children, pathArr, g.fen(), parentPly + 1);
+      }
+    };
+    const start = new Chess();
+    walk(drill.tree, [], start.fen(), 0);
+    return out;
+  }
+  // Flat sans fallback (corpus openings + legacy line entries).
+  const g = new Chess();
+  for (let i = 0; i < drill.sans.length; i++) {
+    const san = drill.sans[i]!;
+    const fenBefore = g.fen();
+    let move: { from: string; to: string; san: string } | null = null;
+    try { move = g.move(san) as any; } catch { break; }
+    if (!move) break;
+    out.push({
+      cardKey: String(i + 1),
+      san,
+      fenBefore,
+      sideToMove: i % 2 === 0 ? "w" : "b",
+      moveNo: Math.floor(i / 2) + 1,
+      from: move.from,
+      to: move.to,
+      isAlternative: false,
+    });
+  }
+  return out;
 }
 
 /** Map a ply's outcome to an FSRS grade:
@@ -78,7 +159,7 @@ export default function DailyStudy() {
   const [nonce, setNonce] = useState(0);
 
   const summary = useMemo(() => queueSummary(), [nonce]);
-  const [drill, setDrill] = useState<{ slug: string; name: string; sans: string[] } | null>(null);
+  const [drill, setDrill] = useState<{ slug: string; name: string; sans: string[]; tree?: RepTreeNode[] } | null>(null);
   const [lastScore, setLastScore] = useState<{ slug: string; name: string; correct: number; total: number; nextReviewAt: Date | null; misses: PlyOutcome[] } | null>(null);
   const [sessionsDone, setSessionsDone] = useState(0);
   // Upcoming schedule — top 5 openings by earliest due-date. Reloaded on
@@ -104,7 +185,8 @@ export default function DailyStudy() {
 
   const onFinish = useCallback((outcomes: PlyOutcome[]) => {
     if (!drill) return;
-    const grades: Array<Grade | undefined> = outcomes.map(gradeFor);
+    const grades: Record<string, Grade> = {};
+    for (const o of outcomes) grades[o.cardKey] = gradeFor(o);
     applyDrillResults(drill.slug, grades);
     const correct = correctCount(outcomes);
     // Compute the opening's NEXT review after the FSRS update — students
@@ -241,99 +323,96 @@ function AllCaughtUp({ sessionsDone, hasQueue }: { sessionsDone: number; hasQueu
   );
 }
 
-/** Interactive drill: student plays BOTH sides through the opening mainline
- *  one move at a time. Wrong moves count as mistakes but the student can
- *  keep trying — a "Show me" peek reveals the correct move (and locks in a
- *  worse grade). Completes at end-of-line or when the student quits. */
+/** Interactive drill: student plays BOTH sides through the opening. For
+ *  tree entries it walks the tree in DFS order — mainline first, then at
+ *  each junction it prompts for every alternative sibling. For flat sans
+ *  (corpus openings + legacy line entries) it just walks the list. Wrong
+ *  attempts count as mistakes; a "Show me" peek reveals the correct move
+ *  and downgrades the FSRS grade for that card. */
 function DrillSession({
   drill,
   onFinish,
   onSkip,
 }: {
-  drill: { slug: string; name: string; sans: string[] };
+  drill: { slug: string; name: string; sans: string[]; tree?: RepTreeNode[] };
   onFinish: (outcomes: PlyOutcome[]) => void;
   onSkip: () => void;
 }) {
-  // Chess instance driving legality + FEN. Recreated per drill.
+  // Precompute the visit plan once per drill. For tree entries this is DFS
+  // over the tree; for flat sans it's just each ply in order.
+  const visits = useMemo(() => planVisits(drill), [drill.slug]);
+  const total = visits.length;
+
+  // Local chess ref — only for computing legal `dests` at the current
+  // position. Position itself comes from visit.fenBefore, not from a live
+  // game state, so backtracking to an ancestor (for alternatives) is
+  // trivial.
   const game = useRef(new Chess());
-  const [fen, setFen] = useState(game.current.fen());
-  const [ply, setPly] = useState(0);                      // 0-based ply index into drill.sans
-  const [peeked, setPeeked] = useState(false);            // did the student peek at THIS ply?
-  const [attempts, setAttempts] = useState(0);            // wrong attempts on THIS ply
+  const [visitIdx, setVisitIdx] = useState(0);
+  const [peeked, setPeeked] = useState(false);
+  const [attempts, setAttempts] = useState(0);
   const [feedback, setFeedback] = useState<"idle" | "wrong" | "correct">("idle");
   const [outcomes, setOutcomes] = useState<PlyOutcome[]>([]);
-  const [lastMove, setLastMove] = useState<[Key, Key] | undefined>(undefined);
-  const [flash, setFlash] = useState<{ from: Key; to: Key } | null>(null);   // arrow hint after peek
+  const [flash, setFlash] = useState<{ from: Key; to: Key } | null>(null);
 
   // Reset when the drill changes (new opening picked).
   useEffect(() => {
-    game.current = new Chess();
-    setFen(game.current.fen());
-    setPly(0);
+    setVisitIdx(0);
     setPeeked(false);
     setAttempts(0);
     setFeedback("idle");
     setOutcomes([]);
-    setLastMove(undefined);
     setFlash(null);
   }, [drill.slug]);
 
-  const total = drill.sans.length;
-  const done = ply >= total;
-  const currentSan = done ? null : drill.sans[ply]!;
-  const turnColor: "white" | "black" = game.current.turn() === "w" ? "white" : "black";
-  const dests = useMemo(() => (done ? new Map() : destsFromChess(game.current as any)), [fen, done]);
+  const done = visitIdx >= total;
+  const current: Visit | null = done ? null : visits[visitIdx]!;
+  const prevVisit: Visit | null = visitIdx > 0 ? visits[visitIdx - 1]! : null;
+  // Load current visit's fenBefore into `game` so `dests` reflects legality
+  // at the right position (including backtracks for alternatives).
+  useEffect(() => {
+    if (!current) return;
+    game.current = new Chess(current.fenBefore);
+  }, [current?.fenBefore]);
+  const dests = useMemo(() => (done ? new Map() : destsFromChess(game.current as any)), [current?.fenBefore, done]);
 
-  // Compute the "correct" from/to for feedback + hint arrow. We do this by
-  // trying the expected SAN against a cloned game (chess.js parses SAN
-  // itself); the returned move object gives us verbose from/to.
-  const expected = useMemo(() => {
-    if (done || !currentSan) return null;
-    const g2 = new Chess(fen);
-    try {
-      const m = g2.move(currentSan);
-      if (!m) return null;
-      return { from: m.from as Key, to: m.to as Key, san: currentSan };
-    } catch { return null; }
-  }, [fen, currentSan, done]);
+  // For the "last-move" arrow we want to show the PREVIOUS visit's move —
+  // but only when the current visit is a mainline continuation of it. If
+  // the current visit is an alternative (or the drill just backtracked to
+  // a different position), don't paint a misleading lastMove arrow.
+  const lastMove: [Key, Key] | undefined = useMemo(() => {
+    if (!prevVisit || !current) return undefined;
+    if (current.fenBefore !== fenAfter(prevVisit)) return undefined;
+    return [prevVisit.from as Key, prevVisit.to as Key];
+  }, [current?.fenBefore, prevVisit?.cardKey]);
 
-  // Commit the correct move on the live game + advance to next ply.
   const advance = useCallback(() => {
-    if (!currentSan || !expected) return;
-    const rec: PlyOutcome = {
+    if (!current) return;
+    setOutcomes((prev) => [...prev, {
+      cardKey: current.cardKey,
       peeked,
       attempts,
-      fenBefore: fen,
-      correctSan: currentSan,
-      correctFrom: String(expected.from),
-      correctTo: String(expected.to),
-      moveNo: Math.ceil((ply + 1) / 2),
-      sideToMove: game.current.turn(),
-    };
-    try {
-      game.current.move(currentSan);
-      setFen(game.current.fen());
-      setLastMove([expected.from, expected.to]);
-    } catch { /* shouldn't happen — SAN validated by chess.js on clone */ }
-    setOutcomes((prev) => [...prev, rec]);
-    setPly((p) => p + 1);
+      fenBefore: current.fenBefore,
+      correctSan: current.san,
+      correctFrom: current.from,
+      correctTo: current.to,
+      moveNo: current.moveNo,
+      sideToMove: current.sideToMove,
+      isAlternative: current.isAlternative,
+    }]);
+    setVisitIdx((i) => i + 1);
     setPeeked(false);
     setAttempts(0);
     setFeedback("idle");
     setFlash(null);
-  }, [attempts, currentSan, expected, fen, peeked, ply]);
+  }, [attempts, current, peeked]);
 
-  // On drill completion, hand results back up.
   useEffect(() => {
     if (!done) return;
-    // Small delay so the last "correct" flash is visible.
     const t = setTimeout(() => onFinish(outcomes), 400);
     return () => clearTimeout(t);
   }, [done, outcomes, onFinish]);
 
-  // Auto-advance the wrong→right flow: after the student plays the right
-  // move (or explicitly asks for the answer), we let them press Enter or
-  // wait 700ms.
   useEffect(() => {
     if (feedback !== "correct") return;
     const t = setTimeout(() => advance(), 500);
@@ -341,42 +420,34 @@ function DrillSession({
   }, [feedback, advance]);
 
   const onMove = (from: Key, to: Key) => {
-    if (done || !currentSan) return;
-    // Convert user move to SAN by trying it on a clone (handles promotions
-    // simply — default to Q; matches most beginner-openings mainline).
-    const g2 = new Chess(fen);
+    if (done || !current) return;
+    const g2 = new Chess(current.fenBefore);
     let userSan: string | null = null;
     try {
       const m = g2.move({ from: String(from), to: String(to), promotion: "q" });
       if (m) userSan = m.san;
-    } catch { /* illegal — chessground shouldn't call us then, but ignore */ }
+    } catch { /* illegal */ }
     if (!userSan) return;
-    // Compare on SAN so, e.g., "Nf3" vs "Ng1f3" both work; chess.js
-    // canonicalises to the shortest legal SAN.
-    if (userSan === currentSan) {
-      setFeedback("correct");
-    } else {
-      setAttempts((a) => a + 1);
-      setFeedback("wrong");
-    }
+    if (userSan === current.san) setFeedback("correct");
+    else { setAttempts((a) => a + 1); setFeedback("wrong"); }
   };
 
   const showAnswer = () => {
-    if (!expected) return;
+    if (!current) return;
     setPeeked(true);
-    setFlash({ from: expected.from, to: expected.to });
+    setFlash({ from: current.from as Key, to: current.to as Key });
     setFeedback("idle");
   };
 
   const skipMove = () => {
-    // Peeked-then-give-up counts as a "wrong" outcome; play the correct move
-    // to march forward.
     setPeeked(true);
     setAttempts((a) => Math.max(a, 1));
-    setFeedback("correct");                                // triggers advance
+    setFeedback("correct");
   };
 
   const shapes = flash ? [{ orig: flash.from, dest: flash.to, brush: "green" }] : [];
+  const turnColor: "white" | "black" = current?.sideToMove === "w" ? "white" : "black";
+  const currentFen = current?.fenBefore ?? new Chess().fen();
 
   return (
     <div className="rounded-xl border border-ink-800 bg-ink-900 p-4">
@@ -384,18 +455,26 @@ function DrillSession({
         <div className="min-w-0">
           <span className="font-semibold text-white">{drill.name}</span>
           {isCustomLineSlug(drill.slug) && (
-            <span className="ml-2 text-[10px] font-normal text-ink-500">· custom line</span>
+            <span className="ml-2 text-[10px] font-normal text-ink-500">· {drill.tree ? "tree" : "custom line"}</span>
           )}
         </div>
         <div className="text-xs text-ink-400">
-          Move <span className="tabular-nums text-white">{Math.min(ply + 1, total)}</span> / {total}
-          <span className="ml-2">· {turnColor === "white" ? "White" : "Black"} to move</span>
+          Move <span className="tabular-nums text-white">{Math.min(visitIdx + 1, total)}</span> / {total}
+          {current && (
+            <span className="ml-2">· {current.sideToMove === "w" ? "White" : "Black"} to move</span>
+          )}
         </div>
       </div>
 
+      {current?.isAlternative && (
+        <div className="mb-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200">
+          🔀 Alternative at move {current.moveNo}{current.sideToMove === "b" ? "…" : "."} — you saved a sideline here. Play it.
+        </div>
+      )}
+
       <div className="mx-auto max-w-md">
         <Board
-          fen={fen}
+          fen={currentFen}
           turnColor={turnColor}
           movableColor={done ? undefined : "both"}
           dests={dests}
