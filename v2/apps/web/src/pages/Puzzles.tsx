@@ -153,6 +153,10 @@ export default function PuzzlesPage() {
   const [player, setPlayer] = useState<string>("");
   const { data: masterPlayers } = useQuery({ queryKey: ["master-players"], queryFn: api.masterPlayers, enabled: section === "masters" });
   const { data: themes } = useQuery({ queryKey: ["themes"], queryFn: api.themes });
+  // Engine analysis panel is hidden for students (owner ask 2026-08-20).
+  // Coaches, academy owners, admins and logged-out visitors keep the panel.
+  const { data: authMe } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
+  const hideEnginePanel = authMe?.loggedIn === true && authMe.role === "student";
   // Selected-theme rating shown right on the training screen (owner 2026-07-08).
   type DashLite = { loggedIn: boolean; themes?: { theme: string; rating: number; games: number }[] };
   const { data: dashLite } = useQuery({ queryKey: ["dashboard"], queryFn: () => get<DashLite>("/api/puzzles/dashboard"), staleTime: 15_000 });
@@ -716,7 +720,7 @@ export default function PuzzlesPage() {
             right rail on desktop and (thanks to the single-col grid on
             mobile) the last panel below the board on phones. Owner ask
             2026-08-18. */}
-        {g.fen && <EngineAnalysisPanel fen={g.fen} />}
+        {g.fen && !hideEnginePanel && <EngineAnalysisPanel fen={g.fen} />}
       </aside>
     </div>
   );
