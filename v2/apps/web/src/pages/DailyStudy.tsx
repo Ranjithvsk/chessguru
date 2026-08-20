@@ -343,11 +343,6 @@ function DrillSession({
   const visits = useMemo(() => planVisits(drill), [drill.slug]);
   const total = visits.length;
 
-  // Local chess ref — only for computing legal `dests` at the current
-  // position. Position itself comes from visit.fenBefore, not from a live
-  // game state, so backtracking to an ancestor (for alternatives) is
-  // trivial.
-  const game = useRef(new Chess());
   const [visitIdx, setVisitIdx] = useState(0);
   const [peeked, setPeeked] = useState(false);
   const [attempts, setAttempts] = useState(0);
@@ -368,13 +363,16 @@ function DrillSession({
   const done = visitIdx >= total;
   const current: Visit | null = done ? null : visits[visitIdx]!;
   const prevVisit: Visit | null = visitIdx > 0 ? visits[visitIdx - 1]! : null;
-  // Load current visit's fenBefore into `game` so `dests` reflects legality
-  // at the right position (including backtracks for alternatives).
-  useEffect(() => {
-    if (!current) return;
-    game.current = new Chess(current.fenBefore);
-  }, [current?.fenBefore]);
-  const dests = useMemo(() => (done ? new Map() : destsFromChess(game.current as any)), [current?.fenBefore, done]);
+  // Compute dests directly from the current visit's fenBefore so the Board
+  // gets legal moves for the RIGHT position on the same render the position
+  // changes. The old code split "load position into a ref" and "compute
+  // dests from that ref" across a useEffect + useMemo, which stayed one
+  // render behind and blocked the student's move on every visit change
+  // (owner report 2026-08-20: "clicked pawn to e5, didn't move").
+  const dests = useMemo(() => {
+    if (done || !current) return new Map();
+    return destsFromChess(new Chess(current.fenBefore) as any);
+  }, [current?.fenBefore, done]);
 
   // For the "last-move" arrow we want to show the PREVIOUS visit's move —
   // but only when the current visit is a mainline continuation of it. If
