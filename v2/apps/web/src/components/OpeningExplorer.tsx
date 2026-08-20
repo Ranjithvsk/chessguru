@@ -185,11 +185,17 @@ export default function OpeningExplorer(
     return () => window.removeEventListener("keydown", onKey);
   }, [onKey]);
 
+  // 3-col layout: give the finder more room (owner report 2026-08-20:
+  // "find the opening is small, names only half visible") and tighten
+  // the gap so the board doesn't feel isolated. Math on 1280 viewport with
+  // the OpeningsHub escape-hatch (available 1248): 280 + 552 + 360 + 32
+  // gap = 1224 ≤ 1248, so the board still hits its 552px CSS cap.
   const gridCols = preBoardExtra
-    ? "lg:grid-cols-[240px_minmax(0,1fr)_400px]"
+    ? "lg:grid-cols-[280px_minmax(0,1fr)_360px]"
     : "lg:grid-cols-[minmax(0,1fr)_400px]";
+  const gap = preBoardExtra ? "gap-4" : "gap-6";
   return (
-    <div className={`grid gap-6 ${gridCols}`}>
+    <div className={`grid ${gap} ${gridCols}`}>
       {preBoardExtra && (
         <aside className="flex flex-col gap-4">
           {preBoardExtra}
