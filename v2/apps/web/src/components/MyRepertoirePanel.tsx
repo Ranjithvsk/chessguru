@@ -16,17 +16,21 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   listRepertoire, addRepertoire, deleteRepertoire, shareRepertoire,
-  type RepertoireEntry,
+  type RepertoireEntry, type RepMoveNode,
 } from "../lib/repertoire-api";
 import { api } from "../lib/api";
+import type { MoveNode } from "../hooks/useFreePlay";
 
 interface Props {
   history: string[];                                     // current line's SANs
+  /** Full move tree with any sidelines — save alongside `history` so branches
+   *  survive the round-trip. Optional so old callers keep working. */
+  tree?: MoveNode[];
   activeOpening?: { slug: string; name: string; eco: string } | null;
-  onLoad: (entry: { sans?: string[]; slug?: string }) => void;
+  onLoad: (entry: { sans?: string[]; tree?: RepMoveNode[]; slug?: string }) => void;
 }
 
-export default function MyRepertoirePanel({ history, activeOpening, onLoad }: Props) {
+export default function MyRepertoirePanel({ history, tree, activeOpening, onLoad }: Props) {
   const qc = useQueryClient();
   const { data: auth } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
   const loggedIn = !!auth?.loggedIn;
@@ -44,12 +48,32 @@ export default function MyRepertoirePanel({ history, activeOpening, onLoad }: Pr
   const addMut = useMutation({ mutationFn: addRepertoire, onSuccess: invalidate });
   const delMut = useMutation({ mutationFn: deleteRepertoire, onSuccess: invalidate });
 
+  // Cheap check: does the tree carry at least one sibling variation? If not,
+  // we skip sending it — the server already rejects trees without branches
+  // (falls back to sans-only), but this saves the payload bytes on the wire
+  // and keeps the intent visible.
+  const treeHasBranches = useMemo(() => {
+    if (!tree || tree.length === 0) return false;
+    const check = (n: MoveNode): boolean => n.children.length > 1 || n.children.some(check);
+    return tree.some(check);
+  }, [tree]);
+
   const saveLine = () => {
     if (!history.length) return;
     const suggested = activeOpening ? `${activeOpening.name} (my line)` : `Line — ${history.slice(0, 6).join(" ")}`;
     const name = window.prompt("Name this line:", suggested);
     if (!name) return;
-    addMut.mutate({ name: name.trim(), kind: "line", sans: history });
+    // Ship the full tree when it contains sidelines so students / coaches
+    // don't silently lose branches on save+reload (owner report 2026-08-19:
+    // "save also side lines while saving, now only main lines are saved
+    // even when sidelines are there"). MoveNode <-> RepMoveNode are
+    // structurally identical — plain { san, children[] }.
+    addMut.mutate({
+      name: name.trim(),
+      kind: "line",
+      sans: history,
+      ...(treeHasBranches ? { tree: tree as RepMoveNode[] } : {}),
+    });
   };
   const saveOpening = () => {
     if (!activeOpening) return;
@@ -156,7 +180,7 @@ function List({
   entries, onLoad, onDelete, isCoach, onShare,
 }: {
   entries: RepertoireEntry[];
-  onLoad: (entry: { sans?: string[]; slug?: string }) => void;
+  onLoad: (entry: { sans?: string[]; tree?: RepMoveNode[]; slug?: string }) => void;
   onDelete: (id: string) => void;
   isCoach: boolean;
   onShare: (entry: RepertoireEntry) => void;
@@ -166,9 +190,16 @@ function List({
       {entries.map((e) => (
         <li key={e._id} className="group flex items-center gap-2 px-2 py-1.5 hover:bg-ink-900">
           <button
-            onClick={() => onLoad(e.kind === "corpus" ? { slug: e.slug } : { sans: e.sans })}
+            onClick={() => onLoad(
+              e.kind === "corpus"
+                ? { slug: e.slug }
+                // Prefer the full tree when present so sidelines load with
+                // the entry (owner report 2026-08-19). Fall back to sans for
+                // pre-tree entries.
+                : { sans: e.sans, ...(e.tree ? { tree: e.tree } : {}) },
+            )}
             className="min-w-0 flex-1 truncate text-left text-xs text-ink-100 hover:text-white">
-            <span className="mr-1">{e.kind === "corpus" ? "📖" : "✏️"}</span>
+            <span className="mr-1">{e.kind === "corpus" ? "📖" : (e.tree ? "🌳" : "✏️")}</span>
             {e.name}
             {e.sharedFromName && (
               <span className="ml-1 text-[10px] font-semibold text-indigo-300"> · from {e.sharedFromName}</span>
@@ -198,10 +229,14 @@ function ShareModal({ entry, onClose, onDone }: { entry: RepertoireEntry; onClos
     queryFn: async () => {
       const r = await fetch(`${(import.meta as any).env?.VITE_API_BASE ?? ""}/api/academy/students`, { credentials: "include" });
       const j = await r.json();
-      return j as { students?: Array<{ _id: string; name?: string; username?: string }> };
+      // /api/academy/students returns a bare Student[] array (see
+      // academy.service.ts::listStudents). Older code here expected a
+      // { students: [...] } envelope, which meant the picker always
+      // showed "No students match" (owner report 2026-08-20).
+      return (Array.isArray(j) ? j : (j?.students ?? [])) as Array<{ _id: string; name?: string; username?: string }>;
     },
   });
-  const students = data?.students ?? [];
+  const students = data ?? [];
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [q, setQ] = useState("");
 
