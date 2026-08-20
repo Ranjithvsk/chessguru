@@ -237,6 +237,23 @@ function ShareModal({ entry, onClose, onDone }: { entry: RepertoireEntry; onClos
     },
   });
   const students = data ?? [];
+  // Batches — one click picks every student in a batch. /api/academy/batches
+  // returns a bare array; each row has `.students: [{_id,name,username}, ...]`
+  // already enriched by the server (see academy.service.ts::listBatches).
+  // Owner ask 2026-08-20: "also option to share batch wise".
+  const { data: batchData } = useQuery({
+    queryKey: ["academy-batches-picker"],
+    queryFn: async () => {
+      const r = await fetch(`${(import.meta as any).env?.VITE_API_BASE ?? ""}/api/academy/batches`, { credentials: "include" });
+      const j = await r.json();
+      return (Array.isArray(j) ? j : (j?.batches ?? [])) as Array<{
+        _id: string; name: string;
+        studentIds?: string[];
+        students?: Array<{ _id: string; name?: string; username?: string }>;
+      }>;
+    },
+  });
+  const batches = batchData ?? [];
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [q, setQ] = useState("");
 
@@ -250,6 +267,28 @@ function ShareModal({ entry, onClose, onDone }: { entry: RepertoireEntry; onClos
     !q.trim() || `${s.name || ""} ${s.username || ""}`.toLowerCase().includes(q.trim().toLowerCase()),
   );
 
+  // Batch selection state: fully-selected = every studentId in the batch is
+  // already picked; partial = some (not all) are picked; none otherwise.
+  const batchIds = (b: { studentIds?: string[]; students?: Array<{ _id: string }> }): string[] =>
+    (b.studentIds && b.studentIds.length ? b.studentIds : (b.students || []).map((s) => s._id)).map(String);
+  const batchState = (b: { studentIds?: string[]; students?: Array<{ _id: string }> }): "all" | "some" | "none" => {
+    const ids = batchIds(b);
+    if (ids.length === 0) return "none";
+    let hit = 0;
+    for (const id of ids) if (picked.has(id)) hit++;
+    return hit === 0 ? "none" : hit === ids.length ? "all" : "some";
+  };
+  const toggleBatch = (b: { studentIds?: string[]; students?: Array<{ _id: string }> }) => {
+    const ids = batchIds(b);
+    setPicked((prev) => {
+      const next = new Set(prev);
+      const state = batchState(b);
+      if (state === "all") for (const id of ids) next.delete(id);
+      else for (const id of ids) next.add(id);
+      return next;
+    });
+  };
+
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
       <div className="w-full max-w-sm rounded-xl2 border border-ink-700 bg-ink-900 p-4" onClick={(e) => e.stopPropagation()}>
@@ -258,9 +297,34 @@ function ShareModal({ entry, onClose, onDone }: { entry: RepertoireEntry; onClos
           <button onClick={onClose} className="text-ink-500 hover:text-white">✕</button>
         </div>
         <p className="mb-2 text-[11px] text-ink-400">Copies land in each student's My Repertoire, tagged "shared by you".</p>
+
+        {batches.length > 0 && (
+          <div className="mb-2">
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-500">Batches</div>
+            <div className="flex flex-wrap gap-1.5">
+              {batches.map((b) => {
+                const ids = batchIds(b);
+                const state = batchState(b);
+                const cls = state === "all"
+                  ? "bg-brand-500 text-white"
+                  : state === "some"
+                    ? "bg-brand-500/40 text-white ring-1 ring-brand-400"
+                    : "bg-ink-800 text-ink-200 hover:bg-ink-700";
+                return (
+                  <button key={b._id} type="button" onClick={() => toggleBatch(b)}
+                    title={state === "all" ? "Unselect batch" : `Add ${ids.length} student${ids.length === 1 ? "" : "s"} from this batch`}
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition ${cls}`}>
+                    {b.name} <span className="opacity-75">· {ids.length}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search students…"
           className="mb-2 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-1.5 text-sm text-white placeholder-ink-500 focus:border-brand-400 focus:outline-none" />
-        <div className="mb-3 max-h-[280px] overflow-y-auto rounded-lg border border-ink-800 bg-ink-950 p-1">
+        <div className="mb-3 max-h-[240px] overflow-y-auto rounded-lg border border-ink-800 bg-ink-950 p-1">
           {filtered.length === 0 ? (
             <div className="p-2 text-xs text-ink-500">No students match.</div>
           ) : filtered.map((s) => {
@@ -276,12 +340,19 @@ function ShareModal({ entry, onClose, onDone }: { entry: RepertoireEntry; onClos
             );
           })}
         </div>
-        <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">Cancel</button>
-          <button onClick={() => shareMut.mutate()} disabled={picked.size === 0 || shareMut.isPending}
-            className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-400 disabled:opacity-40">
-            {shareMut.isPending ? "Sharing…" : `Share with ${picked.size || "…"}`}
+        <div className="flex items-center justify-between gap-2">
+          <button type="button" onClick={() => setPicked(new Set())}
+            disabled={picked.size === 0}
+            className="text-[11px] text-ink-500 underline-offset-2 hover:text-ink-300 hover:underline disabled:opacity-40">
+            Clear
           </button>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">Cancel</button>
+            <button onClick={() => shareMut.mutate()} disabled={picked.size === 0 || shareMut.isPending}
+              className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-400 disabled:opacity-40">
+              {shareMut.isPending ? "Sharing…" : `Share with ${picked.size || "…"}`}
+            </button>
+          </div>
         </div>
       </div>
     </div>
