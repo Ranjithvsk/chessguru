@@ -30,6 +30,11 @@ export interface BoardProps {
   showDests?: boolean;
   onSelect?: (key: Key) => void;
   className?: string;
+  /** Force chessground to re-apply the current fen when this value changes,
+   *  even if fen itself is unchanged. Used by drills to snap a wrong-move
+   *  piece back to its origin square (owner report 2026-08-20 — "I can't
+   *  undo wrong move"). */
+  syncNonce?: number;
 }
 
 export default function Board({
@@ -51,6 +56,7 @@ export default function Board({
   onSelect,
   showDests = false,
   className = "",
+  syncNonce,
 }: BoardProps) {
   const el = useRef<HTMLDivElement>(null);
   const api = useRef<Api | null>(null);
@@ -117,7 +123,7 @@ export default function Board({
       movable: { color: movableColor, dests },
     });
     api.current?.cancelPremove();
-  }, [fen, orientation, turnColor, coordinates, viewOnly, lastMove, check, movableColor, dests]);
+  }, [fen, orientation, turnColor, coordinates, viewOnly, lastMove, check, movableColor, dests, syncNonce]);
 
   // shapes (hints / engine arrows)
   useEffect(() => {

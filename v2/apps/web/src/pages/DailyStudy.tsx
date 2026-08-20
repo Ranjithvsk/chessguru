@@ -349,6 +349,10 @@ function DrillSession({
   const [feedback, setFeedback] = useState<"idle" | "wrong" | "correct">("idle");
   const [outcomes, setOutcomes] = useState<PlyOutcome[]>([]);
   const [flash, setFlash] = useState<{ from: Key; to: Key } | null>(null);
+  // Bumped on every wrong attempt to force Board -> chessground to re-apply
+  // the true fen; without it, chessground eagerly renders the illegal-but-
+  // legal-per-chess move the student just dropped and won't snap back.
+  const [boardSync, setBoardSync] = useState(0);
 
   // Reset when the drill changes (new opening picked).
   useEffect(() => {
@@ -427,7 +431,15 @@ function DrillSession({
     } catch { /* illegal */ }
     if (!userSan) return;
     if (userSan === current.san) setFeedback("correct");
-    else { setAttempts((a) => a + 1); setFeedback("wrong"); }
+    else {
+      setAttempts((a) => a + 1);
+      setFeedback("wrong");
+      // Snap the visually-moved piece back to its origin square. Chessground
+      // eagerly applies any legal move; without a resync it stays where the
+      // student dropped it (owner report 2026-08-20 — "can't undo wrong
+      // move, then only I can play correct move").
+      setBoardSync((n) => n + 1);
+    }
   };
 
   const showAnswer = () => {
@@ -481,6 +493,7 @@ function DrillSession({
           onMove={onMove}
           shapes={shapes as any}
           showDests
+          syncNonce={boardSync}
         />
       </div>
 
