@@ -12,7 +12,7 @@
 // Data comes from GET /api/my/repertoire; mutations go through the api
 // helpers in lib/repertoire-api.ts.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   listRepertoire, addRepertoire, deleteRepertoire, shareRepertoire,
@@ -51,6 +51,24 @@ export default function MyRepertoirePanel({ history, tree, activeOpening, onLoad
 
   const addMut = useMutation({ mutationFn: addRepertoire, onSuccess: invalidate });
   const delMut = useMutation({ mutationFn: deleteRepertoire, onSuccess: invalidate });
+
+  // Auto-activate every coach-force-added entry that isn't already in the
+  // trainer. Runs on every entries update — cheap because
+  // activateRepertoireEntry is idempotent. Owner ask 2026-08-20 —
+  // "coach can force-add to students' opening trainer".
+  useEffect(() => {
+    let didActivate = false;
+    for (const e of entries) {
+      if (!e.forceTrain) continue;
+      if (isRepertoireEntryActivated(e)) continue;
+      activateRepertoireEntry(e);
+      didActivate = true;
+    }
+    if (didActivate) onActivate?.("__force__");
+    // Only depends on entry list identity — activateRepertoireEntry writes
+    // to localStorage synchronously so no cleanup needed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries]);
 
   // Cheap check: does the tree carry at least one sibling variation? If not,
   // we skip sending it — the server already rejects trees without branches
@@ -239,11 +257,11 @@ function List({
                 onActivate?.(e.slug ?? e._id);
               }}
               disabled={activated}
-              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${activated
-                ? "text-emerald-400 cursor-default"
-                : "text-ink-400 hover:bg-ink-800 hover:text-emerald-300"}`}
+              className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${activated
+                ? "bg-emerald-500/20 text-emerald-300 cursor-default"
+                : "bg-brand-500/15 text-brand-300 ring-1 ring-brand-500/30 hover:bg-brand-500 hover:text-white"}`}
               title={activated ? "Already in Opening Trainer" : "Add to Opening Trainer"}>
-              {activated ? "✓📅" : "📅"}
+              {activated ? "✓ In Trainer" : "📅 Add to Trainer"}
             </button>
           )}
           {isCoach && !e.sharedFrom && (
@@ -304,10 +322,18 @@ function ShareModal({ entry, onClose, onDone }: { entry: RepertoireEntry; onClos
   const batches = batchData ?? [];
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [q, setQ] = useState("");
+  // Force-add flag: when checked, the shared copy is flagged forceTrain
+  // on the server, the student's client auto-activates it into the
+  // Opening Trainer and blocks removal (owner ask 2026-08-20).
+  const [forceTrain, setForceTrain] = useState(false);
 
   const shareMut = useMutation({
-    mutationFn: () => shareRepertoire(entry._id, [...picked]),
-    onSuccess: (r) => { alert(`Shared with ${r.shared} student${r.shared === 1 ? "" : "s"}.`); onDone(); },
+    mutationFn: () => shareRepertoire(entry._id, [...picked], forceTrain),
+    onSuccess: (r) => {
+      const suffix = forceTrain ? " (added to their trainer, they can't remove it)" : "";
+      alert(`Shared with ${r.shared} student${r.shared === 1 ? "" : "s"}.${suffix}`);
+      onDone();
+    },
     onError: (e: any) => alert(e.message || "Share failed."),
   });
 
@@ -388,6 +414,16 @@ function ShareModal({ entry, onClose, onDone }: { entry: RepertoireEntry; onClos
             );
           })}
         </div>
+        <label className={`mb-3 flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-xs transition ${forceTrain ? "border-amber-500/40 bg-amber-500/10 text-amber-200" : "border-ink-700 bg-ink-950 text-ink-300 hover:bg-ink-900"}`}>
+          <input type="checkbox" className="mt-0.5" checked={forceTrain}
+            onChange={(e) => setForceTrain(e.target.checked)} />
+          <span>
+            <span className="font-semibold">Force-add to their Opening Trainer</span>
+            <span className="mt-0.5 block text-[10px] font-normal opacity-80">
+              Auto-schedules the opening for daily drills and blocks removal. Use for required homework.
+            </span>
+          </span>
+        </label>
         <div className="flex items-center justify-between gap-2">
           <button type="button" onClick={() => setPicked(new Set())}
             disabled={picked.size === 0}

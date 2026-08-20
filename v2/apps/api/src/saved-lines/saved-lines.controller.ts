@@ -221,6 +221,10 @@ export class SavedLinesController {
       ? body.studentIds.map((s: any) => String(s)).filter(Boolean).slice(0, 200)
       : [];
     if (!studentIds.length) return { ok: true, shared: 0 };
+    // Coach can flag the share as "required study" — the student's client
+    // auto-activates it in the Opening Trainer and blocks removal (owner
+    // ask 2026-08-20). Defaults to false so plain share is unchanged.
+    const forceTrain: boolean = body?.forceTrain === true;
     const students = await this.conn.db!.collection("users").find(
       { _id: { $in: studentIds } as any, academyId: me.academyId, role: "student" },
       { projection: { _id: 1 } },
@@ -243,6 +247,7 @@ export class SavedLinesController {
       notes: src.notes ?? undefined,
       createdAt: now,
       sharedFrom: me.userId,
+      ...(forceTrain ? { forceTrain: true } : {}),
     }));
     await this.col().insertMany(copies as any);
     const coach: any = await this.conn.db!.collection("users").findOne(

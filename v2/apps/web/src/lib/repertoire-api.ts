@@ -8,6 +8,15 @@
 
 const BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
 
+/** A move-tree node — same shape as useFreePlay's MoveNode. `children[0]` is
+ *  the mainline continuation from this node; extra children are sibling
+ *  variations. Persisted so a saved "line" entry keeps every branch the
+ *  student recorded, not just the mainline SAN sequence. */
+export interface RepMoveNode {
+  san: string;
+  children: RepMoveNode[];
+}
+
 export interface RepertoireEntry {
   _id: string;
   ownerId: string;
@@ -15,10 +24,18 @@ export interface RepertoireEntry {
   name: string;
   slug?: string;
   sans?: string[];
+  /** Optional full tree (with sidelines). When present, load THIS instead of
+   *  `sans` so branches survive round-trip. */
+  tree?: RepMoveNode[];
   notes?: string | null;
   createdAt: string;
   sharedFrom?: string | null;
   sharedFromName?: string | null;
+  /** Coach-set flag: this entry is required study. On the student side we
+   *  auto-activate it into the Opening Trainer and hide the remove button
+   *  in the training queue (owner ask 2026-08-20 — "coach can force-add
+   *  to students' opening trainer; students can't remove those"). */
+  forceTrain?: boolean;
 }
 
 async function jf(url: string, init?: RequestInit) {
@@ -32,7 +49,7 @@ export function listRepertoire(): Promise<{ entries: RepertoireEntry[] }> {
   return jf("/api/my/repertoire");
 }
 export function addRepertoire(body: {
-  name: string; kind: "corpus" | "line"; slug?: string; sans?: string[]; notes?: string | null;
+  name: string; kind: "corpus" | "line"; slug?: string; sans?: string[]; tree?: RepMoveNode[]; notes?: string | null;
 }): Promise<{ ok: boolean; entry: RepertoireEntry }> {
   return jf("/api/my/repertoire", {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -42,14 +59,14 @@ export function addRepertoire(body: {
 export function deleteRepertoire(id: string): Promise<{ ok: boolean }> {
   return jf(`/api/my/repertoire/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
-export function shareRepertoire(id: string, studentIds: string[]): Promise<{ ok: boolean; shared: number }> {
+export function shareRepertoire(id: string, studentIds: string[], forceTrain = false): Promise<{ ok: boolean; shared: number }> {
   return jf(`/api/my/repertoire/${encodeURIComponent(id)}/share`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ studentIds }),
+    body: JSON.stringify({ studentIds, forceTrain }),
   });
 }
 export function pushToStudent(studentId: string, body: {
-  name: string; kind: "corpus" | "line"; slug?: string; sans?: string[]; notes?: string | null;
+  name: string; kind: "corpus" | "line"; slug?: string; sans?: string[]; tree?: RepMoveNode[]; notes?: string | null;
 }): Promise<{ ok: boolean; entry: RepertoireEntry }> {
   return jf(`/api/my/repertoire/push/${encodeURIComponent(studentId)}`, {
     method: "POST", headers: { "Content-Type": "application/json" },

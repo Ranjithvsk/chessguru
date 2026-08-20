@@ -30,10 +30,13 @@ import {
   openingReviewSummary,
   queueSummary,
   resolveDrill,
+  trainerSlugFor,
   upcomingOpenings,
   type OpeningReviewSummary,
   type RepTreeNode,
 } from "../lib/cards";
+import { useQuery } from "@tanstack/react-query";
+import { listRepertoire } from "../lib/repertoire-api";
 import type { Grade } from "../lib/fsrs";
 import MyRepertoirePanel from "../components/MyRepertoirePanel";
 
@@ -165,6 +168,20 @@ export default function DailyStudy() {
   // Upcoming schedule — top 5 openings by earliest due-date. Reloaded on
   // every nonce bump so the list stays fresh after a drill.
   const upcoming = useMemo(() => upcomingOpenings(5), [nonce]);
+  // Coach-locked slugs — derived from repertoire entries with forceTrain
+  // set. Students can't remove these from their training queue (owner ask
+  // 2026-08-20). Fetches same query MyRepertoirePanel uses; React Query
+  // dedupes so no extra request.
+  const { data: repData } = useQuery({ queryKey: ["my-repertoire"], queryFn: listRepertoire });
+  const lockedSlugs = useMemo(() => {
+    const s = new Set<string>();
+    for (const e of repData?.entries ?? []) {
+      if (!e.forceTrain) continue;
+      const slug = trainerSlugFor(e);
+      if (slug) s.add(slug);
+    }
+    return s;
+  }, [repData?.entries]);
 
   // No auto-pick — the student picks which opening to drill from the
   // queue below (owner ask 2026-08-20 — "option to play desired opening
@@ -178,10 +195,14 @@ export default function DailyStudy() {
     setDrill(d);
   }, []);
   const removeOpening = useCallback((slug: string, name: string) => {
+    if (lockedSlugs.has(slug)) {
+      alert(`"${name}" was added by your coach as required study. Ask your coach to unassign it.`);
+      return;
+    }
     if (!confirm(`Remove "${name}" from the Opening Trainer?\n\nAll spaced-repetition progress on this opening will be dropped.`)) return;
     deactivateOpening(slug);
     setNonce((n) => n + 1);
-  }, []);
+  }, [lockedSlugs]);
 
   const onFinish = useCallback((outcomes: PlyOutcome[]) => {
     if (!drill) return;
@@ -275,6 +296,7 @@ export default function DailyStudy() {
       {hasActive && upcoming.length > 0 && (
         <TrainingQueue items={upcoming}
           activeSlug={drill?.slug ?? null}
+          lockedSlugs={lockedSlugs}
           onPlay={startDrill}
           onRemove={removeOpening} />
       )}
@@ -618,10 +640,13 @@ function MissCard({ miss }: { miss: PlyOutcome }) {
 }
 
 function TrainingQueue({
-  items, activeSlug, onPlay, onRemove,
+  items, activeSlug, lockedSlugs, onPlay, onRemove,
 }: {
   items: OpeningReviewSummary[];
   activeSlug: string | null;
+  /** Slugs the student can't remove — set by the coach as required study
+   *  via the "Force-add to trainer" checkbox in the Share modal. */
+  lockedSlugs: Set<string>;
   onPlay: (slug: string) => void;
   onRemove: (slug: string, name: string) => void;
 }) {
@@ -634,10 +659,17 @@ function TrainingQueue({
       <ul className="divide-y divide-ink-800/60">
         {items.map((it) => {
           const isActive = it.slug === activeSlug;
+          const isLocked = lockedSlugs.has(it.slug);
           return (
             <li key={it.slug} className={`flex items-center gap-2 py-1.5 text-xs ${isActive ? "bg-brand-500/10 px-2 rounded" : ""}`}>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-ink-100">{it.name}</div>
+                <div className="truncate text-ink-100">
+                  {it.name}
+                  {isLocked && (
+                    <span className="ml-1 rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-amber-300"
+                      title="Coach-assigned — you can't remove this">🎓 assigned</span>
+                  )}
+                </div>
                 <div className="text-[10px] tabular-nums text-ink-500">Next: {formatDueRelative(it.earliestDue)} · {it.totalCards} card{it.totalCards === 1 ? "" : "s"}</div>
               </div>
               <button onClick={() => onPlay(it.slug)}
@@ -648,11 +680,13 @@ function TrainingQueue({
                 title={isActive ? "Currently drilling" : "Start drilling this opening"}>
                 {isActive ? "● Playing" : "▶ Play"}
               </button>
-              <button onClick={() => onRemove(it.slug, it.name)}
-                className="shrink-0 rounded px-1.5 py-1 text-[11px] text-ink-500 hover:bg-rose-500/20 hover:text-rose-300"
-                title="Remove from Opening Trainer">
-                ✕
-              </button>
+              {!isLocked && (
+                <button onClick={() => onRemove(it.slug, it.name)}
+                  className="shrink-0 rounded px-1.5 py-1 text-[11px] text-ink-500 hover:bg-rose-500/20 hover:text-rose-300"
+                  title="Remove from Opening Trainer">
+                  ✕
+                </button>
+              )}
             </li>
           );
         })}
