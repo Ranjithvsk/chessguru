@@ -29,9 +29,12 @@ interface Props {
   tree?: MoveNode[];
   activeOpening?: { slug: string; name: string; eco: string } | null;
   onLoad: (entry: { sans?: string[]; tree?: RepMoveNode[]; slug?: string }) => void;
+  /** Fired when a user clicks the 📅 "add to Opening Trainer" button on an
+   *  entry. Lets embedders (DailyStudy) refresh their queue view. */
+  onActivate?: (slug: string) => void;
 }
 
-export default function MyRepertoirePanel({ history, tree, activeOpening, onLoad }: Props) {
+export default function MyRepertoirePanel({ history, tree, activeOpening, onLoad, onActivate }: Props) {
   const qc = useQueryClient();
   const { data: auth } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
   const loggedIn = !!auth?.loggedIn;
@@ -145,14 +148,14 @@ export default function MyRepertoirePanel({ history, tree, activeOpening, onLoad
           <div className="space-y-3">
             {suggested.length > 0 && (
               <Section title={`🎓 Coach-suggested (${suggested.length})`} tone="indigo">
-                <List entries={suggested} onLoad={onLoad} onDelete={(id) => delMut.mutate(id)} isCoach={isCoach} onShare={() => { /* recipient can't re-share */ }} />
+                <List entries={suggested} onLoad={onLoad} onDelete={(id) => delMut.mutate(id)} isCoach={isCoach} onShare={() => { /* recipient can't re-share */ }} onActivate={onActivate} />
               </Section>
             )}
             <Section title={`✏️ ${suggested.length ? "My own" : "Saved"} (${mine.length})`} tone="brand">
               {mine.length === 0 ? (
                 <div className="px-2 py-3 text-center text-xs text-ink-500">Nothing saved on your own yet.</div>
               ) : (
-                <List entries={mine} onLoad={onLoad} onDelete={(id) => delMut.mutate(id)} isCoach={isCoach} onShare={(e) => setShareTarget(e)} />
+                <List entries={mine} onLoad={onLoad} onDelete={(id) => delMut.mutate(id)} isCoach={isCoach} onShare={(e) => setShareTarget(e)} onActivate={onActivate} />
               )}
             </Section>
           </div>
@@ -178,13 +181,14 @@ function Section({ title, tone, children }: { title: string; tone: "indigo" | "b
 }
 
 function List({
-  entries, onLoad, onDelete, isCoach, onShare,
+  entries, onLoad, onDelete, isCoach, onShare, onActivate,
 }: {
   entries: RepertoireEntry[];
   onLoad: (entry: { sans?: string[]; tree?: RepMoveNode[]; slug?: string }) => void;
   onDelete: (id: string) => void;
   isCoach: boolean;
   onShare: (entry: RepertoireEntry) => void;
+  onActivate?: (slug: string) => void;
 }) {
   // Local counter to force a re-render after activateOpening flips the
   // `isActivated` state (writes to localStorage, no built-in subscribe).
@@ -226,6 +230,7 @@ function List({
                 if (activated) return;
                 activateOpening(e.slug!);
                 setActivateNonce((n) => n + 1);
+                onActivate?.(e.slug!);
               }}
               disabled={activated}
               className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${activated

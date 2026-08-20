@@ -9,7 +9,7 @@
 // State lives in localStorage via ./lib/cards. Everything is client-side.
 
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import Board from "../components/Board";
 import {
   activatedSlugs,
@@ -22,8 +22,10 @@ import {
 } from "../lib/cards";
 import { openingBySlug, structureBySlug } from "../lib/openings";
 import { grade as fsrsGrade, humanDue, GRADE_LABELS, type Grade } from "../lib/fsrs";
+import MyRepertoirePanel from "../components/MyRepertoirePanel";
 
 export default function DailyStudy() {
+  const navigate = useNavigate();
   // Force re-render after each grade + on mount.
   const [nonce, setNonce] = useState(0);
 
@@ -93,6 +95,22 @@ export default function DailyStudy() {
           ✓ {sessionCount} card{sessionCount === 1 ? "" : "s"} reviewed this session
         </div>
       )}
+
+      {/* Repertoire quick-add. Shows your own + coach-suggested entries with
+          a 📅 button per row (see MyRepertoirePanel::List) so a student can
+          activate saved openings into this trainer without going back to the
+          Openings hub. Owner ask 2026-08-20. */}
+      <div className="mb-4">
+        <MyRepertoirePanel
+          history={[]}
+          onLoad={(entry) => {
+            if (entry.slug) navigate(`/study/openings/${entry.slug}`);
+            else navigate("/openings");
+          }}
+          onActivate={() => setNonce((n) => n + 1)}
+        />
+      </div>
+
 
       {!hasActive ? (
         <EmptyState />
