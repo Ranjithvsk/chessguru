@@ -200,8 +200,13 @@ export default function OpeningExplorer(
     ? "lg:grid-cols-[280px_minmax(0,552px)_360px]"
     : "lg:grid-cols-[minmax(0,1fr)_400px]";
   const gap = preBoardExtra ? "gap-2" : "gap-6";
+  // Center the whole 3-col group within the viewport-wide section — the
+  // columns sum to ~1200px; without justify-center the extra viewport
+  // width piles up on the right and the layout hangs to the left edge
+  // (owner report 2026-08-20: "all went left side, center it").
+  const justify = preBoardExtra ? "lg:justify-center" : "";
   return (
-    <div className={`grid ${gap} ${gridCols}`}>
+    <div className={`grid ${gap} ${justify} ${gridCols}`}>
       {preBoardExtra && (
         <aside className="flex flex-col gap-4">
           {preBoardExtra}
