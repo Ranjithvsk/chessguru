@@ -151,17 +151,27 @@ export function isRepertoireEntryActivated(entry: { _id: string; kind: "corpus" 
   return !!s && isActivated(s);
 }
 
-/** Remove opening from study queue and drop its cards. */
+/** Remove opening from study queue and drop its cards. Also cleans up the
+ *  custom-lines map if the slug is a synthetic `line:*` entry, so removing
+ *  a repertoire-derived line doesn't leave a phantom localStorage record. */
 export function deactivateOpening(slug: string): void {
   const set = activatedSlugs();
   if (!set.has(slug)) return;
   set.delete(slug);
   writeActivated(set);
   const store = loadAllStates();
+  const prefix = `${slug}:`;
   for (const id of Object.keys(store)) {
-    if (id.startsWith(`${slug}:`)) delete store[id];
+    if (id.startsWith(prefix)) delete store[id];
   }
   writeAllStates(store);
+  if (isCustomLineSlug(slug)) {
+    const map = loadCustomLines();
+    if (map[slug]) {
+      delete map[slug];
+      writeCustomLines(map);
+    }
+  }
 }
 
 /* ---------- card generation ---------- */
@@ -296,6 +306,15 @@ export function dueCards(now: Date = new Date(), newLimit = 10): Card[] {
   news.sort(prioritise);
   revs.sort(prioritise);
   return [...revs, ...news.slice(0, newLimit)];
+}
+
+/** Resolve a slug into a drillable {slug,name,sans} bundle. Returns null
+ *  when the slug is unknown (activated opening was removed from the corpus
+ *  or its custom-line record was wiped). Used by the trainer's picker. */
+export function resolveDrill(slug: string): { slug: string; name: string; sans: string[] } | null {
+  const data = lineDataFor(slug);
+  if (!data || data.sans.length === 0) return null;
+  return { slug, name: data.name, sans: data.sans };
 }
 
 /** Pick the opening the student should drill next: whichever activated

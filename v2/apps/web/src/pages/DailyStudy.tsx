@@ -24,11 +24,12 @@ import type { Key } from "chessground/types";
 import Board, { destsFromChess } from "../components/Board";
 import {
   applyDrillResults,
+  deactivateOpening,
   displayNameFor,
   isCustomLineSlug,
-  nextOpeningToStudy,
   openingReviewSummary,
   queueSummary,
+  resolveDrill,
   upcomingOpenings,
   type OpeningReviewSummary,
 } from "../lib/cards";
@@ -84,12 +85,22 @@ export default function DailyStudy() {
   // every nonce bump so the list stays fresh after a drill.
   const upcoming = useMemo(() => upcomingOpenings(5), [nonce]);
 
-  // Pick the next opening whenever the queue may have changed. Skip the
-  // pickup if the student is mid-drill or looking at their score screen.
-  useEffect(() => {
-    if (drill || lastScore) return;
-    setDrill(nextOpeningToStudy());
-  }, [nonce, drill, lastScore]);
+  // No auto-pick — the student picks which opening to drill from the
+  // queue below (owner ask 2026-08-20 — "option to play desired opening
+  // in case of multiple openings to train"). The old behaviour of
+  // silently dropping them into the earliest-due opening surprised
+  // students with multiple activations.
+  const startDrill = useCallback((slug: string) => {
+    const d = resolveDrill(slug);
+    if (!d) return;
+    setLastScore(null);
+    setDrill(d);
+  }, []);
+  const removeOpening = useCallback((slug: string, name: string) => {
+    if (!confirm(`Remove "${name}" from the Opening Trainer?\n\nAll spaced-repetition progress on this opening will be dropped.`)) return;
+    deactivateOpening(slug);
+    setNonce((n) => n + 1);
+  }, []);
 
   const onFinish = useCallback((outcomes: PlyOutcome[]) => {
     if (!drill) return;
@@ -116,6 +127,7 @@ export default function DailyStudy() {
   const onNextOpening = () => {
     setLastScore(null);
     setNonce((n) => n + 1);
+    // Return to the picker; student chooses next opening from the queue.
   };
 
   const hasActive = summary.activeOpenings > 0;
@@ -167,16 +179,22 @@ export default function DailyStudy() {
         <EmptyState />
       ) : lastScore ? (
         <Scorecard result={lastScore} onNext={onNextOpening} />
-      ) : !drill ? (
-        <AllCaughtUp sessionsDone={sessionsDone} />
-      ) : (
+      ) : drill ? (
         <DrillSession key={drill.slug} drill={drill} onFinish={onFinish} onSkip={() => { setDrill(null); setNonce((n) => n + 1); }} />
+      ) : (
+        <AllCaughtUp sessionsDone={sessionsDone} hasQueue={upcoming.length > 0} />
       )}
 
-      {/* Upcoming schedule — spaced-repetition preview so the student can
-          see when each activated opening is due next. */}
+      {/* Training queue — every activated opening as a row with Play +
+          Remove buttons. Shown regardless of whether a drill is active
+          so the student can switch openings without going back to the
+          repertoire. Sorted by earliest due-date so the "most due" one
+          floats to the top. */}
       {hasActive && upcoming.length > 0 && (
-        <UpcomingPanel items={upcoming} />
+        <TrainingQueue items={upcoming}
+          activeSlug={drill?.slug ?? null}
+          onPlay={startDrill}
+          onRemove={removeOpening} />
       )}
     </div>
   );
@@ -208,16 +226,16 @@ function EmptyState() {
   );
 }
 
-function AllCaughtUp({ sessionsDone }: { sessionsDone: number }) {
+function AllCaughtUp({ sessionsDone, hasQueue }: { sessionsDone: number; hasQueue: boolean }) {
   return (
-    <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-8 text-center">
+    <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-6 text-center">
       <p className="text-2xl">🎉</p>
       <h2 className="mt-2 text-lg font-bold text-emerald-200">
-        {sessionsDone > 0 ? "Done for now" : "All caught up"}
+        {sessionsDone > 0 ? "Ready when you are" : "Pick an opening to drill"}
       </h2>
       <p className="mt-1 text-sm text-emerald-300">
-        {sessionsDone > 0 ? `Drilled ${sessionsDone} opening${sessionsDone === 1 ? "" : "s"}. ` : ""}
-        Come back later — your spaced-repetition schedule will bring the next batch back on time.
+        {sessionsDone > 0 && `Drilled ${sessionsDone} opening${sessionsDone === 1 ? "" : "s"}. `}
+        {hasQueue ? "Tap ▶ on any opening below to start." : "Add an opening from your repertoire to begin."}
       </p>
     </div>
   );
@@ -509,23 +527,48 @@ function MissCard({ miss }: { miss: PlyOutcome }) {
   );
 }
 
-function UpcomingPanel({ items }: { items: OpeningReviewSummary[] }) {
+function TrainingQueue({
+  items, activeSlug, onPlay, onRemove,
+}: {
+  items: OpeningReviewSummary[];
+  activeSlug: string | null;
+  onPlay: (slug: string) => void;
+  onRemove: (slug: string, name: string) => void;
+}) {
   return (
     <div className="mt-4 rounded-xl border border-ink-800 bg-ink-900 p-4">
       <div className="mb-2 flex items-baseline justify-between">
-        <h3 className="text-sm font-semibold text-white">🗓 Upcoming reviews</h3>
+        <h3 className="text-sm font-semibold text-white">🗓 Your training queue</h3>
         <span className="text-[10px] text-ink-500">FSRS · aims for ~90% recall</span>
       </div>
       <ul className="divide-y divide-ink-800/60">
-        {items.map((it) => (
-          <li key={it.slug} className="flex items-center justify-between gap-2 py-1.5 text-xs">
-            <span className="min-w-0 truncate text-ink-200">{it.name}</span>
-            <span className="shrink-0 tabular-nums text-ink-400">{formatDueRelative(it.earliestDue)}</span>
-          </li>
-        ))}
+        {items.map((it) => {
+          const isActive = it.slug === activeSlug;
+          return (
+            <li key={it.slug} className={`flex items-center gap-2 py-1.5 text-xs ${isActive ? "bg-brand-500/10 px-2 rounded" : ""}`}>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-ink-100">{it.name}</div>
+                <div className="text-[10px] tabular-nums text-ink-500">Next: {formatDueRelative(it.earliestDue)} · {it.totalCards} card{it.totalCards === 1 ? "" : "s"}</div>
+              </div>
+              <button onClick={() => onPlay(it.slug)}
+                disabled={isActive}
+                className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${isActive
+                  ? "bg-brand-500/40 text-white cursor-default"
+                  : "bg-brand-500 text-white hover:bg-brand-400"}`}
+                title={isActive ? "Currently drilling" : "Start drilling this opening"}>
+                {isActive ? "● Playing" : "▶ Play"}
+              </button>
+              <button onClick={() => onRemove(it.slug, it.name)}
+                className="shrink-0 rounded px-1.5 py-1 text-[11px] text-ink-500 hover:bg-rose-500/20 hover:text-rose-300"
+                title="Remove from Opening Trainer">
+                ✕
+              </button>
+            </li>
+          );
+        })}
       </ul>
       <p className="mt-2 text-[10px] text-ink-500">
-        Spaced-repetition intervals are computed per-move: correct moves get pushed further out, misses come back sooner. The schedule targets a 90% recall probability — the sweet spot for long-term memory (Wozniak, SuperMemo research).
+        Intervals are computed per-move: correct moves get pushed further out, misses come back sooner. The schedule targets a 90% recall probability — the sweet spot for long-term memory (SuperMemo research).
       </p>
     </div>
   );
