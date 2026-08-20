@@ -78,6 +78,49 @@ export default function OpeningExplorer(
   const boardBoxRef = useRef<HTMLDivElement>(null);
   const moveListBoxRef = useRef<HTMLDivElement>(null);
   const activeMoveRef = useRef<HTMLButtonElement>(null);
+  // Right-click menu on a move (Lichess analysis parity): Promote variation
+  // / Make main line / Delete from here / Copy PGN. Position stored as
+  // viewport coords; a fixed-position <div> renders at (x, y).
+  const [moveMenu, setMoveMenu] = useState<{ path: number[]; x: number; y: number } | null>(null);
+  const openMoveMenu = useCallback((nodePath: number[], x: number, y: number) => {
+    setMoveMenu({ path: nodePath, x, y });
+  }, []);
+  const closeMoveMenu = useCallback(() => setMoveMenu(null), []);
+  // Close on outside click / Escape / scroll.
+  useEffect(() => {
+    if (!moveMenu) return;
+    const onDown = () => closeMoveMenu();
+    const onKey2 = (e: KeyboardEvent) => { if (e.key === "Escape") closeMoveMenu(); };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey2);
+    window.addEventListener("scroll", onDown, true);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey2);
+      window.removeEventListener("scroll", onDown, true);
+    };
+  }, [moveMenu, closeMoveMenu]);
+  // Walk fp.tree along a path, gather SAN moves — used by "Copy PGN".
+  const sansAtPath = useCallback((p: number[]): string[] => {
+    const out: string[] = [];
+    let cur: MoveNode[] = fp.tree;
+    for (const idx of p) {
+      const n = cur[idx];
+      if (!n) break;
+      out.push(n.san);
+      cur = n.children;
+    }
+    return out;
+  }, [fp.tree]);
+  const formatPgn = (sans: string[]): string => {
+    const parts: string[] = [];
+    for (let i = 0; i < sans.length; i++) {
+      const isWhite = i % 2 === 0;
+      if (isWhite) parts.push(`${Math.floor(i / 2) + 1}.`);
+      parts.push(sans[i]!);
+    }
+    return parts.join(" ");
+  };
   const lastWheelTs = useRef(0);
 
   // Scroll the currently-active move into view whenever the cursor changes
@@ -171,15 +214,17 @@ export default function OpeningExplorer(
             title="Send this line to the Memory Training opening trainer">🧠 Memorize</button>
         </div>
 
-        {/* Clickable PGN move list with variations. When the user rewinds and
-            plays a new move, useFreePlay branches instead of truncating —
-            here we render each sibling from a given position as a
-            parenthesised variation, mainline continues after it. Path is the
-            array of child-indices from root; clicking a move jumps the board
-            to that exact node. Owner ask 2026-08-19: "when in previous move
-            new move plays, make it as sub division in notation, like a
-            tree". */}
-        <div className="mt-3 rounded-lg border border-ink-700 bg-ink-950 px-3 py-2">
+      </section>
+
+      <aside className="flex flex-col gap-4">
+        {/* Clickable PGN move list with variations — sits ABOVE the Opening
+            explorer in the right rail (owner ask 2026-08-20: "moves showed
+            in bottom, need that in right before opening explorer"). When
+            the user rewinds and plays a new move, useFreePlay branches
+            instead of truncating — each sibling renders as an indented
+            variation block. Path is the array of child-indices from root;
+            clicking a move jumps the board to that exact node. */}
+        <div className="rounded-lg border border-ink-700 bg-ink-950 px-3 py-2">
           <div className="mb-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-ink-500">
             <span>Moves</span>
             <span className="normal-case tracking-normal text-ink-600">← → walk · ↑ ↓ switch branch</span>
@@ -189,15 +234,13 @@ export default function OpeningExplorer(
               <div className="font-mono text-xs text-ink-500">Play a move on the board to start the line…</div>
             ) : (
               <>
-                {/* First child = root mainline. Any additional root siblings
-                    (branches played from the very first move) render as
-                    top-level variation blocks. */}
                 <MoveTreeLine startNode={fp.tree[0]!} startNodePath={[0]}
-                  startPly={0} cursor={fp.path} onPick={fp.goTo} activeRef={activeMoveRef} />
+                  startPly={0} cursor={fp.path} onPick={fp.goTo} onContext={openMoveMenu}
+                  activeRef={activeMoveRef} />
                 {fp.tree.slice(1).map((n, i) => (
                   <div key={i} className="my-1 border-l-2 border-ink-700 pl-2 text-[13px]">
                     <MoveTreeLine startNode={n} startNodePath={[i + 1]}
-                      startPly={0} cursor={fp.path} onPick={fp.goTo}
+                      startPly={0} cursor={fp.path} onPick={fp.goTo} onContext={openMoveMenu}
                       depth={1} activeRef={activeMoveRef} />
                   </div>
                 ))}
@@ -205,13 +248,10 @@ export default function OpeningExplorer(
             )}
           </div>
         </div>
-      </section>
 
-      <aside className="flex flex-col gap-4">
-        {/* Explorer moves table on top, then the "Find an opening" tree
+        {/* Explorer moves table, then the "Find an opening" tree
             (asideExtra). Halved max-height on the moves table so both fit
-            side-by-side without either scrolling for pages. Owner ask
-            2026-08-19: "half size, opening explorer on top". */}
+            side-by-side without either scrolling for pages. */}
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-display text-xl text-white">Opening explorer</h2>
@@ -270,6 +310,58 @@ export default function OpeningExplorer(
 
         {asideExtra}
       </aside>
+
+      {/* Right-click context menu on any move in the Moves tree. Options
+          mirror lichess.org/analysis: Promote variation / Make main line
+          are shown only when the move sits in a variation (any path index
+          > 0). Delete + Copy PGN are always available. Owner ask
+          2026-08-20. */}
+      {moveMenu && (() => {
+        const isVariation = moveMenu.path.some((k) => k > 0);
+        const doAndClose = (fn: () => void) => { fn(); closeMoveMenu(); };
+        // Clamp inside the viewport with a rough menu size guess.
+        const menuW = 220, menuH = 180;
+        const x = Math.min(moveMenu.x, window.innerWidth - menuW - 8);
+        const y = Math.min(moveMenu.y, window.innerHeight - menuH - 8);
+        return (
+          <div
+            role="menu"
+            onMouseDown={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+            className="fixed z-50 min-w-[210px] rounded-md border border-ink-700 bg-ink-900 py-1 text-sm text-ink-200 shadow-xl"
+            style={{ left: x, top: y }}>
+            {isVariation && (
+              <button role="menuitem"
+                onClick={() => doAndClose(() => fp.promoteVariation(moveMenu.path))}
+                className="block w-full px-3 py-1.5 text-left hover:bg-ink-800">
+                Promote variation
+              </button>
+            )}
+            {isVariation && (
+              <button role="menuitem"
+                onClick={() => doAndClose(() => fp.makeMainLine(moveMenu.path))}
+                className="block w-full px-3 py-1.5 text-left hover:bg-ink-800">
+                Make main line
+              </button>
+            )}
+            {isVariation && <div className="my-1 border-t border-ink-800" />}
+            <button role="menuitem"
+              onClick={() => doAndClose(() => fp.deleteFrom(moveMenu.path))}
+              className="block w-full px-3 py-1.5 text-left text-rose-300 hover:bg-ink-800">
+              Delete from here
+            </button>
+            <div className="my-1 border-t border-ink-800" />
+            <button role="menuitem"
+              onClick={() => doAndClose(() => {
+                const pgn = formatPgn(sansAtPath(moveMenu.path));
+                try { navigator.clipboard?.writeText(pgn); } catch { /* clipboard blocked — noop */ }
+              })}
+              className="block w-full px-3 py-1.5 text-left hover:bg-ink-800">
+              Copy PGN to here
+            </button>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -283,10 +375,12 @@ export default function OpeningExplorer(
  *  Deeper nested variations get progressively deeper indentation.
  *  Every SAN is a clickable button that jumps the board to that node. */
 function MoveTreeLine({
-  startNode, startNodePath, startPly, cursor, onPick, depth = 0, activeRef,
+  startNode, startNodePath, startPly, cursor, onPick, onContext, depth = 0, activeRef,
 }: {
   startNode: MoveNode; startNodePath: number[]; startPly: number; cursor: number[];
-  onPick: (path: number[]) => void; depth?: number;
+  onPick: (path: number[]) => void;
+  onContext: (nodePath: number[], clientX: number, clientY: number) => void;
+  depth?: number;
   activeRef?: React.RefObject<HTMLButtonElement | null>;
 }) {
   // Walk the mainline starting at startNode. At each ply: emit the move,
@@ -317,6 +411,7 @@ function MoveTreeLine({
           <span className="mr-0.5 text-ink-500">{moveNo}{isWhite ? "." : "…"}</span>
         )}
         <button ref={active ? activeRef : undefined} onClick={() => onPick(nodePath)}
+          onContextMenu={(e) => { e.preventDefault(); onContext(nodePath, e.clientX, e.clientY); }}
           className={`rounded px-1.5 py-0.5 transition ${active
             ? "bg-brand-500/60 text-white"
             : depth === 0 ? "text-ink-100 hover:bg-ink-800" : "text-ink-300 hover:bg-ink-800"}`}>
@@ -337,7 +432,7 @@ function MoveTreeLine({
           className="my-1 border-l-2 border-ink-700 pl-2 text-[13px]"
           style={{ marginLeft: `${Math.min(depth + 1, 3) * 8}px` }}>
           <MoveTreeLine startNode={kids[vi]!} startNodePath={vPath}
-            startPly={ply + 1} cursor={cursor} onPick={onPick}
+            startPly={ply + 1} cursor={cursor} onPick={onPick} onContext={onContext}
             depth={depth + 1} activeRef={activeRef} />
         </div>
       );

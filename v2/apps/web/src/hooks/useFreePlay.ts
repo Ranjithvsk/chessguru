@@ -254,12 +254,123 @@ export function useFreePlay(initialFen?: string) {
     applySans(sans);
     return true;
   };
+  // Replay a FULL MoveNode tree from the start position — preserves every
+  // sideline that was recorded, unlike loadSans which flattens to a single
+  // mainline. Used by the Repertoire loader when a saved entry ships its
+  // whole tree (added 2026-08-19: owner report "save also side lines while
+  // saving, now only main lines are saved even when sidelines are there").
+  // Cursor lands on the mainline leaf so ArrowUp/Down can switch into
+  // sibling variations from any node.
+  const loadTree = (newTree: MoveNode[]): boolean => {
+    if (!Array.isArray(newTree) || newTree.length === 0) return false;
+    // Walk children[0] to the mainline leaf and record the cursor path.
+    const newPath: number[] = [];
+    let cur: MoveNode | undefined = newTree[0];
+    if (cur) {
+      newPath.push(0);
+      while (cur.children.length > 0) {
+        newPath.push(0);
+        cur = cur.children[0];
+        if (!cur) break;
+      }
+    }
+    const mainlineSans = walk(newTree, newPath).sans;
+    setTree(newTree);
+    setPath(newPath);
+    applySans(mainlineSans);
+    return true;
+  };
   // Convenience: does the cursor have somewhere to go forward?
   const hasNext = childrenAtCursor(tree, path).children.length > 0;
+
+  // Structural clone of `tree` down to `p` — every ancestor is a fresh
+  // object so React sees a new reference and re-renders. Returns both the
+  // new tree and a handle to the parent-children array that owns `p[last]`.
+  const cloneToParent = (t: MoveNode[], p: number[]): { tree: MoveNode[]; parentChildren: MoveNode[] | null } => {
+    if (p.length === 0) return { tree: t, parentChildren: null };
+    const nextTop = [...t];
+    let parentArr = nextTop;
+    for (let i = 0; i < p.length - 1; i++) {
+      const idx = p[i]!;
+      const child = parentArr[idx]!;
+      const newChild: MoveNode = { san: child.san, children: [...child.children] };
+      parentArr[idx] = newChild;
+      parentArr = newChild.children;
+    }
+    return { tree: nextTop, parentChildren: parentArr };
+  };
+
+  // Move the child at `p` up one position among its siblings (swap with the
+  // sibling to its left). Lichess "Promote variation" — one step toward
+  // mainline for THIS branch point. Only meaningful when `p.length > 0` and
+  // the last index > 0. Cursor follows the moved node.
+  const promoteVariation = (p: number[]) => {
+    if (p.length === 0) return;
+    const k = p[p.length - 1]!;
+    if (k <= 0) return;
+    const { tree: nextTree, parentChildren } = cloneToParent(tree, p);
+    if (!parentChildren) return;
+    [parentChildren[k - 1], parentChildren[k]] = [parentChildren[k]!, parentChildren[k - 1]!];
+    setTree(nextTree);
+    // Cursor: keep pointing to the SAME node, which is now at k-1. Later
+    // indices in path (if any) stay the same because they index into the
+    // moved node's own children array (unchanged).
+    const nextPath = [...p.slice(0, -1), k - 1, ...path.slice(p.length)];
+    setPath(nextPath);
+  };
+
+  // Fully mainline the branch: for every ancestor along `p` whose index is
+  // > 0, swap it into position 0 at that ancestor. Cursor follows.
+  const makeMainLine = (p: number[]) => {
+    if (p.length === 0) return;
+    // Fresh clone of the top-level array; we'll walk & rebuild each ancestor
+    // that needs its children[0] swapped with children[k].
+    const nextTop = [...tree];
+    let arr = nextTop;
+    const nextPath: number[] = [];
+    for (let i = 0; i < p.length; i++) {
+      const k = p[i]!;
+      if (k > 0) {
+        [arr[0], arr[k]] = [arr[k]!, arr[0]!];
+      }
+      nextPath.push(0);
+      // Descend into the (now-mainline) node's children with a structural copy.
+      const child = arr[0]!;
+      if (i < p.length - 1) {
+        const newChild: MoveNode = { san: child.san, children: [...child.children] };
+        arr[0] = newChild;
+        arr = newChild.children;
+      }
+    }
+    setTree(nextTop);
+    // Extend cursor with any suffix beyond p (if the user's cursor was
+    // deeper inside the moved subtree, keep pointing at the same node —
+    // suffix indices are relative to the moved node's own children which
+    // aren't shuffled).
+    setPath([...nextPath, ...path.slice(p.length)]);
+  };
+
+  // Remove the node at `p` and everything below it. Cursor jumps to the
+  // parent (or to root if we removed a top-level entry). No-op for empty p.
+  const deleteFrom = (p: number[]) => {
+    if (p.length === 0) return;
+    const { tree: nextTree, parentChildren } = cloneToParent(tree, p);
+    if (!parentChildren) return;
+    parentChildren.splice(p[p.length - 1]!, 1);
+    // Prune any ancestors that became empty from the delete (rare — happens
+    // if you delete the only child of the only child …). Simpler: leave them,
+    // since an empty children[] is harmless.
+    setTree(nextTree);
+    // Cursor moves to the parent of the deleted node.
+    const parentPath = p.slice(0, -1);
+    setPath(parentPath);
+    applySans(walk(nextTree, parentPath).sans);
+  };
 
   return {
     game, fen, orientation, turnColor,
     tree, path, history, line, ply, hasNext,
-    dests, onMove, undo, goPrev, goNext, goTo, goSibling, reset, load, loadPermissive, loadSans, flip,
+    dests, onMove, undo, goPrev, goNext, goTo, goSibling, reset, load, loadPermissive, loadSans, loadTree, flip,
+    promoteVariation, makeMainLine, deleteFrom,
   };
 }
