@@ -19,6 +19,7 @@ import {
   type RepertoireEntry, type RepMoveNode,
 } from "../lib/repertoire-api";
 import { api } from "../lib/api";
+import { activateOpening, isActivated } from "../lib/cards";
 import type { MoveNode } from "../hooks/useFreePlay";
 
 interface Props {
@@ -185,9 +186,19 @@ function List({
   isCoach: boolean;
   onShare: (entry: RepertoireEntry) => void;
 }) {
+  // Local counter to force a re-render after activateOpening flips the
+  // `isActivated` state (writes to localStorage, no built-in subscribe).
+  const [activateNonce, setActivateNonce] = useState(0);
   return (
     <ul className="divide-y divide-ink-800/60">
-      {entries.map((e) => (
+      {entries.map((e) => {
+        const activatable = e.kind === "corpus" && !!e.slug;
+        // Re-read on each render / after activation so the button flips
+        // to the "activated" state without needing a page refresh.
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const _touch = activateNonce;
+        const activated = activatable && isActivated(e.slug!);
+        return (
         <li key={e._id} className="group flex items-center gap-2 px-2 py-1.5 hover:bg-ink-900">
           <button
             onClick={() => onLoad(
@@ -205,6 +216,25 @@ function List({
               <span className="ml-1 text-[10px] font-semibold text-indigo-300"> · from {e.sharedFromName}</span>
             )}
           </button>
+          {/* Add to Opening Trainer — visible for corpus entries only (line
+              entries have no corpus slug so the FSRS card generator has
+              nothing to key off). Works for both own and coach-suggested
+              entries (owner ask 2026-08-20). */}
+          {activatable && (
+            <button
+              onClick={() => {
+                if (activated) return;
+                activateOpening(e.slug!);
+                setActivateNonce((n) => n + 1);
+              }}
+              disabled={activated}
+              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${activated
+                ? "text-emerald-400 cursor-default"
+                : "text-ink-400 hover:bg-ink-800 hover:text-emerald-300"}`}
+              title={activated ? "Already in Opening Trainer" : "Add to Opening Trainer"}>
+              {activated ? "✓📅" : "📅"}
+            </button>
+          )}
           {isCoach && !e.sharedFrom && (
             <button
               onClick={() => onShare(e)}
@@ -216,7 +246,8 @@ function List({
             className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-ink-500 hover:bg-rose-500/20 hover:text-rose-300"
             title="Delete">🗑</button>
         </li>
-      ))}
+        );
+      })}
     </ul>
   );
 }

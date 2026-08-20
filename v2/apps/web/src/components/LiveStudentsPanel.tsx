@@ -42,7 +42,7 @@ function activityFor(path: string): { emoji: string; label: string } {
   if (startsWith("/study/zugzwang"))       return { emoji: "🪤", label: "Zugzwang" };
   if (startsWith("/study/opening-memory")) return { emoji: "🧠", label: "Opening memory" };
   if (startsWith("/study/repertoire"))     return { emoji: "📖", label: "Repertoire" };
-  if (startsWith("/study/daily"))          return { emoji: "🗓️", label: "Daily study" };
+  if (startsWith("/study/daily"))          return { emoji: "🗓️", label: "Opening Trainer" };
   if (startsWith("/study"))                return { emoji: "📘", label: "In study section" };
   if (startsWith("/puzzles"))              return { emoji: "🧩", label: "Solving puzzles" };
   if (startsWith("/blindfold"))            return { emoji: "🙈", label: "Blindfold puzzles" };

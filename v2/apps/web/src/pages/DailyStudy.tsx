@@ -67,7 +67,7 @@ export default function DailyStudy() {
     <div className="mx-auto max-w-3xl p-4">
       <header className="mb-4 flex items-baseline justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Daily Study</h1>
+          <h1 className="text-2xl font-bold">Opening Trainer</h1>
           <p className="mt-1 text-sm text-ink-500">Spaced repetition · FSRS scheduling · your active repertoire first.</p>
         </div>
         <div className="flex shrink-0 gap-2">

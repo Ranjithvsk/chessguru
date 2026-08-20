@@ -64,6 +64,16 @@ const GROUPS: Group[] = [
     ],
   },
   {
+    // Openings is its own top-level group placed right after Puzzles (owner
+    // ask 2026-08-20 — "Openings is in the three-line menu inside Learn,
+    // but need it after Puzzles"). Pulled out of the Learn group.
+    label: "Openings", accent: "sky", icon: "📖",
+    items: [
+      { to: "/openings", label: "📖 Openings", desc: "Notation, corpus, tree, repertoire, explorer" },
+      { to: "/study/daily", label: "📅 Opening Trainer", desc: "Spaced-repetition review of your saved openings" },
+    ],
+  },
+  {
     label: "Play", accent: "rose", icon: "♟️",
     items: [
       { to: "/play", label: "♟️ Play", desc: "Pass & play on one screen" },
@@ -77,7 +87,6 @@ const GROUPS: Group[] = [
     label: "Learn", accent: "sky", icon: "📚",
     items: [
       { to: "/study", label: "📚 Study", desc: "Endgames, coordinates, memory palace, drills" },
-      { to: "/openings", label: "📖 Openings", desc: "Notation, corpus, tree, repertoire, explorer" },
       { to: "/broadcasts", label: "📡 Broadcast games", desc: "Master tournament games" },
       { to: "/book", label: "📕 Book", desc: "Puzzles from the book games" },
     ],
