@@ -37,8 +37,21 @@ import MyRepertoirePanel from "../components/MyRepertoirePanel";
 
 /** Per-ply result the drill tracks; feeds applyDrillResults() at session end.
  *  Correctness is derived from (attempts, peeked) at grading time — see
- *  `gradeFor()` — so we don't have to re-derive it inside the drill loop. */
-interface PlyOutcome { peeked: boolean; attempts: number }
+ *  `gradeFor()` — so we don't have to re-derive it inside the drill loop.
+ *  fenBefore/correctSan/correctFrom/correctTo are captured so the scorecard
+ *  can spotlight every ply the student missed (Bjork's "immediate
+ *  re-encoding" — spotlight the mistake at the moment the schedule updates,
+ *  not on next review). */
+interface PlyOutcome {
+  peeked: boolean;
+  attempts: number;
+  fenBefore: string;
+  correctSan: string;
+  correctFrom: string;
+  correctTo: string;
+  moveNo: number;                                      // 1-based (ceil(ply/2))
+  sideToMove: "w" | "b";
+}
 
 /** Map a ply's outcome to an FSRS grade:
  *   attempts === 0 && !peeked → Good (3)
@@ -52,6 +65,9 @@ function gradeFor(o: PlyOutcome): Grade {
 function correctCount(outcomes: PlyOutcome[]): number {
   return outcomes.filter((o) => o.attempts === 0 && !o.peeked).length;
 }
+function missed(outcomes: PlyOutcome[]): PlyOutcome[] {
+  return outcomes.filter((o) => o.attempts > 0 || o.peeked);
+}
 
 export default function DailyStudy() {
   const navigate = useNavigate();
@@ -62,7 +78,7 @@ export default function DailyStudy() {
 
   const summary = useMemo(() => queueSummary(), [nonce]);
   const [drill, setDrill] = useState<{ slug: string; name: string; sans: string[] } | null>(null);
-  const [lastScore, setLastScore] = useState<{ slug: string; name: string; correct: number; total: number; nextReviewAt: Date | null } | null>(null);
+  const [lastScore, setLastScore] = useState<{ slug: string; name: string; correct: number; total: number; nextReviewAt: Date | null; misses: PlyOutcome[] } | null>(null);
   const [sessionsDone, setSessionsDone] = useState(0);
   // Upcoming schedule — top 5 openings by earliest due-date. Reloaded on
   // every nonce bump so the list stays fresh after a drill.
@@ -90,6 +106,7 @@ export default function DailyStudy() {
       correct,
       total: outcomes.length,
       nextReviewAt: summary?.earliestDue ?? null,
+      misses: missed(outcomes),
     });
     setDrill(null);
     setSessionsDone((n) => n + 1);
@@ -266,15 +283,15 @@ function DrillSession({
   const advance = useCallback(() => {
     if (!currentSan || !expected) return;
     const rec: PlyOutcome = {
-      correct: attempts === 0 && !peeked,
       peeked,
       attempts,
+      fenBefore: fen,
+      correctSan: currentSan,
+      correctFrom: String(expected.from),
+      correctTo: String(expected.to),
+      moveNo: Math.ceil((ply + 1) / 2),
+      sideToMove: game.current.turn(),
     };
-    // On a "peeked" or "wrong-then-right" state the student still gets the
-    // move applied so we can march forward; but they got the ply "wrong" for
-    // grading purposes.
-    if (!rec.correct && attempts === 0 && peeked) rec.correct = true;  // played the shown move
-    if (attempts > 0) rec.correct = attempts === 0;                    // any wrong attempt at all = wrong
     try {
       game.current.move(currentSan);
       setFen(game.current.fen());
@@ -286,7 +303,7 @@ function DrillSession({
     setAttempts(0);
     setFeedback("idle");
     setFlash(null);
-  }, [attempts, currentSan, expected, peeked]);
+  }, [attempts, currentSan, expected, fen, peeked, ply]);
 
   // On drill completion, hand results back up.
   useEffect(() => {
@@ -408,7 +425,7 @@ function DrillSession({
   );
 }
 
-function Scorecard({ result, onNext }: { result: { slug: string; name: string; correct: number; total: number; nextReviewAt: Date | null }; onNext: () => void }) {
+function Scorecard({ result, onNext }: { result: { slug: string; name: string; correct: number; total: number; nextReviewAt: Date | null; misses: PlyOutcome[] }; onNext: () => void }) {
   const pct = result.total > 0 ? Math.round((result.correct / result.total) * 100) : 0;
   const isStrong = pct >= 80;
   const isOk = pct >= 50 && pct < 80;
@@ -421,23 +438,73 @@ function Scorecard({ result, onNext }: { result: { slug: string; name: string; c
       : "Rough round — every miss is scheduled for tomorrow.";
   const displayName = displayNameFor(result.slug) || result.name;
   return (
-    <div className={`rounded-xl border ${bg} p-6 text-center`}>
-      <p className="text-3xl">{emoji}</p>
-      <h2 className="mt-2 text-lg font-bold text-white">{displayName}</h2>
-      <div className="mt-3 text-3xl font-bold text-white">
-        {result.correct} <span className="text-ink-400">/ {result.total}</span>
-        <span className="ml-2 text-base font-normal text-ink-400">({pct}%)</span>
+    <div className={`rounded-xl border ${bg} p-6`}>
+      <div className="text-center">
+        <p className="text-3xl">{emoji}</p>
+        <h2 className="mt-2 text-lg font-bold text-white">{displayName}</h2>
+        <div className="mt-3 text-3xl font-bold text-white">
+          {result.correct} <span className="text-ink-400">/ {result.total}</span>
+          <span className="ml-2 text-base font-normal text-ink-400">({pct}%)</span>
+        </div>
+        <p className="mt-2 text-sm text-ink-300">{msg}</p>
+        {result.nextReviewAt && (
+          <p className="mt-2 text-xs text-ink-400">
+            🗓 Next review of this opening: <span className="font-semibold text-ink-200">{formatDueRelative(result.nextReviewAt)}</span>
+          </p>
+        )}
+        <button onClick={onNext}
+          className="mt-4 rounded-full bg-brand-500 px-5 py-2 text-sm font-bold text-white hover:bg-brand-400">
+          Next opening →
+        </button>
       </div>
-      <p className="mt-2 text-sm text-ink-300">{msg}</p>
-      {result.nextReviewAt && (
-        <p className="mt-2 text-xs text-ink-400">
-          🗓 Next review of this opening: <span className="font-semibold text-ink-200">{formatDueRelative(result.nextReviewAt)}</span>
-        </p>
+
+      {/* Mistake spotlight — mini boards for every ply the student missed,
+          with the correct move arrowed on top. Bjork's desirable-difficulty
+          research: immediate re-encoding of a mistake is significantly more
+          effective for long-term retention than passively waiting for the
+          next scheduled review. */}
+      {result.misses.length > 0 && (
+        <MissesSpotlight misses={result.misses} />
       )}
-      <button onClick={onNext}
-        className="mt-4 rounded-full bg-brand-500 px-5 py-2 text-sm font-bold text-white hover:bg-brand-400">
-        Next opening →
-      </button>
+    </div>
+  );
+}
+
+function MissesSpotlight({ misses }: { misses: PlyOutcome[] }) {
+  return (
+    <div className="mt-5 border-t border-ink-800 pt-4">
+      <h3 className="mb-2 text-sm font-semibold text-white">🔎 Moves to remember</h3>
+      <p className="mb-3 text-[11px] text-ink-500">Look once — encoding a mistake right after you make it is one of the fastest ways to lock in the correct move.</p>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        {misses.map((m, i) => (
+          <MissCard key={i} miss={m} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MissCard({ miss }: { miss: PlyOutcome }) {
+  const shape = { orig: miss.correctFrom, dest: miss.correctTo, brush: "green" };
+  return (
+    <div className="rounded-lg border border-ink-800 bg-ink-950 p-2">
+      <div className="mb-1 flex items-baseline justify-between text-[10px]">
+        <span className="font-semibold text-ink-300">
+          Move {miss.moveNo}{miss.sideToMove === "b" ? "…" : "."} · {miss.sideToMove === "w" ? "White" : "Black"}
+        </span>
+        <span className="rounded bg-rose-500/20 px-1.5 py-0.5 font-mono font-bold text-rose-300">
+          {miss.correctSan}
+        </span>
+      </div>
+      <div className="pointer-events-none">
+        <Board
+          fen={miss.fenBefore}
+          viewOnly
+          coordinates={false}
+          orientation={miss.sideToMove === "w" ? "white" : "black"}
+          shapes={[shape] as any}
+        />
+      </div>
     </div>
   );
 }
