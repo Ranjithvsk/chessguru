@@ -13,6 +13,8 @@ import { useQuery } from "@tanstack/react-query";
 import { api, get } from "../lib/api";
 import { parentReportsApi, type ReportData } from "../lib/parent-reports-api";
 import { PeriodPerformanceTable } from "../components/PeriodPerformanceTable";
+import { TrainerStatsStrip } from "../components/TrainerStatsStrip";
+import { getStudentTrainerRollup, type TrainerRollup } from "../lib/opening-trainer-api";
 import { StudentMistakesPanel } from "../components/StudentMistakesPanel";
 import { AchievementsGallery } from "../components/AchievementsGallery";
 
@@ -206,6 +208,14 @@ export default function StudentPerformancePage() {
   });
   const student: Student | undefined = rosterQ.data?.find((s) => s._id === studentId);
 
+  // Opening Trainer rollup for this student (rollout step 3 — coach view).
+  const trainerRollupQ = useQuery<TrainerRollup | null>({
+    queryKey: ["opening-trainer-rollup-for", studentId],
+    queryFn: async () => { try { return await getStudentTrainerRollup(studentId); } catch { return null; } },
+    enabled: !!canManage && !!studentId,
+    staleTime: 60_000,
+  });
+
   if (auth && !auth.loggedIn) return <Navigate to={`/login?back=/academy/students/${encodeURIComponent(studentId)}/performance`} replace />;
   if (auth && !canManage) return (
     <div className="mx-auto max-w-3xl space-y-3 px-3 py-8">
@@ -273,6 +283,14 @@ export default function StudentPerformancePage() {
         <Stat label="Games (W-D-L)" value={`${r.games.won}-${r.games.drawn}-${r.games.lost}`} sub={totalGames === 0 ? "no games in period" : `${winRate}% win`} tone="accent" />
         <Stat label="Attendance" value={`${attendanceCount}/30`} sub={`Last: ${daysAgo(student?.lastAttendedAt)}`} tone={attendanceCount === 0 ? "rose" : "accent"} />
       </div>
+
+      {/* Opening Trainer — coach view of the student's drill activity +
+          coach-assigned compliance %. Rollout step 3 of the Openings
+          Dashboard plan. Hidden when the student has no drills yet AND no
+          coach-assigned openings, to keep the page tidy on new students. */}
+      {trainerRollupQ.data && (trainerRollupQ.data.totals.allSessions > 0 || trainerRollupQ.data.forcedCompliance) && (
+        <TrainerStatsStrip rollup={trainerRollupQ.data} title="Opening Trainer — last 30 days" />
+      )}
 
       {/* Two-col detail grid */}
       <div className="grid gap-6 lg:grid-cols-2">

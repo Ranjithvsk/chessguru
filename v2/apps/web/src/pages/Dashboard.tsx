@@ -6,6 +6,8 @@ import { prettify } from "../lib/format";
 import * as push from "../lib/push";
 import { PeriodPerformanceTable } from "../components/PeriodPerformanceTable";
 import { MyMistakesPanel } from "../components/MyMistakesPanel";
+import { TrainerStatsStrip } from "../components/TrainerStatsStrip";
+import { getMyTrainerRollup, type TrainerRollup } from "../lib/opening-trainer-api";
 
 // Phase 8a: Puzzle of the Day card. Sits at the very top of the dashboard so
 // it's the first thing you see when you log in — the daily anchor for a habit.
@@ -1117,6 +1119,19 @@ function ThemeBar({ t, max, min, onTrain }: { t: ThemeRow; max: number; min: num
   );
 }
 
+/** Opening Trainer performance card — mirrors the strip that lives on
+ *  /study/daily so students see the same at-a-glance stats from the
+ *  dashboard. Rollout step 2 of the Openings Dashboard plan. */
+function OpeningTrainerCard() {
+  const { data } = useQuery<TrainerRollup | null>({
+    queryKey: ["opening-trainer-rollup", "self-dashboard"],
+    queryFn: async () => { try { return await getMyTrainerRollup(); } catch { return null; } },
+    staleTime: 60_000,
+  });
+  if (!data) return null;
+  return <TrainerStatsStrip rollup={data} title="Opening Trainer — last 30 days" />;
+}
+
 export default function DashboardPage() {
   const nav = useNavigate();
   const [sp] = useSearchParams();
@@ -1194,6 +1209,7 @@ export default function DashboardPage() {
       {!viewedAs && <StudentMaterialsCard />}
       {!viewedAs && <StudentClassNotesCard />}
       {!viewedAs && <DailyCard />}
+      {!viewedAs && <OpeningTrainerCard />}
       {data.lastSession && <LastSessionStrip s={data.lastSession} />}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-5">

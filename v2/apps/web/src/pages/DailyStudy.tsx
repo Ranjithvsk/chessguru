@@ -38,6 +38,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { listRepertoire } from "../lib/repertoire-api";
 import { getMyTrainerRollup, postDrillSession, type TrainerRollup } from "../lib/opening-trainer-api";
+import { TrainerStatsStrip } from "../components/TrainerStatsStrip";
 import type { Grade } from "../lib/fsrs";
 import MyRepertoirePanel from "../components/MyRepertoirePanel";
 
@@ -294,7 +295,9 @@ export default function DailyStudy() {
       )}
 
       {rollup && (
-        <TrainerStatsStrip rollup={rollup} />
+        <div className="mb-4">
+          <TrainerStatsStrip rollup={rollup} />
+        </div>
       )}
 
       {/* Repertoire quick-add — coach-suggested + own with 📅 button per row. */}
@@ -725,48 +728,6 @@ function TrainingQueue({
       <p className="mt-2 text-[10px] text-ink-500">
         Intervals are computed per-move: correct moves get pushed further out, misses come back sooner. The schedule targets a 90% recall probability — the sweet spot for long-term memory (SuperMemo research).
       </p>
-    </div>
-  );
-}
-
-/** 30-day mini-heatmap + 7-day success % + current streak + coach-compliance.
- *  Ships with rollout step 1 of the Openings Dashboard plan. Read-only; the
- *  data source is /api/opening-trainer/rollup/mine. */
-function TrainerStatsStrip({ rollup }: { rollup: TrainerRollup }) {
-  const cellColor = (pct: number, sessions: number): string => {
-    if (sessions === 0) return "bg-ink-800";
-    if (pct >= 85) return "bg-emerald-500";
-    if (pct >= 65) return "bg-emerald-500/60";
-    if (pct >= 40) return "bg-amber-500/60";
-    return "bg-rose-500/60";
-  };
-  return (
-    <div className="mb-4 rounded-xl border border-ink-800 bg-ink-900 p-3">
-      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold text-white">📈 Your last 30 days</h3>
-        <div className="flex gap-3 text-[11px] tabular-nums">
-          <span className="text-ink-300">🔥 <span className="font-bold text-amber-300">{rollup.streak}</span>-day streak</span>
-          <span className="text-ink-300">7d: <span className="font-bold text-emerald-300">{rollup.successPct7}%</span></span>
-          <span className="text-ink-300">30d: <span className="font-bold text-emerald-300">{rollup.successPct30}%</span></span>
-          <span className="text-ink-300">Sessions 7d/30d: <span className="font-bold text-white">{rollup.totals.sessions7}/{rollup.totals.sessions30}</span></span>
-        </div>
-      </div>
-      <div className="flex gap-[3px] rounded bg-ink-950 p-1">
-        {rollup.heat.map((h) => (
-          <div key={h.day}
-            className={`h-4 w-full min-w-[6px] rounded-[2px] ${cellColor(h.correctPct, h.sessions)}`}
-            title={`${h.day} · ${h.sessions} session${h.sessions === 1 ? "" : "s"} · ${h.moves} moves · ${h.correctPct}% correct`} />
-        ))}
-      </div>
-      <div className="mt-1 flex justify-between text-[9px] text-ink-500">
-        <span>30 days ago</span>
-        <span>today →</span>
-      </div>
-      {rollup.forcedCompliance && (
-        <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-200">
-          🎓 Coach-assigned: <span className="font-bold">{rollup.forcedCompliance.done}/{rollup.forcedCompliance.assigned}</span> drilled this week ({rollup.forcedCompliance.pct}%){rollup.forcedCompliance.pct < 100 && rollup.forcedCompliance.assigned > 0 ? " — pick an 🎓 assigned opening from the queue below to keep your coach happy" : ""}
-        </div>
-      )}
     </div>
   );
 }
