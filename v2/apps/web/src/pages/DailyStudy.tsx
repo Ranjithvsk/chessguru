@@ -13,8 +13,10 @@ import { Link, useNavigate } from "react-router-dom";
 import Board from "../components/Board";
 import {
   activatedSlugs,
+  displayNameFor,
   dueCards,
   hydrateCard,
+  isCustomLineSlug,
   queueSummary,
   renderNextMoveCard,
   saveCardState,
@@ -183,13 +185,17 @@ function CardView({
   onReveal: () => void;
   onGrade: (g: Grade) => void;
 }) {
-  const opening = openingBySlug.get(card.slug)!;
+  const isCustom = isCustomLineSlug(card.slug);
+  const name = displayNameFor(card.slug);
+  const header = isCustom ? (
+    <span className="font-semibold text-ink-300">{name} <span className="ml-1 text-[10px] font-normal text-ink-500">· custom line</span></span>
+  ) : (
+    <Link to={`/study/openings/${card.slug}`} className="font-semibold text-ink-300 hover:underline">{name}</Link>
+  );
   return (
     <div className="rounded-xl border border-ink-900 bg-ink-900 p-5 shadow-sm">
       <div className="mb-3 flex items-center justify-between text-xs">
-        <Link to={`/study/openings/${card.slug}`} className="font-semibold text-ink-300 hover:underline">
-          {opening.name}
-        </Link>
+        {header}
         <span className="text-ink-600">
           {card.fsrs.state} · {humanDue(card.fsrs)}
           {card.fsrs.reps > 0 && ` · ${card.fsrs.reps} reps`}

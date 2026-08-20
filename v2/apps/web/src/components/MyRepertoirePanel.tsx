@@ -19,7 +19,7 @@ import {
   type RepertoireEntry, type RepMoveNode,
 } from "../lib/repertoire-api";
 import { api } from "../lib/api";
-import { activateOpening, isActivated } from "../lib/cards";
+import { activateRepertoireEntry, isRepertoireEntryActivated } from "../lib/cards";
 import type { MoveNode } from "../hooks/useFreePlay";
 
 interface Props {
@@ -196,12 +196,18 @@ function List({
   return (
     <ul className="divide-y divide-ink-800/60">
       {entries.map((e) => {
-        const activatable = e.kind === "corpus" && !!e.slug;
+        // Corpus entries always have a slug; line entries are activatable
+        // when they carry some SAN moves. Owner ask 2026-08-20 — coach may
+        // share entries as line-kind (from "Save current line") and those
+        // should also be addable to the Opening Trainer.
+        const activatable =
+          (e.kind === "corpus" && !!e.slug) ||
+          (e.kind === "line" && (e.sans?.length ?? 0) > 0);
         // Re-read on each render / after activation so the button flips
         // to the "activated" state without needing a page refresh.
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const _touch = activateNonce;
-        const activated = activatable && isActivated(e.slug!);
+        const activated = activatable && isRepertoireEntryActivated(e);
         return (
         <li key={e._id} className="group flex items-center gap-2 px-2 py-1.5 hover:bg-ink-900">
           <button
@@ -228,9 +234,9 @@ function List({
             <button
               onClick={() => {
                 if (activated) return;
-                activateOpening(e.slug!);
+                activateRepertoireEntry(e);
                 setActivateNonce((n) => n + 1);
-                onActivate?.(e.slug!);
+                onActivate?.(e.slug ?? e._id);
               }}
               disabled={activated}
               className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${activated

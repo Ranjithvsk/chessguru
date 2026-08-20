@@ -36,6 +36,50 @@ export interface Card {
 
 const K_ACTIVATED = "cg_mm500_activated";
 const K_CARDS     = "cg_mm500_cards";
+// Custom lines synthesised from repertoire entries with kind==="line" —
+// stored separately from the 500-corpus so the trainer can hydrate cards
+// whose slug isn't in openingBySlug. Owner ask 2026-08-20 ("also add own
+// repertoire lines to Opening Trainer"). Key format for such slugs is
+// `line:<repertoire-entry-_id>`.
+const K_CUSTOM_LINES = "cg_mm500_custom_lines";
+
+/** Slug prefix used for custom line entries in the trainer. */
+const LINE_SLUG_PREFIX = "line:";
+export function isCustomLineSlug(slug: string): boolean {
+  return slug.startsWith(LINE_SLUG_PREFIX);
+}
+
+interface CustomLine { name: string; sans: string[] }
+function loadCustomLines(): Record<string, CustomLine> {
+  try {
+    const raw = localStorage.getItem(K_CUSTOM_LINES);
+    return raw ? (JSON.parse(raw) as Record<string, CustomLine>) : {};
+  } catch { return {}; }
+}
+function writeCustomLines(map: Record<string, CustomLine>) {
+  localStorage.setItem(K_CUSTOM_LINES, JSON.stringify(map));
+}
+/** Returns the trainer-facing slug for a repertoire entry (corpus slug for
+ *  saved openings, `line:<id>` for custom lines). */
+export function trainerSlugFor(entry: { _id: string; kind: "corpus" | "line"; slug?: string }): string | null {
+  if (entry.kind === "corpus") return entry.slug ?? null;
+  return LINE_SLUG_PREFIX + entry._id;
+}
+/** Lookup a display name + mainline SANs for any slug — corpus or custom. */
+function lineDataFor(slug: string): { name: string; sans: string[] } | null {
+  if (isCustomLineSlug(slug)) {
+    const map = loadCustomLines();
+    return map[slug] ?? null;
+  }
+  const o = openingBySlug.get(slug);
+  if (!o) return null;
+  return { name: o.name, sans: (o.mainlinePgn ?? o.pgnStart) ?? [] };
+}
+/** Display name for any activated slug (corpus opening or custom line). */
+export function displayNameFor(slug: string): string {
+  const d = lineDataFor(slug);
+  return d?.name ?? slug;
+}
 
 /* ---------- activated openings ---------- */
 export function activatedSlugs(): Set<string> {
@@ -68,6 +112,43 @@ export function activateOpening(slug: string): number {
   }
   writeAllStates(store);
   return generated.length;
+}
+
+/** Add a custom line (kind==="line" repertoire entry) to the study queue.
+ *  Generates one next-move card per ply in `sans`. Idempotent. */
+export function activateLineEntry(entry: { _id: string; name: string; sans: string[] }): number {
+  const slug = LINE_SLUG_PREFIX + entry._id;
+  const set = activatedSlugs();
+  if (set.has(slug)) return cardsForOpening(slug).length;
+  const sans = entry.sans || [];
+  if (sans.length === 0) return 0;
+  // Persist the synthetic opening so future renders can look it up by slug.
+  const map = loadCustomLines();
+  map[slug] = { name: entry.name, sans };
+  writeCustomLines(map);
+  set.add(slug);
+  writeActivated(set);
+  const store = loadAllStates();
+  for (let i = 0; i < sans.length; i++) {
+    const id = `${slug}:nm:${i + 1}`;
+    if (!store[id]) store[id] = newCard();
+  }
+  writeAllStates(store);
+  return sans.length;
+}
+
+/** Dispatch helper: activate a repertoire entry regardless of kind. */
+export function activateRepertoireEntry(entry: { _id: string; kind: "corpus" | "line"; slug?: string; name: string; sans?: string[] }): number {
+  if (entry.kind === "corpus" && entry.slug) return activateOpening(entry.slug);
+  if (entry.kind === "line" && entry.sans?.length) {
+    return activateLineEntry({ _id: entry._id, name: entry.name, sans: entry.sans });
+  }
+  return 0;
+}
+/** Predicate that mirrors `activateRepertoireEntry`. */
+export function isRepertoireEntryActivated(entry: { _id: string; kind: "corpus" | "line"; slug?: string }): boolean {
+  const s = trainerSlugFor(entry);
+  return !!s && isActivated(s);
 }
 
 /** Remove opening from study queue and drop its cards. */
@@ -131,12 +212,28 @@ export function saveCardState(cardId: string, state: FsrsState) {
 /* ---------- reconstruction: cardId → Card (with FEN-before, SAN, prompt) ---------- */
 
 /** Hydrate a bare cardId into a full Card object. Returns null if opening or
- *  ply no longer exists (e.g. mainline was shortened between deploys). */
+ *  ply no longer exists (e.g. mainline was shortened between deploys).
+ *
+ *  Note: cardIds for custom-line entries carry an extra "line:" prefix in
+ *  the slug, so a cardId looks like `line:<id>:nm:<ply>` — split(":") gives
+ *  ["line", "<id>", "nm", "<ply>"]. We reassemble the slug accordingly. */
 export function hydrateCard(cardId: string, state?: FsrsState): Card | null {
-  const [slug, kind, plyStr] = cardId.split(":");
-  if (!slug || !kind) return null;
-  const o = openingBySlug.get(slug);
-  if (!o) return null;
+  const parts = cardId.split(":");
+  if (parts.length < 2) return null;
+  let slug: string, kind: string, plyStr: string | undefined;
+  if (parts[0] === "line") {
+    // ["line", <id>, <kind>, <ply?>]
+    if (parts.length < 3) return null;
+    slug = `${parts[0]}:${parts[1]}`;
+    kind = parts[2]!;
+    plyStr = parts[3];
+  } else {
+    slug = parts[0]!;
+    kind = parts[1]!;
+    plyStr = parts[2];
+  }
+  const lineData = lineDataFor(slug);
+  if (!lineData) return null;
   const fsrs = state ?? loadAllStates()[cardId] ?? newCard();
   if (kind === "nm") {
     const ply = plyStr ? Number(plyStr) : undefined;
@@ -154,10 +251,19 @@ export function hydrateCard(cardId: string, state?: FsrsState): Card | null {
 /** All cards belonging to one activated opening — cheap: filter store keys. */
 export function cardsForOpening(slug: string): Card[] {
   const store = loadAllStates();
+  const prefix = `${slug}:`;
   return Object.keys(store)
-    .filter((id) => id.startsWith(`${slug}:`))
+    .filter((id) => id.startsWith(prefix))
     .map((id) => hydrateCard(id, store[id]))
     .filter((c): c is Card => c !== null);
+}
+
+/** Slug extraction from cardId — mirrors hydrateCard's parsing (handles the
+ *  `line:<id>:...` prefix). Used by queue-level filters. */
+function slugFromCardId(id: string): string | null {
+  const parts = id.split(":");
+  if (parts.length < 2) return null;
+  return parts[0] === "line" ? `${parts[0]}:${parts[1]}` : parts[0]!;
 }
 
 /** Daily due queue. Ordered:
@@ -170,7 +276,7 @@ export function dueCards(now: Date = new Date(), newLimit = 10): Card[] {
   const active = activatedSlugs();
   const all: Card[] = [];
   for (const id of Object.keys(store)) {
-    const [slug] = id.split(":");
+    const slug = slugFromCardId(id);
     if (!slug || !active.has(slug)) continue;
     const s = store[id];
     if (!s || !isDue(s, now)) continue;
@@ -205,7 +311,7 @@ export function queueSummary(now: Date = new Date()): {
   let newAvailable = 0;
   let totalCards = 0;
   for (const id of Object.keys(store)) {
-    const [slug] = id.split(":");
+    const slug = slugFromCardId(id);
     if (!slug || !active.has(slug)) continue;
     totalCards++;
     const s = store[id]!;
@@ -218,11 +324,13 @@ export function queueSummary(now: Date = new Date()): {
 /* ---------- render helpers — used by the review UI ---------- */
 
 /** For a next-move card, compute the FEN before the move AND the expected SAN.
- *  Replays the mainline up to (ply-1) so the position + prompt are consistent. */
+ *  Replays the mainline up to (ply-1) so the position + prompt are consistent.
+ *  Works for both 500-corpus openings and custom-line entries — `lineDataFor`
+ *  resolves both. */
 export function renderNextMoveCard(card: Card): { fen: string; san: string; sideToMove: "w" | "b"; moveNo: number } | null {
   if (card.kind !== "next-move" || !card.ply) return null;
-  const o = openingBySlug.get(card.slug);
-  const sans = o?.mainlinePgn ?? o?.pgnStart;
+  const data = lineDataFor(card.slug);
+  const sans = data?.sans;
   if (!sans || card.ply > sans.length) return null;
   const g = new Chess();
   for (let i = 0; i < card.ply - 1; i++) {
