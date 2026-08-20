@@ -252,10 +252,16 @@ function List({
               className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-brand-300"
               title="Share with students">🎓</button>
           )}
-          <button
-            onClick={() => { if (confirm(`Remove "${e.name}"?`)) onDelete(e._id); }}
-            className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-ink-500 hover:bg-rose-500/20 hover:text-rose-300"
-            title="Delete">🗑</button>
+          {/* Students can't delete a coach-shared entry — otherwise a wrong
+              tap wipes homework the coach expected them to study (owner
+              report 2026-08-20). Coaches keep the ability to remove
+              entries they were shared TO. */}
+          {!(e.sharedFrom && !isCoach) && (
+            <button
+              onClick={() => { if (confirm(`Remove "${e.name}"?`)) onDelete(e._id); }}
+              className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-ink-500 hover:bg-rose-500/20 hover:text-rose-300"
+              title="Delete">🗑</button>
+          )}
         </li>
         );
       })}

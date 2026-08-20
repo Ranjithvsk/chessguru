@@ -32,6 +32,13 @@ const NOTES_MAX = 1000;
 const SANS_MAX = 100;
 const SAN_RE = /^[a-hRNBQKPO0-9x+#=\-]{1,10}$/;
 const SLUG_RE = /^[a-z0-9-]{1,80}$/;
+// Sideline tree caps — a saved line can have branches at any node, but not
+// arbitrarily many. Same SANS_MAX ply cap on any single path + a hard total
+// node count so a malicious client can't bomb Mongo with a huge tree.
+const TREE_MAX_NODES = 4000;
+const TREE_MAX_DEPTH = 200;
+
+interface TreeNode { san: string; children: TreeNode[] }
 
 function newId(): string { return new Types.ObjectId().toHexString(); }
 function requireLogin(req: any): { userId: string; role: string | null; academyId: string | null } {
@@ -59,7 +66,31 @@ function normalizeSans(x: unknown): string[] {
   }
   return out;
 }
-function buildEntry(body: any): { kind: "corpus" | "line"; slug?: string; sans?: string[]; notes?: string | null; name: string } {
+// Recursively normalise a MoveNode tree — same shape client-side uses.
+// Enforces total node count, per-node SAN validity, and max branch depth so a
+// bad/hostile client can't bloat Mongo. Returns null when the input is missing
+// or empty (the caller falls back to sans-only saving).
+function normalizeTree(x: unknown): TreeNode[] | null {
+  if (!Array.isArray(x) || x.length === 0) return null;
+  let nodeCount = 0;
+  const walk = (nodes: unknown[], depth: number): TreeNode[] => {
+    if (depth > TREE_MAX_DEPTH) throw new BadRequestException(`tree-too-deep (max ${TREE_MAX_DEPTH})`);
+    const out: TreeNode[] = [];
+    for (const raw of nodes) {
+      nodeCount++;
+      if (nodeCount > TREE_MAX_NODES) throw new BadRequestException(`tree-too-large (max ${TREE_MAX_NODES} nodes)`);
+      const n: any = raw;
+      const san = String(n?.san || "").trim();
+      if (!SAN_RE.test(san)) throw new BadRequestException(`bad-san in tree: ${san}`);
+      const kids = Array.isArray(n?.children) ? walk(n.children, depth + 1) : [];
+      out.push({ san, children: kids });
+    }
+    return out;
+  };
+  return walk(x, 1);
+}
+
+function buildEntry(body: any): { kind: "corpus" | "line"; slug?: string; sans?: string[]; tree?: TreeNode[]; notes?: string | null; name: string } {
   const name = normalizeName(body?.name);
   const kind = body?.kind === "corpus" ? "corpus" : "line";
   if (kind === "corpus") {
@@ -69,7 +100,16 @@ function buildEntry(body: any): { kind: "corpus" | "line"; slug?: string; sans?:
   }
   const sans = normalizeSans(body?.sans);
   const notes = body?.notes ? String(body.notes).slice(0, NOTES_MAX) : null;
-  return { kind, sans, notes, name };
+  // Optional tree — when the client sent one AND it carries at least one
+  // sibling variation, persist it alongside sans. `sans` stays as the
+  // canonical mainline so old clients (and list-render tooltips) keep working.
+  const tree = normalizeTree(body?.tree);
+  const hasVariations = tree ? tree.some(function containsBranch(n: TreeNode): boolean {
+    return n.children.length > 1 || n.children.some(containsBranch);
+  }) : false;
+  return hasVariations
+    ? { kind, sans, tree: tree!, notes, name }
+    : { kind, sans, notes, name };
 }
 
 @Controller("my/repertoire")
@@ -151,6 +191,17 @@ export class SavedLinesController {
   @Delete(":id")
   async remove(@Req() req: any, @Param("id") id: string) {
     const me = requireLogin(req);
+    // Students may not delete entries their coach shared with them —
+    // otherwise a wrong tap wipes homework the coach expected them to
+    // study (owner report 2026-08-20: harinit accidentally deleted a
+    // gunachess-shared repertoire; had to be restored from source).
+    // Coaches/owners can still delete anything they own (including
+    // things they were shared TO, e.g. from their academy owner).
+    const row: any = await this.col().findOne({ _id: id as any, ownerId: me.userId }, { projection: { sharedFrom: 1 } });
+    if (!row) return { ok: false };
+    if (row.sharedFrom && me.role === "student") {
+      throw new BadRequestException("Coach-shared entries can't be deleted by students. Ask your coach to unassign it.");
+    }
     const r = await this.col().deleteOne({ _id: id as any, ownerId: me.userId });
     return { ok: r.deletedCount > 0 };
   }
@@ -185,6 +236,10 @@ export class SavedLinesController {
       name: src.name,
       slug: src.slug ?? undefined,
       sans: src.sans ?? undefined,
+      // Propagate the sideline tree on share too — otherwise coaches sharing
+      // a repertoire with branches would silently flatten it back to mainline
+      // on the student's side.
+      tree: src.tree ?? undefined,
       notes: src.notes ?? undefined,
       createdAt: now,
       sharedFrom: me.userId,
