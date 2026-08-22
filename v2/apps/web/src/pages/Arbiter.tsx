@@ -32,6 +32,7 @@ interface Tournament {
   _id: string; slug: string; name: string; city?: string; federation?: string; start_date?: string; end_date?: string;
   time_control?: string; num_rounds: number; rating_type: string; first_color: string;
   chief_arbiter?: string; cr_sid?: string | null; cr_tournament?: string | null;
+  is_public?: boolean;
   players: Player[]; rounds: Round[];
   standings: Array<{ place: number; rank: number; name: string; rating: number; points: number; buchholz: number; sb: number }>;
 }
@@ -484,8 +485,47 @@ function PublishTab({ t, onChange }: { t: Tournament; onChange: () => void }) {
       onChange();
     },
   });
+  const togglePublic = useMutation({
+    mutationFn: (is_public: boolean) => post<{ ok: boolean; is_public: boolean }>(`/api/pairings/tournaments/${t._id}/public`, { is_public }),
+    onSuccess: () => onChange(),
+  });
   return (
     <div className="space-y-4">
+      <section className="rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-5 text-sm">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="font-semibold text-white">Publish on results.chessguru.cc</h3>
+            <p className="mt-1 text-xs text-ink-400">
+              When enabled, this tournament appears at{" "}
+              <a href={t.is_public ? `https://results.chessguru.cc/t/${t._id}` : "https://results.chessguru.cc/"}
+                 target="_blank" rel="noopener" className="text-brand-400 hover:underline">
+                results.chessguru.cc/t/{t._id.slice(-8)}
+              </a>{" "}
+              — crosstable, standings, and round pairings visible to anyone, no login required.
+              SEO-indexed so players + parents find their results on Google.
+            </p>
+          </div>
+          <label className="flex flex-none cursor-pointer items-center gap-2">
+            <input type="checkbox" checked={!!t.is_public} disabled={togglePublic.isPending}
+                   onChange={(e) => togglePublic.mutate(e.target.checked)}
+                   className="h-5 w-5 accent-emerald-500" />
+            <span className="text-sm font-semibold text-white">{t.is_public ? "Public" : "Private"}</span>
+          </label>
+        </div>
+        {t.is_public && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <a href={`https://results.chessguru.cc/t/${t._id}`} target="_blank" rel="noopener"
+               className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-black hover:brightness-110">
+              Open public page ↗
+            </a>
+            <button onClick={() => { navigator.clipboard.writeText(`https://results.chessguru.cc/t/${t._id}`); }}
+                    className="rounded-lg border border-ink-700 bg-ink-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-ink-800">
+              Copy public link
+            </button>
+          </div>
+        )}
+      </section>
+
       <section className="rounded-2xl border border-ink-700 bg-ink-900/40 p-5 text-sm">
         <h3 className="mb-1 font-semibold text-white">Publish to chess-results.com (optional)</h3>
         <p className="mb-3 text-xs text-ink-400">

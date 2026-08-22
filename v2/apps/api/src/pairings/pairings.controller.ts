@@ -55,6 +55,7 @@ interface Tournament {
   chief_arbiter?: string;
   cr_sid?: string | null;         // chess-results.com Security ID (set once)
   cr_tournament?: string | null;  // chess-results.com tournament number
+  is_public?: boolean;            // when true, mirrored on results.chessguru.cc
   players: Player[];
   rounds: Round[];
   created_at: string;
@@ -318,6 +319,17 @@ export class PairingsController {
       await this.coll().updateOne({ _id: t._id }, { $set: { cr_sid: sid, cr_tournament: tn, updated_at: new Date().toISOString() } });
     }
     return { ok: true, matched, total_players: t.players.length, uid_map_available: !!uidMap };
+  }
+
+  /** POST /api/pairings/tournaments/:id/public — toggle public visibility on
+   *  results.chessguru.cc. Body: { is_public: boolean } */
+  @Post("tournaments/:id/public")
+  async setPublic(@Param("id") id: string, @Body() body: any, @Req() req: any) {
+    const t = await this.loadOwned(id, req);
+    if ("error" in t) return { ok: false, ...t };
+    const is_public = !!body?.is_public;
+    await this.coll().updateOne({ _id: t._id }, { $set: { is_public, updated_at: new Date().toISOString() } });
+    return { ok: true, is_public };
   }
 
   /** GET /api/pairings/tournaments/:id/standings */
