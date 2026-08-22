@@ -82,15 +82,27 @@ async function bootstrap() {
       cookie: { path: "/", httpOnly: true, sameSite: "lax", secure: false, maxAge: 30 * 24 * 60 * 60 * 1000, domain: process.env.COOKIE_DOMAIN || undefined },
     }),
   );
-  // Multi-tenant cookie domain override: gunachess.com (and future tenant
-  // custom domains) can't SSO with the harinitharanjith.com session cookie.
-  // For non-platform hosts, mutate the per-request cookie.domain so Set-Cookie
-  // is host-only (browser scopes the session to the tenant domain).
+  // Per-request cookie-domain override. COOKIE_DOMAIN env is a single value
+  // (`.harinitharanjith.com` in prod), but we serve TWO platform hosts +
+  // any number of tenant custom domains. Rewrite cookie.domain on every
+  // request so Set-Cookie's Domain= actually matches the response's Host —
+  // otherwise the browser silently drops the session cookie and the user
+  // bounces back to login (owner report 2026-08-22 — gunachess signed in
+  // on chessguru.cc, got 201 ok, but /auth/me came back loggedIn:false
+  // because the Set-Cookie was scoped to .harinitharanjith.com).
+  //
+  //   chessguru.cc + subdomains        -> .chessguru.cc         (SSO across brand)
+  //   harinitharanjith.com + subs      -> .harinitharanjith.com (legacy SSO)
+  //   anything else (gunachess.com,
+  //   coach vanity, tenant sub)        -> undefined (host-only)
+  const HH_RX = /(^|\.)harinitharanjith\.com$/;
+  const CC_RX = /(^|\.)chessguru\.cc$/;
   app.use((req: any, _res: any, next: any) => {
     if (!req?.session?.cookie) return next();
     const host = String(req.hostname || "").toLowerCase();
-    const isPlatform = /(^|\.)harinitharanjith\.com$/.test(host);
-    if (!isPlatform) req.session.cookie.domain = undefined;
+    if (CC_RX.test(host))      req.session.cookie.domain = ".chessguru.cc";
+    else if (HH_RX.test(host)) req.session.cookie.domain = ".harinitharanjith.com";
+    else                       req.session.cookie.domain = undefined;
     next();
   });
   // /api/* everywhere except the /auth/* routes (kept at root to match the client)
