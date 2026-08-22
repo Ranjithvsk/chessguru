@@ -87,7 +87,7 @@ export default function Players() {
 
         {!rows ? <div className="text-center opacity-60 py-10">Loading…</div> :
          rows.length === 0 ? (
-          <div className="text-center py-16 rounded-2xl border border-white/10" style={{ background: "rgba(255,255,255,0.02)" }}>
+          <div className="text-center py-16 rounded-2xl border border-[color:var(--border)]" style={{ background: "var(--card-bg-lg)" }}>
             <img src="/marketing/persona-kid-ambitious.webp" className="mx-auto w-32 h-32 object-contain rounded-2xl" />
             <div className="mt-3 font-semibold">No players yet.</div>
             <div className="text-xs opacity-70 mt-1">Add your first player to unlock personalized recommendations.</div>
@@ -97,7 +97,7 @@ export default function Players() {
             {rows.map((p) => {
               const a = age(p.dob);
               return (
-                <div key={p._id} className="rounded-2xl border border-white/10 p-5" style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))" }}>
+                <div key={p._id} className="rounded-2xl border border-[color:var(--border)] p-5" style={{ background: "linear-gradient(180deg, var(--card-grad-a), var(--card-grad-b))" }}>
                   <div className="flex items-start justify-between gap-3 mb-3">
                     <div>
                       <div className="text-lg font-black">{p.name}</div>
@@ -109,7 +109,7 @@ export default function Players() {
                     </div>
                     <div className="flex gap-1">
                       <button onClick={() => setEdit({ ...p, dob: p.dob ? String(p.dob).slice(0, 10) : "", state_rating: p.state_rating ?? "" })}
-                              className="text-xs px-2 py-1 rounded border border-white/20 hover:bg-white/5" title="Edit">✎</button>
+                              className="text-xs px-2 py-1 rounded border border-[color:var(--border-strong)] hover:bg-[color:var(--hover)]" title="Edit">✎</button>
                       <button onClick={() => remove(p._id, p.name)} className="text-xs px-2 py-1 rounded border border-rose-400/40 text-rose-300 hover:bg-rose-500/10" title="Delete">🗑</button>
                     </div>
                   </div>
@@ -127,11 +127,11 @@ export default function Players() {
         {edit && (
           <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setEdit(null)}>
             <form onSubmit={save} onClick={(e) => e.stopPropagation()}
-                  className="w-full max-w-lg rounded-3xl border border-white/10 p-6 max-h-[90vh] overflow-y-auto"
-                  style={{ background: "linear-gradient(180deg, rgba(15,23,42,0.98), rgba(0,0,0,0.95))" }}>
+                  className="w-full max-w-lg rounded-3xl border border-[color:var(--border)] p-6 max-h-[90vh] overflow-y-auto"
+                  style={{ background: "var(--modal-bg)" }}>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-black">{edit._id ? "Edit player" : "Add a player"}</h2>
-                <button type="button" onClick={() => setEdit(null)} className="text-white/60 hover:text-white text-xl leading-none">×</button>
+                <button type="button" onClick={() => setEdit(null)} className="text-[color:var(--text-muted)] hover:text-white text-xl leading-none">×</button>
               </div>
               <div className="space-y-3">
                 <Input label="Name" required value={edit.name} onChange={(e: any) => setEdit({ ...edit, name: e.target.value })} placeholder="Aarav Kumar" />
@@ -166,7 +166,7 @@ export default function Players() {
 }
 function StatChip({ label, v, color }: { label: string; v: any; color: string }) {
   return (
-    <div className="rounded-lg border border-white/10 p-2 text-center" style={{ background: "rgba(255,255,255,0.02)" }}>
+    <div className="rounded-lg border border-[color:var(--border)] p-2 text-center" style={{ background: "var(--card-bg-lg)" }}>
       <div className="text-[10px] uppercase tracking-wider font-semibold" style={{ color }}>{label}</div>
       <div className="font-bold mt-0.5 text-sm">{v != null && v !== "" ? String(v) : "—"}</div>
     </div>

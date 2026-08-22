@@ -50,7 +50,7 @@ export default function InstallPrompt() {
           </div>
           <div className="mt-3 flex gap-2">
             {!ios && <button onClick={install} className="rounded-full px-3 py-1.5 text-xs text-black font-bold" style={{ background: "linear-gradient(135deg,#fbbf24,#f59e0b)" }}>Install</button>}
-            <button onClick={dismiss} className="rounded-full px-3 py-1.5 text-xs opacity-70 hover:opacity-100 border border-white/20">{ios ? "Got it" : "Not now"}</button>
+            <button onClick={dismiss} className="rounded-full px-3 py-1.5 text-xs opacity-70 hover:opacity-100 border border-[color:var(--border-strong)]">{ios ? "Got it" : "Not now"}</button>
           </div>
         </div>
       </div>

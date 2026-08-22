@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 export default function Footer() {
   return (
-    <footer className="border-t border-white/10 mt-10">
+    <footer className="border-t border-[color:var(--border)] mt-10">
       <div className="max-w-7xl mx-auto px-6 py-8 flex flex-col md:flex-row items-center justify-between gap-3 text-xs opacity-70">
         <div className="flex items-center gap-2 font-semibold">
           <span style={{ color: "#fbbf24" }}>♟</span>

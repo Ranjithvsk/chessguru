@@ -131,11 +131,11 @@ export default function MapPage() {
             <div className="text-xs opacity-70">{withLatLng} pinned · click a pin for details</div>
           </div>
         </div>
-        <div className="relative rounded-2xl overflow-hidden border border-white/10" style={{ height: "70vh", minHeight: 500 }}>
+        <div className="relative rounded-2xl overflow-hidden border border-[color:var(--border)]" style={{ height: "70vh", minHeight: 500 }}>
           <div ref={mapEl} style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }} />
           {selected && (
-            <div className="absolute top-3 left-3 max-w-sm w-[calc(100%-24px)] md:w-[380px] rounded-2xl border border-white/15 shadow-2xl"
-                 style={{ background: "linear-gradient(180deg, rgba(15,23,42,0.98), rgba(0,0,0,0.95))", backdropFilter: "blur(6px)" }}>
+            <div className="absolute top-3 left-3 max-w-sm w-[calc(100%-24px)] md:w-[380px] rounded-2xl border border-[color:var(--border-strong)] shadow-2xl"
+                 style={{ background: "var(--modal-bg)", backdropFilter: "blur(6px)" }}>
               <div className="p-4">
                 <div className="flex items-start justify-between gap-3 mb-2">
                   <span className="rounded-full text-[10px] font-bold px-2.5 py-1"

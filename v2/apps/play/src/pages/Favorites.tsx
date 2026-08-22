@@ -67,7 +67,7 @@ export default function Favorites() {
         )}
         {!rows ? <div className="text-center opacity-60 py-10">Loading…</div> :
          rows.length === 0 ? (
-          <div className="text-center py-16 rounded-2xl border border-white/10" style={{ background: "rgba(255,255,255,0.02)" }}>
+          <div className="text-center py-16 rounded-2xl border border-[color:var(--border)]" style={{ background: "var(--card-bg-lg)" }}>
             <img src="/marketing/empty-state.webp" className="mx-auto w-32 h-32 object-contain opacity-80" />
             <div className="mt-3 font-semibold">No bookmarks yet.</div>
             <div className="text-xs opacity-70 mt-1">Tap the ♡ on any tournament card to save it.</div>

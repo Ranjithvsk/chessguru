@@ -102,11 +102,11 @@ export default function Outreach() {
 
   return (
     <>
-      <nav className="sticky top-0 z-50 backdrop-blur-md bg-black/40 border-b border-white/10 py-3 px-6">
+      <nav className="sticky top-0 z-50 backdrop-blur-md bg-[color:var(--nav-bg)] border-b border-[color:var(--border)] py-3 px-6">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2 font-bold text-lg">
             <span style={{ color: "#fbbf24" }}>♟</span><span>ChessGuru</span>
-            <span className="text-xs font-normal opacity-60 border border-white/20 rounded-full px-2 py-0.5 ml-1">Play · Outreach</span>
+            <span className="text-xs font-normal opacity-60 border border-[color:var(--border-strong)] rounded-full px-2 py-0.5 ml-1">Play · Outreach</span>
           </Link>
           <div className="flex gap-3 text-sm">
             <Link to="/admin" className="opacity-80 hover:opacity-100">← Admin</Link>
@@ -129,7 +129,7 @@ export default function Outreach() {
               { l: "Responded", v: responded, c: "#c084fc" },
               { l: "Pending", v: total - sent, c: "#f472b6" },
             ].map((s) => (
-              <div key={s.l} className="rounded-2xl border border-white/10 p-4" style={{ background: "rgba(255,255,255,0.03)" }}>
+              <div key={s.l} className="rounded-2xl border border-[color:var(--border)] p-4" style={{ background: "var(--card-bg)" }}>
                 <div className="text-xs uppercase tracking-wider opacity-70">{s.l}</div>
                 <div className="text-2xl font-black mt-1" style={{ color: s.c }}>{s.v}</div>
               </div>
@@ -140,7 +140,7 @@ export default function Outreach() {
         <div className="flex flex-wrap gap-2 mb-4 items-center">
           {(["ALL","PENDING","SENT","RESPONDED"] as const).map((f) => (
             <button key={f} onClick={() => setFilter(f)}
-                    className={`text-xs font-semibold rounded-full px-3 py-1.5 border transition ${filter === f ? "text-black border-transparent" : "text-white/80 border-white/20 hover:bg-white/5"}`}
+                    className={`text-xs font-semibold rounded-full px-3 py-1.5 border transition ${filter === f ? "text-black border-transparent" : "text-[color:var(--text-dim)] border-[color:var(--border-strong)] hover:bg-[color:var(--hover)]"}`}
                     style={filter === f ? { background: "linear-gradient(135deg,#fbbf24,#f472b6)" } : {}}>{f[0] + f.slice(1).toLowerCase()}</button>
           ))}
           <div className="flex-1" />
@@ -170,7 +170,7 @@ export default function Outreach() {
         {!rows ? <div className="text-center opacity-60 py-10">Loading…</div> : (
           <div className="space-y-2">
             {filtered.map((r) => (
-              <div key={r.phone} className="rounded-2xl border border-white/10 p-4"
+              <div key={r.phone} className="rounded-2xl border border-[color:var(--border)] p-4"
                    style={{ background: r.sent_at ? "rgba(37,211,102,0.05)" : "rgba(255,255,255,0.02)" }}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
@@ -196,7 +196,7 @@ export default function Outreach() {
                       <>
                         {!r.sent_at
                           ? <button onClick={() => act(r.phone, { action: "sent" })} className="text-xs px-3 py-2 rounded-full border border-emerald-400/40 text-emerald-300 hover:bg-emerald-500/10">Mark sent ✓</button>
-                          : <button onClick={() => act(r.phone, { action: "unsent" })} className="text-xs px-3 py-2 rounded-full border border-white/20 opacity-80 hover:opacity-100">↩ Unmark</button>}
+                          : <button onClick={() => act(r.phone, { action: "unsent" })} className="text-xs px-3 py-2 rounded-full border border-[color:var(--border-strong)] opacity-80 hover:opacity-100">↩ Unmark</button>}
                         {r.sent_at && !r.responded_at && (
                           <button onClick={() => act(r.phone, { action: "responded" })} className="text-xs px-3 py-2 rounded-full border border-purple-400/40 text-purple-300 hover:bg-purple-500/10">Mark responded 💬</button>
                         )}

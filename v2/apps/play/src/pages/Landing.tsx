@@ -93,7 +93,7 @@ export default function Landing() {
             <p className="text-base md:text-lg opacity-80 mb-6 max-w-xl">
               Discover FIDE, AICF and state-rated tournaments across the country. Nearby ones show first — Chennai, Bengaluru, or anywhere. Register in one tap.
             </p>
-            <div className="rounded-2xl border border-white/10 p-4 mb-2" style={{ background: "rgba(255,255,255,0.03)" }}>
+            <div className="rounded-2xl border border-[color:var(--border)] p-4 mb-2" style={{ background: "var(--card-bg)" }}>
               {geo?.state ? (
                 <div className="text-sm">
                   <span className="opacity-70">Showing tournaments near </span>
@@ -108,7 +108,7 @@ export default function Landing() {
                   <span className="opacity-70">📍 Your pincode for nearby tournaments:</span>
                   <input value={pincode} onChange={(e) => setPincode(e.target.value.replace(/\D/g, "").slice(0, 6))}
                          placeholder="600001"
-                         className="flex-1 max-w-[140px] rounded-lg border border-white/15 bg-black/30 px-3 py-1.5 text-white placeholder:text-white/30 focus:border-amber-400 focus:outline-none" />
+                         className="flex-1 max-w-[140px] rounded-lg border border-[color:var(--border-strong)] bg-[color:var(--input-bg)] px-3 py-1.5 text-white placeholder:text-[color:var(--text-muted)] focus:border-amber-400 focus:outline-none" />
                   <button type="submit" className="rounded-lg px-3 py-1.5 text-black text-xs font-bold" style={{ background: "linear-gradient(135deg,#fbbf24,#f59e0b)" }}>Go</button>
                 </form>
               )}
@@ -125,7 +125,7 @@ export default function Landing() {
       {playersCount === 0 && (
         <section className="max-w-7xl mx-auto px-6 pt-4">
           <Link to="/me/players"
-                className="block rounded-2xl border border-white/10 hover:border-purple-400/40 transition p-4 md:p-5 flex items-center gap-4"
+                className="block rounded-2xl border border-[color:var(--border)] hover:border-purple-400/40 transition p-4 md:p-5 flex items-center gap-4"
                 style={{ background: "linear-gradient(180deg, rgba(168,85,247,0.08), rgba(0,0,0,0.4))" }}>
             <div className="text-3xl">🎯</div>
             <div className="flex-1">
@@ -143,7 +143,7 @@ export default function Landing() {
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
             {recs.map((r) => (
               <Link key={r.player_id} to="/me/players"
-                    className="block rounded-2xl border border-white/10 hover:border-purple-400/40 transition p-4"
+                    className="block rounded-2xl border border-[color:var(--border)] hover:border-purple-400/40 transition p-4"
                     style={{ background: "linear-gradient(180deg, rgba(168,85,247,0.08), rgba(0,0,0,0.4))" }}>
                 <div className="flex items-center justify-between">
                   <div>
@@ -167,7 +167,7 @@ export default function Landing() {
 
       {/* Rated near you strip */}
       {rated && rated.length > 0 && (
-        <section className="border-y border-white/10 py-10 px-6" style={{ background: "rgba(255,255,255,0.02)" }}>
+        <section className="border-y border-[color:var(--border)] py-10 px-6" style={{ background: "var(--card-bg-lg)" }}>
           <div className="max-w-7xl mx-auto">
             <div className="flex items-end justify-between mb-6 gap-4">
               <div>
@@ -190,7 +190,7 @@ export default function Landing() {
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {TILES.map((tile) => (
-            <div key={tile.title} className="relative rounded-3xl overflow-hidden border border-white/10 hover:border-white/25 transition aspect-[16/10] group cursor-pointer">
+            <div key={tile.title} className="relative rounded-3xl overflow-hidden border border-[color:var(--border)] hover:border-[color:var(--border-hover)] transition aspect-[16/10] group cursor-pointer">
               <img src={tile.img} alt="" className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy" />
               <div className={`absolute inset-0 bg-gradient-to-br ${tile.grad}`} />
               <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(10,15,28,0.9) 0%, transparent 55%)" }} />
@@ -213,7 +213,7 @@ export default function Landing() {
           <div className="flex flex-wrap gap-2">
             {FILTERS.map((f) => (
               <button key={f.id} onClick={() => setFilter(f.id)}
-                      className={`text-xs font-semibold rounded-full px-3 py-1.5 border transition ${filter === f.id ? "text-black border-transparent" : "text-white/80 border-white/20 hover:bg-white/5"}`}
+                      className={`text-xs font-semibold rounded-full px-3 py-1.5 border transition ${filter === f.id ? "text-black border-transparent" : "text-[color:var(--text-dim)] border-[color:var(--border-strong)] hover:bg-[color:var(--hover)]"}`}
                       style={filter === f.id ? { background: "linear-gradient(135deg,#fbbf24,#f472b6)" } : {}}>
                 {f.label}
               </button>
@@ -223,7 +223,7 @@ export default function Landing() {
         {!nearby ? (
           <div className="text-center opacity-60 py-10">Loading tournaments…</div>
         ) : filtered.length === 0 ? (
-          <div className="text-center py-16 rounded-2xl border border-white/10" style={{ background: "rgba(255,255,255,0.02)" }}>
+          <div className="text-center py-16 rounded-2xl border border-[color:var(--border)]" style={{ background: "var(--card-bg-lg)" }}>
             <img src="/marketing/empty-state.webp" className="mx-auto w-32 h-32 object-contain opacity-80" />
             <div className="mt-3 font-semibold">No tournaments match this filter yet.</div>
             <div className="text-xs opacity-70 mt-1">We add more every day — try changing the filter.</div>
@@ -239,7 +239,7 @@ export default function Landing() {
       <section className="py-14 px-6 max-w-7xl mx-auto">
         <div className="grid md:grid-cols-2 gap-6">
           <a href="https://chessguru.cc/" target="_blank" rel="noopener"
-             className="block rounded-3xl border border-white/10 hover:border-amber-400/40 transition overflow-hidden group"
+             className="block rounded-3xl border border-[color:var(--border)] hover:border-amber-400/40 transition overflow-hidden group"
              style={{ background: "linear-gradient(180deg, rgba(251,191,36,0.06), rgba(0,0,0,0.4))" }}>
             <img src="/marketing/prep-bundle.webp" className="w-full h-40 object-cover group-hover:scale-105 transition duration-500" />
             <div className="p-6">
@@ -250,7 +250,7 @@ export default function Landing() {
             </div>
           </a>
           <a href="https://chessguru.cc/signup-academy" target="_blank" rel="noopener"
-             className="block rounded-3xl border border-white/10 hover:border-amber-400/40 transition overflow-hidden group"
+             className="block rounded-3xl border border-[color:var(--border)] hover:border-amber-400/40 transition overflow-hidden group"
              style={{ background: "linear-gradient(180deg, rgba(168,85,247,0.06), rgba(0,0,0,0.4))" }}>
             <img src="/marketing/coach-placement.webp" className="w-full h-40 object-cover group-hover:scale-105 transition duration-500" />
             <div className="p-6">

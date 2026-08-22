@@ -95,7 +95,7 @@ export default function Connect() {
         <div className="flex gap-2 mb-4">
           {(["inbox","send","contacts"] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)}
-                    className={`text-sm font-semibold rounded-full px-4 py-2 border transition ${tab === t ? "text-black border-transparent" : "text-white/80 border-white/20 hover:bg-white/5"}`}
+                    className={`text-sm font-semibold rounded-full px-4 py-2 border transition ${tab === t ? "text-black border-transparent" : "text-[color:var(--text-dim)] border-[color:var(--border-strong)] hover:bg-[color:var(--hover)]"}`}
                     style={tab === t ? { background: "linear-gradient(135deg,#25D366,#128C7E)" } : {}}>
               {t === "inbox" && `📥 Inbox${stats?.unread ? ` (${stats.unread})` : ""}`}
               {t === "send" && "✉️ Send"}
@@ -115,7 +115,7 @@ export default function Connect() {
 
 function Stat({ n, l, c }: { n: number | string; l: string; c: string }) {
   return (
-    <div className="rounded-xl border border-white/10 px-3 py-2 min-w-[70px]" style={{ background: "rgba(255,255,255,0.03)" }}>
+    <div className="rounded-xl border border-[color:var(--border)] px-3 py-2 min-w-[70px]" style={{ background: "var(--card-bg)" }}>
       <div className="text-xl font-black leading-tight" style={{ color: c }}>{n}</div>
       <div className="text-[10px] uppercase tracking-wider opacity-70">{l}</div>
     </div>
@@ -151,7 +151,7 @@ function InboxTab({ onSent }: { onSent: () => void }) {
 
   if (!rows) return <Loading />;
   if (rows.length === 0) return (
-    <div className="text-center py-16 rounded-2xl border border-white/10" style={{ background: "rgba(255,255,255,0.02)" }}>
+    <div className="text-center py-16 rounded-2xl border border-[color:var(--border)]" style={{ background: "var(--card-bg-lg)" }}>
       <div className="text-4xl mb-2">📭</div>
       <div className="font-semibold">No inbound messages yet.</div>
       <div className="text-xs opacity-70 mt-1">Once a parent replies to any of your sends, it lands here.</div>
@@ -160,10 +160,10 @@ function InboxTab({ onSent }: { onSent: () => void }) {
 
   return (
     <div className="grid md:grid-cols-[300px_1fr] gap-4">
-      <div className="rounded-2xl border border-white/10 overflow-y-auto max-h-[70vh]" style={{ background: "rgba(255,255,255,0.02)" }}>
+      <div className="rounded-2xl border border-[color:var(--border)] overflow-y-auto max-h-[70vh]" style={{ background: "var(--card-bg-lg)" }}>
         {rows.map((r) => (
           <button key={r._id} onClick={() => setActive(r._id)}
-                  className={`w-full text-left p-3 border-b border-white/5 hover:bg-white/5 ${active === r._id ? "bg-white/10" : ""}`}>
+                  className={`w-full text-left p-3 border-b border-white/5 hover:bg-[color:var(--hover)] ${active === r._id ? "bg-[color:var(--hover)]" : ""}`}>
             <div className="flex items-baseline justify-between gap-2">
               <div className="font-semibold text-sm truncate">{r.name || `+${r._id}`}</div>
               <div className="text-[10px] opacity-60 flex-none">{ago(r.last_at)}</div>
@@ -175,7 +175,7 @@ function InboxTab({ onSent }: { onSent: () => void }) {
           </button>
         ))}
       </div>
-      <div className="rounded-2xl border border-white/10 flex flex-col max-h-[70vh]" style={{ background: "rgba(255,255,255,0.02)" }}>
+      <div className="rounded-2xl border border-[color:var(--border)] flex flex-col max-h-[70vh]" style={{ background: "var(--card-bg-lg)" }}>
         {!active ? (
           <div className="flex-1 flex items-center justify-center opacity-60 text-sm">Pick a conversation from the left</div>
         ) : (
@@ -183,17 +183,17 @@ function InboxTab({ onSent }: { onSent: () => void }) {
             <div className="flex-1 overflow-y-auto p-4 space-y-2">
               {!msgs ? <Loading /> : msgs.map((m: any, i: number) => (
                 <div key={i} className={`flex ${m.direction === "out" ? "justify-end" : "justify-start"}`}>
-                  <div className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm ${m.direction === "out" ? "bg-emerald-500/20 rounded-br-sm" : "bg-white/10 rounded-bl-sm"}`}>
+                  <div className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm ${m.direction === "out" ? "bg-emerald-500/20 rounded-br-sm" : "bg-[color:var(--hover)] rounded-bl-sm"}`}>
                     <div className="whitespace-pre-wrap break-words">{m.body}</div>
                     <div className="text-[10px] opacity-60 mt-1">{new Date(m.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}{m.status && ` · ${m.status}`}</div>
                   </div>
                 </div>
               ))}
             </div>
-            <div className="border-t border-white/10 p-3 flex gap-2">
+            <div className="border-t border-[color:var(--border)] p-3 flex gap-2">
               <input value={reply} onChange={(e) => setReply(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") sendReply(); }}
                      placeholder="Reply (free-form within 24h of their last msg)"
-                     className="flex-1 rounded-full border border-white/15 bg-black/30 px-4 py-2 text-sm text-white placeholder:text-white/30 focus:border-emerald-400 focus:outline-none" />
+                     className="flex-1 rounded-full border border-[color:var(--border-strong)] bg-[color:var(--input-bg)] px-4 py-2 text-sm text-white placeholder:text-[color:var(--text-muted)] focus:border-emerald-400 focus:outline-none" />
               <button disabled={busy || !reply.trim()} onClick={sendReply}
                       className="rounded-full px-4 py-2 text-sm font-bold text-white disabled:opacity-40"
                       style={{ background: "linear-gradient(135deg,#25D366,#128C7E)" }}>{busy ? "…" : "Send"}</button>
@@ -231,11 +231,11 @@ function SendTab({ cfg, onSent }: { cfg: any; onSent: () => void }) {
   }
 
   return (
-    <form onSubmit={submit} className="rounded-2xl border border-white/10 p-6 space-y-4" style={{ background: "rgba(255,255,255,0.02)" }}>
+    <form onSubmit={submit} className="rounded-2xl border border-[color:var(--border)] p-6 space-y-4" style={{ background: "var(--card-bg-lg)" }}>
       <div className="flex gap-2 mb-4">
         {(["one","bulk"] as const).map((m) => (
           <button key={m} type="button" onClick={() => setMode(m)}
-                  className={`text-xs font-semibold rounded-full px-3 py-1.5 border ${mode === m ? "text-black border-transparent" : "text-white/80 border-white/20"}`}
+                  className={`text-xs font-semibold rounded-full px-3 py-1.5 border ${mode === m ? "text-black border-transparent" : "text-[color:var(--text-dim)] border-[color:var(--border-strong)]"}`}
                   style={mode === m ? { background: "linear-gradient(135deg,#25D366,#128C7E)" } : {}}>{m === "one" ? "Single" : "Bulk"}</button>
         ))}
       </div>
@@ -247,12 +247,12 @@ function SendTab({ cfg, onSent }: { cfg: any; onSent: () => void }) {
           <div className="text-xs font-semibold opacity-80 mb-1.5">Phone numbers (one per line)</div>
           <textarea value={bulk} onChange={(e) => setBulk(e.target.value)} rows={5}
                     placeholder={"9876543210\n9876543211\n9876543212"}
-                    className="w-full rounded-xl border border-white/15 bg-black/30 px-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-emerald-400 focus:outline-none font-mono" />
+                    className="w-full rounded-xl border border-[color:var(--border-strong)] bg-[color:var(--input-bg)] px-4 py-2.5 text-sm text-white placeholder:text-[color:var(--text-muted)] focus:border-emerald-400 focus:outline-none font-mono" />
           <div className="text-[11px] opacity-60 mt-1">Throttled to ~3 per second on send.</div>
         </div>
       )}
 
-      <div className="border-t border-white/10 pt-4">
+      <div className="border-t border-[color:var(--border)] pt-4">
         <div className="text-xs font-semibold tracking-widest uppercase opacity-70 mb-2" style={{ color: "#25D366" }}>Template variables</div>
         <div className="grid grid-cols-2 gap-3">
           <Input label="Recipient name ({{1}})" value={name} onChange={(e: any) => setName(e.target.value)} placeholder="Parent" />
@@ -298,8 +298,8 @@ function ContactsTab({ onChange }: { onChange: () => void }) {
 
   return (
     <div className="grid md:grid-cols-[1fr_320px] gap-4">
-      <div className="rounded-2xl border border-white/10 overflow-hidden" style={{ background: "rgba(255,255,255,0.02)" }}>
-        <div className="text-xs font-semibold opacity-70 uppercase tracking-wider px-4 py-3 border-b border-white/10">
+      <div className="rounded-2xl border border-[color:var(--border)] overflow-hidden" style={{ background: "var(--card-bg-lg)" }}>
+        <div className="text-xs font-semibold opacity-70 uppercase tracking-wider px-4 py-3 border-b border-[color:var(--border)]">
           Your contacts ({rows?.length ?? "…"})
         </div>
         {!rows ? <Loading /> : rows.length === 0 ? (
@@ -307,7 +307,7 @@ function ContactsTab({ onChange }: { onChange: () => void }) {
         ) : (
           <div className="max-h-[60vh] overflow-y-auto">
             {rows.map((r) => (
-              <div key={r._id} className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between hover:bg-white/5">
+              <div key={r._id} className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between hover:bg-[color:var(--hover)]">
                 <div>
                   <div className="font-semibold text-sm">{r.name || <span className="opacity-60">Unnamed</span>}</div>
                   <div className="text-xs opacity-70 font-mono">+{r.phone}</div>
@@ -318,12 +318,12 @@ function ContactsTab({ onChange }: { onChange: () => void }) {
           </div>
         )}
       </div>
-      <form onSubmit={importCsv} className="rounded-2xl border border-white/10 p-4" style={{ background: "rgba(255,255,255,0.02)" }}>
+      <form onSubmit={importCsv} className="rounded-2xl border border-[color:var(--border)] p-4" style={{ background: "var(--card-bg-lg)" }}>
         <div className="text-xs font-semibold opacity-70 uppercase tracking-wider mb-3">Import contacts</div>
         <div className="text-[11px] opacity-70 mb-2">Paste one contact per line. Format: <span className="font-mono">phone,name</span> (comma or tab).</div>
         <textarea value={importText} onChange={(e) => setImportText(e.target.value)} rows={8}
                   placeholder={"9876543210,Aarav Parent\n9876543211,Priya\n9876543212"}
-                  className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-xs text-white placeholder:text-white/30 focus:border-emerald-400 focus:outline-none font-mono" />
+                  className="w-full rounded-xl border border-[color:var(--border-strong)] bg-[color:var(--input-bg)] px-3 py-2 text-xs text-white placeholder:text-[color:var(--text-muted)] focus:border-emerald-400 focus:outline-none font-mono" />
         {result && <div className={`mt-2 text-xs px-2 py-1.5 rounded ${result.startsWith("❌") ? "text-rose-300" : "text-emerald-300"}`}>{result}</div>}
         <button type="submit" disabled={busy || !importText.trim()}
                 className="mt-3 w-full rounded-full py-2 text-xs font-bold text-white disabled:opacity-40"

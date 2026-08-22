@@ -13,6 +13,15 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="apple-touch-icon" href="/marketing/hero-tournament.webp">
 <script>
+  // Theme init — must run BEFORE React paints to avoid a dark/light flash.
+  // Priority: user's saved choice > system preference > dark default.
+  (function () {
+    try {
+      var saved = localStorage.getItem("cg-play-theme");
+      var mode = saved || (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+      document.documentElement.dataset.theme = mode;
+    } catch (e) { /* localStorage disabled — dark by default */ }
+  })();
   // Register SW after load — non-blocking. Silent-fail is fine; site works without.
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));

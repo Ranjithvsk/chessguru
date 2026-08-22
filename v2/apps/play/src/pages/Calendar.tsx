@@ -84,16 +84,16 @@ export default function CalendarPage() {
             </h1>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => shift(-1)} className="w-9 h-9 rounded-full border border-white/20 hover:bg-white/5" title="Previous month">‹</button>
-            <button onClick={jumpToday} className="rounded-full px-3 py-1.5 text-xs font-semibold border border-white/20 hover:bg-white/5">Today</button>
-            <button onClick={() => shift(1)} className="w-9 h-9 rounded-full border border-white/20 hover:bg-white/5" title="Next month">›</button>
+            <button onClick={() => shift(-1)} className="w-9 h-9 rounded-full border border-[color:var(--border-strong)] hover:bg-[color:var(--hover)]" title="Previous month">‹</button>
+            <button onClick={jumpToday} className="rounded-full px-3 py-1.5 text-xs font-semibold border border-[color:var(--border-strong)] hover:bg-[color:var(--hover)]">Today</button>
+            <button onClick={() => shift(1)} className="w-9 h-9 rounded-full border border-[color:var(--border-strong)] hover:bg-[color:var(--hover)]" title="Next month">›</button>
           </div>
         </div>
 
         <div className="flex flex-wrap gap-2 mb-4">
           {FILTERS.map((f) => (
             <button key={f.id} onClick={() => setFilter(f.id)}
-                    className={`text-xs font-semibold rounded-full px-3 py-1.5 border transition ${filter === f.id ? "text-black border-transparent" : "text-white/80 border-white/20 hover:bg-white/5"}`}
+                    className={`text-xs font-semibold rounded-full px-3 py-1.5 border transition ${filter === f.id ? "text-black border-transparent" : "text-[color:var(--text-dim)] border-[color:var(--border-strong)] hover:bg-[color:var(--hover)]"}`}
                     style={filter === f.id ? { background: "linear-gradient(135deg,#fbbf24,#f472b6)" } : {}}>{f.label}</button>
           ))}
         </div>
@@ -111,7 +111,7 @@ export default function CalendarPage() {
             const items = byDay.get(k) || [];
             return (
               <div key={k}
-                   className={`min-h-[80px] md:min-h-[110px] rounded-xl md:rounded-2xl border p-1.5 md:p-2 flex flex-col overflow-hidden ${inMonth ? "border-white/10" : "border-white/5 opacity-40"} ${isToday ? "ring-2 ring-amber-400/40" : ""}`}
+                   className={`min-h-[80px] md:min-h-[110px] rounded-xl md:rounded-2xl border p-1.5 md:p-2 flex flex-col overflow-hidden ${inMonth ? "border-[color:var(--border)]" : "border-white/5 opacity-40"} ${isToday ? "ring-2 ring-amber-400/40" : ""}`}
                    style={{ background: isToday ? "rgba(251,191,36,0.06)" : "rgba(255,255,255,0.02)" }}>
                 <div className={`text-[11px] md:text-xs font-bold mb-1 ${isToday ? "text-amber-300" : "opacity-70"}`}>{day}</div>
                 <div className="flex-1 flex flex-col gap-1 overflow-hidden">

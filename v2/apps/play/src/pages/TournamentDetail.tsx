@@ -12,7 +12,7 @@ import { useFavorites } from "../lib/useFavorites";
 
 function InfoCard({ icon, label, value, sub }: any) {
   return (
-    <div className="rounded-2xl border border-white/10 p-4" style={{ background: "rgba(255,255,255,0.03)" }}>
+    <div className="rounded-2xl border border-[color:var(--border)] p-4" style={{ background: "var(--card-bg)" }}>
       <div className="flex items-center gap-2 text-xs opacity-70 mb-1">
         <span>{icon}</span><span className="font-semibold uppercase tracking-wider">{label}</span>
       </div>
@@ -75,7 +75,7 @@ export default function TournamentDetail() {
           <div className="flex items-start justify-between gap-4">
             <span className="inline-block rounded-full text-xs font-bold px-3 py-1 mb-4" style={{ background: rat.bg }}>{rat.label}</span>
             <button onClick={onFav} title={isFav ? "Bookmarked" : "Bookmark"}
-                    className={`flex-none text-xl leading-none w-10 h-10 rounded-full border transition ${isFav ? "bg-rose-500/20 border-rose-400/60 text-rose-300" : "border-white/20 opacity-70 hover:opacity-100 hover:border-rose-400/40"}`}>
+                    className={`flex-none text-xl leading-none w-10 h-10 rounded-full border transition ${isFav ? "bg-rose-500/20 border-rose-400/60 text-rose-300" : "border-[color:var(--border-strong)] opacity-70 hover:opacity-100 hover:border-rose-400/40"}`}>
               {isFav ? "♥" : "♡"}
             </button>
           </div>
@@ -109,8 +109,8 @@ export default function TournamentDetail() {
               Register now →
             </a>
           )}
-          {t.prospectus_url && <a href={t.prospectus_url} target="_blank" rel="noopener" className="rounded-full px-6 py-3.5 font-semibold text-sm border border-white/20 hover:bg-white/5">📄 Prospectus PDF</a>}
-          {t.maps_url && <a href={t.maps_url} target="_blank" rel="noopener" className="rounded-full px-6 py-3.5 font-semibold text-sm border border-white/20 hover:bg-white/5">🗺️ Google Maps</a>}
+          {t.prospectus_url && <a href={t.prospectus_url} target="_blank" rel="noopener" className="rounded-full px-6 py-3.5 font-semibold text-sm border border-[color:var(--border-strong)] hover:bg-[color:var(--hover)]">📄 Prospectus PDF</a>}
+          {t.maps_url && <a href={t.maps_url} target="_blank" rel="noopener" className="rounded-full px-6 py-3.5 font-semibold text-sm border border-[color:var(--border-strong)] hover:bg-[color:var(--hover)]">🗺️ Google Maps</a>}
           <a href={`https://wa.me/?text=${encodeURIComponent(waText)}`} target="_blank" rel="noopener"
              className="rounded-full px-6 py-3.5 font-semibold text-sm border border-emerald-400/40 text-emerald-300 hover:bg-emerald-500/10">💬 Share on WhatsApp</a>
           {ended && (
@@ -125,7 +125,7 @@ export default function TournamentDetail() {
 
       {(t.contact_person || (t.contact_phones && t.contact_phones.length > 0)) && (
         <section className="max-w-5xl mx-auto px-6 pb-6">
-          <div className="rounded-2xl border border-white/10 p-5" style={{ background: "rgba(255,255,255,0.03)" }}>
+          <div className="rounded-2xl border border-[color:var(--border)] p-5" style={{ background: "var(--card-bg)" }}>
             <div className="text-xs font-semibold tracking-widest uppercase opacity-70 mb-2" style={{ color: "#2dd4bf" }}>Contact</div>
             {t.contact_person && <div className="font-semibold">{t.contact_person}</div>}
             {(t.contact_phones || []).map((p) => <a key={p} href={`tel:${p}`} className="text-amber-300 hover:text-amber-200 mr-4">📞 {p}</a>)}
@@ -135,7 +135,7 @@ export default function TournamentDetail() {
 
       <section className="max-w-5xl mx-auto px-6 py-10">
         <a href="https://chessguru.cc/" target="_blank" rel="noopener"
-           className="block rounded-3xl border border-white/10 hover:border-amber-400/40 transition overflow-hidden group"
+           className="block rounded-3xl border border-[color:var(--border)] hover:border-amber-400/40 transition overflow-hidden group"
            style={{ background: "linear-gradient(180deg, rgba(251,191,36,0.06), rgba(0,0,0,0.4))" }}>
           <div className="grid md:grid-cols-2">
             <img src="/marketing/prep-bundle.webp" className="w-full h-full max-h-64 object-cover group-hover:scale-105 transition duration-500" />

@@ -47,7 +47,7 @@ export default function Submit() {
             <Link to="/" className="rounded-full px-5 py-2.5 text-black font-bold text-sm" style={{ background: "linear-gradient(135deg,#fbbf24,#f59e0b)" }}>See my tournament →</Link>
             <a href={waHref} target="_blank" rel="noopener" className="rounded-full px-5 py-2.5 font-bold text-sm border border-emerald-400/40 text-emerald-300 hover:bg-emerald-500/10">💬 Share on WhatsApp</a>
           </div>
-          <div className="mt-10 rounded-2xl border border-white/10 p-5 text-left" style={{ background: "linear-gradient(180deg, rgba(168,85,247,0.06), rgba(0,0,0,0.4))" }}>
+          <div className="mt-10 rounded-2xl border border-[color:var(--border)] p-5 text-left" style={{ background: "linear-gradient(180deg, rgba(168,85,247,0.06), rgba(0,0,0,0.4))" }}>
             <div className="text-xs font-semibold tracking-widest uppercase" style={{ color: "#c084fc" }}>Also for you</div>
             <h3 className="font-bold mt-1 mb-2">Do you run a chess academy?</h3>
             <p className="text-sm opacity-80">Free 90-day trial of ChessGuru academy manager — students, coaches, fees, live classes. ₹1,000/month after.</p>
@@ -69,7 +69,7 @@ export default function Submit() {
           <h1 className="text-3xl md:text-5xl font-black mb-3">List your tournament</h1>
           <p className="opacity-80 max-w-xl mx-auto">Reach parents and players across India. Free, unlimited listings. We handle discovery — you handle the tournament.</p>
         </div>
-        <form onSubmit={submit} className="space-y-6 rounded-3xl border border-white/10 p-6 md:p-8" style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.4))" }}>
+        <form onSubmit={submit} className="space-y-6 rounded-3xl border border-[color:var(--border)] p-6 md:p-8" style={{ background: "linear-gradient(180deg, var(--card-grad-a), var(--card-grad-deep))" }}>
           <div>
             <div className="text-xs font-semibold tracking-widest uppercase opacity-70 mb-3" style={{ color: "#2dd4bf" }}>Tournament</div>
             <div className="space-y-4">
@@ -93,7 +93,7 @@ export default function Submit() {
               </div>
             </div>
           </div>
-          <div className="pt-2 border-t border-white/10">
+          <div className="pt-2 border-t border-[color:var(--border)]">
             <div className="text-xs font-semibold tracking-widest uppercase opacity-70 mb-3 mt-4" style={{ color: "#a855f7" }}>Location</div>
             <div className="space-y-4">
               <Input label="Venue name" value={f.venue} onChange={set("venue")} placeholder="e.g. XYZ Matric School Hall" />
@@ -104,14 +104,14 @@ export default function Submit() {
               <Input label="Google Maps link" value={f.maps_url} onChange={set("maps_url")} placeholder="https://maps.app.goo.gl/... (optional but recommended)" />
             </div>
           </div>
-          <div className="pt-2 border-t border-white/10">
+          <div className="pt-2 border-t border-[color:var(--border)]">
             <div className="text-xs font-semibold tracking-widest uppercase opacity-70 mb-3 mt-4" style={{ color: "#fbbf24" }}>Fees & prizes</div>
             <div className="grid grid-cols-2 gap-3">
               <Input label="Entry fee (₹)" type="number" min="0" value={f.entry_fee_rupees} onChange={set("entry_fee_rupees")} placeholder="400" />
               <Input label="Total prize pool (₹)" type="number" min="0" value={f.prize_pool_rupees} onChange={set("prize_pool_rupees")} placeholder="25000 (optional)" />
             </div>
           </div>
-          <div className="pt-2 border-t border-white/10">
+          <div className="pt-2 border-t border-[color:var(--border)]">
             <div className="text-xs font-semibold tracking-widest uppercase opacity-70 mb-3 mt-4" style={{ color: "#f472b6" }}>Contact & links</div>
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">

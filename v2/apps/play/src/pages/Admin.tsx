@@ -60,11 +60,11 @@ export default function Admin() {
 
   return (
     <>
-      <nav className="sticky top-0 z-50 backdrop-blur-md bg-black/40 border-b border-white/10 py-3 px-6">
+      <nav className="sticky top-0 z-50 backdrop-blur-md bg-[color:var(--nav-bg)] border-b border-[color:var(--border)] py-3 px-6">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2 font-bold text-lg">
             <span style={{ color: "#fbbf24" }}>♟</span><span>ChessGuru</span>
-            <span className="text-xs font-normal opacity-60 border border-white/20 rounded-full px-2 py-0.5 ml-1">Play · Admin</span>
+            <span className="text-xs font-normal opacity-60 border border-[color:var(--border-strong)] rounded-full px-2 py-0.5 ml-1">Play · Admin</span>
           </Link>
           <Link to="/" className="text-sm opacity-80 hover:opacity-100">← Site</Link>
         </div>
@@ -80,7 +80,7 @@ export default function Admin() {
               { l: "Hidden", v: stats.hidden, c: "#f87171" },
               { l: "Geocoded", v: stats.geocoded, c: "#60a5fa" },
             ].map((s) => (
-              <div key={s.l} className="rounded-2xl border border-white/10 p-4" style={{ background: "rgba(255,255,255,0.03)" }}>
+              <div key={s.l} className="rounded-2xl border border-[color:var(--border)] p-4" style={{ background: "var(--card-bg)" }}>
                 <div className="text-xs uppercase tracking-wider opacity-70">{s.l}</div>
                 <div className="text-2xl font-black mt-1" style={{ color: s.c }}>{s.v}</div>
               </div>
@@ -90,7 +90,7 @@ export default function Admin() {
         <div className="flex flex-wrap gap-2 mb-4">
           {TABS.map((t) => (
             <button key={t.id} onClick={() => setTab(t.id)}
-                    className={`text-xs font-semibold rounded-full px-3 py-1.5 border transition ${tab === t.id ? "text-black border-transparent" : "text-white/80 border-white/20 hover:bg-white/5"}`}
+                    className={`text-xs font-semibold rounded-full px-3 py-1.5 border transition ${tab === t.id ? "text-black border-transparent" : "text-[color:var(--text-dim)] border-[color:var(--border-strong)] hover:bg-[color:var(--hover)]"}`}
                     style={tab === t.id ? { background: "linear-gradient(135deg,#fbbf24,#f472b6)" } : {}}>{t.label}</button>
           ))}
         </div>
@@ -99,14 +99,14 @@ export default function Admin() {
         ) : rows.length === 0 ? (
           <div className="text-center py-10 opacity-70">No tournaments in this view.</div>
         ) : (
-          <div className="overflow-x-auto rounded-2xl border border-white/10">
+          <div className="overflow-x-auto rounded-2xl border border-[color:var(--border)]">
             <table className="w-full text-sm">
-              <thead className="text-left text-xs uppercase tracking-wider opacity-70" style={{ background: "rgba(255,255,255,0.03)" }}>
+              <thead className="text-left text-xs uppercase tracking-wider opacity-70" style={{ background: "var(--card-bg)" }}>
                 <tr>{["Name", "Organizer", "Where", "When", "Rating", "Fee", "Prize", "Source", "Status", "Actions"].map((c) => <th key={c} className="px-3 py-2.5 font-semibold">{c}</th>)}</tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r._id} className="border-t border-white/5 hover:bg-white/5">
+                  <tr key={r._id} className="border-t border-white/5 hover:bg-[color:var(--hover)]">
                     <td className="px-3 py-2.5 font-semibold max-w-xs truncate">{r.name}</td>
                     <td className="px-3 py-2.5 opacity-80 max-w-[160px] truncate">{r.organizer_name || "—"}</td>
                     <td className="px-3 py-2.5 opacity-80 max-w-[160px] truncate">{[r.city, r.state].filter(Boolean).join(", ") || r.location_raw || "—"}</td>
@@ -128,7 +128,7 @@ export default function Admin() {
                     <td className="px-3 py-2.5 whitespace-nowrap">
                       {busyId === r._id ? <span className="opacity-60 text-xs">…</span> : (
                         <div className="flex gap-1">
-                          <a href={`/t?id=${encodeURIComponent(r._id)}`} target="_blank" rel="noopener" className="text-xs px-2 py-1 rounded border border-white/20 hover:bg-white/5" title="View">👁</a>
+                          <a href={`/t?id=${encodeURIComponent(r._id)}`} target="_blank" rel="noopener" className="text-xs px-2 py-1 rounded border border-[color:var(--border-strong)] hover:bg-[color:var(--hover)]" title="View">👁</a>
                           {r.submission_status !== "VERIFIED" && <button onClick={() => act(r._id, "verify")} className="text-xs px-2 py-1 rounded border border-emerald-400/40 text-emerald-300 hover:bg-emerald-500/10" title="Verify">✓</button>}
                           {r.hidden
                             ? <button onClick={() => act(r._id, "unhide")} className="text-xs px-2 py-1 rounded border border-teal-400/40 text-teal-300 hover:bg-teal-500/10" title="Unhide">↑</button>

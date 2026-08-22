@@ -21,8 +21,8 @@ export default function TournamentCard({ t }: { t: Tournament }) {
   return (
     <Link
       to={`/t?id=${encodeURIComponent(t._id)}`}
-      className="block rounded-2xl border border-white/10 hover:border-amber-400/40 hover:-translate-y-0.5 transition p-4 group"
-      style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))" }}
+      className="block rounded-2xl border border-[color:var(--border)] hover:border-amber-400/40 hover:-translate-y-0.5 transition p-4 group"
+      style={{ background: "linear-gradient(180deg, var(--card-grad-a), var(--card-grad-b))" }}
     >
       <div className="flex items-start justify-between gap-2 mb-3">
         <div className="flex-1 min-w-0">
@@ -36,7 +36,7 @@ export default function TournamentCard({ t }: { t: Tournament }) {
           </span>
           <button
             onClick={onFav} title={isFav ? "Remove bookmark" : "Bookmark"} aria-label="Bookmark"
-            className={`text-lg leading-none w-8 h-8 rounded-full border transition ${isFav ? "bg-rose-500/20 border-rose-400/60 text-rose-300" : "border-white/20 opacity-60 hover:opacity-100 hover:border-rose-400/40"}`}
+            className={`text-lg leading-none w-8 h-8 rounded-full border transition ${isFav ? "bg-rose-500/20 border-rose-400/60 text-rose-300" : "border-[color:var(--border-strong)] opacity-60 hover:opacity-100 hover:border-rose-400/40"}`}
           >{isFav ? "♥" : "♡"}</button>
         </div>
       </div>
