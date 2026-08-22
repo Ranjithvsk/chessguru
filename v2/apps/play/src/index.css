@@ -2,31 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Semantic tokens — read via var() in components. `data-theme="light"` on <html>
- * flips the whole palette; theme init script in index.html sets it before React
- * paints so no flash. */
+/* Semantic tokens — read via var() in components. `data-theme` on <html> selects
+ * the palette; theme init script in index.html sets it before React paints so no
+ * flash. Default (bare :root) is LIGHT — owner directive 2026-08-22. Users who
+ * previously chose dark keep dark via localStorage. */
 :root {
-  color-scheme: dark;
-  --bg: #0a0f1c;                                  /* page background */
-  --text: #f4f4f5;                                /* main text */
-  --text-dim: rgba(244, 244, 245, 0.7);           /* secondary text */
-  --text-muted: rgba(244, 244, 245, 0.55);        /* tertiary text */
-  --card-bg: rgba(255, 255, 255, 0.03);           /* card fill */
-  --card-bg-lg: rgba(255, 255, 255, 0.02);        /* subtle section bg */
-  --card-grad-a: rgba(255, 255, 255, 0.03);       /* card gradient top */
-  --card-grad-b: rgba(255, 255, 255, 0.01);       /* card gradient bottom */
-  --card-grad-deep: rgba(0, 0, 0, 0.4);           /* card gradient bottom, deep */
-  --modal-bg: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(0, 0, 0, 0.95));
-  --border: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.15);
-  --border-hover: rgba(255, 255, 255, 0.25);
-  --nav-bg: rgba(0, 0, 0, 0.4);                   /* backdrop-blurred nav */
-  --input-bg: rgba(0, 0, 0, 0.3);
-  --hover: rgba(255, 255, 255, 0.05);
-  --aurora-opacity: 0.35;                         /* dim in light mode */
-  --shadow-strong: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
-}
-html[data-theme="light"] {
   color-scheme: light;
   --bg: #fefbf6;                                  /* warm off-white — cream, matches jewel-tone family */
   --text: #1c1917;                                /* near-black, warm */
@@ -46,6 +26,27 @@ html[data-theme="light"] {
   --hover: rgba(28, 25, 23, 0.04);
   --aurora-opacity: 0.15;                         /* softer so pastel doesn't overpower */
   --shadow-strong: 0 25px 50px -12px rgba(28, 25, 23, 0.15);
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0a0f1c;                                  /* page background */
+  --text: #f4f4f5;                                /* main text */
+  --text-dim: rgba(244, 244, 245, 0.7);
+  --text-muted: rgba(244, 244, 245, 0.55);
+  --card-bg: rgba(255, 255, 255, 0.03);
+  --card-bg-lg: rgba(255, 255, 255, 0.02);
+  --card-grad-a: rgba(255, 255, 255, 0.03);
+  --card-grad-b: rgba(255, 255, 255, 0.01);
+  --card-grad-deep: rgba(0, 0, 0, 0.4);
+  --modal-bg: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(0, 0, 0, 0.95));
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.15);
+  --border-hover: rgba(255, 255, 255, 0.25);
+  --nav-bg: rgba(0, 0, 0, 0.4);
+  --input-bg: rgba(0, 0, 0, 0.3);
+  --hover: rgba(255, 255, 255, 0.05);
+  --aurora-opacity: 0.35;
+  --shadow-strong: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
 }
 
 html, body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, sans-serif; }

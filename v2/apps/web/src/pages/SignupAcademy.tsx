@@ -12,6 +12,22 @@ import {
   FEATURES, FEATURES_BY_CATEGORY, CATEGORY_META,
   type FeatureCategory, type Feature,
 } from "../lib/features";
+import { useTheme } from "../hooks/useTheme";
+
+// Small sun/moon pill used in the sticky top-bar. Shares the app-wide
+// cg.theme localStorage key, so switching here syncs with the rest of
+// chessguru.cc (dashboard/puzzles/nav). Default is LIGHT.
+function ThemePill() {
+  const { choice, toggle } = useTheme();
+  return (
+    <button type="button" onClick={toggle}
+            title={choice === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            aria-label="Toggle theme"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-ink-700 text-sm text-ink-300 hover:bg-ink-800">
+      {choice === "dark" ? "☀" : "🌙"}
+    </button>
+  );
+}
 
 type FieldErr = string | null;
 
@@ -347,7 +363,7 @@ function FeatureShot({ f }: { f: Feature }) {
 
 function FeatureCard({ f }: { f: Feature }) {
   return (
-    <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-white/5 bg-ink-900/80 shadow-lg transition-all duration-300 hover:-translate-y-1 hover:border-brand-500/40 hover:shadow-brand-500/20">
+    <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-ink-700 bg-ink-900/80 shadow-lg transition-all duration-300 hover:-translate-y-1 hover:border-brand-500/40 hover:shadow-brand-500/20">
       {/* Animated gradient border on hover */}
       <div className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100"
            style={{ background: "linear-gradient(135deg, rgba(124,58,237,.15), rgba(236,72,153,.15), rgba(251,191,36,.15))" }} />
@@ -531,9 +547,12 @@ function StickyCTA() {
           <span className="hidden font-semibold text-white sm:inline">ChessGuru</span>
           <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[11px] font-semibold text-emerald-300">3 months free</span>
         </div>
-        <a href="#signup" className="rounded-lg bg-gradient-to-r from-brand-500 to-purple-500 px-4 py-1.5 text-sm font-semibold text-white shadow hover:brightness-110">
-          Start free trial →
-        </a>
+        <div className="flex items-center gap-2">
+          <ThemePill />
+          <a href="#signup" className="rounded-lg bg-gradient-to-r from-brand-500 to-purple-500 px-4 py-1.5 text-sm font-semibold text-white shadow hover:brightness-110">
+            Start free trial →
+          </a>
+        </div>
       </div>
     </div>
   );
@@ -608,7 +627,8 @@ export default function SignupAcademyPage() {
       <StickyCTA />
 
       {/* ── Hero ─────────────────────────────────────────────────── */}
-      <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-ink-900/40 p-8 shadow-2xl backdrop-blur md:p-14">
+      <section className="relative overflow-hidden rounded-3xl border border-ink-700 bg-ink-900/40 p-8 shadow-2xl backdrop-blur md:p-14">
+        <div className="absolute right-4 top-4 z-10"><ThemePill /></div>
         <div className="relative">
           <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/40 bg-emerald-500/15 px-4 py-1 text-xs font-semibold uppercase tracking-widest text-emerald-300">
             🎁 90-day free trial · No card
@@ -629,7 +649,7 @@ export default function SignupAcademyPage() {
             <a href="#signup" className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 via-purple-500 to-pink-500 px-7 py-3.5 text-base font-semibold text-white shadow-xl transition hover:brightness-110 hover:scale-[1.02]">
               Start free trial <span className="text-lg">→</span>
             </a>
-            <a href="#features" className="rounded-xl border border-white/15 bg-white/5 px-7 py-3.5 text-base text-white backdrop-blur transition hover:bg-white/10">
+            <a href="#features" className="rounded-xl border border-ink-700 bg-ink-800/60 px-7 py-3.5 text-base text-white backdrop-blur transition hover:bg-ink-800">
               Explore features
             </a>
           </div>
@@ -642,7 +662,7 @@ export default function SignupAcademyPage() {
               ["Unlimited", "coaches", "👨‍🏫"],
               ["₹1,000/mo", "after trial", "💳"],
             ].map(([n, l, e], i) => (
-              <div key={i} className="rounded-2xl border border-white/10 bg-ink-900/60 p-4 backdrop-blur">
+              <div key={i} className="rounded-2xl border border-ink-700 bg-ink-900/60 p-4 backdrop-blur">
                 <div className="text-2xl">{e}</div>
                 <div className="mt-1 font-display text-xl font-bold text-white">{n}</div>
                 <div className="text-xs text-ink-400">{l}</div>

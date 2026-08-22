@@ -5,13 +5,13 @@ import { useEffect, useState } from "react";
 
 export default function ThemeToggle() {
   const [theme, setTheme] = useState<"dark" | "light">(() => {
-    if (typeof document === "undefined") return "dark";
-    return (document.documentElement.dataset.theme as any) || "dark";
+    if (typeof document === "undefined") return "light";
+    return (document.documentElement.dataset.theme as any) || "light";
   });
 
   useEffect(() => {
     // Sync in case another tab / init script updated the attr after mount.
-    const cur = (document.documentElement.dataset.theme as any) || "dark";
+    const cur = (document.documentElement.dataset.theme as any) || "light";
     if (cur !== theme) setTheme(cur);
   }, []);
 

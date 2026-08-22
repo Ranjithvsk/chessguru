@@ -14,13 +14,13 @@
 <link rel="apple-touch-icon" href="/marketing/hero-tournament.webp">
 <script>
   // Theme init — must run BEFORE React paints to avoid a dark/light flash.
-  // Priority: user's saved choice > system preference > dark default.
+  // Default (no saved choice) is LIGHT for every user. Only saved="dark"
+  // overrides. Owner directive 2026-08-22.
   (function () {
     try {
       var saved = localStorage.getItem("cg-play-theme");
-      var mode = saved || (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
-      document.documentElement.dataset.theme = mode;
-    } catch (e) { /* localStorage disabled — dark by default */ }
+      document.documentElement.dataset.theme = saved === "dark" ? "dark" : "light";
+    } catch (e) { document.documentElement.dataset.theme = "light"; }
   })();
   // Register SW after load — non-blocking. Silent-fail is fine; site works without.
   if ("serviceWorker" in navigator) {
