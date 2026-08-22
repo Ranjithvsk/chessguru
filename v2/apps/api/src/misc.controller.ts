@@ -18,6 +18,30 @@ export class MiscController {
   @Get("themes")
   themes() { return { themes: THEMES }; }
 
+  /** GET /api/public/stats — live counters for the marketing landing page.
+   *  Cached in-memory for 60s so a viral tweet can't turn the landing page
+   *  into a Mongo count() flood. Anonymous, safe to expose publicly. */
+  private _statsCache: { at: number; data: any } = { at: 0, data: null };
+  @Get("public/stats")
+  async publicStats() {
+    const now = Date.now();
+    if (this._statsCache.data && now - this._statsCache.at < 60_000) return this._statsCache.data;
+    const db = this.conn.db!;
+    const weekAgo = new Date(now - 7 * 86_400_000);
+    const [academies, students, coaches, puzzlesSolvedWeek] = await Promise.all([
+      db.collection("academies").countDocuments({}),
+      db.collection("students").countDocuments({}).catch(() => 0),
+      db.collection("users").countDocuments({ role: "coach" }).catch(() => 0),
+      db.collection("rounds").countDocuments({ d: { $gte: weekAgo } }).catch(() => 0),
+    ]);
+    const data = {
+      academies, students, coaches, puzzlesSolvedWeek,
+      updatedAt: new Date(now).toISOString(),
+    };
+    this._statsCache = { at: now, data };
+    return data;
+  }
+
   /** GET /api/me/streak-status — the pieces the frontend needs to decide
    *  whether to show the "your streak is at risk" banner (Phase 7k). We return
    *  raw pieces (streak count + solvedToday flag) rather than a computed

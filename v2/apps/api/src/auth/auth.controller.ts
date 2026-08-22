@@ -38,7 +38,13 @@ export class AuthController {
   @Post("signup-academy")
   signupAcademy(@Body() body: any, @Req() req: any, @Res({ passthrough: true }) res: any) {
     clearHostOnlyTwin(req, res);
-    return this.auth.signupAcademy(body, req.session);
+    // Real client IP behind CF + nginx. Priority: CF-Connecting-IP (unspoofable
+    // inbound — CF strips client copies), then x-forwarded-for's first hop,
+    // then socket.
+    const cfip = String(req.headers?.["cf-connecting-ip"] ?? "").trim();
+    const xff = String(req.headers?.["x-forwarded-for"] ?? "").split(",")[0]?.trim();
+    const ip = cfip || xff || req.ip || req.socket?.remoteAddress || "unknown";
+    return this.auth.signupAcademy(body, req.session, ip);
   }
 
   // Password reset via emailed link

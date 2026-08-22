@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ChessGuru Play — Every India tournament, one home</title>
+<meta name="description" content="Discover every chess tournament in India — nearby first. Rated, weekend, youth. Register in one tap.">
+<link rel="icon" href="/marketing/hero-tournament.webp" type="image/webp">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#fbbf24">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="CG Play">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="/marketing/hero-tournament.webp">
+<script>
+  // Register SW after load — non-blocking. Silent-fail is fine; site works without.
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+  }
+</script>
+</head>
+<body class="antialiased">
+<div id="root"></div>
+<script type="module" src="/src/main.tsx"></script>
+</body>
+</html>

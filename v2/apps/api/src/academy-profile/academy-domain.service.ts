@@ -35,7 +35,7 @@ function validDomain(raw: string): string | null {
   if (!d || d.length > 253) return null;
   if (!DOMAIN_RE.test(d)) return null;
   if (TEST_ALLOWLIST.has(d)) return d;
-  const blocked = ["harinitharanjith.com", "dreamcy.com", "dreamworldplants.com", "dreamworldplants.in"];
+  const blocked = ["chessguru.cc", "harinitharanjith.com", "dreamcy.com", "dreamworldplants.com", "dreamworldplants.in"];
   for (const b of blocked) if (d === b || d.endsWith(`.${b}`)) return null;
   return d;
 }

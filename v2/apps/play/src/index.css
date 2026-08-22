@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body { background: #0a0f1c; color: #f4f4f5; font-family: system-ui, -apple-system, sans-serif; }
+
+@keyframes cg-blob1 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(4vw,-3vh) scale(1.05); } }
+@keyframes cg-blob2 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-3vw,4vh) scale(1.08); } }
+.blob-a { animation: cg-blob1 22s ease-in-out infinite; filter: blur(80px); }
+.blob-b { animation: cg-blob2 26s ease-in-out infinite; filter: blur(90px); }

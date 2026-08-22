@@ -124,7 +124,30 @@ export class AuthService {
    * then logs the owner in. Slug is derived from academyName and made
    * globally unique (append -2, -3, ... on collision).
    * ================================================================ */
-  async signupAcademy(body: any, session: any) {
+  // Per-IP rate limit for /auth/signup-academy — 5 signups per hour per IP.
+  // In-memory (single node), fine for one API pod. Prevents spam creation.
+  private signupRate = new Map<string, { count: number; resetAt: number }>();
+  private signupRateCheck(ip: string): { ok: true } | { ok: false; retryAfterSec: number } {
+    const HOUR = 60 * 60 * 1000;
+    const now = Date.now();
+    const rec = this.signupRate.get(ip);
+    if (!rec || rec.resetAt < now) {
+      this.signupRate.set(ip, { count: 1, resetAt: now + HOUR });
+      if (this.signupRate.size > 500) {
+        for (const [k, v] of this.signupRate) if (v.resetAt < now) this.signupRate.delete(k);
+      }
+      return { ok: true };
+    }
+    if (rec.count >= 5) return { ok: false, retryAfterSec: Math.ceil((rec.resetAt - now) / 1000) };
+    rec.count++;
+    return { ok: true };
+  }
+
+  async signupAcademy(body: any, session: any, ip?: string) {
+    if (ip) {
+      const rl = this.signupRateCheck(ip);
+      if (!rl.ok) return { ok: false, error: `Too many signup attempts from this IP. Try again in ${Math.ceil(rl.retryAfterSec / 60)} min.` };
+    }
     const academyName = String(body?.academyName || "").trim();
     const ownerEmail  = String(body?.ownerEmail || "").trim().toLowerCase();
     const password    = String(body?.password || "");
@@ -132,6 +155,20 @@ export class AuthService {
     // otherwise we derive it from the email local-part so login by username still
     // works (the user can also always sign in via email + password).
     const providedName = String(body?.ownerName || "").trim();
+    // v2 signup form adds: fullName (human display, spaces allowed), ownerMobile
+    // (E.164, optional), mobileConsent (bool, opt-in for WhatsApp updates).
+    const fullName = String(body?.fullName || "").trim().slice(0, 60);
+    const rawMobile = String(body?.ownerMobile || "").trim();
+    const mobileConsent = !!body?.mobileConsent;
+    let ownerMobile = "";
+    if (rawMobile) {
+      const cleaned = rawMobile.replace(/[^\d+]/g, "");
+      const normalized = cleaned.startsWith("+") ? cleaned : `+${cleaned}`;
+      if (!/^\+\d{8,15}$/.test(normalized)) {
+        return { ok: false, error: "Mobile number looks invalid — use format like +91 98765 43210." };
+      }
+      ownerMobile = normalized;
+    }
 
     if (!academyName || academyName.length < 2) return { ok: false, error: "Academy name is required." };
     if (!ownerEmail  || !ownerEmail.includes("@")) return { ok: false, error: "Valid email is required." };
@@ -143,10 +180,14 @@ export class AuthService {
     const academies = this.conn.db!.collection("academies");
     const users = this.users();
 
-    // Slug: lowercase, alphanumerics + dashes; append -N if taken
-    const base = academyName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "academy";
-    let slug = base; let n = 2;
-    while (await academies.findOne({ _id: slug as any })) { slug = `${base}-${n++}`; if (n > 999) break; }
+    // Slug: lowercase, alphanumerics + dashes. Reject duplicate academy names outright
+    // (previously auto-appended -2, -3 which silently let owners create a fresh trial
+    // instead of returning to their existing one — happened with "Guna Chess Academy"
+    // on 2026-08-10 vs 2026-08-21). Case- and punctuation-insensitive via the slug.
+    const slug = academyName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "academy";
+    if (await academies.findOne({ _id: slug as any })) {
+      return { ok: false, error: `An academy named "${academyName}" already exists. If it's yours, sign in instead — otherwise try a different name.` };
+    }
 
     // Username auto-derivation: prefer provided, else sanitize email local-part.
     // Sanitize keeps [a-z0-9_-]; strips dots and other chars. Enforce 2-30 length.
@@ -168,7 +209,7 @@ export class AuthService {
     // 90-day free trial → then ₹1000/month unlimited. Stored so the app can
     // decide when to nag / lock down; enforcement is a separate follow-up.
     const trialEndsAt = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
-    const academyDoc = {
+    const academyDoc: Record<string, any> = {
       _id: slug,
       name: academyName,
       ownerId: uid,
@@ -179,7 +220,9 @@ export class AuthService {
       subscriptionStatus: "trialing",
       createdAt: now,
     };
-    const userDoc = {
+    if (ownerMobile) academyDoc.contactMobile = ownerMobile;
+
+    const userDoc: Record<string, any> = {
       _id: uid,
       username: ownerName,
       bpass: hash,
@@ -189,6 +232,8 @@ export class AuthService {
       createdAt: now,
       lastLogin: now,
     };
+    if (fullName) userDoc.fullName = fullName;
+    if (ownerMobile) { userDoc.mobile = ownerMobile; userDoc.mobileConsent = mobileConsent; }
     await academies.insertOne(academyDoc as any);
     await users.insertOne(userDoc as any);
 
