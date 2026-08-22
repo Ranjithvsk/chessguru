@@ -35,6 +35,7 @@ import BoardEditorPage from "./pages/BoardEditor";
 import LoginPage from "./pages/Login";
 import ResetPasswordPage from "./pages/ResetPassword";
 import SignupAcademyPage from "./pages/SignupAcademy";
+import ArbiterPage from "./pages/Arbiter";
 import AcademyDashboardPage from "./pages/AcademyDashboard";
 import StudentsManagerPage from "./pages/StudentsManager";
 import StudentPerformancePage from "./pages/StudentPerformance";
@@ -208,6 +209,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="login" element={<SmartLoginRoute />} />
             <Route path="reset-password" element={<ResetPasswordPage />} />
             <Route path="signup-academy" element={<SignupAcademyPage />} />
+            <Route path="arbiter" element={<ArbiterPage />} />
+            <Route path="arbiter/:id" element={<ArbiterPage />} />
             <Route path="academy" element={<AcademyDashboardPage />} />
             <Route path="students" element={<StudentsManagerPage />} />
             <Route path="academy/performance" element={<ErrorBoundary label="Student performance"><AcademyPerformancePage /></ErrorBoundary>} />
