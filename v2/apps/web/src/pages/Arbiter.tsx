@@ -357,6 +357,8 @@ function PlayersTab({ t, onChange }: { t: Tournament; onChange: () => void }) {
 
 function RoundsTab({ t, canPair, nextRoundNo, onChange }: { t: Tournament; canPair: boolean; nextRoundNo: number; onChange: () => void }) {
   const [pairingErr, setPairingErr] = useState<string | null>(null);
+  const [pgnText, setPgnText] = useState("");
+  const [pgnMsg, setPgnMsg] = useState<string | null>(null);
   const nameByRank = useMemo(() => Object.fromEntries(t.players.map((p) => [p.rank, p.name])), [t.players]);
 
   const pair = useMutation({
@@ -367,6 +369,10 @@ function RoundsTab({ t, canPair, nextRoundNo, onChange }: { t: Tournament; canPa
     mutationFn: (v: { round: number; board: number; result: string | null }) =>
       post<{ ok: boolean; cr_push?: any }>(`/api/pairings/tournaments/${t._id}/rounds/${v.round}/result`, { board: v.board, result: v.result }),
     onSuccess: () => onChange(),
+  });
+  const uploadPgn = useMutation({
+    mutationFn: () => post<{ ok: boolean; matched?: number; skipped?: number; total?: number; error?: string }>(`/api/pairings/tournaments/${t._id}/games`, { pgn: pgnText }),
+    onSuccess: (r) => { setPgnMsg(r.ok ? `Matched ${r.matched} of ${r.total} games (${r.skipped} skipped — check name spellings).` : (r.error || "Upload failed")); if (r.ok) { setPgnText(""); onChange(); } },
   });
 
   return (
@@ -384,6 +390,26 @@ function RoundsTab({ t, canPair, nextRoundNo, onChange }: { t: Tournament; canPa
         </button>
       </div>
       {pairingErr && <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">{pairingErr}</div>}
+
+      {t.rounds.length > 0 && (
+        <details className="rounded-2xl border border-ink-700 bg-ink-900/40 p-4">
+          <summary className="cursor-pointer text-sm font-semibold text-white">📁 Upload PGN (games viewer)</summary>
+          <div className="mt-3 space-y-2 text-sm">
+            <div className="text-xs text-ink-400">
+              Paste a PGN file (one game per <code>[Event]</code> header). Each game is matched to a pairing by
+              White + Black + Round headers. Once uploaded, the public results page shows a "▶ Play" button per board.
+            </div>
+            <textarea value={pgnText} onChange={(e) => setPgnText(e.target.value)} rows={6}
+                      placeholder="[Event &quot;Chennai Weekend Open 2026&quot;]&#10;[Round &quot;1&quot;]&#10;[White &quot;Anand, Test&quot;]&#10;[Black &quot;Sethuraman, Test&quot;]&#10;[Result &quot;1-0&quot;]&#10;&#10;1. e4 e5 2. Nf3 Nc6 …"
+                      className="w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 font-mono text-xs text-white" />
+            <button disabled={!pgnText.trim() || uploadPgn.isPending} onClick={() => uploadPgn.mutate()}
+                    className="rounded-lg bg-brand-500 px-4 py-1.5 text-sm font-semibold text-white disabled:opacity-40">
+              {uploadPgn.isPending ? "Uploading…" : "Upload PGN"}
+            </button>
+            {pgnMsg && <div className="rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-xs text-ink-300">{pgnMsg}</div>}
+          </div>
+        </details>
+      )}
 
       {t.rounds.length === 0 ? (
         <div className="rounded-2xl border border-ink-700 bg-ink-900/40 p-8 text-center text-ink-400">No rounds paired yet. Add players in the Players tab first.</div>

@@ -62,6 +62,15 @@ interface Tournament {
   updated_at: string;
 }
 
+// Extract [Tag "value"] pairs from a PGN header block.
+function extractHeaders(pgn: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const re = /\[([A-Za-z]+)\s+"([^"]*)"\]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(pgn))) out[m[1]!] = m[2]!;
+  return out;
+}
+
 function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "tournament";
 }
@@ -330,6 +339,48 @@ export class PairingsController {
     const is_public = !!body?.is_public;
     await this.coll().updateOne({ _id: t._id }, { $set: { is_public, updated_at: new Date().toISOString() } });
     return { ok: true, is_public };
+  }
+
+  /** POST /api/pairings/tournaments/:id/games — bulk PGN upload (paste a PGN
+   *  file with one or many games; we extract per-game headers and match each
+   *  to a pairing by White + Black + Round). Games stored in sm_games. */
+  @Post("tournaments/:id/games")
+  async uploadGames(@Param("id") id: string, @Body() body: any, @Req() req: any) {
+    const t = await this.loadOwned(id, req);
+    if ("error" in t) return { ok: false, ...t };
+    const pgnBlob: string = String(body?.pgn || "").trim();
+    if (!pgnBlob) return { ok: false, error: "Empty PGN" };
+
+    // Split into individual games. PGN uses `[Event ...]` header block + blank
+    // line + moves + blank line. We split on `[Event ` starts (keeping the
+    // marker as part of the next game).
+    const games = pgnBlob.split(/(?=\[Event\s)/g).map((g) => g.trim()).filter(Boolean);
+    const gamesColl = this.conn.db!.collection("sm_games");
+    let matched = 0, skipped = 0;
+    for (const pgn of games) {
+      const h = extractHeaders(pgn);
+      const round = parseInt(h.Round || "0", 10);
+      if (!round || !h.White || !h.Black) { skipped++; continue; }
+      // Match round + white + black to a pairing (loose match — trim/lower/comma removed)
+      const norm = (s: string) => s.toLowerCase().replace(/[\s,\.]/g, "");
+      const round_doc = t.rounds.find((r) => r.round_no === round);
+      if (!round_doc) { skipped++; continue; }
+      const p = round_doc.pairings.find((g) => {
+        const w = t.players.find((x) => x.rank === g.white_rank);
+        const b = t.players.find((x) => x.rank === g.black_rank);
+        return w && b && norm(w.name).includes(norm(h.White!)) && norm(b.name).includes(norm(h.Black!));
+      });
+      if (!p) { skipped++; continue; }
+      await gamesColl.updateOne(
+        { tournament_id: t._id, round_no: round, board: p.board },
+        { $set: { tournament_id: t._id, round_no: round, board: p.board,
+                  white_rank: p.white_rank, black_rank: p.black_rank,
+                  pgn, headers: h, uploaded_at: new Date().toISOString() } },
+        { upsert: true },
+      );
+      matched++;
+    }
+    return { ok: true, matched, skipped, total: games.length };
   }
 
   /** GET /api/pairings/tournaments/:id/standings */

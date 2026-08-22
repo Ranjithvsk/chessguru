@@ -37,6 +37,8 @@ import ResetPasswordPage from "./pages/ResetPassword";
 import SignupAcademyPage from "./pages/SignupAcademy";
 import ArbiterPage from "./pages/Arbiter";
 import { PublicResultsHome, PublicResultsDetail } from "./pages/PublicResults";
+import PublicPlayer from "./pages/PublicPlayer";
+import PublicFederation from "./pages/PublicFederation";
 import AcademyDashboardPage from "./pages/AcademyDashboard";
 import StudentsManagerPage from "./pages/StudentsManager";
 import StudentPerformancePage from "./pages/StudentPerformance";
@@ -215,6 +217,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="results" element={<PublicResultsHome />} />
             <Route path="results/:id" element={<PublicResultsDetail />} />
             <Route path="t/:id" element={<PublicResultsDetail />} />
+            <Route path="player/:fide_id" element={<PublicPlayer />} />
+            <Route path="federation/:code" element={<PublicFederation />} />
             <Route path="academy" element={<AcademyDashboardPage />} />
             <Route path="students" element={<StudentsManagerPage />} />
             <Route path="academy/performance" element={<ErrorBoundary label="Student performance"><AcademyPerformancePage /></ErrorBoundary>} />
