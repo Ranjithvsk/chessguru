@@ -26,7 +26,7 @@ type Brand = {
 function slugFromHost(): string {
   if (typeof window === "undefined") return "";
   const h = window.location.hostname.toLowerCase();
-  if (/^(chessguru\.com|harinitharanjith\.com|localhost|127\.0\.0\.1|\d+\.\d+\.\d+\.\d+)$/.test(h)) return "";
+  if (/^(chessguru\.com|chessguru\.cc|harinitharanjith\.com|localhost|127\.0\.0\.1|\d+\.\d+\.\d+\.\d+)$/.test(h)) return "";
   return h.split(".")[0] || "";
 }
 

@@ -165,7 +165,7 @@ export default function LoginPage() {
           them into signing up their own competing academy. */}
       {(() => {
         const isTenantDomain = typeof window !== "undefined" &&
-          !/^(chessguru\.com|harinitharanjith\.com|localhost|127\.0\.0\.1|\d+\.\d+\.\d+\.\d+)$/.test(window.location.hostname.toLowerCase());
+          !/^(chessguru\.com|chessguru\.cc|harinitharanjith\.com|localhost|127\.0\.0\.1|\d+\.\d+\.\d+\.\d+)$/.test(window.location.hostname.toLowerCase());
         if (isTenantDomain) return null;
         return (
           <div className="mt-4 rounded-xl2 border border-brand-500/30 bg-gradient-to-br from-brand-500/10 via-ink-900 to-ink-900 p-4 text-center text-sm">

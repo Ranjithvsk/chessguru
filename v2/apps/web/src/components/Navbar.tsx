@@ -230,7 +230,7 @@ function useTenantSlug(): string | null {
   // Custom domain — anything that isn't chessguru.com / harinitharanjith.com / localhost / bare IP
   if (typeof window !== "undefined") {
     const h = window.location.hostname.toLowerCase();
-    if (h && !/^(chessguru\.com|harinitharanjith\.com|localhost|127\.0\.0\.1|\d+\.\d+\.\d+\.\d+)$/.test(h)) {
+    if (h && !/^(chessguru\.com|chessguru\.cc|harinitharanjith\.com|localhost|127\.0\.0\.1|\d+\.\d+\.\d+\.\d+)$/.test(h)) {
       // Take first label as the guess slug (gunachess.com → "gunachess"). Backend
       // /api/academy-page/:slug tolerates ownerId lookup for tenants.
       return h.split(".")[0];

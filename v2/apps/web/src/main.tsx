@@ -87,7 +87,16 @@ import ParentReportViewPage from "./pages/ParentReportView";
 function SmartLoginRoute() {
   if (typeof window === "undefined") return <LoginPage />;
   const h = window.location.hostname.toLowerCase();
-  const isCanonical = /(^|\.)harinitharanjith\.com$/.test(h) || h === "localhost" || h === "127.0.0.1" || /^\d+\.\d+\.\d+\.\d+$/.test(h);
+  // chessguru.cc + chessguru.com + harinitharanjith.com are the platform (canonical)
+  // hosts. Any other domain (gunachess.com, coach vanity, tenant subdomain) hits
+  // the tenant-branded login. Adding chessguru.cc here after 2026-08-21 domain
+  // flip; without it, chessguru.cc landed on TenantLogin and errored
+  // "Academy 'chessguru' not found".
+  const isCanonical =
+    /(^|\.)harinitharanjith\.com$/.test(h) ||
+    /(^|\.)chessguru\.cc$/.test(h) ||
+    /(^|\.)chessguru\.com$/.test(h) ||
+    h === "localhost" || h === "127.0.0.1" || /^\d+\.\d+\.\d+\.\d+$/.test(h);
   return isCanonical ? <LoginPage /> : <TenantLoginPage />;
 }
 import DailyPage from "./pages/Daily";
