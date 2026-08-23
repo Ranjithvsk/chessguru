@@ -102,6 +102,21 @@ export class AcademyController {
     return this.svc.listStudents(req.session);
   }
 
+  /** Attendance sheet for a date (default today). Returns every eligible
+   *  student pre-filled to "present"; overlay of prior marks flips them to
+   *  late/absent. Owner sees all coaches; coach pinned to their roster. */
+  @Get("attendance")
+  attendanceSheet(@Req() req: any, @Query("date") date: string, @Query("coachId") coachId: string, @Query("batchId") batchId: string) {
+    return this.svc.getAttendanceSheet(req.session, date, coachId || null, batchId || null);
+  }
+
+  /** Bulk mark attendance for a date. Body: { date, entries: [{ studentId,
+   *  status: "present"|"late"|"absent", lateMinutes?, reason? }] }. */
+  @Post("attendance/mark")
+  markAttendance(@Req() req: any, @Body() body: any) {
+    return this.svc.markAttendanceBulk(req.session, body);
+  }
+
   /** Presence heartbeat — any signed-in user pings this every ~60s (and on
    *  route change). Body: { path }. Updates users.lastSeen + currentPath so
    *  coaches see who is online right now on the /academy dashboard. */

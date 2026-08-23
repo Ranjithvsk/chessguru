@@ -1049,6 +1049,176 @@ export class AcademyService {
     return { ok: true, credentials: { username: target.username || target._id, password } };
   }
 
+  /** Attendance sheet for a given date + optional coach + optional batch. Every
+   *  student in scope appears, defaulting to status="present" UNLESS the coach
+   *  has previously marked them absent/late for that date (idempotent read of
+   *  the classAttendance collection). Owner ask 2026-08-23: "default present,
+   *  mark absent" — this is the read side that powers that UX.
+   *
+   *  Response row shape:
+   *    { studentId, name, username, avatarKey, status, lateMinutes, reason,
+   *      currentAttendanceStreak, lastPresentDate, absentYesterday }
+   *
+   *  Uses the classId key "manual-<markedBy>-<yyyymmdd>" AS WELL AS ANY
+   *  scheduled/live-class attendance for that date — so a student who joined
+   *  the /class-v2 video call already shows as "present" without duplicate
+   *  marking. Manual marks override auto marks (last write wins).
+   */
+  async getAttendanceSheet(session: any, dateStr: string, coachIdRaw?: string | null, batchId?: string | null) {
+    const g = this.ensureCoachOrOwner(session);
+    // Normalise date. Owner sees any coach; coach is pinned to themselves.
+    const raw = String(dateStr || "").trim();
+    const date = raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : new Date().toISOString().slice(0, 10);
+    const dayStart = new Date(`${date}T00:00:00`);
+    const dayEnd = new Date(`${date}T23:59:59.999`);
+    const coachId = g.role === "coach" ? g.userId : (String(coachIdRaw || "").trim() || null);
+
+    // Roster — students in this academy, optionally filtered by coach + batch.
+    const studentFilter: any = { academyId: g.academyId, role: "student" };
+    if (coachId) studentFilter.coachId = coachId;
+    if (batchId) {
+      const b: any = await this.batches().findOne({ _id: batchId as any, academyId: g.academyId });
+      if (!b) return { ok: false, error: "That batch isn't in this academy." };
+      const ids: string[] = (b.studentIds || []).map(String);
+      studentFilter._id = { $in: ids as any };
+    }
+    const students: any[] = await this.users().find(studentFilter, { projection: { _id: 1, username: 1, name: 1, coachId: 1, avatarKey: 1 } }).toArray();
+    const ids = students.map((s) => String(s._id));
+
+    // Attendance marks for this date. Any row for this student on this date =
+    // present-baseline; explicit status field overrides. Late/absent statuses
+    // added by this feature; older manual rows had no status = treat as present.
+    const attRows: any[] = ids.length ? await this.conn.db!.collection("classAttendance")
+      .find({ key: { $in: ids as any }, joinedAt: { $gte: dayStart, $lte: dayEnd } })
+      .sort({ lastSeenAt: 1 })
+      .toArray() : [];
+    // Last-write-wins per student for the date.
+    const byStudent = new Map<string, any>();
+    for (const a of attRows) byStudent.set(String(a.key), a);
+
+    // Streak + last-present-date lookup — one aggregation covering past 60d.
+    const streakCutoff = new Date(Date.now() - 60 * 86400_000);
+    const streakAgg = ids.length ? await this.conn.db!.collection("classAttendance").aggregate([
+      { $match: { key: { $in: ids as any }, joinedAt: { $gte: streakCutoff }, $or: [{ status: { $exists: false } }, { status: "present" }, { status: "late" }] } },
+      { $group: {
+          _id: "$key",
+          days: { $addToSet: {
+            $dateToString: { format: "%Y-%m-%d", date: "$joinedAt", timezone: "Asia/Kolkata" },
+          } },
+      } },
+    ]).toArray() : [];
+    const streakMap = new Map<string, { current: number; lastPresentDate: string | null }>();
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = new Date(Date.now() - 86400_000).toISOString().slice(0, 10);
+    for (const s of streakAgg) {
+      const days = new Set<string>(s.days || []);
+      const sorted = [...days].sort().reverse();
+      const lastPresentDate = sorted[0] || null;
+      // Current streak = consecutive backward from today/yesterday
+      let cur = 0;
+      let cursor = new Date();
+      // If not present today, allow starting from yesterday
+      if (!days.has(today) && !days.has(yesterday)) {
+        cur = 0;
+      } else {
+        // Skip forward to first present day (today or yesterday)
+        while (!days.has(cursor.toISOString().slice(0, 10))) cursor.setDate(cursor.getDate() - 1);
+        // Walk backward counting consecutive days
+        while (days.has(cursor.toISOString().slice(0, 10))) { cur++; cursor.setDate(cursor.getDate() - 1); }
+      }
+      streakMap.set(String(s._id), { current: cur, lastPresentDate });
+    }
+
+    const rows = students.map((s: any) => {
+      const uid = String(s._id);
+      const mark = byStudent.get(uid);
+      // Legacy rows had no `status` — treat presence as "present".
+      const status: "present" | "late" | "absent" =
+        !mark ? "present"                       // no mark = default present (per owner directive)
+        : mark.status === "absent" ? "absent"
+        : mark.status === "late" ? "late"
+        : "present";
+      const streak = streakMap.get(uid);
+      return {
+        studentId: uid,
+        name: s.name || s.username,
+        username: s.username,
+        avatarKey: s.avatarKey || null,
+        coachId: s.coachId || null,
+        status,
+        lateMinutes: mark?.lateMinutes ?? null,
+        reason: mark?.reason ?? null,
+        markedAt: mark?.lastSeenAt || mark?.joinedAt || null,
+        currentAttendanceStreak: streak?.current ?? 0,
+        lastPresentDate: streak?.lastPresentDate ?? null,
+        absentYesterday: (streak?.lastPresentDate && streak.lastPresentDate < yesterday) || (!streak?.lastPresentDate && ids.length > 0),
+      };
+    });
+    // Owner: "reverse order" — most-recently-registered students first so newest
+    // faces the coach checks in each session are up top.
+    rows.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    rows.reverse();
+    return { ok: true, date, coachId, batchId: batchId || null, rows };
+  }
+
+  /** Bulk mark attendance. Body: { date, entries: [{ studentId, status,
+   *  lateMinutes?, reason? }] }. Coach can only touch their own students;
+   *  owner can touch any in the academy. Uses classId
+   *  "manual-<coachOrOwner>-<yyyymmdd>" so re-marking is idempotent (updateOne
+   *  per student). Auto-sets timestamps + captures who marked.
+   *
+   *  A status of "present" writes the same row as the old markStudentAttended;
+   *  "late" adds lateMinutes; "absent" writes a row with status="absent" so the
+   *  read side knows to display red instead of treating "no row" as absent
+   *  (older data has no rows for absent kids, so we default-present on read). */
+  async markAttendanceBulk(session: any, body: any) {
+    const g = this.ensureCoachOrOwner(session);
+    const raw = String(body?.date || "").trim();
+    const dateStr = raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : new Date().toISOString().slice(0, 10);
+    const dayAt = new Date(`${dateStr}T09:00:00`);
+    if (isNaN(dayAt.getTime())) return { ok: false, error: "Bad date." };
+    const yyyymmdd = dateStr.replace(/-/g, "");
+    const classId = `manual-${g.userId}-${yyyymmdd}`;
+    const entries = Array.isArray(body?.entries) ? body.entries : [];
+    if (!entries.length) return { ok: false, error: "No entries to mark." };
+
+    // Guard — only touch students in this academy (and if coach, only their own).
+    const idsRequested = entries.map((e: any) => String(e?.studentId || "")).filter(Boolean);
+    const targets: any[] = idsRequested.length ? await this.users().find({
+      _id: { $in: idsRequested as any },
+      academyId: g.academyId,
+      role: "student",
+      ...(g.role === "coach" ? { coachId: g.userId } : {}),
+    }, { projection: { _id: 1, name: 1, username: 1, coachId: 1 } }).toArray() : [];
+    const allowed = new Map(targets.map((t: any) => [String(t._id), t]));
+
+    const col = this.conn.db!.collection("classAttendance");
+    let marked = 0, skipped = 0;
+    for (const e of entries) {
+      const uid = String(e?.studentId || "");
+      const target = allowed.get(uid);
+      if (!target) { skipped++; continue; }
+      const status: "present" | "late" | "absent" =
+        e?.status === "late" ? "late"
+        : e?.status === "absent" ? "absent"
+        : "present";
+      const lateMinutes = status === "late" && typeof e?.lateMinutes === "number"
+        ? Math.max(0, Math.min(300, Math.round(e.lateMinutes)))
+        : null;
+      const reason = typeof e?.reason === "string" ? e.reason.slice(0, 200) : null;
+      await col.updateOne(
+        { classId, key: target._id },
+        {
+          $setOnInsert: { joinedAt: dayAt, classId, key: target._id, userId: target._id, name: target.name || target.username, manual: true, markedByUserId: g.userId },
+          $set: { lastSeenAt: new Date(), status, lateMinutes, reason },
+        },
+        { upsert: true },
+      );
+      marked++;
+    }
+    return { ok: true, date: dateStr, marked, skipped };
+  }
+
   /** Owner OR coach: list students in this academy. Owner sees ALL; coach sees theirs.
    *  Enriches each row with:
    *    - puzzleRating (from userperfs.puzzle.gl.r)
