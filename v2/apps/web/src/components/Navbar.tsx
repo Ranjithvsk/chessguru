@@ -63,6 +63,7 @@ const GROUPS: Group[] = [
       { to: "/dashboard", label: "📊 My performance", desc: "Ratings, strengths & progress" },
       { to: "/history", label: "📜 My history", desc: "Every puzzle you've solved" },
       { to: "/settings/accounts", label: "🔗 Linked accounts", desc: "Link Lichess + Chess.com" },
+      { to: "/settings/face", label: "👤 Face check-in", desc: "One-time enrollment — walk past class camera to auto-mark present" },
     ],
   },
   {

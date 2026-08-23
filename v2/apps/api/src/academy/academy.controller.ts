@@ -168,6 +168,36 @@ export class AcademyController {
     return this.svc.getAbsentNotifyStatus(req.session, studentId, date);
   }
 
+  /** Face check-in — student self-enrolls a 128-dim descriptor (computed
+   *  client-side via face-api.js from 3+ selfies). Body: { descriptor,
+   *  consent }. NEVER stores original photos. */
+  @Post("attendance/face/enroll")
+  enrollFace(@Req() req: any, @Body() body: any) {
+    return this.svc.enrollFace(req.session, body);
+  }
+
+  /** Delete a face enrollment. ?studentId= for coach/owner to delete
+   *  on someone's behalf; omit to delete your own. */
+  @Post("attendance/face/delete")
+  deleteFace(@Req() req: any, @Body() body: any) {
+    return this.svc.deleteFaceEnrollment(req.session, body?.studentId);
+  }
+
+  /** Coach's face-check-in fires this per detected face. Body: { descriptor,
+   *  date?, coachId?, batchId?, threshold? }. Returns best match under
+   *  threshold + auto-marks present. */
+  @Post("attendance/face/match")
+  matchFace(@Req() req: any, @Body() body: any) {
+    return this.svc.matchFaceCheckin(req.session, body);
+  }
+
+  /** Roster with enrollment status — for the enrollment panel + the
+   *  face check-in "N of M enrolled" indicator. */
+  @Get("attendance/face/roster")
+  faceRoster(@Req() req: any) {
+    return this.svc.listFaceEnrollment(req.session);
+  }
+
   /** Per-student attendance history for the calendar heatmap on the
    *  performance page. ?days=N (default 90, max 365). Auth: coach for own
    *  students, owner for any academy student, student for self, parent for

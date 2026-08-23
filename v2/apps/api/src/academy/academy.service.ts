@@ -1614,6 +1614,183 @@ export class AcademyService {
     };
   }
 
+  /** Enroll a student's face for attendance check-in.
+   *
+   *  Client (student's browser) uses face-api.js to compute a 128-dim
+   *  descriptor from 3+ selfies, averages them client-side, then POSTs
+   *  the averaged vector here. Owner ask 2026-08-23. We NEVER store the
+   *  original photos — only the descriptor (which is not reversible into
+   *  a recognizable image). Consent is captured explicitly.
+   *
+   *  Auth: student enrolls themselves. Coach/owner can trigger a
+   *  re-enrollment prompt but not enroll ON someone's behalf.
+   */
+  async enrollFace(session: any, body: any) {
+    const userId: string | null = session?.userId ?? null;
+    if (!userId) return { ok: false, error: "Sign in first." };
+    // Multi-embedding: accept an array of descriptors (recommended, better
+    // recognition across poses/lighting) OR a single descriptor (legacy /
+    // simple flow). Server stores as `faceDescriptors: number[][]`.
+    const rawDescs = Array.isArray(body?.descriptors) ? body.descriptors
+                   : Array.isArray(body?.descriptor) ? [body.descriptor]
+                   : null;
+    if (!rawDescs || rawDescs.length === 0) {
+      return { ok: false, error: "Expected one or more 128-dimensional face descriptors." };
+    }
+    if (rawDescs.length > 20) return { ok: false, error: "Too many descriptors (max 20)." };
+    const clean: number[][] = [];
+    for (const d of rawDescs) {
+      if (!Array.isArray(d) || d.length !== 128) return { ok: false, error: "Each descriptor must have 128 values." };
+      const row: number[] = [];
+      for (const v of d) {
+        const n = Number(v);
+        if (!Number.isFinite(n)) return { ok: false, error: "Descriptor contains invalid numbers." };
+        row.push(n);
+      }
+      clean.push(row);
+    }
+    // Liveness signal — client attests it passed at least one challenge
+    // (blink / smile / head-turn). Not cryptographically enforced (a
+    // determined attacker could bypass) but adds real friction against
+    // "hold up a photo" spoofs. Recorded for audit.
+    const livenessPassed = !!body?.livenessPassed;
+    const livenessMethod = typeof body?.livenessMethod === "string" ? body.livenessMethod.slice(0, 40) : null;
+    const consent = !!body?.consent;
+    if (!consent) return { ok: false, error: "Please accept the consent notice to enroll." };
+    await this.users().updateOne(
+      { _id: userId as any },
+      { $set: {
+          faceDescriptors: clean,
+          faceEnrolledAt: new Date(),
+          faceConsent: true,
+          faceConsentAt: new Date(),
+          faceLivenessPassed: livenessPassed,
+          faceLivenessMethod: livenessMethod,
+      },
+      // Cleanup legacy single-descriptor field so match logic doesn't hit
+      // two paths for the same user.
+      $unset: { faceDescriptor: "" } },
+    );
+    return { ok: true, enrolledAt: new Date().toISOString(), enrolledCount: clean.length };
+  }
+
+  /** Delete a student's face enrollment. Student can delete their own; coach
+   *  can delete for their students; owner for any. */
+  async deleteFaceEnrollment(session: any, studentIdRaw?: string) {
+    const userId: string | null = session?.userId ?? null;
+    if (!userId) return { ok: false, error: "Sign in first." };
+    const targetId = studentIdRaw && studentIdRaw !== userId ? studentIdRaw : userId;
+    if (targetId !== userId) {
+      const g = this.ensureCoachOrOwner(session);
+      const student: any = await this.users().findOne({ _id: targetId as any, academyId: g.academyId, role: "student" });
+      if (!student) return { ok: false, error: "Not found in your academy." };
+      if (g.role === "coach" && String(student.coachId || "") !== g.userId) return { ok: false, error: "Not your student." };
+    }
+    await this.users().updateOne(
+      { _id: targetId as any },
+      {
+        $unset: { faceDescriptor: "", faceDescriptors: "", faceEnrolledAt: "", faceLivenessMethod: "", faceLivenessPassed: "" },
+        $set: { faceConsent: false, faceUnenrolledAt: new Date() },
+      },
+    );
+    return { ok: true };
+  }
+
+  /** Coach's face-check-in mode calls this per detected face. Body:
+   *  { descriptor: number[128], date?, coachId?, batchId?, threshold? }.
+   *  Returns the best match (studentId + distance) if under threshold,
+   *  or { ok: true, match: null } if no confident match.
+   *
+   *  Nearest-neighbor Euclidean over enrolled students in scope. Roster
+   *  sizes are small (usually <200/academy), so linear scan is fine —
+   *  optimize when > 1000. Threshold default 0.55 (face-api.js recommends
+   *  0.6; we're a bit stricter to reduce false positives).
+   *
+   *  Auto-marks the matched student PRESENT for the given date. Idempotent
+   *  via classId "facein-<coachId>-<yyyymmdd>". */
+  async matchFaceCheckin(session: any, body: any) {
+    const g = this.ensureCoachOrOwner(session);
+    const descriptor = Array.isArray(body?.descriptor) ? body.descriptor : null;
+    if (!descriptor || descriptor.length !== 128) return { ok: false, error: "Bad descriptor." };
+    const query: number[] = descriptor.map((n: any) => Number(n));
+    const threshold = Math.max(0.3, Math.min(0.8, Number(body?.threshold) || 0.55));
+    const dateRaw = String(body?.date || "").trim();
+    const date = dateRaw && /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? dateRaw : new Date().toISOString().slice(0, 10);
+    const coachId = g.role === "coach" ? g.userId : (String(body?.coachId || "").trim() || null);
+    const batchId = String(body?.batchId || "").trim() || null;
+
+    // Roster in scope — enrolled students only. Match either multi-embedding
+    // (faceDescriptors: number[][]) or legacy single (faceDescriptor: number[]).
+    const filter: any = {
+      academyId: g.academyId,
+      role: "student",
+      $or: [{ faceDescriptors: { $exists: true } }, { faceDescriptor: { $exists: true } }],
+    };
+    if (coachId) filter.coachId = coachId;
+    if (batchId) {
+      const b: any = await this.batches().findOne({ _id: batchId as any, academyId: g.academyId });
+      if (!b) return { ok: false, error: "That batch isn't in this academy." };
+      filter._id = { $in: (b.studentIds || []).map(String) as any };
+    }
+    const enrolled: any[] = await this.users().find(filter, { projection: { _id: 1, name: 1, username: 1, faceDescriptors: 1, faceDescriptor: 1 } }).toArray();
+    if (!enrolled.length) return { ok: true, match: null, message: "No enrolled students in scope." };
+
+    // Nearest-neighbor Euclidean. For multi-embedding users, take the MIN
+    // distance across all their stored descriptors — this handles pose/
+    // lighting variation better than averaging.
+    let best: { studentId: string; name: string; distance: number } | null = null;
+    for (const s of enrolled) {
+      const descs: number[][] = Array.isArray(s.faceDescriptors) ? s.faceDescriptors
+                              : Array.isArray(s.faceDescriptor) ? [s.faceDescriptor]
+                              : [];
+      let minDist = Infinity;
+      for (const d of descs) {
+        if (!Array.isArray(d) || d.length !== 128) continue;
+        let sum = 0;
+        for (let i = 0; i < 128; i++) { const diff = query[i]! - d[i]!; sum += diff * diff; }
+        const dist = Math.sqrt(sum);
+        if (dist < minDist) minDist = dist;
+      }
+      if (minDist !== Infinity && (!best || minDist < best.distance)) {
+        best = { studentId: String(s._id), name: s.name || s.username, distance: minDist };
+      }
+    }
+    if (!best || best.distance > threshold) return { ok: true, match: null, best };
+
+    // Auto-mark present. Idempotent via classId "facein-...".
+    const yyyymmdd = date.replace(/-/g, "");
+    const classId = `facein-${coachId || g.academyId}-${yyyymmdd}`;
+    const dayAt = new Date(`${date}T09:00:00`);
+    await this.conn.db!.collection("classAttendance").updateOne(
+      { classId, key: best.studentId },
+      {
+        $setOnInsert: { joinedAt: new Date(), classId, key: best.studentId, userId: best.studentId, name: best.name, manual: true, markedByUserId: g.userId },
+        $set: { lastSeenAt: new Date(), status: "present", lateMinutes: null, reason: null, source: "face" },
+      },
+      { upsert: true },
+    );
+    return { ok: true, match: best, date };
+  }
+
+  /** List which students in scope have face enrollment. Used by the enrollment
+   *  panel on coach's academy page + the face check-in modal ("N of M
+   *  enrolled"). */
+  async listFaceEnrollment(session: any) {
+    const g = this.ensureCoachOrOwner(session);
+    const filter: any = { academyId: g.academyId, role: "student" };
+    if (g.role === "coach") filter.coachId = g.userId;
+    const students: any[] = await this.users().find(filter, { projection: { _id: 1, name: 1, username: 1, faceEnrolledAt: 1 } }).toArray();
+    return {
+      ok: true,
+      total: students.length,
+      enrolled: students.filter((s) => !!s.faceEnrolledAt).length,
+      rows: students.map((s) => ({
+        studentId: String(s._id), name: s.name || s.username, username: s.username,
+        enrolledAt: s.faceEnrolledAt || null,
+      })),
+    };
+  }
+
   /** Auto-send absent notification via Meta WhatsApp Cloud API.
    *
    *  Owner ask 2026-08-23. Uses the same WHATSAPP_TOKEN +

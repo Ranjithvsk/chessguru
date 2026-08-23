@@ -14,6 +14,7 @@ import { Link, Navigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
 import { api, get, post } from "../lib/api";
+import { loadFaceApi, detectAllFaces } from "../lib/faceApi";
 
 type Status = "present" | "late" | "absent";
 type DayStatus = "present" | "late" | "absent" | "unmarked";
@@ -80,6 +81,7 @@ export default function AttendancePage() {
   const [toast, setToast] = useState<string | null>(null);
   const [detail, setDetail] = useState<Row | null>(null);   // long-press → open modal
   const [qrOpen, setQrOpen] = useState(false);
+  const [faceOpen, setFaceOpen] = useState(false);
   const [notifyOpen, setNotifyOpen] = useState(false);
 
   useEffect(() => {
@@ -279,6 +281,11 @@ export default function AttendancePage() {
                 title="Show QR — kids scan with phone to mark themselves present">
           📱 QR Check-in
         </button>
+        <button type="button" onClick={() => setFaceOpen(true)}
+                className="rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:shadow-purple-500/30"
+                title="Camera → recognize enrolled faces → auto-mark present">
+          👤 Face Check-in
+        </button>
         {stats.absent > 0 && (
           <button type="button" onClick={() => setNotifyOpen(true)}
                   className="rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:shadow-emerald-500/30"
@@ -307,6 +314,13 @@ export default function AttendancePage() {
         <QrCheckinModal date={date} coachId={coachId || null} batchId={batchId || null}
                         onClose={() => setQrOpen(false)}
                         onCheckin={() => qc.invalidateQueries({ queryKey: ["attendance-sheet"] })} />
+      )}
+
+      {/* Face check-in modal */}
+      {faceOpen && (
+        <FaceCheckinModal date={date} coachId={coachId || null} batchId={batchId || null}
+                          onClose={() => setFaceOpen(false)}
+                          onMatch={() => qc.invalidateQueries({ queryKey: ["attendance-sheet"] })} />
       )}
 
       {/* Notify-absent-parents bulk modal */}
@@ -729,6 +743,167 @@ function ParentContactButtons({ studentId }: { studentId: string }) {
             📱 WhatsApp {c.name}
           </a>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/** Coach's face check-in — fullscreen video, detects ALL faces per frame,
+ *  sends each descriptor to server for match, auto-marks matched students
+ *  present. Confidence threshold is coach-tunable (0.40 tight → 0.70 loose).
+ *  Owner ask 2026-08-23. */
+function FaceCheckinModal({ date, coachId, batchId, onClose, onMatch }: {
+  date: string;
+  coachId: string | null;
+  batchId: string | null;
+  onClose: () => void;
+  onMatch: () => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [threshold, setThreshold] = useState(0.55);
+  const [recognized, setRecognized] = useState<Array<{ studentId: string; name: string; at: number; distance: number }>>([]);
+  const [pending, setPending] = useState(false);
+  const recentIdsRef = useRef<Map<string, number>>(new Map());   // studentId → lastMatchedAt (ms)
+
+  const rosterQ = useQuery({
+    queryKey: ["face-roster"],
+    queryFn: () => get<{ ok: boolean; total: number; enrolled: number }>("/api/academy/attendance/face/roster"),
+    staleTime: 60_000,
+  });
+
+  // Camera + models
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await loadFaceApi();
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        });
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play().catch(() => {});
+        }
+        setReady(true);
+      } catch (e: any) {
+        setError(e?.message || "Could not access camera. Please grant permission.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; }
+    };
+  }, []);
+
+  // Recognition loop — runs every 1.2s while modal open. Cooldown per
+  // recognized student (60s) so the same face doesn't spam the log.
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled || !videoRef.current) return;
+      try {
+        setPending(true);
+        const detections = await detectAllFaces(videoRef.current);
+        for (const det of detections) {
+          const res: any = await post("/api/academy/attendance/face/match", {
+            descriptor: Array.from(det.descriptor),
+            date, coachId, batchId, threshold,
+          });
+          if (res?.ok && res.match) {
+            const now = Date.now();
+            const last = recentIdsRef.current.get(res.match.studentId) || 0;
+            if (now - last > 60_000) {
+              recentIdsRef.current.set(res.match.studentId, now);
+              setRecognized((prev) => {
+                const seen = new Set(prev.map((r) => r.studentId));
+                if (seen.has(res.match.studentId)) return prev;
+                return [{ ...res.match, at: now }, ...prev].slice(0, 20);
+              });
+              onMatch();
+            }
+          }
+        }
+      } catch { /* transient, ignore */ }
+      finally { setPending(false); }
+      if (!cancelled) setTimeout(tick, 1200);
+    };
+    tick();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, threshold]);
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/90 p-3 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-3xl rounded-2xl border border-ink-700 bg-ink-950 p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-baseline justify-between gap-2">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-purple-300">Attendance · face check-in</div>
+            <h2 className="mt-0.5 font-display text-xl text-white">👤 Point at students to check them in</h2>
+          </div>
+          <button type="button" onClick={onClose} className="text-2xl text-ink-400 hover:text-white">×</button>
+        </div>
+
+        {error && (
+          <div className="mb-3 rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200">
+            {error}
+          </div>
+        )}
+
+        {!error && rosterQ.data && rosterQ.data.enrolled === 0 && (
+          <div className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200">
+            ⚠️ No students have enrolled their face yet. Share <b>/settings/face</b> with them so they can enroll once.
+          </div>
+        )}
+
+        <div className="relative overflow-hidden rounded-xl bg-black">
+          <video ref={videoRef} autoPlay muted playsInline className="w-full" />
+          {!ready && !error && (
+            <div className="absolute inset-0 grid place-items-center bg-black/60 text-sm text-ink-300">
+              Loading camera + face models…
+            </div>
+          )}
+          {pending && (
+            <div className="absolute top-2 right-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] text-white">🔍 scanning…</div>
+          )}
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg bg-ink-900 p-3">
+          <div className="min-w-0 flex-1">
+            <label className="text-[10px] uppercase text-ink-500">Confidence threshold: <b className="text-white">{threshold.toFixed(2)}</b></label>
+            <input type="range" min={0.40} max={0.70} step={0.01} value={threshold}
+                   onChange={(e) => setThreshold(Number(e.target.value))} className="w-full accent-purple-500" />
+            <div className="flex justify-between text-[9px] text-ink-500">
+              <span>0.40 tight (fewer matches)</span>
+              <span>0.70 loose (more false ✓)</span>
+            </div>
+          </div>
+          {rosterQ.data && (
+            <div className="text-xs text-ink-400">
+              <b className="text-white tabular-nums">{rosterQ.data.enrolled}</b> / {rosterQ.data.total} enrolled
+            </div>
+          )}
+        </div>
+
+        {recognized.length > 0 && (
+          <div className="mt-3 rounded-lg bg-ink-900 p-3">
+            <div className="mb-1 text-[10px] uppercase text-ink-500">Checked in this session ({recognized.length})</div>
+            <div className="max-h-32 space-y-1 overflow-y-auto">
+              {recognized.map((r) => (
+                <div key={r.studentId + r.at} className="flex items-center justify-between rounded bg-ink-950 px-2 py-1 text-xs">
+                  <span className="font-semibold text-emerald-300">✓ {r.name}</span>
+                  <span className="text-ink-500 tabular-nums">dist {r.distance.toFixed(2)} · {new Date(r.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
