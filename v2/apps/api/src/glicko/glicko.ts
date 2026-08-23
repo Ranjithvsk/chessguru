@@ -57,6 +57,17 @@ export function updatePuzzleRating(userPerf: Perf, puzzleGlicko: Glicko, win: bo
   const nU = computeGame(uG, puzzleGlicko, score);
   const nP = computeGame(puzzleGlicko, uG, 1 - score);
   nU.r = Math.max(uG.r - MAX_RATING_DELTA, Math.min(uG.r + MAX_RATING_DELTA, nU.r));
+  // Cap upward drift from grinding easy puzzles. Owner report 2026-08-23:
+  // Deepakcharanv (2794) + Mageswaran (2809) climbed to strong ratings by
+  // solving ~100 mateIn1 puzzles rated 300+ below their level. Glicko delta
+  // on those is tiny (0.5-2 pts each) but compounds. If the puzzle is more
+  // than 250 pts below the user's rating, cap the upward delta at +1 —
+  // solving trivially-easy puzzles shouldn't move the needle. Losing to
+  // an easy puzzle still counts fully (that IS a signal).
+  const gap = uG.r - puzzleGlicko.r;
+  if (win && gap > 250 && nU.r > uG.r) {
+    nU.r = Math.min(nU.r, uG.r + 1);
+  }
   if (!sanity(nU)) nU.r = uG.r;
   // Rating history kept per user. Bumped 12 → 100 on 2026-08-18 to power the
   // coach performance-dashboard sparkline — 12 points was too short for the

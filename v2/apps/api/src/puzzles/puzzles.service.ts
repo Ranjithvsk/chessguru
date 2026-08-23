@@ -86,6 +86,14 @@ export class PuzzlesService {
     const target = typeof exactRating === "number" && exactRating > 0
       ? clamp(exactRating, 400, 3000)
       : clamp(baseRating + (DIFF[difficulty] ?? 0), 400, 3000);
+    // Hard floor: never serve a puzzle more than 250 pts below the user's live
+    // rating (unless it's the "easiest" difficulty tier where users explicitly
+    // ask for warm-up puzzles). Owner report 2026-08-23: Deepakcharanv (2794)
+    // + Mageswaran (2809) climbed to strong ratings by grinding 100+ mateIn1
+    // puzzles rated ~2000 (300+ below their level). The old picker fell back
+    // to easy puzzles when the exact-band pool was thin; that fallback fueled
+    // rating inflation. Now: fallback still expands upward but the floor stays.
+    const easyFloor = difficulty === "easiest" ? 400 : Math.max(400, baseRating - 250);
     const played = userId ? await this.playedIds(userId) : [];
     const playedSet = new Set(played);
 
@@ -144,6 +152,9 @@ export class PuzzlesService {
     const pcQ = maxPc && maxPc < 32 ? { pieceCount: { $lte: maxPc } } : {};
     const dedupQ = played.length ? { _id: { $nin: played } } : {};
     const srcExcl = { source: { $ne: "broadcast" } }; // keep GM section out of normal play
+    // Enforce the easy-floor on every fallback query so a thin exact-band pool
+    // never bleeds into serving 300+-below puzzles.
+    const withFloor = (band: any) => ({ ...band, $gte: Math.max(band.$gte, easyFloor) });
     const sample = async (m: any) => {
       const d = await this.col().aggregate([{ $match: m }, { $sample: { size: 1 } }]).toArray();
       return d.length ? applyLastMove(fmtPuzzle(d[0])) : null;
@@ -154,13 +165,13 @@ export class PuzzlesService {
       {},
     ];
     for (const tier of tiers) {
-      const pz = await sample({ "glicko.r": { $gte: target - flex, $lte: target + flex }, ...tier, ...themeQ, ...pcQ, ...dedupQ, ...srcExcl });
+      const pz = await sample({ "glicko.r": withFloor({ $gte: target - flex, $lte: target + flex }), ...tier, ...themeQ, ...pcQ, ...dedupQ, ...srcExcl });
       if (pz) return pz;
     }
-    const wide = await sample({ "glicko.r": { $gte: target - 400, $lte: target + 400 }, ...themeQ, ...pcQ, ...dedupQ, ...srcExcl });
+    const wide = await sample({ "glicko.r": withFloor({ $gte: target - 400, $lte: target + 400 }), ...themeQ, ...pcQ, ...dedupQ, ...srcExcl });
     if (wide) return wide;
     if (played.length) {
-      const any = await sample({ "glicko.r": { $gte: target - 400, $lte: target + 400 }, ...themeQ, ...pcQ, ...srcExcl });
+      const any = await sample({ "glicko.r": withFloor({ $gte: target - 400, $lte: target + 400 }), ...themeQ, ...pcQ, ...srcExcl });
       if (any) return any;
     }
     return null;
