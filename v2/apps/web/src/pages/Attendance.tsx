@@ -2,19 +2,20 @@
 // Owner directive 2026-08-23: default everyone PRESENT, tap-to-mark absent,
 // reverse-order roster, modern colourful UI with coach + batch filters.
 //
-// Tap once   → LATE   (yellow, timestamp captured — "how many minutes?")
-// Tap twice  → ABSENT (red, dimmed, reason picker on long-press)
+// Tap once   → LATE   (yellow, opens modal to set minutes)
+// Tap twice  → ABSENT (red, opens modal to add reason)
 // Tap thrice → back to PRESENT (green glow)
 //
-// Auto-saves every tap via the bulk endpoint; explicit "Save all" reassures
-// the coach that everything landed. Undo toast after save. Route:
-// /academy/attendance.
-import { useEffect, useMemo, useState } from "react";
+// Long-press a card → detail modal (edit minutes, reason, or open student
+// profile). Auto-saves every tap via the bulk endpoint; undo toast for 2.2s.
+// Route: /academy/attendance.
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, get, post } from "../lib/api";
 
 type Status = "present" | "late" | "absent";
+type DayStatus = "present" | "late" | "absent" | "unmarked";
 type Row = {
   studentId: string;
   name: string | null;
@@ -28,8 +29,9 @@ type Row = {
   currentAttendanceStreak: number;
   lastPresentDate: string | null;
   absentYesterday: boolean;
+  last7: Array<{ day: string; status: DayStatus }>;
 };
-type Resp = { ok: boolean; error?: string; date: string; coachId: string | null; batchId: string | null; rows: Row[] };
+type Resp = { ok: boolean; error?: string; date: string; coachId: string | null; batchId: string | null; rows: Row[]; lastClassDate: string | null };
 type Coach = { _id: string; name?: string | null; username: string };
 type Batch = { _id: string; name: string; coachUserId: string; studentIds: string[] };
 
@@ -45,10 +47,16 @@ function statusStyle(s: Status): { ring: string; bg: string; text: string; label
   return                 { ring: "ring-rose-500/70",         bg: "bg-rose-500/15 hover:bg-rose-500/25 opacity-70", text: "text-rose-200", label: "Absent", emoji: "❌" };
 }
 
+function dayDotColor(s: DayStatus): string {
+  if (s === "present") return "bg-emerald-400";
+  if (s === "late") return "bg-amber-400";
+  if (s === "absent") return "bg-rose-500";
+  return "bg-ink-700";
+}
+
 function Avatar({ name, size = "md" }: { name: string | null; size?: "md" | "lg" }) {
   const initial = (name || "?").trim().charAt(0).toUpperCase();
   const cls = size === "lg" ? "h-14 w-14 text-xl" : "h-10 w-10 text-base";
-  // Deterministic accent per initial so kids get consistent color
   const hue = (initial.charCodeAt(0) * 137) % 360;
   return (
     <div className={`grid ${cls} shrink-0 place-items-center rounded-full font-bold text-white`}
@@ -58,6 +66,8 @@ function Avatar({ name, size = "md" }: { name: string | null; size?: "md" | "lg"
   );
 }
 
+const REASONS = ["Sick", "School event", "Travel", "No reason given", "Family emergency"];
+
 export default function AttendancePage() {
   const { data: auth } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
   const qc = useQueryClient();
@@ -65,6 +75,7 @@ export default function AttendancePage() {
   const [coachId, setCoachId] = useState<string>("");
   const [batchId, setBatchId] = useState<string>("");
   const [toast, setToast] = useState<string | null>(null);
+  const [detail, setDetail] = useState<Row | null>(null);   // long-press → open modal
 
   useEffect(() => {
     if (!toast) return;
@@ -99,6 +110,7 @@ export default function AttendancePage() {
   });
 
   const rows = attendanceQ.data?.rows ?? [];
+  const lastClassDate = attendanceQ.data?.lastClassDate ?? null;
 
   const markMut = useMutation({
     mutationFn: (entries: Array<{ studentId: string; status: Status; lateMinutes?: number | null; reason?: string | null }>) =>
@@ -112,6 +124,16 @@ export default function AttendancePage() {
       } else if (res.marked > 0) {
         setToast(`Marked ${res.marked} student${res.marked > 1 ? "s" : ""}`);
       }
+    },
+  });
+
+  const copyMut = useMutation({
+    mutationFn: (fromDate: string) => post<{ ok: boolean; marked: number; note?: string; error?: string }>(`/api/academy/attendance/copy`, {
+      fromDate, toDate: date, coachId: coachId || undefined, batchId: batchId || undefined,
+    }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["attendance-sheet"] });
+      setToast(res.error ? `Copy failed: ${res.error}` : res.note || `Copied ${res.marked} non-present marks from last class`);
     },
   });
 
@@ -133,8 +155,8 @@ export default function AttendancePage() {
 
   function toggleOne(row: Row) {
     const s = nextStatus(row.status);
-    const lateMinutes = s === "late" ? 5 : null;  // default 5 min late — coach can edit later
-    markMut.mutate([{ studentId: row.studentId, status: s, lateMinutes }]);
+    const lateMinutes = s === "late" ? (row.lateMinutes || 5) : null;
+    markMut.mutate([{ studentId: row.studentId, status: s, lateMinutes, reason: row.reason }]);
   }
 
   function bulkPresent() {
@@ -181,7 +203,7 @@ export default function AttendancePage() {
             📋 Attendance
           </h1>
           <div className="mt-1 text-sm text-ink-400">
-            Everyone starts as <b className="text-emerald-300">Present</b>. Tap a card to change to Late → Absent → Present.
+            Everyone starts as <b className="text-emerald-300">Present</b>. Tap to change → Late → Absent → Present. Long-press for details.
           </div>
         </div>
         <Link to="/academy" className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs font-medium text-ink-300 hover:text-white">← Academy</Link>
@@ -222,7 +244,7 @@ export default function AttendancePage() {
         </div>
       </div>
 
-      {/* Bulk actions */}
+      {/* Bulk + copy actions */}
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" onClick={bulkPresent} disabled={!rows.length || markMut.isPending}
                 className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-40">
@@ -233,7 +255,14 @@ export default function AttendancePage() {
                 title="Useful when only a few kids came — mark all absent, then flip the ones present">
           ❌ Mark all Absent
         </button>
-        <span className="text-xs text-ink-500">Long-press an absent card to add a reason (Sick / School / Travel)</span>
+        {lastClassDate && (
+          <button type="button" onClick={() => copyMut.mutate(lastClassDate)} disabled={copyMut.isPending}
+                  className="rounded-lg bg-fuchsia-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-fuchsia-500 disabled:opacity-40"
+                  title={`Copy Late/Absent marks from ${lastClassDate}`}>
+            📋 Copy from last class ({lastClassDate})
+          </button>
+        )}
+        <span className="text-xs text-ink-500">Tap = cycle status · Long-press = edit reason/minutes</span>
       </div>
 
       {/* Roster grid */}
@@ -245,9 +274,21 @@ export default function AttendancePage() {
       )}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
         {rows.map((r) => (
-          <StudentCard key={r.studentId} row={r} onTap={() => toggleOne(r)} pending={markMut.isPending} />
+          <StudentCard key={r.studentId} row={r} onTap={() => toggleOne(r)} onLongPress={() => setDetail(r)} pending={markMut.isPending} />
         ))}
       </div>
+
+      {/* Detail modal — edit minutes / reason, or view profile */}
+      {detail && (
+        <DetailModal
+          row={detail}
+          onClose={() => setDetail(null)}
+          onSave={(status, lateMinutes, reason) => {
+            markMut.mutate([{ studentId: detail.studentId, status, lateMinutes, reason }]);
+            setDetail(null);
+          }}
+        />
+      )}
 
       {/* Undo toast */}
       {toast && (
@@ -259,11 +300,31 @@ export default function AttendancePage() {
   );
 }
 
-function StudentCard({ row, onTap, pending }: { row: Row; onTap: () => void; pending: boolean }) {
+function StudentCard({ row, onTap, onLongPress, pending }: { row: Row; onTap: () => void; onLongPress: () => void; pending: boolean }) {
   const s = statusStyle(row.status);
   const wasAbsentYesterday = row.absentYesterday && row.status === "present";
+  const timer = useRef<number | null>(null);
+  const longPressed = useRef(false);
+
+  const startPress = () => {
+    longPressed.current = false;
+    timer.current = window.setTimeout(() => {
+      longPressed.current = true;
+      onLongPress();
+    }, 500);
+  };
+  const endPress = () => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+  };
+  const handleClick = () => {
+    if (longPressed.current) return;
+    onTap();
+  };
+
   return (
-    <button type="button" onClick={onTap} disabled={pending}
+    <button type="button" onClick={handleClick} disabled={pending}
+      onMouseDown={startPress} onMouseUp={endPress} onMouseLeave={endPress}
+      onTouchStart={startPress} onTouchEnd={endPress} onTouchCancel={endPress}
       className={`group relative flex flex-col items-center gap-2 rounded-2xl border border-ink-800 p-3 text-center transition-all ring-2 ${s.ring} ${s.bg} disabled:cursor-wait active:scale-95`}>
       {/* Streak flame in top-left */}
       {row.currentAttendanceStreak >= 3 && (
@@ -283,7 +344,112 @@ function StudentCard({ row, onTap, pending }: { row: Row; onTap: () => void; pen
         <div className={`mt-0.5 text-[11px] font-bold uppercase tracking-wide ${s.text}`}>
           {s.emoji} {s.label}{row.status === "late" && row.lateMinutes ? ` · ${row.lateMinutes}m` : ""}
         </div>
+        {row.reason && row.status === "absent" && (
+          <div className="mt-0.5 truncate text-[10px] italic text-ink-500">{row.reason}</div>
+        )}
       </div>
+      {/* Last 7 days mini-strip: oldest → newest, tiny dots */}
+      {row.last7 && row.last7.length > 0 && (
+        <div className="flex gap-0.5 pt-1" title="Last 7 days (oldest → newest)">
+          {row.last7.map((d) => (
+            <span key={d.day} className={`h-1.5 w-1.5 rounded-full ${dayDotColor(d.status)}`} title={`${d.day}: ${d.status}`} />
+          ))}
+        </div>
+      )}
     </button>
+  );
+}
+
+function DetailModal({ row, onClose, onSave }: {
+  row: Row;
+  onClose: () => void;
+  onSave: (status: Status, lateMinutes: number | null, reason: string | null) => void;
+}) {
+  const [status, setStatus] = useState<Status>(row.status);
+  const [lateMinutes, setLateMinutes] = useState<number>(row.lateMinutes || 5);
+  const [reason, setReason] = useState<string>(row.reason || "");
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl border border-ink-700 bg-ink-900 p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-3">
+          <Avatar name={row.name} size="lg" />
+          <div className="min-w-0">
+            <div className="truncate text-lg font-bold text-white">{row.name}</div>
+            <div className="text-xs text-ink-400">@{row.username}</div>
+            {row.currentAttendanceStreak > 0 && (
+              <div className="mt-0.5 text-[11px] text-amber-300">🔥 {row.currentAttendanceStreak}-day streak</div>
+            )}
+          </div>
+        </div>
+
+        {/* Status picker */}
+        <div className="mt-4 flex gap-2">
+          {(["present", "late", "absent"] as Status[]).map((s) => {
+            const st = statusStyle(s);
+            const active = status === s;
+            return (
+              <button key={s} type="button" onClick={() => setStatus(s)}
+                className={`flex-1 rounded-xl border p-2.5 text-sm font-semibold transition ${active ? `border-transparent ${st.bg} ${st.text} ring-2 ${st.ring}` : "border-ink-700 bg-ink-950 text-ink-400 hover:text-white"}`}>
+                {st.emoji} {st.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Late-minutes editor */}
+        {status === "late" && (
+          <div className="mt-4">
+            <label className="mb-1 block text-xs font-semibold text-ink-400">Minutes late</label>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => setLateMinutes(Math.max(1, lateMinutes - 5))} className="grid h-9 w-9 place-items-center rounded-lg bg-ink-800 text-lg text-white hover:bg-ink-700">−</button>
+              <input type="number" min={1} max={300} value={lateMinutes} onChange={(e) => setLateMinutes(Math.max(1, Math.min(300, Number(e.target.value) || 5)))}
+                     className="w-24 rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-center text-lg font-bold tabular-nums text-white outline-none focus:border-amber-400" />
+              <button type="button" onClick={() => setLateMinutes(Math.min(300, lateMinutes + 5))} className="grid h-9 w-9 place-items-center rounded-lg bg-ink-800 text-lg text-white hover:bg-ink-700">+</button>
+              <span className="text-xs text-ink-500">minutes</span>
+            </div>
+          </div>
+        )}
+
+        {/* Reason picker (absent) */}
+        {status === "absent" && (
+          <div className="mt-4">
+            <label className="mb-1 block text-xs font-semibold text-ink-400">Reason (optional)</label>
+            <div className="flex flex-wrap gap-1.5">
+              {REASONS.map((r) => (
+                <button key={r} type="button" onClick={() => setReason(r === reason ? "" : r)}
+                  className={`rounded-full border px-3 py-1 text-xs font-medium transition ${reason === r ? "border-rose-400 bg-rose-500/20 text-rose-200" : "border-ink-700 bg-ink-950 text-ink-400 hover:text-white"}`}>
+                  {r}
+                </button>
+              ))}
+            </div>
+            <input type="text" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Custom reason…" maxLength={200}
+                   className="mt-2 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-rose-400" />
+          </div>
+        )}
+
+        {/* Last 7 days strip */}
+        {row.last7 && row.last7.length > 0 && (
+          <div className="mt-4">
+            <div className="mb-1 text-xs font-semibold text-ink-400">Last 7 days</div>
+            <div className="flex gap-1">
+              {row.last7.map((d) => (
+                <div key={d.day} className="flex flex-1 flex-col items-center gap-1">
+                  <span className={`h-3 w-full rounded ${dayDotColor(d.status)}`} title={`${d.day}: ${d.status}`} />
+                  <span className="text-[9px] text-ink-500">{d.day.slice(8)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-lg border border-ink-700 px-4 py-2 text-sm text-ink-300 hover:text-white">Cancel</button>
+          <Link to={`/academy/students/${row.studentId}/performance`} className="rounded-lg border border-ink-700 px-4 py-2 text-sm text-ink-300 hover:text-white">View profile →</Link>
+          <button type="button" onClick={() => onSave(status, status === "late" ? lateMinutes : null, status === "absent" ? (reason.trim() || null) : null)}
+                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500">Save</button>
+        </div>
+      </div>
+    </div>
   );
 }

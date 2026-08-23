@@ -1096,37 +1096,47 @@ export class AcademyService {
     const byStudent = new Map<string, any>();
     for (const a of attRows) byStudent.set(String(a.key), a);
 
-    // Streak + last-present-date lookup — one aggregation covering past 60d.
+    // Streak + last-present-date + last-7-day strip — one aggregation covering
+    // past 60d. Also captures status per day so the card can render a
+    // 7-day mini-strip: green=present, yellow=late, red=absent, grey=unmarked.
     const streakCutoff = new Date(Date.now() - 60 * 86400_000);
     const streakAgg = ids.length ? await this.conn.db!.collection("classAttendance").aggregate([
-      { $match: { key: { $in: ids as any }, joinedAt: { $gte: streakCutoff }, $or: [{ status: { $exists: false } }, { status: "present" }, { status: "late" }] } },
+      { $match: { key: { $in: ids as any }, joinedAt: { $gte: streakCutoff } } },
       { $group: {
-          _id: "$key",
-          days: { $addToSet: {
-            $dateToString: { format: "%Y-%m-%d", date: "$joinedAt", timezone: "Asia/Kolkata" },
-          } },
+          _id: { u: "$key", d: { $dateToString: { format: "%Y-%m-%d", date: "$joinedAt", timezone: "Asia/Kolkata" } } },
+          // Last-write-wins per day: prefer the most recent lastSeenAt
+          status: { $last: { $ifNull: ["$status", "present"] } },
+      } },
+      { $group: {
+          _id: "$_id.u",
+          days: { $push: { day: "$_id.d", status: "$status" } },
       } },
     ]).toArray() : [];
-    const streakMap = new Map<string, { current: number; lastPresentDate: string | null }>();
+    const streakMap = new Map<string, { current: number; lastPresentDate: string | null; last7: Array<{ day: string; status: string }> }>();
     const today = new Date().toISOString().slice(0, 10);
     const yesterday = new Date(Date.now() - 86400_000).toISOString().slice(0, 10);
     for (const s of streakAgg) {
-      const days = new Set<string>(s.days || []);
-      const sorted = [...days].sort().reverse();
+      const dayList = (s.days || []) as Array<{ day: string; status: string }>;
+      const presentDays = new Set<string>(dayList.filter((d) => d.status !== "absent").map((d) => d.day));
+      const sorted = [...presentDays].sort().reverse();
       const lastPresentDate = sorted[0] || null;
       // Current streak = consecutive backward from today/yesterday
       let cur = 0;
       let cursor = new Date();
-      // If not present today, allow starting from yesterday
-      if (!days.has(today) && !days.has(yesterday)) {
+      if (!presentDays.has(today) && !presentDays.has(yesterday)) {
         cur = 0;
       } else {
-        // Skip forward to first present day (today or yesterday)
-        while (!days.has(cursor.toISOString().slice(0, 10))) cursor.setDate(cursor.getDate() - 1);
-        // Walk backward counting consecutive days
-        while (days.has(cursor.toISOString().slice(0, 10))) { cur++; cursor.setDate(cursor.getDate() - 1); }
+        while (!presentDays.has(cursor.toISOString().slice(0, 10))) cursor.setDate(cursor.getDate() - 1);
+        while (presentDays.has(cursor.toISOString().slice(0, 10))) { cur++; cursor.setDate(cursor.getDate() - 1); }
       }
-      streakMap.set(String(s._id), { current: cur, lastPresentDate });
+      // Last 7 days by date (oldest→newest for consistent left-to-right render).
+      const dayStatusMap = new Map(dayList.map((d) => [d.day, d.status]));
+      const last7: Array<{ day: string; status: string }> = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(Date.now() - i * 86400_000).toISOString().slice(0, 10);
+        last7.push({ day: d, status: dayStatusMap.get(d) || "unmarked" });
+      }
+      streakMap.set(String(s._id), { current: cur, lastPresentDate, last7 });
     }
 
     const rows = students.map((s: any) => {
@@ -1152,13 +1162,52 @@ export class AcademyService {
         currentAttendanceStreak: streak?.current ?? 0,
         lastPresentDate: streak?.lastPresentDate ?? null,
         absentYesterday: (streak?.lastPresentDate && streak.lastPresentDate < yesterday) || (!streak?.lastPresentDate && ids.length > 0),
+        last7: streak?.last7 ?? [],
       };
     });
     // Owner: "reverse order" — most-recently-registered students first so newest
     // faces the coach checks in each session are up top.
     rows.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
     rows.reverse();
-    return { ok: true, date, coachId, batchId: batchId || null, rows };
+
+    // Most recent PRIOR class date this coach has marked anyone on. Used for the
+    // "Copy from last class" one-click UI so the coach doesn't manually pick a date.
+    let lastClassDate: string | null = null;
+    if (ids.length) {
+      const lookback = new Date(Date.now() - 30 * 86400_000);
+      const prior: any = await this.conn.db!.collection("classAttendance").findOne(
+        { key: { $in: ids as any }, joinedAt: { $gte: lookback, $lt: dayStart }, manual: true },
+        { sort: { joinedAt: -1 }, projection: { joinedAt: 1 } },
+      );
+      if (prior?.joinedAt) {
+        const d = new Date(prior.joinedAt);
+        lastClassDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      }
+    }
+
+    return { ok: true, date, coachId, batchId: batchId || null, rows, lastClassDate };
+  }
+
+  /** Copy the attendance marks from `fromDate` to `toDate` for the same
+   *  coach+batch scope. Owner ask 2026-08-23: one-click "same as last class"
+   *  when 90% of the roster shows up consistently. Only re-marks students
+   *  who WERE marked non-present on the source date; leaves everyone else at
+   *  default present on target date. */
+  async copyAttendance(session: any, body: any) {
+    const g = this.ensureCoachOrOwner(session);
+    const fromRaw = String(body?.fromDate || "").trim();
+    const toRaw = String(body?.toDate || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fromRaw) || !/^\d{4}-\d{2}-\d{2}$/.test(toRaw)) {
+      return { ok: false, error: "Bad date." };
+    }
+    if (fromRaw === toRaw) return { ok: false, error: "Source and target dates are the same." };
+    const source = await this.getAttendanceSheet(session, fromRaw, body?.coachId || null, body?.batchId || null);
+    if (!source.ok || !source.rows) return { ok: false, error: (source as any).error || "Source date has no data." };
+    const marks = source.rows
+      .filter((r: any) => r.status !== "present")   // only carry non-default statuses
+      .map((r: any) => ({ studentId: r.studentId, status: r.status as "late" | "absent", lateMinutes: r.lateMinutes, reason: r.reason }));
+    if (!marks.length) return { ok: true, date: toRaw, marked: 0, note: "Everyone was Present on the source date — nothing to copy." };
+    return this.markAttendanceBulk(session, { date: toRaw, entries: marks });
   }
 
   /** Bulk mark attendance. Body: { date, entries: [{ studentId, status,

@@ -447,7 +447,7 @@ export default function LeaderboardPage() {
           <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-400">Academy · leaderboard</div>
           <h1 className="font-display text-3xl bg-gradient-to-r from-amber-300 via-fuchsia-300 to-brand-300 bg-clip-text text-transparent">🏆 Academy Leaderboard</h1>
           <div className="mt-1 text-sm text-ink-400">
-            {q.data?.studentCount ?? 0} students · ranked by ChessGuru Score (0–100).
+            {q.data?.studentCount ?? 0} students · ranked by Overall Score (0–100).
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -476,7 +476,7 @@ export default function LeaderboardPage() {
       <div className="flex overflow-hidden rounded-xl border border-ink-700 text-sm">
         <button type="button" onClick={() => setSortBy("score")}
           className={`flex-1 px-4 py-2 font-semibold transition ${sortBy === "score" ? "bg-gradient-to-r from-amber-500 to-fuchsia-500 text-white" : "bg-ink-900 text-ink-300 hover:bg-ink-800"}`}>
-          🏆 ChessGuru Score
+          🏆 Overall Score
         </button>
         <button type="button" onClick={() => setSortBy("consistency")}
           className={`flex-1 px-4 py-2 font-semibold transition ${sortBy === "consistency" ? "bg-gradient-to-r from-emerald-500 to-teal-500 text-white" : "bg-ink-900 text-ink-300 hover:bg-ink-800"}`}

@@ -117,6 +117,13 @@ export class AcademyController {
     return this.svc.markAttendanceBulk(req.session, body);
   }
 
+  /** Copy attendance marks from one date to another for the same scope.
+   *  Body: { fromDate, toDate, coachId?, batchId? }. */
+  @Post("attendance/copy")
+  copyAttendance(@Req() req: any, @Body() body: any) {
+    return this.svc.copyAttendance(req.session, body);
+  }
+
   /** Presence heartbeat — any signed-in user pings this every ~60s (and on
    *  route change). Body: { path }. Updates users.lastSeen + currentPath so
    *  coaches see who is online right now on the /academy dashboard. */

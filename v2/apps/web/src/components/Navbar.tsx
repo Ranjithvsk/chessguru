@@ -45,7 +45,7 @@ const GROUPS: Group[] = [
     label: "Academy", accent: "amber", icon: "🏛️",
     items: [
       { to: "/academy", label: "🏛️ My Academy", desc: "Coaches, students, invites, batches" },
-      { to: "/academy/leaderboard", label: "🏆 Leaderboard", desc: "Academy ranking, ChessGuru Score, champions, boost weeks" },
+      { to: "/academy/leaderboard", label: "🏆 Leaderboard", desc: "Academy ranking, Overall Score, champions, boost weeks" },
       { to: "/academy/attendance", label: "📋 Attendance", desc: "Mark today's class — default present, tap to change" },
       { to: "/academy/performance", label: "📊 Student performance", desc: "Rating, tier, attendance dashboard per student" },
       { to: "/coach-board", label: "🧑‍🏫 Class Board", desc: "Student watchlist + class-plan generator" },
