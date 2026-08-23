@@ -64,25 +64,16 @@ export function updatePuzzleRating(userPerf: Perf, puzzleGlicko: Glicko, win: bo
   const nU = computeGame(uG, puzzleGlicko, score);
   const nP = computeGame(puzzleGlicko, uG, 1 - score);
   nU.r = Math.max(uG.r - MAX_RATING_DELTA, Math.min(uG.r + MAX_RATING_DELTA, nU.r));
-  // Asymmetric rating dynamics on easy puzzles (gap > 250 pts):
-  //   WIN  → cap upward delta at +1 (grinding easy puzzles shouldn't inflate)
-  //   LOSS → 2× downward multiplier (losing to a puzzle 250+ below you is a
-  //          strong signal your rating is inflated — accelerate correction)
-  //
-  // Owner directive 2026-08-23: match Lichess's asymmetric behavior where
-  // high-rated players get punished harder for losing easy puzzles. This
-  // makes rating correction happen naturally in a few games instead of
-  // slowly over hundreds. Combined with picker floor (fix f), inflated
-  // users will actually FACE at-level puzzles and get corrected fast.
+  // Cap upward drift from grinding easy puzzles (gap > 250 pts). On WINS
+  // against a puzzle 250+ below the user, hold the delta at +1 max — grinding
+  // trivially-easy puzzles shouldn't move the needle. LOSSES take their full
+  // Glicko-2 delta which is already 5-10× larger than an equivalent win by
+  // formula (expected win ≈ 85% → loss delta scales with (0 - 0.85)) — that
+  // natural asymmetry is enough to correct an inflated rating in ~8-12 easy
+  // losses without any extra multiplier.
   const gap = uG.r - puzzleGlicko.r;
-  if (gap > 250) {
-    if (win && nU.r > uG.r) {
-      nU.r = Math.min(nU.r, uG.r + 1);
-    } else if (!win && nU.r < uG.r) {
-      // Double the loss delta. Base loss might be -30; becomes -60.
-      const baseLoss = uG.r - nU.r;
-      nU.r = uG.r - baseLoss * 2;
-    }
+  if (win && gap > 250 && nU.r > uG.r) {
+    nU.r = Math.min(nU.r, uG.r + 1);
   }
   if (!sanity(nU)) nU.r = uG.r;
   // Rating history kept per user. Bumped 12 → 100 on 2026-08-18 to power the
