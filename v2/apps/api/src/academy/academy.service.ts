@@ -1234,6 +1234,113 @@ export class AcademyService {
     return { ok: true, date, coachId, batchId: batchId || null, rows, lastClassDate };
   }
 
+  /** Per-student attendance history — last N days as GitHub-style calendar
+   *  input. Returns one entry per calendar day with the winning status
+   *  (manual > qr > live-class > unmarked) so the heatmap can render 3-color
+   *  cells. Owner ask 2026-08-23. Also returns rollup counts for the header
+   *  ("last 30 days: 22 present · 2 late · 6 absent").
+   *
+   *  Auth: coach can view their own students, owner can view any student in
+   *  their academy, student can view themselves, parent can view their kids.
+   *
+   *  N days capped to 365; default 90 (12-13 weeks).
+   */
+  async getAttendanceHistory(session: any, studentId: string, daysRaw?: number) {
+    const userId: string | null = session?.userId ?? null;
+    const role = session?.role;
+    if (!userId) return { ok: false, error: "Sign in first." };
+    const student: any = await this.users().findOne({ _id: studentId as any, role: "student" });
+    if (!student) return { ok: false, error: "Student not found." };
+    // Auth check — reuse the same rules as parent-report + performance page.
+    let allowed = false;
+    if (role === "academy_owner" && String(session.academyId) === String(student.academyId)) allowed = true;
+    else if (role === "coach" && String(session.academyId) === String(student.academyId) && String(student.coachId || "") === userId) allowed = true;
+    else if (role === "parent" && Array.isArray(student.parentIds) && student.parentIds.includes(userId)) allowed = true;
+    else if (userId === String(student._id)) allowed = true;   // student viewing self
+    if (!allowed) return { ok: false, error: "Not authorized." };
+
+    const days = Math.max(7, Math.min(365, Math.round(Number(daysRaw) || 90)));
+    const cutoff = new Date(Date.now() - days * 86400_000);
+    const rows: any[] = await this.conn.db!.collection("classAttendance")
+      .find({ key: studentId as any, joinedAt: { $gte: cutoff } })
+      .sort({ lastSeenAt: 1 })
+      .toArray();
+
+    // Same priority rules as the sheet — manual > qr > live-class.
+    // Group by IST day, keep the winning tier.
+    const byDay = new Map<string, { manual: any | null; qr: any | null; auto: any | null }>();
+    const dayStr = (d: Date) => {
+      // IST = UTC+5:30
+      const ist = new Date(d.getTime() + 5.5 * 60 * 60_000);
+      return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, "0")}-${String(ist.getUTCDate()).padStart(2, "0")}`;
+    };
+    for (const r of rows) {
+      const day = dayStr(new Date(r.joinedAt));
+      const rec = byDay.get(day) || { manual: null, qr: null, auto: null };
+      const cid = String(r.classId || "");
+      if (cid.startsWith("qrcheckin-") || r.source === "qr") {
+        if (!rec.qr || (r.lastSeenAt || r.joinedAt) > (rec.qr.lastSeenAt || rec.qr.joinedAt)) rec.qr = r;
+      } else if (cid.startsWith("manual-")) {
+        if (!rec.manual || (r.lastSeenAt || r.joinedAt) > (rec.manual.lastSeenAt || rec.manual.joinedAt)) rec.manual = r;
+      } else {
+        if (!rec.auto || (r.lastSeenAt || r.joinedAt) > (rec.auto.lastSeenAt || rec.auto.joinedAt)) rec.auto = r;
+      }
+      byDay.set(day, rec);
+    }
+
+    // Emit N days ending TODAY. Each day: { day, status, source, reason?, lateMinutes? }.
+    const today = dayStr(new Date());
+    const outDays: Array<{ day: string; status: "present" | "late" | "absent" | "unmarked"; source: string; reason: string | null; lateMinutes: number | null }> = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 86400_000);
+      const dstr = dayStr(d);
+      const rec = byDay.get(dstr);
+      if (!rec) {
+        outDays.push({ day: dstr, status: "unmarked", source: "none", reason: null, lateMinutes: null });
+        continue;
+      }
+      const mark = rec.manual || rec.qr || rec.auto;
+      const src = rec.manual ? "manual" : rec.qr ? "qr" : "live-class";
+      const status: "present" | "late" | "absent" =
+        mark.status === "absent" ? "absent" : mark.status === "late" ? "late" : "present";
+      outDays.push({ day: dstr, status, source: src, reason: mark.reason || null, lateMinutes: mark.lateMinutes ?? null });
+    }
+
+    // Rollups
+    const last30 = outDays.slice(-30);
+    const summary30 = {
+      present: last30.filter((d) => d.status === "present").length,
+      late: last30.filter((d) => d.status === "late").length,
+      absent: last30.filter((d) => d.status === "absent").length,
+      unmarked: last30.filter((d) => d.status === "unmarked").length,
+    };
+    const summaryAll = {
+      present: outDays.filter((d) => d.status === "present").length,
+      late: outDays.filter((d) => d.status === "late").length,
+      absent: outDays.filter((d) => d.status === "absent").length,
+      unmarked: outDays.filter((d) => d.status === "unmarked").length,
+    };
+    // Current attendance streak — walk backward from today across days that
+    // are present OR late, stop on absent (unmarked days count as no-class).
+    let currentStreak = 0;
+    for (let i = outDays.length - 1; i >= 0; i--) {
+      const s = outDays[i]!.status;
+      if (s === "absent") break;
+      if (s === "present" || s === "late") currentStreak++;
+      // unmarked → skip (weekends, off days)
+    }
+    return {
+      ok: true,
+      studentId,
+      name: student.name || student.username,
+      days: outDays,
+      today,
+      summary30,
+      summary: summaryAll,
+      currentStreak,
+    };
+  }
+
   /** Parent contact info for a student — used by the Attendance page to show
    *  a "📱 WhatsApp parent" button on absent cards. Returns pre-formatted
    *  wa.me click-to-chat links (works today, no Meta template needed) plus

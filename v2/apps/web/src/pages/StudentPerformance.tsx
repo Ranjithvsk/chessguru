@@ -59,10 +59,102 @@ function daysAgo(iso: string | null | undefined): string {
   return `${Math.floor(days / 30)}mo ago`;
 }
 
-/** 30-day attendance strip. Green square = attended a class that day.
- *  Left = 30 days ago; right = today. Renders 30 fixed slots so the row
- *  aligns even when the boolean array is short/missing. */
-function AttendanceHeatmap({ days }: { days: boolean[] | undefined }) {
+/** 90-day attendance calendar heatmap (GitHub-style grid). Each cell = one
+ *  IST day, colored by status (present/late/absent/unmarked). Grouped into
+ *  weeks (Mon-Sun columns), oldest week left → newest week right. Hover
+ *  tooltip shows date + status + reason. Owner ask 2026-08-23. Fetches
+ *  /api/academy/attendance/history/:studentId?days=90.
+ *
+ *  Fallback: if the fetch fails or the endpoint returns empty (fresh student),
+ *  falls back to the simple 30-day boolean strip from listStudents. */
+function AttendanceCalendar({ studentId, fallback }: { studentId: string; fallback?: boolean[] }) {
+  const q = useQuery({
+    queryKey: ["attendance-history", studentId, 90],
+    queryFn: () => get<{
+      ok: boolean;
+      days: Array<{ day: string; status: "present" | "late" | "absent" | "unmarked"; source: string; reason: string | null; lateMinutes: number | null }>;
+      summary30: { present: number; late: number; absent: number; unmarked: number };
+      summary: { present: number; late: number; absent: number; unmarked: number };
+      currentStreak: number;
+    }>(`/api/academy/attendance/history/${encodeURIComponent(studentId)}?days=90`),
+    staleTime: 60_000,
+  });
+
+  // Fallback to old strip if no data available
+  if (!q.data?.ok || !q.data.days?.length) {
+    return <AttendanceHeatmap30 days={fallback} />;
+  }
+  const { days, summary30, summary, currentStreak } = q.data;
+
+  // Group cells into columns of 7 (Mon-Sun). Pad the first column with empty
+  // cells so weeks align (day-of-week alignment across the whole grid).
+  // Grid renders left→right = oldest week → newest week.
+  const firstDate = new Date(days[0]!.day + "T12:00:00");
+  const firstDow = (firstDate.getDay() + 6) % 7;   // 0=Mon..6=Sun
+  const padded: Array<typeof days[number] | null> = [
+    ...Array.from({ length: firstDow }, () => null),
+    ...days,
+  ];
+  const weeks: Array<Array<typeof days[number] | null>> = [];
+  for (let i = 0; i < padded.length; i += 7) weeks.push(padded.slice(i, i + 7));
+
+  const cellColor = (status: string | undefined) => {
+    if (status === "present") return "bg-emerald-500";
+    if (status === "late") return "bg-amber-400";
+    if (status === "absent") return "bg-rose-500";
+    return "bg-ink-800";   // unmarked
+  };
+
+  return (
+    <div>
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <div className="text-xs font-medium text-ink-400">Last 90 days · attendance calendar</div>
+        <div className="flex items-center gap-2 text-xs tabular-nums">
+          <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-emerald-300">✅ {summary.present}</span>
+          <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-amber-300">⏰ {summary.late}</span>
+          <span className="rounded-full bg-rose-500/15 px-2 py-0.5 text-rose-300">❌ {summary.absent}</span>
+          {currentStreak > 0 && <span className="rounded-full bg-orange-500/20 px-2 py-0.5 text-orange-300">🔥 {currentStreak}</span>}
+        </div>
+      </div>
+      {/* Grid — weeks are columns (left oldest, right newest) */}
+      <div className="flex gap-[3px] overflow-x-auto pb-1">
+        {/* Day-of-week labels (Mon Wed Fri) */}
+        <div className="flex flex-col gap-[3px] pr-1 pt-[2px] text-[9px] text-ink-500">
+          {["", "M", "", "W", "", "F", ""].map((l, i) => (
+            <div key={i} className="grid h-3 w-3 place-items-center leading-none">{l}</div>
+          ))}
+        </div>
+        {weeks.map((week, wi) => (
+          <div key={wi} className="flex flex-col gap-[3px]">
+            {Array.from({ length: 7 }, (_, di) => {
+              const cell = week[di];
+              if (!cell) return <div key={di} className="h-3 w-3" />;
+              const tip = `${cell.day} · ${cell.status}${cell.reason ? ` (${cell.reason})` : ""}${cell.lateMinutes ? ` · ${cell.lateMinutes}m` : ""}`;
+              return (
+                <div key={di} title={tip}
+                     className={`h-3 w-3 rounded-sm ${cellColor(cell.status)}`} />
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 flex items-center justify-between text-[10px] text-ink-500">
+        <div className="flex items-center gap-2">
+          <span>90d ago</span>
+          <span className="text-ink-700">→</span>
+          <span>today</span>
+        </div>
+        <div>
+          Last 30d: <b className="text-white tabular-nums">{summary30.present + summary30.late}/{summary30.present + summary30.late + summary30.absent}</b> classes
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Fallback 30-day strip — kept for cases where the /attendance/history
+ *  endpoint doesn't yet have data (fresh student, network hiccup). */
+function AttendanceHeatmap30({ days }: { days: boolean[] | undefined }) {
   const cells = Array.from({ length: 30 }, (_, i) => (days ?? [])[i] ?? false);
   const attendedCount = cells.filter(Boolean).length;
   return (
@@ -83,6 +175,9 @@ function AttendanceHeatmap({ days }: { days: boolean[] | undefined }) {
     </div>
   );
 }
+
+// Backwards-compat alias — existing call sites still use <AttendanceHeatmap />
+const AttendanceHeatmap = AttendanceHeatmap30;
 
 /** Rating sparkline from the perf.puzzle.re history (oldest→newest).
  *  glicko.ts caps re[] at 12 entries so this is a compact trend, not a
@@ -307,8 +402,8 @@ export default function StudentPerformancePage() {
         {/* Left column */}
         <div className="space-y-6">
           <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
-            <h2 className="mb-3 text-sm font-semibold text-white">Attendance heatmap</h2>
-            <AttendanceHeatmap days={student?.attendance30d} />
+            <h2 className="mb-3 text-sm font-semibold text-white">Attendance calendar</h2>
+            <AttendanceCalendar studentId={studentId} fallback={student?.attendance30d} />
             <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
               <div className="rounded bg-ink-800 p-2 text-center">
                 <div className="text-[10px] text-ink-500">This week</div>

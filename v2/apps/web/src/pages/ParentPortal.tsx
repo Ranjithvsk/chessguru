@@ -42,6 +42,66 @@ type MePayload = {
 const rupees = (paise: number) => "₹" + (paise / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 
+/** Compact 60-day attendance calendar for a parent's child card. Same data
+ *  source as the /academy/students/:id/performance page — parent role is
+ *  authorized in the backend endpoint. Owner ask 2026-08-23. */
+function MiniAttendanceCalendar({ studentId }: { studentId: string }) {
+  const q = useQuery({
+    queryKey: ["attendance-history", studentId, 60],
+    queryFn: () => get<{
+      ok: boolean;
+      days: Array<{ day: string; status: "present" | "late" | "absent" | "unmarked" }>;
+      summary30: { present: number; late: number; absent: number; unmarked: number };
+      currentStreak: number;
+    }>(`/api/academy/attendance/history/${encodeURIComponent(studentId)}?days=60`),
+    staleTime: 60_000,
+  });
+  if (!q.data?.ok || !q.data.days?.length) return null;
+  const { days, summary30, currentStreak } = q.data;
+  const firstDate = new Date(days[0]!.day + "T12:00:00");
+  const firstDow = (firstDate.getDay() + 6) % 7;
+  const padded: Array<typeof days[number] | null> = [
+    ...Array.from({ length: firstDow }, () => null),
+    ...days,
+  ];
+  const weeks: Array<Array<typeof days[number] | null>> = [];
+  for (let i = 0; i < padded.length; i += 7) weeks.push(padded.slice(i, i + 7));
+  const cellColor = (status: string | undefined) => {
+    if (status === "present") return "bg-emerald-500";
+    if (status === "late") return "bg-amber-400";
+    if (status === "absent") return "bg-rose-500";
+    return "bg-ink-800";
+  };
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-[10px]">
+        <div className="text-ink-500">Attendance · last 60 days</div>
+        <div className="flex items-center gap-1 tabular-nums">
+          <span className="text-emerald-400">{summary30.present + summary30.late}</span>
+          <span className="text-ink-600">/</span>
+          <span className="text-ink-400">{summary30.present + summary30.late + summary30.absent}</span>
+          {currentStreak > 0 && <span className="ml-1 text-orange-400">🔥{currentStreak}</span>}
+        </div>
+      </div>
+      <div className="flex gap-[2px] overflow-x-auto">
+        {weeks.map((week, wi) => (
+          <div key={wi} className="flex flex-col gap-[2px]">
+            {Array.from({ length: 7 }, (_, di) => {
+              const cell = week[di];
+              if (!cell) return <div key={di} className="h-2.5 w-2.5" />;
+              return (
+                <div key={di}
+                     title={`${cell.day}: ${cell.status}`}
+                     className={`h-2.5 w-2.5 rounded-sm ${cellColor(cell.status)}`} />
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function ParentPortalPage() {
   const { data: auth } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
   const q = useQuery({
@@ -154,6 +214,10 @@ export default function ParentPortalPage() {
                     )}
                   </div>
                 )}
+                {/* Compact attendance calendar (last 60 days) */}
+                <div className="mt-3">
+                  <MiniAttendanceCalendar studentId={c._id} />
+                </div>
                 {pendingSum > 0 && (
                   <div className="mt-3 rounded border border-rose-500/30 bg-rose-500/5 px-2 py-1.5 text-[11px] text-rose-200">
                     ₹{(pendingSum / 100).toLocaleString("en-IN")} pending · {pending.length} unpaid invoice{pending.length === 1 ? "" : "s"}

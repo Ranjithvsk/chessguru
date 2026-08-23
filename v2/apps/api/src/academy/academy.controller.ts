@@ -153,6 +153,15 @@ export class AcademyController {
     return this.svc.getParentContact(req.session, studentId, date);
   }
 
+  /** Per-student attendance history for the calendar heatmap on the
+   *  performance page. ?days=N (default 90, max 365). Auth: coach for own
+   *  students, owner for any academy student, student for self, parent for
+   *  their children. */
+  @Get("attendance/history/:studentId")
+  attendanceHistory(@Req() req: any, @Param("studentId") studentId: string, @Query("days") days: string) {
+    return this.svc.getAttendanceHistory(req.session, studentId, Number(days) || 90);
+  }
+
   /** Presence heartbeat — any signed-in user pings this every ~60s (and on
    *  route change). Body: { path }. Updates users.lastSeen + currentPath so
    *  coaches see who is online right now on the /academy dashboard. */
