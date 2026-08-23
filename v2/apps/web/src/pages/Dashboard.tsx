@@ -1169,12 +1169,12 @@ export default function DashboardPage() {
   const studyTotal = data.study?.total ?? 0;
   const studyTop = data.study?.byType?.[0];
   const cards = [
-    { label: "Puzzle rating", value: data.global?.rating ?? 1500, sub: `${data.global?.games ?? 0} rated solves`, hero: true },
+    { label: "Puzzle rating", value: data.global?.rating ?? 1500, provisional: !!data.global?.provisional, sub: `${data.global?.games ?? 0} rated solves`, hero: true },
     { label: "Total puzzles solved", value: data.global?.games ?? 0, sub: `${data.totals?.wins ?? 0} correct · ${data.totals?.accuracy ?? 0}% accuracy` },
     { label: "Total study drills solved", value: studyTotal, sub: studyTop ? `Most: ${prettify(studyTop.type)} (${studyTop.nb})` : "Try Rule of the Square, Queen Mate, Coordinate…" },
     { label: "Themes trained", value: themes.length, sub: `${rated.length} with reliable ratings` },
-    ...(data.blindfold ? [{ label: "Blindfold rating", value: data.blindfold.rating, sub: `${data.blindfold.games} solves` }] : []),
-  ];
+    ...(data.blindfold ? [{ label: "Blindfold rating", value: data.blindfold.rating, provisional: !!(data.blindfold as any).provisional, sub: `${data.blindfold.games} solves` }] : []),
+  ] as Array<{ label: string; value: any; sub: string; hero?: boolean; provisional?: boolean }>;
   const streak = data.days ? streaks(data.days) : { current: 0, longest: 0 };
 
   return (
@@ -1216,8 +1216,10 @@ export default function DashboardPage() {
         {cards.map((c) => (
           <div key={c.label} className={`rounded-xl2 border p-5 ${c.hero ? "border-brand-600/50 bg-brand-600/10" : "border-ink-700 bg-ink-900"}`}>
             <div className="text-xs text-ink-400">{c.label}</div>
-            <div className={`mt-1 font-display font-bold tabular-nums ${c.hero ? "text-3xl text-brand-300" : "text-2xl text-white"}`}>{c.value}</div>
-            <div className="mt-1 text-[11px] text-ink-500">{c.sub}</div>
+            <div className={`mt-1 font-display font-bold tabular-nums ${c.hero ? "text-3xl text-brand-300" : "text-2xl text-white"}`}>
+              {c.provisional && <span className="text-gold-400">≈</span>}{c.value}{c.provisional && <span className="ml-0.5 align-top text-base text-gold-400">?</span>}
+            </div>
+            <div className="mt-1 text-[11px] text-ink-500">{c.sub}{c.provisional && " · provisional"}</div>
           </div>
         ))}
         <StreakCard current={streak.current} longest={streak.longest} />

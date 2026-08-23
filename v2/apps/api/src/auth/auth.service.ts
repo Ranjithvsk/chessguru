@@ -3,6 +3,7 @@ import { isAdmin } from "../admin/admins";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import bcrypt from "bcryptjs";
+import { isProvisional } from "../glicko/glicko";
 import { randomBytes, createHash } from "crypto";
 import { sendMail } from "../lib/mail";
 import { AcademyService } from "../academy/academy.service";
@@ -250,9 +251,14 @@ export class AuthService {
   }
 
   async myRating(session: any) {
-    if (!session?.userId) return { rating: 1500, loggedIn: false };
+    if (!session?.userId) return { rating: 1500, loggedIn: false, provisional: true };
     const doc: any = await this.conn.db!.collection("userperfs").findOne({ _id: session.userId });
-    return { rating: Math.round(doc?.puzzle?.gl?.r ?? 1500), loggedIn: true, userId: session.userId };
+    return {
+      rating: Math.round(doc?.puzzle?.gl?.r ?? 1500),
+      loggedIn: true,
+      userId: session.userId,
+      provisional: doc?.puzzle ? isProvisional(doc.puzzle) : true,
+    };
   }
 
   /* ================================================================

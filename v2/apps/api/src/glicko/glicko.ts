@@ -49,6 +49,14 @@ export function computeGame(player: Glicko, opponent: Glicko, score: number): Gl
   };
 }
 
+// A rating is "provisional" (Lichess convention) when either sample size is
+// too small OR deviation is still high — the number shown is an unstable
+// estimate. UI shows "≈" or "?" until this returns false. Thresholds match
+// Lichess: nb>=30 puzzles solved AND d<=100 uncertainty → established.
+export function isProvisional(perf: Perf): boolean {
+  return (perf.nb || 0) < 30 || liveDeviation(perf) > 100;
+}
+
 export function liveDeviation(perf: Perf, reverse = false): number {
   const la = perf.la ? new Date(perf.la) : null;
   if (!la) return perf.gl.d;
@@ -97,6 +105,28 @@ export function updatePuzzleRating(userPerf: Perf, puzzleGlicko: Glicko, win: bo
   if (win && dampeningMult < 1 && nU.r > uG.r) {
     const gain = nU.r - uG.r;
     nU.r = uG.r + Math.round(gain * dampeningMult);
+  }
+  // Slow-climb calibration (owner 2026-08-23): scale delta by
+  // min(1, 100 / liveDeviation) so early-phase ratings (d=500 fresh
+  // account, d=200-300 fresh theme) don't swing +300-400 pts per solve.
+  //   d=500 → scale=0.20  (fresh user — 5x slower climb)
+  //   d=200 → scale=0.50
+  //   d=100 → scale=1.00  (established — full delta)
+  //
+  // Applies symmetrically to wins AND losses. Rationale: it's a
+  // CALIBRATION damper, not a punishment lift — a single loss shouldn't
+  // nuke a fresh user's rating either. Once user reaches d<=100 (~30+
+  // solves depending on activity), scaling stops entirely and Glicko
+  // math runs pure.
+  //
+  // Complements the provisional UI badge (isProvisional() below): badge
+  // tells users "this is an estimate", slow-climb makes the estimate
+  // itself less wild. Together they fix theeraj-style +356-in-one-solve
+  // early inflation.
+  const cScale = Math.min(1, 100 / uG.d);
+  if (cScale < 1) {
+    const rawDelta = nU.r - uG.r;
+    nU.r = uG.r + Math.round(rawDelta * cScale);
   }
   if (!sanity(nU)) nU.r = uG.r;
   // Rating history kept per user. Bumped 12 → 100 on 2026-08-18 to power the

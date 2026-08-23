@@ -73,6 +73,7 @@ export default function App() {
     <div className="min-h-screen">
       <Navbar
         rating={rating?.rating}
+        ratingProvisional={rating?.provisional ?? false}
         username={auth?.loggedIn ? auth.username : undefined}
         admin={auth?.loggedIn ? !!auth.admin : false}
         onLogout={logout}

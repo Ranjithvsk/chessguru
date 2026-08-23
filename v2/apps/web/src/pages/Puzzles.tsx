@@ -76,7 +76,7 @@ function SuggestedThemesRow({ current, setTheme, disabled }: { current: string; 
     <div className="mb-3 rounded-xl2 border border-ink-700 bg-ink-900 p-4">
       <div className="mb-2 flex items-baseline justify-between">
         <div className="text-xs font-semibold uppercase tracking-wide text-ink-400">🎯 Suggested for you</div>
-        <div className="text-[10px] text-ink-500">Your rating <span className="tabular-nums text-ink-300">{data.global}</span></div>
+        <div className="text-[10px] text-ink-500">Your rating <span className="tabular-nums text-ink-300">{(data as any).globalProvisional && <span className="text-gold-400">≈</span>}{data.global}{(data as any).globalProvisional && <span className="text-gold-400">?</span>}</span></div>
       </div>
       <div className="flex flex-wrap gap-1.5">
         {data.items.map((s) => {

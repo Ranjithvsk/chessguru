@@ -38,6 +38,9 @@ export interface MeRating {
   rating: number;
   loggedIn: boolean;
   userId?: string;
+  /** Owner 2026-08-23 (fix A): true when nb<30 OR d>100 — UI shows "≈"/"?"
+   *  badge because the rating is still an unstable early-phase estimate. */
+  provisional?: boolean;
 }
 
 export interface CompleteResult {
@@ -45,6 +48,8 @@ export interface CompleteResult {
   ratingDiff?: number;
   rating?: number;
   glicko?: Glicko;
+  /** Same semantics as MeRating.provisional — set on every solve. */
+  provisional?: boolean;
   /** Phase 7n + 7o: set when this solve crossed a round-number threshold on
    *  either rating OR solve-count. If both fire on the same solve, the client
    *  gets the rating one — the count one still gets recorded + push-notified. */

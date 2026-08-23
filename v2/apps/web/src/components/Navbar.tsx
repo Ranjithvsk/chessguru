@@ -217,7 +217,7 @@ function Dropdown({ group }: { group: Group }) {
   );
 }
 
-interface Props { rating?: number; username?: string; admin?: boolean; onLogout?: () => void; }
+interface Props { rating?: number; ratingProvisional?: boolean; username?: string; admin?: boolean; onLogout?: () => void; }
 
 // Detect the tenant slug from the URL (/a/:slug/*) OR from the custom domain
 // (gunachess.com → "gunachess"). Returns null when we're on the main ChessGuru
@@ -287,7 +287,7 @@ function useTenantBrand(): Brand | null {
   return brand;
 }
 
-export default function Navbar({ rating, username, admin, onLogout }: Props) {
+export default function Navbar({ rating, ratingProvisional, username, admin, onLogout }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const { pathname } = useLocation();
   useEffect(() => setMenuOpen(false), [pathname]); // navigating closes the drawer
@@ -349,8 +349,11 @@ export default function Navbar({ rating, username, admin, onLogout }: Props) {
           <ThemeToggle />
           <InstallButton />
           {rating != null && (
-            <span className="hidden rounded-lg bg-ink-800 px-3 py-1.5 text-sm sm:inline">
-              <span className="text-ink-400">Rating </span><span className="font-semibold text-white">{rating}</span>
+            <span className="hidden rounded-lg bg-ink-800 px-3 py-1.5 text-sm sm:inline" title={ratingProvisional ? "Provisional — few solves, unstable estimate" : undefined}>
+              <span className="text-ink-400">Rating </span>
+              <span className="font-semibold text-white">
+                {ratingProvisional && <span className="text-gold-400">≈</span>}{rating}{ratingProvisional && <span className="text-gold-400">?</span>}
+              </span>
             </span>
           )}
           {username ? (
@@ -389,7 +392,7 @@ export default function Navbar({ rating, username, admin, onLogout }: Props) {
                     </>
                   )}
                   {rating != null && (
-                    <div className="mt-2 px-1 text-xs text-ink-400">Rating <b className="text-white">{rating}</b></div>
+                    <div className="mt-2 px-1 text-xs text-ink-400">Rating <b className="text-white">{ratingProvisional && <span className="text-gold-400">≈</span>}{rating}{ratingProvisional && <span className="text-gold-400">?</span>}</b></div>
                   )}
                   {username ? (
                     <div className="mt-2 flex items-center justify-between px-1">

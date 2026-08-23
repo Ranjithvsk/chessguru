@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
-import { updatePuzzleRating, DEFAULT_VOLATILITY } from "../glicko/glicko";
+import { updatePuzzleRating, isProvisional, DEFAULT_VOLATILITY } from "../glicko/glicko";
 import { fmtPuzzle, applyLastMove } from "../lib/puzzle-format";
 import { recordAndCelebrate } from "./milestones";
 import { PushService } from "../push/push.service";
@@ -518,8 +518,8 @@ export class PuzzlesService {
 
     return {
       loggedIn: true,
-      global: { rating: Math.round(p.puzzle?.gl?.r ?? 1200), rd: Math.round(p.puzzle?.gl?.d ?? 500), games: p.puzzle?.nb ?? 0 },
-      blindfold: p.blindfold ? { rating: Math.round(p.blindfold.gl?.r ?? 800), games: p.blindfold.nb ?? 0 } : null,
+      global: { rating: Math.round(p.puzzle?.gl?.r ?? 1200), rd: Math.round(p.puzzle?.gl?.d ?? 500), games: p.puzzle?.nb ?? 0, provisional: p.puzzle ? isProvisional(p.puzzle) : true },
+      blindfold: p.blindfold ? { rating: Math.round(p.blindfold.gl?.r ?? 800), games: p.blindfold.nb ?? 0, provisional: isProvisional(p.blindfold) } : null,
       totals: { attempted: puzzleRounds.length, wins, accuracy: puzzleRounds.length ? Math.round((wins / puzzleRounds.length) * 100) : 0 },
       study: { total: studyTotal, byType: studyByType },
       themes,
@@ -551,6 +551,7 @@ export class PuzzlesService {
    *     tough rather than piling on the worst ones. */
   async suggestedThemes(userId: string | null): Promise<{
     global: number;
+    globalProvisional: boolean;
     items: Array<{ theme: string; yourRating: number | null; delta: number | null; solves: number; provisional: boolean; reason: "weakness" | "strength" | "new" | "starter" }>;
   }> {
     // Themes worth suggesting — meta/length/level tags are filtered so we
@@ -579,6 +580,7 @@ export class PuzzlesService {
     if (!userId) {
       return {
         global: 1500,
+        globalProvisional: true,
         items: STARTER.map((theme) => ({ theme, yourRating: null, delta: null, solves: 0, provisional: true, reason: "starter" as const })),
       };
     }
@@ -586,6 +588,7 @@ export class PuzzlesService {
     const globalR = Math.round(perf?.puzzle?.gl?.r ?? 1200);
     const totalSolves = perf?.puzzle?.nb ?? 0;
     const themes = perf?.themes ?? {};
+    const globalProvisional = perf?.puzzle ? isProvisional(perf.puzzle) : true;
 
     if (totalSolves < 20) {
       // Not enough data to trust per-theme numbers. Mix STARTER with any few
@@ -595,6 +598,7 @@ export class PuzzlesService {
       const merged = [...new Set([...seen, ...STARTER])].slice(0, 7);
       return {
         global: globalR,
+        globalProvisional,
         items: merged.map((theme) => {
           const tp = themes[theme];
           const nb = tp?.nb ?? 0;
@@ -675,7 +679,7 @@ export class PuzzlesService {
       });
       seen.add(t);
     }
-    return { global: globalR, items: zipped.slice(0, 7) };
+    return { global: globalR, globalProvisional, items: zipped.slice(0, 7) };
   }
 
   /** Phase 8c: bump the user's daily-puzzle attendance streak if this solve
@@ -873,7 +877,7 @@ export class PuzzlesService {
       const dailyStreak = body.daily
         ? await this.bumpDailyStreak(userId, id).catch(() => null)
         : null;
-      return { win, ratingDiff: upd.ratingDiff, rating: upd.userPerf.gl.r, glicko: upd.userPerf.gl, milestone, dailyStreak };
+      return { win, ratingDiff: upd.ratingDiff, rating: upd.userPerf.gl.r, glicko: upd.userPerf.gl, provisional: isProvisional(upd.userPerf), milestone, dailyStreak };
     }
 
     // guest — one-off, non-persisted
