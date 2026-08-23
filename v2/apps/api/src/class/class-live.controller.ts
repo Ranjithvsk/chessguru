@@ -45,7 +45,7 @@ export class ClassLiveController {
     if (!me || !academyId || (role !== "coach" && role !== "academy_owner")) return { ok: false };
 
     let joinPath = typeof body?.joinPath === "string" ? body.joinPath : "";
-    // Jitsi + from-scratch mesh call are retired (owner 2026-08-12). Any
+    // The old in-app WebRTC-mesh CallRoom was retired 2026-08-12. Any
     // announcement that doesn't ship its own valid /class-v2/... path defaults
     // to Dream Meet — the sole live-class surface.
     if (!JOIN_PATH_RE.test(joinPath)) joinPath = `/class-v2/${id}?role=student`;
@@ -214,7 +214,7 @@ export class ClassLiveController {
         _id: r._id,
         title: titleById.get(String(r._id)) || "Class",
         coach: coachName.get(String(r.coachUserId)) || "Your coach",
-        roomKind: "meet" as const,   // every live class is Dream Meet now (Jitsi retired 2026-08-12)
+        roomKind: "meet" as const,   // every live class is Dream Meet now (in-app mesh CallRoom retired 2026-08-12)
         startAt: r.at,
         durationMin: 60,
       })),

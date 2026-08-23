@@ -3,7 +3,7 @@
 //
 // Auth: no user gate today. Anyone in the class (which is anyone with the URL) can
 // see who's attended. The class URL is the shared secret; the panel is a nicer view
-// of what Jitsi's participant list already shows live.
+// of what Dream Meet's participant list already shows live.
 //
 // Data (classAttendance collection): one doc per (classId, key) with
 //   { classId, key, userId, name, joinedAt, lastSeenAt }

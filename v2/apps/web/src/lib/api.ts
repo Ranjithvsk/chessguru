@@ -33,10 +33,11 @@ export async function announceGoingLive(room: string, joinPath: string): Promise
   catch { /* never block the room from loading */ }
 }
 
-// Router path for a class room. Historically switched between Jitsi (/class/)
-// and a from-scratch WebRTC mesh (/call/); both were retired (owner 2026-08-12)
-// and every live class runs on Dream Meet now. `kind` and `role` are kept in
-// the signature so existing callers compile; the `kind` value is ignored.
+// Router path for a class room. Historically switched between two retired
+// in-app implementations (/class/ and a from-scratch WebRTC mesh at /call/);
+// both were removed 2026-08-12. Every live class now runs on Dream Meet.
+// `kind` and `role` are kept in the signature so existing callers compile;
+// the `kind` value is ignored.
 export function classRoomPath(_kind: string | null | undefined, id: string, role: "coach" | "student"): string {
   return `/class-v2/${encodeURIComponent(id)}?role=${role}`;
 }

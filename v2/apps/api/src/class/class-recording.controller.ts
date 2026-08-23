@@ -6,12 +6,13 @@
 // one file per stop.
 //
 // Auth model matches the class WS itself: no user-account gate; the class URL is
-// the shared secret. Anyone with the URL can list/download (matches Jitsi's own
-// invite-link semantics). Room-id character set is restricted so the on-disk path
-// can never escape RECORDINGS_DIR.
+// the shared secret. Anyone with the URL can list/download (matches Dream Meet's
+// own invite-link semantics). Room-id character set is restricted so the on-disk
+// path can never escape RECORDINGS_DIR.
 //
-// A future upgrade to server-side Jibri recording (needs self-hosted Jitsi) can
-// write into the same directory tree and reuse the list/download endpoints as-is.
+// A future upgrade to server-side Jibri recording (Dream Meet's upstream stack
+// supports it) can write into the same directory tree and reuse the list/
+// download endpoints as-is.
 
 import { Body, Controller, Get, Param, Post, Res, HttpException, HttpStatus } from "@nestjs/common";
 // Response typed as `any` — @types/express isn't in the api's deps and we only

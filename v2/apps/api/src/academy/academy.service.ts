@@ -1095,8 +1095,8 @@ export class AcademyService {
     // Attendance marks for this date. Rows come from TWO sources:
     //   (a) Manual coach marks — classId "manual-<coachId>-<yyyymmdd>",
     //       explicit `status: "present"|"late"|"absent"`. Coach's ground truth.
-    //   (b) Live-class auto-joins — classId = Jitsi room, no `status` field.
-    //       Written by video-signal.ts when a student joins the call.
+    //   (b) Live-class auto-joins — classId = Dream Meet room, no `status`
+    //       field. Written by video-signal.ts when a student joins the call.
     //
     // Priority for display: manual (a) always wins over auto (b). Within
     // manual, latest lastSeenAt wins. This prevents a student marked absent
@@ -1111,7 +1111,7 @@ export class AcademyService {
     // mark exists — the UI can show "You marked absent · joined Live Class 14:30"
     // so the coach can spot conflicts.
     // Three source tiers: manual (coach explicit) > qr (student self-checked-in
-    // via QR scan) > live-class (auto Jitsi join). Manual always wins.
+    // via QR scan) > live-class (auto Dream Meet join). Manual always wins.
     const byStudent = new Map<string, { manual: any | null; qr: any | null; auto: any | null }>();
     for (const a of attRows) {
       const key = String(a.key);

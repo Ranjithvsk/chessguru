@@ -53,7 +53,7 @@ import ParentPortalPage from "./pages/ParentPortal";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import ZugzwangStudyPage from "./pages/ZugzwangStudy";
 import AcceptInvitePage from "./pages/AcceptInvite";
-// CallRoomPage + ClassPage removed 2026-08-12 (Jitsi + WebRTC mesh retired).
+// CallRoomPage + ClassPage removed 2026-08-12 (old in-app WebRTC mesh retired).
 // Every live class URL funnels through /class-v2/ (Dream Meet).
 import AccountLinksPage from "./pages/AccountLinks";
 import ExternalGamePage from "./pages/ExternalGame";
@@ -117,10 +117,10 @@ import CoachPublicPage from "./pages/CoachPublic";
 import CoachProfileEditPage from "./pages/CoachEdit";
 import AcademyPublicPage from "./pages/AcademyPublic";
 import AcademyProfileEditPage from "./pages/AcademyProfileEdit";
-// Jitsi is retired (owner 2026-08-12) — every live-class URL now funnels into
-// Dream Meet (/class-v2/). These tiny redirect shims preserve old bookmarks +
-// server-generated push-notification joinPaths without keeping the Jitsi UI
-// or the old from-scratch mesh call code on the router. Uses replace so the
+// Old in-app CallRoom + mesh Class page retired 2026-08-12 — every live-class
+// URL now funnels into Dream Meet (/class-v2/). These tiny redirect shims
+// preserve old bookmarks + server-generated push-notification joinPaths
+// without keeping the retired routes on the router. Uses replace so the
 // browser history doesn't stack a dead route entry.
 function ClassIdRedirect() {
   const { id } = useParams();

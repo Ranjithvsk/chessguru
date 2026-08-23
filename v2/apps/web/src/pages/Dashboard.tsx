@@ -64,10 +64,10 @@ function StudentLiveClassCard() {
   return (
     <div className="space-y-2">
       {rows.slice(0, 3).map((c) => {
-        // Jitsi + from-scratch mesh call retired (owner 2026-08-12) — every
-        // live class runs on Dream Meet. roomKind is retained on old rows but
-        // ignored here; /call/:room is a redirect shim (main.tsx) for old push
-        // URLs so no one is stranded.
+        // Old in-app mesh Class page retired 2026-08-12 — every live class
+        // runs on Dream Meet. roomKind is retained on old rows but ignored
+        // here; /call/:room is a redirect shim (main.tsx) for old push URLs
+        // so no one is stranded.
         const join = `/class-v2/${encodeURIComponent(c._id)}?role=student`;
         const startedMin = Math.max(0, Math.round((Date.now() - new Date(c.startAt).getTime()) / 60_000));
         return (

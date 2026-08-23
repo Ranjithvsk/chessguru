@@ -4929,12 +4929,12 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
           </div>
         </div>
       )}
-      {/* Route to our own from-scratch video call (/call/:room?board=1) — feature
-       *  parity with Jitsi now: mesh up to 8, TURN, AV1, chat, hand, reactions,
-       *  moderator role, spotlight, blur, live captions, screen share, recording,
-       *  chess-native board mode. Attendance auto-writes to classAttendance on
-       *  join via the same collection the /academy roster reads. Jitsi fallback
-       *  at meet.harinitharanjith.com still works if a user types it directly. */}
+      {/* Route to Dream Meet at meet.harinitharanjith.com — every live class
+       *  opens there. Attendance auto-writes to classAttendance on join via
+       *  the video-signal.ts WebSocket, feeding the /academy/attendance sheet
+       *  with a ✨ Live badge. (The old from-scratch mesh route was retired
+       *  2026-08-12; a redirect shim in main.tsx catches legacy /call/:room
+       *  URLs from earlier push notifications.) */}
       <a
         href={`https://wa.me/?text=${encodeURIComponent((live ? `🔴 Chess class "${c.title}" is LIVE now! Join here: ` : `♟️ Chess class "${c.title}" — ${fmtStartAt(c.startAt)}. Join here: `) + `${location.origin}${import.meta.env.BASE_URL}${classRoomPath(c.roomKind, c._id, "student").slice(1)}`)}`}
         target="_blank" rel="noopener noreferrer"
