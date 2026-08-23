@@ -22,14 +22,25 @@ const INVITE_TTL_DAYS = 7;
  *  ranking is fair inside the academy (not gated by absolute chess-strength).
  *  Tuning knob for the coach: swap these to bias toward e.g. more accuracy or
  *  more attendance. Kept as a module-level export so the leaderboard response
- *  can echo them back for transparency in the UI. */
+ *  can echo them back for transparency in the UI.
+ *
+ *  Owner rebalance 2026-08-23: "reward consistent players, because consistency
+ *  is key to success". Consistency now weighs 30% (was 15%, when it was just
+ *  the raw consecutive-day streak). New `consistency` composite blends:
+ *    - active days in past 30 (out of 30)   0.5
+ *    - current streak (sqrt-capped, 60 max) 0.3
+ *    - weekly cadence — weeks in past 8
+ *      with >= 3 active days                0.2
+ *  Missing one day no longer nukes a kid's rank. Kids who show up 5 days/week
+ *  for months beat both cramming-then-vanishing sprinters AND streak-obsessed
+ *  perfectionists who play one puzzle a day just to keep the number ticking. */
 const WEIGHTS = {
-  rating: 0.25,
-  puzzles: 0.25,
+  rating: 0.20,
+  puzzles: 0.20,
   accuracy: 0.15,
-  streak: 0.15,
+  consistency: 0.30,
   themes: 0.10,
-  attendance: 0.10,
+  attendance: 0.05,
 } as const;
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1771,7 +1782,7 @@ export class AcademyService {
    *  Period options: today | 7d | 30d | 180d | 365d | lifetime. Some
    *  columns (current rating, peak rating, streak, longestStreak) are
    *  period-independent; the rest are windowed. */
-  async buildLeaderboard(session: any, periodRaw: string, opts: { bucket?: string; withDelta?: boolean } = {}) {
+  async buildLeaderboard(session: any, periodRaw: string, opts: { bucket?: string; withDelta?: boolean; sortBy?: "score" | "consistency" } = {}) {
     const academyId = session?.academyId;
     const userId = session?.userId;
     if (!userId || !academyId) throw new ForbiddenException("sign in first");
@@ -1909,6 +1920,48 @@ export class AcademyService {
       });
     }
 
+    // Consistency signals (owner 2026-08-23 rebalance): active-days-in-past-30
+    // (unique IST-day count from rounds) + weekly cadence (weeks in past 8 with
+    // >= 3 active days). Always spans 30/56 days regardless of the leaderboard
+    // period the user is viewing — consistency IS a rolling-recent-habit
+    // metric, not "in the selected period".
+    const consistCutoff = new Date(now - 56 * dayMs);
+    const consistAgg = await this.conn.db!.collection("rounds").aggregate([
+      { $match: { d: { $gte: consistCutoff } } },
+      { $project: {
+          u: { $arrayElemAt: [{ $split: ["$_id", ":"] }, 0] },
+          day: { $dateToString: { format: "%Y-%m-%d", date: "$d", timezone: "Asia/Kolkata" } },
+          week: { $dateToString: { format: "%G-%V", date: "$d", timezone: "Asia/Kolkata" } },
+          d: 1,
+      } },
+      { $match: { u: { $in: ids as any } } },
+      { $group: {
+          _id: { u: "$u", day: "$day", week: "$week" },
+          n: { $sum: 1 },
+          maxDate: { $max: "$d" },
+      } },
+      { $group: {
+          _id: "$_id.u",
+          days: { $addToSet: {
+            day: "$_id.day",
+            week: "$_id.week",
+            n: "$n",
+            recent30: { $gte: ["$maxDate", new Date(now - 30 * dayMs)] },
+          } },
+      } },
+    ]).toArray();
+    const consistMap = new Map<string, { activeDays30: number; weeklyCadence8: number }>();
+    for (const c of consistAgg) {
+      const days = c.days as Array<{ day: string; week: string; n: number; recent30: boolean }>;
+      const activeDays30 = days.filter((d) => d.recent30).length;
+      // Weeks with >= 3 active days. consistCutoff = 56 days = 8 weeks, so
+      // every week key in `days` is already within the 8-week window.
+      const weekDayCount = new Map<string, number>();
+      for (const d of days) weekDayCount.set(d.week, (weekDayCount.get(d.week) || 0) + 1);
+      const weeklyCadence8 = [...weekDayCount.values()].filter((n) => n >= 3).length;
+      consistMap.set(String(c._id), { activeDays30, weeklyCadence8 });
+    }
+
     // Attendance (30d, capped at 30) — reuse the same shape used elsewhere.
     const heatStart = new Date(now - 29 * dayMs);
     heatStart.setUTCHours(0, 0, 0, 0);
@@ -1967,6 +2020,8 @@ export class AcademyService {
         streak: streak.current,
         longestStreak: streak.longest,
         attendance30d: attMap.get(String(s._id)) ?? 0,
+        activeDays30: consistMap.get(String(s._id))?.activeDays30 ?? 0,
+        weeklyCadence8: consistMap.get(String(s._id))?.weeklyCadence8 ?? 0,
       };
     });
 
@@ -1996,25 +2051,42 @@ export class AcademyService {
     const minP = 0, maxP = Math.max(...puzzlesArr, 0.1);
     // Streak scaling — sqrt & cap so a 300-day streak isn't 10× a 30-day.
     const streakScore = (n: number) => Math.min(1, Math.sqrt(Math.min(n, 60)) / Math.sqrt(60));
+    // Consistency composite (see WEIGHTS comment). Missing a day no longer
+    // resets your rank; showing up 5 days/week for months beats sprinters.
+    const consistencyScore = (activeDays30: number, streak: number, weeklyCadence8: number) => {
+      const dayPart  = Math.min(1, activeDays30 / 30);         // 30/30 = perfect
+      const streakP  = streakScore(streak);                     // continuous days
+      const weekP    = Math.min(1, weeklyCadence8 / 8);         // 8/8 solid weeks
+      return 0.5 * dayPart + 0.3 * streakP + 0.2 * weekP;
+    };
     const rows = raw.map((r) => {
       const parts = {
-        rating:     norm(r.currentRating, minR, maxR),
-        puzzles:    norm(Math.log1p(r.puzzlesForScore), minP, maxP),
-        accuracy:   r.puzzles >= 5 ? r.accuracy : 0, // <5 rounds = not enough signal
-        streak:     streakScore(r.streak),
-        themes:     Math.min(1, r.themesCount / 20),
-        attendance: Math.min(1, r.attendance30d / 30),
+        rating:      norm(r.currentRating, minR, maxR),
+        puzzles:     norm(Math.log1p(r.puzzlesForScore), minP, maxP),
+        accuracy:    r.puzzles >= 5 ? r.accuracy : 0, // <5 rounds = not enough signal
+        consistency: consistencyScore(r.activeDays30, r.streak, r.weeklyCadence8),
+        themes:      Math.min(1, r.themesCount / 20),
+        attendance:  Math.min(1, r.attendance30d / 30),
       };
       const score =
-        parts.rating     * WEIGHTS.rating +
-        parts.puzzles    * WEIGHTS.puzzles +
-        parts.accuracy   * WEIGHTS.accuracy +
-        parts.streak     * WEIGHTS.streak +
-        parts.themes     * WEIGHTS.themes +
-        parts.attendance * WEIGHTS.attendance;
+        parts.rating      * WEIGHTS.rating +
+        parts.puzzles     * WEIGHTS.puzzles +
+        parts.accuracy    * WEIGHTS.accuracy +
+        parts.consistency * WEIGHTS.consistency +
+        parts.themes      * WEIGHTS.themes +
+        parts.attendance  * WEIGHTS.attendance;
       return { ...r, score: Math.round(score * 10) / 10, scoreParts: parts };
     });
-    rows.sort((a, b) => b.score - a.score);
+    // Owner ask 2026-08-23 "Most Consistent" tab: sortBy=consistency ranks
+    // purely on the consistency composite (100% weight, ignore everything
+    // else). Default sortBy=score keeps the all-rounder ChessGuru Score.
+    // Same row shape either way — coach sees which kids showed up regardless
+    // of their raw talent.
+    if (opts.sortBy === "consistency") {
+      rows.sort((a, b) => b.scoreParts.consistency - a.scoreParts.consistency);
+    } else {
+      rows.sort((a, b) => b.score - a.score);
+    }
     rows.forEach((r: any, i) => { r.rank = i + 1; });
 
     // ── Rank delta — compare current-period rank against the previous
@@ -2040,16 +2112,16 @@ export class AcademyService {
         const puzzles = p?.puzzles ?? 0;
         const accuracy = puzzles > 0 ? (p?.wins ?? 0) / puzzles : 0;
         const parts = {
-          rating:     norm(r.currentRating, minR, maxR),
-          puzzles:    norm(Math.log1p(puzzles), 0, Math.max(...raw.map((rr: any) => Math.log1p(prevMap.get(rr.studentId)?.puzzles ?? 0)), 0.1)),
-          accuracy:   puzzles >= 5 ? accuracy : 0,
-          streak:     streakScore(r.streak),
-          themes:     Math.min(1, r.themesCount / 20),
-          attendance: Math.min(1, r.attendance30d / 30),
+          rating:      norm(r.currentRating, minR, maxR),
+          puzzles:     norm(Math.log1p(puzzles), 0, Math.max(...raw.map((rr: any) => Math.log1p(prevMap.get(rr.studentId)?.puzzles ?? 0)), 0.1)),
+          accuracy:    puzzles >= 5 ? accuracy : 0,
+          consistency: consistencyScore(r.activeDays30, r.streak, r.weeklyCadence8),
+          themes:      Math.min(1, r.themesCount / 20),
+          attendance:  Math.min(1, r.attendance30d / 30),
         };
         const score =
           parts.rating * WEIGHTS.rating + parts.puzzles * WEIGHTS.puzzles +
-          parts.accuracy * WEIGHTS.accuracy + parts.streak * WEIGHTS.streak +
+          parts.accuracy * WEIGHTS.accuracy + parts.consistency * WEIGHTS.consistency +
           parts.themes * WEIGHTS.themes + parts.attendance * WEIGHTS.attendance;
         return { studentId: r.studentId, score };
       });
@@ -2093,6 +2165,9 @@ export class AcademyService {
       longestStreak: champion((r) => r.streak),
       mostThemes:    champion((r) => r.themesCount),
       blindfoldKing: champion((r) => r.blindfoldPuzzles),
+      // Owner ask 2026-08-23: "reward consistent players". Micro-champion
+      // celebrated in the leaderboard header alongside overall winner.
+      mostConsistent: champion((r) => r.activeDays30, 5),
     };
 
     // Comeback of the period — biggest positive deltaRank.

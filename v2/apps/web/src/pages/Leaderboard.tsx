@@ -373,6 +373,7 @@ export default function LeaderboardPage() {
   const qc = useQueryClient();
   const [period, setPeriod] = useState<Period>("7d");
   const [bucket, setBucket] = useState<Bucket>("all");
+  const [sortBy, setSortBy] = useState<"score" | "consistency">("score");
   const [showBoost, setShowBoost] = useState(false);
   const canManage = !!auth?.loggedIn && (auth.role === "academy_owner" || auth.role === "coach");
   // Students land on their own rating-bucket by default so they see peers
@@ -395,8 +396,8 @@ export default function LeaderboardPage() {
     }
   }, [auth?.loggedIn, auth?.role, myRating?.rating]);
   const q = useQuery({
-    queryKey: ["academy-leaderboard", period, bucket],
-    queryFn: () => get<LeaderboardResp>(`/api/academy/leaderboard?period=${period}${bucket !== "all" ? `&bucket=${bucket}` : ""}`),
+    queryKey: ["academy-leaderboard", period, bucket, sortBy],
+    queryFn: () => get<LeaderboardResp>(`/api/academy/leaderboard?period=${period}${bucket !== "all" ? `&bucket=${bucket}` : ""}${sortBy === "consistency" ? "&sortBy=consistency" : ""}`),
     enabled: !!auth?.loggedIn && !!auth?.academyId,
     staleTime: 60_000,
   });
@@ -467,6 +468,22 @@ export default function LeaderboardPage() {
           <Link to="/academy" className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs font-medium text-ink-300 hover:text-white">← Academy</Link>
         </div>
       </header>
+
+      {/* Owner 2026-08-23: "reward consistent players — consistency is key
+          to success." Toggle between the all-rounder ChessGuru Score and a
+          pure-consistency rank so kids who show up daily get their own
+          spotlight even if they're not top-rated. */}
+      <div className="flex overflow-hidden rounded-xl border border-ink-700 text-sm">
+        <button type="button" onClick={() => setSortBy("score")}
+          className={`flex-1 px-4 py-2 font-semibold transition ${sortBy === "score" ? "bg-gradient-to-r from-amber-500 to-fuchsia-500 text-white" : "bg-ink-900 text-ink-300 hover:bg-ink-800"}`}>
+          🏆 ChessGuru Score
+        </button>
+        <button type="button" onClick={() => setSortBy("consistency")}
+          className={`flex-1 px-4 py-2 font-semibold transition ${sortBy === "consistency" ? "bg-gradient-to-r from-emerald-500 to-teal-500 text-white" : "bg-ink-900 text-ink-300 hover:bg-ink-800"}`}
+          title="Kids who show up regularly — active days, cadence, streak">
+          🔥 Most Consistent
+        </button>
+      </div>
 
       {/* Active boost banner — driven by the coach; multiplies matching-theme
           puzzles for real training focus this week. */}
