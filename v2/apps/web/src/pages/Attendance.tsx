@@ -445,7 +445,11 @@ function StudentCard({ row, onTap, onLongPress, pending }: { row: Row; onTap: ()
       )}
       <Avatar name={row.name} size="lg" />
       <div className="min-w-0 w-full">
-        <div className="truncate text-sm font-semibold text-white">{row.name}</div>
+        {/* text-ink-100 flips correctly in both themes (light text on dark bg,
+            dark text on light bg). text-white would be exempted by the global
+            "text-white on bg-emerald-*" rule and stay white on the 10%-opacity
+            light-mode surface — invisible. */}
+        <div className="truncate text-sm font-semibold text-ink-100">{row.name}</div>
         <div className={`mt-0.5 text-[11px] font-bold uppercase tracking-wide ${s.text}`}>
           {s.emoji} {s.label}{row.status === "late" && row.lateMinutes ? ` · ${row.lateMinutes}m` : ""}
         </div>
