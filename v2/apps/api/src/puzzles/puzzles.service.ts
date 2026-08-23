@@ -728,16 +728,22 @@ export class PuzzlesService {
       // (lengths, goals, origins) are not rated. Regular puzzle mode only.
       if (Array.isArray(pz.themes)) {
         const themeNs = key === "blindfold" ? "themesBf" : "themes"; // blindfold themes rated separately
-        // Seed a fresh per-theme entry from the user's GLOBAL rating with moderate
-        // uncertainty (d=250) — "roughly at your global level in this theme, refine
-        // from here." The old default (1500 / d=500) caused rapid inflation for
-        // skilled players: a 2809 user's first mateIn5 solve vs a 2600 puzzle jumped
-        // rating +1063 in a single game because Glicko's expected-win was ~1%.
-        // Mageswaran incident 2026-08-23.
-        const globalR = perf?.gl?.r ?? 800;
+        // Owner directive 2026-08-23 (afternoon): revert to seeding fresh
+        // per-theme entries at 1500/d=500 (Lichess convention). Rationale:
+        // per-theme rating is a MEASURED skill in that specific theme,
+        // independent of the user's global. Users should build each theme
+        // rating from scratch. Inflation is no longer a UX problem because:
+        //   - Fix (b): picker ignores per-theme rating until nb>=8 + d<=200
+        //   - Fix (c): suggestedThemes requires nb>=15 + d<=200 to classify
+        //              as strength/weakness — provisional flag on rest
+        //   - Fix (f): picker floor at global-250 regardless of per-theme drift
+        //   - Fix (e): easy-win delta cap prevents runaway per-theme drift
+        // So per-theme can inflate freely while provisional; once it stabilizes
+        // (many solves + low RD) it reflects real theme-specific skill.
+        const startR = key === "blindfold" ? 800 : 1500;
         for (const t of pz.themes) {
           if (PuzzlesService.UNRATED.has(t) || typeof t !== "string" || !/^[a-zA-Z0-9]+$/.test(t)) continue;
-          const tPerf = doc[themeNs]?.[t] || { gl: { r: globalR, d: 250, v: DEFAULT_VOLATILITY }, nb: 0, re: [], la: null };
+          const tPerf = doc[themeNs]?.[t] || { gl: { r: startR, d: 500, v: DEFAULT_VOLATILITY }, nb: 0, re: [], la: null };
           const tUpd = updatePuzzleRating(tPerf, puzzleGlicko, win);
           sets[`${themeNs}.${t}`] = tUpd.userPerf;
         }
