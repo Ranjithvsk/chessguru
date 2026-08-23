@@ -256,6 +256,8 @@ export class HomeworkService {
         assignedById: r.coachId || null,
         assignedByName: c?.name || c?.username || null,
         assignedByRole: c?.role || null,
+        catchupForDate: r.catchupForDate ?? null,
+        catchupSource: r.catchupSource ?? null,
       };
     });
   }
@@ -269,6 +271,8 @@ export class HomeworkService {
       _id: String(r._id), title: r.title, tasks: r.tasks,
       dueAt: r.dueAt, assignedAt: r.assignedAt,
       status: r.status, progress: r.progress, completedAt: r.completedAt ?? null,
+      catchupForDate: r.catchupForDate ?? null,
+      catchupSource: r.catchupSource ?? null,
     }));
   }
 

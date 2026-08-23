@@ -1803,6 +1803,66 @@ Thank you!`;
     return this.markAttendanceBulk(session, { date: toRaw, entries: marks });
   }
 
+  /** Auto-assign a catch-up homework when a student is marked absent.
+   *  Idempotent per (studentId, absentDate) via the catchupForDate marker —
+   *  re-marking the same absence, or a coach flipping present→absent later,
+   *  will not create duplicate homework. Owner ask 2026-08-23.
+   *
+   *  Tasks: 3 puzzle packs from the student's weakest themes (≥3 solves).
+   *  Falls back to a curated tactical mix (pin/fork/skewer) for brand-new
+   *  students. 5 puzzles per pack. Due in 7 days.
+   *
+   *  Idempotent + best-effort — swallows all errors so an insert failure
+   *  never breaks the underlying attendance mark. Logged on failure.
+   */
+  private async autoAssignCatchupHomework(academyId: string, coachId: string, studentId: string, absentDate: string): Promise<void> {
+    try {
+      const hwCol = this.conn.db!.collection("homework");
+      // Dedupe — bail if we've already assigned a catch-up for this student+date.
+      const existing = await hwCol.findOne({ studentId, catchupForDate: absentDate });
+      if (existing) return;
+      // Pick 3 weakest themes with ≥3 solves; fallback to defaults.
+      const perf: any = await this.conn.db!.collection("userperfs").findOne(
+        { _id: studentId as any }, { projection: { themes: 1, puzzle: 1 } },
+      );
+      const overallR = perf?.puzzle?.gl?.r ? Math.round(perf.puzzle.gl.r) : 1500;
+      const themes = perf?.themes || {};
+      const rated: Array<{ theme: string; rating: number; nb: number }> = [];
+      for (const [k, v] of Object.entries<any>(themes)) {
+        if (!v?.gl?.r || !v?.nb || v.nb < 3) continue;
+        rated.push({ theme: k, rating: Math.round(v.gl.r), nb: v.nb });
+      }
+      rated.sort((a, b) => a.rating - b.rating);   // weakest first
+      const picks = rated.length >= 3
+        ? rated.slice(0, 3).map((r) => ({ theme: r.theme, targetRating: r.rating }))
+        : ["pin", "fork", "skewer"].map((t) => ({ theme: t, targetRating: overallR }));
+      const tasks = picks.map((p) => ({
+        kind: "puzzle_pack" as const,
+        theme: p.theme,
+        targetCount: 5,
+        targetRating: p.targetRating,
+      }));
+      const now = new Date();
+      const dParts = absentDate.split("-").map(Number);
+      const pretty = new Date(dParts[0]!, (dParts[1]! - 1), dParts[2]!)
+        .toLocaleDateString(undefined, { day: "2-digit", month: "short" });
+      await hwCol.insertOne({
+        academyId, coachId, studentId,
+        title: `Catch-up · ${pretty}`,
+        tasks,
+        dueAt: new Date(now.getTime() + 7 * 86_400_000),
+        assignedAt: now,
+        status: "assigned",
+        progress: {},
+        completedAt: null,
+        // Markers so the homework list can show a "catch-up" badge and dedup
+        // key so we never assign twice for the same missed day.
+        catchupForDate: absentDate,
+        catchupSource: "absent",
+      });
+    } catch { /* best-effort — never let this break the attendance mark */ }
+  }
+
   /** Bulk mark attendance. Body: { date, entries: [{ studentId, status,
    *  lateMinutes?, reason? }] }. Coach can only touch their own students;
    *  owner can touch any in the academy. Uses classId
@@ -1856,6 +1916,14 @@ Thank you!`;
         },
         { upsert: true },
       );
+      // Phase 4d: auto-assign catch-up homework for absentees. Idempotent per
+      // (student, date) so re-marking or oscillating doesn't dupe. Runs
+      // sequentially inside the loop; fast (one indexed findOne + one insert)
+      // and best-effort — errors swallowed so an insert failure never breaks
+      // the attendance mark itself.
+      if (status === "absent") {
+        await this.autoAssignCatchupHomework(g.academyId, g.userId, String(target._id), dateStr);
+      }
       marked++;
     }
     return { ok: true, date: dateStr, marked, skipped };

@@ -296,6 +296,8 @@ type StudentHomework = {
   dueAt: string; assignedAt: string;
   status: "assigned"|"in_progress"|"completed";
   progress: Record<string, number>;
+  catchupForDate?: string | null;
+  catchupSource?: string | null;
 };
 async function reorderHomework(hwId: string, order: number[]) {
   await fetch(`${(import.meta as any).env?.VITE_API_BASE ?? ""}/api/me/homework/${encodeURIComponent(hwId)}/reorder`, {
@@ -350,9 +352,20 @@ function HomeworkCard() {
             <div key={h._id} className="rounded-xl border border-ink-700 bg-ink-900/70 p-3">
               <div className="flex items-baseline justify-between gap-2">
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-white">{h.title}</div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="truncate text-sm font-medium text-white">{h.title}</div>
+                    {h.catchupSource === "absent" && (
+                      <span className="shrink-0 rounded-full bg-amber-500/25 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-200"
+                            title={`Auto-assigned because you missed class on ${h.catchupForDate}`}>
+                        ⚡ Catch-up
+                      </span>
+                    )}
+                  </div>
                   <div className="mt-0.5 text-[11px] text-ink-500">
                     {totalDone}/{totalTargets} · {h.tasks.length} section{h.tasks.length === 1 ? "" : "s"}
+                    {h.catchupSource === "absent" && h.catchupForDate && (
+                      <span className="ml-1 text-amber-400/70">· missed {h.catchupForDate}</span>
+                    )}
                   </div>
                 </div>
                 <div className={`shrink-0 text-xs font-semibold ${dueColor}`}>{dueLabel}</div>
