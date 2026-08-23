@@ -1103,16 +1103,20 @@ export class AcademyService {
     // Also collect the auto-join info (class + timestamp) even when a manual
     // mark exists — the UI can show "You marked absent · joined Live Class 14:30"
     // so the coach can spot conflicts.
-    const byStudent = new Map<string, { manual: any | null; auto: any | null }>();
+    // Three source tiers: manual (coach explicit) > qr (student self-checked-in
+    // via QR scan) > live-class (auto Jitsi join). Manual always wins.
+    const byStudent = new Map<string, { manual: any | null; qr: any | null; auto: any | null }>();
     for (const a of attRows) {
       const key = String(a.key);
-      const rec = byStudent.get(key) || { manual: null, auto: null };
-      const isManual = typeof a.classId === "string" && a.classId.startsWith("manual-");
+      const rec = byStudent.get(key) || { manual: null, qr: null, auto: null };
+      const cid = typeof a.classId === "string" ? a.classId : "";
+      const isQr = cid.startsWith("qrcheckin-") || a.source === "qr";
+      const isManual = !isQr && cid.startsWith("manual-");
       if (isManual) {
-        // Latest manual wins.
         if (!rec.manual || (a.lastSeenAt || a.joinedAt) > (rec.manual.lastSeenAt || rec.manual.joinedAt)) rec.manual = a;
+      } else if (isQr) {
+        if (!rec.qr || (a.lastSeenAt || a.joinedAt) > (rec.qr.lastSeenAt || rec.qr.joinedAt)) rec.qr = a;
       } else {
-        // Latest auto wins.
         if (!rec.auto || (a.lastSeenAt || a.joinedAt) > (rec.auto.lastSeenAt || rec.auto.joinedAt)) rec.auto = a;
       }
       byStudent.set(key, rec);
@@ -1164,20 +1168,26 @@ export class AcademyService {
     const rows = students.map((s: any) => {
       const uid = String(s._id);
       const rec = byStudent.get(uid);
-      // Priority: manual mark > auto-detected join > default present.
-      // A student who is auto-detected via live-class join is present unless
-      // the coach explicitly said otherwise (manual absent/late overrides).
-      const mark = rec?.manual || rec?.auto || null;
-      const isAuto = !rec?.manual && !!rec?.auto;
+      // Priority: manual mark > qr check-in > live-class auto-join > default.
+      // A manual mark ALWAYS wins so a coach's explicit "absent" isn't
+      // silently flipped by a later scan/join.
+      const mark = rec?.manual || rec?.qr || rec?.auto || null;
+      const source: "manual" | "qr" | "live-class" | "default" =
+        rec?.manual ? "manual"
+        : rec?.qr ? "qr"
+        : rec?.auto ? "live-class"
+        : "default";
       const status: "present" | "late" | "absent" =
         !mark ? "present"                       // no mark at all = default present
         : mark.status === "absent" ? "absent"
         : mark.status === "late" ? "late"
         : "present";
       const streak = streakMap.get(uid);
-      // Auto-join details (for UI badge) — even if manual mark is present,
-      // surface the class join so the coach can spot conflicts.
-      const auto = rec?.auto;
+      // Auto-join details (for UI badge/conflict display) — even if manual
+      // mark is present, surface the join so the coach can spot conflicts.
+      // Prefer live-class join over QR when both exist (QR is initiated by
+      // coach so it's less "new information").
+      const auto = rec?.auto || rec?.qr;
       const autoJoin = auto ? {
         classId: String(auto.classId || ""),
         joinedAt: auto.joinedAt || null,
@@ -1193,8 +1203,8 @@ export class AcademyService {
         lateMinutes: mark?.lateMinutes ?? null,
         reason: mark?.reason ?? null,
         markedAt: mark?.lastSeenAt || mark?.joinedAt || null,
-        source: (isAuto ? "live-class" : mark ? "manual" : "default") as "live-class" | "manual" | "default",
-        autoJoin,   // {classId, joinedAt, lastSeenAt} of the auto row (nullable)
+        source,
+        autoJoin,
         currentAttendanceStreak: streak?.current ?? 0,
         lastPresentDate: streak?.lastPresentDate ?? null,
         absentYesterday: (streak?.lastPresentDate && streak.lastPresentDate < yesterday) || (!streak?.lastPresentDate && ids.length > 0),
@@ -1222,6 +1232,103 @@ export class AcademyService {
     }
 
     return { ok: true, date, coachId, batchId: batchId || null, rows, lastClassDate };
+  }
+
+  /** Create a QR check-in session — coach shows the QR on their tablet at
+   *  class start; students scan with their phone and get marked present
+   *  automatically. Owner ask 2026-08-23. Token is short-lived (~2h),
+   *  scoped to a specific date + coach + batch (optional).
+   *
+   *  Storage: attendanceQrSessions collection with a TTL index on expiresAt
+   *  (auto-cleanup — no cron job needed). Coach owns the session; only
+   *  students in scope can redeem it.
+   *
+   *  Returns { token, expiresAt, checkinUrl } — the URL is what the QR
+   *  encodes (SPA route `/checkin/:token`). */
+  async createQrCheckinSession(session: any, body: any) {
+    const g = this.ensureCoachOrOwner(session);
+    const dateStr = String(body?.date || "").trim();
+    const date = dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : new Date().toISOString().slice(0, 10);
+    const coachId = g.role === "coach" ? g.userId : (String(body?.coachId || "").trim() || null);
+    const batchId = String(body?.batchId || "").trim() || null;
+    // Validate batch belongs to this academy if specified.
+    if (batchId) {
+      const b: any = await this.batches().findOne({ _id: batchId as any, academyId: g.academyId });
+      if (!b) return { ok: false, error: "That batch isn't in this academy." };
+    }
+    const token = randomBytes(6).toString("base64url");   // ~8 char URL-safe, easy to type as fallback
+    const expiresAt = new Date(Date.now() + 2 * 60 * 60_000);   // 2h window
+    await this.conn.db!.collection("attendanceQrSessions").updateOne(
+      { token },
+      { $set: { token, academyId: g.academyId, coachId, batchId, date, createdByUserId: g.userId, createdAt: new Date(), expiresAt } },
+      { upsert: true },
+    );
+    // Ensure TTL index (idempotent). expireAfterSeconds: 0 means Mongo respects
+    // the exact expiresAt date field.
+    try { await this.conn.db!.collection("attendanceQrSessions").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }); } catch {}
+    const base = process.env.PUBLIC_URL || "https://chessguru.cc";
+    return { ok: true, token, expiresAt: expiresAt.toISOString(), checkinUrl: `${base}/checkin/${token}` };
+  }
+
+  /** Student scans the QR → this endpoint runs. Auth: student must be signed
+   *  in (redirect from checkin page if not). Validates: token exists + not
+   *  expired + student is in the scope (right academy; if batch scoped,
+   *  student is in that batch; if coach scoped, student's coach matches).
+   *  On success, marks student present for the session's date. */
+  async redeemQrCheckin(session: any, token: string) {
+    const userId: string | null = session?.userId ?? null;
+    if (!userId) return { ok: false, error: "Sign in first." };
+    const sess: any = await this.conn.db!.collection("attendanceQrSessions").findOne({ token });
+    if (!sess) return { ok: false, error: "Invalid or expired check-in code." };
+    if (new Date(sess.expiresAt).getTime() < Date.now()) return { ok: false, error: "This check-in code has expired." };
+    const student: any = await this.users().findOne({ _id: userId as any, academyId: sess.academyId, role: "student" });
+    if (!student) return { ok: false, error: "You are not a student in this academy." };
+    if (sess.coachId && String(student.coachId || "") !== sess.coachId) return { ok: false, error: "This QR is for another coach's class." };
+    if (sess.batchId) {
+      const b: any = await this.batches().findOne({ _id: sess.batchId as any });
+      if (!b || !(b.studentIds || []).map(String).includes(String(userId))) {
+        return { ok: false, error: "This QR is for a specific batch you're not part of." };
+      }
+    }
+    // Write the attendance row directly — bypasses the coach-only mark
+    // guard since the student is marking THEMSELVES via a valid token.
+    const dayAt = new Date(`${sess.date}T09:00:00`);
+    const yyyymmdd = String(sess.date).replace(/-/g, "");
+    const classId = `qrcheckin-${sess.coachId || sess.academyId}-${yyyymmdd}`;
+    await this.conn.db!.collection("classAttendance").updateOne(
+      { classId, key: student._id },
+      {
+        $setOnInsert: { joinedAt: new Date(), classId, key: student._id, userId: student._id, name: student.name || student.username, manual: true, markedByUserId: userId },
+        $set: { lastSeenAt: new Date(), status: "present", lateMinutes: null, reason: null, source: "qr" },
+      },
+      { upsert: true },
+    );
+    return { ok: true, date: sess.date, name: student.name || student.username };
+  }
+
+  /** Poll endpoint — coach's QR modal calls this every few seconds to show
+   *  live "N students checked in" counter. Cheap: one query on classAttendance
+   *  filtered to the QR-session's classId. */
+  async getQrCheckinStatus(session: any, token: string) {
+    const g = this.ensureCoachOrOwner(session);
+    const sess: any = await this.conn.db!.collection("attendanceQrSessions").findOne({ token, academyId: g.academyId });
+    if (!sess) return { ok: false, error: "Session not found." };
+    const yyyymmdd = String(sess.date).replace(/-/g, "");
+    const classId = `qrcheckin-${sess.coachId || sess.academyId}-${yyyymmdd}`;
+    const checked: any[] = await this.conn.db!.collection("classAttendance")
+      .find({ classId, source: "qr" }, { projection: { key: 1, name: 1, lastSeenAt: 1 } })
+      .sort({ lastSeenAt: -1 })
+      .limit(200)
+      .toArray();
+    return {
+      ok: true,
+      date: sess.date,
+      coachId: sess.coachId,
+      batchId: sess.batchId,
+      expiresAt: sess.expiresAt,
+      count: checked.length,
+      recent: checked.slice(0, 20).map((c: any) => ({ studentId: String(c.key), name: c.name, at: c.lastSeenAt })),
+    };
   }
 
   /** Copy the attendance marks from `fromDate` to `toDate` for the same

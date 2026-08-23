@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import QRCode from "qrcode";
 import { api, get, post } from "../lib/api";
 
 type Status = "present" | "late" | "absent";
@@ -26,7 +27,7 @@ type Row = {
   lateMinutes: number | null;
   reason: string | null;
   markedAt: string | null;
-  source: "live-class" | "manual" | "default";
+  source: "manual" | "qr" | "live-class" | "default";
   autoJoin: { classId: string; joinedAt: string | null; lastSeenAt: string | null } | null;
   currentAttendanceStreak: number;
   lastPresentDate: string | null;
@@ -78,6 +79,7 @@ export default function AttendancePage() {
   const [batchId, setBatchId] = useState<string>("");
   const [toast, setToast] = useState<string | null>(null);
   const [detail, setDetail] = useState<Row | null>(null);   // long-press → open modal
+  const [qrOpen, setQrOpen] = useState(false);
 
   useEffect(() => {
     if (!toast) return;
@@ -150,7 +152,7 @@ export default function AttendancePage() {
     const present = rows.filter((r) => r.status === "present").length;
     const late = rows.filter((r) => r.status === "late").length;
     const absent = rows.filter((r) => r.status === "absent").length;
-    const autoDetected = rows.filter((r) => r.source === "live-class").length;
+    const autoDetected = rows.filter((r) => r.source === "live-class" || r.source === "qr").length;
     const total = rows.length;
     const rate = total ? Math.round(((present + late) / total) * 100) : 0;
     return { present, late, absent, autoDetected, total, rate };
@@ -268,6 +270,11 @@ export default function AttendancePage() {
             📋 Copy from last class ({lastClassDate})
           </button>
         )}
+        <button type="button" onClick={() => setQrOpen(true)}
+                className="rounded-lg bg-gradient-to-r from-sky-600 to-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:shadow-sky-500/30"
+                title="Show QR — kids scan with phone to mark themselves present">
+          📱 QR Check-in
+        </button>
         <span className="text-xs text-ink-500">Tap = cycle status · Long-press = edit reason/minutes</span>
       </div>
 
@@ -283,6 +290,13 @@ export default function AttendancePage() {
           <StudentCard key={r.studentId} row={r} onTap={() => toggleOne(r)} onLongPress={() => setDetail(r)} pending={markMut.isPending} />
         ))}
       </div>
+
+      {/* QR check-in modal */}
+      {qrOpen && (
+        <QrCheckinModal date={date} coachId={coachId || null} batchId={batchId || null}
+                        onClose={() => setQrOpen(false)}
+                        onCheckin={() => qc.invalidateQueries({ queryKey: ["attendance-sheet"] })} />
+      )}
 
       {/* Detail modal — edit minutes / reason, or view profile */}
       {detail && (
@@ -315,10 +329,13 @@ function fmtTime(iso: string | null): string {
 function StudentCard({ row, onTap, onLongPress, pending }: { row: Row; onTap: () => void; onLongPress: () => void; pending: boolean }) {
   const s = statusStyle(row.status);
   const wasAbsentYesterday = row.absentYesterday && row.status === "present";
-  // Auto-joined via live class + coach hasn't manually overridden yet.
-  const isAutoDetected = row.source === "live-class";
-  // Conflict: coach marked absent BUT student joined the live call anyway.
-  // Nudges the coach to reconcile ("did they attend or not?").
+  // Auto-marked via live class join OR student's own QR scan.
+  const isAutoDetected = row.source === "live-class" || row.source === "qr";
+  const autoLabel = row.source === "qr" ? "📱 QR" : "✨ Live";
+  const autoTitle = row.source === "qr"
+    ? `Self check-in via QR at ${fmtTime(row.autoJoin?.joinedAt || null)}`
+    : `Auto-detected: joined Live Class at ${fmtTime(row.autoJoin?.joinedAt || null)}`;
+  // Conflict: coach marked absent BUT student joined the live call or scanned QR.
   const hasConflict = row.source === "manual" && row.status === "absent" && !!row.autoJoin;
   const timer = useRef<number | null>(null);
   const longPressed = useRef(false);
@@ -355,11 +372,11 @@ function StudentCard({ row, onTap, onLongPress, pending }: { row: Row; onTap: ()
         <div className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(250,204,21,0.7)]"
              title="Was absent last class — check in with them" />
       )}
-      {/* Auto-detected badge — top-right */}
+      {/* Auto-detected badge — top-right (QR self-checkin OR live-class auto-join) */}
       {isAutoDetected && (
-        <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 rounded-full bg-sky-500/25 px-1.5 py-0.5 text-[10px] font-bold text-sky-200"
-             title={`Auto-detected: joined Live Class at ${fmtTime(row.autoJoin?.joinedAt || null)}`}>
-          ✨ Live
+        <div className={`absolute top-1.5 right-1.5 flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${row.source === "qr" ? "bg-indigo-500/25 text-indigo-200" : "bg-sky-500/25 text-sky-200"}`}
+             title={autoTitle}>
+          {autoLabel}
         </div>
       )}
       {/* Conflict badge — coach said absent, but the student showed up on video */}
@@ -379,7 +396,9 @@ function StudentCard({ row, onTap, onLongPress, pending }: { row: Row; onTap: ()
           <div className="mt-0.5 truncate text-[10px] italic text-ink-500">{row.reason}</div>
         )}
         {isAutoDetected && row.autoJoin?.joinedAt && (
-          <div className="mt-0.5 text-[10px] text-sky-400/80">joined {fmtTime(row.autoJoin.joinedAt)}</div>
+          <div className={`mt-0.5 text-[10px] ${row.source === "qr" ? "text-indigo-400/80" : "text-sky-400/80"}`}>
+            {row.source === "qr" ? "scanned" : "joined"} {fmtTime(row.autoJoin.joinedAt)}
+          </div>
         )}
       </div>
       {/* Last 7 days mini-strip: oldest → newest, tiny dots */}
@@ -391,6 +410,120 @@ function StudentCard({ row, onTap, onLongPress, pending }: { row: Row; onTap: ()
         </div>
       )}
     </button>
+  );
+}
+
+function QrCheckinModal({ date, coachId, batchId, onClose, onCheckin }: {
+  date: string;
+  coachId: string | null;
+  batchId: string | null;
+  onClose: () => void;
+  onCheckin: () => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [session, setSession] = useState<{ token: string; expiresAt: string; checkinUrl: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Create the session on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await post<{ ok: boolean; token: string; expiresAt: string; checkinUrl: string; error?: string }>(
+          "/api/academy/attendance/qr/create",
+          { date, coachId: coachId || undefined, batchId: batchId || undefined },
+        );
+        if (cancelled) return;
+        if (!res.ok) { setError(res.error || "Failed to create QR."); return; }
+        setSession({ token: res.token, expiresAt: res.expiresAt, checkinUrl: res.checkinUrl });
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message || "Failed to create QR.");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [date, coachId, batchId]);
+
+  // Render QR onto canvas whenever session URL changes
+  useEffect(() => {
+    if (!session?.checkinUrl || !canvasRef.current) return;
+    QRCode.toCanvas(canvasRef.current, session.checkinUrl, {
+      width: 320, margin: 2,
+      color: { dark: "#0f172a", light: "#ffffff" },
+      errorCorrectionLevel: "M",
+    }).catch(() => setError("Failed to render QR."));
+  }, [session?.checkinUrl]);
+
+  // Poll status every 3s so the "N checked in" counter feels live.
+  const statusQ = useQuery({
+    queryKey: ["qr-checkin-status", session?.token],
+    queryFn: () => get<{ ok: boolean; count: number; recent: Array<{ studentId: string; name: string; at: string }> }>(
+      `/api/academy/attendance/qr/${session!.token}/status`,
+    ),
+    enabled: !!session?.token,
+    refetchInterval: 3000,
+  });
+
+  // When count grows, invalidate the parent's sheet so it re-renders.
+  const lastCount = useRef(0);
+  useEffect(() => {
+    const n = statusQ.data?.count ?? 0;
+    if (n > lastCount.current) {
+      lastCount.current = n;
+      onCheckin();
+    }
+  }, [statusQ.data?.count, onCheckin]);
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl border border-ink-700 bg-gradient-to-b from-ink-900 to-ink-950 p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 text-center">
+          <div className="text-xs font-semibold uppercase tracking-wide text-sky-400">Attendance · check-in</div>
+          <h2 className="mt-1 font-display text-2xl text-white">📱 Scan to check in</h2>
+          <p className="mt-1 text-xs text-ink-400">Kids scan with their phone camera — they'll be marked <b className="text-emerald-300">Present</b> instantly.</p>
+        </div>
+
+        {error && (
+          <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">{error}</div>
+        )}
+
+        {!error && !session && (
+          <div className="grid h-80 place-items-center text-sm text-ink-500">Generating QR…</div>
+        )}
+
+        {session && (
+          <>
+            <div className="grid place-items-center rounded-xl bg-white p-4">
+              <canvas ref={canvasRef} className="h-72 w-72" />
+            </div>
+            <div className="mt-3 text-center text-[11px] text-ink-500 break-all">
+              or open: <span className="text-sky-300">{session.checkinUrl}</span>
+            </div>
+            <div className="mt-3 flex items-center justify-between rounded-lg bg-ink-800/60 px-3 py-2">
+              <div className="text-xs text-ink-400">Checked in so far</div>
+              <div className="flex items-center gap-2">
+                <span className="grid h-8 min-w-8 place-items-center rounded-full bg-gradient-to-r from-sky-500 to-emerald-500 px-2 text-sm font-bold text-white tabular-nums">
+                  {statusQ.data?.count ?? 0}
+                </span>
+              </div>
+            </div>
+            {statusQ.data?.recent && statusQ.data.recent.length > 0 && (
+              <div className="mt-2 max-h-24 overflow-y-auto text-xs">
+                {statusQ.data.recent.slice(0, 5).map((r) => (
+                  <div key={r.studentId} className="flex justify-between border-b border-ink-800 py-1">
+                    <span className="text-white">{r.name}</span>
+                    <span className="text-ink-500">{new Date(r.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        <div className="mt-4 flex justify-end">
+          <button type="button" onClick={onClose} className="rounded-lg border border-ink-700 px-4 py-2 text-sm font-semibold text-ink-300 hover:bg-ink-800 hover:text-white">Close</button>
+        </div>
+      </div>
+    </div>
   );
 }
 

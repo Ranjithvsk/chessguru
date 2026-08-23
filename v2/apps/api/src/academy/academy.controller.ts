@@ -124,6 +124,27 @@ export class AcademyController {
     return this.svc.copyAttendance(req.session, body);
   }
 
+  /** Create a QR check-in session — coach displays this at class start,
+   *  students scan with phone → auto-marked present. Body: { date?, coachId?,
+   *  batchId? }. Returns { token, expiresAt, checkinUrl } for QR encoding. */
+  @Post("attendance/qr/create")
+  createQrCheckin(@Req() req: any, @Body() body: any) {
+    return this.svc.createQrCheckinSession(req.session, body);
+  }
+
+  /** Student scans QR → this endpoint runs. Auth: must be signed in and be a
+   *  student in the session's scope. Body: { token }. */
+  @Post("attendance/qr/checkin")
+  redeemQrCheckin(@Req() req: any, @Body() body: any) {
+    return this.svc.redeemQrCheckin(req.session, String(body?.token || ""));
+  }
+
+  /** Coach polls this to show live "N checked in" counter in the QR modal. */
+  @Get("attendance/qr/:token/status")
+  qrCheckinStatus(@Req() req: any, @Param("token") token: string) {
+    return this.svc.getQrCheckinStatus(req.session, token);
+  }
+
   /** Presence heartbeat — any signed-in user pings this every ~60s (and on
    *  route change). Body: { path }. Updates users.lastSeen + currentPath so
    *  coaches see who is online right now on the /academy dashboard. */
