@@ -209,6 +209,16 @@ const LazyMini = React.memo(function LazyMini({ it, onOpen }: { it: HistoryItem;
           <span>{tTier.emoji}</span><span className="tabular-nums">{fmtMs(it.ms)}</span>
         </span>
       )}
+      {/* Blindfold badge — owner ask 2026-08-23: parents confused why some
+          "mateIn1 · 4-piece" rounds looked oddly minimal; those are blindfold
+          rounds served with a low pieceCount filter for visualisation. Explicit
+          badge in top-left keeps mode obvious in the mini-board grid. */}
+      {it.mode === "blindfold" && (
+        <span className="absolute top-1 left-1 rounded-md border border-violet-400/60 bg-violet-500/40 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-sm backdrop-blur-sm"
+              title="Blindfold puzzle — solved without seeing the board">
+          🙈 BF
+        </span>
+      )}
     </button>
   );
 });
