@@ -18,22 +18,29 @@ import { ACHIEVEMENTS, type Achievement } from "./achievements.catalog";
 
 const INVITE_TTL_DAYS = 7;
 
-/** ChessGuru Score weights — sum to 1.0. Percentile-based dimensions so the
+/** Overall Score weights — sum to 1.0. Percentile-based dimensions so the
  *  ranking is fair inside the academy (not gated by absolute chess-strength).
  *  Tuning knob for the coach: swap these to bias toward e.g. more accuracy or
  *  more attendance. Kept as a module-level export so the leaderboard response
  *  can echo them back for transparency in the UI.
  *
  *  Owner rebalance 2026-08-23: "reward consistent players, because consistency
- *  is key to success". Consistency now weighs 30% (was 15%, when it was just
- *  the raw consecutive-day streak). New `consistency` composite blends:
- *    - active days in past 30 (out of 30)   0.5
- *    - current streak (sqrt-capped, 60 max) 0.3
- *    - weekly cadence — weeks in past 8
- *      with >= 3 active days                0.2
+ *  is key to success". Consistency = 30% of the overall score.
+ *
+ *  The `consistency` composite blends practice (puzzles) AND attendance
+ *  (physical class-showing-up) — Phase 5b, owner: "attendance streaks feed
+ *  Consistency Score":
+ *    Puzzles side:
+ *      0.35 × active days in past 30 (puzzles solved)
+ *      0.20 × puzzle daily-streak (sqrt-capped, 60 max)
+ *      0.10 × weekly cadence (weeks with >= 3 active days, out of 8)
+ *    Attendance side:
+ *      0.20 × attendance days in past 30 (physical class attended)
+ *      0.15 × attendance streak (sqrt-capped, 60 max)
+ *
  *  Missing one day no longer nukes a kid's rank. Kids who show up 5 days/week
- *  for months beat both cramming-then-vanishing sprinters AND streak-obsessed
- *  perfectionists who play one puzzle a day just to keep the number ticking. */
+ *  for months + also practice at home beat both cramming-then-vanishing
+ *  sprinters AND passive attendees who never solve puzzles. */
 const WEIGHTS = {
   rating: 0.20,
   puzzles: 0.20,
@@ -3030,17 +3037,47 @@ Thank you!`;
       consistMap.set(String(c._id), { activeDays30, weeklyCadence8 });
     }
 
-    // Attendance (30d, capped at 30) — reuse the same shape used elsewhere.
-    const heatStart = new Date(now - 29 * dayMs);
+    // Attendance signals — Phase 5b (owner ask 2026-08-23): feed attendance
+    // streaks into the Consistency Score. Two metrics per student:
+    //   attendance30d  — count of distinct days present/late in past 30d
+    //   attendanceStreak — consecutive days back from today (or yesterday)
+    //                      where student was present/late. Absent days break;
+    //                      unmarked / no-class days count as "no signal" and
+    //                      don't extend but don't break either — we just
+    //                      count DAYS THE STUDENT WAS PRESENT.
+    // Both use classAttendance (any source: manual, qr, live-class), skipping
+    // rows with status:"absent". Window is 60d so long streaks can be shown.
+    const heatStart = new Date(now - 59 * dayMs);
     heatStart.setUTCHours(0, 0, 0, 0);
     const attRows: any[] = await this.conn.db!.collection("classAttendance").aggregate([
       { $match: { userId: { $in: ids }, joinedAt: { $gte: heatStart } } },
-      { $group: { _id: "$userId", days: { $addToSet: {
-          $dateToString: { format: "%Y-%m-%d", date: "$joinedAt", timezone: "Asia/Kolkata" },
-      } } } },
+      { $project: {
+          userId: 1,
+          day: { $dateToString: { format: "%Y-%m-%d", date: "$joinedAt", timezone: "Asia/Kolkata" } },
+          status: { $ifNull: ["$status", "present"] },
+      } },
+      { $match: { status: { $ne: "absent" } } },
+      { $group: { _id: "$userId", days: { $addToSet: "$day" } } },
     ]).toArray();
+    // Legacy shape: `attMap` = attended-days count in past 30d (for scoring
+    // + display). Also compute `attStreakMap` = alive consecutive streak.
     const attMap = new Map<string, number>();
-    for (const a of attRows) attMap.set(String(a._id), (a.days || []).length);
+    const attStreakMap = new Map<string, number>();
+    const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const today = iso(new Date());
+    const yesterday = iso(new Date(Date.now() - dayMs));
+    for (const a of attRows) {
+      const daySet = new Set<string>(a.days || []);
+      // 30d attended count
+      let count30 = 0;
+      for (let i = 0; i < 30; i++) if (daySet.has(iso(new Date(Date.now() - i * dayMs)))) count30++;
+      attMap.set(String(a._id), count30);
+      // Live streak — walk backward from today or (fallback) yesterday.
+      let cursor = daySet.has(today) ? new Date() : daySet.has(yesterday) ? new Date(Date.now() - dayMs) : null;
+      let streak = 0;
+      while (cursor && daySet.has(iso(cursor))) { streak++; cursor.setDate(cursor.getDate() - 1); }
+      attStreakMap.set(String(a._id), streak);
+    }
 
     // Streak — from users.dailyPuzzleStreak. Alive iff lastDate is today or
     // yesterday (matches the rule in listStudents).
@@ -3088,6 +3125,7 @@ Thank you!`;
         streak: streak.current,
         longestStreak: streak.longest,
         attendance30d: attMap.get(String(s._id)) ?? 0,
+        attendanceStreak: attStreakMap.get(String(s._id)) ?? 0,
         activeDays30: consistMap.get(String(s._id))?.activeDays30 ?? 0,
         weeklyCadence8: consistMap.get(String(s._id))?.weeklyCadence8 ?? 0,
       };
@@ -3121,18 +3159,38 @@ Thank you!`;
     const streakScore = (n: number) => Math.min(1, Math.sqrt(Math.min(n, 60)) / Math.sqrt(60));
     // Consistency composite (see WEIGHTS comment). Missing a day no longer
     // resets your rank; showing up 5 days/week for months beats sprinters.
-    const consistencyScore = (activeDays30: number, streak: number, weeklyCadence8: number) => {
-      const dayPart  = Math.min(1, activeDays30 / 30);         // 30/30 = perfect
-      const streakP  = streakScore(streak);                     // continuous days
-      const weekP    = Math.min(1, weeklyCadence8 / 8);         // 8/8 solid weeks
-      return 0.5 * dayPart + 0.3 * streakP + 0.2 * weekP;
+    //
+    // Phase 5b (owner 2026-08-23): attendance is now half of consistency,
+    // matching the intuition "showing up matters as much as solving alone".
+    //   Puzzle side (kept from earlier):
+    //     0.35 × active days in past 30 (puzzles-solved days)
+    //     0.20 × puzzle daily-streak (sqrt-capped)
+    //     0.10 × weekly cadence (weeks with >= 3 active days)
+    //   Attendance side (new):
+    //     0.20 × attendance days in past 30 (physical class-attended days)
+    //     0.15 × attendance streak (sqrt-capped)
+    //
+    // Together, a student who both practices AND shows up dominates. A
+    // grinder who never attends class + a passive kid who only attends
+    // both fall short of a balanced learner.
+    const consistencyScore = (
+      activeDays30: number, streak: number, weeklyCadence8: number,
+      attendance30d: number, attendanceStreak: number,
+    ) => {
+      const puzzleDayP  = Math.min(1, activeDays30 / 30);
+      const puzzleStrP  = streakScore(streak);
+      const puzzleWeekP = Math.min(1, weeklyCadence8 / 8);
+      const attDayP     = Math.min(1, attendance30d / 30);
+      const attStrP     = streakScore(attendanceStreak);
+      return 0.35 * puzzleDayP + 0.20 * puzzleStrP + 0.10 * puzzleWeekP
+           + 0.20 * attDayP    + 0.15 * attStrP;
     };
     const rows = raw.map((r) => {
       const parts = {
         rating:      norm(r.currentRating, minR, maxR),
         puzzles:     norm(Math.log1p(r.puzzlesForScore), minP, maxP),
         accuracy:    r.puzzles >= 5 ? r.accuracy : 0, // <5 rounds = not enough signal
-        consistency: consistencyScore(r.activeDays30, r.streak, r.weeklyCadence8),
+        consistency: consistencyScore(r.activeDays30, r.streak, r.weeklyCadence8, r.attendance30d, r.attendanceStreak),
         themes:      Math.min(1, r.themesCount / 20),
         attendance:  Math.min(1, r.attendance30d / 30),
       };
@@ -3183,7 +3241,7 @@ Thank you!`;
           rating:      norm(r.currentRating, minR, maxR),
           puzzles:     norm(Math.log1p(puzzles), 0, Math.max(...raw.map((rr: any) => Math.log1p(prevMap.get(rr.studentId)?.puzzles ?? 0)), 0.1)),
           accuracy:    puzzles >= 5 ? accuracy : 0,
-          consistency: consistencyScore(r.activeDays30, r.streak, r.weeklyCadence8),
+          consistency: consistencyScore(r.activeDays30, r.streak, r.weeklyCadence8, r.attendance30d, r.attendanceStreak),
           themes:      Math.min(1, r.themesCount / 20),
           attendance:  Math.min(1, r.attendance30d / 30),
         };
@@ -3235,7 +3293,12 @@ Thank you!`;
       blindfoldKing: champion((r) => r.blindfoldPuzzles),
       // Owner ask 2026-08-23: "reward consistent players". Micro-champion
       // celebrated in the leaderboard header alongside overall winner.
-      mostConsistent: champion((r) => r.activeDays30, 5),
+      // Phase 5b: champion is picked by the composite consistency (both
+      // puzzles + attendance). Uses the same score the leaderboard sorts by
+      // when sortBy=consistency — one source of truth.
+      mostConsistent: champion((r) => Math.round((r.scoreParts?.consistency ?? 0) * 100), 5),
+      // Longest attendance streak — dedicated award for physical showing-up.
+      attendanceChampion: champion((r) => r.attendanceStreak, 3),
     };
 
     // Comeback of the period — biggest positive deltaRank.

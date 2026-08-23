@@ -36,6 +36,7 @@ type Row = {
   streak: number;
   longestStreak: number;
   attendance30d: number;
+  attendanceStreak?: number;
   badgesUnlocked?: number;
 };
 
