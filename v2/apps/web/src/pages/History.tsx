@@ -197,26 +197,30 @@ const LazyMini = React.memo(function LazyMini({ it, onOpen }: { it: HistoryItem;
       <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/40 text-xs font-semibold text-white opacity-0 transition-opacity group-hover:opacity-100">
         {it.win ? "▶ Replay" : "🔍 Review"}
       </span>
-      {rdT && rd != null && (
-        <span className={`absolute top-1 right-1 flex items-center gap-0.5 rounded-md border ${rdT.chip} px-1.5 py-0.5 text-[10px] font-bold shadow-sm backdrop-blur-sm tabular-nums`}
+      {/* Rating-delta chip (top-right). Hide when delta is exactly 0 — that
+          happens when a strong player wins against a far-easier puzzle (delta
+          rounds to 0). Showing "+0" is noise. */}
+      {rdT && rd != null && rd !== 0 && (
+        <span className={`absolute top-1 right-1 flex items-center gap-0.5 rounded border ${rdT.chip} px-1 py-0 text-[9px] font-bold shadow-sm backdrop-blur-sm tabular-nums leading-tight`}
               title={`Rating ${rd >= 0 ? "gained" : "lost"} on this solve`}>
           <span>{rdT.arrow}</span><span>{rdT.sign}{Math.abs(rd)}</span>
         </span>
       )}
+      {/* Solve-time chip (bottom-right). */}
       {tTier && typeof it.ms === "number" && (
-        <span className={`absolute bottom-1 right-1 flex items-center gap-0.5 rounded-md border ${tTier.chip} px-1.5 py-0.5 text-[10px] font-semibold shadow-sm backdrop-blur-sm`}
+        <span className={`absolute bottom-1 right-1 flex items-center gap-0.5 rounded border ${tTier.chip} px-1 py-0 text-[9px] font-semibold shadow-sm backdrop-blur-sm leading-tight`}
               title="Time to solve this puzzle">
           <span>{tTier.emoji}</span><span className="tabular-nums">{fmtMs(it.ms)}</span>
         </span>
       )}
-      {/* Blindfold badge — owner ask 2026-08-23: parents confused why some
+      {/* Blindfold badge (top-left) — parents/coaches confused why some
           "mateIn1 · 4-piece" rounds looked oddly minimal; those are blindfold
-          rounds served with a low pieceCount filter for visualisation. Explicit
-          badge in top-left keeps mode obvious in the mini-board grid. */}
+          rounds served with a low pieceCount filter for visualization. Explicit
+          badge keeps mode obvious in the mini-board grid. */}
       {it.mode === "blindfold" && (
-        <span className="absolute top-1 left-1 rounded-md border border-violet-400/60 bg-violet-500/40 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-sm backdrop-blur-sm"
+        <span className="absolute top-1 left-1 rounded border border-violet-400/70 bg-violet-500/60 px-1 py-0 text-[9px] font-bold text-white shadow-sm backdrop-blur-sm leading-tight"
               title="Blindfold puzzle — solved without seeing the board">
-          🙈 BF
+          🙈
         </span>
       )}
     </button>
@@ -536,7 +540,7 @@ export default function HistoryPage() {
                     <h3 className="mb-2 text-sm font-semibold text-ink-300">
                       {tg.label} <span className="font-normal text-ink-500">· {tg.items.length}</span>
                     </h3>
-                    <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10">
                       {tg.items.map((it) => <LazyMini key={it.id + it.date} it={it} onOpen={openReview} />)}
                     </div>
                   </div>
