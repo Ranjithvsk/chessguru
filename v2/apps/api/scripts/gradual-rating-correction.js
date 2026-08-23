@@ -16,7 +16,10 @@
 // Runs: DRY_RUN=true|false mongosh chessguru --quiet gradual-rating-correction.js
 
 const DRY_RUN = process.env.DRY_RUN !== "false";
-const MAX_DAILY_DROP = 15;         // max pts reduced per day per user
+// MAX_DAILY_DROP is normally 15 pts/day (gentle). Override to a big value
+// (e.g. 9999) for a one-shot full correction — puts everyone on target
+// immediately. Owner used FULL=true after seeing 12 users flagged 2026-08-23.
+const MAX_DAILY_DROP = parseInt(process.env.MAX_DAILY_DROP || "15", 10);
 const GAP_THRESHOLD = 50;          // stop when within this of target
 const MIN_ROUNDS_FOR_TARGET = 30;  // need this many solves to estimate sustainable rating
 
@@ -65,7 +68,11 @@ async function correct() {
     if (currentR <= target + GAP_THRESHOLD) continue;  // already close enough
 
     const gap = currentR - target;
-    const drop = Math.min(MAX_DAILY_DROP, Math.max(1, Math.round(gap / 15)));
+    // Normal cron: gentle drop = gap/15 or the cap, whichever is smaller.
+    // Full mode (MAX_DAILY_DROP >= 500 or FULL=true): drop = full gap.
+    const drop = (MAX_DAILY_DROP >= 500 || process.env.FULL === "true")
+      ? gap
+      : Math.min(MAX_DAILY_DROP, Math.max(1, Math.round(gap / 15)));
     const newR = currentR - drop;
 
     changes.push({ uid: u._id, was: currentR, target, drop, newR, gap });
