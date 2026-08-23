@@ -189,40 +189,44 @@ const LazyMini = React.memo(function LazyMini({ it, onOpen }: { it: HistoryItem;
   return (
     <button ref={ref as unknown as React.RefObject<HTMLButtonElement>} onClick={() => onOpen(it.id)}
       type="button" title={hint}
-      className={`group relative overflow-hidden rounded-md border-2 ${it.win ? "border-accent-500" : "border-rose-500"} transition-transform hover:-translate-y-0.5 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-brand-400`}>
-      {show && it.fen
-        ? <Board fen={it.fen} orientation={it.orientation} lastMove={lm} viewOnly coordinates={false} className="mini" />
-        : <div className="aspect-square w-full bg-ink-800" />}
-      {/* Hover reveal: subtle "▶ replay" chip so it's obvious the tile is interactive. */}
-      <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/40 text-xs font-semibold text-white opacity-0 transition-opacity group-hover:opacity-100">
-        {it.win ? "▶ Replay" : "🔍 Review"}
-      </span>
-      {/* Rating-delta chip (top-right). Hide when delta is exactly 0 — that
-          happens when a strong player wins against a far-easier puzzle (delta
-          rounds to 0). Showing "+0" is noise. */}
-      {rdT && rd != null && rd !== 0 && (
-        <span className={`absolute top-1 right-1 flex items-center gap-0.5 rounded border ${rdT.chip} px-1 py-0 text-[9px] font-bold shadow-sm backdrop-blur-sm tabular-nums leading-tight`}
-              title={`Rating ${rd >= 0 ? "gained" : "lost"} on this solve`}>
-          <span>{rdT.arrow}</span><span>{rdT.sign}{Math.abs(rd)}</span>
+      className={`group relative flex flex-col overflow-hidden rounded-md border-2 ${it.win ? "border-accent-500" : "border-rose-500"} transition-transform hover:-translate-y-0.5 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-brand-400`}>
+      <div className="relative">
+        {show && it.fen
+          ? <Board fen={it.fen} orientation={it.orientation} lastMove={lm} viewOnly coordinates={false} className="mini" />
+          : <div className="aspect-square w-full bg-ink-800" />}
+        {/* Hover reveal: subtle "▶ replay" chip so it's obvious the tile is interactive. */}
+        <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/40 text-xs font-semibold text-white opacity-0 transition-opacity group-hover:opacity-100">
+          {it.win ? "▶ Replay" : "🔍 Review"}
         </span>
-      )}
-      {/* Solve-time chip (bottom-right). */}
-      {tTier && typeof it.ms === "number" && (
-        <span className={`absolute bottom-1 right-1 flex items-center gap-0.5 rounded border ${tTier.chip} px-1 py-0 text-[9px] font-semibold shadow-sm backdrop-blur-sm leading-tight`}
-              title="Time to solve this puzzle">
-          <span>{tTier.emoji}</span><span className="tabular-nums">{fmtMs(it.ms)}</span>
+      </div>
+      {/* Caption bar BELOW the board — keeps chips off the chess pieces.
+          Owner report 2026-08-23: previous overlay chips sat on top of the
+          board obscuring pieces + felt cluttered on small tiles. Now: a
+          single row under the board with blindfold badge (left) + rating
+          delta + solve time (right). Empty tiles get a thin invisible spacer
+          so grid heights stay uniform. */}
+      <div className="flex h-6 items-center justify-between gap-1 border-t border-ink-800 bg-ink-900/80 px-1.5 text-[11px] leading-none">
+        <span>
+          {it.mode === "blindfold" && (
+            <span className="rounded border border-violet-400/60 bg-violet-500/25 px-1 py-0.5 text-[10px] font-bold text-violet-200"
+                  title="Blindfold puzzle — solved without seeing the board">🙈</span>
+          )}
         </span>
-      )}
-      {/* Blindfold badge (top-left) — parents/coaches confused why some
-          "mateIn1 · 4-piece" rounds looked oddly minimal; those are blindfold
-          rounds served with a low pieceCount filter for visualization. Explicit
-          badge keeps mode obvious in the mini-board grid. */}
-      {it.mode === "blindfold" && (
-        <span className="absolute top-1 left-1 rounded border border-violet-400/70 bg-violet-500/60 px-1 py-0 text-[9px] font-bold text-white shadow-sm backdrop-blur-sm leading-tight"
-              title="Blindfold puzzle — solved without seeing the board">
-          🙈
+        <span className="flex items-center gap-1.5">
+          {rdT && rd != null && rd !== 0 && (
+            <span className={`flex items-center gap-0.5 tabular-nums font-bold text-[10px] ${rd >= 0 ? "text-emerald-300" : "text-rose-300"}`}
+                  title={`Rating ${rd >= 0 ? "gained" : "lost"} on this solve`}>
+              <span>{rdT.arrow}</span><span>{rdT.sign}{Math.abs(rd)}</span>
+            </span>
+          )}
+          {tTier && typeof it.ms === "number" && (
+            <span className="flex items-center gap-0.5 text-[10px] text-ink-400"
+                  title="Time to solve this puzzle">
+              <span>{tTier.emoji}</span><span className="tabular-nums">{fmtMs(it.ms)}</span>
+            </span>
+          )}
         </span>
-      )}
+      </div>
     </button>
   );
 });
@@ -540,7 +544,7 @@ export default function HistoryPage() {
                     <h3 className="mb-2 text-sm font-semibold text-ink-300">
                       {tg.label} <span className="font-normal text-ink-500">· {tg.items.length}</span>
                     </h3>
-                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10">
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
                       {tg.items.map((it) => <LazyMini key={it.id + it.date} it={it} onOpen={openReview} />)}
                     </div>
                   </div>
