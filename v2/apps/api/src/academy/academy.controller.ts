@@ -145,6 +145,14 @@ export class AcademyController {
     return this.svc.getQrCheckinStatus(req.session, token);
   }
 
+  /** Fetch parent WhatsApp contact for a student — used by the "📱 WhatsApp
+   *  Parent" button on absent cards. Returns wa.me click-to-chat links
+   *  pre-filled with a friendly absent-notification message. */
+  @Get("attendance/parent-contact/:studentId")
+  parentContact(@Req() req: any, @Param("studentId") studentId: string, @Query("date") date: string) {
+    return this.svc.getParentContact(req.session, studentId, date);
+  }
+
   /** Presence heartbeat — any signed-in user pings this every ~60s (and on
    *  route change). Body: { path }. Updates users.lastSeen + currentPath so
    *  coaches see who is online right now on the /academy dashboard. */

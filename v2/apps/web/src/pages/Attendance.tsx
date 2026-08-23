@@ -80,6 +80,7 @@ export default function AttendancePage() {
   const [toast, setToast] = useState<string | null>(null);
   const [detail, setDetail] = useState<Row | null>(null);   // long-press → open modal
   const [qrOpen, setQrOpen] = useState(false);
+  const [notifyOpen, setNotifyOpen] = useState(false);
 
   useEffect(() => {
     if (!toast) return;
@@ -275,6 +276,13 @@ export default function AttendancePage() {
                 title="Show QR — kids scan with phone to mark themselves present">
           📱 QR Check-in
         </button>
+        {stats.absent > 0 && (
+          <button type="button" onClick={() => setNotifyOpen(true)}
+                  className="rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:shadow-emerald-500/30"
+                  title={`WhatsApp the parents of all ${stats.absent} absent students`}>
+            💬 Notify absent parents ({stats.absent})
+          </button>
+        )}
         <span className="text-xs text-ink-500">Tap = cycle status · Long-press = edit reason/minutes</span>
       </div>
 
@@ -296,6 +304,15 @@ export default function AttendancePage() {
         <QrCheckinModal date={date} coachId={coachId || null} batchId={batchId || null}
                         onClose={() => setQrOpen(false)}
                         onCheckin={() => qc.invalidateQueries({ queryKey: ["attendance-sheet"] })} />
+      )}
+
+      {/* Notify-absent-parents bulk modal */}
+      {notifyOpen && (
+        <NotifyAbsentModal
+          date={date}
+          absentRows={rows.filter((r) => r.status === "absent")}
+          onClose={() => setNotifyOpen(false)}
+        />
       )}
 
       {/* Detail modal — edit minutes / reason, or view profile */}
@@ -527,6 +544,113 @@ function QrCheckinModal({ date, coachId, batchId, onClose, onCheckin }: {
   );
 }
 
+/** Bulk absent-notification modal — one row per absent student, each row
+ *  fetches its parent contacts lazily and renders a "Send" button that
+ *  opens WhatsApp with the pre-filled message. Coach clicks through the
+ *  list in ~5 seconds per student. Marks each row as "sent" locally so the
+ *  coach knows what they've already done. */
+function NotifyAbsentModal({ date, absentRows, onClose }: { date: string; absentRows: Row[]; onClose: () => void }) {
+  const [sent, setSent] = useState<Set<string>>(new Set());
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-2xl border border-ink-700 bg-ink-900 p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 text-center">
+          <div className="text-xs font-semibold uppercase tracking-wide text-emerald-400">Attendance · notify parents</div>
+          <h2 className="mt-1 font-display text-2xl text-white">💬 WhatsApp absent parents</h2>
+          <p className="mt-1 text-xs text-ink-400">{absentRows.length} student{absentRows.length === 1 ? "" : "s"} absent · click each to open WhatsApp</p>
+        </div>
+        <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+          {absentRows.map((r) => (
+            <AbsentNotifyRow key={r.studentId} row={r} date={date} sent={sent.has(r.studentId)} onSent={() => setSent((s) => new Set(s).add(r.studentId))} />
+          ))}
+        </div>
+        <div className="mt-4 flex items-center justify-between">
+          <div className="text-xs text-ink-500">{sent.size} / {absentRows.length} notified</div>
+          <button type="button" onClick={onClose} className="rounded-lg border border-ink-700 px-4 py-2 text-sm font-semibold text-ink-300 hover:bg-ink-800 hover:text-white">Done</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AbsentNotifyRow({ row, date, sent, onSent }: { row: Row; date: string; sent: boolean; onSent: () => void }) {
+  const q = useQuery({
+    queryKey: ["parent-contact", row.studentId, date],
+    queryFn: () => get<{
+      ok: boolean;
+      error?: string;
+      contacts?: Array<{ parentId: string; name: string; phoneE164: string | null; waLink: string | null }>;
+    }>(`/api/academy/attendance/parent-contact/${encodeURIComponent(row.studentId)}?date=${date}`),
+    staleTime: 60_000,
+  });
+  const contacts = q.data?.contacts?.filter((c) => c.waLink) ?? [];
+  return (
+    <div className={`flex items-center gap-3 rounded-xl border p-3 transition ${sent ? "border-emerald-500/40 bg-emerald-500/10" : "border-ink-800 bg-ink-950"}`}>
+      <Avatar name={row.name} />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-semibold text-white">{row.name}</div>
+        {row.reason && <div className="truncate text-[11px] italic text-ink-500">Reason: {row.reason}</div>}
+        {q.isLoading && <div className="text-[11px] text-ink-500">Loading…</div>}
+        {!q.isLoading && contacts.length === 0 && <div className="text-[11px] text-amber-300">No parent phone on file</div>}
+      </div>
+      <div className="flex flex-col gap-1">
+        {contacts.map((c) => (
+          <a key={c.parentId} href={c.waLink!} target="_blank" rel="noreferrer" onClick={onSent}
+             className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 text-[11px] font-semibold transition ${sent ? "border-emerald-500/60 bg-emerald-500/20 text-emerald-200" : "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"}`}>
+            {sent ? "✓ " : "📱 "}{c.name}
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Inline "📱 WhatsApp Parent" contact list — fetches on mount, shows one
+ *  button per linked parent with the pre-filled wa.me link. Coach clicks →
+ *  WhatsApp opens on their device (desktop or phone) with the message ready
+ *  to send. Zero setup, no Meta template approval needed. */
+function ParentContactButtons({ studentId }: { studentId: string }) {
+  const [date] = useState(ymd(new Date()));
+  const q = useQuery({
+    queryKey: ["parent-contact", studentId, date],
+    queryFn: () => get<{
+      ok: boolean;
+      error?: string;
+      contacts?: Array<{ parentId: string; name: string; phoneE164: string | null; waLink: string | null; mobileConsent: boolean }>;
+    }>(`/api/academy/attendance/parent-contact/${encodeURIComponent(studentId)}?date=${date}`),
+    staleTime: 60_000,
+  });
+  if (q.isLoading) return <div className="mt-4 text-xs text-ink-500">Loading parent contacts…</div>;
+  if (!q.data?.ok) return <div className="mt-4 text-xs text-rose-400">{q.data?.error || "Couldn't load parent contacts."}</div>;
+  const contacts = q.data.contacts || [];
+  if (contacts.length === 0) {
+    return (
+      <div className="mt-4 rounded-lg border border-ink-700 bg-ink-950 p-3 text-xs text-ink-400">
+        No parent contact linked yet. <Link to="/academy" className="text-brand-300 hover:underline">Link a parent →</Link>
+      </div>
+    );
+  }
+  const usable = contacts.filter((c) => c.waLink);
+  return (
+    <div className="mt-4">
+      <label className="mb-1 block text-xs font-semibold text-ink-400">Notify parent via WhatsApp</label>
+      {usable.length === 0 && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+          Parent linked but no mobile number on file. Ask them to add it in the Family portal.
+        </div>
+      )}
+      <div className="flex flex-wrap gap-1.5">
+        {usable.map((c) => (
+          <a key={c.parentId} href={c.waLink!} target="_blank" rel="noreferrer"
+             className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-200 transition hover:bg-emerald-500/25">
+            📱 WhatsApp {c.name}
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function DetailModal({ row, onClose, onSave }: {
   row: Row;
   onClose: () => void;
@@ -593,6 +717,11 @@ function DetailModal({ row, onClose, onSave }: {
             <input type="text" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Custom reason…" maxLength={200}
                    className="mt-2 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-rose-400" />
           </div>
+        )}
+
+        {/* WhatsApp parent — only for absent; opens wa.me with pre-filled msg */}
+        {status === "absent" && (
+          <ParentContactButtons studentId={row.studentId} />
         )}
 
         {/* Auto-join info banner — shown whether or not it "wins" over manual */}

@@ -1234,6 +1234,83 @@ export class AcademyService {
     return { ok: true, date, coachId, batchId: batchId || null, rows, lastClassDate };
   }
 
+  /** Parent contact info for a student — used by the Attendance page to show
+   *  a "📱 WhatsApp parent" button on absent cards. Returns pre-formatted
+   *  wa.me click-to-chat links (works today, no Meta template needed) plus
+   *  the raw phone/message so a future auto-send path can reuse it.
+   *
+   *  Auth: coach can only fetch for their own students; owner for anyone in
+   *  the academy. Owner ask 2026-08-23. Message copy is friendly + neutral
+   *  so it works whether the parent English is comfortable or not.
+   */
+  async getParentContact(session: any, studentId: string, dateStr?: string) {
+    const g = this.ensureCoachOrOwner(session);
+    const student: any = await this.users().findOne({ _id: studentId as any, academyId: g.academyId, role: "student" });
+    if (!student) return { ok: false, error: "Student not found in your academy." };
+    if (g.role === "coach" && String(student.coachId || "") !== g.userId) {
+      return { ok: false, error: "That student isn't assigned to you." };
+    }
+    const date = dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : new Date().toISOString().slice(0, 10);
+    const parentIds: string[] = (student.parentIds || []).map(String);
+    // Also fall back to the student's own mobile (some kids have their own
+    // phone but no linked parent yet — the message is still useful even if
+    // it reaches the kid directly for now).
+    const parents: any[] = parentIds.length
+      ? await this.users().find({ _id: { $in: parentIds as any } }, { projection: { _id: 1, username: 1, name: 1, mobile: 1, mobileConsent: 1, email: 1 } }).toArray()
+      : [];
+    const academy: any = await this.academies().findOne({ _id: g.academyId as any }, { projection: { name: 1 } });
+    const academyName = academy?.name || "the academy";
+    const studentName = student.name || student.username;
+    // Pretty date — "Sat, Aug 23" — parents scan a message faster than a raw ISO date.
+    const dParts = date.split("-").map(Number);
+    const prettyDate = new Date(dParts[0]!, (dParts[1]! - 1), dParts[2]!)
+      .toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    const message =
+`Hello,
+
+This is a message from ${academyName} (via ChessGuru).
+
+${studentName} was marked ABSENT from today's chess class on ${prettyDate}.
+
+If this was unexpected, please reach out to their coach.
+
+Thank you!`;
+    // Normalize a mobile to India-91 assumption if it's a bare 10-digit local.
+    const norm = (m: string | null | undefined): string | null => {
+      if (!m) return null;
+      const digits = String(m).replace(/\D/g, "");
+      if (!digits) return null;
+      if (digits.length === 10) return "91" + digits;    // India default
+      return digits;
+    };
+    const contactRows = parents.map((p) => {
+      const phone = norm(p.mobile);
+      return {
+        parentId: String(p._id),
+        name: p.name || p.username,
+        email: p.email || null,
+        mobile: p.mobile || null,
+        mobileConsent: !!p.mobileConsent,
+        phoneE164: phone,
+        waLink: phone ? `https://wa.me/${phone}?text=${encodeURIComponent(message)}` : null,
+      };
+    });
+    // Student's own mobile fallback (only if no parent contacts exist).
+    if (contactRows.length === 0 && student.mobile) {
+      const phone = norm(student.mobile);
+      contactRows.push({
+        parentId: `self:${studentId}`,
+        name: `${studentName} (student's own phone)`,
+        email: student.email || null,
+        mobile: student.mobile,
+        mobileConsent: !!student.mobileConsent,
+        phoneE164: phone,
+        waLink: phone ? `https://wa.me/${phone}?text=${encodeURIComponent(message)}` : null,
+      });
+    }
+    return { ok: true, studentName, date, prettyDate, message, contacts: contactRows };
+  }
+
   /** Create a QR check-in session — coach shows the QR on their tablet at
    *  class start; students scan with their phone and get marked present
    *  automatically. Owner ask 2026-08-23. Token is short-lived (~2h),
