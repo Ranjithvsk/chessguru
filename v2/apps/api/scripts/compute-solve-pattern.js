@@ -41,9 +41,15 @@ while (cur.hasNext()) {
   if (lastTheme && lastTheme !== "mix") {
     for (const r of all) { if (r.sel === lastTheme) streak++; else break; }
   }
-  const type = (atLvlPct >= 15 && diversity >= 5) ? "legitimate"
-             : (atLvlPct >= 5)                     ? "borderline"
-             :                                       "grinder";
+  // Classification:
+  //   grinder    = one-theme farming (streak >= 20 same theme)
+  //                OR low at-level rate + low diversity
+  //   legitimate = at-level rate >= 15% AND diversity >= 5 AND no streak farm
+  //   borderline = everything else
+  const type = (streak >= 20) ? "grinder"
+             : (atLvlPct < 5 && diversity < 5) ? "grinder"
+             : (atLvlPct >= 15 && diversity >= 5) ? "legitimate"
+             : "borderline";
   const solvePattern = {
     type,
     atLevelPct: Math.round(atLvlPct * 10) / 10,
