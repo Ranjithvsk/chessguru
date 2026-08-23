@@ -26,6 +26,8 @@ type Row = {
   lateMinutes: number | null;
   reason: string | null;
   markedAt: string | null;
+  source: "live-class" | "manual" | "default";
+  autoJoin: { classId: string; joinedAt: string | null; lastSeenAt: string | null } | null;
   currentAttendanceStreak: number;
   lastPresentDate: string | null;
   absentYesterday: boolean;
@@ -148,9 +150,10 @@ export default function AttendancePage() {
     const present = rows.filter((r) => r.status === "present").length;
     const late = rows.filter((r) => r.status === "late").length;
     const absent = rows.filter((r) => r.status === "absent").length;
+    const autoDetected = rows.filter((r) => r.source === "live-class").length;
     const total = rows.length;
     const rate = total ? Math.round(((present + late) / total) * 100) : 0;
-    return { present, late, absent, total, rate };
+    return { present, late, absent, autoDetected, total, rate };
   }, [rows]);
 
   function toggleOne(row: Row) {
@@ -240,6 +243,9 @@ export default function AttendancePage() {
           <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 font-semibold text-emerald-300">✅ {stats.present}</span>
           <span className="rounded-full bg-amber-500/15 px-2.5 py-1 font-semibold text-amber-300">⏰ {stats.late}</span>
           <span className="rounded-full bg-rose-500/15 px-2.5 py-1 font-semibold text-rose-300">❌ {stats.absent}</span>
+          {stats.autoDetected > 0 && (
+            <span className="rounded-full bg-sky-500/15 px-2.5 py-1 font-semibold text-sky-300" title="Auto-detected from Live Class join">✨ {stats.autoDetected} live</span>
+          )}
           <span className="rounded-full border border-ink-700 px-2.5 py-1 font-semibold text-ink-300 tabular-nums">{stats.rate}%</span>
         </div>
       </div>
@@ -300,9 +306,20 @@ export default function AttendancePage() {
   );
 }
 
+function fmtTime(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 function StudentCard({ row, onTap, onLongPress, pending }: { row: Row; onTap: () => void; onLongPress: () => void; pending: boolean }) {
   const s = statusStyle(row.status);
   const wasAbsentYesterday = row.absentYesterday && row.status === "present";
+  // Auto-joined via live class + coach hasn't manually overridden yet.
+  const isAutoDetected = row.source === "live-class";
+  // Conflict: coach marked absent BUT student joined the live call anyway.
+  // Nudges the coach to reconcile ("did they attend or not?").
+  const hasConflict = row.source === "manual" && row.status === "absent" && !!row.autoJoin;
   const timer = useRef<number | null>(null);
   const longPressed = useRef(false);
 
@@ -338,6 +355,20 @@ function StudentCard({ row, onTap, onLongPress, pending }: { row: Row; onTap: ()
         <div className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(250,204,21,0.7)]"
              title="Was absent last class — check in with them" />
       )}
+      {/* Auto-detected badge — top-right */}
+      {isAutoDetected && (
+        <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 rounded-full bg-sky-500/25 px-1.5 py-0.5 text-[10px] font-bold text-sky-200"
+             title={`Auto-detected: joined Live Class at ${fmtTime(row.autoJoin?.joinedAt || null)}`}>
+          ✨ Live
+        </div>
+      )}
+      {/* Conflict badge — coach said absent, but the student showed up on video */}
+      {hasConflict && (
+        <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 rounded-full bg-orange-500/30 px-1.5 py-0.5 text-[10px] font-bold text-orange-200 animate-pulse"
+             title={`Marked absent but joined Live Class at ${fmtTime(row.autoJoin?.joinedAt || null)} — tap to reconcile`}>
+          ⚠️ Joined
+        </div>
+      )}
       <Avatar name={row.name} size="lg" />
       <div className="min-w-0 w-full">
         <div className="truncate text-sm font-semibold text-white">{row.name}</div>
@@ -346,6 +377,9 @@ function StudentCard({ row, onTap, onLongPress, pending }: { row: Row; onTap: ()
         </div>
         {row.reason && row.status === "absent" && (
           <div className="mt-0.5 truncate text-[10px] italic text-ink-500">{row.reason}</div>
+        )}
+        {isAutoDetected && row.autoJoin?.joinedAt && (
+          <div className="mt-0.5 text-[10px] text-sky-400/80">joined {fmtTime(row.autoJoin.joinedAt)}</div>
         )}
       </div>
       {/* Last 7 days mini-strip: oldest → newest, tiny dots */}
@@ -425,6 +459,17 @@ function DetailModal({ row, onClose, onSave }: {
             </div>
             <input type="text" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Custom reason…" maxLength={200}
                    className="mt-2 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-rose-400" />
+          </div>
+        )}
+
+        {/* Auto-join info banner — shown whether or not it "wins" over manual */}
+        {row.autoJoin?.joinedAt && (
+          <div className={`mt-4 rounded-lg border p-3 text-xs ${row.source === "live-class" ? "border-sky-500/30 bg-sky-500/10 text-sky-200" : "border-orange-500/30 bg-orange-500/10 text-orange-200"}`}>
+            {row.source === "live-class" ? (
+              <>✨ <b>Auto-detected</b> — joined Live Class at <b>{fmtTime(row.autoJoin.joinedAt)}</b>. Your manual mark (if any) overrides this.</>
+            ) : (
+              <>⚠️ <b>Conflict</b>: you marked <b>{statusStyle(row.status).label}</b>, but they joined Live Class at <b>{fmtTime(row.autoJoin.joinedAt)}</b>. Reconcile?</>
+            )}
           </div>
         )}
 

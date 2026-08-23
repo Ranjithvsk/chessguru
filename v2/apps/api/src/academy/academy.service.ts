@@ -1085,16 +1085,38 @@ export class AcademyService {
     const students: any[] = await this.users().find(studentFilter, { projection: { _id: 1, username: 1, name: 1, coachId: 1, avatarKey: 1 } }).toArray();
     const ids = students.map((s) => String(s._id));
 
-    // Attendance marks for this date. Any row for this student on this date =
-    // present-baseline; explicit status field overrides. Late/absent statuses
-    // added by this feature; older manual rows had no status = treat as present.
+    // Attendance marks for this date. Rows come from TWO sources:
+    //   (a) Manual coach marks — classId "manual-<coachId>-<yyyymmdd>",
+    //       explicit `status: "present"|"late"|"absent"`. Coach's ground truth.
+    //   (b) Live-class auto-joins — classId = Jitsi room, no `status` field.
+    //       Written by video-signal.ts when a student joins the call.
+    //
+    // Priority for display: manual (a) always wins over auto (b). Within
+    // manual, latest lastSeenAt wins. This prevents a student marked absent
+    // by the coach at 14:00 from being auto-flipped to present when they
+    // then join the video call at 14:30 (owner ask 2026-08-23).
     const attRows: any[] = ids.length ? await this.conn.db!.collection("classAttendance")
       .find({ key: { $in: ids as any }, joinedAt: { $gte: dayStart, $lte: dayEnd } })
       .sort({ lastSeenAt: 1 })
       .toArray() : [];
-    // Last-write-wins per student for the date.
-    const byStudent = new Map<string, any>();
-    for (const a of attRows) byStudent.set(String(a.key), a);
+    // Per-student best mark: manual > auto, then latest wins within each tier.
+    // Also collect the auto-join info (class + timestamp) even when a manual
+    // mark exists — the UI can show "You marked absent · joined Live Class 14:30"
+    // so the coach can spot conflicts.
+    const byStudent = new Map<string, { manual: any | null; auto: any | null }>();
+    for (const a of attRows) {
+      const key = String(a.key);
+      const rec = byStudent.get(key) || { manual: null, auto: null };
+      const isManual = typeof a.classId === "string" && a.classId.startsWith("manual-");
+      if (isManual) {
+        // Latest manual wins.
+        if (!rec.manual || (a.lastSeenAt || a.joinedAt) > (rec.manual.lastSeenAt || rec.manual.joinedAt)) rec.manual = a;
+      } else {
+        // Latest auto wins.
+        if (!rec.auto || (a.lastSeenAt || a.joinedAt) > (rec.auto.lastSeenAt || rec.auto.joinedAt)) rec.auto = a;
+      }
+      byStudent.set(key, rec);
+    }
 
     // Streak + last-present-date + last-7-day strip — one aggregation covering
     // past 60d. Also captures status per day so the card can render a
@@ -1141,14 +1163,26 @@ export class AcademyService {
 
     const rows = students.map((s: any) => {
       const uid = String(s._id);
-      const mark = byStudent.get(uid);
-      // Legacy rows had no `status` — treat presence as "present".
+      const rec = byStudent.get(uid);
+      // Priority: manual mark > auto-detected join > default present.
+      // A student who is auto-detected via live-class join is present unless
+      // the coach explicitly said otherwise (manual absent/late overrides).
+      const mark = rec?.manual || rec?.auto || null;
+      const isAuto = !rec?.manual && !!rec?.auto;
       const status: "present" | "late" | "absent" =
-        !mark ? "present"                       // no mark = default present (per owner directive)
+        !mark ? "present"                       // no mark at all = default present
         : mark.status === "absent" ? "absent"
         : mark.status === "late" ? "late"
         : "present";
       const streak = streakMap.get(uid);
+      // Auto-join details (for UI badge) — even if manual mark is present,
+      // surface the class join so the coach can spot conflicts.
+      const auto = rec?.auto;
+      const autoJoin = auto ? {
+        classId: String(auto.classId || ""),
+        joinedAt: auto.joinedAt || null,
+        lastSeenAt: auto.lastSeenAt || null,
+      } : null;
       return {
         studentId: uid,
         name: s.name || s.username,
@@ -1159,6 +1193,8 @@ export class AcademyService {
         lateMinutes: mark?.lateMinutes ?? null,
         reason: mark?.reason ?? null,
         markedAt: mark?.lastSeenAt || mark?.joinedAt || null,
+        source: (isAuto ? "live-class" : mark ? "manual" : "default") as "live-class" | "manual" | "default",
+        autoJoin,   // {classId, joinedAt, lastSeenAt} of the auto row (nullable)
         currentAttendanceStreak: streak?.current ?? 0,
         lastPresentDate: streak?.lastPresentDate ?? null,
         absentYesterday: (streak?.lastPresentDate && streak.lastPresentDate < yesterday) || (!streak?.lastPresentDate && ids.length > 0),
