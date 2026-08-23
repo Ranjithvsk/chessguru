@@ -58,22 +58,23 @@ export function liveDeviation(perf: Perf, reverse = false): number {
 
 const sanity = (x: Glicko) => x.r > 0 && x.r < 4000 && x.d > 0 && x.d < 2000 && x.v > 0 && x.v < 2;
 
-export function updatePuzzleRating(userPerf: Perf, puzzleGlicko: Glicko, win: boolean) {
+export function updatePuzzleRating(userPerf: Perf, puzzleGlicko: Glicko, win: boolean, solvePatternType?: "legitimate" | "borderline" | "grinder") {
   const uG: Glicko = { r: userPerf.gl.r, d: liveDeviation(userPerf), v: userPerf.gl.v || DEFAULT_VOLATILITY };
   const score = win ? 1 : 0;
   const nU = computeGame(uG, puzzleGlicko, score);
   const nP = computeGame(puzzleGlicko, uG, 1 - score);
   nU.r = Math.max(uG.r - MAX_RATING_DELTA, Math.min(uG.r + MAX_RATING_DELTA, nU.r));
-  // Cap upward drift from grinding easy puzzles (gap > 250 pts). On WINS
-  // against a puzzle 250+ below the user, hold the delta at +1 max — grinding
-  // trivially-easy puzzles shouldn't move the needle. LOSSES take their full
-  // Glicko-2 delta which is already 5-10× larger than an equivalent win by
-  // formula (expected win ≈ 85% → loss delta scales with (0 - 0.85)) — that
-  // natural asymmetry is enough to correct an inflated rating in ~8-12 easy
-  // losses without any extra multiplier.
+  // Cap upward drift from grinding easy puzzles (gap > 250 pts).
+  //   - legitimate / borderline / unknown: +1 max (tiny reward, no inflation)
+  //   - grinder (per solvePattern classifier):  0    (rating truly stuck until
+  //                                                    they face at-level)
+  // LOSSES take their full Glicko-2 delta which is already 5-10× larger than
+  // an equivalent win by formula — that natural asymmetry is enough to
+  // correct rating in ~8-12 easy losses.
   const gap = uG.r - puzzleGlicko.r;
   if (win && gap > 250 && nU.r > uG.r) {
-    nU.r = Math.min(nU.r, uG.r + 1);
+    const cap = solvePatternType === "grinder" ? 0 : 1;
+    nU.r = Math.min(nU.r, uG.r + cap);
   }
   if (!sanity(nU)) nU.r = uG.r;
   // Rating history kept per user. Bumped 12 → 100 on 2026-08-18 to power the

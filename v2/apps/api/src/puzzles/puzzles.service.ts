@@ -720,7 +720,12 @@ export class PuzzlesService {
       // them down. With d=500 initially, strong players still climb rapidly.
       const perf = doc[key] || { gl: { r: 800, d: 500, v: DEFAULT_VOLATILITY }, nb: 0, re: [], la: null };
       if (hint) return { win, ratingDiff: 0, rating: Math.round(perf.gl.r), glicko: perf.gl };
-      const upd = updatePuzzleRating(perf, puzzleGlicko, win);
+      // Pass solvePattern.type so grinders get stricter easy-win cap (0
+      // instead of +1). Pattern computed nightly by compute-solve-pattern.js
+      // + refreshed on demand.
+      const spType: "legitimate" | "borderline" | "grinder" | undefined =
+        doc.puzzle?.solvePattern?.type;
+      const upd = updatePuzzleRating(perf, puzzleGlicko, win, spType);
       const sets: Record<string, any> = { [key]: upd.userPerf };
       // Per-theme Glicko ratings (owner 2026-07-08): every rated solve also rates the
       // puzzle's MEANINGFUL themes, so the dashboard shows real strengths/weaknesses
