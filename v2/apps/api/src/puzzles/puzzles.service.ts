@@ -67,10 +67,18 @@ export class PuzzlesService {
       const up = await this.conn.db!.collection("userperfs").findOne({ _id: userId as any }, { projection: proj });
       const liveR = (up as any)?.[perfKey]?.gl?.r;
       if (typeof liveR === "number" && liveR > 0) baseRating = liveR;
-      // Theme training uses the THEME rating once it has a little signal — a player
+      // Theme training uses the THEME rating once it has enough signal — a player
       // strong in forks but weak in endgames gets correctly-hard puzzles in each.
+      // Gates: nb >= 8 AND d <= 200. Below those, the rating is provisional and
+      // often inflated (Mageswaran report 2026-08-23: mateIn5 climbed to 3042 for
+      // a globally-2809 player after 9 forcing-sequence wins from a 1500 start).
+      // For provisional themes, fall back to global rating so puzzles land at a
+      // realistic difficulty instead of feeding the inflation loop.
       const tp = themed ? (up as any)?.[themeNs]?.[theme] : null;
-      if (tp && typeof tp.gl?.r === "number" && (tp.nb ?? 0) >= 3) baseRating = tp.gl.r;
+      const trustTheme = tp && typeof tp.gl?.r === "number"
+        && (tp.nb ?? 0) >= 8
+        && (tp.gl?.d ?? 500) <= 200;
+      if (trustTheme) baseRating = tp.gl.r;
     }
     // Curriculum step: caller-specified exact rating wins over both the
     // live-rating override AND the difficulty offset. Used by the weakness
@@ -532,7 +540,7 @@ export class PuzzlesService {
    *     tough rather than piling on the worst ones. */
   async suggestedThemes(userId: string | null): Promise<{
     global: number;
-    items: Array<{ theme: string; yourRating: number | null; delta: number | null; solves: number; reason: "weakness" | "strength" | "new" | "starter" }>;
+    items: Array<{ theme: string; yourRating: number | null; delta: number | null; solves: number; provisional: boolean; reason: "weakness" | "strength" | "new" | "starter" }>;
   }> {
     // Themes worth suggesting — meta/length/level tags are filtered so we
     // never suggest "long" or "master". This mirrors the front-end trainer's
@@ -560,7 +568,7 @@ export class PuzzlesService {
     if (!userId) {
       return {
         global: 1500,
-        items: STARTER.map((theme) => ({ theme, yourRating: null, delta: null, solves: 0, reason: "starter" as const })),
+        items: STARTER.map((theme) => ({ theme, yourRating: null, delta: null, solves: 0, provisional: true, reason: "starter" as const })),
       };
     }
     const perf: any = await this.conn.db!.collection("userperfs").findOne({ _id: userId as any });
@@ -576,30 +584,49 @@ export class PuzzlesService {
       const merged = [...new Set([...seen, ...STARTER])].slice(0, 7);
       return {
         global: globalR,
-        items: merged.map((theme) => ({
-          theme,
-          yourRating: themes[theme] ? Math.round(themes[theme].gl?.r ?? globalR) : null,
-          delta: themes[theme] ? Math.round((themes[theme].gl?.r ?? globalR) - globalR) : null,
-          solves: themes[theme]?.nb ?? 0,
-          reason: "starter" as const,
-        })),
+        items: merged.map((theme) => {
+          const tp = themes[theme];
+          const nb = tp?.nb ?? 0;
+          return {
+            theme,
+            yourRating: tp ? Math.round(tp.gl?.r ?? globalR) : null,
+            delta: tp ? Math.round((tp.gl?.r ?? globalR) - globalR) : null,
+            solves: nb,
+            provisional: true,  // everything is provisional for very-new users
+            reason: "starter" as const,
+          };
+        }),
       };
     }
 
     // Established-user path: classify each candidate theme by our per-theme
-    // rating delta. MIN_SOLVES gates flimsy 2-solve deltas so we don't
-    // hyper-suggest something the user barely touched.
-    const MIN_SOLVES = 5;
-    type Row = { theme: string; yourRating: number | null; delta: number | null; solves: number; reason: "weakness" | "strength" | "new" | "starter" };
+    // rating delta. Only themes with enough SOLVES *and* low RD (<=200) are
+    // trusted for strength/weakness classification — provisional ratings on
+    // few-play themes routinely inflate to +200-300 from the fresh-1500 start
+    // (Mageswaran mateIn5 = 3042 on 9 solves, 234 above global 2809, was being
+    // suggested as a "strength" and served 3000+-rated puzzles). Provisional
+    // themes still show in "new" if the user has touched them, but the UI can
+    // render them with a "provisional — few solves" badge.
+    const MIN_SOLVES_TRUSTED = 15;
+    const MAX_RD_TRUSTED = 200;
+    type Row = { theme: string; yourRating: number | null; delta: number | null; solves: number; provisional: boolean; reason: "weakness" | "strength" | "new" | "starter" };
     const rows: Row[] = CANDIDATE_THEMES.map((theme) => {
       const tp = themes[theme];
       const nb = tp?.nb ?? 0;
-      if (nb >= MIN_SOLVES) {
+      const rd = tp?.gl?.d ?? 500;
+      const trusted = nb >= MIN_SOLVES_TRUSTED && rd <= MAX_RD_TRUSTED;
+      if (trusted) {
         const r = Math.round(tp.gl?.r ?? globalR);
         const d = r - globalR;
-        return { theme, yourRating: r, delta: d, solves: nb, reason: d <= -50 ? "weakness" : d >= 50 ? "strength" : "starter" as const };
+        return { theme, yourRating: r, delta: d, solves: nb, provisional: false,
+                 reason: d <= -50 ? "weakness" : d >= 50 ? "strength" : "starter" as const };
       }
-      return { theme, yourRating: nb > 0 ? Math.round(tp.gl?.r ?? globalR) : null, delta: null, solves: nb, reason: "new" as const };
+      return { theme,
+               yourRating: nb > 0 ? Math.round(tp.gl?.r ?? globalR) : null,
+               delta: null,
+               solves: nb,
+               provisional: nb > 0,   // played but not trusted → provisional
+               reason: "new" as const };
     });
 
     // Pick 3 biggest weaknesses (most negative delta), 2 strengths (biggest
@@ -626,11 +653,13 @@ export class PuzzlesService {
       if (seen.has(t)) continue;
       const tp = themes[t];
       const nb = tp?.nb ?? 0;
+      const rd = tp?.gl?.d ?? 500;
       zipped.push({
         theme: t,
         yourRating: nb > 0 ? Math.round(tp.gl?.r ?? globalR) : null,
         delta: nb > 0 ? Math.round((tp.gl?.r ?? globalR) - globalR) : null,
         solves: nb,
+        provisional: !(nb >= MIN_SOLVES_TRUSTED && rd <= MAX_RD_TRUSTED),
         reason: "starter",
       });
       seen.add(t);
@@ -683,10 +712,16 @@ export class PuzzlesService {
       // (lengths, goals, origins) are not rated. Regular puzzle mode only.
       if (Array.isArray(pz.themes)) {
         const themeNs = key === "blindfold" ? "themesBf" : "themes"; // blindfold themes rated separately
-        const startR = key === "blindfold" ? 800 : 1500;
+        // Seed a fresh per-theme entry from the user's GLOBAL rating with moderate
+        // uncertainty (d=250) — "roughly at your global level in this theme, refine
+        // from here." The old default (1500 / d=500) caused rapid inflation for
+        // skilled players: a 2809 user's first mateIn5 solve vs a 2600 puzzle jumped
+        // rating +1063 in a single game because Glicko's expected-win was ~1%.
+        // Mageswaran incident 2026-08-23.
+        const globalR = perf?.gl?.r ?? (key === "blindfold" ? 800 : 1500);
         for (const t of pz.themes) {
           if (PuzzlesService.UNRATED.has(t) || typeof t !== "string" || !/^[a-zA-Z0-9]+$/.test(t)) continue;
-          const tPerf = doc[themeNs]?.[t] || { gl: { r: startR, d: 500, v: DEFAULT_VOLATILITY }, nb: 0, re: [], la: null };
+          const tPerf = doc[themeNs]?.[t] || { gl: { r: globalR, d: 250, v: DEFAULT_VOLATILITY }, nb: 0, re: [], la: null };
           const tUpd = updatePuzzleRating(tPerf, puzzleGlicko, win);
           sets[`${themeNs}.${t}`] = tUpd.userPerf;
         }

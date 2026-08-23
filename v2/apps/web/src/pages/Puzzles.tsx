@@ -89,14 +89,22 @@ function SuggestedThemesRow({ current, setTheme, disabled }: { current: string; 
                 ? { emoji: "✨", tip: "Untried — try something new" }
                 : { emoji: "•", tip: "Starter" };
           const label = prettify(s.theme);
+          // Ratings on themes with few solves (or high Glicko RD) are provisional
+          // — flag with "?" and hide the (+delta) since it isn't reliable yet.
+          const prov = (s as any).provisional === true;
           const sub = s.yourRating != null
-            ? `${badge.emoji} ${label} · ${s.yourRating}${s.delta != null ? ` (${s.delta >= 0 ? "+" : ""}${s.delta})` : ""}`
+            ? prov
+              ? `${badge.emoji} ${label} · ${s.yourRating}?`
+              : `${badge.emoji} ${label} · ${s.yourRating}${s.delta != null ? ` (${s.delta >= 0 ? "+" : ""}${s.delta})` : ""}`
             : `${badge.emoji} ${label}`;
+          const tip = prov
+            ? `${badge.tip}${s.solves ? ` · ${s.solves} solves` : ""} · provisional rating (need ≥15 solves for a reliable estimate)`
+            : `${badge.tip}${s.solves ? ` · ${s.solves} solves` : ""}`;
           return (
             <button key={s.theme} type="button" disabled={disabled}
               onClick={() => setTheme(s.theme)}
-              title={`${badge.tip}${s.solves ? ` · ${s.solves} solves` : ""}`}
-              className={`rounded-full px-2.5 py-1 text-xs transition ${chosen ? "bg-brand-600 text-white" : "bg-ink-800 text-ink-200 hover:bg-ink-700"} ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}>
+              title={tip}
+              className={`rounded-full px-2.5 py-1 text-xs transition ${chosen ? "bg-brand-600 text-white" : "bg-ink-800 text-ink-200 hover:bg-ink-700"} ${prov ? "italic" : ""} ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}>
               {sub}
             </button>
           );
