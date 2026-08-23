@@ -518,7 +518,7 @@ export class PuzzlesService {
 
     return {
       loggedIn: true,
-      global: { rating: Math.round(p.puzzle?.gl?.r ?? 800), rd: Math.round(p.puzzle?.gl?.d ?? 500), games: p.puzzle?.nb ?? 0 },
+      global: { rating: Math.round(p.puzzle?.gl?.r ?? 1200), rd: Math.round(p.puzzle?.gl?.d ?? 500), games: p.puzzle?.nb ?? 0 },
       blindfold: p.blindfold ? { rating: Math.round(p.blindfold.gl?.r ?? 800), games: p.blindfold.nb ?? 0 } : null,
       totals: { attempted: puzzleRounds.length, wins, accuracy: puzzleRounds.length ? Math.round((wins / puzzleRounds.length) * 100) : 0 },
       study: { total: studyTotal, byType: studyByType },
@@ -583,7 +583,7 @@ export class PuzzlesService {
       };
     }
     const perf: any = await this.conn.db!.collection("userperfs").findOne({ _id: userId as any });
-    const globalR = Math.round(perf?.puzzle?.gl?.r ?? 800);
+    const globalR = Math.round(perf?.puzzle?.gl?.r ?? 1200);
     const totalSolves = perf?.puzzle?.nb ?? 0;
     const themes = perf?.themes ?? {};
 
@@ -713,12 +713,14 @@ export class PuzzlesService {
       const perfsCol = this.conn.db!.collection("userperfs");
       const doc: any = (await perfsCol.findOne({ _id: userId as any })) || {};
       const key = mode === "blindfold" ? "blindfold" : "puzzle";
-      // Fresh puzzle seed for a first-time solver: use NEW_USER_RATING (800),
-      // not the Lichess default of 1500. Kids at academies (our primary
-      // audience) skew far below 1500 — starting them at 1500 meant their
-      // first 8-10 puzzles were demoralizingly hard as Glicko slowly ratcheted
-      // them down. With d=500 initially, strong players still climb rapidly.
-      const perf = doc[key] || { gl: { r: 800, d: 500, v: DEFAULT_VOLATILITY }, nb: 0, re: [], la: null };
+      // Fresh puzzle seed for a first-time solver: use 1200 for regular
+      // puzzles, 800 for blindfold. Regular starts at 1200 (owner directive
+      // 2026-08-23) — mid-way between the Lichess default of 1500 and a
+      // beginner floor of 800. Below 1500 means kids aren't crushed on
+      // their first solves; above 800 means adult beginners aren't
+      // patronized by trivial puzzles. Strong players still climb quickly
+      // via Glicko convergence with d=500 initially.
+      const perf = doc[key] || { gl: { r: (key === "blindfold" ? 800 : 1200), d: 500, v: DEFAULT_VOLATILITY }, nb: 0, re: [], la: null };
       if (hint) return { win, ratingDiff: 0, rating: Math.round(perf.gl.r), glicko: perf.gl };
       // Pass solvePattern.type so grinders get stricter easy-win cap (0
       // instead of +1). Pattern computed nightly by compute-solve-pattern.js

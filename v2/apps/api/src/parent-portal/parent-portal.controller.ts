@@ -42,7 +42,7 @@ export class ParentPortalController {
     ]);
     const ratingById = new Map<string, { rating: number; nb: number }>();
     for (const p of perfs) {
-      const r = Math.round((p as any).puzzle?.gl?.r ?? 800);
+      const r = Math.round((p as any).puzzle?.gl?.r ?? 1200);
       const nb = (p as any).puzzle?.nb ?? 0;
       ratingById.set(String(p._id), { rating: r, nb });
     }
