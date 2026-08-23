@@ -2,9 +2,9 @@
 // Owner directive 2026-08-23: default everyone PRESENT, tap-to-mark absent,
 // reverse-order roster, modern colourful UI with coach + batch filters.
 //
-// Tap once   → LATE   (yellow, opens modal to set minutes)
-// Tap twice  → ABSENT (red, opens modal to add reason)
-// Tap thrice → back to PRESENT (green glow)
+// Tap once   → ABSENT (red — most common exception, first tap)
+// Tap twice  → LATE   (yellow, defaults to 5 min)
+// Tap thrice → back to PRESENT (green)
 //
 // Long-press a card → detail modal (edit minutes, reason, or open student
 // profile). Auto-saves every tap via the bulk endpoint; undo toast for 2.2s.
@@ -46,8 +46,11 @@ type Batch = { _id: string; name: string; coachUserId: string; studentIds: strin
 
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
+// Owner directive 2026-08-23: first tap = ABSENT (the common case — most
+// students are present by default, coach only touches the ones missing).
+// Cycle: Present → Absent → Late → Present.
 function nextStatus(s: Status): Status {
-  return s === "present" ? "late" : s === "late" ? "absent" : "present";
+  return s === "present" ? "absent" : s === "absent" ? "late" : "present";
 }
 
 function statusStyle(s: Status, excused = false): { ring: string; bg: string; text: string; label: string; emoji: string } {
@@ -127,11 +130,48 @@ export default function AttendancePage() {
   const rows = attendanceQ.data?.rows ?? [];
   const lastClassDate = attendanceQ.data?.lastClassDate ?? null;
 
+  const sheetKey = ["attendance-sheet", date, coachId, batchId];
   const markMut = useMutation({
     mutationFn: (entries: Array<{ studentId: string; status: Status; lateMinutes?: number | null; reason?: string | null }>) =>
       post<{ ok: boolean; marked: number; skipped: number }>(`/api/academy/attendance/mark`, { date, entries }),
-    onSuccess: (res, vars) => {
+    // Optimistic UI (owner ask 2026-08-23 "click should be instant"):
+    // patch the cached sheet BEFORE the server responds so the card flips
+    // immediately. Cache a snapshot so we can roll back on error. Coach
+    // can keep tapping other cards while the previous POST is still in
+    // flight — each mutation is independent.
+    onMutate: async (entries) => {
+      await qc.cancelQueries({ queryKey: sheetKey });
+      const prev = qc.getQueryData<Resp>(sheetKey);
+      if (prev) {
+        const patched: Resp = {
+          ...prev,
+          rows: prev.rows.map((r) => {
+            const e = entries.find((x) => x.studentId === r.studentId);
+            if (!e) return r;
+            return {
+              ...r,
+              status: e.status,
+              lateMinutes: e.status === "late" ? (e.lateMinutes ?? r.lateMinutes ?? 5) : null,
+              reason: e.reason ?? r.reason,
+              source: "manual",
+            };
+          }),
+        };
+        qc.setQueryData(sheetKey, patched);
+      }
+      return { prev };
+    },
+    onError: (_err, _vars, ctx: any) => {
+      // Roll back on failure — restore the pre-mutation snapshot.
+      if (ctx?.prev) qc.setQueryData(sheetKey, ctx.prev);
+      setToast("Save failed — reverted");
+    },
+    onSettled: () => {
+      // Reconcile with server truth in the background (won't flicker since
+      // the optimistic patch already matches).
       qc.invalidateQueries({ queryKey: ["attendance-sheet"] });
+    },
+    onSuccess: (res, vars) => {
       if (vars.length === 1) {
         const e = vars[0]!;
         const row = rows.find((r) => r.studentId === e.studentId);
@@ -219,7 +259,7 @@ export default function AttendancePage() {
             📋 Attendance
           </h1>
           <div className="mt-1 text-sm text-ink-400">
-            Everyone starts as <b className="text-emerald-300">Present</b>. Tap to change → Late → Absent → Present. Long-press for details.
+            Everyone starts as <b className="text-emerald-300">Present</b>. Tap once = <b className="text-rose-300">Absent</b>, again = <b className="text-amber-300">Late</b>, again = Present. Long-press for details.
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -318,7 +358,7 @@ export default function AttendancePage() {
       )}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
         {rows.map((r) => (
-          <StudentCard key={r.studentId} row={r} onTap={() => toggleOne(r)} onLongPress={() => setDetail(r)} pending={markMut.isPending} />
+          <StudentCard key={r.studentId} row={r} onTap={() => toggleOne(r)} onLongPress={() => setDetail(r)} />
         ))}
       </div>
 
@@ -383,7 +423,7 @@ function fmtTime(iso: string | null): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function StudentCard({ row, onTap, onLongPress, pending }: { row: Row; onTap: () => void; onLongPress: () => void; pending: boolean }) {
+function StudentCard({ row, onTap, onLongPress }: { row: Row; onTap: () => void; onLongPress: () => void }) {
   const s = statusStyle(row.status, !!row.excused);
   const wasAbsentYesterday = row.absentYesterday && row.status === "present";
   // Auto-marked via live class join OR student's own QR scan.
@@ -413,10 +453,11 @@ function StudentCard({ row, onTap, onLongPress, pending }: { row: Row; onTap: ()
   };
 
   return (
-    <button type="button" onClick={handleClick} disabled={pending}
+    <button type="button" onClick={handleClick}
       onMouseDown={startPress} onMouseUp={endPress} onMouseLeave={endPress}
       onTouchStart={startPress} onTouchEnd={endPress} onTouchCancel={endPress}
-      className={`group relative flex flex-col items-center gap-2 rounded-2xl border border-ink-800 p-3 text-center transition-all ring-2 ${s.ring} ${s.bg} disabled:cursor-wait active:scale-95`}>
+      style={{ touchAction: "manipulation" }}
+      className={`group relative flex flex-col items-center gap-2 rounded-2xl border border-ink-800 p-3 text-center transition-all ring-2 ${s.ring} ${s.bg} active:scale-95`}>
       {/* Streak flame in top-left */}
       {row.currentAttendanceStreak >= 3 && (
         <div className="absolute top-1.5 left-1.5 flex items-center gap-0.5 rounded-full bg-amber-500/25 px-1.5 py-0.5 text-[10px] font-bold text-amber-200"
