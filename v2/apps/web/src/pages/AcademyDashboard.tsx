@@ -52,6 +52,74 @@ interface Student {
   dailyStreakCurrent?: number; dailyStreakLongest?: number;
 }
 // Mini 30-day attendance strip — 30 tiny cells, green when present.
+/** Absent-of-week alert banner. Appears at the top of /academy when there are
+ *  students needing attention this week — flagged by the same rules as the
+ *  attendance dashboard watchlist (>=3 absences in past 7 days, 2 consecutive
+ *  misses, or rate dropped >=20 pts vs prior period). Dismissible for the
+ *  browser session so the coach can stash it if they've already acted.
+ *  Owner ask 2026-08-23. Shows top 3 names + a "See all →" link to the full
+ *  dashboard. */
+function AbsentWeekAlert() {
+  const [dismissed, setDismissed] = useState<boolean>(() => {
+    try { return sessionStorage.getItem("attendance-alert-dismissed") === "1"; } catch { return false; }
+  });
+  const q = useQuery({
+    queryKey: ["attendance-alert", 7],
+    queryFn: () => get<{
+      ok: boolean;
+      watchlist: Array<{
+        studentId: string; name: string; coachName: string | null;
+        batchNames: string[]; currentRate: number | null; recentAbsent: number;
+        consecutiveMiss: boolean; reasons: string[];
+      }>;
+    }>("/api/academy/attendance/dashboard?days=7"),
+    refetchInterval: 5 * 60_000,   // refresh every 5 min
+    staleTime: 60_000,
+  });
+  if (dismissed || !q.data?.ok || q.data.watchlist.length === 0) return null;
+  const list = q.data.watchlist;
+  const top = list.slice(0, 3);
+  return (
+    <div className="rounded-2xl border border-rose-500/40 bg-gradient-to-r from-rose-500/10 via-orange-500/10 to-amber-500/10 p-4 shadow-lg shadow-rose-500/5">
+      <div className="flex items-start gap-3">
+        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-rose-500/25 text-lg">⚠️</div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div className="font-display text-base font-bold text-white">
+              {list.length} student{list.length === 1 ? "" : "s"} need{list.length === 1 ? "s" : ""} a check-in this week
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <Link to="/academy/attendance/dashboard" className="rounded-full bg-rose-500/25 px-3 py-1 font-semibold text-rose-100 hover:bg-rose-500/40">See all →</Link>
+              <button type="button" onClick={() => { try { sessionStorage.setItem("attendance-alert-dismissed", "1"); } catch { /* private mode */ } setDismissed(true); }}
+                      className="text-ink-500 hover:text-white" title="Hide until refresh">×</button>
+            </div>
+          </div>
+          <div className="mt-2 space-y-1.5">
+            {top.map((w) => (
+              <Link key={w.studentId} to={`/academy/students/${encodeURIComponent(w.studentId)}/performance`}
+                    className="flex items-center gap-2 rounded-lg bg-ink-950/40 px-3 py-1.5 text-xs transition hover:bg-ink-900">
+                <span className="min-w-0 flex-1 truncate font-semibold text-white">{w.name}</span>
+                <div className="flex flex-wrap justify-end gap-1">
+                  {w.reasons.slice(0, 2).map((r, i) => (
+                    <span key={i} className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                      w.consecutiveMiss && r.includes("row") ? "bg-rose-500/30 text-rose-200"
+                      : r.includes("this week") ? "bg-orange-500/25 text-orange-200"
+                      : "bg-amber-500/20 text-amber-200"
+                    }`}>{r}</span>
+                  ))}
+                </div>
+              </Link>
+            ))}
+            {list.length > 3 && (
+              <div className="pl-3 text-[11px] text-ink-500">+ {list.length - 3} more…</div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AttendanceStrip({ days }: { days?: boolean[] }) {
   const strip = (days && days.length === 30) ? days : new Array(30).fill(false);
   return (
@@ -2251,6 +2319,10 @@ export default function AcademyDashboardPage() {
       </div>
 
       <AcademyHero name={academyMeta?.name || me.academyId} roleLabel={roleLabel} username={me.username || ""} trialEndsAt={academyMeta?.trialEndsAt} />
+
+      {/* Absent-of-week alert — shown to coaches/owners only, appears at the
+          top so the first thing they see is "these kids need attention". */}
+      {canManage && <AbsentWeekAlert />}
 
       {/* Leaderboard — pulled to the very top of the dashboard so students
           + coach see the competition the moment they land, not after
