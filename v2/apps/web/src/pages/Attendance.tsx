@@ -831,19 +831,22 @@ function parseVoiceTranscript(transcript: string, roster: Row[]): VoiceIntent[] 
       .replace(/\d+/g, "")
       .replace(/\s+/g, " ")
       .trim();
-    // Score every roster row + pick top-3 candidates
+    // Score every roster row + pick top-5 candidates. Threshold loosened
+    // (0.7→0.6, gap 0.15→0.10) because voice-transcribed Indian names are
+    // often lightly off (e.g. "Aarav" → "R chunk", "Priya" → "prayer").
+    // Coach can always click a candidate chip to correct.
     const scored = roster.map((r) => ({
       studentId: r.studentId,
       name: r.name || r.username,
       score: nameScore(nameGuess, r.name || r.username),
-    })).sort((a, b) => b.score - a.score).slice(0, 3);
+    })).sort((a, b) => b.score - a.score).slice(0, 5);
     const best = scored[0];
-    const confident = best && best.score >= 0.7 && (!scored[1] || best.score - scored[1].score >= 0.15);
+    const confident = best && best.score >= 0.6 && (!scored[1] || best.score - scored[1].score >= 0.10);
     intents.push({
       fragment: frag,
       studentId: confident ? best!.studentId : null,
       matchedName: confident ? best!.name : null,
-      candidates: scored.filter((s) => s.score > 0.3),
+      candidates: scored.filter((s) => s.score > 0.2),   // was 0.3
       status,
       lateMinutes,
     });
@@ -859,12 +862,38 @@ function VoiceMarkModal({ rows, onClose, onApply }: {
   onApply: (entries: Array<{ studentId: string; status: Status; lateMinutes?: number | null }>) => void;
 }) {
   const [transcript, setTranscript] = useState("");
+  const [interimText, setInterimText] = useState("");
   const [listening, setListening] = useState(false);
   const [supported, setSupported] = useState<boolean | null>(null);
   const [intents, setIntents] = useState<VoiceIntent[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [lang, setLang] = useState<"en-IN" | "en-US" | "en-GB">("en-IN");
   const recRef = useRef<any>(null);
   const finalRef = useRef<string>("");
+  const wantListenRef = useRef(false);   // user's intent — auto-restart on onend
 
+  // Human-friendly error messages per SpeechRecognitionErrorEvent.error code.
+  const explainError = (code: string): string => {
+    switch (code) {
+      case "not-allowed":
+      case "service-not-allowed":
+        return "🎤 Microphone permission denied. Click the 🔒 icon in your address bar → allow mic → try again.";
+      case "no-speech":
+        return "Didn't hear anything — try speaking louder or closer to the mic.";
+      case "audio-capture":
+        return "No microphone detected. Plug one in or check your system audio settings.";
+      case "network":
+        return "Recognition needs an internet connection (Chrome sends audio to Google servers).";
+      case "aborted":
+        return null as any;   // user-initiated stop, don't show
+      case "language-not-supported":
+        return `Language ${lang} not supported. Try switching to en-US or en-GB below.`;
+      default:
+        return `Recognition error: ${code}`;
+    }
+  };
+
+  // Build/rebuild the recognizer whenever the lang changes.
   useEffect(() => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     setSupported(!!SR);
@@ -872,7 +901,7 @@ function VoiceMarkModal({ rows, onClose, onApply }: {
     const rec = new SR();
     rec.continuous = true;
     rec.interimResults = true;
-    rec.lang = "en-IN";     // best-effort accent; user can retrain later
+    rec.lang = lang;
     rec.onresult = (ev: any) => {
       let interim = "";
       let final = "";
@@ -881,13 +910,35 @@ function VoiceMarkModal({ rows, onClose, onApply }: {
         if (r.isFinal) final += r[0].transcript + " "; else interim += r[0].transcript;
       }
       if (final) finalRef.current += final;
+      setInterimText(interim);
       setTranscript(finalRef.current + interim);
+      setError(null);
     };
-    rec.onend = () => setListening(false);
-    rec.onerror = () => setListening(false);
+    rec.onend = () => {
+      // Web Speech auto-stops after ~5-10s silence. If user still wants to
+      // listen, restart transparently so a pause between names doesn't kill
+      // the session.
+      if (wantListenRef.current) {
+        try { rec.start(); } catch { setListening(false); }
+      } else {
+        setListening(false);
+      }
+    };
+    rec.onerror = (ev: any) => {
+      const code = String(ev?.error || "unknown");
+      const msg = explainError(code);
+      if (msg) setError(msg);
+      if (code === "not-allowed" || code === "service-not-allowed" || code === "audio-capture") {
+        wantListenRef.current = false;
+        setListening(false);
+      }
+    };
     recRef.current = rec;
-    return () => { try { rec.stop(); } catch { /* ignore */ } };
-  }, []);
+    return () => {
+      wantListenRef.current = false;
+      try { rec.stop(); } catch { /* ignore */ }
+    };
+  }, [lang]);
 
   // Re-parse whenever transcript changes
   useEffect(() => {
@@ -896,11 +947,17 @@ function VoiceMarkModal({ rows, onClose, onApply }: {
 
   const start = () => {
     if (!recRef.current) return;
-    finalRef.current = "";
-    setTranscript("");
-    try { recRef.current.start(); setListening(true); } catch { /* already running */ }
+    setError(null);
+    wantListenRef.current = true;
+    try { recRef.current.start(); setListening(true); }
+    catch (e: any) {
+      // InvalidStateError = already running; stop then restart cleanly.
+      try { recRef.current.stop(); } catch { /* ignore */ }
+      setTimeout(() => { try { recRef.current.start(); setListening(true); } catch { setError("Couldn't start recognition — try refresh."); } }, 100);
+    }
   };
   const stop = () => {
+    wantListenRef.current = false;
     if (!recRef.current) return;
     try { recRef.current.stop(); } catch { /* ignore */ }
     setListening(false);
@@ -908,7 +965,9 @@ function VoiceMarkModal({ rows, onClose, onApply }: {
   const clear = () => {
     finalRef.current = "";
     setTranscript("");
+    setInterimText("");
     setIntents([]);
+    setError(null);
   };
 
   const pickCandidate = (idx: number, studentId: string, name: string) => {
@@ -923,6 +982,13 @@ function VoiceMarkModal({ rows, onClose, onApply }: {
       status: it.status,
       lateMinutes: it.status === "late" ? (it.lateMinutes ?? 5) : null,
     })));
+  };
+
+  // Manual edit — coach can type/paste directly, bypassing the mic entirely.
+  const setManualTranscript = (v: string) => {
+    finalRef.current = v;
+    setInterimText("");
+    setTranscript(v);
   };
 
   return (
@@ -945,17 +1011,44 @@ function VoiceMarkModal({ rows, onClose, onApply }: {
 
         {supported !== false && (
           <>
-            {/* Mic button + transcript box */}
+            {/* Mic button + language + transcript */}
             <div className="flex flex-col items-center gap-3 py-2">
               <button type="button" onClick={listening ? stop : start}
-                      className={`grid h-20 w-20 place-items-center rounded-full text-3xl shadow-lg transition ${listening ? "bg-rose-600 animate-pulse" : "bg-gradient-to-br from-orange-500 to-red-600 hover:scale-105"}`}
+                      className={`grid h-20 w-20 place-items-center rounded-full text-3xl shadow-lg transition ${listening ? "bg-rose-600 animate-pulse ring-4 ring-rose-500/40" : "bg-gradient-to-br from-orange-500 to-red-600 hover:scale-105"}`}
                       title={listening ? "Stop listening" : "Start listening"}>
                 🎙️
               </button>
-              <div className="text-xs text-ink-500">{listening ? "Listening… tap to stop" : "Tap to start"}</div>
+              <div className="text-xs text-ink-500">
+                {listening ? (interimText ? `Hearing: "${interimText}"` : "Listening…") : "Tap the mic to start"}
+              </div>
+              <div className="flex items-center gap-2 text-[10px] text-ink-500">
+                <span>Language:</span>
+                {(["en-IN", "en-US", "en-GB"] as const).map((l) => (
+                  <button key={l} type="button" onClick={() => setLang(l)}
+                          className={`rounded-full border px-2 py-0.5 ${lang === l ? "border-orange-400 bg-orange-500/20 text-orange-200" : "border-ink-700 text-ink-400 hover:text-white"}`}>
+                    {l}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="min-h-16 rounded-lg border border-ink-700 bg-ink-950 p-3 text-sm text-ink-200">
-              {transcript || <span className="italic text-ink-500">Transcript will appear here…</span>}
+
+            {/* Error banner */}
+            {error && (
+              <div className="mb-2 rounded-lg border border-rose-500/40 bg-rose-500/10 p-2 text-xs text-rose-200">
+                {error}
+              </div>
+            )}
+
+            {/* Editable transcript — coach can also just type/paste here */}
+            <textarea
+              value={transcript}
+              onChange={(e) => setManualTranscript(e.target.value)}
+              placeholder='Or type directly: "Aarav absent, Priya late 5 minutes, Rohit here"'
+              rows={3}
+              className="w-full rounded-lg border border-ink-700 bg-ink-950 p-3 text-sm text-ink-100 outline-none focus:border-orange-400"
+            />
+            <div className="mt-1 text-[10px] text-ink-500">
+              💡 Tip: If a name gets mis-heard, just fix it in the box above — parsing updates live.
             </div>
 
             {/* Parsed intents */}
