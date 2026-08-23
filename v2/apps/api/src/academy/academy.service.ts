@@ -1607,6 +1607,194 @@ export class AcademyService {
     };
   }
 
+  /** Auto-send absent notification via Meta WhatsApp Cloud API.
+   *
+   *  Owner ask 2026-08-23. Uses the same WHATSAPP_TOKEN +
+   *  WHATSAPP_PHONE_NUMBER_ID that DWP outreach already reuses; needs a
+   *  UTILITY-category template WA_TPL_ABSENT_NOTICE approved by Meta.
+   *
+   *  Template (owner submits to Business Manager, category UTILITY):
+   *    Name: attendance_absent_notice   Language: en_US
+   *    Body:
+   *      Hello, this is a message from {{1}} (via ChessGuru).
+   *      {{2}} was marked ABSENT from today's chess class on {{3}}.
+   *      If this was unexpected, please reach out to their coach.
+   *      Thank you!
+   *    Variables: {{1}}=academy name, {{2}}=student name, {{3}}=pretty date
+   *
+   *  While template pending approval: set OUTREACH_DRY_RUN=1 to log intent
+   *  without sending. Endpoint returns per-recipient status so the coach's
+   *  modal can render green ✓ / amber ⚠ / red ✗ inline.
+   *
+   *  Dedupe: attendanceNotifyLog collection keyed by (studentId, date,
+   *  parentUserId). Re-sending the same absence is a no-op unless
+   *  ?force=1 is set.
+   */
+  async autoSendAbsentNotifications(session: any, body: any) {
+    const g = this.ensureCoachOrOwner(session);
+    const dateRaw = String(body?.date || "").trim();
+    const date = dateRaw && /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? dateRaw : new Date().toISOString().slice(0, 10);
+    const studentIds: string[] = Array.isArray(body?.studentIds) ? body.studentIds.map(String) : [];
+    const force = !!body?.force;
+    if (!studentIds.length) return { ok: false, error: "No students to notify." };
+
+    const token = process.env.WHATSAPP_TOKEN;
+    const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    const tpl = process.env.WA_TPL_ABSENT_NOTICE;
+    const lang = process.env.WHATSAPP_LANG || "en_US";
+    const ver = process.env.WHATSAPP_API_VERSION || "v21.0";
+    const dryRun = process.env.OUTREACH_DRY_RUN === "1";
+    if (!token || !phoneId) {
+      return { ok: false, error: "Meta WhatsApp not configured. Set WHATSAPP_TOKEN + WHATSAPP_PHONE_NUMBER_ID in apps/api/.env." };
+    }
+    if (!tpl) {
+      return { ok: false, error: "Template not configured. Submit 'attendance_absent_notice' to Meta Business Manager, wait for approval (24-72h), then set WA_TPL_ABSENT_NOTICE=<name> in apps/api/.env + pm2 restart. Meanwhile, use the manual WhatsApp buttons — they work today." };
+    }
+
+    // Guard — only allow notifying students in this coach/owner's scope.
+    const students: any[] = await this.users().find({
+      _id: { $in: studentIds as any },
+      academyId: g.academyId,
+      role: "student",
+      ...(g.role === "coach" ? { coachId: g.userId } : {}),
+    }, { projection: { _id: 1, name: 1, username: 1, parentIds: 1, mobile: 1 } }).toArray();
+    if (!students.length) return { ok: false, error: "None of those students are in your scope." };
+
+    const academy: any = await this.academies().findOne({ _id: g.academyId as any }, { projection: { name: 1 } });
+    const academyName = academy?.name || "the academy";
+    const dParts = date.split("-").map(Number);
+    const prettyDate = new Date(dParts[0]!, (dParts[1]! - 1), dParts[2]!)
+      .toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+
+    // Collect parent contacts across all selected students.
+    const parentIdSet = new Set<string>();
+    for (const s of students) for (const pid of (s.parentIds || []).map(String)) parentIdSet.add(pid);
+    const parents: any[] = parentIdSet.size
+      ? await this.users().find({ _id: { $in: [...parentIdSet] as any } }, { projection: { _id: 1, username: 1, name: 1, mobile: 1, mobileConsent: 1 } }).toArray()
+      : [];
+    const parentById = new Map(parents.map((p: any) => [String(p._id), p]));
+
+    const normPhone = (m: string | null | undefined): string | null => {
+      if (!m) return null;
+      const digits = String(m).replace(/\D/g, "");
+      if (!digits) return null;
+      return digits.length === 10 ? "91" + digits : digits;   // India default
+    };
+    const notifyCol = this.conn.db!.collection("attendanceNotifyLog");
+    try { await notifyCol.createIndex({ studentId: 1, date: 1, parentUserId: 1 }, { unique: true }); } catch {}
+
+    const results: Array<{
+      studentId: string; studentName: string;
+      parentId: string | null; parentName: string | null; phone: string | null;
+      ok: boolean; status: "sent" | "dry-run" | "skipped" | "no-phone" | "error";
+      providerId?: string; error?: string;
+    }> = [];
+
+    for (const s of students) {
+      const sid = String(s._id);
+      const sName = s.name || s.username;
+      const parentIds: string[] = (s.parentIds || []).map(String);
+      const targets: any[] = parentIds.length
+        ? parentIds.map((pid) => parentById.get(pid)).filter(Boolean)
+        : (s.mobile ? [{ _id: `self:${sid}`, name: sName, mobile: s.mobile }] : []);
+      if (!targets.length) {
+        results.push({ studentId: sid, studentName: sName, parentId: null, parentName: null, phone: null, ok: false, status: "no-phone", error: "No parent linked or no mobile on file." });
+        continue;
+      }
+      for (const p of targets) {
+        const pid = String(p._id);
+        const pName = p.name || p.username || null;
+        const phone = normPhone(p.mobile);
+        if (!phone) {
+          results.push({ studentId: sid, studentName: sName, parentId: pid, parentName: pName, phone: null, ok: false, status: "no-phone", error: "Parent has no mobile on file." });
+          continue;
+        }
+        // Dedup unless force
+        if (!force) {
+          const prior = await notifyCol.findOne({ studentId: sid, date, parentUserId: pid });
+          if (prior?.status === "sent" || prior?.status === "dry-run") {
+            results.push({ studentId: sid, studentName: sName, parentId: pid, parentName: pName, phone, ok: true, status: "skipped", providerId: prior.providerId });
+            continue;
+          }
+        }
+        // Fire Meta template send
+        try {
+          if (dryRun) {
+            await notifyCol.updateOne(
+              { studentId: sid, date, parentUserId: pid },
+              { $set: { studentId: sid, date, parentUserId: pid, phone, status: "dry-run", providerId: "dry-run", sentAt: new Date(), template: tpl, vars: [academyName, sName, prettyDate] } },
+              { upsert: true },
+            );
+            results.push({ studentId: sid, studentName: sName, parentId: pid, parentName: pName, phone, ok: true, status: "dry-run", providerId: "dry-run" });
+            continue;
+          }
+          const reqBody = {
+            messaging_product: "whatsapp",
+            to: phone,
+            type: "template",
+            template: {
+              name: tpl,
+              language: { code: lang },
+              components: [{ type: "body", parameters: [
+                { type: "text", text: String(academyName).slice(0, 200) },
+                { type: "text", text: String(sName).slice(0, 200) },
+                { type: "text", text: String(prettyDate).slice(0, 60) },
+              ] }],
+            },
+          };
+          const res = await fetch(`https://graph.facebook.com/${ver}/${phoneId}/messages`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+            body: JSON.stringify(reqBody),
+          });
+          const j: any = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            const msg = j?.error?.message || JSON.stringify(j).slice(0, 200);
+            const code = j?.error?.code;
+            const hint = code === 132001 ? " — template not approved for your WABA. Check Meta Business Manager → Message Templates."
+                       : code === 131047 ? " — 24h re-engagement rule; parent hasn't messaged you recently. Only templates work here."
+                       : "";
+            await notifyCol.updateOne(
+              { studentId: sid, date, parentUserId: pid },
+              { $set: { studentId: sid, date, parentUserId: pid, phone, status: "error", error: msg + hint, sentAt: new Date() } },
+              { upsert: true },
+            );
+            results.push({ studentId: sid, studentName: sName, parentId: pid, parentName: pName, phone, ok: false, status: "error", error: `Meta ${res.status}: ${msg}${hint}` });
+            continue;
+          }
+          const providerId = j?.messages?.[0]?.id || "queued";
+          await notifyCol.updateOne(
+            { studentId: sid, date, parentUserId: pid },
+            { $set: { studentId: sid, date, parentUserId: pid, phone, status: "sent", providerId, sentAt: new Date(), template: tpl, vars: [academyName, sName, prettyDate] } },
+            { upsert: true },
+          );
+          results.push({ studentId: sid, studentName: sName, parentId: pid, parentName: pName, phone, ok: true, status: "sent", providerId });
+        } catch (e: any) {
+          results.push({ studentId: sid, studentName: sName, parentId: pid, parentName: pName, phone, ok: false, status: "error", error: String(e?.message || e).slice(0, 300) });
+        }
+      }
+    }
+
+    const sent = results.filter((r) => r.status === "sent" || r.status === "dry-run").length;
+    const skipped = results.filter((r) => r.status === "skipped").length;
+    const failed = results.filter((r) => !r.ok).length;
+    return { ok: true, date, dryRun, sent, skipped, failed, results };
+  }
+
+  /** Read the auto-send status for a student+date so the coach's UI can
+   *  show green ✓ next to already-notified parents (avoids re-sending). */
+  async getAbsentNotifyStatus(session: any, studentId: string, dateStr?: string) {
+    const g = this.ensureCoachOrOwner(session);
+    const student: any = await this.users().findOne({ _id: studentId as any, academyId: g.academyId, role: "student" });
+    if (!student) return { ok: false, error: "Not found." };
+    if (g.role === "coach" && String(student.coachId || "") !== g.userId) return { ok: false, error: "Not yours." };
+    const date = dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : new Date().toISOString().slice(0, 10);
+    const rows: any[] = await this.conn.db!.collection("attendanceNotifyLog")
+      .find({ studentId, date }, { projection: { parentUserId: 1, phone: 1, status: 1, sentAt: 1, providerId: 1, error: 1 } })
+      .toArray();
+    return { ok: true, date, sent: rows };
+  }
+
   /** Parent contact info for a student — used by the Attendance page to show
    *  a "📱 WhatsApp parent" button on absent cards. Returns pre-formatted
    *  wa.me click-to-chat links (works today, no Meta template needed) plus

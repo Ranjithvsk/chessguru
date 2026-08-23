@@ -153,6 +153,21 @@ export class AcademyController {
     return this.svc.getParentContact(req.session, studentId, date);
   }
 
+  /** Auto-send absent notifications via Meta WhatsApp Cloud API. Body:
+   *  { studentIds: string[], date?, force? }. Requires template
+   *  WA_TPL_ABSENT_NOTICE approved by Meta. Returns per-recipient status. */
+  @Post("attendance/notify-absent")
+  notifyAbsent(@Req() req: any, @Body() body: any) {
+    return this.svc.autoSendAbsentNotifications(req.session, body);
+  }
+
+  /** Per-student notify-send status for a date. Used to show green ✓
+   *  next to already-notified parents. */
+  @Get("attendance/notify-status/:studentId")
+  notifyStatus(@Req() req: any, @Param("studentId") studentId: string, @Query("date") date: string) {
+    return this.svc.getAbsentNotifyStatus(req.session, studentId, date);
+  }
+
   /** Per-student attendance history for the calendar heatmap on the
    *  performance page. ?days=N (default 90, max 365). Auth: coach for own
    *  students, owner for any academy student, student for self, parent for

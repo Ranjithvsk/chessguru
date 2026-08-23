@@ -547,28 +547,96 @@ function QrCheckinModal({ date, coachId, batchId, onClose, onCheckin }: {
   );
 }
 
-/** Bulk absent-notification modal — one row per absent student, each row
- *  fetches its parent contacts lazily and renders a "Send" button that
- *  opens WhatsApp with the pre-filled message. Coach clicks through the
- *  list in ~5 seconds per student. Marks each row as "sent" locally so the
- *  coach knows what they've already done. */
+/** Bulk absent-notification modal — TWO paths:
+ *
+ *   🚀 Auto-send all — one click, server calls Meta WhatsApp Cloud API
+ *      to send the approved template to every absent kid's parent.
+ *      Requires WA_TPL_ABSENT_NOTICE template approved by Meta.
+ *
+ *   📱 Manual — per-row wa.me click-through that opens WhatsApp on the
+ *      coach's device with a pre-filled message. Works today, no
+ *      template approval needed. Always available as a fallback.
+ *
+ *  Shows result summary after auto-send (sent / skipped / failed) plus
+ *  per-row status. Manual buttons remain visible for retries. */
 function NotifyAbsentModal({ date, absentRows, onClose }: { date: string; absentRows: Row[]; onClose: () => void }) {
-  const [sent, setSent] = useState<Set<string>>(new Set());
+  const [sentLocal, setSentLocal] = useState<Set<string>>(new Set());
+  const [autoRes, setAutoRes] = useState<null | {
+    ok: boolean; error?: string; dryRun?: boolean; sent?: number; skipped?: number; failed?: number;
+    results?: Array<{ studentId: string; parentName: string | null; status: string; error?: string }>;
+  }>(null);
+  const autoMut = useMutation({
+    mutationFn: (force: boolean) => post<{ ok: boolean; error?: string; dryRun?: boolean; sent?: number; skipped?: number; failed?: number; results?: any[] }>(
+      "/api/academy/attendance/notify-absent",
+      { studentIds: absentRows.map((r) => r.studentId), date, force },
+    ),
+    onSuccess: (res) => {
+      setAutoRes(res);
+      // Mark all with a sent/skipped/dry-run status as done locally
+      const donIds = new Set<string>((res.results || [])
+        .filter((r: any) => r.status === "sent" || r.status === "skipped" || r.status === "dry-run")
+        .map((r: any) => r.studentId));
+      setSentLocal((prev) => new Set([...prev, ...donIds]));
+    },
+  });
+  const totalWithParents = autoRes?.results?.filter((r) => r.status !== "no-phone").length ?? absentRows.length;
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4 backdrop-blur-sm" onClick={onClose}>
       <div className="w-full max-w-lg rounded-2xl border border-ink-700 bg-ink-900 p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 text-center">
           <div className="text-xs font-semibold uppercase tracking-wide text-emerald-400">Attendance · notify parents</div>
           <h2 className="mt-1 font-display text-2xl text-white">💬 WhatsApp absent parents</h2>
-          <p className="mt-1 text-xs text-ink-400">{absentRows.length} student{absentRows.length === 1 ? "" : "s"} absent · click each to open WhatsApp</p>
+          <p className="mt-1 text-xs text-ink-400">{absentRows.length} student{absentRows.length === 1 ? "" : "s"} absent</p>
         </div>
-        <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
-          {absentRows.map((r) => (
-            <AbsentNotifyRow key={r.studentId} row={r} date={date} sent={sent.has(r.studentId)} onSent={() => setSent((s) => new Set(s).add(r.studentId))} />
-          ))}
+
+        {/* Auto-send bar — the fast path */}
+        <div className="mb-3 rounded-xl border border-sky-500/30 bg-gradient-to-r from-sky-500/10 to-emerald-500/10 p-3">
+          <button type="button" onClick={() => autoMut.mutate(false)} disabled={autoMut.isPending}
+                  className="w-full rounded-lg bg-gradient-to-r from-sky-600 to-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-md hover:shadow-lg disabled:opacity-40">
+            {autoMut.isPending ? "Sending…" : "🚀 Auto-send all via WhatsApp"}
+          </button>
+          {autoRes && (
+            <div className="mt-2 text-xs">
+              {autoRes.ok ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  {autoRes.dryRun && <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-amber-200">DRY-RUN mode</span>}
+                  {(autoRes.sent ?? 0) > 0 && <span className="rounded-full bg-emerald-500/25 px-2 py-0.5 text-emerald-200">✓ {autoRes.sent} sent</span>}
+                  {(autoRes.skipped ?? 0) > 0 && <span className="rounded-full bg-ink-700 px-2 py-0.5 text-ink-300">↺ {autoRes.skipped} already sent</span>}
+                  {(autoRes.failed ?? 0) > 0 && <span className="rounded-full bg-rose-500/25 px-2 py-0.5 text-rose-200">✗ {autoRes.failed} failed</span>}
+                  {(autoRes.failed ?? 0) > 0 && (
+                    <button type="button" onClick={() => autoMut.mutate(true)}
+                            className="ml-1 text-ink-400 underline hover:text-white">Retry failed</button>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-amber-200">
+                  ⚠️ {autoRes.error} <span className="text-ink-500">— use the manual buttons below (they work today).</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="mb-2 flex items-center gap-2 text-[11px] text-ink-500">
+          <span className="h-px flex-1 bg-ink-800" />
+          <span>or send manually</span>
+          <span className="h-px flex-1 bg-ink-800" />
+        </div>
+
+        <div className="max-h-[50vh] space-y-2 overflow-y-auto pr-1">
+          {absentRows.map((r) => {
+            const rowRes = autoRes?.results?.find((x) => x.studentId === r.studentId);
+            return (
+              <AbsentNotifyRow key={r.studentId} row={r} date={date}
+                               sent={sentLocal.has(r.studentId)}
+                               autoStatus={rowRes?.status}
+                               autoError={rowRes?.error}
+                               onSent={() => setSentLocal((s) => new Set(s).add(r.studentId))} />
+            );
+          })}
         </div>
         <div className="mt-4 flex items-center justify-between">
-          <div className="text-xs text-ink-500">{sent.size} / {absentRows.length} notified</div>
+          <div className="text-xs text-ink-500">{sentLocal.size} / {totalWithParents} notified</div>
           <button type="button" onClick={onClose} className="rounded-lg border border-ink-700 px-4 py-2 text-sm font-semibold text-ink-300 hover:bg-ink-800 hover:text-white">Done</button>
         </div>
       </div>
@@ -576,7 +644,9 @@ function NotifyAbsentModal({ date, absentRows, onClose }: { date: string; absent
   );
 }
 
-function AbsentNotifyRow({ row, date, sent, onSent }: { row: Row; date: string; sent: boolean; onSent: () => void }) {
+function AbsentNotifyRow({ row, date, sent, autoStatus, autoError, onSent }: {
+  row: Row; date: string; sent: boolean; autoStatus?: string; autoError?: string; onSent: () => void;
+}) {
   const q = useQuery({
     queryKey: ["parent-contact", row.studentId, date],
     queryFn: () => get<{
@@ -587,12 +657,22 @@ function AbsentNotifyRow({ row, date, sent, onSent }: { row: Row; date: string; 
     staleTime: 60_000,
   });
   const contacts = q.data?.contacts?.filter((c) => c.waLink) ?? [];
+  const autoBadge = autoStatus === "sent" ? { text: "✓ auto-sent", cls: "bg-emerald-500/25 text-emerald-200" }
+                  : autoStatus === "dry-run" ? { text: "◔ dry-run", cls: "bg-amber-500/25 text-amber-200" }
+                  : autoStatus === "skipped" ? { text: "↺ already sent", cls: "bg-ink-700 text-ink-300" }
+                  : autoStatus === "no-phone" ? { text: "✗ no phone", cls: "bg-amber-500/25 text-amber-200" }
+                  : autoStatus === "error" ? { text: "✗ failed", cls: "bg-rose-500/25 text-rose-200" }
+                  : null;
   return (
-    <div className={`flex items-center gap-3 rounded-xl border p-3 transition ${sent ? "border-emerald-500/40 bg-emerald-500/10" : "border-ink-800 bg-ink-950"}`}>
+    <div className={`flex items-center gap-3 rounded-xl border p-3 transition ${sent || autoStatus === "sent" || autoStatus === "dry-run" ? "border-emerald-500/40 bg-emerald-500/10" : "border-ink-800 bg-ink-950"}`}>
       <Avatar name={row.name} />
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-semibold text-white">{row.name}</div>
+        <div className="flex items-center gap-1.5">
+          <div className="truncate text-sm font-semibold text-white">{row.name}</div>
+          {autoBadge && <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${autoBadge.cls}`}>{autoBadge.text}</span>}
+        </div>
         {row.reason && <div className="truncate text-[11px] italic text-ink-500">Reason: {row.reason}</div>}
+        {autoError && <div className="truncate text-[10px] text-rose-300" title={autoError}>{autoError}</div>}
         {q.isLoading && <div className="text-[11px] text-ink-500">Loading…</div>}
         {!q.isLoading && contacts.length === 0 && <div className="text-[11px] text-amber-300">No parent phone on file</div>}
       </div>
