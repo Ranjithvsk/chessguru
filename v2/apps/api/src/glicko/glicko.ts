@@ -60,7 +60,7 @@ export function liveDeviation(perf: Perf, reverse = false): number {
 
 const sanity = (x: Glicko) => x.r > 0 && x.r < 4000 && x.d > 0 && x.d < 2000 && x.v > 0 && x.v < 2;
 
-export function updatePuzzleRating(userPerf: Perf, puzzleGlicko: Glicko, win: boolean, solvePatternType?: "legitimate" | "borderline" | "grinder") {
+export function updatePuzzleRating(userPerf: Perf, puzzleGlicko: Glicko, win: boolean, solvePatternType?: "legitimate" | "borderline" | "grinder", dampeningMult: number = 1) {
   const uG: Glicko = { r: userPerf.gl.r, d: liveDeviation(userPerf), v: userPerf.gl.v || DEFAULT_VOLATILITY };
   const score = win ? 1 : 0;
   const nU = computeGame(uG, puzzleGlicko, score);
@@ -89,6 +89,14 @@ export function updatePuzzleRating(userPerf: Perf, puzzleGlicko: Glicko, win: bo
   if (win && gap > easyThreshold && nU.r > uG.r) {
     const cap = isGrinder ? 0 : 1;
     nU.r = Math.min(nU.r, uG.r + cap);
+  }
+  // Dampening multiplier from Layer 1 (24h theme count) or Layer 2 (7d theme
+  // gain cap) — computed in puzzles.service.ts::complete() and passed in.
+  // Applies only to positive deltas (wins that grow rating). Losses always
+  // take full punishment.
+  if (win && dampeningMult < 1 && nU.r > uG.r) {
+    const gain = nU.r - uG.r;
+    nU.r = uG.r + Math.round(gain * dampeningMult);
   }
   if (!sanity(nU)) nU.r = uG.r;
   // Rating history kept per user. Bumped 12 → 100 on 2026-08-18 to power the

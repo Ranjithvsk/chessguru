@@ -702,6 +702,60 @@ export class PuzzlesService {
     return { current, longest };
   }
 
+  // Anti-grinding dampening multiplier — see call site for design notes.
+  // Two rolling windows on the user's rounds for the SELECTED theme:
+  //   Layer 1 (24h count):    1-3=1.0, 4-8=0.7, 9-14=0.4, 15+=0
+  //   Layer 2 (7d gain cap):  >=40 total positive rd → 0
+  //                           >=25 total positive rd → clamp to 0.3
+  // Both defenses cover complementary attacks — grind burst vs slow spread.
+  // Skipped for mix / null theme (picker serves diverse themes naturally).
+  // Reads use _id prefix regex which mongo optimizes via the _id index.
+  //
+  // Layer 2 is SKIPPED for solvePattern.type === "legitimate" users because
+  // a high-rated legitimate user can genuinely gain 30-50 rating per win via
+  // normal Glicko-2 asymmetry — 8 wins/week × 30 = +240 easily exceeds the
+  // +40 cap even though there's no grinding (owner check 2026-08-23 on
+  // theerajkumarr, 2708 rating: 8 legit sacrifice wins → +274 in 7d, false
+  // positive under blanket Layer 2). Grinders and borderline users still
+  // get both layers. If a legit user starts grinding, nightly classifier
+  // flips them to grinder (streak >= 20 rule) → Layer 2 re-engages.
+  private async computeDampeningMult(userId: string, selectedTheme: string | null, spType?: string): Promise<number> {
+    if (!selectedTheme || selectedTheme === "mix") return 1;
+    const now = Date.now();
+    const t24h = new Date(now - 24 * 60 * 60 * 1000);
+    const t7d = new Date(now - 7 * 24 * 60 * 60 * 1000);
+    const rounds = this.conn.db!.collection("rounds");
+    const uidRe = { $regex: `^${userId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:` } as any;
+
+    const count24h = await rounds.countDocuments({
+      _id: uidRe,
+      k: "puzzle",
+      sel: selectedTheme,
+      d: { $gte: t24h },
+    });
+    let mult = count24h >= 15 ? 0
+             : count24h >= 9  ? 0.4
+             : count24h >= 4  ? 0.7
+             : 1;
+
+    if (mult > 0 && spType !== "legitimate") {
+      const agg = await rounds.aggregate([
+        { $match: {
+            _id: uidRe,
+            k: "puzzle",
+            sel: selectedTheme,
+            d: { $gte: t7d },
+            rd: { $gt: 0 },
+          } },
+        { $group: { _id: null, total: { $sum: "$rd" } } },
+      ]).toArray();
+      const gain7d = agg[0]?.total || 0;
+      if (gain7d >= 40) mult = 0;
+      else if (gain7d >= 25) mult = Math.min(mult, 0.3);
+    }
+    return mult;
+  }
+
   async complete(id: string, body: { win: boolean; userId?: string | null; hint?: boolean; mode?: string; rating?: number; deviation?: number; theme?: string; ms?: number; wrong?: string; daily?: boolean }) {
     const pz = await this.col().findOne({ _id: id as any });
     if (!pz) return null;
@@ -727,7 +781,26 @@ export class PuzzlesService {
       // + refreshed on demand.
       const spType: "legitimate" | "borderline" | "grinder" | undefined =
         doc.puzzle?.solvePattern?.type;
-      const upd = updatePuzzleRating(perf, puzzleGlicko, win, spType);
+      // Anti-grinding dampening (owner 2026-08-23, "ship both layers"):
+      //
+      //   Layer 1 — 24h rolling per-theme count. Multiplier drops based on
+      //             how many times user has solved this SELECTED theme in
+      //             the past 24 hours. Closes the "consecutive streak reset"
+      //             loophole (alternating themes) AND the "daily reset"
+      //             loophole (streak grinds resetting overnight).
+      //
+      //   Layer 2 — 7-day rolling per-theme rating-gain cap. Once user has
+      //             gained >=40 positive rating points from this theme in
+      //             the past 7 days, further wins give 0 delta. Prevents
+      //             the "spread grind across multiple days" workaround.
+      //
+      // Skipped in mix mode (sel = "mix"/null) since the picker naturally
+      // serves diverse themes, and on losses (which always take full delta
+      // as the corrective force). See conversation 2026-08-23 for design.
+      const dampeningMult = (win && key === "puzzle")
+        ? await this.computeDampeningMult(userId, body.theme || null, spType)
+        : 1;
+      const upd = updatePuzzleRating(perf, puzzleGlicko, win, spType, dampeningMult);
       const sets: Record<string, any> = { [key]: upd.userPerf };
       // Per-theme Glicko ratings (owner 2026-07-08): every rated solve also rates the
       // puzzle's MEANINGFUL themes, so the dashboard shows real strengths/weaknesses
@@ -751,7 +824,12 @@ export class PuzzlesService {
         for (const t of pz.themes) {
           if (PuzzlesService.UNRATED.has(t) || typeof t !== "string" || !/^[a-zA-Z0-9]+$/.test(t)) continue;
           const tPerf = doc[themeNs]?.[t] || { gl: { r: startR, d: 500, v: DEFAULT_VOLATILITY }, nb: 0, re: [], la: null };
-          const tUpd = updatePuzzleRating(tPerf, puzzleGlicko, win);
+          // Apply the same dampening multiplier to per-theme entries when a
+          // grinding pattern is detected in the selected theme. Puzzle themes
+          // overlap (mateIn3 solves inflate [mate, mateIn3, middlegame, long]),
+          // so uniformly dampening keeps the picker (which reads per-theme
+          // ratings once trusted) from being driven above real skill level.
+          const tUpd = updatePuzzleRating(tPerf, puzzleGlicko, win, undefined, dampeningMult);
           sets[`${themeNs}.${t}`] = tUpd.userPerf;
         }
       }
