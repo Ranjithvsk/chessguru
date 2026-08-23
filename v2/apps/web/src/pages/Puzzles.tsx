@@ -438,11 +438,19 @@ export default function PuzzlesPage() {
         </div>
       )}
       <section className="min-w-0 lg:flex lg:min-h-0 lg:flex-col lg:justify-center">
-        <Board
-          fen={g.fen} orientation={g.orientation} turnColor={g.turnColor}
-          movableColor={g.movableColor} dests={g.dests} lastMove={g.lastMove}
-          shapes={boardShapes} onMove={g.onMove}
-        />
+        {/* aspect-square wrapper: prevents flex from stretching the board into
+            a rectangle (owner report 2026-08-23 "board looks crooked / abnormal
+            size"). At lg viewports the parent grid sets an explicit height AND
+            width on the column, so chessground filled both dimensions without
+            respecting its intrinsic 1:1 aspect. Wrapping in aspect-square + a
+            height cap keeps the board square regardless of column shape. */}
+        <div className="mx-auto aspect-square w-full" style={{ maxWidth: "min(100%, calc(100dvh - 10.5rem))", maxHeight: "calc(100dvh - 10.5rem)" }}>
+          <Board
+            fen={g.fen} orientation={g.orientation} turnColor={g.turnColor}
+            movableColor={g.movableColor} dests={g.dests} lastMove={g.lastMove}
+            shapes={boardShapes} onMove={g.onMove}
+          />
+        </div>
         {/* Live FEN + QR — click text to copy; scan QR to open the same
             position on any phone in this tenant's board editor. */}
         {g.fen && (() => {
