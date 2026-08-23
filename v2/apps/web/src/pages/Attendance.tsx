@@ -89,6 +89,7 @@ export default function AttendancePage() {
   const [detail, setDetail] = useState<Row | null>(null);   // long-press → open modal
   const [qrOpen, setQrOpen] = useState(false);
   const [faceOpen, setFaceOpen] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(false);
   const [notifyOpen, setNotifyOpen] = useState(false);
 
   useEffect(() => {
@@ -293,6 +294,11 @@ export default function AttendancePage() {
                 title="Camera → recognize enrolled faces → auto-mark present">
           👤 Face Check-in
         </button>
+        <button type="button" onClick={() => setVoiceOpen(true)}
+                className="rounded-lg bg-gradient-to-r from-orange-600 to-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:shadow-orange-500/30"
+                title='Say "Aarav absent, Priya late 5 minutes" → auto-marks'>
+          🎙️ Voice Mark
+        </button>
         {stats.absent > 0 && (
           <button type="button" onClick={() => setNotifyOpen(true)}
                   className="rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:shadow-emerald-500/30"
@@ -328,6 +334,15 @@ export default function AttendancePage() {
         <FaceCheckinModal date={date} coachId={coachId || null} batchId={batchId || null}
                           onClose={() => setFaceOpen(false)}
                           onMatch={() => qc.invalidateQueries({ queryKey: ["attendance-sheet"] })} />
+      )}
+
+      {/* Voice mark modal */}
+      {voiceOpen && (
+        <VoiceMarkModal rows={rows} onClose={() => setVoiceOpen(false)}
+                        onApply={(entries) => {
+                          markMut.mutate(entries);
+                          setVoiceOpen(false);
+                        }} />
       )}
 
       {/* Notify-absent-parents bulk modal */}
@@ -705,6 +720,256 @@ function AbsentNotifyRow({ row, date, sent, autoStatus, autoError, onSent }: {
             {sent ? "✓ " : "📱 "}{c.name}
           </a>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Voice-mark parsing (client-side, no server call).
+// Coach dictates like "Aarav absent, Priya late 5 minutes, Rohit present".
+// Owner ask 2026-08-23. Chrome/Edge have full Web Speech API; Safari partial;
+// Firefox unsupported → we show a clear "not supported" message.
+// ─────────────────────────────────────────────────────────────────────────
+type VoiceIntent = {
+  fragment: string;                          // original text this came from
+  studentId: string | null;                  // null = ambiguous / no match
+  matchedName: string | null;
+  candidates: Array<{ studentId: string; name: string; score: number }>;   // top 3 for picker
+  status: Status;
+  lateMinutes?: number | null;
+};
+
+// Simple normalized-Levenshtein similarity 0..1.
+function nameScore(a: string, b: string): number {
+  const A = a.toLowerCase().replace(/[^a-z ]/g, "").trim();
+  const B = b.toLowerCase().replace(/[^a-z ]/g, "").trim();
+  if (!A || !B) return 0;
+  if (A === B) return 1;
+  // Prefer prefix / contained matches
+  if (B.startsWith(A) || A.startsWith(B)) return 0.9;
+  if (B.includes(A) || A.includes(B)) return 0.75;
+  // Compare first-word (first name) — most spoken names are just first names
+  const [af] = A.split(" "); const [bf] = B.split(" ");
+  if (af && bf && af === bf) return 0.85;
+  // Char-overlap ratio as a cheap fuzzy fallback
+  const shorter = A.length < B.length ? A : B;
+  const longer  = A.length < B.length ? B : A;
+  let hits = 0;
+  for (const c of new Set(shorter)) if (longer.includes(c)) hits++;
+  return hits / new Set(longer).size;
+}
+
+function parseVoiceTranscript(transcript: string, roster: Row[]): VoiceIntent[] {
+  const text = transcript.trim();
+  if (!text) return [];
+  // Split on commas + " and " + period + newline
+  const fragments = text.split(/,|\band\b|\.|\n/gi).map((s) => s.trim()).filter(Boolean);
+  const intents: VoiceIntent[] = [];
+  for (const frag of fragments) {
+    const lower = frag.toLowerCase();
+    // Status detection (order matters — "late" before "absent" in case of "late 5 minutes")
+    let status: Status = "present";
+    if (/\b(late|delayed|minutes?\s+late)\b/.test(lower)) status = "late";
+    else if (/\b(absent|missing|not here|not present|didn'?t come|no show)\b/.test(lower)) status = "absent";
+    else if (/\b(present|here|attending|came)\b/.test(lower)) status = "present";
+    else continue;   // no status keyword → skip fragment
+    // Minutes detection
+    let lateMinutes: number | null = null;
+    if (status === "late") {
+      const m = lower.match(/(\d{1,3})\s*(?:min|minute|minutes|m)?\b/);
+      lateMinutes = m ? Math.max(1, Math.min(300, parseInt(m[1]!, 10))) : 5;
+    }
+    // Strip status/number words to isolate the name-ish portion
+    const nameGuess = frag
+      .replace(/\b(absent|late|present|here|missing|attending|came|delayed|not\s+here|not\s+present|didn'?t\s+come|no\s+show|minutes?|min|by)\b/gi, "")
+      .replace(/\d+/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    // Score every roster row + pick top-3 candidates
+    const scored = roster.map((r) => ({
+      studentId: r.studentId,
+      name: r.name || r.username,
+      score: nameScore(nameGuess, r.name || r.username),
+    })).sort((a, b) => b.score - a.score).slice(0, 3);
+    const best = scored[0];
+    const confident = best && best.score >= 0.7 && (!scored[1] || best.score - scored[1].score >= 0.15);
+    intents.push({
+      fragment: frag,
+      studentId: confident ? best!.studentId : null,
+      matchedName: confident ? best!.name : null,
+      candidates: scored.filter((s) => s.score > 0.3),
+      status,
+      lateMinutes,
+    });
+  }
+  return intents;
+}
+
+/** Voice-mark modal — coach dictates roll call, we parse names + statuses
+ *  from the transcript and let them review + apply. */
+function VoiceMarkModal({ rows, onClose, onApply }: {
+  rows: Row[];
+  onClose: () => void;
+  onApply: (entries: Array<{ studentId: string; status: Status; lateMinutes?: number | null }>) => void;
+}) {
+  const [transcript, setTranscript] = useState("");
+  const [listening, setListening] = useState(false);
+  const [supported, setSupported] = useState<boolean | null>(null);
+  const [intents, setIntents] = useState<VoiceIntent[]>([]);
+  const recRef = useRef<any>(null);
+  const finalRef = useRef<string>("");
+
+  useEffect(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    setSupported(!!SR);
+    if (!SR) return;
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = "en-IN";     // best-effort accent; user can retrain later
+    rec.onresult = (ev: any) => {
+      let interim = "";
+      let final = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const r = ev.results[i];
+        if (r.isFinal) final += r[0].transcript + " "; else interim += r[0].transcript;
+      }
+      if (final) finalRef.current += final;
+      setTranscript(finalRef.current + interim);
+    };
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+    recRef.current = rec;
+    return () => { try { rec.stop(); } catch { /* ignore */ } };
+  }, []);
+
+  // Re-parse whenever transcript changes
+  useEffect(() => {
+    setIntents(parseVoiceTranscript(transcript, rows));
+  }, [transcript, rows]);
+
+  const start = () => {
+    if (!recRef.current) return;
+    finalRef.current = "";
+    setTranscript("");
+    try { recRef.current.start(); setListening(true); } catch { /* already running */ }
+  };
+  const stop = () => {
+    if (!recRef.current) return;
+    try { recRef.current.stop(); } catch { /* ignore */ }
+    setListening(false);
+  };
+  const clear = () => {
+    finalRef.current = "";
+    setTranscript("");
+    setIntents([]);
+  };
+
+  const pickCandidate = (idx: number, studentId: string, name: string) => {
+    setIntents((prev) => prev.map((it, i) => i === idx ? { ...it, studentId, matchedName: name } : it));
+  };
+
+  const confirmed = intents.filter((it) => !!it.studentId);
+  const applyAll = () => {
+    if (!confirmed.length) return;
+    onApply(confirmed.map((it) => ({
+      studentId: it.studentId!,
+      status: it.status,
+      lateMinutes: it.status === "late" ? (it.lateMinutes ?? 5) : null,
+    })));
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-2xl border border-ink-700 bg-ink-900 p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-baseline justify-between gap-2">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-orange-300">Attendance · voice</div>
+            <h2 className="mt-0.5 font-display text-xl text-white">🎙️ Voice Mark</h2>
+            <p className="text-xs text-ink-400">Say: <i>"Aarav absent, Priya late 5 minutes, Rohit present"</i></p>
+          </div>
+          <button type="button" onClick={onClose} className="text-2xl text-ink-400 hover:text-white">×</button>
+        </div>
+
+        {supported === false && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200">
+            ⚠️ Voice recognition isn't supported in this browser. Use Chrome, Edge, or Safari on desktop / Android Chrome on mobile.
+          </div>
+        )}
+
+        {supported !== false && (
+          <>
+            {/* Mic button + transcript box */}
+            <div className="flex flex-col items-center gap-3 py-2">
+              <button type="button" onClick={listening ? stop : start}
+                      className={`grid h-20 w-20 place-items-center rounded-full text-3xl shadow-lg transition ${listening ? "bg-rose-600 animate-pulse" : "bg-gradient-to-br from-orange-500 to-red-600 hover:scale-105"}`}
+                      title={listening ? "Stop listening" : "Start listening"}>
+                🎙️
+              </button>
+              <div className="text-xs text-ink-500">{listening ? "Listening… tap to stop" : "Tap to start"}</div>
+            </div>
+            <div className="min-h-16 rounded-lg border border-ink-700 bg-ink-950 p-3 text-sm text-ink-200">
+              {transcript || <span className="italic text-ink-500">Transcript will appear here…</span>}
+            </div>
+
+            {/* Parsed intents */}
+            {intents.length > 0 && (
+              <div className="mt-3">
+                <div className="mb-1 flex items-center justify-between">
+                  <div className="text-[10px] uppercase text-ink-500">Parsed ({intents.length})</div>
+                  <button type="button" onClick={clear} className="text-[11px] text-ink-500 hover:text-white">clear</button>
+                </div>
+                <div className="max-h-60 space-y-1.5 overflow-y-auto pr-1">
+                  {intents.map((it, i) => {
+                    const s = statusStyle(it.status);
+                    return (
+                      <div key={i} className={`rounded-lg border p-2 text-xs ${it.studentId ? "border-emerald-500/30 bg-emerald-500/5" : "border-amber-500/30 bg-amber-500/5"}`}>
+                        <div className="flex items-baseline justify-between gap-2">
+                          <div className="min-w-0 flex-1 italic text-ink-400 truncate">"{it.fragment}"</div>
+                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${s.text} bg-black/20`}>
+                            {s.emoji} {s.label}{it.lateMinutes ? ` ${it.lateMinutes}m` : ""}
+                          </span>
+                        </div>
+                        {it.studentId ? (
+                          <div className="mt-1 text-emerald-300">✓ {it.matchedName}</div>
+                        ) : it.candidates.length > 0 ? (
+                          <div className="mt-1">
+                            <div className="text-amber-300">? Ambiguous — pick one:</div>
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {it.candidates.map((c) => (
+                                <button key={c.studentId} type="button" onClick={() => pickCandidate(i, c.studentId, c.name)}
+                                        className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-200 hover:bg-amber-500/20">
+                                  {c.name} <span className="text-ink-500">({(c.score * 100).toFixed(0)}%)</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="mt-1 text-rose-300">✗ No matching student</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        <div className="mt-4 flex items-center justify-between">
+          <div className="text-xs text-ink-500">
+            {confirmed.length > 0 && <span className="text-emerald-300">{confirmed.length} ready · </span>}
+            {intents.length - confirmed.length > 0 && <span className="text-amber-300">{intents.length - confirmed.length} unresolved</span>}
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className="rounded-lg border border-ink-700 px-4 py-2 text-sm text-ink-300 hover:text-white">Cancel</button>
+            <button type="button" onClick={applyAll} disabled={confirmed.length === 0}
+                    className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 disabled:opacity-40">
+              Apply {confirmed.length}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
