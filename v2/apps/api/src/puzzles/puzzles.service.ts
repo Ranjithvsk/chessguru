@@ -518,7 +518,7 @@ export class PuzzlesService {
 
     return {
       loggedIn: true,
-      global: { rating: Math.round(p.puzzle?.gl?.r ?? 1500), rd: Math.round(p.puzzle?.gl?.d ?? 500), games: p.puzzle?.nb ?? 0 },
+      global: { rating: Math.round(p.puzzle?.gl?.r ?? 800), rd: Math.round(p.puzzle?.gl?.d ?? 500), games: p.puzzle?.nb ?? 0 },
       blindfold: p.blindfold ? { rating: Math.round(p.blindfold.gl?.r ?? 800), games: p.blindfold.nb ?? 0 } : null,
       totals: { attempted: puzzleRounds.length, wins, accuracy: puzzleRounds.length ? Math.round((wins / puzzleRounds.length) * 100) : 0 },
       study: { total: studyTotal, byType: studyByType },
@@ -583,7 +583,7 @@ export class PuzzlesService {
       };
     }
     const perf: any = await this.conn.db!.collection("userperfs").findOne({ _id: userId as any });
-    const globalR = Math.round(perf?.puzzle?.gl?.r ?? 1500);
+    const globalR = Math.round(perf?.puzzle?.gl?.r ?? 800);
     const totalSolves = perf?.puzzle?.nb ?? 0;
     const themes = perf?.themes ?? {};
 
@@ -713,7 +713,12 @@ export class PuzzlesService {
       const perfsCol = this.conn.db!.collection("userperfs");
       const doc: any = (await perfsCol.findOne({ _id: userId as any })) || {};
       const key = mode === "blindfold" ? "blindfold" : "puzzle";
-      const perf = doc[key] || { gl: { r: key === "blindfold" ? 800 : 1500, d: 500, v: DEFAULT_VOLATILITY }, nb: 0, re: [], la: null };
+      // Fresh puzzle seed for a first-time solver: use NEW_USER_RATING (800),
+      // not the Lichess default of 1500. Kids at academies (our primary
+      // audience) skew far below 1500 — starting them at 1500 meant their
+      // first 8-10 puzzles were demoralizingly hard as Glicko slowly ratcheted
+      // them down. With d=500 initially, strong players still climb rapidly.
+      const perf = doc[key] || { gl: { r: 800, d: 500, v: DEFAULT_VOLATILITY }, nb: 0, re: [], la: null };
       if (hint) return { win, ratingDiff: 0, rating: Math.round(perf.gl.r), glicko: perf.gl };
       const upd = updatePuzzleRating(perf, puzzleGlicko, win);
       const sets: Record<string, any> = { [key]: upd.userPerf };
@@ -729,7 +734,7 @@ export class PuzzlesService {
         // skilled players: a 2809 user's first mateIn5 solve vs a 2600 puzzle jumped
         // rating +1063 in a single game because Glicko's expected-win was ~1%.
         // Mageswaran incident 2026-08-23.
-        const globalR = perf?.gl?.r ?? (key === "blindfold" ? 800 : 1500);
+        const globalR = perf?.gl?.r ?? 800;
         for (const t of pz.themes) {
           if (PuzzlesService.UNRATED.has(t) || typeof t !== "string" || !/^[a-zA-Z0-9]+$/.test(t)) continue;
           const tPerf = doc[themeNs]?.[t] || { gl: { r: globalR, d: 250, v: DEFAULT_VOLATILITY }, nb: 0, re: [], la: null };

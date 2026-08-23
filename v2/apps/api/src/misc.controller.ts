@@ -167,7 +167,7 @@ export class MiscController {
     const selfUid: string | null = req?.session?.userId ?? null;
     if (uid && uid !== selfUid && isAdmin(selfUid)) {
       const perf: any = await this.conn.db!.collection("userperfs").findOne({ _id: uid as any });
-      return { rating: Math.round(perf?.puzzle?.gl?.r ?? 1500), loggedIn: true, userId: uid, asAdmin: true };
+      return { rating: Math.round(perf?.puzzle?.gl?.r ?? 800), loggedIn: true, userId: uid, asAdmin: true };
     }
     return this.auth.myRating(req.session);
   }
@@ -283,7 +283,7 @@ export class MiscController {
     let viewedRating: number | null = null;
     if (viewedAs) {
       const perf: any = await this.conn.db!.collection("userperfs").findOne({ _id: userId as any });
-      viewedRating = Math.round(perf?.puzzle?.gl?.r ?? 1500);
+      viewedRating = Math.round(perf?.puzzle?.gl?.r ?? 800);
     }
     return {
       loggedIn: true,

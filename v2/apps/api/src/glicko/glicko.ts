@@ -1,5 +1,12 @@
 // Lichess-exact Glicko-2, ported from the original glicko2.js. Constants frozen.
+// DEFAULT_RATING = 1500 is the Glicko-2 math anchor (formula normalizes
+// around it — DO NOT change). NEW_USER_RATING is a separate concept:
+// what a brand-new account is seeded at before their first puzzle. Owner
+// directive 2026-08-23: was 1500 (Lichess default), now 800 — better
+// starting point for academy kids (the primary audience). Strong players
+// climb rapidly via Glicko convergence (high d=500 → big early swings).
 export const DEFAULT_RATING = 1500, DEFAULT_DEVIATION = 500, DEFAULT_VOLATILITY = 0.09;
+export const NEW_USER_RATING = 800;
 const TAU = 0.75, RATING_PERIODS_PER_DAY = 0.21436, MAX_DEVIATION = 500, MIN_DEVIATION = 45;
 const MAX_RATING_DELTA = 700, RATING_FLOOR = 400, CONVERGENCE_TOL = 1e-6, SCALE = 173.7178;
 
