@@ -30,6 +30,11 @@ type Row = {
   markedAt: string | null;
   source: "manual" | "qr" | "live-class" | "default";
   autoJoin: { classId: string; joinedAt: string | null; lastSeenAt: string | null } | null;
+  excused?: boolean;
+  excuseDocUrl?: string | null;
+  excuseNote?: string | null;
+  excuseUploadedByRole?: string | null;
+  excuseUploadedAt?: string | null;
   currentAttendanceStreak: number;
   lastPresentDate: string | null;
   absentYesterday: boolean;
@@ -45,9 +50,11 @@ function nextStatus(s: Status): Status {
   return s === "present" ? "late" : s === "late" ? "absent" : "present";
 }
 
-function statusStyle(s: Status): { ring: string; bg: string; text: string; label: string; emoji: string } {
+function statusStyle(s: Status, excused = false): { ring: string; bg: string; text: string; label: string; emoji: string } {
   if (s === "present") return { ring: "ring-emerald-400/60", bg: "bg-emerald-500/10 hover:bg-emerald-500/20", text: "text-emerald-200", label: "Present",  emoji: "✅" };
   if (s === "late")    return { ring: "ring-amber-400/70",   bg: "bg-amber-500/10 hover:bg-amber-500/20",     text: "text-amber-200",   label: "Late",     emoji: "⏰" };
+  // Excused = softer purple treatment vs the harsh rose for unexcused absent.
+  if (excused)         return { ring: "ring-purple-400/60",  bg: "bg-purple-500/10 hover:bg-purple-500/20",   text: "text-purple-200",  label: "Excused",  emoji: "📎" };
   return                 { ring: "ring-rose-500/70",         bg: "bg-rose-500/15 hover:bg-rose-500/25 opacity-70", text: "text-rose-200", label: "Absent", emoji: "❌" };
 }
 
@@ -336,6 +343,7 @@ export default function AttendancePage() {
       {detail && (
         <DetailModal
           row={detail}
+          date={date}
           onClose={() => setDetail(null)}
           onSave={(status, lateMinutes, reason) => {
             markMut.mutate([{ studentId: detail.studentId, status, lateMinutes, reason }]);
@@ -361,7 +369,7 @@ function fmtTime(iso: string | null): string {
 }
 
 function StudentCard({ row, onTap, onLongPress, pending }: { row: Row; onTap: () => void; onLongPress: () => void; pending: boolean }) {
-  const s = statusStyle(row.status);
+  const s = statusStyle(row.status, !!row.excused);
   const wasAbsentYesterday = row.absentYesterday && row.status === "present";
   // Auto-marked via live class join OR student's own QR scan.
   const isAutoDetected = row.source === "live-class" || row.source === "qr";
@@ -702,6 +710,96 @@ function AbsentNotifyRow({ row, date, sent, autoStatus, autoError, onSent }: {
   );
 }
 
+/** Excuse upload panel — shown inside DetailModal for absent students. Lets
+ *  the coach/owner/parent upload a doctor's note (image or PDF) OR just add
+ *  a text note. Uploading marks the absence as "excused" — softer purple
+ *  treatment on the card, and dashboard rollups exclude it from absent
+ *  counts + watchlist triggers. Owner ask 2026-08-23. */
+function ExcuseUploadPanel({ row, date }: { row: Row; date: string }) {
+  const qc = useQueryClient();
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const uploadDoc = async () => {
+    const file = fileRef.current?.files?.[0];
+    if (!file) return;
+    setBusy(true); setMsg(null);
+    try {
+      const url = `/api/academy/attendance/excuse/${encodeURIComponent(row.studentId)}/${encodeURIComponent(date)}${note ? `?note=${encodeURIComponent(note)}` : ""}`;
+      const res = await fetch(url, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j?.ok) { setMsg({ ok: false, text: j?.error || `Upload failed (${res.status})` }); }
+      else {
+        setMsg({ ok: true, text: "Excuse uploaded — marked as Excused." });
+        qc.invalidateQueries({ queryKey: ["attendance-sheet"] });
+      }
+    } catch (e: any) {
+      setMsg({ ok: false, text: e?.message || "Upload failed." });
+    } finally { setBusy(false); }
+  };
+
+  const noteOnly = async () => {
+    if (!note.trim()) { setMsg({ ok: false, text: "Enter a note or attach a file." }); return; }
+    setBusy(true); setMsg(null);
+    try {
+      const res = await post<{ ok: boolean; error?: string }>(`/api/academy/attendance/excuse-note/${encodeURIComponent(row.studentId)}/${encodeURIComponent(date)}`, { note });
+      if (!res.ok) setMsg({ ok: false, text: res.error || "Failed" });
+      else {
+        setMsg({ ok: true, text: "Note saved — marked as Excused." });
+        qc.invalidateQueries({ queryKey: ["attendance-sheet"] });
+      }
+    } catch (e: any) { setMsg({ ok: false, text: e?.message || "Failed" }); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="mt-4 rounded-lg border border-purple-500/30 bg-purple-500/5 p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <label className="text-xs font-semibold text-purple-200">📎 Mark as excused</label>
+        {row.excused && (
+          <span className="rounded-full bg-purple-500/25 px-2 py-0.5 text-[10px] font-bold text-purple-200">
+            ✓ Already excused{row.excuseUploadedByRole ? ` by ${row.excuseUploadedByRole}` : ""}
+          </span>
+        )}
+      </div>
+      {row.excused && row.excuseDocUrl && (
+        <a href={row.excuseDocUrl} target="_blank" rel="noreferrer"
+           className="mb-2 inline-block text-xs text-purple-300 underline hover:text-purple-200">
+          📄 View uploaded document →
+        </a>
+      )}
+      {row.excused && row.excuseNote && (
+        <div className="mb-2 rounded bg-ink-950 px-2 py-1.5 text-xs text-ink-300">Note: {row.excuseNote}</div>
+      )}
+      <input type="text" value={note} onChange={(e) => setNote(e.target.value)}
+             placeholder="Optional note (e.g. Doctor visit)" maxLength={500}
+             className="w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-purple-400" />
+      <div className="mt-2 flex flex-wrap gap-2">
+        <input ref={fileRef} type="file" accept="image/*,application/pdf" onChange={uploadDoc}
+               className="hidden" id={`excuse-file-${row.studentId}`} />
+        <label htmlFor={`excuse-file-${row.studentId}`}
+               className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-purple-500/40 bg-purple-500/10 px-3 py-1.5 text-xs font-semibold text-purple-200 hover:bg-purple-500/20 ${busy ? "opacity-40" : ""}`}>
+          📎 Attach doc (image/PDF)
+        </label>
+        <button type="button" onClick={noteOnly} disabled={busy}
+                className="inline-flex items-center gap-1.5 rounded-full border border-purple-500/40 bg-purple-500/10 px-3 py-1.5 text-xs font-semibold text-purple-200 hover:bg-purple-500/20 disabled:opacity-40">
+          Save note only
+        </button>
+      </div>
+      {msg && (
+        <div className={`mt-2 text-xs ${msg.ok ? "text-emerald-300" : "text-rose-300"}`}>{msg.text}</div>
+      )}
+    </div>
+  );
+}
+
 /** Inline "📱 WhatsApp Parent" contact list — fetches on mount, shows one
  *  button per linked parent with the pre-filled wa.me link. Coach clicks →
  *  WhatsApp opens on their device (desktop or phone) with the message ready
@@ -909,8 +1007,9 @@ function FaceCheckinModal({ date, coachId, batchId, onClose, onMatch }: {
   );
 }
 
-function DetailModal({ row, onClose, onSave }: {
+function DetailModal({ row, date, onClose, onSave }: {
   row: Row;
+  date: string;
   onClose: () => void;
   onSave: (status: Status, lateMinutes: number | null, reason: string | null) => void;
 }) {
@@ -980,6 +1079,11 @@ function DetailModal({ row, onClose, onSave }: {
         {/* WhatsApp parent — only for absent; opens wa.me with pre-filled msg */}
         {status === "absent" && (
           <ParentContactButtons studentId={row.studentId} />
+        )}
+
+        {/* Excuse upload — only for absent; parent/coach uploads doctor's note */}
+        {status === "absent" && (
+          <ExcuseUploadPanel row={row} date={date} />
         )}
 
         {/* Auto-join info banner — shown whether or not it "wins" over manual */}

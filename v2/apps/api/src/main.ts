@@ -55,6 +55,16 @@ async function bootstrap() {
   // shape as coach uploads — raw image bytes, 8 MB cap, both top-level and
   // nested :kind/:subId flow through the same mount.
   app.use("/api/me/academy-profile/upload", expressLib.raw({ type: "image/*", limit: "8mb" }));
+  // Excuse doc uploads (parent uploads doctor's note for absent day). Accept
+  // images OR PDF, 8 MB cap. Scoped path so global json parser doesn't
+  // consume the body first. Owner ask 2026-08-23.
+  app.use("/api/academy/attendance/excuse/:studentId/:date", expressLib.raw({
+    type: (req: any) => {
+      const ct = String(req?.headers?.["content-type"] || "").toLowerCase();
+      return ct.startsWith("image/") || ct === "application/pdf";
+    },
+    limit: "8mb",
+  }));
   // Vision endpoints carry base64-encoded PNG board/silhouette payloads.
   // Phone-captured book photos land at 3-6MB. Cap at 12MB so any modern
   // phone image fits.

@@ -50,7 +50,7 @@ function MiniAttendanceCalendar({ studentId }: { studentId: string }) {
     queryKey: ["attendance-history", studentId, 60],
     queryFn: () => get<{
       ok: boolean;
-      days: Array<{ day: string; status: "present" | "late" | "absent" | "unmarked" }>;
+      days: Array<{ day: string; status: "present" | "late" | "absent" | "unmarked"; excused?: boolean }>;
       summary30: { present: number; late: number; absent: number; unmarked: number };
       currentStreak: number;
     }>(`/api/academy/attendance/history/${encodeURIComponent(studentId)}?days=60`),
@@ -66,10 +66,12 @@ function MiniAttendanceCalendar({ studentId }: { studentId: string }) {
   ];
   const weeks: Array<Array<typeof days[number] | null>> = [];
   for (let i = 0; i < padded.length; i += 7) weeks.push(padded.slice(i, i + 7));
-  const cellColor = (status: string | undefined) => {
-    if (status === "present") return "bg-emerald-500";
-    if (status === "late") return "bg-amber-400";
-    if (status === "absent") return "bg-rose-500";
+  const cellColor = (cell: { status: string; excused?: boolean } | null | undefined) => {
+    if (!cell) return "bg-ink-800";
+    if (cell.status === "present") return "bg-emerald-500";
+    if (cell.status === "late") return "bg-amber-400";
+    if (cell.status === "absent" && cell.excused) return "bg-purple-500";
+    if (cell.status === "absent") return "bg-rose-500";
     return "bg-ink-800";
   };
   return (
@@ -91,8 +93,8 @@ function MiniAttendanceCalendar({ studentId }: { studentId: string }) {
               if (!cell) return <div key={di} className="h-2.5 w-2.5" />;
               return (
                 <div key={di}
-                     title={`${cell.day}: ${cell.status}`}
-                     className={`h-2.5 w-2.5 rounded-sm ${cellColor(cell.status)}`} />
+                     title={`${cell.day}: ${cell.excused && cell.status === "absent" ? "excused" : cell.status}`}
+                     className={`h-2.5 w-2.5 rounded-sm ${cellColor(cell)}`} />
               );
             })}
           </div>

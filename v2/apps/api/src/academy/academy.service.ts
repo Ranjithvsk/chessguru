@@ -1200,6 +1200,11 @@ export class AcademyService {
         joinedAt: auto.joinedAt || null,
         lastSeenAt: auto.lastSeenAt || null,
       } : null;
+      // Excused flag — check ANY of the tier rows (excuse doc may be uploaded
+      // to the row with any source, coach could mark absent + parent later
+      // uploads excuse doc to the same row).
+      const excusedRow = [rec?.manual, rec?.qr, rec?.auto].find((x) => x?.excused);
+      const excused = !!excusedRow;
       return {
         studentId: uid,
         name: s.name || s.username,
@@ -1212,6 +1217,11 @@ export class AcademyService {
         markedAt: mark?.lastSeenAt || mark?.joinedAt || null,
         source,
         autoJoin,
+        excused,
+        excuseDocUrl: excusedRow?.excuseDocPath ? `/api/academy/attendance/excuse-doc/${excusedRow.excuseDocPath}` : null,
+        excuseNote: excusedRow?.excuseNote || null,
+        excuseUploadedByRole: excusedRow?.excuseUploadedByRole || null,
+        excuseUploadedAt: excusedRow?.excuseUploadedAt || null,
         currentAttendanceStreak: streak?.current ?? 0,
         lastPresentDate: streak?.lastPresentDate ?? null,
         absentYesterday: (streak?.lastPresentDate && streak.lastPresentDate < yesterday) || (!streak?.lastPresentDate && ids.length > 0),
@@ -1296,6 +1306,7 @@ export class AcademyService {
           u: "$key",
           day: { $dateToString: { format: "%Y-%m-%d", date: "$joinedAt", timezone: "Asia/Kolkata" } },
           status: { $ifNull: ["$status", "present"] },
+          excused: { $ifNull: ["$excused", false] },
           classId: 1, joinedAt: 1, lastSeenAt: 1,
       } },
       { $sort: { lastSeenAt: 1 } as any },
@@ -1324,18 +1335,22 @@ export class AcademyService {
       for (const d of dayMap.keys()) if (d >= dayCutoff) classDaysCurrent.add(d);
     }
 
-    // Roll up per-student current + prior period.
-    type StatusCounts = { present: number; late: number; absent: number };
+    // Roll up per-student current + prior period. Excused absences are
+    // EXCLUDED from `absent` count — they're a "legitimate miss" and
+    // shouldn't drag down attendance rate or trigger watchlist flags.
+    type StatusCounts = { present: number; late: number; absent: number; excused: number };
     const rollup = (period: "current" | "prev"): Map<string, StatusCounts> => {
       const from = period === "current" ? dayCutoff : prevCutoff.toISOString().slice(0, 10);
       const to = period === "current" ? "9999-12-31" : dayCutoff;
       const out = new Map<string, StatusCounts>();
       for (const [sid, dayMap] of perStudentDay.entries()) {
-        const counts: StatusCounts = { present: 0, late: 0, absent: 0 };
+        const counts: StatusCounts = { present: 0, late: 0, absent: 0, excused: 0 };
         for (const [day, rec] of dayMap.entries()) {
           if (day < from || day >= to) continue;
           const mark = rec.manual || rec.qr || rec.auto;
           if (!mark) continue;
+          const anyExcused = !!(rec.manual?.excused || rec.qr?.excused || rec.auto?.excused);
+          if (mark.status === "absent" && anyExcused) { counts.excused++; continue; }
           const s = mark.status === "absent" ? "absent" : mark.status === "late" ? "late" : "present";
           counts[s]++;
         }
@@ -1355,7 +1370,7 @@ export class AcademyService {
     // Fleet metrics
     let sumAttended = 0, sumTotal = 0, perfectCount = 0;
     for (const s of students) {
-      const c = cur.get(String(s._id)) || { present: 0, late: 0, absent: 0 };
+      const c = cur.get(String(s._id)) || { present: 0, late: 0, absent: 0, excused: 0 };
       const tot = c.present + c.late + c.absent;
       if (tot > 0) {
         sumAttended += (c.present + c.late);
@@ -1436,13 +1451,14 @@ export class AcademyService {
     const watchlist: any[] = [];
     for (const s of students) {
       const sid = String(s._id);
-      const c = cur.get(sid) || { present: 0, late: 0, absent: 0 };
+      const c = cur.get(sid) || { present: 0, late: 0, absent: 0, excused: 0 };
       const p = prev.get(sid);
       const curRate = rate(c);
       const prevRate = rate(p);
       const rateDrop = curRate != null && prevRate != null ? prevRate - curRate : 0;
 
-      // Absences in last 7 days
+      // Absences in last 7 days — excused absences DON'T count against the
+      // student (parent uploaded doctor's note = legitimate miss).
       let recentAbsent = 0;
       const dayMap = perStudentDay.get(sid);
       const recentDays: Array<{ day: string; status: string }> = [];
@@ -1450,8 +1466,17 @@ export class AcademyService {
         for (const [day, rec] of dayMap.entries()) {
           if (day < sevenDaysAgo) continue;
           const mark = rec.manual || rec.qr || rec.auto;
-          if (mark && mark.status === "absent") recentAbsent++;
-          if (mark) recentDays.push({ day, status: mark.status === "absent" ? "absent" : mark.status === "late" ? "late" : "present" });
+          if (!mark) continue;
+          const anyExcused = !!(rec.manual?.excused || rec.qr?.excused || rec.auto?.excused);
+          const isAbsent = mark.status === "absent" && !anyExcused;
+          if (isAbsent) recentAbsent++;
+          recentDays.push({
+            day,
+            status: isAbsent ? "absent"
+                  : mark.status === "late" ? "late"
+                  : anyExcused && mark.status === "absent" ? "excused"
+                  : "present",
+          });
         }
       }
       // Consecutive miss — sort desc, check top 2
@@ -1563,7 +1588,7 @@ export class AcademyService {
 
     // Emit N days ending TODAY. Each day: { day, status, source, reason?, lateMinutes? }.
     const today = dayStr(new Date());
-    const outDays: Array<{ day: string; status: "present" | "late" | "absent" | "unmarked"; source: string; reason: string | null; lateMinutes: number | null }> = [];
+    const outDays: Array<{ day: string; status: "present" | "late" | "absent" | "unmarked"; source: string; reason: string | null; lateMinutes: number | null; excused?: boolean }> = [];
     for (let i = days - 1; i >= 0; i--) {
       const d = new Date(Date.now() - i * 86400_000);
       const dstr = dayStr(d);
@@ -1576,7 +1601,12 @@ export class AcademyService {
       const src = rec.manual ? "manual" : rec.qr ? "qr" : "live-class";
       const status: "present" | "late" | "absent" =
         mark.status === "absent" ? "absent" : mark.status === "late" ? "late" : "present";
-      outDays.push({ day: dstr, status, source: src, reason: mark.reason || null, lateMinutes: mark.lateMinutes ?? null });
+      const excusedRow = [rec.manual, rec.qr, rec.auto].find((x: any) => x?.excused);
+      outDays.push({
+        day: dstr, status, source: src,
+        reason: mark.reason || null, lateMinutes: mark.lateMinutes ?? null,
+        excused: !!excusedRow,
+      });
     }
 
     // Rollups
@@ -1612,6 +1642,128 @@ export class AcademyService {
       summary: summaryAll,
       currentStreak,
     };
+  }
+
+  /** Upload an excuse document for a student's absent day. Owner ask
+   *  2026-08-23. Marks the student's classAttendance row with
+   *  excused=true + a link to the uploaded doc (image or PDF).
+   *
+   *  Auth: parent (for linked children), coach (own students), owner
+   *  (any student in academy). Student can add a note-only excuse for
+   *  themselves. Docs stored under EXCUSE_DOCS_DIR served via
+   *  /api/academy/attendance/excuse-doc/:excuseId (auth-gated).
+   *
+   *  Body can be raw Buffer (file upload) OR JSON { note } for a
+   *  note-only excuse without doc. Auto-creates the classAttendance
+   *  row as absent+excused if it doesn't exist yet — so parent can
+   *  submit an excuse in advance of the coach marking. */
+  async uploadExcuseDoc(session: any, studentId: string, dateStr: string, buf: Buffer | null, contentType: string, note: string | null) {
+    const userId: string | null = session?.userId ?? null;
+    const role = session?.role;
+    if (!userId) return { ok: false, error: "Sign in first." };
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return { ok: false, error: "Bad date." };
+    const student: any = await this.users().findOne({ _id: studentId as any, role: "student" });
+    if (!student) return { ok: false, error: "Student not found." };
+    // Auth
+    let allowed = false;
+    let uploaderRole = "";
+    if (role === "academy_owner" && String(session.academyId) === String(student.academyId)) { allowed = true; uploaderRole = "owner"; }
+    else if (role === "coach" && String(session.academyId) === String(student.academyId) && String(student.coachId || "") === userId) { allowed = true; uploaderRole = "coach"; }
+    else if (role === "parent" && Array.isArray(student.parentIds) && student.parentIds.includes(userId)) { allowed = true; uploaderRole = "parent"; }
+    else if (userId === String(student._id)) { allowed = true; uploaderRole = "self"; }
+    if (!allowed) return { ok: false, error: "Not authorized." };
+
+    // Optional file: sniff type + validate
+    let docPath: string | null = null;
+    let docFilename: string | null = null;
+    let docMime: string | null = null;
+    let docBytes: number | null = null;
+    if (buf && buf.byteLength > 0) {
+      if (buf.byteLength > 8 * 1024 * 1024) return { ok: false, error: "File too large (max 8 MB)." };
+      const ct = String(contentType || "").toLowerCase().split(";")[0]?.trim() || "";
+      const extMap: Record<string, string> = {
+        "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png",
+        "image/webp": "webp", "image/gif": "gif",
+        "application/pdf": "pdf",
+      };
+      const ext = extMap[ct];
+      if (!ext) return { ok: false, error: "Only images (jpg/png/webp/gif) and PDF accepted." };
+      const dir = process.env.CHESSGURU_EXCUSE_DOCS_DIR ?? "/home/ubuntu/chessguru-excuse-docs";
+      const fs = await import("fs/promises");
+      await fs.mkdir(dir, { recursive: true });
+      const id = randomBytes(8).toString("base64url");
+      docFilename = `${studentId}-${dateStr.replace(/-/g, "")}-${id}.${ext}`;
+      const path = await import("path");
+      await fs.writeFile(path.join(dir, docFilename), buf);
+      docPath = docFilename;
+      docMime = ct;
+      docBytes = buf.byteLength;
+    }
+    if (!docPath && !note) return { ok: false, error: "Provide either a document or a note." };
+
+    // Upsert the classAttendance row. We use a manual-style classId owned by
+    // the uploader — the sheet's manual > qr > auto priority still applies,
+    // but this row is tagged excused. If the coach had ALREADY marked with a
+    // manual classId, we ALSO update that row (best-effort) so the sheet
+    // shows excused right away.
+    const yyyymmdd = dateStr.replace(/-/g, "");
+    const col = this.conn.db!.collection("classAttendance");
+    // Try to update ANY existing row for (student, date) with the excused flag
+    // + doc info, regardless of source. This preserves the coach's mark chain.
+    const dayStart = new Date(`${dateStr}T00:00:00`);
+    const dayEnd = new Date(`${dateStr}T23:59:59.999`);
+    const existing: any = await col.findOne({ key: studentId as any, joinedAt: { $gte: dayStart, $lte: dayEnd } });
+    const excusePatch: any = {
+      excused: true,
+      excuseNote: note ? String(note).slice(0, 500) : null,
+      excuseDocPath: docPath,
+      excuseDocMime: docMime,
+      excuseDocBytes: docBytes,
+      excuseUploadedByUserId: userId,
+      excuseUploadedByRole: uploaderRole,
+      excuseUploadedAt: new Date(),
+    };
+    if (existing) {
+      await col.updateOne({ _id: existing._id }, { $set: { ...excusePatch, lastSeenAt: new Date() } });
+    } else {
+      // No prior row — create a row as absent+excused so the sheet reflects it.
+      const classId = `excuse-${uploaderRole}-${userId}-${yyyymmdd}`;
+      const dayAt = new Date(`${dateStr}T09:00:00`);
+      await col.updateOne(
+        { classId, key: studentId as any },
+        {
+          $setOnInsert: { joinedAt: dayAt, classId, key: studentId, userId: studentId, name: student.name || student.username, manual: true, markedByUserId: userId },
+          $set: { lastSeenAt: new Date(), status: "absent", lateMinutes: null, reason: note || "Excused absence", ...excusePatch },
+        },
+        { upsert: true },
+      );
+    }
+    return { ok: true, date: dateStr, hasDoc: !!docPath, docFilename: docPath };
+  }
+
+  /** Serve an uploaded excuse doc — auth-gated (same rules as upload). */
+  async getExcuseDoc(session: any, docFilename: string): Promise<{ ok: boolean; error?: string; path?: string; mime?: string }> {
+    const userId: string | null = session?.userId ?? null;
+    const role = session?.role;
+    if (!userId) return { ok: false, error: "Sign in first." };
+    // Sanity: only allow safe filenames matching our upload pattern.
+    if (!/^[A-Za-z0-9._-]+$/.test(docFilename)) return { ok: false, error: "Bad filename." };
+    // Look up the row that references this doc.
+    const row: any = await this.conn.db!.collection("classAttendance").findOne({ excuseDocPath: docFilename });
+    if (!row) return { ok: false, error: "Not found." };
+    const studentId = String(row.key);
+    const student: any = await this.users().findOne({ _id: studentId as any });
+    if (!student) return { ok: false, error: "Student not found." };
+    // Auth (same as upload)
+    let allowed = false;
+    if (role === "academy_owner" && String(session.academyId) === String(student.academyId)) allowed = true;
+    else if (role === "coach" && String(session.academyId) === String(student.academyId) && String(student.coachId || "") === userId) allowed = true;
+    else if (role === "parent" && Array.isArray(student.parentIds) && student.parentIds.includes(userId)) allowed = true;
+    else if (userId === String(student._id)) allowed = true;
+    if (!allowed) return { ok: false, error: "Not authorized." };
+    const dir = process.env.CHESSGURU_EXCUSE_DOCS_DIR ?? "/home/ubuntu/chessguru-excuse-docs";
+    const path = await import("path");
+    return { ok: true, path: path.join(dir, docFilename), mime: row.excuseDocMime || "application/octet-stream" };
   }
 
   /** Enroll a student's face for attendance check-in.

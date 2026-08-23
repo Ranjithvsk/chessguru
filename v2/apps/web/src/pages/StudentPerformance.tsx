@@ -72,7 +72,7 @@ function AttendanceCalendar({ studentId, fallback }: { studentId: string; fallba
     queryKey: ["attendance-history", studentId, 90],
     queryFn: () => get<{
       ok: boolean;
-      days: Array<{ day: string; status: "present" | "late" | "absent" | "unmarked"; source: string; reason: string | null; lateMinutes: number | null }>;
+      days: Array<{ day: string; status: "present" | "late" | "absent" | "unmarked"; source: string; reason: string | null; lateMinutes: number | null; excused?: boolean }>;
       summary30: { present: number; late: number; absent: number; unmarked: number };
       summary: { present: number; late: number; absent: number; unmarked: number };
       currentStreak: number;
@@ -98,11 +98,13 @@ function AttendanceCalendar({ studentId, fallback }: { studentId: string; fallba
   const weeks: Array<Array<typeof days[number] | null>> = [];
   for (let i = 0; i < padded.length; i += 7) weeks.push(padded.slice(i, i + 7));
 
-  const cellColor = (status: string | undefined) => {
-    if (status === "present") return "bg-emerald-500";
-    if (status === "late") return "bg-amber-400";
-    if (status === "absent") return "bg-rose-500";
-    return "bg-ink-800";   // unmarked
+  const cellColor = (cell: { status: string; excused?: boolean } | undefined | null) => {
+    if (!cell) return "bg-ink-800";
+    if (cell.status === "present") return "bg-emerald-500";
+    if (cell.status === "late") return "bg-amber-400";
+    if (cell.status === "absent" && cell.excused) return "bg-purple-500";
+    if (cell.status === "absent") return "bg-rose-500";
+    return "bg-ink-800";
   };
 
   return (
@@ -129,10 +131,10 @@ function AttendanceCalendar({ studentId, fallback }: { studentId: string; fallba
             {Array.from({ length: 7 }, (_, di) => {
               const cell = week[di];
               if (!cell) return <div key={di} className="h-3 w-3" />;
-              const tip = `${cell.day} · ${cell.status}${cell.reason ? ` (${cell.reason})` : ""}${cell.lateMinutes ? ` · ${cell.lateMinutes}m` : ""}`;
+              const tip = `${cell.day} · ${cell.excused && cell.status === "absent" ? "excused" : cell.status}${cell.reason ? ` (${cell.reason})` : ""}${cell.lateMinutes ? ` · ${cell.lateMinutes}m` : ""}`;
               return (
                 <div key={di} title={tip}
-                     className={`h-3 w-3 rounded-sm ${cellColor(cell.status)}`} />
+                     className={`h-3 w-3 rounded-sm ${cellColor(cell)}`} />
               );
             })}
           </div>

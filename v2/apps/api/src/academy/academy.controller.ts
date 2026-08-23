@@ -2,7 +2,7 @@
 // session.role === 'academy_owner' — the guard lives inside AcademyService
 // so no controller code needs to duplicate it.
 
-import { Body, Controller, Delete, Get, Param, Post, Put, Query, Req, UnauthorizedException } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, Req, Res, UnauthorizedException } from "@nestjs/common";
 import { AcademyService } from "./academy.service";
 import { CoachStarredDigestService } from "./coach-starred-digest.service";
 
@@ -196,6 +196,41 @@ export class AcademyController {
   @Get("attendance/face/roster")
   faceRoster(@Req() req: any) {
     return this.svc.listFaceEnrollment(req.session);
+  }
+
+  /** Upload an excuse doc (image or PDF, max 8MB) for a student's absent day.
+   *  Raw body upload — send Content-Type: image/png / application/pdf / etc.
+   *  Query ?note=... adds a text note alongside (or use POST /excuse-note
+   *  for note-only, no file). Auth: parent for linked children, coach for
+   *  own students, owner for any, student for self. */
+  @Post("attendance/excuse/:studentId/:date")
+  uploadExcuseDoc(@Req() req: any, @Param("studentId") studentId: string, @Param("date") date: string, @Query("note") note: string, @Body() body: any) {
+    const buf = Buffer.isBuffer(body) ? body : null;
+    const ct = String(req?.headers?.["content-type"] || "");
+    return this.svc.uploadExcuseDoc(req.session, studentId, date, buf, ct, note || null);
+  }
+
+  /** Note-only excuse (no file). Body: { note }. */
+  @Post("attendance/excuse-note/:studentId/:date")
+  excuseNote(@Req() req: any, @Param("studentId") studentId: string, @Param("date") date: string, @Body() body: any) {
+    const note = typeof body?.note === "string" ? body.note : "";
+    return this.svc.uploadExcuseDoc(req.session, studentId, date, null, "", note);
+  }
+
+  /** Auth-gated file serve for an uploaded excuse doc. */
+  @Get("attendance/excuse-doc/:filename")
+  async serveExcuseDoc(@Req() req: any, @Param("filename") filename: string, @Res() res: any) {
+    const r = await this.svc.getExcuseDoc(req.session, filename);
+    if (!r.ok || !r.path) return res.status(r.error === "Not authorized." ? 403 : 404).json({ ok: false, error: r.error });
+    const fs = await import("fs/promises");
+    try {
+      const buf = await fs.readFile(r.path);
+      res.setHeader("Content-Type", r.mime || "application/octet-stream");
+      res.setHeader("Cache-Control", "private, max-age=0, no-store");
+      return res.send(buf);
+    } catch {
+      return res.status(404).json({ ok: false, error: "File missing on disk." });
+    }
   }
 
   /** Per-student attendance history for the calendar heatmap on the
