@@ -1234,6 +1234,272 @@ export class AcademyService {
     return { ok: true, date, coachId, batchId: batchId || null, rows, lastClassDate };
   }
 
+  /** Coach + owner attendance dashboard — the "at-a-glance" view above
+   *  individual marking. Owner ask 2026-08-23. Returns:
+   *
+   *    fleet:      overall academy stats for the period
+   *    byBatch:    per-batch rate + trend + coach + student count
+   *    byCoach:    per-coach summary (owner only; coach sees just self)
+   *    watchlist:  students needing attention — absent >=3 in past 7 days,
+   *                OR missed last 2 consecutive class days,
+   *                OR attendance dropped >=20 pts vs prior period
+   *
+   *  Period defaults to 30 days; capped 7-365. Single big aggregation over
+   *  classAttendance scoped to this academy's students; one round-trip.
+   */
+  async getAttendanceDashboard(session: any, daysRaw?: number) {
+    const g = this.ensureCoachOrOwner(session);
+    const days = Math.max(7, Math.min(365, Math.round(Number(daysRaw) || 30)));
+    const now = Date.now();
+    const cutoff = new Date(now - days * 86400_000);
+    const prevCutoff = new Date(now - 2 * days * 86400_000);
+
+    // Roster in scope — coach sees their students; owner sees whole academy.
+    const studentFilter: any = { academyId: g.academyId, role: "student" };
+    if (g.role === "coach") studentFilter.coachId = g.userId;
+    const students: any[] = await this.users().find(studentFilter, { projection: { _id: 1, name: 1, username: 1, coachId: 1 } }).toArray();
+    if (!students.length) {
+      return { ok: true, period: { days }, fleet: { totalStudents: 0, totalClassDays: 0, overallRate: 0, perfectCount: 0, avgAttended: 0 }, byBatch: [], byCoach: [], watchlist: [] };
+    }
+    const ids = students.map((s: any) => String(s._id));
+    const byStudent = new Map(students.map((s: any) => [String(s._id), s]));
+
+    // Coaches lookup for the byCoach breakdown (owner) + student-row enrichment.
+    const coachIds = [...new Set(students.map((s: any) => s.coachId).filter(Boolean).map(String))];
+    const coaches: any[] = coachIds.length ? await this.users().find({ _id: { $in: coachIds as any } }, { projection: { _id: 1, name: 1, username: 1 } }).toArray() : [];
+    const coachById = new Map(coaches.map((c: any) => [String(c._id), c]));
+
+    // Batches for this academy — used to name-group students.
+    const batchFilter: any = { academyId: g.academyId };
+    if (g.role === "coach") batchFilter.coachUserId = g.userId;
+    const batches: any[] = await this.batches().find(batchFilter, { projection: { _id: 1, name: 1, coachUserId: 1, studentIds: 1 } }).toArray();
+    // Reverse index: studentId → [batchIds]
+    const batchesByStudent = new Map<string, string[]>();
+    for (const b of batches) for (const sid of (b.studentIds || []).map(String)) {
+      const arr = batchesByStudent.get(sid) || [];
+      arr.push(String(b._id));
+      batchesByStudent.set(sid, arr);
+    }
+
+    // One big scan of classAttendance — current period + prior period so we
+    // can compute per-student rate change in a single query.
+    const attRows: any[] = await this.conn.db!.collection("classAttendance").aggregate([
+      { $match: { key: { $in: ids as any }, joinedAt: { $gte: prevCutoff } } },
+      { $project: {
+          u: "$key",
+          day: { $dateToString: { format: "%Y-%m-%d", date: "$joinedAt", timezone: "Asia/Kolkata" } },
+          status: { $ifNull: ["$status", "present"] },
+          classId: 1, joinedAt: 1, lastSeenAt: 1,
+      } },
+      { $sort: { lastSeenAt: 1 } as any },
+    ]).toArray();
+
+    // Per-student per-day winning status (same manual > qr > live-class priority).
+    // Group cursors by (student, day).
+    const perStudentDay = new Map<string, Map<string, { manual: any | null; qr: any | null; auto: any | null }>>();
+    for (const r of attRows) {
+      const sid = String(r.u);
+      const day = String(r.day);
+      let dayMap = perStudentDay.get(sid);
+      if (!dayMap) { dayMap = new Map(); perStudentDay.set(sid, dayMap); }
+      let rec = dayMap.get(day) || { manual: null, qr: null, auto: null };
+      const cid = String(r.classId || "");
+      if (cid.startsWith("qrcheckin-")) rec.qr = r;
+      else if (cid.startsWith("manual-")) rec.manual = r;
+      else rec.auto = r;
+      dayMap.set(day, rec);
+    }
+
+    // Which days had ANY attendance activity for the academy (roughly = class days).
+    const classDaysCurrent = new Set<string>();
+    const dayCutoff = cutoff.toISOString().slice(0, 10);
+    for (const dayMap of perStudentDay.values()) {
+      for (const d of dayMap.keys()) if (d >= dayCutoff) classDaysCurrent.add(d);
+    }
+
+    // Roll up per-student current + prior period.
+    type StatusCounts = { present: number; late: number; absent: number };
+    const rollup = (period: "current" | "prev"): Map<string, StatusCounts> => {
+      const from = period === "current" ? dayCutoff : prevCutoff.toISOString().slice(0, 10);
+      const to = period === "current" ? "9999-12-31" : dayCutoff;
+      const out = new Map<string, StatusCounts>();
+      for (const [sid, dayMap] of perStudentDay.entries()) {
+        const counts: StatusCounts = { present: 0, late: 0, absent: 0 };
+        for (const [day, rec] of dayMap.entries()) {
+          if (day < from || day >= to) continue;
+          const mark = rec.manual || rec.qr || rec.auto;
+          if (!mark) continue;
+          const s = mark.status === "absent" ? "absent" : mark.status === "late" ? "late" : "present";
+          counts[s]++;
+        }
+        out.set(sid, counts);
+      }
+      return out;
+    };
+    const cur = rollup("current");
+    const prev = rollup("prev");
+
+    const rate = (c: StatusCounts | undefined) => {
+      if (!c) return null;
+      const tot = c.present + c.late + c.absent;
+      return tot > 0 ? Math.round(((c.present + c.late) / tot) * 100) : null;
+    };
+
+    // Fleet metrics
+    let sumAttended = 0, sumTotal = 0, perfectCount = 0;
+    for (const s of students) {
+      const c = cur.get(String(s._id)) || { present: 0, late: 0, absent: 0 };
+      const tot = c.present + c.late + c.absent;
+      if (tot > 0) {
+        sumAttended += (c.present + c.late);
+        sumTotal += tot;
+        if (c.absent === 0 && tot >= 4) perfectCount++;   // >=4 classes with no absence
+      }
+    }
+    const overallRate = sumTotal > 0 ? Math.round((sumAttended / sumTotal) * 100) : 0;
+    const totalClassDays = classDaysCurrent.size;
+    const avgAttended = totalClassDays > 0 ? Math.round(sumAttended / totalClassDays) : 0;
+
+    // Per-batch rollup
+    const byBatch = batches.map((b: any) => {
+      const bids = (b.studentIds || []).map(String);
+      let att = 0, tot = 0;
+      for (const sid of bids) {
+        const c = cur.get(sid);
+        if (!c) continue;
+        att += (c.present + c.late);
+        tot += (c.present + c.late + c.absent);
+      }
+      const bRate = tot > 0 ? Math.round((att / tot) * 100) : null;
+      // Prev
+      let pAtt = 0, pTot = 0;
+      for (const sid of bids) {
+        const c = prev.get(sid);
+        if (!c) continue;
+        pAtt += (c.present + c.late);
+        pTot += (c.present + c.late + c.absent);
+      }
+      const pRate = pTot > 0 ? Math.round((pAtt / pTot) * 100) : null;
+      const coach = coachById.get(String(b.coachUserId));
+      return {
+        batchId: String(b._id),
+        name: b.name,
+        coachId: String(b.coachUserId || ""),
+        coachName: coach ? (coach.name || coach.username) : null,
+        studentCount: bids.length,
+        rate: bRate,
+        prevRate: pRate,
+        delta: bRate != null && pRate != null ? bRate - pRate : null,
+      };
+    }).sort((a: any, b: any) => (b.rate ?? -1) - (a.rate ?? -1));
+
+    // Per-coach rollup (owner only)
+    const byCoach: any[] = [];
+    if (g.role === "academy_owner") {
+      const coachStats = new Map<string, { students: number; att: number; tot: number }>();
+      for (const s of students) {
+        const cid = String(s.coachId || "");
+        if (!cid) continue;
+        const st = coachStats.get(cid) || { students: 0, att: 0, tot: 0 };
+        st.students++;
+        const c = cur.get(String(s._id));
+        if (c) {
+          st.att += (c.present + c.late);
+          st.tot += (c.present + c.late + c.absent);
+        }
+        coachStats.set(cid, st);
+      }
+      for (const [cid, st] of coachStats.entries()) {
+        const coach = coachById.get(cid);
+        byCoach.push({
+          coachId: cid,
+          coachName: coach ? (coach.name || coach.username) : cid,
+          studentCount: st.students,
+          rate: st.tot > 0 ? Math.round((st.att / st.tot) * 100) : null,
+        });
+      }
+      byCoach.sort((a: any, b: any) => (b.rate ?? -1) - (a.rate ?? -1));
+    }
+
+    // Watchlist — kids needing attention. Three criteria:
+    //   1. >= 3 absences in the last 7 days (heavy recent)
+    //   2. Last 2 marked class-days both absent (consecutive miss)
+    //   3. Attendance rate dropped >= 20 pts vs prior period
+    const sevenDaysAgo = new Date(now - 7 * 86400_000).toISOString().slice(0, 10);
+    const watchlist: any[] = [];
+    for (const s of students) {
+      const sid = String(s._id);
+      const c = cur.get(sid) || { present: 0, late: 0, absent: 0 };
+      const p = prev.get(sid);
+      const curRate = rate(c);
+      const prevRate = rate(p);
+      const rateDrop = curRate != null && prevRate != null ? prevRate - curRate : 0;
+
+      // Absences in last 7 days
+      let recentAbsent = 0;
+      const dayMap = perStudentDay.get(sid);
+      const recentDays: Array<{ day: string; status: string }> = [];
+      if (dayMap) {
+        for (const [day, rec] of dayMap.entries()) {
+          if (day < sevenDaysAgo) continue;
+          const mark = rec.manual || rec.qr || rec.auto;
+          if (mark && mark.status === "absent") recentAbsent++;
+          if (mark) recentDays.push({ day, status: mark.status === "absent" ? "absent" : mark.status === "late" ? "late" : "present" });
+        }
+      }
+      // Consecutive miss — sort desc, check top 2
+      recentDays.sort((a, b) => b.day.localeCompare(a.day));
+      const consecutiveMiss = recentDays.length >= 2 && recentDays[0]!.status === "absent" && recentDays[1]!.status === "absent";
+
+      const reasons: string[] = [];
+      if (recentAbsent >= 3) reasons.push(`${recentAbsent} absences this week`);
+      if (consecutiveMiss) reasons.push("2 in a row absent");
+      if (rateDrop >= 20) reasons.push(`rate dropped ${rateDrop}pts`);
+      if (!reasons.length) continue;
+
+      const coach = coachById.get(String(s.coachId || ""));
+      const bIds = batchesByStudent.get(sid) || [];
+      const bNames = bIds.map((bid) => {
+        const b = batches.find((x: any) => String(x._id) === bid);
+        return b ? b.name : null;
+      }).filter(Boolean);
+
+      watchlist.push({
+        studentId: sid,
+        name: s.name || s.username,
+        coachName: coach ? (coach.name || coach.username) : null,
+        batchNames: bNames,
+        currentRate: curRate,
+        prevRate,
+        rateDelta: curRate != null && prevRate != null ? curRate - prevRate : null,
+        recentAbsent,
+        consecutiveMiss,
+        reasons,
+      });
+    }
+    // Sort watchlist: consecutive-miss first, then most recentAbsent, then biggest drop.
+    watchlist.sort((a: any, b: any) => {
+      if (a.consecutiveMiss !== b.consecutiveMiss) return a.consecutiveMiss ? -1 : 1;
+      if (a.recentAbsent !== b.recentAbsent) return b.recentAbsent - a.recentAbsent;
+      return (b.prevRate ?? 0) - (b.currentRate ?? 0) - ((a.prevRate ?? 0) - (a.currentRate ?? 0));
+    });
+
+    return {
+      ok: true,
+      period: { days, from: cutoff.toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10) },
+      fleet: {
+        totalStudents: students.length,
+        totalClassDays,
+        overallRate,
+        perfectCount,
+        avgAttended,
+      },
+      byBatch,
+      byCoach,
+      watchlist: watchlist.slice(0, 20),
+    };
+  }
+
   /** Per-student attendance history — last N days as GitHub-style calendar
    *  input. Returns one entry per calendar day with the winning status
    *  (manual > qr > live-class > unmarked) so the heatmap can render 3-color

@@ -47,6 +47,7 @@ const GROUPS: Group[] = [
       { to: "/academy", label: "🏛️ My Academy", desc: "Coaches, students, invites, batches" },
       { to: "/academy/leaderboard", label: "🏆 Leaderboard", desc: "Academy ranking, Overall Score, champions, boost weeks" },
       { to: "/academy/attendance", label: "📋 Attendance", desc: "Mark today's class — default present, tap to change" },
+      { to: "/academy/attendance/dashboard", label: "📊 Attendance dashboard", desc: "Fleet rate, per-batch trends, kids who need a check-in" },
       { to: "/academy/performance", label: "📊 Student performance", desc: "Rating, tier, attendance dashboard per student" },
       { to: "/coach-board", label: "🧑‍🏫 Class Board", desc: "Student watchlist + class-plan generator" },
       { to: "/coach-board/reports", label: "📄 Parent reports", desc: "Monthly per-student progress reports" },

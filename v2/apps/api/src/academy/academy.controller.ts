@@ -162,6 +162,13 @@ export class AcademyController {
     return this.svc.getAttendanceHistory(req.session, studentId, Number(days) || 90);
   }
 
+  /** Coach + owner dashboard: fleet metrics, per-batch table, watchlist of
+   *  students needing attention. ?days=N (default 30). */
+  @Get("attendance/dashboard")
+  attendanceDashboard(@Req() req: any, @Query("days") days: string) {
+    return this.svc.getAttendanceDashboard(req.session, Number(days) || 30);
+  }
+
   /** Presence heartbeat — any signed-in user pings this every ~60s (and on
    *  route change). Body: { path }. Updates users.lastSeen + currentPath so
    *  coaches see who is online right now on the /academy dashboard. */

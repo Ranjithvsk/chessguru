@@ -212,7 +212,10 @@ export default function AttendancePage() {
             Everyone starts as <b className="text-emerald-300">Present</b>. Tap to change → Late → Absent → Present. Long-press for details.
           </div>
         </div>
-        <Link to="/academy" className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs font-medium text-ink-300 hover:text-white">← Academy</Link>
+        <div className="flex items-center gap-2">
+          <Link to="/academy/attendance/dashboard" className="rounded-lg bg-fuchsia-600/80 px-3 py-1.5 text-xs font-semibold text-white hover:bg-fuchsia-500">📊 Dashboard →</Link>
+          <Link to="/academy" className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs font-medium text-ink-300 hover:text-white">← Academy</Link>
+        </div>
       </header>
 
       {/* Filters bar (sticky at top on scroll) */}
