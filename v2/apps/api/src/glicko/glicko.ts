@@ -66,16 +66,28 @@ export function updatePuzzleRating(userPerf: Perf, puzzleGlicko: Glicko, win: bo
   const nU = computeGame(uG, puzzleGlicko, score);
   const nP = computeGame(puzzleGlicko, uG, 1 - score);
   nU.r = Math.max(uG.r - MAX_RATING_DELTA, Math.min(uG.r + MAX_RATING_DELTA, nU.r));
-  // Cap upward drift from grinding easy puzzles (gap > 250 pts).
-  //   - legitimate / borderline / unknown: +1 max (tiny reward, no inflation)
-  //   - grinder (per solvePattern classifier):  0    (rating truly stuck until
-  //                                                    they face at-level)
-  // LOSSES take their full Glicko-2 delta which is already 5-10× larger than
-  // an equivalent win by formula — that natural asymmetry is enough to
-  // correct rating in ~8-12 easy losses.
+  // Cap upward drift from grinding easy puzzles. Threshold + cap depend on
+  // solvePattern classification:
+  //
+  //   Regular user (legitimate / borderline / unknown):
+  //     gap > 250 → cap at +1  (tiny reward, no inflation from occasional
+  //                              easy solve while playing at-level)
+  //
+  //   Grinder (per solvePattern classifier — see compute-solve-pattern.js):
+  //     gap > 100 → cap at 0   (rating truly stuck. Owner report 2026-08-23:
+  //                              Akshay grinded 41 mateIn3 puzzles in 2 hours,
+  //                              rating 2472 → 2792. Per-theme rating drove
+  //                              picker to serve puzzles only 100-200 below
+  //                              global, so the old gap>250 threshold never
+  //                              fired. Grinders now capped much earlier.)
+  //
+  // LOSSES take their full Glicko-2 delta (5-10× win-delta by natural
+  // asymmetry) — no cap, ever. That's what corrects an inflated rating.
   const gap = uG.r - puzzleGlicko.r;
-  if (win && gap > 250 && nU.r > uG.r) {
-    const cap = solvePatternType === "grinder" ? 0 : 1;
+  const isGrinder = solvePatternType === "grinder";
+  const easyThreshold = isGrinder ? 100 : 250;
+  if (win && gap > easyThreshold && nU.r > uG.r) {
+    const cap = isGrinder ? 0 : 1;
     nU.r = Math.min(nU.r, uG.r + cap);
   }
   if (!sanity(nU)) nU.r = uG.r;
