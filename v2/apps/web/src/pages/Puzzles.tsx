@@ -157,7 +157,11 @@ export default function PuzzlesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [difficulty, setDifficulty] = useState<Difficulty>("normal");
-  const [section, setSection] = useState<"normal" | "masters">(() => { try { return (localStorage.getItem("cg_section") as "normal" | "masters") || "normal"; } catch { return "normal"; } });
+  // Section default = "normal" every session (owner 2026-08-24). Previously
+  // persisted in localStorage, but that meant a coach clicked "Master Games"
+  // once and every subsequent session opened there — including for kids who
+  // shouldn't be on 2400+ puzzles. Reset to normal each fresh visit.
+  const [section, setSection] = useState<"normal" | "masters">("normal");
   const [player, setPlayer] = useState<string>("");
   const { data: masterPlayers } = useQuery({ queryKey: ["master-players"], queryFn: api.masterPlayers, enabled: section === "masters" });
   const { data: themes } = useQuery({ queryKey: ["themes"], queryFn: api.themes });
@@ -478,7 +482,18 @@ export default function PuzzlesPage() {
       <aside className="flex min-w-0 flex-col gap-4 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
         <div className="flex gap-2">
           {([["normal", "Normal"], ["masters", "\u{1F451} Master Games"]] as const).map(([sec, label]) => (
-            <button key={sec} onClick={() => { setSection(sec); try { localStorage.setItem("cg_section", sec); } catch { /* */ } }}
+            <button key={sec} onClick={() => {
+              // Confirm before switching TO Master Games (2400+ puzzles by
+              // definition — meant only for strong players). Owner ask
+              // 2026-08-24: kids kept clicking accidentally and getting
+              // crushed. No confirmation on the way back to Normal.
+              if (sec === "masters" && section !== "masters") {
+                if (!confirm("Master Games are GM-level puzzles rated 2200-3200 — much harder than your normal training. Continue?")) return;
+              }
+              setSection(sec);
+              // Not persisted to localStorage (owner 2026-08-24) — every
+              // session defaults to Normal.
+            }}
               className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold ${section === sec ? "bg-brand-600 text-white" : "border border-ink-700 text-ink-300 hover:bg-ink-800"}`}>
               {label}
             </button>
