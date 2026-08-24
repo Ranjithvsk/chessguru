@@ -735,26 +735,41 @@ export class PuzzlesService {
       // Losses always heavier than wins → naturally anti-inflation.
       const selectedTheme = body.theme || null;
 
-      // Session fatigue (owner 2026-08-24): talented kids can grind mateIn1
-      // at 91% win rate for 143 solves in a day (deepakcharanv Aug 22 case:
-      // +525 rating in one theme in one day). Weighted-average alone drops
-      // that to +70 but still lets grinding pay off. Fatigue formula reduces
-      // the win weight for each recent same-theme solve:
-      //   fatigueMul = 1 / (1 + sameThemeSolves30min / 15)
-      // Effect: 1st solve full weight, 15th solve 50%, 30th 33%, 60th 20%.
-      // Applied to WINS only — losses always take full weight (punishment
-      // for missing an "easy" theme puzzle stays real). Session window 30
-      // minutes so a coach's 5-puzzle warm-up doesn't trigger it.
+      // Session fatigue (owner 2026-08-24): grinding dampener that fires on
+      // ANY sustained solving pattern, not just mateIn1. Two signals:
+      //
+      //   1. SAME-THEME fatigue (fires on themed solving):
+      //      themeFatigue = 1 / (1 + sameThemeSolves30min / 15)
+      //      → 1st=1.00, 15th=0.50, 30th=0.33, 60th=0.20
+      //      Catches: kid picks mateIn1/fork/endgame/etc. and spams it
+      //
+      //   2. VOLUME fatigue (fires on mix-mode or any high-volume session):
+      //      volumeFatigue = 1 / (1 + totalSolves30min / 30)
+      //      → 1st=1.00, 30th=0.50, 60th=0.33, 100th=0.23
+      //      Catches: kid in mix mode does 100 puzzles fast for rating
+      //
+      // Effective fatigue = MIN of both (whichever is stricter). Applied to
+      // WINS only — losses always take full punishment. Losing an easy
+      // puzzle mid-grind still hurts full, which is the correction lever.
+      //
+      // Reference: deepakcharanv Aug 22 grinded 143 mateIn1s → +525 rating
+      // under old model. Under new model (weighted-average + fatigue) same
+      // session yields ~+15 rating.
       let fatigueMul = 1;
-      if (win && selectedTheme && selectedTheme !== "mix") {
+      if (win) {
         const t30m = new Date(Date.now() - 30 * 60_000);
-        const sameThemeCount = await this.conn.db!.collection("rounds").countDocuments({
-          _id: { $regex: `^${userId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:` } as any,
-          k: "puzzle",
-          sel: selectedTheme,
-          d: { $gte: t30m },
-        });
-        if (sameThemeCount > 0) fatigueMul = 1 / (1 + sameThemeCount / 15);
+        const uidRe = { $regex: `^${userId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:` } as any;
+        const rounds = this.conn.db!.collection("rounds");
+        // Volume fatigue always applies; theme fatigue only when a specific
+        // theme is picked (mix mode doesn't have a single-theme count).
+        const totalCount = await rounds.countDocuments({ _id: uidRe, k: "puzzle", d: { $gte: t30m } });
+        const volumeFatigue = totalCount > 0 ? 1 / (1 + totalCount / 30) : 1;
+        let themeFatigue = 1;
+        if (selectedTheme && selectedTheme !== "mix") {
+          const themeCount = await rounds.countDocuments({ _id: uidRe, k: "puzzle", sel: selectedTheme, d: { $gte: t30m } });
+          themeFatigue = themeCount > 0 ? 1 / (1 + themeCount / 15) : 1;
+        }
+        fatigueMul = Math.min(volumeFatigue, themeFatigue);
       }
 
       const upd = updatePuzzleRating(perf, puzzleGlicko, win, selectedTheme);
