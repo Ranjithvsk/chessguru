@@ -83,17 +83,22 @@ export class PuzzlesService {
     // Curriculum step: caller-specified exact rating wins over both the
     // live-rating override AND the difficulty offset. Used by the weakness
     // curriculum's ratchet so each step lands on a known target rating.
-    const target = typeof exactRating === "number" && exactRating > 0
+    const rawTarget = typeof exactRating === "number" && exactRating > 0
       ? clamp(exactRating, 400, 3000)
       : clamp(baseRating + (DIFF[difficulty] ?? 0), 400, 3000);
-    // Hard floor: never serve a puzzle more than 250 pts below the user's live
-    // rating (unless it's the "easiest" difficulty tier where users explicitly
-    // ask for warm-up puzzles). Owner report 2026-08-23: Deepakcharanv (2794)
-    // + Mageswaran (2809) climbed to strong ratings by grinding 100+ mateIn1
-    // puzzles rated ~2000 (300+ below their level). The old picker fell back
-    // to easy puzzles when the exact-band pool was thin; that fallback fueled
-    // rating inflation. Now: fallback still expands upward but the floor stays.
-    const easyFloor = difficulty === "easiest" ? 400 : Math.max(400, baseRating - 250);
+    // Hard floor: never serve a puzzle more than 250 pts below baseRating,
+    // regardless of difficulty tier. Owner report 2026-08-24: srinithi_sn
+    // solved 217 puzzles over 48h with 188 wins but net rating went DOWN by
+    // 347 — picker was serving her puzzles rated 400-800 (via FAST PATH pool
+    // sampling + the old easiest-tier exemption) while her global 1481 and
+    // per-theme 1900+ said she should be seeing 1600+ puzzles. Every easy
+    // win got capped at +1 by the anti-inflation rule; every rare loss on a
+    // 400-800 puzzle took a huge -50 Glicko hit (losing to a much-weaker
+    // puzzle screams "you're overrated"). Floor now enforced UNIVERSALLY,
+    // and the FAST PATH clamps target to floor before doing the band lookup
+    // so a thin exact-band pool can never bleed into the 900-rated bucket.
+    const easyFloor = Math.max(400, baseRating - 250);
+    const target = Math.max(rawTarget, easyFloor);
     const played = userId ? await this.playedIds(userId) : [];
     const playedSet = new Set(played);
 
