@@ -154,14 +154,20 @@ export class HomeworkService {
       const sid = String(s._id);
       if (skip.has(sid)) { skipped++; continue; }
       const { themes, overallRating } = await this.pickWeakThemesForStudent(sid);
+      // Owner directive 2026-08-24: one-click homework ALWAYS uses the
+      // student's current global rating for targetRating (not per-theme).
+      // Rationale: per-theme snapshots drift stale AND drove srinithi/
+      // akshay-style picker mismatches. Under the new Lichess weighted-avg
+      // rating model, the picker uses global rating for band anyway, so
+      // homework snapshot should match. Themes list is still chosen by
+      // per-theme weakness (what to practice); rating is universal.
+      const target = Math.round(overallRating ?? 1500);
       const tasks: HomeworkTask[] = [
         ...themes.map((t) => ({
           kind: "puzzle_pack" as const,
           theme: t.theme,
           targetCount: 5,
-          // Prefer per-theme rating; fall back to the student's overall puzzle
-          // rating so brand-new students still get puzzles near their level.
-          targetRating: Math.round(t.rating ?? overallRating ?? 1500),
+          targetRating: target,
         })),
         { kind: "opening_revision" as const, openingSlug: DEFAULT_OPENING },
       ];
@@ -184,12 +190,15 @@ export class HomeworkService {
     themes: Array<{ theme: string; rating: number | null }>;
     overallRating: number | null;
   }> {
-    const [perf, userRating]: any[] = await Promise.all([
-      this.conn.db!.collection("userperfs").findOne({ _id: userId as any }, { projection: { themes: 1 } }),
-      // The user's overall puzzle rating — stored on the user doc for fast reads
-      this.conn.db!.collection("users").findOne({ _id: userId as any }, { projection: { puzzleRating: 1, rating: 1 } }),
-    ]);
-    const overallRating = (userRating?.puzzleRating ?? userRating?.rating ?? null) as number | null;
+    // Read the live global puzzle rating from userperfs.puzzle.gl.r —
+    // that's where the rating model writes to. Old code read from
+    // users.puzzleRating / users.rating which was undefined for most
+    // students (bug found 2026-08-24 — caused homework to fall to
+    // 1500 default even for high-rated students).
+    const perf: any = await this.conn.db!.collection("userperfs").findOne(
+      { _id: userId as any }, { projection: { themes: 1, puzzle: 1 } },
+    );
+    const overallRating: number | null = perf?.puzzle?.gl?.r ? Math.round(perf.puzzle.gl.r) : null;
     const themes = perf?.themes || {};
     const rows: Array<{ theme: string; rating: number; nb: number }> = [];
     for (const [k, v] of Object.entries<any>(themes)) {
