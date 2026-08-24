@@ -60,25 +60,20 @@ export class PuzzlesService {
       // blindfold theme ratings (themesBf), fully separate from regular puzzles.
       const bf = mode === "blindfold";
       const perfKey = bf ? "blindfold" : "puzzle";
-      const themeNs = bf ? "themesBf" : "themes";
-      const themed = theme && theme !== "mix" && /^[a-zA-Z0-9]+$/.test(theme);
-      const proj: Record<string, number> = { [`${perfKey}.gl.r`]: 1 };
-      if (themed) { proj[`${themeNs}.${theme}.gl.r`] = 1; proj[`${themeNs}.${theme}.nb`] = 1; }
-      const up = await this.conn.db!.collection("userperfs").findOne({ _id: userId as any }, { projection: proj });
+      const up = await this.conn.db!.collection("userperfs").findOne({ _id: userId as any }, { projection: { [`${perfKey}.gl.r`]: 1 } });
       const liveR = (up as any)?.[perfKey]?.gl?.r;
       if (typeof liveR === "number" && liveR > 0) baseRating = liveR;
-      // Theme training uses the THEME rating once it has enough signal — a player
-      // strong in forks but weak in endgames gets correctly-hard puzzles in each.
-      // Gates: nb >= 8 AND d <= 200. Below those, the rating is provisional and
-      // often inflated (Mageswaran report 2026-08-23: mateIn5 climbed to 3042 for
-      // a globally-2809 player after 9 forcing-sequence wins from a 1500 start).
-      // For provisional themes, fall back to global rating so puzzles land at a
-      // realistic difficulty instead of feeding the inflation loop.
-      const tp = themed ? (up as any)?.[themeNs]?.[theme] : null;
-      const trustTheme = tp && typeof tp.gl?.r === "number"
-        && (tp.nb ?? 0) >= 8
-        && (tp.gl?.d ?? 500) <= 200;
-      if (trustTheme) baseRating = tp.gl.r;
+      // Picker now uses GLOBAL rating only (owner directive 2026-08-24) —
+      // per-theme ratings are for DISPLAY + WEAKNESS DETECTION only. Prior
+      // behaviour trusted per-theme when nb>=8 + d<=200, which caused the
+      // srinithi disaster: her per-theme mateIn3 sat at 2112 while her real
+      // skill (global) was 1481; picker served 2000+ puzzles she couldn't
+      // solve → losses took huge Glicko hits, wins capped at +1 → net −347
+      // rating despite 88% win rate. Ranjith the same day: global 2075,
+      // per-theme mateIn3 grown to 2500+, picker served 2550 → unwinnable.
+      // Since we now use Lichess weighted-average rating (theme adjusts
+      // WEIGHT of the delta, not the picker band), we don't need per-theme
+      // to also drive picker. One source of truth = the user's global.
     }
     // Curriculum step: caller-specified exact rating wins over both the
     // live-rating override AND the difficulty offset. Used by the weakness
@@ -711,60 +706,6 @@ export class PuzzlesService {
     return { current, longest };
   }
 
-  // Anti-grinding dampening multiplier — see call site for design notes.
-  // Two rolling windows on the user's rounds for the SELECTED theme:
-  //   Layer 1 (24h count):    1-3=1.0, 4-8=0.7, 9-14=0.4, 15+=0
-  //   Layer 2 (7d gain cap):  >=40 total positive rd → 0
-  //                           >=25 total positive rd → clamp to 0.3
-  // Both defenses cover complementary attacks — grind burst vs slow spread.
-  // Skipped for mix / null theme (picker serves diverse themes naturally).
-  // Reads use _id prefix regex which mongo optimizes via the _id index.
-  //
-  // Layer 2 is SKIPPED for solvePattern.type === "legitimate" users because
-  // a high-rated legitimate user can genuinely gain 30-50 rating per win via
-  // normal Glicko-2 asymmetry — 8 wins/week × 30 = +240 easily exceeds the
-  // +40 cap even though there's no grinding (owner check 2026-08-23 on
-  // theerajkumarr, 2708 rating: 8 legit sacrifice wins → +274 in 7d, false
-  // positive under blanket Layer 2). Grinders and borderline users still
-  // get both layers. If a legit user starts grinding, nightly classifier
-  // flips them to grinder (streak >= 20 rule) → Layer 2 re-engages.
-  private async computeDampeningMult(userId: string, selectedTheme: string | null, spType?: string): Promise<number> {
-    if (!selectedTheme || selectedTheme === "mix") return 1;
-    const now = Date.now();
-    const t24h = new Date(now - 24 * 60 * 60 * 1000);
-    const t7d = new Date(now - 7 * 24 * 60 * 60 * 1000);
-    const rounds = this.conn.db!.collection("rounds");
-    const uidRe = { $regex: `^${userId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:` } as any;
-
-    const count24h = await rounds.countDocuments({
-      _id: uidRe,
-      k: "puzzle",
-      sel: selectedTheme,
-      d: { $gte: t24h },
-    });
-    let mult = count24h >= 15 ? 0
-             : count24h >= 9  ? 0.4
-             : count24h >= 4  ? 0.7
-             : 1;
-
-    if (mult > 0 && spType !== "legitimate") {
-      const agg = await rounds.aggregate([
-        { $match: {
-            _id: uidRe,
-            k: "puzzle",
-            sel: selectedTheme,
-            d: { $gte: t7d },
-            rd: { $gt: 0 },
-          } },
-        { $group: { _id: null, total: { $sum: "$rd" } } },
-      ]).toArray();
-      const gain7d = agg[0]?.total || 0;
-      if (gain7d >= 40) mult = 0;
-      else if (gain7d >= 25) mult = Math.min(mult, 0.3);
-    }
-    return mult;
-  }
-
   async complete(id: string, body: { win: boolean; userId?: string | null; hint?: boolean; mode?: string; rating?: number; deviation?: number; theme?: string; ms?: number; wrong?: string; daily?: boolean }) {
     const pz = await this.col().findOne({ _id: id as any });
     if (!pz) return null;
@@ -785,61 +726,42 @@ export class PuzzlesService {
       // via Glicko convergence with d=500 initially.
       const perf = doc[key] || { gl: { r: (key === "blindfold" ? 800 : 1200), d: 500, v: DEFAULT_VOLATILITY }, nb: 0, re: [], la: null };
       if (hint) return { win, ratingDiff: 0, rating: Math.round(perf.gl.r), glicko: perf.gl };
-      // Pass solvePattern.type so grinders get stricter easy-win cap (0
-      // instead of +1). Pattern computed nightly by compute-solve-pattern.js
-      // + refreshed on demand.
-      const spType: "legitimate" | "borderline" | "grinder" | undefined =
-        doc.puzzle?.solvePattern?.type;
-      // Anti-grinding dampening (owner 2026-08-23, "ship both layers"):
-      //
-      //   Layer 1 — 24h rolling per-theme count. Multiplier drops based on
-      //             how many times user has solved this SELECTED theme in
-      //             the past 24 hours. Closes the "consecutive streak reset"
-      //             loophole (alternating themes) AND the "daily reset"
-      //             loophole (streak grinds resetting overnight).
-      //
-      //   Layer 2 — 7-day rolling per-theme rating-gain cap. Once user has
-      //             gained >=40 positive rating points from this theme in
-      //             the past 7 days, further wins give 0 delta. Prevents
-      //             the "spread grind across multiple days" workaround.
-      //
-      // Skipped in mix mode (sel = "mix"/null) since the picker naturally
-      // serves diverse themes, and on losses (which always take full delta
-      // as the corrective force). See conversation 2026-08-23 for design.
-      const dampeningMult = (win && key === "puzzle")
-        ? await this.computeDampeningMult(userId, body.theme || null, spType)
-        : 1;
-      const upd = updatePuzzleRating(perf, puzzleGlicko, win, spType, dampeningMult);
+      // Rating update — Lichess weighted-average model (owner 2026-08-24).
+      // Theme decides how much of the raw Glicko delta gets kept:
+      //   mix (no filter)                       → 100% of Glicko
+      //   neutral (endgame/master/opening)      → 70% win / 80% loss
+      //   hinting (fork/pin/skewer/sacrifice)   → 20% win / 70% loss
+      //   obvious (mateIn1, all *Mates)         → 10% win / 40% loss
+      // Losses always heavier than wins → naturally anti-inflation.
+      // No more hard caps, slow-climb, or dampening layers.
+      const selectedTheme = body.theme || null;
+      const upd = updatePuzzleRating(perf, puzzleGlicko, win, selectedTheme);
       const sets: Record<string, any> = { [key]: upd.userPerf };
-      // Per-theme Glicko ratings (owner 2026-07-08): every rated solve also rates the
-      // puzzle's MEANINGFUL themes, so the dashboard shows real strengths/weaknesses
-      // and theme training serves difficulty from the theme rating. Noise tags
-      // (lengths, goals, origins) are not rated. Regular puzzle mode only.
+
+      // Per-theme ratings — updated with the SAME weighted-average model.
+      // Each theme on the puzzle gets its own Glicko track. NOT used by the
+      // picker anymore (which uses global only) — kept for display + weakness
+      // detection. Clamped to global ± 300 on write to prevent drift.
       if (Array.isArray(pz.themes)) {
-        const themeNs = key === "blindfold" ? "themesBf" : "themes"; // blindfold themes rated separately
-        // Owner directive 2026-08-23 (afternoon): revert to seeding fresh
-        // per-theme entries at 1500/d=500 (Lichess convention). Rationale:
-        // per-theme rating is a MEASURED skill in that specific theme,
-        // independent of the user's global. Users should build each theme
-        // rating from scratch. Inflation is no longer a UX problem because:
-        //   - Fix (b): picker ignores per-theme rating until nb>=8 + d<=200
-        //   - Fix (c): suggestedThemes requires nb>=15 + d<=200 to classify
-        //              as strength/weakness — provisional flag on rest
-        //   - Fix (f): picker floor at global-250 regardless of per-theme drift
-        //   - Fix (e): easy-win delta cap prevents runaway per-theme drift
-        // So per-theme can inflate freely while provisional; once it stabilizes
-        // (many solves + low RD) it reflects real theme-specific skill.
+        const themeNs = key === "blindfold" ? "themesBf" : "themes";
+        const globalR = upd.userPerf.gl.r;
         const startR = key === "blindfold" ? 800 : 1500;
         for (const t of pz.themes) {
           if (PuzzlesService.UNRATED.has(t) || typeof t !== "string" || !/^[a-zA-Z0-9]+$/.test(t)) continue;
           const tPerf = doc[themeNs]?.[t] || { gl: { r: startR, d: 500, v: DEFAULT_VOLATILITY }, nb: 0, re: [], la: null };
-          // Apply the same dampening multiplier to per-theme entries when a
-          // grinding pattern is detected in the selected theme. Puzzle themes
-          // overlap (mateIn3 solves inflate [mate, mateIn3, middlegame, long]),
-          // so uniformly dampening keeps the picker (which reads per-theme
-          // ratings once trusted) from being driven above real skill level.
-          const tUpd = updatePuzzleRating(tPerf, puzzleGlicko, win, undefined, dampeningMult);
-          sets[`${themeNs}.${t}`] = tUpd.userPerf;
+          // Same weighted-average model, but pass the theme name (not the
+          // user's selected filter) so weight matches the puzzle's actual
+          // theme. Result: fork puzzle updates fork per-theme with 20% weight
+          // even if user picked "mix" mode.
+          const tUpd = updatePuzzleRating(tPerf, puzzleGlicko, win, t);
+          const tOut = tUpd.userPerf;
+          // Clamp per-theme to global ± 300 so drift can't accumulate
+          // (root cause of srinithi's -347 disaster). This is our safety
+          // net; in practice the weighted-average dampening rarely lets
+          // per-theme drift this far anyway.
+          const clamped = Math.max(globalR - 300, Math.min(globalR + 300, tOut.gl.r));
+          if (clamped !== tOut.gl.r) tOut.gl.r = clamped;
+          sets[`${themeNs}.${t}`] = tOut;
         }
       }
       await perfsCol.updateOne({ _id: userId as any }, { $set: sets }, { upsert: true });
@@ -888,7 +810,7 @@ export class PuzzlesService {
     // guest — one-off, non-persisted
     const r = body.rating || 1500, dev = body.deviation || 500;
     if (hint) return { win, ratingDiff: 0, rating: r, glicko: { r, d: dev, v: DEFAULT_VOLATILITY } };
-    const upd = updatePuzzleRating({ gl: { r, d: dev, v: DEFAULT_VOLATILITY }, nb: 0, re: [], la: null }, puzzleGlicko, win);
+    const upd = updatePuzzleRating({ gl: { r, d: dev, v: DEFAULT_VOLATILITY }, nb: 0, re: [], la: null }, puzzleGlicko, win, body.theme || null);
     return { win, ratingDiff: upd.ratingDiff, rating: upd.userPerf.gl.r, glicko: upd.userPerf.gl };
   }
 }

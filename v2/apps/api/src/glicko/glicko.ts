@@ -68,76 +68,117 @@ export function liveDeviation(perf: Perf, reverse = false): number {
 
 const sanity = (x: Glicko) => x.r > 0 && x.r < 4000 && x.d > 0 && x.d < 2000 && x.v > 0 && x.v < 2;
 
-export function updatePuzzleRating(userPerf: Perf, puzzleGlicko: Glicko, win: boolean, solvePatternType?: "legitimate" | "borderline" | "grinder", dampeningMult: number = 1) {
+// ─────────────────────────────────────────────────────────────────────────
+// Lichess weighted-average model (owner 2026-08-24, ported from lila
+// `modules/puzzle/src/main/PuzzleFinisher.scala::ponder.player`).
+//
+// Instead of running vanilla Glicko-2 and clamping the output ("gap > 250
+// → +1 flat"), Lichess computes the raw Glicko-2 delta and keeps only a
+// FRACTION of it, weighted by:
+//   1. Theme class of the puzzle (mix / neutral / hinting / obvious)
+//   2. Whether it's a win or loss (losses weigh heavier — anti-inflation)
+//   3. Whether the puzzle itself is provisional (untrusted → less impact)
+//
+// Weight table (from lila `weightOf`):
+//                    win    loss
+//   mix              1.00   1.00   ← no theme filter, full delta
+//   neutral          0.70   0.80   ← endgame, master, opening, ...
+//   hinting          0.20   0.70   ← fork, pin, skewer, sacrifice, ...
+//   obvious          0.10   0.40   ← mateIn1, castling, enPassant, all *Mates
+//
+// Weight is then linearly interpolated between pre-solve and raw-Glicko-
+// output ratings. All three components (rating, deviation, volatility)
+// move proportionally. Provisional-puzzle penalty subtracts extra weight
+// (-0.2 win, -0.7 loss), floored at 0.1.
+//
+// See PROJECT_MASTER/knowledge/16-lichess-puzzle-system.md for the full
+// reference.
+
+// Themes with strong intrinsic hint (title tells you the answer). Wins
+// carry only 10% weight; losses 40% — grinding these is break-even at best.
+const OBVIOUS_THEMES = new Set([
+  "enPassant", "attackingF2F7", "doubleCheck", "mateIn1", "castling",
+  // All *Mate patterns
+  "anastasiaMate", "arabianMate", "backRankMate", "balestraMate", "blindSwineMate",
+  "bodenMate", "cornerMate", "doubleBishopMate", "dovetailMate", "epauletteMate",
+  "hookMate", "killBoxMate", "pillsburysMate", "morphysMate", "operaMate",
+  "swallowstailMate", "triangleMate", "vukovicMate", "smotheredMate",
+]);
+
+// Themes that don't hint at a specific tactic — solving these actually
+// measures real skill. Wins 70%, losses 80%.
+const NEUTRAL_THEMES = new Set([
+  "opening", "middlegame", "endgame",
+  "rookEndgame", "bishopEndgame", "pawnEndgame", "knightEndgame",
+  "queenEndgame", "queenRookEndgame",
+  "master", "masterVsMaster", "superGM",
+]);
+
+const PROVISIONAL_DEVIATION = 110;
+
+export function themeWeight(theme: string | null | undefined, win: boolean): number {
+  if (!theme || theme === "mix") return 1.0;
+  if (OBVIOUS_THEMES.has(theme)) return win ? 0.10 : 0.40;
+  if (NEUTRAL_THEMES.has(theme)) return win ? 0.70 : 0.80;
+  return win ? 0.20 : 0.70;   // hinting (default for everything else)
+}
+
+// Weighted linear interp — matches Lichess `Glicko.average`.
+function averageGlicko(a: Glicko, b: Glicko, w: number): Glicko {
+  if (w >= 1) return b;
+  if (w <= 0) return a;
+  return {
+    r: a.r * (1 - w) + b.r * w,
+    d: a.d * (1 - w) + b.d * w,
+    v: a.v * (1 - w) + b.v * w,
+  };
+}
+
+/** Update a rating using the Lichess weighted-average model.
+ *
+ *  Used for BOTH global puzzle rating AND per-theme ratings — pass the
+ *  puzzle's SELECTED theme filter (body.theme) OR the per-theme's theme
+ *  key. Each per-theme update uses the same weighted-average logic; only
+ *  the theme argument differs.
+ *
+ *  Returns the new user perf (with rating history + nb bumped) and the
+ *  computed ratingDiff for display. Puzzle-side new glicko is also returned
+ *  for callers that want to update the puzzle document (usually only the
+ *  first per-solve call — subsequent per-theme updates should skip the
+ *  puzzle-side write to avoid triple-counting).
+ */
+export function updatePuzzleRating(userPerf: Perf, puzzleGlicko: Glicko, win: boolean, theme?: string | null) {
   const uG: Glicko = { r: userPerf.gl.r, d: liveDeviation(userPerf), v: userPerf.gl.v || DEFAULT_VOLATILITY };
   const score = win ? 1 : 0;
-  const nU = computeGame(uG, puzzleGlicko, score);
-  const nP = computeGame(puzzleGlicko, uG, 1 - score);
-  nU.r = Math.max(uG.r - MAX_RATING_DELTA, Math.min(uG.r + MAX_RATING_DELTA, nU.r));
-  // Cap upward drift from grinding easy puzzles. Threshold + cap depend on
-  // solvePattern classification:
-  //
-  //   Regular user (legitimate / borderline / unknown):
-  //     gap > 250 → cap at +1  (tiny reward, no inflation from occasional
-  //                              easy solve while playing at-level)
-  //
-  //   Grinder (per solvePattern classifier — see compute-solve-pattern.js):
-  //     gap > 100 → cap at 0   (rating truly stuck. Owner report 2026-08-23:
-  //                              Akshay grinded 41 mateIn3 puzzles in 2 hours,
-  //                              rating 2472 → 2792. Per-theme rating drove
-  //                              picker to serve puzzles only 100-200 below
-  //                              global, so the old gap>250 threshold never
-  //                              fired. Grinders now capped much earlier.)
-  //
-  // LOSSES take their full Glicko-2 delta (5-10× win-delta by natural
-  // asymmetry) — no cap, ever. That's what corrects an inflated rating.
-  const gap = uG.r - puzzleGlicko.r;
-  const isGrinder = solvePatternType === "grinder";
-  const easyThreshold = isGrinder ? 100 : 250;
-  if (win && gap > easyThreshold && nU.r > uG.r) {
-    const cap = isGrinder ? 0 : 1;
-    nU.r = Math.min(nU.r, uG.r + cap);
-  }
-  // Dampening multiplier from Layer 1 (24h theme count) or Layer 2 (7d theme
-  // gain cap) — computed in puzzles.service.ts::complete() and passed in.
-  // Applies only to positive deltas (wins that grow rating). Losses always
-  // take full punishment.
-  if (win && dampeningMult < 1 && nU.r > uG.r) {
-    const gain = nU.r - uG.r;
-    nU.r = uG.r + Math.round(gain * dampeningMult);
-  }
-  // Slow-climb calibration (owner 2026-08-23): scale delta by
-  // min(1, 100 / liveDeviation) so early-phase ratings (d=500 fresh
-  // account, d=200-300 fresh theme) don't swing +300-400 pts per solve.
-  //   d=500 → scale=0.20  (fresh user — 5x slower climb)
-  //   d=200 → scale=0.50
-  //   d=100 → scale=1.00  (established — full delta)
-  //
-  // Applies symmetrically to wins AND losses. Rationale: it's a
-  // CALIBRATION damper, not a punishment lift — a single loss shouldn't
-  // nuke a fresh user's rating either. Once user reaches d<=100 (~30+
-  // solves depending on activity), scaling stops entirely and Glicko
-  // math runs pure.
-  //
-  // Complements the provisional UI badge (isProvisional() below): badge
-  // tells users "this is an estimate", slow-climb makes the estimate
-  // itself less wild. Together they fix theeraj-style +356-in-one-solve
-  // early inflation.
-  const cScale = Math.min(1, 100 / uG.d);
-  if (cScale < 1) {
-    const rawDelta = nU.r - uG.r;
-    nU.r = uG.r + Math.round(rawDelta * cScale);
-  }
-  if (!sanity(nU)) nU.r = uG.r;
-  // Rating history kept per user. Bumped 12 → 100 on 2026-08-18 to power the
-  // coach performance-dashboard sparkline — 12 points was too short for the
-  // trend to be readable. 100 = ~a few months of daily solving for an active
-  // student; ~800 bytes per user (negligible storage). Existing users grow
-  // into it naturally; no migration needed.
-  const recent = [nU.r, ...(userPerf.re || [])].slice(0, 100);
+  // Raw Glicko-2 outputs — the ENDPOINT of the weighted-average interp.
+  const rawUser = computeGame(uG, puzzleGlicko, score);
+  const rawPuzzle = computeGame(puzzleGlicko, uG, 1 - score);
+  // Puzzle-side ±MAX_RATING_DELTA clamp (safety, matches Lichess).
+  rawPuzzle.r = Math.max(puzzleGlicko.r - MAX_RATING_DELTA, Math.min(puzzleGlicko.r + MAX_RATING_DELTA, rawPuzzle.r));
+
+  // Weight from theme classifier + provisional-puzzle modifier.
+  const baseWeight = themeWeight(theme, win);
+  const puzzleProvisional = puzzleGlicko.d >= PROVISIONAL_DEVIATION;
+  const provisionalMod = puzzleProvisional ? (win ? -0.2 : -0.7) : 0;
+  const weight = Math.max(0.1, baseWeight + provisionalMod);
+
+  // Weighted average between pre-solve and raw Glicko output.
+  const newG = averageGlicko(uG, rawUser, weight);
+  newG.r = Math.round(newG.r);
+  newG.d = Math.round(newG.d);
+  // Sanity + rating history (100-entry cap)
+  if (!sanity(newG)) { newG.r = uG.r; newG.d = uG.d; newG.v = uG.v; }
+  const recent = [newG.r, ...(userPerf.re || [])].slice(0, 100);
+
   return {
-    userPerf: { gl: { r: nU.r, d: liveDeviation({ gl: nU, la: new Date() }, true), v: nU.v }, nb: (userPerf.nb || 0) + 1, re: recent, la: new Date() },
-    puzzleGlicko: nP,
-    ratingDiff: nU.r - uG.r,
+    userPerf: {
+      gl: { r: newG.r, d: liveDeviation({ gl: newG, la: new Date() }, true), v: newG.v },
+      nb: (userPerf.nb || 0) + 1,
+      re: recent,
+      la: new Date(),
+    },
+    puzzleGlicko: rawPuzzle,
+    ratingDiff: newG.r - uG.r,
+    weight,   // exposed for logging/debugging
   };
 }
