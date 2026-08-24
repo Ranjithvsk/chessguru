@@ -3298,13 +3298,13 @@ Thank you!`;
       const life = await this.conn.db!.collection("rounds").aggregate([
         { $project: {
             u: { $arrayElemAt: [{ $split: ["$_id", ":"] }, 0] },
-            pr: 1,
+            r: 1,
         } },
-        { $match: { u: { $in: ids } } },
+        { $match: { u: { $in: ids }, r: { $type: "number" } } },
         { $group: {
             _id: "$u",
             puzzlesLifetime: { $sum: 1 },
-            peakRating: { $max: "$pr" },
+            peakRating: { $max: "$r" },
         } },
       ]).toArray();
       for (const l of life) lifetimeMap.set(String(l._id), {
@@ -3312,11 +3312,14 @@ Thank you!`;
         peakRating: l.peakRating ?? null,
       });
     } else {
-      // Lifetime IS the period — reuse counts, still need peakRating
+      // Lifetime IS the period — reuse counts, still need peakRating.
+      // Owner report 2026-08-24: previous code used $max: "$pr" which is
+      // the HIGHEST PUZZLE RATING the user has solved — not the user's own
+      // peak rating. Fixed to $max: "$r" (user rating after solve).
       const life = await this.conn.db!.collection("rounds").aggregate([
-        { $project: { u: { $arrayElemAt: [{ $split: ["$_id", ":"] }, 0] }, pr: 1 } },
-        { $match: { u: { $in: ids } } },
-        { $group: { _id: "$u", peakRating: { $max: "$pr" } } },
+        { $project: { u: { $arrayElemAt: [{ $split: ["$_id", ":"] }, 0] }, r: 1 } },
+        { $match: { u: { $in: ids }, r: { $type: "number" } } },
+        { $group: { _id: "$u", peakRating: { $max: "$r" } } },
       ]).toArray();
       for (const l of life) lifetimeMap.set(String(l._id), {
         puzzlesLifetime: roundMap.get(String(l._id))?.puzzles ?? 0,
@@ -3820,7 +3823,10 @@ Thank you!`;
             _id: null,
             total: { $sum: 1 },
             blindfold: { $sum: { $cond: [{ $eq: ["$k", "blindfold"] }, 1, 0] } },
-            peakPr: { $max: "$pr" },
+            // Peak = user's highest personal rating ever (from rounds.r).
+            // Fixed 2026-08-24: was $max: "$pr" (puzzle rating) which showed
+            // "hardest puzzle solved" not "your peak rating".
+            peakPr: { $max: "$r" },
             themes: { $addToSet: "$th" },
         } },
       ]).toArray().then((rows) => rows[0] || null),
