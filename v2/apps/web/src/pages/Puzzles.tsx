@@ -344,7 +344,7 @@ export default function PuzzlesPage() {
   const fbColor = { wait: "text-ink-300", good: "text-accent-400", bad: "text-rose-400", solved: "text-accent-400" }[g.fb.kind];
 
   return (
-    <div className="grid gap-6 lg:h-[calc(100dvh-9rem)] lg:grid-cols-[minmax(0,1fr)_360px] lg:overflow-hidden">
+    <div className="grid gap-6 lg:h-[calc(100dvh-7rem)] lg:grid-cols-[minmax(0,1fr)_360px] lg:overflow-hidden">
       {/* Homework mode banner — spans both columns. Locks theme + shows
        *  progress bar + celebrates when task is complete. */}
       {inHwMode && (
@@ -444,42 +444,15 @@ export default function PuzzlesPage() {
             width on the column, so chessground filled both dimensions without
             respecting its intrinsic 1:1 aspect. Wrapping in aspect-square + a
             height cap keeps the board square regardless of column shape. */}
-        <div className="mx-auto aspect-square w-full" style={{ maxWidth: "min(100%, calc(100dvh - 13rem))", maxHeight: "calc(100dvh - 13rem)" }}>
+        <div className="mx-auto aspect-square w-full" style={{ maxWidth: "min(100%, calc(100dvh - 11rem))", maxHeight: "calc(100dvh - 11rem)" }}>
           <Board
             fen={g.fen} orientation={g.orientation} turnColor={g.turnColor}
             movableColor={g.movableColor} dests={g.dests} lastMove={g.lastMove}
             shapes={boardShapes} onMove={g.onMove}
           />
         </div>
-        {/* Live FEN + QR — click text to copy; scan QR to open the same
-            position on any phone in this tenant's board editor. */}
-        {g.fen && (() => {
-          const boardUrl = `${typeof window !== "undefined" ? window.location.origin : ""}/board-editor?fen=${encodeURIComponent(g.fen)}`;
-          const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=90x90&margin=2&data=${encodeURIComponent(boardUrl)}`;
-          return (
-            <div className="mt-3 flex items-center justify-center gap-3">
-              <img
-                src={qrSrc}
-                alt="Scan to open this position"
-                title="Scan with phone to open this position"
-                width={72}
-                height={72}
-                className="rounded-md border border-ink-700 bg-white p-0.5"
-                loading="lazy"
-              />
-              <div className="flex min-w-0 flex-col gap-1">
-                <span className="text-[10px] font-semibold uppercase tracking-widest text-ink-400">FEN</span>
-                <button
-                  onClick={() => { navigator.clipboard?.writeText(g.fen).catch(() => {}); }}
-                  title="Click to copy FEN"
-                  className="max-w-full overflow-x-auto whitespace-nowrap rounded-md border border-ink-700 bg-ink-900/70 px-2 py-1 text-left font-mono text-[11px] text-ink-200 hover:border-brand-500 hover:text-white"
-                >
-                  {g.fen}
-                </button>
-              </div>
-            </div>
-          );
-        })()}
+        {/* FEN + QR removed 2026-08-24 — was eating vertical space, pushing
+            the replay controls below the fold on tenant domains. */}
         {g.solved && g.replayTotal > 0 && !g.exploring && (
           <div className="mt-3 flex flex-wrap items-center justify-center gap-3">
             <button onClick={g.replayPrev} aria-label="Previous move"
