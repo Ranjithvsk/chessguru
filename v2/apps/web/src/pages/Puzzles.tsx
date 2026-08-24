@@ -344,7 +344,7 @@ export default function PuzzlesPage() {
   const fbColor = { wait: "text-ink-300", good: "text-accent-400", bad: "text-rose-400", solved: "text-accent-400" }[g.fb.kind];
 
   return (
-    <div className="grid gap-6 lg:h-[calc(100dvh-6.5rem)] lg:grid-cols-[minmax(0,1fr)_360px] lg:overflow-hidden">
+    <div className="grid gap-6 lg:h-[calc(100dvh-9rem)] lg:grid-cols-[minmax(0,1fr)_360px] lg:overflow-hidden">
       {/* Homework mode banner — spans both columns. Locks theme + shows
        *  progress bar + celebrates when task is complete. */}
       {inHwMode && (
@@ -437,14 +437,14 @@ export default function PuzzlesPage() {
           </div>
         </div>
       )}
-      <section className="min-w-0 lg:flex lg:min-h-0 lg:flex-col lg:justify-center">
+      <section className="min-w-0 lg:flex lg:min-h-0 lg:flex-col lg:justify-start lg:pt-2">
         {/* aspect-square wrapper: prevents flex from stretching the board into
             a rectangle (owner report 2026-08-23 "board looks crooked / abnormal
             size"). At lg viewports the parent grid sets an explicit height AND
             width on the column, so chessground filled both dimensions without
             respecting its intrinsic 1:1 aspect. Wrapping in aspect-square + a
             height cap keeps the board square regardless of column shape. */}
-        <div className="mx-auto aspect-square w-full" style={{ maxWidth: "min(100%, calc(100dvh - 10.5rem))", maxHeight: "calc(100dvh - 10.5rem)" }}>
+        <div className="mx-auto aspect-square w-full" style={{ maxWidth: "min(100%, calc(100dvh - 13rem))", maxHeight: "calc(100dvh - 13rem)" }}>
           <Board
             fen={g.fen} orientation={g.orientation} turnColor={g.turnColor}
             movableColor={g.movableColor} dests={g.dests} lastMove={g.lastMove}
