@@ -733,9 +733,38 @@ export class PuzzlesService {
       //   hinting (fork/pin/skewer/sacrifice)   → 20% win / 70% loss
       //   obvious (mateIn1, all *Mates)         → 10% win / 40% loss
       // Losses always heavier than wins → naturally anti-inflation.
-      // No more hard caps, slow-climb, or dampening layers.
       const selectedTheme = body.theme || null;
+
+      // Session fatigue (owner 2026-08-24): talented kids can grind mateIn1
+      // at 91% win rate for 143 solves in a day (deepakcharanv Aug 22 case:
+      // +525 rating in one theme in one day). Weighted-average alone drops
+      // that to +70 but still lets grinding pay off. Fatigue formula reduces
+      // the win weight for each recent same-theme solve:
+      //   fatigueMul = 1 / (1 + sameThemeSolves30min / 15)
+      // Effect: 1st solve full weight, 15th solve 50%, 30th 33%, 60th 20%.
+      // Applied to WINS only — losses always take full weight (punishment
+      // for missing an "easy" theme puzzle stays real). Session window 30
+      // minutes so a coach's 5-puzzle warm-up doesn't trigger it.
+      let fatigueMul = 1;
+      if (win && selectedTheme && selectedTheme !== "mix") {
+        const t30m = new Date(Date.now() - 30 * 60_000);
+        const sameThemeCount = await this.conn.db!.collection("rounds").countDocuments({
+          _id: { $regex: `^${userId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:` } as any,
+          k: "puzzle",
+          sel: selectedTheme,
+          d: { $gte: t30m },
+        });
+        if (sameThemeCount > 0) fatigueMul = 1 / (1 + sameThemeCount / 15);
+      }
+
       const upd = updatePuzzleRating(perf, puzzleGlicko, win, selectedTheme);
+      // Apply fatigue by scaling the delta down (never up).
+      if (fatigueMul < 1 && upd.ratingDiff > 0) {
+        const oldR = perf.gl.r;
+        const dampenedDelta = Math.round(upd.ratingDiff * fatigueMul);
+        upd.userPerf.gl.r = oldR + dampenedDelta;
+        upd.ratingDiff = dampenedDelta;
+      }
       const sets: Record<string, any> = { [key]: upd.userPerf };
 
       // Per-theme ratings — updated with the SAME weighted-average model.
