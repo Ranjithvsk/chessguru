@@ -105,4 +105,11 @@ export class ChessdbService {
   async stats() {
     return await this.get("/stats");
   }
+
+  /** Player autocomplete/typo-tolerance. Proxies to Vinayaka's
+   *  /players/suggest endpoint. Owner ask 2026-08-24. */
+  async playersSuggest(opts: { q: string; limit?: number }) {
+    const res = await this.get("/players/suggest", { q: opts.q, limit: Math.min(opts.limit ?? 10, 50) });
+    return res || { items: [] };
+  }
 }
