@@ -41,9 +41,10 @@ export function useClassSetupOpen(): boolean {
 // Coach action bus — reset / stepBack / stepForward triggers from the footer
 // buttons rendered by ClassV2 flow through this. ClassV2 has no access to the
 // class-ws socket; module scope keeps the wiring flat.
-type ClassBoardAction = "reset" | "stepBack" | "stepForward" | "toggleLock";
+type ClassBoardAction = "reset" | "stepBack" | "stepForward" | "toggleLock" | "flipOrientation";
 const _actionSubs = new Set<(a: ClassBoardAction) => void>();
 export function triggerClassBoardAction(a: ClassBoardAction) { _actionSubs.forEach((f) => f(a)); }
+export function triggerClassFlipOrientation() { _actionSubs.forEach((f) => f("flipOrientation")); }
 
 // Cursor position (which move index students are currently seeing) — the
 // footer nav shows "3 / 12" so the coach knows where they are in the game.
@@ -76,6 +77,24 @@ export function useClassLocked(): boolean {
 }
 export function triggerClassLockToggle() {
   _actionSubs.forEach((f) => f("toggleLock"));
+}
+
+// Room orientation — coach flip broadcasts to all students so both sides see
+// the same POV. Server keeps the last orientation in room state so late
+// joiners land on the correct side. Module scope + subscribe hook mirrors
+// the lock pattern above.
+type Orientation = "white" | "black";
+let _orientationState: Orientation = "white";
+const _orientationSubs = new Set<() => void>();
+function _publishOrientation(v: Orientation) {
+  if (_orientationState === v) return;
+  _orientationState = v;
+  _orientationSubs.forEach((f) => f());
+}
+export function useClassOrientation(): Orientation {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((n) => n + 1); _orientationSubs.add(f); return () => { _orientationSubs.delete(f); }; }, []);
+  return _orientationState;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -429,6 +448,7 @@ export default function SharedClassBoard(
         setShapes(Array.isArray(msg.shapes) ? msg.shapes : []);
         _publishCursor(Number(msg.cursorIdx ?? (Array.isArray(msg.history) ? msg.history.length : 0)), Array.isArray(msg.history) ? msg.history.length : 0);
         if (typeof msg.locked === "boolean") _publishLocked(msg.locked);
+        if (msg.orientation === "white" || msg.orientation === "black") _publishOrientation(msg.orientation);
       }
       else if (msg.type === "move") {
         applyFen(msg.fen, msg.move);
@@ -450,6 +470,7 @@ export default function SharedClassBoard(
       }
       else if (msg.type === "pointer") setRemotePointer({ x: Number(msg.x) || 0, y: Number(msg.y) || 0 });
       else if (msg.type === "pointer-off") setRemotePointer(null);
+      else if (msg.type === "orientation") { if (msg.orientation === "white" || msg.orientation === "black") _publishOrientation(msg.orientation); }
       else if (msg.type === "classEnded") { onClassEnded?.(String(msg.reason || "coach_left")); }
     };
     return () => {
@@ -520,6 +541,11 @@ export default function SharedClassBoard(
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     try { ws.send(JSON.stringify({ type: "lock", locked: nextLocked })); } catch { /* */ }
   };
+  const sendOrientation = (next: Orientation) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try { ws.send(JSON.stringify({ type: "orientation", orientation: next })); } catch { /* */ }
+  };
   // Subscribe to the footer's action bus so coach's ← → / Reset / Lock clicks
   // in ClassV2 reach us and go over the ws.
   useEffect(() => {
@@ -528,6 +554,7 @@ export default function SharedClassBoard(
       else if (a === "stepBack") sendStepBack();
       else if (a === "stepForward") sendStepForward();
       else if (a === "toggleLock") sendLock(!_lockedState);
+      else if (a === "flipOrientation") sendOrientation(_orientationState === "white" ? "black" : "white");
     };
     _actionSubs.add(handle);
     return () => { _actionSubs.delete(handle); };
@@ -540,6 +567,7 @@ export default function SharedClassBoard(
   // without the hook, changing `_lockedState` at module scope wouldn't wake
   // the student's board up until an unrelated re-render.
   const locked = useClassLocked();
+  const orientation = useClassOrientation();
   const boardMovable: "both" | "none" = role === "coach" ? "both" : (locked ? "none" : "both");
   // Setup modal state now lives in the module (see setClassSetupOpen at top
   // of file) so ClassV2's footer button can open it. Local FEN/error still
@@ -594,6 +622,7 @@ export default function SharedClassBoard(
     >
       <Board
         fen={fen}
+        orientation={orientation}
         movableColor={boardMovable}
         dests={boardMovable === "none" ? (new Map() as any) : (dests as any)}
         lastMove={lastMoveTuple}

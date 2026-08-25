@@ -16,7 +16,7 @@ import {
 import { Track, DataPacket_Kind } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
-import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, useClassCursorInfo, useClassLocked, triggerClassLockToggle } from "../components/SharedClassBoard";
+import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle } from "../components/SharedClassBoard";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -398,6 +398,22 @@ function CoachBoardNav() {
         →
       </button>
     </div>
+  );
+}
+
+// Coach-only board flip. Broadcasts to every student so the whole class sees
+// the same POV (owner ask 2026-08-25).
+function CoachFlipToggle() {
+  const orientation = useClassOrientation();
+  const isBlack = orientation === "black";
+  return (
+    <button
+      onClick={triggerClassFlipOrientation}
+      title={isBlack ? "Board is showing Black at the bottom — click to flip to White" : "Board is showing White at the bottom — click to flip to Black"}
+      className="rounded-full border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm font-semibold text-ink-100 transition hover:bg-ink-800"
+    >
+      🔄 {isBlack ? "Black view" : "White view"}
+    </button>
   );
 }
 
@@ -932,6 +948,7 @@ export default function ClassV2Page() {
                 <ChatToggleButton />
                 <ReactionsBar />
                 {role === "coach" && <CoachBoardNav />}
+                {role === "coach" && <CoachFlipToggle />}
                 {role === "coach" && <CoachLockToggle />}
                 {role === "coach" && (
                   <button
