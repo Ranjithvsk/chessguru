@@ -57,7 +57,7 @@ Every new brand-visible surface must be reviewed against this ADR at PR time.
 
 ## Regression test
 
-`/tmp/test-pwa-branding.sh` (or a permanent home when we adopt a test runner) — asserts:
+`v2/scripts/test-pwa-branding.sh` (or a permanent home when we adopt a test runner) — asserts:
 
 - **Tenant (`gunachess.com`)** manifest name/short_name/icons/theme_color = Guna; NO 'ChessGuru' literal appears anywhere in the manifest body; all 6 index.html meta swaps landed.
 - **Canonical (`chessguru.cc`)** manifest still returns "ChessGuru" (regression guard).
@@ -67,7 +67,7 @@ Every new brand-visible surface must be reviewed against this ADR at PR time.
 Run before any nginx template / manifest endpoint change:
 
 ```
-./tmp/test-pwa-branding.sh
+.v2/scripts/test-pwa-branding.sh
 ```
 
 Expect: `19 passed, 0 failed`.
