@@ -8,7 +8,7 @@
 // the dashboard can poll it every 10s while a class is live without breaking
 // a sweat.
 
-import { BadRequestException, Body, Controller, Get, Param, Post, Req } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Req } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { getLiveAttendees, closeClassRoom, kickFromClassRoom } from "./class-ws";
@@ -71,6 +71,13 @@ export class ClassLiveController {
       academyId, coachUserId: me,
     });
     if (alreadyRecent) return { ok: true, already: true };
+    // Audience-picker flow: the /class-v2 page opens a modal on coach entry
+    // and calls going-live with deferNotify:true. Push then fires from
+    // PATCH /audience once the coach has picked the batch / students. This
+    // prevents an initial "everyone I coach" push from going out before the
+    // coach has narrowed the audience. Announcement row is still written so
+    // the live-now feed picks the room up.
+    if (body?.deferNotify) return { ok: true, deferred: true };
 
     const klass: any = await this.conn.db!.collection("classSchedules").findOne(
       { _id: id as any }, { projection: { title: 1 } });
@@ -101,6 +108,175 @@ export class ClassLiveController {
       if (r.sent > 0) notified++;
     }));
     return { ok: true, notified };
+  }
+
+  /** GET /api/class/:id/audience — audience state + picker options.
+   *  Returns the current audience selection (kind, batchId, studentIds) plus
+   *  the coach's batches and students so the picker UI can render without
+   *  another round-trip. Coach/owner only; other roles get {}. */
+  @Get(":id/audience")
+  async getAudience(@Param("id") id: string, @Req() req: any) {
+    if (!ROOM_RE.test(id)) throw new BadRequestException("bad room id");
+    const me: string | null = req?.session?.userId ?? null;
+    const role: string | null = req?.session?.role ?? null;
+    const academyId: string | null = req?.session?.academyId ?? null;
+    if (!me || !academyId || (role !== "coach" && role !== "academy_owner")) return {};
+    const db = this.conn.db!;
+    const klass: any = await db.collection("classSchedules").findOne(
+      { _id: id as any },
+      { projection: { batchStudentIds: 1, audienceKind: 1, audienceBatchId: 1, createdByUserId: 1, academyId: 1 } },
+    );
+    // Coach can only see audience for classes they host.
+    if (klass && klass.createdByUserId && klass.createdByUserId !== me && role !== "academy_owner") {
+      return {};
+    }
+    const batchFilter: any = { academyId };
+    if (role === "coach") batchFilter.coachUserId = me;
+    const batches = await db.collection("academyBatches")
+      .find(batchFilter, { projection: { _id: 1, name: 1, studentIds: 1 } })
+      .sort({ createdAt: -1 }).limit(50).toArray();
+    const studentFilter: any = { academyId, role: "student" };
+    if (role === "coach") studentFilter.coachId = me;
+    const students = await db.collection("users")
+      .find(studentFilter, { projection: { _id: 1, name: 1, username: 1 } })
+      .sort({ name: 1 }).limit(500).toArray();
+    return {
+      audienceKind: klass?.audienceKind ?? null,
+      audienceBatchId: klass?.audienceBatchId ?? null,
+      batchStudentIds: Array.isArray(klass?.batchStudentIds) ? klass.batchStudentIds : null,
+      batches: batches.map((b: any) => ({ _id: String(b._id), name: b.name, memberCount: (b.studentIds ?? []).length })),
+      students: students.map((u: any) => ({ _id: String(u._id), name: u.name || u.username || String(u._id) })),
+    };
+  }
+
+  /** PATCH /api/class/:id/audience — coach picks who can join + who gets
+   *  notified. Body: { kind, batchId?, studentIds?, notify? }. kind is
+   *  "batch" | "coach_students" | "individuals" | "academy". "academy" is
+   *  owner-only (opens the room to the whole tenant). Coach picks resolve
+   *  ONLY within their own students so a coach can't invite another coach's
+   *  students by id. Writes batchStudentIds on classSchedules (creating an
+   *  ad-hoc row if there is none — matches the classic "Start now" flow).
+   *  If notify != false, fires push to the resolved audience with the same
+   *  tag as going-live so the notification stack de-dupes. Owner ask
+   *  2026-08-25 ("coach needs option to select batch, coach students, or
+   *  individual person, the person selected can only join the class, and
+   *  only they should get notification"). */
+  @Patch(":id/audience")
+  async setAudience(@Param("id") id: string, @Body() body: any, @Req() req: any) {
+    if (!ROOM_RE.test(id)) throw new BadRequestException("bad room id");
+    const me: string | null = req?.session?.userId ?? null;
+    const role: string | null = req?.session?.role ?? null;
+    const academyId: string | null = req?.session?.academyId ?? null;
+    if (!me || !academyId || (role !== "coach" && role !== "academy_owner")) {
+      return { ok: false, error: "forbidden" };
+    }
+    const kind = String(body?.kind || "").trim();
+    if (!["batch", "coach_students", "individuals", "academy"].includes(kind)) {
+      throw new BadRequestException("bad kind");
+    }
+    if (kind === "academy" && role !== "academy_owner") {
+      return { ok: false, error: "only-owner-can-open-to-academy" };
+    }
+    const db = this.conn.db!;
+
+    // Resolve studentIds based on kind. Coach picks always intersect with
+    // the coach's own students so no cross-coach leak.
+    let studentIds: string[] = [];
+    let audienceBatchId: string | null = null;
+    if (kind === "batch") {
+      audienceBatchId = String(body?.batchId || "").trim();
+      if (!audienceBatchId) throw new BadRequestException("batchId required");
+      const batchFilter: any = { _id: audienceBatchId as any, academyId };
+      if (role === "coach") batchFilter.coachUserId = me;
+      const batch: any = await db.collection("academyBatches").findOne(batchFilter);
+      if (!batch) return { ok: false, error: "batch-not-found" };
+      studentIds = (batch.studentIds || []).map(String);
+    } else if (kind === "coach_students") {
+      const rows = await db.collection("users")
+        .find({ academyId, role: "student", coachId: me }, { projection: { _id: 1 } })
+        .toArray();
+      studentIds = rows.map((r: any) => String(r._id));
+    } else if (kind === "individuals") {
+      const rawIds = Array.isArray(body?.studentIds) ? body.studentIds.map(String) : [];
+      if (!rawIds.length) throw new BadRequestException("studentIds required");
+      const filter: any = { academyId, role: "student", _id: { $in: rawIds as any } };
+      if (role === "coach") filter.coachId = me;
+      const rows = await db.collection("users").find(filter, { projection: { _id: 1 } }).toArray();
+      studentIds = rows.map((r: any) => String(r._id));
+    } else {
+      // "academy" — owner opens to whole tenant. studentIds stays [] and
+      // batchStudentIds gets $unset so resolveEligibility falls back to
+      // unrestricted (rule 3 in class-eligibility.ts).
+      studentIds = [];
+    }
+
+    // Ensure the classSchedules row exists so batchStudentIds sticks
+    // (ad-hoc "Start now" rooms don't have one). Minimal doc — matches the
+    // shape the schedule-controller edits, so /schedule list picks it up.
+    const now = new Date();
+    const update: any = {
+      audienceKind: kind,
+      audienceBatchId,
+      audienceUpdatedAt: now,
+    };
+    if (kind === "academy") update.batchStudentIds = null;
+    else update.batchStudentIds = studentIds;
+    await db.collection("classSchedules").updateOne(
+      { _id: id as any },
+      {
+        $set: update,
+        $setOnInsert: {
+          title: (typeof body?.title === "string" && body.title.trim()) || "Ad-hoc class",
+          coach: "", startAt: now, durationMin: 60, notes: "", createdAt: now,
+          createdByUserId: me, academyId, roomKind: "meet",
+        },
+      },
+      { upsert: true },
+    );
+    // Clear batchStudentIds field explicitly when opening to academy (a
+    // $set: {batchStudentIds: null} above stamps null; resolveEligibility
+    // treats missing OR non-array as unrestricted, so this is safe).
+    if (kind === "academy") {
+      await db.collection("classSchedules").updateOne(
+        { _id: id as any }, { $unset: { batchStudentIds: "" } },
+      );
+    }
+
+    // Push to the audience (unless coach opted out via notify:false).
+    let notified = 0;
+    if (body?.notify !== false && (kind === "academy" || studentIds.length > 0)) {
+      const klass: any = await db.collection("classSchedules").findOne(
+        { _id: id as any }, { projection: { title: 1 } });
+      const coachDoc: any = await db.collection("users").findOne(
+        { _id: me as any }, { projection: { name: 1, username: 1 } });
+      const title = (typeof body?.title === "string" && body.title.slice(0, 80)) || klass?.title || "Class";
+      const coach = coachDoc?.name || coachDoc?.username || "Your coach";
+      const joinPath = `/class-v2/${id}?role=student`;
+
+      let recipientQuery: any = { academyId, role: "student" };
+      if (kind !== "academy") recipientQuery._id = { $in: studentIds as any };
+      const recipients = await db.collection("users")
+        .find(recipientQuery, { projection: { _id: 1 } }).toArray();
+      await Promise.all(recipients.map(async (st: any) => {
+        if (String(st._id) === String(me)) return;
+        const r = await this.push.sendToUser(String(st._id), {
+          title: `\u{1F534} ${coach} is live now`,
+          body: `${title} has started — tap to join.`,
+          url: joinPath,
+          tag: `cg-classlive-${id}`,     // same tag as going-live → replaces any prior notif
+        });
+        if (r.sent > 0) notified++;
+      }));
+      // Stamp the announcement so live-now feed reflects "latest activity"
+      // — mirrors going-live's upsert without repeating the 3h idempotency
+      // check (the picker is an explicit coach action).
+      await db.collection("classLiveAnnouncements").updateOne(
+        { _id: id as any },
+        { $set: { at: new Date(), academyId, coachUserId: me, joinPath } },
+        { upsert: true },
+      );
+    }
+    return { ok: true, kind, audienceCount: studentIds.length, notified };
   }
 
   /** POST /api/class/:id/kick — coach removes a student from this ONE class

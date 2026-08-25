@@ -472,6 +472,7 @@ export default function SharedClassBoard(
       else if (msg.type === "pointer-off") setRemotePointer(null);
       else if (msg.type === "orientation") { if (msg.orientation === "white" || msg.orientation === "black") _publishOrientation(msg.orientation); }
       else if (msg.type === "classEnded") { onClassEnded?.(String(msg.reason || "coach_left")); }
+      else if (msg.type === "not-invited") { onClassEnded?.("not-invited"); }
     };
     return () => {
       cancelled = true;

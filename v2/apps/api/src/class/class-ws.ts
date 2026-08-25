@@ -28,6 +28,7 @@ import type { Server as HttpServer, IncomingMessage } from "http";
 // what we use — extend if you touch this file and hit new TS7016 errors.
 import { WebSocketServer, WebSocket } from "ws";
 import { Chess } from "chess.js";
+import { resolveEligibility, isStudentEligible } from "./class-eligibility";
 // Mongoose Connection is passed in from main.ts (via attachClassWs) so we can
 // persist attendance events without pulling this file into a Nest module.
 type Connection = { db?: { collection: (name: string) => any } };
@@ -315,6 +316,22 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
             try { ws.close(1000, "kicked"); } catch { /* ignore */ }
             return;
           }
+        }
+        // Audience gate — for STUDENTS only. Non-coach clients who aren't
+        // in the class's picked audience (batch / individuals / coach's
+        // students) get dropped with a `not-invited` frame. The coach and
+        // guests (anonymous) are always allowed — coach because they can't
+        // be locked out of their own room, guests because eligibility keys
+        // on userId which they don't have. Owner ask 2026-08-25.
+        if (dbConn && socketRole.get(ws) !== "coach" && userId) {
+          try {
+            const elig = await resolveEligibility(dbConn as any, roomId, null);
+            if (!isStudentEligible(elig, userId)) {
+              try { ws.send(JSON.stringify({ type: "not-invited" })); } catch { /* ignore */ }
+              try { ws.close(1000, "not-invited"); } catch { /* ignore */ }
+              return;
+            }
+          } catch { /* fail-open — a mongo hiccup mustn't lock the class */ }
         }
         const { firstJoin } = await recordAttendance(roomId, userId, name, "join");
         if (firstJoin) await maybeAlertLate(room, roomId, userId, name);

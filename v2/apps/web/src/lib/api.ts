@@ -24,13 +24,28 @@ export async function deleteJson<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export async function patch<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    credentials: "include", body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`PATCH ${path} → ${res.status}`);
+  return res.json() as Promise<T>;
+}
+
 // Best-effort: tell the API the coach just entered a class room, so it can push
 // the academy's OFFLINE students a "class is live" notification deep-linking to
 // this exact room. Server is session-authenticated + coach-gated + idempotent,
 // so calling it from any room mount is safe (students are a silent no-op).
-export async function announceGoingLive(room: string, joinPath: string): Promise<void> {
-  try { await post<{ ok: boolean }>(`/api/class/${encodeURIComponent(room)}/going-live`, { joinPath }); }
-  catch { /* never block the room from loading */ }
+// When `deferNotify` is true (audience-picker flow), the announcement row is
+// still written but push fires later from PATCH /audience — prevents an
+// initial "everyone I coach" push before the coach has narrowed the audience.
+export async function announceGoingLive(room: string, joinPath: string, opts: { deferNotify?: boolean } = {}): Promise<void> {
+  try {
+    await post<{ ok: boolean }>(`/api/class/${encodeURIComponent(room)}/going-live`, {
+      joinPath, deferNotify: !!opts.deferNotify,
+    });
+  } catch { /* never block the room from loading */ }
 }
 
 // Router path for a class room. Historically switched between two retired

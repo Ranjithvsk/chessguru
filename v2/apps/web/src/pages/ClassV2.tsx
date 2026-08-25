@@ -17,6 +17,7 @@ import { Track, DataPacket_Kind } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
 import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle } from "../components/SharedClassBoard";
+import AudiencePickerModal from "../components/AudiencePickerModal";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -757,13 +758,22 @@ export default function ClassV2Page() {
   // Student receives classEnded from the class-ws bus — show a soft banner and
   // auto-redirect after a couple seconds so they know WHY they were kicked
   // (otherwise the sudden nav feels like a bug).
-  const onClassEnded = (_reason: string) => {
-    setEndedMsg("This class was ended by the coach.");
-    setTimeout(() => navigate("/dashboard"), 2500);
+  const onClassEnded = (reason: string) => {
+    setEndedMsg(
+      reason === "not-invited"
+        ? "You aren't on this class's invite list. Ask your coach to add you."
+        : "This class was ended by the coach.",
+    );
+    setTimeout(() => navigate("/dashboard"), reason === "not-invited" ? 4000 : 2500);
   };
 
   const [errMsg, setErrMsg] = useState<string | null>(null);
   const [tokenData, setTokenData] = useState<LKTokenResp | null>(null);
+  // Audience picker — shows on coach entry if no audience has been picked
+  // for this class yet (ad-hoc "Start now" rooms + scheduled classes without
+  // a batch). Coach can re-open via the footer 🎯 button to change mid-class.
+  const [audiencePickerOpen, setAudiencePickerOpen] = useState(false);
+  const [audienceToast, setAudienceToast] = useState<string | null>(null);
   const { data: status, isLoading: statusLoading } = useQuery({
     queryKey: ["livekit-status"],
     queryFn: () => get<LKStatus>("/api/livekit/status"),
@@ -780,9 +790,23 @@ export default function ClassV2Page() {
         // ensure was skipped for any reason.
         if (role === "coach") {
           await post("/api/livekit/room", { roomName: room, title: `Class ${room}` });
-          // Coach is live → push the academy's OFFLINE students, deep-linking to
-          // THIS Dream Meet room (server is session-authed + coach-gated + idempotent).
-          void announceGoingLive(room, `${import.meta.env.BASE_URL}class-v2/${room}?role=student`);
+          // Peek at the audience state — if the coach already picked (or the
+          // class was scheduled with a batch), fire going-live push as before.
+          // If NOT picked, defer the push and pop the picker modal so the
+          // coach chooses batch / students / individuals first. Prevents
+          // notifying the wrong people on ad-hoc "Start now" rooms.
+          let audiencePreset = false;
+          try {
+            const aud = await get<{ audienceKind?: string | null; batchStudentIds?: string[] | null }>(
+              `/api/class/${encodeURIComponent(room)}/audience`);
+            audiencePreset = !!(aud?.audienceKind || (Array.isArray(aud?.batchStudentIds) && aud.batchStudentIds.length));
+          } catch { /* fail-open — go with the old push flow */ }
+          void announceGoingLive(
+            room,
+            `${import.meta.env.BASE_URL}class-v2/${room}?role=student`,
+            { deferNotify: !audiencePreset },
+          );
+          if (!audiencePreset && !cancelled) setAudiencePickerOpen(true);
         }
         const t = await get<LKTokenResp>(`/api/livekit/token?room=${encodeURIComponent(room)}&role=${role}`);
         if (!cancelled) setTokenData(t);
@@ -792,6 +816,13 @@ export default function ClassV2Page() {
     })();
     return () => { cancelled = true; };
   }, [me?.loggedIn, room, role, status?.configured]);
+
+  // Auto-clear the "Notified X people" toast after a few seconds.
+  useEffect(() => {
+    if (!audienceToast) return;
+    const t = setTimeout(() => setAudienceToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [audienceToast]);
 
   if (authLoading || statusLoading) return <div className="py-16 text-center text-ink-400">Loading…</div>;
   if (!me?.loggedIn) return <Navigate to={`/login?back=${encodeURIComponent(location.pathname + location.search)}`} replace />;
@@ -928,6 +959,25 @@ export default function ClassV2Page() {
                *  toggle badge + toast pop even when the panel is closed. */}
               <ChatSink />
               <ChatToastStack />
+              {role === "coach" && audiencePickerOpen && (
+                <AudiencePickerModal
+                  room={room}
+                  onClose={() => setAudiencePickerOpen(false)}
+                  onDone={(r) => {
+                    setAudiencePickerOpen(false);
+                    setAudienceToast(
+                      r.audienceCount === 0
+                        ? "No one matched that pick."
+                        : `Invited ${r.audienceCount} • notified ${r.notified}`,
+                    );
+                  }}
+                />
+              )}
+              {audienceToast && (
+                <div className="pointer-events-none absolute left-1/2 top-4 z-[65] -translate-x-1/2 rounded-full border border-brand-500/60 bg-brand-500/25 px-4 py-1.5 text-sm font-semibold text-brand-50 shadow-lg backdrop-blur">
+                  🎯 {audienceToast}
+                </div>
+              )}
             </div>
 
             {/* Controls footer — mic / cam / screen + hand / chat / reactions,
@@ -950,6 +1000,15 @@ export default function ClassV2Page() {
                 {role === "coach" && <CoachBoardNav />}
                 {role === "coach" && <CoachFlipToggle />}
                 {role === "coach" && <CoachLockToggle />}
+                {role === "coach" && (
+                  <button
+                    onClick={() => setAudiencePickerOpen(true)}
+                    title="Change who can join this class + who gets notified"
+                    className="rounded-full border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm font-semibold text-ink-100 hover:bg-ink-800"
+                  >
+                    🎯 Audience
+                  </button>
+                )}
                 {role === "coach" && (
                   <button
                     onClick={() => setClassSetupOpen(true)}
