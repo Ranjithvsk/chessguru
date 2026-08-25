@@ -16,6 +16,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, HttpException, HttpStatus } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
+import { resolveEligibility, isStudentEligible } from "./class-eligibility";
 
 const ROOM_RE = /^[A-Za-z0-9_-]{4,64}$/;
 const MAX_TITLE = 120;
@@ -244,15 +245,26 @@ export class ClassScheduleController {
     const myAcademy: string | null = req?.session?.academyId ?? null;
     const myRole: string | null = req?.session?.role ?? null;
     // Academy scoping — STRICT: tenant members see ONLY their academy's classes.
-    // Coach-only refinement: a "coach" role sees only classes they created or
-    // batches that include their students. Owner + student roles still see the
-    // whole academy roster (student's dashboard has its own attendance filter).
+    //   coach role → only classes they created (unchanged)
+    //   student role → only classes they're ELIGIBLE for (post-filtered by
+    //     resolveEligibility below — batchStudentIds OR coach-of-student
+    //     relationship); prevents Sarika's ad-hoc class from showing on
+    //     Ashwanth's *and* every other guna student's dashboard
+    //     (owner-fixed 2026-08-25).
+    //   academy_owner / no role → see everything in their academy.
     const filter: any = myAcademy
       ? (myRole === "coach"
           ? { academyId: myAcademy, createdByUserId: me }
           : { academyId: myAcademy })
       : { academyId: { $in: [null, undefined] } };
-    const rows = await this.col().find(filter, { sort: { startAt: 1 } }).limit(200).toArray();
+    let rows = await this.col().find(filter, { sort: { startAt: 1 } }).limit(200).toArray();
+    if (myRole === "student" && rows.length) {
+      const checks = await Promise.all(rows.map(async (r) => {
+        const elig = await resolveEligibility(this.conn, String(r._id), r.createdByUserId ?? null);
+        return isStudentEligible(elig, me);
+      }));
+      rows = rows.filter((_r, i) => checks[i]);
+    }
     const live: (ScheduleDoc & { mine: boolean; attendedCount?: number })[] = [];
     const upcoming: (ScheduleDoc & { mine: boolean; attendedCount?: number })[] = [];
     const mineIds: string[] = [];

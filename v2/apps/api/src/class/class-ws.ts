@@ -299,7 +299,19 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       const userId = typeof frame.userId === "string" && frame.userId.length ? frame.userId.slice(0, 64) : null;
       const name = typeof frame.displayName === "string" && frame.displayName.trim() ? frame.displayName.trim().slice(0, 80) : "Guest";
       socketWho.set(ws, { userId, name, classId: roomId });
+      // Persisted kick check — if this user has been removed from THIS
+      // class session, drop them straight away with a `kicked` frame.
+      // Runs off the hello (rather than in the upgrade handshake) because
+      // that's where we first learn who this socket belongs to.
       void (async () => {
+        if (userId) {
+          const kicks = await loadKicksForRoom(roomId);
+          if (kicks.has(userId)) {
+            try { ws.send(JSON.stringify({ type: "kicked", reason: "coach_removed" })); } catch { /* ignore */ }
+            try { ws.close(1000, "kicked"); } catch { /* ignore */ }
+            return;
+          }
+        }
         const { firstJoin } = await recordAttendance(roomId, userId, name, "join");
         if (firstJoin) await maybeAlertLate(room, roomId, userId, name);
       })();
@@ -456,6 +468,51 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     broadcast(room, { type: "participants", participants: room.clients.size });
   });
 });
+
+// Per-class in-memory kick registry — mirrors the `classKicks` Mongo
+// collection so the ws upgrade path can gate joins without a DB round trip
+// on every frame. Loaded lazily on first `hello` per room. Owner ask
+// 2026-08-25 ("option to remove users from video class, by the coach, for
+// that one particular video class session").
+const roomKicks = new Map<string, Set<string>>();
+
+async function loadKicksForRoom(id: string): Promise<Set<string>> {
+  let s = roomKicks.get(id);
+  if (s) return s;
+  s = new Set();
+  roomKicks.set(id, s);
+  if (dbConn?.db) {
+    try {
+      const rows: any[] = await dbConn.db.collection("classKicks")
+        .find({ classId: id }, { projection: { userId: 1 } })
+        .toArray();
+      for (const r of rows) if (r.userId) s.add(String(r.userId));
+    } catch { /* silent — fail-open on lookup errors */ }
+  }
+  return s;
+}
+
+/** Called by the HTTP kick endpoint. Add the user id to this room's live
+ *  kick set AND drop any of their open sockets so they see the "kicked"
+ *  frame immediately instead of waiting for their tab to reconnect. */
+export function kickFromClassRoom(id: string, userId: string): { dropped: number } {
+  let s = roomKicks.get(id);
+  if (!s) { s = new Set(); roomKicks.set(id, s); }
+  s.add(userId);
+  const room = rooms.get(id);
+  if (!room) return { dropped: 0 };
+  const frame = JSON.stringify({ type: "kicked", reason: "coach_removed" });
+  let dropped = 0;
+  for (const c of Array.from(room.clients)) {
+    const who = socketWho.get(c);
+    if (who?.userId === userId) {
+      try { c.send(frame); } catch { /* ignore */ }
+      try { c.close(1000, "kicked"); } catch { /* ignore */ }
+      dropped++;
+    }
+  }
+  return { dropped };
+}
 
 /** Explicit close by the coach — broadcasts a `classEnded` frame so every
  *  connected student's tab bails out of the room, then closes each socket and

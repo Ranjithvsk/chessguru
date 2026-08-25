@@ -12,6 +12,7 @@ import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpExc
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { LivekitService } from "./livekit.service";
+import { resolveEligibility, isStudentEligible } from "../class/class-eligibility";
 
 @Controller("livekit")
 export class LivekitController {
@@ -52,34 +53,64 @@ export class LivekitController {
     if (!/^[a-zA-Z0-9_-]{2,64}$/.test(roomName)) throw new BadRequestException("bad room");
     const role: "coach" | "student" = roleRaw === "coach" ? "coach" : "student";
     if (!this.svc.isConfigured()) throw new ServiceUnavailableException("LiveKit not configured");
-    // TENANT ISOLATION: if the requested room maps to a scheduled class with
-    // an academyId, the caller's session must belong to that same academy.
-    // Blocks Harinitha (academy X) from joining a Guna Chess (academy Y) class
-    // by knowing the room URL. Ad-hoc rooms (no schedule row) fall through so
-    // legacy public meetings still work.
+    // TENANT ISOLATION + coach-student scoping. Rules:
+    //   * class has an academyId → caller's session must belong to that
+    //     academy (blocks a Guna student from a Harinitha room)
+    //   * coach role → must be the creator, an academy_owner, OR the
+    //     coach who started an ad-hoc room (looked up from
+    //     classLiveAnnouncements when no schedule row exists)
+    //   * student role → must be in the class's eligibility set (either
+    //     explicit batchStudentIds, or "students whose coachId matches
+    //     the coach who created/is-hosting the class"). See
+    //     class-eligibility.ts for the resolution order.
+    //
+    // Ad-hoc rooms (no schedule row) go through classLiveAnnouncements to
+    // find the hosting coach so the eligibility check still applies —
+    // otherwise Sarika's ad-hoc class would fall to "everyone in academy
+    // allowed" (owner-reported 2026-08-25: all guna students joined
+    // Sarika's class).
     try {
-      const klass: any = await this.conn.db!.collection("classSchedules")
-        .findOne({ _id: roomName as any }, { projection: { academyId: 1, createdByUserId: 1, batchStudentIds: 1 } });
-      if (klass?.academyId) {
-        const mine = req.session.academyId ?? null;
-        if (mine !== klass.academyId) throw new HttpException("not found", HttpStatus.NOT_FOUND);
-        // If joining as COACH: the class must be created by this user (or the
-        // owner). Blocks other academy coaches from starting another coach's
-        // Dream Meet room.
-        if (role === "coach") {
-          const myRole = req.session.role;
-          const myUid = req.session.userId;
-          const isCreator = klass.createdByUserId === myUid;
-          const isOwner = myRole === "academy_owner";
-          if (!isCreator && !isOwner) throw new HttpException("not found", HttpStatus.NOT_FOUND);
+      const db = this.conn.db!;
+      const klass: any = await db.collection("classSchedules")
+        .findOne({ _id: roomName as any }, { projection: { academyId: 1, createdByUserId: 1 } });
+      const announce: any = await db.collection("classLiveAnnouncements")
+        .findOne({ _id: roomName as any }, { projection: { academyId: 1, coachUserId: 1 } });
+      const academyId: string | null = klass?.academyId ?? announce?.academyId ?? null;
+      const coachUserId: string | null = klass?.createdByUserId ?? announce?.coachUserId ?? null;
+      const mineAcademy: string | null = req.session.academyId ?? null;
+      if (academyId) {
+        if (mineAcademy !== academyId) throw new HttpException("not found", HttpStatus.NOT_FOUND);
+      }
+      if (role === "coach") {
+        // Must own this room. Academy owners can join any coach's room.
+        const myRole = req.session.role;
+        const myUid = req.session.userId;
+        const isCreator = coachUserId && coachUserId === myUid;
+        const isOwner = myRole === "academy_owner";
+        // If there's neither a schedule row NOR an announcement AND we know
+        // the caller is a coach in the academy, allow it (they're claiming a
+        // fresh ad-hoc room). Same-academy check above already fired.
+        const roomHasHost = !!(klass || announce);
+        if (roomHasHost && !isCreator && !isOwner) {
+          throw new HttpException("not found", HttpStatus.NOT_FOUND);
         }
-        // If joining as STUDENT and class has a batch: student must be in the batch.
-        if (role === "student" && Array.isArray(klass.batchStudentIds) && klass.batchStudentIds.length) {
-          const myUid = req.session.userId;
-          if (!myUid || !klass.batchStudentIds.includes(myUid)) {
-            throw new HttpException("not found", HttpStatus.NOT_FOUND);
-          }
+      }
+      if (role === "student" && (klass || announce)) {
+        const elig = await resolveEligibility(this.conn, roomName, coachUserId);
+        if (!isStudentEligible(elig, req.session.userId)) {
+          throw new HttpException("not found", HttpStatus.NOT_FOUND);
         }
+      }
+      // Kicked from THIS session? Block token issue too so they can't sneak
+      // back in via LiveKit-only (coach doesn't want them). Coaches never
+      // hit this branch — the kick endpoint refuses to kick the host.
+      const myUidForKick = req?.session?.userId;
+      if (myUidForKick) {
+        const kicked = await db.collection("classKicks").findOne(
+          { _id: `${roomName}:${myUidForKick}` as any },
+          { projection: { _id: 1 } },
+        );
+        if (kicked) throw new HttpException("not found", HttpStatus.NOT_FOUND);
       }
     } catch (e) {
       if (e instanceof HttpException) throw e;

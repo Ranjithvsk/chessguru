@@ -450,12 +450,52 @@ function ReactionsBar() {
 // dropdown showing WHO'S in the room right now — coach's most-requested view
 // (owner 2026-08-12: "coach can't see participants details"). Each row shows
 // display name + identity + "coach"/"student" tag + join time.
-function LiveHeaderBits({ room }: { room: string }) {
+function LiveHeaderBits({ room, role }: { room: string; role: "coach" | "student" }) {
   const participants = useParticipants();
   const { localParticipant } = useLocalParticipant();
   const me = localParticipant?.identity ?? "";
   const [copied, setCopied] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(false);
+  // Track who has been kicked from THIS session so the roster shows a
+  // "kicked" pill instead of vanishing (LiveKit removes their tile from
+  // useParticipants once the token is denied; the roster snapshot is
+  // cached in the coach's tab for the coach's own reference).
+  const [kickedIds, setKickedIds] = useState<Set<string>>(new Set());
+  const [busyId, setBusyId] = useState<string | null>(null);
+  useEffect(() => {
+    if (role !== "coach") return;
+    // On mount + when roster opens, pull the persisted kick list so a
+    // page reload keeps the "kicked" tag visible.
+    if (!rosterOpen) return;
+    let alive = true;
+    (async () => {
+      try {
+        const r = await get<{ kicks: Array<{ userId: string }> }>(`/api/class/${encodeURIComponent(room)}/kicks`);
+        if (!alive) return;
+        setKickedIds(new Set(r.kicks.map((k) => k.userId)));
+      } catch { /* ignore */ }
+    })();
+    return () => { alive = false; };
+  }, [rosterOpen, role, room]);
+  async function kickParticipant(userId: string, name: string) {
+    if (!window.confirm(`Remove ${name || userId} from this class session? They won't be able to rejoin until you undo it.`)) return;
+    setBusyId(userId);
+    try {
+      const r = await post<{ ok: boolean; kicked?: boolean; error?: string }>(`/api/class/${encodeURIComponent(room)}/kick`, { userId });
+      if (!r?.ok) throw new Error(r?.error || "kick failed");
+      setKickedIds((prev) => new Set([...prev, userId]));
+    } catch (e) {
+      window.alert(`Couldn't remove ${name}: ${(e as Error).message}`);
+    } finally { setBusyId(null); }
+  }
+  async function unkickParticipant(userId: string) {
+    setBusyId(userId);
+    try {
+      await post(`/api/class/${encodeURIComponent(room)}/unkick`, { userId });
+      setKickedIds((prev) => { const n = new Set(prev); n.delete(userId); return n; });
+    } catch (e) { window.alert(`Couldn't undo: ${(e as Error).message}`); }
+    finally { setBusyId(null); }
+  }
   const inviteUrl = `${location.origin}${import.meta.env.BASE_URL}class-v2/${encodeURIComponent(room)}?role=student`;
   const copy = async () => {
     try { await navigator.clipboard.writeText(inviteUrl); setCopied(true); setTimeout(() => setCopied(false), 1500); }
@@ -493,6 +533,7 @@ function LiveHeaderBits({ room }: { room: string }) {
                     ? Math.max(0, Math.round((Date.now() - new Date(p.joinedAt).getTime()) / 60_000))
                     : null;
                   const speaking = (p as any).isSpeaking as boolean | undefined;
+                  const isKicked = kickedIds.has(p.identity);
                   return (
                     <li key={p.sid || p.identity} className="flex items-center gap-2 px-3 py-1.5 text-xs">
                       <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${speaking ? "bg-emerald-400 animate-pulse" : "bg-ink-600"}`} title={speaking ? "speaking" : "silent"} />
@@ -500,15 +541,49 @@ function LiveHeaderBits({ room }: { room: string }) {
                         <div className="truncate font-semibold text-white">
                           {p.name || p.identity}
                           {isSelf && <span className="ml-1 text-[10px] font-normal text-brand-300">(you)</span>}
+                          {isKicked && <span className="ml-1 rounded bg-rose-500/25 px-1 text-[9px] font-normal text-rose-100">removed</span>}
                         </div>
                         <div className="truncate text-[10px] text-ink-500">
                           {p.identity}
                           {joinedMinAgo != null && <> · {joinedMinAgo === 0 ? "just now" : `${joinedMinAgo}m ago`}</>}
                         </div>
                       </div>
+                      {role === "coach" && !isSelf && (
+                        isKicked ? (
+                          <button
+                            onClick={() => unkickParticipant(p.identity)}
+                            disabled={busyId === p.identity}
+                            className="shrink-0 rounded-md border border-ink-700 px-1.5 py-0.5 text-[10px] font-semibold text-ink-200 hover:bg-ink-800 disabled:opacity-50"
+                            title="Allow this student to rejoin this session"
+                          >Undo</button>
+                        ) : (
+                          <button
+                            onClick={() => kickParticipant(p.identity, p.name || p.identity)}
+                            disabled={busyId === p.identity}
+                            className="shrink-0 rounded-md border border-rose-500/40 px-1.5 py-0.5 text-[10px] font-semibold text-rose-200 hover:bg-rose-500/20 disabled:opacity-50"
+                            title="Remove from THIS class session only"
+                          >Remove</button>
+                        )
+                      )}
                     </li>
                   );
                 })}
+                {role === "coach" && [...kickedIds].filter((uid) => !rows.some((p) => p.identity === uid)).map((uid) => (
+                  <li key={"k-" + uid} className="flex items-center gap-2 px-3 py-1.5 text-xs opacity-70">
+                    <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-rose-500" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-ink-300">
+                        {uid}
+                        <span className="ml-1 rounded bg-rose-500/25 px-1 text-[9px] text-rose-100">removed</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => unkickParticipant(uid)}
+                      disabled={busyId === uid}
+                      className="shrink-0 rounded-md border border-ink-700 px-1.5 py-0.5 text-[10px] font-semibold text-ink-200 hover:bg-ink-800 disabled:opacity-50"
+                    >Undo</button>
+                  </li>
+                ))}
               </ul>
               <div className="border-t border-ink-800 bg-ink-950/40 px-3 py-2 text-[10px] text-ink-500">
                 Green dot = currently speaking · updated live
@@ -790,7 +865,7 @@ export default function ClassV2Page() {
               <span className="hidden truncate text-xs text-ink-500 sm:inline">· you're {role}</span>
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <LiveHeaderBits room={room} />
+              <LiveHeaderBits room={room} role={role} />
               {role === "coach" ? (
                 <button
                   onClick={endClass}

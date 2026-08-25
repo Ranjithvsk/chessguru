@@ -11,8 +11,9 @@
 import { BadRequestException, Body, Controller, Get, Param, Post, Req } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
-import { getLiveAttendees, closeClassRoom } from "./class-ws";
+import { getLiveAttendees, closeClassRoom, kickFromClassRoom } from "./class-ws";
 import { PushService } from "../push/push.service";
+import { resolveEligibility, isStudentEligible } from "./class-eligibility";
 
 const ROOM_RE = /^[a-zA-Z0-9_-]{3,32}$/;
 // Whitelist the room routes a "join" push may point at — defends the
@@ -78,8 +79,16 @@ export class ClassLiveController {
     const title = (body?.title && String(body.title).slice(0, 80)) || klass?.title || "Class";
     const coach = coachDoc?.name || coachDoc?.username || "Your coach";
 
+    // Only push to students who are ELIGIBLE for this class. Coach's own
+    // students for coach-created classes, batchStudentIds when set, or the
+    // whole academy for owner-created broadcasts (see class-eligibility.ts).
+    // Owner-fixed 2026-08-25: previously fanned to every academy student —
+    // Sarika's ad-hoc class notified all 78 guna students instead of her 2.
+    const elig = await resolveEligibility(this.conn, id, me);
+    const studentsQuery: any = { academyId, role: "student" };
+    if (elig.restricted) studentsQuery._id = { $in: [...elig.studentIds] };
     const students = await this.conn.db!.collection("users")
-      .find({ academyId, role: "student" }, { projection: { _id: 1 } }).toArray();
+      .find(studentsQuery, { projection: { _id: 1 } }).toArray();
     let notified = 0;
     await Promise.all(students.map(async (st: any) => {
       if (String(st._id) === String(me)) return;
@@ -92,6 +101,92 @@ export class ClassLiveController {
       if (r.sent > 0) notified++;
     }));
     return { ok: true, notified };
+  }
+
+  /** POST /api/class/:id/kick — coach removes a student from this ONE class
+   *  session. Adds the studentId to an in-memory + persisted per-class
+   *  kick-list; class-ws refuses further connections from that user AND
+   *  drops any open sockets. Persisted (classKicks collection) so a page
+   *  reload doesn't let them back in. Scoped per class — being kicked from
+   *  today's session doesn't affect tomorrow's. Owner ask 2026-08-25. */
+  @Post(":id/kick")
+  async kick(@Param("id") id: string, @Body() body: any, @Req() req: any) {
+    if (!ROOM_RE.test(id)) throw new BadRequestException("bad room id");
+    const me: string | null = req?.session?.userId ?? null;
+    const role: string | null = req?.session?.role ?? null;
+    if (!me) return { ok: false, error: "auth" };
+    if (role !== "coach" && role !== "academy_owner") return { ok: false, error: "forbidden" };
+    // Ownership check: coach must be host of THIS room (creator or ad-hoc
+    // announcer). Academy owners can kick from any room in their academy.
+    const db = this.conn.db!;
+    const klass: any = await db.collection("classSchedules")
+      .findOne({ _id: id as any }, { projection: { createdByUserId: 1, academyId: 1 } });
+    const announce: any = await db.collection("classLiveAnnouncements")
+      .findOne({ _id: id as any }, { projection: { coachUserId: 1, academyId: 1 } });
+    const roomAcademy = klass?.academyId ?? announce?.academyId ?? null;
+    const hostUid = klass?.createdByUserId ?? announce?.coachUserId ?? null;
+    const mineAcademy: string | null = req?.session?.academyId ?? null;
+    if (roomAcademy && mineAcademy !== roomAcademy) return { ok: false, error: "forbidden" };
+    const isHost = hostUid && hostUid === me;
+    const isOwner = role === "academy_owner";
+    if (!isHost && !isOwner) return { ok: false, error: "forbidden" };
+    const targetUid = String(body?.userId || "").trim();
+    if (!targetUid || targetUid.length > 64) throw new BadRequestException("bad userId");
+    if (targetUid === me) return { ok: false, error: "cannot-kick-self" };
+    if (hostUid && targetUid === hostUid) return { ok: false, error: "cannot-kick-host" };
+    // Persist so a page reload can't re-join. Composite id keeps it
+    // per-class-per-user + idempotent on re-kick clicks.
+    const rowId = `${id}:${targetUid}`;
+    await db.collection("classKicks").updateOne(
+      { _id: rowId as any },
+      { $set: { classId: id, userId: targetUid, kickedByUserId: me, kickedAt: new Date() } },
+      { upsert: true },
+    );
+    const { dropped } = kickFromClassRoom(id, targetUid);
+    return { ok: true, kicked: true, socketsDropped: dropped };
+  }
+
+  /** DELETE /api/class/:id/kick/:userId — undo a kick (coach may have
+   *  clicked the wrong name). Removes the persisted row so the student
+   *  can re-join if their tab is still open (WS re-connects on wake). */
+  @Post(":id/unkick")
+  async unkick(@Param("id") id: string, @Body() body: any, @Req() req: any) {
+    if (!ROOM_RE.test(id)) throw new BadRequestException("bad room id");
+    const me: string | null = req?.session?.userId ?? null;
+    const role: string | null = req?.session?.role ?? null;
+    if (!me || (role !== "coach" && role !== "academy_owner")) return { ok: false };
+    const targetUid = String(body?.userId || "").trim();
+    if (!targetUid) throw new BadRequestException("bad userId");
+    const rowId = `${id}:${targetUid}`;
+    const r = await this.conn.db!.collection("classKicks").deleteOne({ _id: rowId as any });
+    return { ok: true, removed: r.deletedCount ?? 0 };
+  }
+
+  /** GET /api/class/:id/kicks — who has been kicked from this session.
+   *  Coach uses this to show a small "removed from this class" list with
+   *  an Undo button. Academy-scoped read; anyone in the academy can see
+   *  the list (small, not sensitive). */
+  @Get(":id/kicks")
+  async listKicks(@Param("id") id: string, @Req() req: any) {
+    if (!ROOM_RE.test(id)) throw new BadRequestException("bad room id");
+    const rows = await this.conn.db!.collection("classKicks")
+      .find({ classId: id }, { projection: { userId: 1, kickedByUserId: 1, kickedAt: 1 } })
+      .sort({ kickedAt: -1 })
+      .limit(50)
+      .toArray();
+    if (!rows.length) return { kicks: [] };
+    const uids = [...new Set(rows.map((r: any) => String(r.userId)))];
+    const users = await this.conn.db!.collection("users")
+      .find({ _id: { $in: uids as any } }, { projection: { name: 1, username: 1 } })
+      .toArray();
+    const nameById = new Map(users.map((u: any) => [String(u._id), u.name || u.username || String(u._id)]));
+    return {
+      kicks: rows.map((r: any) => ({
+        userId: String(r.userId),
+        name: nameById.get(String(r.userId)) || String(r.userId),
+        kickedAt: r.kickedAt,
+      })),
+    };
   }
 
   /** POST /api/class/:id/end — coach explicitly ended the class. Deletes the
@@ -195,14 +290,29 @@ export class ClassLiveController {
   @Get("live-now")
   async liveNow(@Req() req: any) {
     const academyId: string | null = req?.session?.academyId ?? null;
+    const meUid: string | null = req?.session?.userId ?? null;
+    const meRole: string | null = req?.session?.role ?? null;
     if (!academyId) return { live: [] };
     const since = new Date(Date.now() - 2 * 3_600_000);
     const rows = await this.conn.db!.collection("classLiveAnnouncements")
       .find({ academyId, at: { $gte: since } }, { projection: { _id: 1, at: 1, coachUserId: 1, joinPath: 1 } })
       .sort({ at: -1 }).limit(10).toArray();
     if (!rows.length) return { live: [] };
-    const coachIds = [...new Set(rows.map((r: any) => r.coachUserId).filter(Boolean))];
-    const roomIds = rows.map((r: any) => r._id);
+    // Filter out live classes this student isn't eligible for. Coach +
+    // academy_owner see everything in-academy so they can supervise.
+    // Owner-fixed 2026-08-25: previously every guna student saw Sarika's
+    // live-now entry regardless of who her assigned students were.
+    let visible = rows;
+    if (meRole === "student") {
+      const checks = await Promise.all(rows.map(async (r: any) => {
+        const elig = await resolveEligibility(this.conn, String(r._id), r.coachUserId ?? null);
+        return isStudentEligible(elig, meUid);
+      }));
+      visible = rows.filter((_r, i) => checks[i]);
+    }
+    if (!visible.length) return { live: [] };
+    const coachIds = [...new Set(visible.map((r: any) => r.coachUserId).filter(Boolean))];
+    const roomIds = visible.map((r: any) => r._id);
     const [coaches, klasses] = await Promise.all([
       this.conn.db!.collection("users").find({ _id: { $in: coachIds } }, { projection: { name: 1, username: 1 } }).toArray(),
       this.conn.db!.collection("classSchedules").find({ _id: { $in: roomIds } }, { projection: { title: 1 } }).toArray(),
@@ -210,7 +320,7 @@ export class ClassLiveController {
     const coachName = new Map(coaches.map((u: any) => [String(u._id), u.name || u.username]));
     const titleById = new Map(klasses.map((k: any) => [String(k._id), k.title]));
     return {
-      live: rows.map((r: any) => ({
+      live: visible.map((r: any) => ({
         _id: r._id,
         title: titleById.get(String(r._id)) || "Class",
         coach: coachName.get(String(r.coachUserId)) || "Your coach",
