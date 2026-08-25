@@ -446,6 +446,18 @@ export class AcademyDomainService {
       .replace(/\\/g, "\\\\").replace(/"/g, "\\\"").slice(0, 120);
     const safeLogo = String(logoUrl || "")
       .replace(/\\/g, "\\\\").replace(/"/g, "\\\"").slice(0, 240);
+    // Short-form name for iOS home-screen title (12 char cap for good display).
+    const safeShortName = safeName.length > 12
+      ? safeName.split(/\s+/).slice(0, 2).join(" ").slice(0, 12)
+      : safeName;
+    // Sized icon derivations — matches the naming convention baked into
+    // /api/academy-page/manifest and used by academyProfiles uploads:
+    //   <prefix>-logo.<ext> → <prefix>-192.webp, <prefix>-512.webp
+    // Falls back to the logoUrl itself when the prefix pattern doesn't match.
+    const sizedPrefixMatch = logoUrl.match(/^(.+?)-logo\.[a-z0-9]+$/i);
+    const icon192 = sizedPrefixMatch ? `${sizedPrefixMatch[1]}-192.webp` : logoUrl;
+    const safeIcon192 = String(icon192 || "")
+      .replace(/\\/g, "\\\\").replace(/"/g, "\\\"").slice(0, 240);
     return `# Auto-generated ${new Date().toISOString()} by academy-domain.service.
 # Academy custom-domain SSL vhost for ${domain}. Delete via /api/me/academy-profile/domain/remove.
 server {
@@ -474,6 +486,19 @@ server {
   # /v2/ prefix retired 2026-08-15 — legacy URLs 301 to root.
   location = /v2 { return 301 /; }
   location /v2/ { rewrite ^/v2/(.*)$ /$1 permanent; }
+  # PWA manifest — proxied to the dynamic per-host endpoint so Android's
+  # "Add to Home Screen" flow gets the TENANT name + logo + theme color
+  # instead of the static ChessGuru manifest. Owner ask 2026-08-25:
+  # deepakcharan + gunachess students reported their installed PWA
+  # showed "ChessGuru" branding on Android launchers.
+  location = /manifest.webmanifest {
+    proxy_pass http://localhost:4000/api/academy-page/manifest?host=$host;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    add_header Cache-Control "public, max-age=300" always;
+  }
   # sub_filter templates the tenant name into the SERVED index.html so the
   # browser tab never shows "ChessGuru" before JS runs. Applies only to
   # text/html; asset responses are untouched.
@@ -482,8 +507,11 @@ server {
     add_header Cache-Control "no-cache" always;
     sub_filter_once off;
     sub_filter "<title>ChessGuru — Puzzle Trainer</title>" "<title>${safeName}</title>";
-    sub_filter "content=\\"ChessGuru\\"" "content=\\"${safeName}\\"";${safeLogo ? `
-    sub_filter "rel=\\"icon\\" id=\\"cg-favicon\\" type=\\"image/svg+xml\\" href=\\"/favicon.svg\\"" "rel=\\"icon\\" id=\\"cg-favicon\\" href=\\"${safeLogo}\\"";` : ""}
+    sub_filter "id=\\"cg-theme-color\\" content=\\"#7c3aed\\"" "id=\\"cg-theme-color\\" content=\\"#14a2b8\\"";
+    sub_filter "id=\\"cg-apple-title\\" content=\\"ChessGuru\\"" "id=\\"cg-apple-title\\" content=\\"${safeName}\\"";
+    sub_filter "ChessGuru failed to load twice." "${safeName} failed to load twice.";${safeLogo ? `
+    sub_filter "id=\\"cg-favicon\\" type=\\"image/svg+xml\\" href=\\"/favicon.svg\\"" "id=\\"cg-favicon\\" href=\\"${safeLogo}\\"";
+    sub_filter "id=\\"cg-apple-icon\\" href=\\"/icons/icon-192.png\\"" "id=\\"cg-apple-icon\\" href=\\"${safeIcon192}\\"";` : ""}
   }
   location /assets/ { try_files $uri =404; }
 

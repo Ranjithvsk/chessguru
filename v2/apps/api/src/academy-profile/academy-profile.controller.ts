@@ -15,6 +15,33 @@ import {
 import { AcademyProfileService } from "./academy-profile.service";
 import { AcademyDomainService } from "./academy-domain.service";
 
+/** Build a monogram SVG icon (first letter over the tenant accent gradient)
+ *  and return it as a `data:image/svg+xml;utf8,...` URI. Used by the PWA
+ *  manifest endpoint when a tenant has no logo uploaded — beats falling
+ *  through to the ChessGuru knight on their students' home screens.
+ *  Chrome, Firefox, Safari all accept SVG data URIs as manifest icons. */
+function monogramDataUri(name: string, color: string): string {
+  const letter = (name.trim().charAt(0) || "?").toUpperCase()
+    .replace(/[<>&"']/g, "?");     // strip anything that would break the SVG
+  const safeColor = /^#[0-9a-fA-F]{3,8}$/.test(color) ? color : "#14a2b8";
+  // Simple two-stop gradient + centered letter. 512×512 renders crisply at
+  // both PWA install sizes (Android uses 192/512, iOS falls back to 180).
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">` +
+      `<defs>` +
+        `<linearGradient id="g" x1="0" y1="0" x2="1" y2="1">` +
+          `<stop offset="0%" stop-color="${safeColor}"/>` +
+          `<stop offset="100%" stop-color="#0b3e47"/>` +
+        `</linearGradient>` +
+      `</defs>` +
+      `<rect width="512" height="512" rx="96" fill="url(#g)"/>` +
+      `<text x="50%" y="50%" text-anchor="middle" dominant-baseline="central" ` +
+        `font-family="'Inter','Helvetica Neue',Arial,sans-serif" font-weight="700" ` +
+        `font-size="300" fill="#ffffff">${letter}</text>` +
+    `</svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
 @Controller("academy-page")
 export class AcademyPublicController {
   constructor(
@@ -52,33 +79,63 @@ export class AcademyPublicController {
       }
     }
     let name = "ChessGuru";
-    let logoUrl = "/icons/icon-192.png";
+    let logoUrl: string | null = null;
     let color = "#7c3aed";
+    let isTenant = false;
     if (hit) {
       const data = hit.data || (await this.svc.getBySlug(hit.slug).catch(() => null));
       if (data) {
         name = data.profile?.displayName || data.academy?.name || name;
-        logoUrl = data.profile?.logoUrl || logoUrl;
+        logoUrl = data.profile?.logoUrl || null;
         color = "#14a2b8"; // tenant theme accent
+        isTenant = true;
       }
     }
     const short = name.length > 12 ? name.split(/\s+/).slice(0, 2).join(" ") : name;
-    const ext = (logoUrl.match(/\.([a-z0-9]+)(?:\?|$)/i)?.[1] || "png").toLowerCase();
-    const iconType = ext === "png" ? "image/png" : ext === "svg" ? "image/svg+xml" : "image/webp";
-    // Prefer per-tenant sized icons if the logo follows the "<prefix>-logo.<ext>"
-    // convention (uploadImage auto-generates <prefix>-192.webp, <prefix>-512.webp,
-    // <prefix>-maskable-512.webp via sharp). Chrome validates declared sizes
-    // against real pixel dims, so serving one 512 file as 192 silently drops
-    // the 192 icon and can fall back to generic install branding.
-    const sizedPrefix = logoUrl.match(/^(.+?)-logo\.[a-z0-9]+$/i)?.[1];
-    const icons = sizedPrefix ? [
-      { src: `${sizedPrefix}-192.webp`,           sizes: "192x192", type: "image/webp", purpose: "any" },
-      { src: `${sizedPrefix}-512.webp`,           sizes: "512x512", type: "image/webp", purpose: "any" },
-      { src: `${sizedPrefix}-maskable-512.webp`,  sizes: "512x512", type: "image/webp", purpose: "maskable" },
-    ] : [
-      { src: logoUrl, sizes: "512x512", type: iconType, purpose: "any" },
-      { src: logoUrl, sizes: "512x512", type: iconType, purpose: "maskable" },
-    ];
+
+    // Icon resolution — three tiers, in order:
+    //   1. Tenant with a proper sized upload → serve /academy/<slug>-192.webp
+    //      etc. (the uploadImage pipeline sharp-generates these).
+    //   2. Tenant with only a single-file logoUrl (no sized derivatives) →
+    //      serve that one file at both sizes (Chrome may complain about
+    //      dim mismatch but the icon still shows).
+    //   3. Tenant without ANY logo → auto-generate an SVG monogram of the
+    //      tenant's initial letter, embedded as a data URI in the manifest.
+    //      Owner ask 2026-08-25: never fall through to ChessGuru's knight
+    //      just because a tenant hasn't uploaded a logo yet.
+    //   Canonical host (no tenant) → ChessGuru icons untouched.
+    let icons: any[];
+    if (isTenant && logoUrl) {
+      const sizedPrefix = logoUrl.match(/^(.+?)-logo\.[a-z0-9]+$/i)?.[1];
+      if (sizedPrefix) {
+        icons = [
+          { src: `${sizedPrefix}-192.webp`,           sizes: "192x192", type: "image/webp", purpose: "any" },
+          { src: `${sizedPrefix}-512.webp`,           sizes: "512x512", type: "image/webp", purpose: "any" },
+          { src: `${sizedPrefix}-maskable-512.webp`,  sizes: "512x512", type: "image/webp", purpose: "maskable" },
+        ];
+      } else {
+        const ext = (logoUrl.match(/\.([a-z0-9]+)(?:\?|$)/i)?.[1] || "png").toLowerCase();
+        const iconType = ext === "png" ? "image/png" : ext === "svg" ? "image/svg+xml" : "image/webp";
+        icons = [
+          { src: logoUrl, sizes: "512x512", type: iconType, purpose: "any" },
+          { src: logoUrl, sizes: "512x512", type: iconType, purpose: "maskable" },
+        ];
+      }
+    } else if (isTenant) {
+      // Fallback monogram — SVG with tenant initial over the tenant accent
+      // gradient. Encoded once, served at both sizes (SVG scales natively).
+      const dataUri = monogramDataUri(name, color);
+      icons = [
+        { src: dataUri, sizes: "192x192", type: "image/svg+xml", purpose: "any" },
+        { src: dataUri, sizes: "512x512", type: "image/svg+xml", purpose: "any" },
+        { src: dataUri, sizes: "512x512", type: "image/svg+xml", purpose: "maskable" },
+      ];
+    } else {
+      icons = [
+        { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+        { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      ];
+    }
     return {
       name,
       short_name: short,
