@@ -5,6 +5,7 @@ import Navbar from "./components/Navbar";
 import StreakAtRiskBanner from "./components/StreakAtRiskBanner";
 import LiveClassBanner from "./components/LiveClassBanner";
 import HomeworkPendingBanner from "./components/HomeworkPendingBanner";
+import SupportWidget from "./components/SupportWidget";
 import { api } from "./lib/api";
 import { usePresenceHeartbeat } from "./hooks/usePresenceHeartbeat";
 
@@ -110,6 +111,9 @@ export default function App() {
           <span className="hidden sm:inline">Scan position</span>
         </Link>
       )}
+      {/* Global "?" support widget — bottom-right pill on every page.
+       *  Hidden on /class-v2/* so it doesn't overlap video controls. */}
+      <SupportWidget />
     </div>
   );
 }

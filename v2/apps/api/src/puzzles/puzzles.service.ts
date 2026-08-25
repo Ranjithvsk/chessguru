@@ -706,6 +706,53 @@ export class PuzzlesService {
     return { current, longest };
   }
 
+  /** Bump the student's active homework tasks whose puzzle_pack theme matches
+   *  any theme on the just-solved puzzle. One solve can credit multiple
+   *  tasks across multiple coaches (e.g. a `promotion` solve credits both
+   *  Raagul's advancedPawn/promotion task AND Gunachess's promotion task).
+   *  Clamped at target; only bumps if current < target so we never overshoot.
+   *  Silent on any error — homework credit is a nice-to-have; a Mongo hiccup
+   *  must never break the puzzle-complete flow. Owner ask 2026-08-25. */
+  private async autoCreditHomework(userId: string, puzzleThemes: string[]): Promise<void> {
+    const themeSet = new Set(puzzleThemes.filter((t) => typeof t === "string"));
+    if (themeSet.size === 0) return;
+    const hwCol = this.conn.db!.collection("homework");
+    // Only pending ("assigned" or "in_progress") — completed homework is not
+    // touched. Sorted by assignedAt so the oldest coach's assignment gets
+    // credited first when multiple homeworks share the same theme (fair
+    // to the coach who assigned first).
+    const active: any[] = await hwCol.find(
+      { studentId: userId, status: { $in: ["assigned", "in_progress"] } },
+      { projection: { tasks: 1, progress: 1, status: 1 } },
+    ).sort({ assignedAt: 1 }).limit(20).toArray();
+    if (!active.length) return;
+    for (const hw of active) {
+      const tasks = Array.isArray(hw.tasks) ? hw.tasks : [];
+      const oldProgress: Record<string, number> = { ...(hw.progress || {}) };
+      let mutated = false;
+      for (let i = 0; i < tasks.length; i++) {
+        const t = tasks[i];
+        if (!t || t.kind !== "puzzle_pack" || !t.theme || !themeSet.has(t.theme)) continue;
+        const cur = Number(oldProgress[String(i)] ?? 0);
+        const target = Number(t.targetCount ?? 5);
+        if (cur >= target) continue;
+        oldProgress[String(i)] = cur + 1;
+        mutated = true;
+      }
+      if (!mutated) continue;
+      // Recompute status like homework.service.ts::advance does.
+      const allDone = tasks.every((t: any, i: number) => {
+        const c = Number(oldProgress[String(i)] ?? 0);
+        const tgt = t?.kind === "puzzle_pack" ? Number(t.targetCount ?? 5) : 1;
+        return c >= tgt;
+      });
+      const set: any = { progress: oldProgress };
+      if (allDone) { set.status = "completed"; set.completedAt = new Date(); }
+      else if (hw.status === "assigned") set.status = "in_progress";
+      await hwCol.updateOne({ _id: hw._id }, { $set: set });
+    }
+  }
+
   async complete(id: string, body: { win: boolean; userId?: string | null; hint?: boolean; mode?: string; rating?: number; deviation?: number; theme?: string; ms?: number; wrong?: string; daily?: boolean }) {
     const pz = await this.col().findOne({ _id: id as any });
     if (!pz) return null;
@@ -826,6 +873,20 @@ export class PuzzlesService {
         } },
         { upsert: true },
       );
+      // Auto-credit homework. Owner ask 2026-08-25: Harini solved puzzles
+      // that matched Raagul's assigned themes, but Raagul saw progress:{}
+      // because the advance bump only fires on the `?hw=<id>` deep-link path.
+      // Students naturally practise from the general trainer without ever
+      // clicking through the homework page, so their coach's homework never
+      // moved. Now: on every WIN in `puzzle` mode by a signed-in student,
+      // look up their pending homework tasks and bump any puzzle_pack whose
+      // theme is in the just-solved puzzle's themes. Clamped at target,
+      // deduped (updateOne with $inc), status auto-promoted to in_progress
+      // or completed. Losses do NOT count — same anti-farming rule as the
+      // rating fatigue system.
+      if (win && key === "puzzle" && Array.isArray(pz.themes) && pz.themes.length > 0) {
+        void this.autoCreditHomework(userId, pz.themes as string[]).catch(() => { /* silent */ });
+      }
       // Phase 7n + 7o: milestone crossings on both rating AND solve-count.
       // Only for regular puzzle mode — blindfold's rating distribution is
       // different enough that the round-100 thresholds wouldn't feel meaningful.
