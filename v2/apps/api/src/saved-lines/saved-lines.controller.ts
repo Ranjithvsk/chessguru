@@ -22,7 +22,7 @@
 //   * Coach can also PUSH straight to one student's repertoire without
 //     saving to their own — same shape, different endpoint.
 
-import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Req } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Req } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection, Types } from "mongoose";
 import { PushService } from "../push/push.service";
@@ -122,16 +122,27 @@ export class SavedLinesController {
   /** Fan-out web push + persist a small notification row so students see a
    *  bell / inbox entry the next time they open the app (owner ask
    *  2026-08-19: "when coach shares, notify the student"). Fire-and-forget
-   *  — a push hiccup shouldn't roll back the share itself. */
-  private async notifyRecipients(recipientIds: string[], coachName: string, entryName: string) {
+   *  — a push hiccup shouldn't roll back the share itself. `mode` picks the
+   *  copy: "share" for the initial share, "update" for propagated edits
+   *  (owner ask 2026-08-25 — "if edited, shared file should reflect edit
+   *  and notify changes to the student"). */
+  private async notifyRecipients(
+    recipientIds: string[], coachName: string, entryName: string,
+    mode: "share" | "update" = "share",
+  ) {
     if (!recipientIds.length) return;
+    const title = mode === "update"
+      ? `\u{270F}\u{FE0F} ${coachName} updated an opening`
+      : `\u{1F393} ${coachName} shared an opening`;
+    const body = mode === "update"
+      ? `${entryName} was updated in your Repertoire — tap to open.`
+      : `${entryName} was added to your Repertoire — tap to open.`;
     // Web push (best-effort — students who granted permission see a real toast)
     await Promise.all(recipientIds.map((sid) =>
       this.push.sendToUser(sid, {
-        title: `\u{1F393} ${coachName} shared an opening`,
-        body: `${entryName} was added to your Repertoire — tap to open.`,
+        title, body,
         url: "/openings",
-        tag: `cg-rep-share-${sid}`,
+        tag: `cg-rep-${mode}-${sid}`,
       }).catch(() => { /* silent */ })
     ));
     // Durable in-app record — students see it in their notifications feed
@@ -141,9 +152,11 @@ export class SavedLinesController {
       recipientIds.map((sid) => ({
         _id: new Types.ObjectId().toHexString(),
         userId: sid,
-        kind: "repertoire-share",
-        title: `${coachName} shared an opening`,
-        body: `${entryName} was added to your Repertoire.`,
+        kind: mode === "update" ? "repertoire-update" : "repertoire-share",
+        title: mode === "update" ? `${coachName} updated an opening` : `${coachName} shared an opening`,
+        body: mode === "update"
+          ? `${entryName} was updated in your Repertoire.`
+          : `${entryName} was added to your Repertoire.`,
         url: "/openings",
         createdAt: now,
         readAt: null,
@@ -247,6 +260,10 @@ export class SavedLinesController {
       notes: src.notes ?? undefined,
       createdAt: now,
       sharedFrom: me.userId,
+      // Backlink to the coach's original doc so a later PATCH on the coach
+      // entry can fan the edit out to every student copy (owner ask
+      // 2026-08-25 — "if edited, shared file should reflect edit").
+      sourceId: String(src._id),
       ...(forceTrain ? { forceTrain: true } : {}),
     }));
     await this.col().insertMany(copies as any);
@@ -256,6 +273,114 @@ export class SavedLinesController {
     const coachName = coach?.name || coach?.username || "Your coach";
     await this.notifyRecipients(validIds, coachName, src.name);
     return { ok: true, shared: copies.length };
+  }
+
+  /** PATCH /api/my/repertoire/:id — edit an entry the caller owns. Body may
+   *  include any subset of { name, notes, sans, tree, forceTrain }. `kind`
+   *  and `slug` are intentionally NOT editable — changing kind would
+   *  invalidate the shape; slug corresponds to a fixed ECO opening.
+   *
+   *  Students can't edit an entry a coach shared with them (same rule as
+   *  delete — otherwise homework rots silently). Coaches CAN edit their
+   *  own — and every student copy that came from this doc (matched via
+   *  sourceId) is updated to match AND notified. Owner ask 2026-08-25:
+   *  "if edited, shared file should reflect edit and notify changes to
+   *  the student." */
+  @Patch(":id")
+  async edit(@Req() req: any, @Param("id") id: string, @Body() body: any) {
+    const me = requireLogin(req);
+    const row: any = await this.col().findOne({ _id: id as any, ownerId: me.userId });
+    if (!row) throw new BadRequestException("not-found");
+    if (row.sharedFrom && me.role === "student") {
+      throw new BadRequestException("Coach-shared entries can't be edited. Duplicate first to make your own copy.");
+    }
+
+    // Build the patch. Every field is optional; unspecified fields are left
+    // untouched. Validation reuses the same normalisers the create path uses.
+    const patch: any = { updatedAt: new Date() };
+    if (body?.name !== undefined)  patch.name  = normalizeName(body.name);
+    if (body?.notes !== undefined) patch.notes = body.notes ? String(body.notes).slice(0, NOTES_MAX) : null;
+    if (body?.sans !== undefined) {
+      // Only meaningful for kind=line. Corpus entries silently ignore sans
+      // edits (they're a bookmark, not a hand-played sequence).
+      if (row.kind === "line") patch.sans = normalizeSans(body.sans);
+    }
+    if (body?.tree !== undefined) {
+      // Same rule as create: only persist the tree when it carries at least
+      // one branch, else drop it so old readers keep working on `sans`.
+      const nextTree = normalizeTree(body.tree);
+      const hasVar = nextTree ? nextTree.some(function has(n: TreeNode): boolean {
+        return n.children.length > 1 || n.children.some(has);
+      }) : false;
+      if (hasVar) patch.tree = nextTree;
+      else patch.tree = null;  // explicit clear
+    }
+    if (body?.forceTrain !== undefined) patch.forceTrain = !!body.forceTrain;
+
+    // Guard against a payload that patches nothing (would be a wasted write).
+    const changed = Object.keys(patch).filter((k) => k !== "updatedAt");
+    if (!changed.length) return { ok: true, changed: 0 };
+
+    // Apply. Also $unset tree when we explicitly cleared it (patch.tree null).
+    const set: any = { ...patch };
+    const unset: any = {};
+    if (patch.tree === null) { delete set.tree; unset.tree = ""; }
+    const op: any = { $set: set };
+    if (Object.keys(unset).length) op.$unset = unset;
+    await this.col().updateOne({ _id: id as any, ownerId: me.userId }, op);
+
+    // Propagation — ONLY when the coach edits their own original (not a
+    // sharedFrom copy) AND is a coach/owner. Find every student copy that
+    // came from this doc, apply the same set/unset, then fan out a push
+    // + inbox notification tagged "update".
+    let propagated = 0;
+    if (!row.sharedFrom && (me.role === "coach" || me.role === "academy_owner")) {
+      const copyFilter = { sourceId: String(id), sharedFrom: me.userId };
+      const copies: any[] = await this.col().find(copyFilter, { projection: { _id: 1, ownerId: 1 } }).toArray();
+      if (copies.length) {
+        await this.col().updateMany(copyFilter, op);
+        propagated = copies.length;
+        const coach: any = await this.conn.db!.collection("users").findOne(
+          { _id: me.userId as any }, { projection: { name: 1, username: 1 } },
+        );
+        const coachName = coach?.name || coach?.username || "Your coach";
+        const nextName = (patch.name as string) || row.name;
+        await this.notifyRecipients(copies.map((c) => String(c.ownerId)), coachName, nextName, "update");
+      }
+    }
+
+    const fresh: any = await this.col().findOne({ _id: id as any });
+    return { ok: true, changed: changed.length, propagated, entry: fresh };
+  }
+
+  /** POST /api/my/repertoire/:id/duplicate — clone an entry the caller owns
+   *  under their own ownership. Copy loses `sharedFrom` + `sourceId` (it's
+   *  a fresh independent entry) and gets `name: "Copy of X"` unless the
+   *  caller overrides via body.name. Students may duplicate a coach-shared
+   *  entry — that's how they get an editable personal fork without losing
+   *  the coach-suggested original. Owner ask 2026-08-25. */
+  @Post(":id/duplicate")
+  async duplicate(@Req() req: any, @Param("id") id: string, @Body() body: any) {
+    const me = requireLogin(req);
+    const src: any = await this.col().findOne({ _id: id as any, ownerId: me.userId });
+    if (!src) throw new BadRequestException("not-found");
+    const overrideName = body?.name ? String(body.name).slice(0, NAME_MAX).trim() : "";
+    const dupName = overrideName || `Copy of ${src.name}`.slice(0, NAME_MAX);
+    const doc: any = {
+      _id: newId(),
+      ownerId: me.userId,
+      academyId: me.academyId,
+      kind: src.kind,
+      name: dupName,
+      slug: src.slug ?? undefined,
+      sans: src.sans ?? undefined,
+      tree: src.tree ?? undefined,
+      notes: src.notes ?? undefined,
+      createdAt: new Date(),
+      // Fresh entry — no sharedFrom / sourceId, no forceTrain lock.
+    };
+    await this.col().insertOne(doc);
+    return { ok: true, entry: doc };
   }
 
   /** Coach → ONE student, push directly (no self-copy). Body: same shape as

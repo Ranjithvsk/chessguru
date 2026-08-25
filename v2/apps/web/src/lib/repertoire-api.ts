@@ -59,6 +59,20 @@ export function addRepertoire(body: {
 export function deleteRepertoire(id: string): Promise<{ ok: boolean }> {
   return jf(`/api/my/repertoire/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
+export function updateRepertoire(id: string, patch: {
+  name?: string; notes?: string | null; sans?: string[]; tree?: RepMoveNode[] | null; forceTrain?: boolean;
+}): Promise<{ ok: boolean; changed: number; propagated: number; entry: RepertoireEntry }> {
+  return jf(`/api/my/repertoire/${encodeURIComponent(id)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}
+export function duplicateRepertoire(id: string, name?: string): Promise<{ ok: boolean; entry: RepertoireEntry }> {
+  return jf(`/api/my/repertoire/${encodeURIComponent(id)}/duplicate`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(name ? { name } : {}),
+  });
+}
 export function shareRepertoire(id: string, studentIds: string[], forceTrain = false): Promise<{ ok: boolean; shared: number }> {
   return jf(`/api/my/repertoire/${encodeURIComponent(id)}/share`, {
     method: "POST", headers: { "Content-Type": "application/json" },

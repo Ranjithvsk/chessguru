@@ -16,6 +16,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   listRepertoire, addRepertoire, deleteRepertoire, shareRepertoire,
+  updateRepertoire, duplicateRepertoire,
   type RepertoireEntry, type RepMoveNode,
 } from "../lib/repertoire-api";
 import { api } from "../lib/api";
@@ -51,6 +52,10 @@ export default function MyRepertoirePanel({ history, tree, activeOpening, onLoad
 
   const addMut = useMutation({ mutationFn: addRepertoire, onSuccess: invalidate });
   const delMut = useMutation({ mutationFn: deleteRepertoire, onSuccess: invalidate });
+  const dupMut = useMutation({
+    mutationFn: (id: string) => duplicateRepertoire(id),
+    onSuccess: invalidate,
+  });
 
   // Auto-activate every coach-force-added entry that isn't already in the
   // trainer. Runs on every entries update — cheap because
@@ -112,6 +117,7 @@ export default function MyRepertoirePanel({ history, tree, activeOpening, onLoad
   const openingAlreadySaved = !!(activeOpening && savedSlugs.has(activeOpening.slug));
 
   const [shareTarget, setShareTarget] = useState<RepertoireEntry | null>(null);
+  const [editTarget, setEditTarget] = useState<RepertoireEntry | null>(null);
 
   if (!loggedIn) {
     return (
@@ -166,14 +172,22 @@ export default function MyRepertoirePanel({ history, tree, activeOpening, onLoad
           <div className="space-y-3">
             {suggested.length > 0 && (
               <Section title={`🎓 Coach-suggested (${suggested.length})`} tone="indigo">
-                <List entries={suggested} onLoad={onLoad} onDelete={(id) => delMut.mutate(id)} isCoach={isCoach} onShare={() => { /* recipient can't re-share */ }} onActivate={onActivate} />
+                <List entries={suggested} onLoad={onLoad} onDelete={(id) => delMut.mutate(id)} isCoach={isCoach}
+                  onShare={() => { /* recipient can't re-share */ }}
+                  onEdit={() => { /* recipient can't edit — must duplicate first */ }}
+                  onDuplicate={(id) => dupMut.mutate(id)}
+                  onActivate={onActivate} />
               </Section>
             )}
             <Section title={`✏️ ${suggested.length ? "My own" : "Saved"} (${mine.length})`} tone="brand">
               {mine.length === 0 ? (
                 <div className="px-2 py-3 text-center text-xs text-ink-500">Nothing saved on your own yet.</div>
               ) : (
-                <List entries={mine} onLoad={onLoad} onDelete={(id) => delMut.mutate(id)} isCoach={isCoach} onShare={(e) => setShareTarget(e)} onActivate={onActivate} />
+                <List entries={mine} onLoad={onLoad} onDelete={(id) => delMut.mutate(id)} isCoach={isCoach}
+                  onShare={(e) => setShareTarget(e)}
+                  onEdit={(e) => setEditTarget(e)}
+                  onDuplicate={(id) => dupMut.mutate(id)}
+                  onActivate={onActivate} />
               )}
             </Section>
           </div>
@@ -182,6 +196,9 @@ export default function MyRepertoirePanel({ history, tree, activeOpening, onLoad
 
       {shareTarget && (
         <ShareModal entry={shareTarget} onClose={() => setShareTarget(null)} onDone={() => { setShareTarget(null); invalidate(); }} />
+      )}
+      {editTarget && (
+        <EditModal entry={editTarget} onClose={() => setEditTarget(null)} onDone={() => { setEditTarget(null); invalidate(); }} />
       )}
     </div>
   );
@@ -199,13 +216,15 @@ function Section({ title, tone, children }: { title: string; tone: "indigo" | "b
 }
 
 function List({
-  entries, onLoad, onDelete, isCoach, onShare, onActivate,
+  entries, onLoad, onDelete, isCoach, onShare, onEdit, onDuplicate, onActivate,
 }: {
   entries: RepertoireEntry[];
   onLoad: (entry: { sans?: string[]; tree?: RepMoveNode[]; slug?: string }) => void;
   onDelete: (id: string) => void;
   isCoach: boolean;
   onShare: (entry: RepertoireEntry) => void;
+  onEdit: (entry: RepertoireEntry) => void;
+  onDuplicate: (id: string) => void;
   onActivate?: (slug: string) => void;
 }) {
   // Local counter to force a re-render after activateOpening flips the
@@ -264,6 +283,23 @@ function List({
               {activated ? "✓ In Trainer" : "📅 Add to Trainer"}
             </button>
           )}
+          {/* Edit — owner-editable entries only. Coach-shared entries on a
+              student's side are read-only (they can Duplicate to fork).
+              Coaches can edit their own; edit propagates to every student
+              copy + fires an "updated" push. */}
+          {!e.sharedFrom && (
+            <button
+              onClick={() => onEdit(e)}
+              className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-brand-300"
+              title="Edit — changes fan out to every student you shared this with">✏️</button>
+          )}
+          {/* Duplicate — available on every entry (including coach-shared, so
+              students can fork one to edit). Creates a fresh entry owned by
+              the caller with no sharedFrom link. */}
+          <button
+            onClick={() => onDuplicate(e._id)}
+            className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-brand-300"
+            title="Duplicate — make an editable copy">📋</button>
           {isCoach && !e.sharedFrom && (
             <button
               onClick={() => onShare(e)}
@@ -437,6 +473,84 @@ function ShareModal({ entry, onClose, onDone }: { entry: RepertoireEntry; onClos
               {shareMut.isPending ? "Sharing…" : `Share with ${picked.size || "…"}`}
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Small in-place editor for a repertoire entry. Coach edits fan out to
+ *  every student the entry was shared with (server does the propagation
+ *  + push). Line kind gets notes; corpus kind just gets a name rename.
+ *  Move sequences / trees aren't editable here — the coach re-records via
+ *  the board and "Save current line", then Duplicates onto this entry. */
+function EditModal({ entry, onClose, onDone }: { entry: RepertoireEntry; onClose: () => void; onDone: () => void }) {
+  const [name, setName]             = useState(entry.name);
+  const [notes, setNotes]           = useState(entry.notes ?? "");
+  const [forceTrain, setForceTrain] = useState(!!entry.forceTrain);
+  const editMut = useMutation({
+    mutationFn: () => updateRepertoire(entry._id, {
+      name: name.trim(),
+      ...(entry.kind === "line" ? { notes: notes.trim() || null } : {}),
+      forceTrain,
+    }),
+    onSuccess: (r) => {
+      const msg = r.propagated > 0
+        ? `Saved. Updated ${r.propagated} student cop${r.propagated === 1 ? "y" : "ies"} + notified them.`
+        : "Saved.";
+      alert(msg);
+      onDone();
+    },
+    onError: (e: any) => alert(e.message || "Save failed."),
+  });
+  const dirty =
+    name.trim() !== entry.name.trim() ||
+    (entry.kind === "line" && (notes.trim() || null) !== (entry.notes ?? null)) ||
+    forceTrain !== !!entry.forceTrain;
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-sm rounded-xl2 border border-ink-700 bg-ink-900 p-4" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-2 flex items-baseline justify-between">
+          <h3 className="font-display text-sm font-semibold text-white">Edit "{entry.name}"</h3>
+          <button onClick={onClose} className="text-ink-500 hover:text-white">✕</button>
+        </div>
+        <p className="mb-3 text-[11px] text-ink-400">
+          {entry.kind === "corpus"
+            ? "Rename this saved opening. Fans out to every student you shared it with."
+            : "Rename, tweak notes, or flag as required study. Every student copy syncs and gets a notification."}
+        </p>
+
+        <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wide text-ink-500">Name</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80}
+          className="mb-3 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-1.5 text-sm text-white placeholder-ink-500 focus:border-brand-400 focus:outline-none" />
+
+        {entry.kind === "line" && (
+          <>
+            <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wide text-ink-500">Notes</label>
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={1000} rows={3}
+              placeholder="e.g. Answer to 1.e4 e5 — focus on the pin"
+              className="mb-3 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-1.5 text-xs text-white placeholder-ink-500 focus:border-brand-400 focus:outline-none" />
+          </>
+        )}
+
+        <label className={`mb-3 flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-xs transition ${forceTrain ? "border-amber-500/40 bg-amber-500/10 text-amber-200" : "border-ink-700 bg-ink-950 text-ink-300 hover:bg-ink-900"}`}>
+          <input type="checkbox" className="mt-0.5" checked={forceTrain}
+            onChange={(e) => setForceTrain(e.target.checked)} />
+          <span>
+            <span className="font-semibold">Force-add to student trainer</span>
+            <span className="mt-0.5 block text-[10px] font-normal opacity-80">
+              Auto-schedules for daily drills and blocks removal on the student's side.
+            </span>
+          </span>
+        </label>
+
+        <div className="flex items-center justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">Cancel</button>
+          <button onClick={() => editMut.mutate()} disabled={!dirty || editMut.isPending || !name.trim()}
+            className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-400 disabled:opacity-40">
+            {editMut.isPending ? "Saving…" : "Save"}
+          </button>
         </div>
       </div>
     </div>
