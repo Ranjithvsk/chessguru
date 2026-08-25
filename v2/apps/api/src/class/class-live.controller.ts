@@ -451,9 +451,28 @@ export class ClassLiveController {
     // academy_owner see everything in-academy so they can supervise.
     // Owner-fixed 2026-08-25: previously every guna student saw Sarika's
     // live-now entry regardless of who her assigned students were.
+    //
+    // Owner-hardened 2026-08-25 ROUND 3: student live-now HIDES any room
+    // whose audience the coach hasn't explicitly picked yet. The push
+    // fix (round 2) blocked the push notification, but the in-app
+    // "🟢 Live now" banner was still popping the instant the coach
+    // clicked Dream Meet — because going-live writes the announcement
+    // row before the audience picker even opens. Now: room only shows
+    // in student live-now once classSchedules.audienceKind is set (or
+    // batchStudentIds explicitly populated). Coaches / owners still see
+    // every announcement so they can supervise / clean up stalled rooms.
     let visible = rows;
     if (meRole === "student") {
+      const roomIds = rows.map((r: any) => r._id);
+      const schedules = await this.conn.db!.collection("classSchedules")
+        .find({ _id: { $in: roomIds } }, { projection: { _id: 1, audienceKind: 1, batchStudentIds: 1 } })
+        .toArray();
+      const scheduleById = new Map(schedules.map((s: any) => [String(s._id), s]));
       const checks = await Promise.all(rows.map(async (r: any) => {
+        const sched: any = scheduleById.get(String(r._id));
+        // Audience must be explicitly picked — no picker done = no banner.
+        const audiencePicked = !!sched && (sched.audienceKind || (Array.isArray(sched.batchStudentIds) && sched.batchStudentIds.length > 0));
+        if (!audiencePicked) return false;
         const elig = await resolveEligibility(this.conn, String(r._id), r.coachUserId ?? null);
         return isStudentEligible(elig, meUid);
       }));
