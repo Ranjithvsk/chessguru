@@ -71,43 +71,16 @@ export class ClassLiveController {
       academyId, coachUserId: me,
     });
     if (alreadyRecent) return { ok: true, already: true };
-    // Audience-picker flow: the /class-v2 page opens a modal on coach entry
-    // and calls going-live with deferNotify:true. Push then fires from
-    // PATCH /audience once the coach has picked the batch / students. This
-    // prevents an initial "everyone I coach" push from going out before the
-    // coach has narrowed the audience. Announcement row is still written so
-    // the live-now feed picks the room up.
-    if (body?.deferNotify) return { ok: true, deferred: true };
-
-    const klass: any = await this.conn.db!.collection("classSchedules").findOne(
-      { _id: id as any }, { projection: { title: 1 } });
-    const coachDoc: any = await this.conn.db!.collection("users").findOne(
-      { _id: me as any }, { projection: { name: 1, username: 1 } });
-    const title = (body?.title && String(body.title).slice(0, 80)) || klass?.title || "Class";
-    const coach = coachDoc?.name || coachDoc?.username || "Your coach";
-
-    // Only push to students who are ELIGIBLE for this class. Coach's own
-    // students for coach-created classes, batchStudentIds when set, or the
-    // whole academy for owner-created broadcasts (see class-eligibility.ts).
-    // Owner-fixed 2026-08-25: previously fanned to every academy student —
-    // Sarika's ad-hoc class notified all 78 guna students instead of her 2.
-    const elig = await resolveEligibility(this.conn, id, me);
-    const studentsQuery: any = { academyId, role: "student" };
-    if (elig.restricted) studentsQuery._id = { $in: [...elig.studentIds] };
-    const students = await this.conn.db!.collection("users")
-      .find(studentsQuery, { projection: { _id: 1 } }).toArray();
-    let notified = 0;
-    await Promise.all(students.map(async (st: any) => {
-      if (String(st._id) === String(me)) return;
-      const r = await this.push.sendToUser(String(st._id), {
-        title: `\u{1F534} ${coach} is live now`,
-        body: `${title} has started — tap to join.`,
-        url: joinPath,
-        tag: `cg-classlive-${id}`,
-      });
-      if (r.sent > 0) notified++;
-    }));
-    return { ok: true, notified };
+    // Owner-hardened 2026-08-25 ROUND 2: going-live NEVER fires the push
+    // anymore. The class-v2 page always opens the audience picker on coach
+    // entry, and only PATCH /audience fires the push (to the coach's
+    // freshly-picked recipients). This closes the last leak reported by
+    // the owner: "after clicking Dream Meet itself, notification shows,
+    // in background class starts and wait for joining" — students got
+    // pinged before the coach had a chance to narrow down. The
+    // announcement row is still written so the in-app live-now banner
+    // picks the room up for whoever's already logged in.
+    return { ok: true, deferred: true };
   }
 
   /** GET /api/class/:id/audience — audience state + picker options.

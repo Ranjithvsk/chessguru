@@ -790,23 +790,23 @@ export default function ClassV2Page() {
         // ensure was skipped for any reason.
         if (role === "coach") {
           await post("/api/livekit/room", { roomName: room, title: `Class ${room}` });
-          // Peek at the audience state — if the coach already picked (or the
-          // class was scheduled with a batch), fire going-live push as before.
-          // If NOT picked, defer the push and pop the picker modal so the
-          // coach chooses batch / students / individuals first. Prevents
-          // notifying the wrong people on ad-hoc "Start now" rooms.
-          let audiencePreset = false;
-          try {
-            const aud = await get<{ audienceKind?: string | null; batchStudentIds?: string[] | null }>(
-              `/api/class/${encodeURIComponent(room)}/audience`);
-            audiencePreset = !!(aud?.audienceKind || (Array.isArray(aud?.batchStudentIds) && aud.batchStudentIds.length));
-          } catch { /* fail-open — go with the old push flow */ }
+          // Owner-hardened 2026-08-25 ROUND 2: ALWAYS open the audience
+          // picker on coach entry — never fire the push before the coach
+          // has explicitly picked who to notify. Owner report: "after
+          // clicking Dream Meet itself, notification shows, in background
+          // class starts and wait for joining" — the push was firing
+          // whenever a preset audience existed, so a coach re-launching
+          // an earlier class quietly re-pinged that saved list before
+          // seeing any UI. Now: going-live is ALWAYS deferred, picker
+          // ALWAYS shows, PATCH /audience is the ONLY thing that pushes.
+          // The picker pre-fills with the last saved audience so a coach
+          // who wants "same as last time" is one click away (Confirm).
           void announceGoingLive(
             room,
             `${import.meta.env.BASE_URL}class-v2/${room}?role=student`,
-            { deferNotify: !audiencePreset },
+            { deferNotify: true },
           );
-          if (!audiencePreset && !cancelled) setAudiencePickerOpen(true);
+          if (!cancelled) setAudiencePickerOpen(true);
         }
         const t = await get<LKTokenResp>(`/api/livekit/token?room=${encodeURIComponent(room)}&role=${role}`);
         if (!cancelled) setTokenData(t);
