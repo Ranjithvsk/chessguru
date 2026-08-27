@@ -90,7 +90,19 @@ function normalizeTree(x: unknown): TreeNode[] | null {
   return walk(x, 1);
 }
 
-function buildEntry(body: any): { kind: "corpus" | "line"; slug?: string; sans?: string[]; tree?: TreeNode[]; notes?: string | null; name: string } {
+// FEN sanity — 6 space-delimited fields, board piece placement is 8
+// slash-delimited ranks of pieces + digits. Not full-parse validation
+// (that'd need chess.js server-side), just enough to reject junk that
+// would break the client on reload.
+const FEN_RE = /^[a-zA-Z0-9\/]+ [wb] [KQkq-]+ [a-h0-9-]+ \d+ \d+$/;
+function normalizeStartFen(x: unknown): string | undefined {
+  if (typeof x !== "string") return undefined;
+  const s = x.trim();
+  if (!s) return undefined;
+  if (s.length > 100 || !FEN_RE.test(s)) throw new BadRequestException("bad-startFen");
+  return s;
+}
+function buildEntry(body: any): { kind: "corpus" | "line"; slug?: string; sans?: string[]; tree?: TreeNode[]; notes?: string | null; name: string; startFen?: string } {
   const name = normalizeName(body?.name);
   const kind = body?.kind === "corpus" ? "corpus" : "line";
   if (kind === "corpus") {
@@ -107,9 +119,14 @@ function buildEntry(body: any): { kind: "corpus" | "line"; slug?: string; sans?:
   const hasVariations = tree ? tree.some(function containsBranch(n: TreeNode): boolean {
     return n.children.length > 1 || n.children.some(containsBranch);
   }) : false;
-  return hasVariations
-    ? { kind, sans, tree: tree!, notes, name }
-    : { kind, sans, notes, name };
+  // Optional startFen — set when the coach saved a line from a SETUP position
+  // (mid-game, endgame study, etc.). Loading the entry back replays sans/tree
+  // from THIS fen instead of the standard opening.
+  const startFen = normalizeStartFen(body?.startFen);
+  const base: { kind: "corpus" | "line"; slug?: string; sans?: string[]; tree?: TreeNode[]; notes?: string | null; name: string; startFen?: string } =
+    hasVariations ? { kind, sans, tree: tree!, notes, name } : { kind, sans, notes, name };
+  if (startFen) base.startFen = startFen;
+  return base;
 }
 
 @Controller("my/repertoire")
@@ -253,6 +270,7 @@ export class SavedLinesController {
       name: src.name,
       slug: src.slug ?? undefined,
       sans: src.sans ?? undefined,
+      startFen: src.startFen ?? undefined,
       // Propagate the sideline tree on share too — otherwise coaches sharing
       // a repertoire with branches would silently flatten it back to mainline
       // on the student's side.
@@ -374,6 +392,7 @@ export class SavedLinesController {
       name: dupName,
       slug: src.slug ?? undefined,
       sans: src.sans ?? undefined,
+      startFen: src.startFen ?? undefined,
       tree: src.tree ?? undefined,
       notes: src.notes ?? undefined,
       createdAt: new Date(),

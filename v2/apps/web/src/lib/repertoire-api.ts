@@ -27,6 +27,11 @@ export interface RepertoireEntry {
   /** Optional full tree (with sidelines). When present, load THIS instead of
    *  `sans` so branches survive round-trip. */
   tree?: RepMoveNode[];
+  /** Optional starting FEN — set when the coach saved this line from a
+   *  custom SETUP position (mid-game, endgame study, etc.). When absent,
+   *  the line replays from the standard opening. Loading callers must pass
+   *  this fen to the position-replay so sans/tree land correctly. */
+  startFen?: string;
   notes?: string | null;
   createdAt: string;
   sharedFrom?: string | null;
@@ -49,7 +54,7 @@ export function listRepertoire(): Promise<{ entries: RepertoireEntry[] }> {
   return jf("/api/my/repertoire");
 }
 export function addRepertoire(body: {
-  name: string; kind: "corpus" | "line"; slug?: string; sans?: string[]; tree?: RepMoveNode[]; notes?: string | null;
+  name: string; kind: "corpus" | "line"; slug?: string; sans?: string[]; tree?: RepMoveNode[]; notes?: string | null; startFen?: string;
 }): Promise<{ ok: boolean; entry: RepertoireEntry }> {
   return jf("/api/my/repertoire", {
     method: "POST", headers: { "Content-Type": "application/json" },

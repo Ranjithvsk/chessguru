@@ -843,7 +843,9 @@ function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "stu
     // activateRepertoireEntry needs an entry-like object; craft a synthetic
     // client-side entry from the current mainline. Also POST to
     // /api/my/repertoire so it survives across devices.
-    void addRepertoire({ name, kind: "line" as const, sans: currentSans }).then((r) => {
+    const body: any = { name, kind: "line" as const, sans: currentSans };
+    if (startFen && startFen !== STANDARD_START_FEN) body.startFen = startFen;
+    void addRepertoire(body).then((r) => {
       if (r?.entry) {
         activateRepertoireEntry(r.entry);
         setMemoToast(`🧠 Added "${r.entry.name}" to your Opening Trainer`);
@@ -1416,11 +1418,14 @@ function TeachOpeningModal({ room, role, onClose }: { room: string; role: "coach
   };
 
   const loadFromRep = (e: RepertoireEntry) => {
-    // If entry has a tree, replay it. Otherwise walk sans.
+    // Setup-position aware: replay from entry.startFen when present, else
+    // fall back to the standard opening. If both tree and sans are present,
+    // the tree wins (it preserves variations; sans is mainline-only).
+    const base = e.startFen && e.startFen.length > 0 ? e.startFen : STANDARD_START_FEN;
     const wsTree = e.tree && e.tree.length > 0
-      ? repTreeToWsTree(STANDARD_START_FEN, e.tree)
-      : sansToStraightTree(STANDARD_START_FEN, e.sans ?? []);
-    void loadIntoClass(e._id, STANDARD_START_FEN, wsTree, e);
+      ? repTreeToWsTree(base, e.tree)
+      : sansToStraightTree(base, e.sans ?? []);
+    void loadIntoClass(e._id, base, wsTree, e);
   };
   const loadFromCorpus = (o: Opening) => {
     const wsTree = sansToStraightTree(STANDARD_START_FEN, o.pgnStart);
@@ -1622,6 +1627,12 @@ function SaveToRepertoireDialog({ room, startFen, tree, fromPath, onClose }: { r
         while (cur) { flat.push(cur.san); cur = cur.children[0]; }
         body.sans = flat;
       }
+      // Persist the SETUP-position start fen when the coach saved from a
+      // non-standard board (endgame study, mid-game tactic, etc.). Skip when
+      // it's the standard opening so old clients don't get an unnecessary
+      // field. `repFen` here is the fen AT the fromPath — which for save-
+      // from-here is the position where the coach right-clicked.
+      if (repFen && repFen !== STANDARD_START_FEN) body.startFen = repFen;
       const r = await addRepertoire(body);
       qc.invalidateQueries({ queryKey: ["my-repertoire"] });
       if (shareAfter && r?.entry?._id) {
@@ -1648,6 +1659,12 @@ function SaveToRepertoireDialog({ room, startFen, tree, fromPath, onClose }: { r
           Saves {fromPath.length === 0 ? "the whole current tree" : `the sub-tree from move ${fromPath.length}`}
           {suggested && <> · auto-named <span className="text-brand-300">{suggested}</span></>}
         </div>
+        {repFen && repFen !== STANDARD_START_FEN && (
+          <div className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
+            📋 <span className="font-semibold">Setup position</span> — the start FEN will be saved so you can reload this exact board later.
+            <div className="mt-0.5 truncate font-mono text-[10px] text-amber-200/70" title={repFen}>{repFen}</div>
+          </div>
+        )}
         <label className="block text-[10px] font-bold uppercase tracking-widest text-ink-500">Name</label>
         <input type="text" value={name} onChange={(e) => setName(e.target.value)} maxLength={140}
           className="mt-1 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
