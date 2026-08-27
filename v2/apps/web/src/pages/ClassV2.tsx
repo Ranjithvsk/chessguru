@@ -376,17 +376,34 @@ function ChatPanelHost() {
 // Coach-only prev/next arrows through the game history + "3 / 12" indicator.
 // Non-destructive — walking back and forward keeps every move; playing a new
 // move from a rewound position truncates the "future" (like editor undo/redo).
-function CoachBoardNav() {
-  const { cursorIdx, historyLen } = useClassCursorInfo();
-  const canBack = cursorIdx > 0;
-  const canFwd  = cursorIdx < historyLen;
-  const label = historyLen === 0 ? "start" : `${cursorIdx} / ${historyLen}`;
+function CoachBoardNav({ readOnly = false }: { readOnly?: boolean } = {}) {
+  // Post-tree refactor: cursorIdx = cursorPath.length and history[] is the
+  // moves up-to-cursor, so cursorIdx === historyLen always → the old
+  // canFwd = cursorIdx < historyLen check was permanently false and the
+  // → button never enabled. Derive canFwd from the TREE instead: cursor
+  // can go forward if the current node has any children (mainline extends).
+  const { tree, cursorPath } = useClassMoveList();
+  const canBack = cursorPath.length > 0;
+  const canFwd = (() => {
+    let cur = tree;
+    for (const idx of cursorPath) cur = (cur[idx]?.children) ?? [];
+    return cur.length > 0;
+  })();
+  // Best-effort ply / total-along-mainline label. Total = walk mainline from
+  // root all the way down (child[0] chain length), even if cursor is on a
+  // variation — matches the /openings "N / M" pattern.
+  const mainlineLen = (() => {
+    let n = 0; let cur = tree;
+    while (cur.length > 0) { n++; cur = cur[0]!.children; }
+    return n;
+  })();
+  const label = mainlineLen === 0 ? "start" : `${cursorPath.length} / ${mainlineLen}`;
   return (
     <div className="inline-flex items-center gap-1 rounded-full border border-ink-700 bg-ink-900 px-2 py-1 shadow">
       <button
         onClick={() => triggerClassBoardAction("stepBack")}
-        disabled={!canBack}
-        title="Previous move (←) — non-destructive; step forward again to return"
+        disabled={readOnly || !canBack}
+        title={readOnly ? "Only the coach can rewind for the class" : "Previous move (←) — non-destructive; step forward again to return"}
         className="rounded-md px-2 py-0.5 text-sm text-white transition hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-30"
       >
         ←
@@ -394,8 +411,8 @@ function CoachBoardNav() {
       <span className="px-1 font-mono text-[11px] tabular-nums text-ink-400">{label}</span>
       <button
         onClick={() => triggerClassBoardAction("stepForward")}
-        disabled={!canFwd}
-        title="Next move (→)"
+        disabled={readOnly || !canFwd}
+        title={readOnly ? "Only the coach can advance for the class" : "Next move (→)"}
         className="rounded-md px-2 py-0.5 text-sm text-white transition hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-30"
       >
         →
@@ -1343,7 +1360,7 @@ export default function ClassV2Page() {
                 <HandRaiseButton />
                 <ChatToggleButton />
                 <ReactionsBar />
-                {role === "coach" && <CoachBoardNav />}
+                <CoachBoardNav readOnly={role !== "coach"} />
                 {role === "coach" && <CoachFlipToggle />}
                 {role === "coach" && <CoachLockToggle />}
                 {role === "coach" && (
