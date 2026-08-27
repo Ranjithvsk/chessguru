@@ -60,6 +60,33 @@ export function useClassCursorInfo(): { cursorIdx: number; historyLen: number } 
   return _cursorInfo;
 }
 
+// Move list snapshot — startFen (either the standard opening OR whatever the
+// coach loaded via loadFen) + every from/to move played from it + the cursor
+// position. Consumers (ClassV2's notation panel) derive SAN + move numbers
+// from this. Module-scoped so the notation panel doesn't have to prop-drill
+// through the LiveKit / class-ws intermediate tree.
+type SharedMove = { from: string; to: string; promotion?: string };
+let _moveList: { startFen: string; history: SharedMove[]; cursorIdx: number } = {
+  startFen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+  history: [], cursorIdx: 0,
+};
+const _moveListSubs = new Set<() => void>();
+function _publishMoveList(startFen: string, history: SharedMove[], cursorIdx: number) {
+  _moveList = { startFen, history, cursorIdx };
+  _moveListSubs.forEach((f) => f());
+}
+export function useClassMoveList(): { startFen: string; history: SharedMove[]; cursorIdx: number } {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((n) => n + 1); _moveListSubs.add(f); return () => { _moveListSubs.delete(f); }; }, []);
+  return _moveList;
+}
+
+// Coach seek — jump cursor to a specific ply (0 = startFen, history.length =
+// live). Goes through the module-scoped ws sender registered by SharedClassBoard.
+type SeekFn = (idx: number) => void;
+let _seekFn: SeekFn | null = null;
+export function triggerClassSeek(idx: number) { _seekFn?.(idx); }
+
 // Room lock state (whether students can move pieces). Default = LOCKED —
 // students can never accidentally scramble the board mid-lesson (owner
 // 2026-08-12). Coach's footer button toggles it for interactive practice.
@@ -554,13 +581,19 @@ export default function SharedClassBoard(
       if (msg.type === "state") {
         applyFen(msg.fen, msg.lastMove ?? null);
         setShapes(Array.isArray(msg.shapes) ? msg.shapes : []);
-        _publishCursor(Number(msg.cursorIdx ?? (Array.isArray(msg.history) ? msg.history.length : 0)), Array.isArray(msg.history) ? msg.history.length : 0);
+        const hist: SharedMove[] = Array.isArray(msg.history) ? msg.history : [];
+        const cursor = Number(msg.cursorIdx ?? hist.length);
+        _publishCursor(cursor, hist.length);
+        _publishMoveList(typeof msg.startFen === "string" ? msg.startFen : new Chess().fen(), hist, cursor);
         if (typeof msg.locked === "boolean") _publishLocked(msg.locked);
         if (msg.orientation === "white" || msg.orientation === "black") _publishOrientation(msg.orientation);
       }
       else if (msg.type === "move") {
         applyFen(msg.fen, msg.move);
-        _publishCursor(Number(msg.cursorIdx ?? (Array.isArray(msg.history) ? msg.history.length : 0)), Array.isArray(msg.history) ? msg.history.length : 0);
+        const hist: SharedMove[] = Array.isArray(msg.history) ? msg.history : [];
+        const cursor = Number(msg.cursorIdx ?? hist.length);
+        _publishCursor(cursor, hist.length);
+        _publishMoveList(typeof msg.startFen === "string" ? msg.startFen : _moveList.startFen, hist, cursor);
         if (typeof msg.locked === "boolean") _publishLocked(msg.locked);
       }
       else if (msg.type === "lock") { if (typeof msg.locked === "boolean") _publishLocked(msg.locked); }
@@ -645,6 +678,19 @@ export default function SharedClassBoard(
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     try { ws.send(JSON.stringify({ type: "stepForward" })); } catch { /* */ }
   };
+  const sendSeek = (idx: number) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try { ws.send(JSON.stringify({ type: "seek", cursorIdx: Math.max(0, Math.floor(idx)) })); } catch { /* */ }
+  };
+  // Register the module-scoped seek fn so the notation panel (rendered up in
+  // ClassV2, without direct ws access) can drive the cursor. Clear on unmount
+  // so a stale ws reference doesn't linger after leaving the class.
+  useEffect(() => {
+    _seekFn = sendSeek;
+    return () => { if (_seekFn === sendSeek) _seekFn = null; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const sendLock = (nextLocked: boolean) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;

@@ -53,6 +53,7 @@ type ClientFrame =
   | { type: "loadFen"; fen: string }        // coach only — set the board to an arbitrary position
   | { type: "lock"; locked: boolean }       // coach only — student moves are dropped when true
   | { type: "takeback" }                    // coach only — pops the last move (legacy: destructive)
+  | { type: "seek"; cursorIdx: number }     // coach only — jump cursor to a specific ply (0 = startFen, history.length = live)
   | { type: "stepBack" }                    // coach only — cursor--, keeps history so students can step forward again
   | { type: "stepForward" }                 // coach only — cursor++
   | { type: "annot"; shapes: Shape[] }      // arrows/circles — anyone can annotate
@@ -64,8 +65,8 @@ type ClientFrame =
 // is broadcast to the room on state changes.
 type ServerFrame =
   | { type: "role"; role: "coach" | "student"; coachToken?: string }
-  | { type: "state"; fen: string; lastMove: Move | null; history: Move[]; cursorIdx: number; participants: number; locked: boolean; shapes: Shape[]; orientation: Orientation }
-  | { type: "move"; move: Move; fen: string; history: Move[]; cursorIdx: number; participants: number; locked: boolean }
+  | { type: "state"; fen: string; startFen: string; lastMove: Move | null; history: Move[]; cursorIdx: number; participants: number; locked: boolean; shapes: Shape[]; orientation: Orientation }
+  | { type: "move"; move: Move; fen: string; startFen: string; history: Move[]; cursorIdx: number; participants: number; locked: boolean }
   | { type: "reset"; fen: string; participants: number; locked: boolean }
   | { type: "lock"; locked: boolean; participants: number }
   | { type: "annot"; shapes: Shape[]; participants: number }
@@ -77,6 +78,11 @@ type ServerFrame =
 
 interface Room {
   fen: string;
+  /** FEN the current move sequence started from — default = standard opening,
+   *  reset on `loadFen` (setup position). Sent in every state broadcast so the
+   *  client can render notation from an arbitrary starting position ("1... Kb8"
+   *  when the coach loaded a mid-game FEN with black to move). */
+  startFen: string;
   lastMove: Move | null;
   history: Move[];
   /** How many moves of `history` are currently shown. cursorIdx === history.length
@@ -214,7 +220,7 @@ function getRoom(id: string): Room {
     // Default LOCKED so students can't scramble the board just by clicking a
     // piece — owner reported 2026-08-12 that "students were controlling
     // moves". Coach can unlock via the footer 🔒 toggle for interactive drills.
-    r = { fen: START_FEN, lastMove: null, history: [], cursorIdx: 0, clients: new Set(),
+    r = { fen: START_FEN, startFen: START_FEN, lastMove: null, history: [], cursorIdx: 0, clients: new Set(),
           coachToken: null, coach: null, locked: true, shapes: [], orientation: "white", emptyEvictAt: null };
     rooms.set(id, r);
   }
@@ -228,7 +234,12 @@ function getRoom(id: string): Room {
 // cursor/history change so `room.fen` is always the SEEN position, not the
 // latest-move position (they diverge whenever the coach steps back).
 function recomputeFromHistory(room: Room): void {
-  const c = new Chess();
+  // Replay from the room's startFen (not always the standard opening — the
+  // coach may have loaded a setup position via loadFen). Falls back to the
+  // standard start if startFen is somehow corrupt so a bad frame can't
+  // permanently break the board.
+  let c: Chess;
+  try { c = new Chess(room.startFen); } catch { c = new Chess(); }
   for (let i = 0; i < room.cursorIdx; i++) {
     const m = room.history[i];
     if (!m) break;
@@ -261,7 +272,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
   // Snapshot current board to the new participant. Role isn't decided here — client
   // sends `hello` (optionally with its saved coachToken) and role is resolved there.
-  send({ type: "state", fen: room.fen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+  send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
   broadcast(room, { type: "participants", participants: room.clients.size });
 
   const isCoach = () => socketRole.get(ws) === "coach";
@@ -341,8 +352,24 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
     if (frame.type === "reset") {
       if (!isCoach()) return;                            // coach-gated to prevent accidental reset by a student
-      room.fen = START_FEN; room.lastMove = null; room.history = []; room.cursorIdx = 0;
+      room.fen = START_FEN; room.startFen = START_FEN; room.lastMove = null; room.history = []; room.cursorIdx = 0;
       broadcast(room, { type: "reset", fen: room.fen, participants: room.clients.size, locked: room.locked });
+      return;
+    }
+
+    if (frame.type === "seek") {
+      // Coach-only jump-to-ply. Idempotent — clamps to [0, history.length]
+      // so a stale/mistyped index can't crash the room. Broadcasts a full
+      // state so every client's fen + cursorIdx stay in lock-step (same
+      // shape as stepBack/stepForward).
+      if (!isCoach()) return;
+      const raw = Number((frame as any).cursorIdx);
+      if (!Number.isFinite(raw)) return;
+      const idx = Math.max(0, Math.min(Math.round(raw), room.history.length));
+      if (idx === room.cursorIdx) return;
+      room.cursorIdx = idx;
+      recomputeFromHistory(room);
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
       return;
     }
 
@@ -355,7 +382,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       else if (frame.type === "stepForward" && room.cursorIdx < room.history.length) room.cursorIdx++;
       else return;                                      // already at bound, no-op
       recomputeFromHistory(room);
-      broadcast(room, { type: "state", fen: room.fen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
       return;
     }
 
@@ -376,11 +403,12 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         return;
       }
       room.fen = cleanFen;
+      room.startFen = cleanFen;   // notation numbering now starts from this position
       room.lastMove = null;
       room.history = [];
       room.cursorIdx = 0;
       room.shapes = [];    // stale arrows/circles from the previous position are meaningless
-      broadcast(room, { type: "state", fen: room.fen, lastMove: null, history: [], cursorIdx: 0, participants: room.clients.size, locked: room.locked, shapes: [], orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
       return;
     }
 
@@ -406,7 +434,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       room.history.pop();
       if (room.cursorIdx > room.history.length) room.cursorIdx = room.history.length;
       recomputeFromHistory(room);
-      broadcast(room, { type: "state", fen: room.fen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
       return;
     }
 
@@ -456,7 +484,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     if (frame.type === "move" && frame.move && typeof frame.move.from === "string" && typeof frame.move.to === "string") {
       // Student-lock check: student moves are dropped when the coach has toggled the
       // lock. The sender still gets a state snapshot to reconcile any optimistic UI.
-      if (room.locked && !isCoach()) { send({ type: "state", fen: room.fen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation }); return; }
+      if (room.locked && !isCoach()) { send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation }); return; }
       // Server-side chess.js is the tie-breaker: two racing clients can't diverge the
       // canonical FEN. Illegal moves are dropped silently — the sender's local board
       // will reconcile from the next authoritative state frame it receives.
@@ -466,7 +494,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         const applied = c.move({ from: frame.move.from, to: frame.move.to, promotion: (frame.move.promotion as any) || "q" });
         ok = !!applied;
       } catch { ok = false; }
-      if (!ok) { send({ type: "state", fen: room.fen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation }); return; }
+      if (!ok) { send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation }); return; }
       // If cursor is in the past, drop the "future" history that this new move
       // supersedes — classic editor undo/redo semantics: after ← ← type-new-char,
       // the redo stack goes away.
@@ -475,7 +503,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       room.lastMove = { from: frame.move.from, to: frame.move.to, promotion: frame.move.promotion };
       room.history.push(room.lastMove);
       room.cursorIdx = room.history.length;
-      broadcast(room, { type: "move", move: room.lastMove, fen: room.fen, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked });
+      broadcast(room, { type: "move", move: room.lastMove, fen: room.fen, startFen: room.startFen, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked });
     }
   });
 

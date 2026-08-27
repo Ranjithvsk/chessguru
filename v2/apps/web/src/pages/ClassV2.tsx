@@ -5,7 +5,7 @@
 //
 // Requires the API to have LIVEKIT_URL / _API_KEY / _API_SECRET envs. Until
 // those are set, the page renders a friendly "not configured yet" splash.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Navigate, useParams, useSearchParams, Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -17,7 +17,8 @@ import {
 import { Track, DataPacket_Kind } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
-import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle } from "../components/SharedClassBoard";
+import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, triggerClassSeek } from "../components/SharedClassBoard";
+import { Chess } from "chess.js";
 import AudiencePickerModal from "../components/AudiencePickerModal";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
@@ -740,6 +741,135 @@ function DraggableCameraPIP({ children }: { children: any }) {
   return typeof document !== "undefined" ? createPortal(node, document.body) : node;
 }
 
+// Move-list strip below the board, mirroring the /openings PGN column.
+// Rebuilds SAN from the class-ws room's startFen + history so notation
+// numbers correctly even after a Setup Position: if the coach loaded a
+// mid-game FEN with 15 full-moves + black to move, the first move played
+// still shows as "15... Kb8" instead of "1. Kb8". Clickable for the coach
+// (fires `seek` frame, all clients follow); read-only for students.
+function ClassNotationStrip({ role }: { role: "coach" | "student" }) {
+  const { startFen, history, cursorIdx } = useClassMoveList();
+  // Compute SAN + turn/moveNumber for every ply. Wrapped in try/catch per move
+  // so a mid-flight bad frame (server race, partial state) can't blank the
+  // panel — worst case a single row shows "??" and playback resumes.
+  const rows = useMemo(() => {
+    const out: Array<{ ply: number; san: string; turn: "w" | "b"; num: number }> = [];
+    let game: Chess;
+    try { game = new Chess(startFen); } catch { game = new Chess(); }
+    for (let i = 0; i < history.length; i++) {
+      const m = history[i]!;
+      const turn = game.turn();                  // whose turn BEFORE this move
+      const num = Number(game.fen().split(" ")[5] || "1");
+      let san = "??";
+      try {
+        const applied = game.move({ from: m.from, to: m.to, promotion: (m.promotion as any) || "q" });
+        if (applied) san = applied.san;
+      } catch { /* leave as "??" */ }
+      out.push({ ply: i + 1, san, turn, num });
+    }
+    return out;
+  }, [startFen, history]);
+
+  // Group rows into full-move rows for a two-column notation display —
+  // { num: 15, white?: {san,ply}, black?: {san,ply} }. Handles a game that
+  // starts on black-to-move (setup positions) by leaving white empty on
+  // the first row.
+  const fullMoves = useMemo(() => {
+    const groups: Array<{ num: number; white?: { san: string; ply: number }; black?: { san: string; ply: number } }> = [];
+    for (const r of rows) {
+      const bucket = groups[groups.length - 1];
+      if (r.turn === "w") {
+        groups.push({ num: r.num, white: { san: r.san, ply: r.ply } });
+      } else {
+        if (bucket && bucket.num === r.num && !bucket.black) {
+          bucket.black = { san: r.san, ply: r.ply };
+        } else {
+          groups.push({ num: r.num, black: { san: r.san, ply: r.ply } });
+        }
+      }
+    }
+    return groups;
+  }, [rows]);
+
+  // Auto-scroll the ACTIVE move into view when the cursor moves — matters
+  // most for long games where the current move would otherwise be off-screen.
+  const listRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = listRef.current?.querySelector<HTMLButtonElement>(`[data-ply="${cursorIdx}"]`);
+    el?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+  }, [cursorIdx]);
+
+  if (history.length === 0) {
+    return (
+      <div className="shrink-0 border-t border-ink-800 bg-ink-950/60 px-3 py-1.5 text-[11px] text-ink-500">
+        No moves yet — <span className="text-ink-400">notation appears here as the game unfolds.</span>
+      </div>
+    );
+  }
+
+  const seek = (ply: number) => { if (role === "coach") triggerClassSeek(ply); };
+  const startBtnDisabled = role !== "coach";
+
+  return (
+    <div className="shrink-0 border-t border-ink-800 bg-ink-950/60">
+      <div ref={listRef} className="flex items-center gap-0.5 overflow-x-auto whitespace-nowrap px-2 py-1.5 text-[12px] font-mono">
+        {/* "Start" pip — clicking rewinds to the startFen (ply 0). */}
+        <button
+          type="button"
+          data-ply={0}
+          onClick={() => seek(0)}
+          disabled={startBtnDisabled}
+          title={role === "coach" ? "Rewind to the starting position" : "Starting position"}
+          className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${cursorIdx === 0 ? "bg-brand-500/30 text-brand-100" : "text-ink-500 hover:text-ink-200"} ${startBtnDisabled ? "cursor-default" : "cursor-pointer"}`}
+        >
+          ⏮
+        </button>
+        {fullMoves.map((g) => (
+          <span key={g.num} className="inline-flex shrink-0 items-center gap-0.5">
+            <span className="pl-1 pr-0.5 text-ink-500">{g.num}.</span>
+            {g.white ? (
+              <button
+                type="button"
+                data-ply={g.white.ply}
+                onClick={() => seek(g.white!.ply)}
+                disabled={startBtnDisabled}
+                className={`rounded px-1 py-0.5 ${cursorIdx === g.white.ply ? "bg-brand-500/30 text-brand-100" : "text-ink-100 hover:text-white hover:bg-ink-800"} ${startBtnDisabled ? "cursor-default" : "cursor-pointer"}`}
+              >
+                {g.white.san}
+              </button>
+            ) : (
+              <span className="px-1 text-ink-600">…</span>
+            )}
+            {g.black && (
+              <button
+                type="button"
+                data-ply={g.black.ply}
+                onClick={() => seek(g.black!.ply)}
+                disabled={startBtnDisabled}
+                className={`rounded px-1 py-0.5 ${cursorIdx === g.black.ply ? "bg-brand-500/30 text-brand-100" : "text-ink-100 hover:text-white hover:bg-ink-800"} ${startBtnDisabled ? "cursor-default" : "cursor-pointer"}`}
+              >
+                {g.black.san}
+              </button>
+            )}
+          </span>
+        ))}
+        {/* Trailing "live" chip — coach can click to jump back to the latest
+         *  position after reviewing. Highlighted when cursor is at live. */}
+        <button
+          type="button"
+          data-ply={history.length}
+          onClick={() => seek(history.length)}
+          disabled={startBtnDisabled}
+          title={role === "coach" ? "Jump to the current live position" : "Live position"}
+          className={`ml-1 shrink-0 rounded px-1.5 py-0.5 text-[10px] ${cursorIdx === history.length ? "bg-emerald-500/30 text-emerald-100" : "text-ink-500 hover:text-ink-200"} ${startBtnDisabled ? "cursor-default" : "cursor-pointer"}`}
+        >
+          ⏭ Live
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function ClassV2Page() {
   const { room = "" } = useParams();
   const [sp] = useSearchParams();
@@ -993,6 +1123,11 @@ export default function ClassV2Page() {
                 </div>
               )}
             </div>
+
+            {/* Move-list strip — /openings-style notation from the current
+             *  startFen. Coach clicks navigate every client. Sits above the
+             *  controls footer, below the board. */}
+            <ClassNotationStrip role={role} />
 
             {/* Controls footer — mic / cam / screen + hand / chat / reactions,
              *  sits UNDER the board so nothing overlaps pieces. */}
