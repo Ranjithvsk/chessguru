@@ -38,6 +38,11 @@ type PushSvcLike = { sendToUser: (userId: string, payload: { title: string; body
 let pushSvc: PushSvcLike | null = null;
 
 type Move = { from: string; to: string; promotion?: string };
+// Tree node stored on the room — { move, children }. Root is a virtual
+// pre-move node with no `move`. Coach playing a new move at a rewound
+// cursor now APPENDS a variation instead of truncating the future
+// (matches Lichess-analysis semantics + /openings free-play tree).
+type TreeNode = { move: Move; children: TreeNode[] };
 // Chessground DrawShape subset — we serialize only the fields we care about
 // (orig/dest/brush) so the frame stays small even with many annotations.
 type Shape = { orig: string; dest?: string; brush?: string };
@@ -53,7 +58,7 @@ type ClientFrame =
   | { type: "loadFen"; fen: string }        // coach only — set the board to an arbitrary position
   | { type: "lock"; locked: boolean }       // coach only — student moves are dropped when true
   | { type: "takeback" }                    // coach only — pops the last move (legacy: destructive)
-  | { type: "seek"; cursorIdx: number }     // coach only — jump cursor to a specific ply (0 = startFen, history.length = live)
+  | { type: "seek"; cursorIdx?: number; path?: number[] }     // coach only — jump cursor to a specific ply (0 = startFen, history.length = live) OR to a tree path
   | { type: "stepBack" }                    // coach only — cursor--, keeps history so students can step forward again
   | { type: "stepForward" }                 // coach only — cursor++
   | { type: "annot"; shapes: Shape[] }      // arrows/circles — anyone can annotate
@@ -65,8 +70,8 @@ type ClientFrame =
 // is broadcast to the room on state changes.
 type ServerFrame =
   | { type: "role"; role: "coach" | "student"; coachToken?: string }
-  | { type: "state"; fen: string; startFen: string; lastMove: Move | null; history: Move[]; cursorIdx: number; participants: number; locked: boolean; shapes: Shape[]; orientation: Orientation }
-  | { type: "move"; move: Move; fen: string; startFen: string; history: Move[]; cursorIdx: number; participants: number; locked: boolean }
+  | { type: "state"; fen: string; startFen: string; lastMove: Move | null; history: Move[]; cursorIdx: number; tree: TreeNode[]; cursorPath: number[]; participants: number; locked: boolean; shapes: Shape[]; orientation: Orientation }
+  | { type: "move"; move: Move; fen: string; startFen: string; history: Move[]; cursorIdx: number; tree: TreeNode[]; cursorPath: number[]; participants: number; locked: boolean }
   | { type: "reset"; fen: string; participants: number; locked: boolean }
   | { type: "lock"; locked: boolean; participants: number }
   | { type: "annot"; shapes: Shape[]; participants: number }
@@ -83,7 +88,18 @@ interface Room {
    *  client can render notation from an arbitrary starting position ("1... Kb8"
    *  when the coach loaded a mid-game FEN with black to move). */
   startFen: string;
+  /** Full variation tree from startFen. Coach playing a new move at a rewound
+   *  cursor creates a variation (sibling child) instead of truncating the
+   *  future — matches Lichess-analysis + /openings semantics. */
+  tree: TreeNode[];
+  /** Cursor into the tree: array of child indices from root. Empty = at
+   *  startFen (no moves played yet). Mainline is always the FIRST child at
+   *  each depth (index 0). */
+  cursorPath: number[];
   lastMove: Move | null;
+  /** Legacy: linear "mainline up to cursor" — kept in sync from tree +
+   *  cursorPath so pre-tree clients still render notation. Removed once
+   *  every client ships with tree-aware rendering. */
   history: Move[];
   /** How many moves of `history` are currently shown. cursorIdx === history.length
    *  means "at latest position (live)". cursorIdx < history.length means the
@@ -220,7 +236,7 @@ function getRoom(id: string): Room {
     // Default LOCKED so students can't scramble the board just by clicking a
     // piece — owner reported 2026-08-12 that "students were controlling
     // moves". Coach can unlock via the footer 🔒 toggle for interactive drills.
-    r = { fen: START_FEN, startFen: START_FEN, lastMove: null, history: [], cursorIdx: 0, clients: new Set(),
+    r = { fen: START_FEN, startFen: START_FEN, tree: [], cursorPath: [], lastMove: null, history: [], cursorIdx: 0, clients: new Set(),
           coachToken: null, coach: null, locked: true, shapes: [], orientation: "white", emptyEvictAt: null };
     rooms.set(id, r);
   }
@@ -233,20 +249,51 @@ function getRoom(id: string): Room {
 // Re-derive fen + lastMove from history[0..cursorIdx]. Called after any
 // cursor/history change so `room.fen` is always the SEEN position, not the
 // latest-move position (they diverge whenever the coach steps back).
-function recomputeFromHistory(room: Room): void {
-  // Replay from the room's startFen (not always the standard opening — the
-  // coach may have loaded a setup position via loadFen). Falls back to the
-  // standard start if startFen is somehow corrupt so a bad frame can't
-  // permanently break the board.
-  let c: Chess;
-  try { c = new Chess(room.startFen); } catch { c = new Chess(); }
-  for (let i = 0; i < room.cursorIdx; i++) {
-    const m = room.history[i];
-    if (!m) break;
-    try { c.move({ from: m.from, to: m.to, promotion: (m.promotion as any) || "q" }); } catch { /* skip malformed */ }
+/** Walk the tree along cursorPath, collecting the moves for legacy
+ *  `history` + `cursorIdx` fields (still emitted for backward compat). */
+function nodesAt(tree: TreeNode[], path: number[]): TreeNode[] {
+  const out: TreeNode[] = [];
+  let cur = tree;
+  for (const idx of path) {
+    const n = cur[idx];
+    if (!n) break;
+    out.push(n);
+    cur = n.children;
   }
-  room.fen = c.fen();
-  room.lastMove = room.cursorIdx > 0 ? (room.history[room.cursorIdx - 1] ?? null) : null;
+  return out;
+}
+function pathMoves(tree: TreeNode[], path: number[]): Move[] {
+  return nodesAt(tree, path).map((n) => n.move);
+}
+/** Fen after applying every move along cursorPath. Falls back to a fresh
+ *  game if startFen is corrupt so a bad frame can't wedge the room. */
+function fenAtPath(startFen: string, tree: TreeNode[], path: number[]): { fen: string; last: Move | null } {
+  let c: Chess;
+  try { c = new Chess(startFen); } catch { c = new Chess(); }
+  let last: Move | null = null;
+  for (const n of nodesAt(tree, path)) {
+    try {
+      c.move({ from: n.move.from, to: n.move.to, promotion: (n.move.promotion as any) || "q" });
+      last = n.move;
+    } catch { break; }
+  }
+  return { fen: c.fen(), last };
+}
+function recomputeFromTree(room: Room): void {
+  const r = fenAtPath(room.startFen, room.tree, room.cursorPath);
+  room.fen = r.fen;
+  room.lastMove = r.last;
+  const moves = pathMoves(room.tree, room.cursorPath);
+  room.history = moves;
+  room.cursorIdx = moves.length;
+}
+/** Total plies in the current line (up to end of mainline from cursor).
+ *  Used by legacy stepForward — walks one child[0] at a time from cursor. */
+function extendMainlineOnce(tree: TreeNode[], path: number[]): number[] | null {
+  const nodes = nodesAt(tree, path);
+  const parentChildren = nodes.length === 0 ? tree : nodes[nodes.length - 1]!.children;
+  if (parentChildren.length === 0) return null;
+  return [...path, 0];
 }
 
 function broadcast(room: Room, frame: ServerFrame): void {
@@ -272,7 +319,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
   // Snapshot current board to the new participant. Role isn't decided here — client
   // sends `hello` (optionally with its saved coachToken) and role is resolved there.
-  send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+  send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
   broadcast(room, { type: "participants", participants: room.clients.size });
 
   const isCoach = () => socketRole.get(ws) === "coach";
@@ -352,37 +399,69 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
     if (frame.type === "reset") {
       if (!isCoach()) return;                            // coach-gated to prevent accidental reset by a student
-      room.fen = START_FEN; room.startFen = START_FEN; room.lastMove = null; room.history = []; room.cursorIdx = 0;
+      room.fen = START_FEN; room.startFen = START_FEN; room.tree = []; room.cursorPath = []; room.lastMove = null; room.history = []; room.cursorIdx = 0;
       broadcast(room, { type: "reset", fen: room.fen, participants: room.clients.size, locked: room.locked });
+      // Also emit a full state so tree-aware clients drop their cached tree.
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
       return;
     }
 
     if (frame.type === "seek") {
-      // Coach-only jump-to-ply. Idempotent — clamps to [0, history.length]
-      // so a stale/mistyped index can't crash the room. Broadcasts a full
-      // state so every client's fen + cursorIdx stay in lock-step (same
-      // shape as stepBack/stepForward).
+      // Coach-only jump. Two shapes accepted:
+      //  * { path: number[] } — jump to a specific node in the tree (used by
+      //    the /openings-style notation panel to seek a variation).
+      //  * { cursorIdx: number } — legacy: jump N plies along the MAINLINE
+      //    from root. Convert to a path of [0,0,0,...] of the requested length.
       if (!isCoach()) return;
-      const raw = Number((frame as any).cursorIdx);
-      if (!Number.isFinite(raw)) return;
-      const idx = Math.max(0, Math.min(Math.round(raw), room.history.length));
-      if (idx === room.cursorIdx) return;
-      room.cursorIdx = idx;
-      recomputeFromHistory(room);
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      let nextPath: number[] | null = null;
+      const p = (frame as any).path;
+      if (Array.isArray(p)) {
+        const cleaned: number[] = [];
+        let cur = room.tree;
+        for (const raw of p) {
+          const idx = Math.trunc(Number(raw));
+          if (!Number.isFinite(idx) || idx < 0 || idx >= cur.length) break;
+          cleaned.push(idx);
+          cur = cur[idx]!.children;
+        }
+        nextPath = cleaned;
+      } else {
+        const raw = Number((frame as any).cursorIdx);
+        if (!Number.isFinite(raw)) return;
+        const want = Math.max(0, Math.round(raw));
+        // Walk mainline (child[0]) up to `want` moves.
+        const built: number[] = [];
+        let cur = room.tree;
+        for (let i = 0; i < want; i++) {
+          if (cur.length === 0) break;
+          built.push(0);
+          cur = cur[0]!.children;
+        }
+        nextPath = built;
+      }
+      if (!nextPath) return;
+      // Idempotent — same path means no-op broadcast.
+      if (nextPath.length === room.cursorPath.length && nextPath.every((v, i) => v === room.cursorPath[i])) return;
+      room.cursorPath = nextPath;
+      recomputeFromTree(room);
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
       return;
     }
 
     if (frame.type === "stepBack" || frame.type === "stepForward") {
-      // Coach-only cursor walk over history — non-destructive; the move list
-      // stays intact so → keeps working after ←. Broadcast full state so both
-      // sides render the same past/future position.
+      // Coach-only cursor walk over the tree — non-destructive. Back drops
+      // the last index; forward extends into child[0] (mainline).
       if (!isCoach()) return;
-      if (frame.type === "stepBack" && room.cursorIdx > 0) room.cursorIdx--;
-      else if (frame.type === "stepForward" && room.cursorIdx < room.history.length) room.cursorIdx++;
-      else return;                                      // already at bound, no-op
-      recomputeFromHistory(room);
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      if (frame.type === "stepBack") {
+        if (room.cursorPath.length === 0) return;
+        room.cursorPath = room.cursorPath.slice(0, -1);
+      } else {
+        const extended = extendMainlineOnce(room.tree, room.cursorPath);
+        if (!extended) return;
+        room.cursorPath = extended;
+      }
+      recomputeFromTree(room);
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
       return;
     }
 
@@ -404,11 +483,13 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       }
       room.fen = cleanFen;
       room.startFen = cleanFen;   // notation numbering now starts from this position
+      room.tree = [];
+      room.cursorPath = [];
       room.lastMove = null;
       room.history = [];
       room.cursorIdx = 0;
       room.shapes = [];    // stale arrows/circles from the previous position are meaningless
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
       return;
     }
 
@@ -429,12 +510,20 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     }
 
     if (frame.type === "takeback") {
+      // Delete the node at cursor + move cursor back one. In tree terms:
+      // splice the current node out of its parent's children array, then
+      // truncate cursorPath by one. If cursor is at root there's nothing
+      // to take back.
       if (!isCoach()) return;
-      if (room.history.length === 0) return;
-      room.history.pop();
-      if (room.cursorIdx > room.history.length) room.cursorIdx = room.history.length;
-      recomputeFromHistory(room);
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      if (room.cursorPath.length === 0) return;
+      const path = room.cursorPath;
+      let parentChildren = room.tree;
+      for (let i = 0; i < path.length - 1; i++) parentChildren = parentChildren[path[i]!]!.children;
+      const lastIdx = path[path.length - 1]!;
+      parentChildren.splice(lastIdx, 1);
+      room.cursorPath = path.slice(0, -1);
+      recomputeFromTree(room);
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
       return;
     }
 
@@ -484,7 +573,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     if (frame.type === "move" && frame.move && typeof frame.move.from === "string" && typeof frame.move.to === "string") {
       // Student-lock check: student moves are dropped when the coach has toggled the
       // lock. The sender still gets a state snapshot to reconcile any optimistic UI.
-      if (room.locked && !isCoach()) { send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation }); return; }
+      if (room.locked && !isCoach()) { send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation }); return; }
       // Server-side chess.js is the tie-breaker: two racing clients can't diverge the
       // canonical FEN. Illegal moves are dropped silently — the sender's local board
       // will reconcile from the next authoritative state frame it receives.
@@ -494,16 +583,27 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         const applied = c.move({ from: frame.move.from, to: frame.move.to, promotion: (frame.move.promotion as any) || "q" });
         ok = !!applied;
       } catch { ok = false; }
-      if (!ok) { send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation }); return; }
-      // If cursor is in the past, drop the "future" history that this new move
-      // supersedes — classic editor undo/redo semantics: after ← ← type-new-char,
-      // the redo stack goes away.
-      if (room.cursorIdx < room.history.length) room.history = room.history.slice(0, room.cursorIdx);
-      room.fen = c.fen();
-      room.lastMove = { from: frame.move.from, to: frame.move.to, promotion: frame.move.promotion };
-      room.history.push(room.lastMove);
-      room.cursorIdx = room.history.length;
-      broadcast(room, { type: "move", move: room.lastMove, fen: room.fen, startFen: room.startFen, history: room.history, cursorIdx: room.cursorIdx, participants: room.clients.size, locked: room.locked });
+      if (!ok) { send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation }); return; }
+      // Tree semantics: append the new move as a child of the node at
+      // cursorPath. If a child with the same from/to/promotion already
+      // exists, just move the cursor to it (don't duplicate). Playing a
+      // new move at a rewound cursor now creates a VARIATION instead of
+      // truncating the future (matches /openings + Lichess analysis).
+      const newMove: Move = { from: frame.move.from, to: frame.move.to, promotion: frame.move.promotion };
+      // Locate the parent children[] for the current cursor.
+      let parentChildren = room.tree;
+      for (const idx of room.cursorPath) parentChildren = parentChildren[idx]!.children;
+      // Match promotion loosely: undefined ~ "q" (chess.js default).
+      const norm = (p?: string) => (p || "q").toLowerCase();
+      let existingIdx = parentChildren.findIndex((n) =>
+        n.move.from === newMove.from && n.move.to === newMove.to && norm(n.move.promotion) === norm(newMove.promotion));
+      if (existingIdx < 0) {
+        parentChildren.push({ move: newMove, children: [] });
+        existingIdx = parentChildren.length - 1;
+      }
+      room.cursorPath = [...room.cursorPath, existingIdx];
+      recomputeFromTree(room);
+      broadcast(room, { type: "move", move: room.lastMove!, fen: room.fen, startFen: room.startFen, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked });
     }
   });
 

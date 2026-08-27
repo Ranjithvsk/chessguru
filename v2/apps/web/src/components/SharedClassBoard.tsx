@@ -61,31 +61,40 @@ export function useClassCursorInfo(): { cursorIdx: number; historyLen: number } 
 }
 
 // Move list snapshot — startFen (either the standard opening OR whatever the
-// coach loaded via loadFen) + every from/to move played from it + the cursor
-// position. Consumers (ClassV2's notation panel) derive SAN + move numbers
-// from this. Module-scoped so the notation panel doesn't have to prop-drill
-// through the LiveKit / class-ws intermediate tree.
-type SharedMove = { from: string; to: string; promotion?: string };
-let _moveList: { startFen: string; history: SharedMove[]; cursorIdx: number } = {
+// coach loaded via loadFen) + the full variation TREE played from it + the
+// cursor path. Consumers (ClassV2's notation panel) derive SAN + move numbers
+// from this. Module-scoped so the panel doesn't have to prop-drill through
+// the LiveKit / class-ws intermediate tree.
+export type SharedMove = { from: string; to: string; promotion?: string };
+export type SharedTreeNode = { move: SharedMove; children: SharedTreeNode[] };
+let _moveList: {
+  startFen: string;
+  history: SharedMove[];       // legacy — linear moves up to cursorPath
+  cursorIdx: number;           // legacy — cursorPath.length
+  tree: SharedTreeNode[];
+  cursorPath: number[];
+} = {
   startFen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
   history: [], cursorIdx: 0,
+  tree: [], cursorPath: [],
 };
 const _moveListSubs = new Set<() => void>();
-function _publishMoveList(startFen: string, history: SharedMove[], cursorIdx: number) {
-  _moveList = { startFen, history, cursorIdx };
+function _publishMoveList(startFen: string, history: SharedMove[], cursorIdx: number, tree: SharedTreeNode[], cursorPath: number[]) {
+  _moveList = { startFen, history, cursorIdx, tree, cursorPath };
   _moveListSubs.forEach((f) => f());
 }
-export function useClassMoveList(): { startFen: string; history: SharedMove[]; cursorIdx: number } {
+export function useClassMoveList() {
   const [, force] = useState(0);
   useEffect(() => { const f = () => force((n) => n + 1); _moveListSubs.add(f); return () => { _moveListSubs.delete(f); }; }, []);
   return _moveList;
 }
 
-// Coach seek — jump cursor to a specific ply (0 = startFen, history.length =
-// live). Goes through the module-scoped ws sender registered by SharedClassBoard.
-type SeekFn = (idx: number) => void;
+// Coach seek — jump cursor to a specific ply (legacy: cursorIdx) OR to a
+// tree path (new: number[] into the tree). Goes through the module-scoped
+// ws sender registered by SharedClassBoard.
+type SeekFn = (arg: number | number[]) => void;
 let _seekFn: SeekFn | null = null;
-export function triggerClassSeek(idx: number) { _seekFn?.(idx); }
+export function triggerClassSeek(arg: number | number[]) { _seekFn?.(arg); }
 
 // Room lock state (whether students can move pieces). Default = LOCKED —
 // students can never accidentally scramble the board mid-lesson (owner
@@ -583,8 +592,10 @@ export default function SharedClassBoard(
         setShapes(Array.isArray(msg.shapes) ? msg.shapes : []);
         const hist: SharedMove[] = Array.isArray(msg.history) ? msg.history : [];
         const cursor = Number(msg.cursorIdx ?? hist.length);
+        const tree: SharedTreeNode[] = Array.isArray(msg.tree) ? msg.tree : [];
+        const cursorPath: number[] = Array.isArray(msg.cursorPath) ? msg.cursorPath : [];
         _publishCursor(cursor, hist.length);
-        _publishMoveList(typeof msg.startFen === "string" ? msg.startFen : new Chess().fen(), hist, cursor);
+        _publishMoveList(typeof msg.startFen === "string" ? msg.startFen : new Chess().fen(), hist, cursor, tree, cursorPath);
         if (typeof msg.locked === "boolean") _publishLocked(msg.locked);
         if (msg.orientation === "white" || msg.orientation === "black") _publishOrientation(msg.orientation);
       }
@@ -592,8 +603,10 @@ export default function SharedClassBoard(
         applyFen(msg.fen, msg.move);
         const hist: SharedMove[] = Array.isArray(msg.history) ? msg.history : [];
         const cursor = Number(msg.cursorIdx ?? hist.length);
+        const tree: SharedTreeNode[] = Array.isArray(msg.tree) ? msg.tree : _moveList.tree;
+        const cursorPath: number[] = Array.isArray(msg.cursorPath) ? msg.cursorPath : _moveList.cursorPath;
         _publishCursor(cursor, hist.length);
-        _publishMoveList(typeof msg.startFen === "string" ? msg.startFen : _moveList.startFen, hist, cursor);
+        _publishMoveList(typeof msg.startFen === "string" ? msg.startFen : _moveList.startFen, hist, cursor, tree, cursorPath);
         if (typeof msg.locked === "boolean") _publishLocked(msg.locked);
       }
       else if (msg.type === "lock") { if (typeof msg.locked === "boolean") _publishLocked(msg.locked); }
@@ -678,10 +691,15 @@ export default function SharedClassBoard(
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     try { ws.send(JSON.stringify({ type: "stepForward" })); } catch { /* */ }
   };
-  const sendSeek = (idx: number) => {
+  const sendSeek = (arg: number | number[]) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    try { ws.send(JSON.stringify({ type: "seek", cursorIdx: Math.max(0, Math.floor(idx)) })); } catch { /* */ }
+    try {
+      const body = Array.isArray(arg)
+        ? { type: "seek", path: arg.map((n) => Math.max(0, Math.floor(Number(n) || 0))) }
+        : { type: "seek", cursorIdx: Math.max(0, Math.floor(arg)) };
+      ws.send(JSON.stringify(body));
+    } catch { /* */ }
   };
   // Register the module-scoped seek fn so the notation panel (rendered up in
   // ClassV2, without direct ws access) can drive the cursor. Clear on unmount

@@ -17,7 +17,7 @@ import {
 import { Track, DataPacket_Kind } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
-import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, triggerClassSeek } from "../components/SharedClassBoard";
+import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, triggerClassSeek, type SharedTreeNode } from "../components/SharedClassBoard";
 import { Chess } from "chess.js";
 import AudiencePickerModal from "../components/AudiencePickerModal";
 
@@ -741,130 +741,227 @@ function DraggableCameraPIP({ children }: { children: any }) {
   return typeof document !== "undefined" ? createPortal(node, document.body) : node;
 }
 
-// Move-list strip below the board, mirroring the /openings PGN column.
-// Rebuilds SAN from the class-ws room's startFen + history so notation
-// numbers correctly even after a Setup Position: if the coach loaded a
-// mid-game FEN with 15 full-moves + black to move, the first move played
-// still shows as "15... Kb8" instead of "1. Kb8". Clickable for the coach
-// (fires `seek` frame, all clients follow); read-only for students.
-function ClassNotationStrip({ role }: { role: "coach" | "student" }) {
-  const { startFen, history, cursorIdx } = useClassMoveList();
-  // Compute SAN + turn/moveNumber for every ply. Wrapped in try/catch per move
-  // so a mid-flight bad frame (server race, partial state) can't blank the
-  // panel — worst case a single row shows "??" and playback resumes.
-  const rows = useMemo(() => {
-    const out: Array<{ ply: number; san: string; turn: "w" | "b"; num: number }> = [];
-    let game: Chess;
-    try { game = new Chess(startFen); } catch { game = new Chess(); }
-    for (let i = 0; i < history.length; i++) {
-      const m = history[i]!;
-      const turn = game.turn();                  // whose turn BEFORE this move
-      const num = Number(game.fen().split(" ")[5] || "1");
-      let san = "??";
-      try {
-        const applied = game.move({ from: m.from, to: m.to, promotion: (m.promotion as any) || "q" });
-        if (applied) san = applied.san;
-      } catch { /* leave as "??" */ }
-      out.push({ ply: i + 1, san, turn, num });
-    }
-    return out;
-  }, [startFen, history]);
+// /openings-style two-column mainline notation with inline variation branches.
+// Rebuilds SAN client-side from startFen + the class-ws room's tree so
+// numbering respects a Setup Position (a coach who loaded a mid-game FEN
+// with 15 full-moves + black to move sees "15... Kb8" not "1. Kb8"). Coach
+// clicks any ply to seek every client to that path; students see it as a
+// read-only ledger. Playing a new move at a rewound cursor now creates a
+// variation branch (server-side tree semantics, dd67193 → this commit).
+type EnrichedNode = {
+  san: string;
+  path: number[];
+  ply: number;         // 0-indexed from startFen
+  moveNo: number;      // full-move counter
+  turn: "w" | "b";     // whose move BEFORE this ply
+  children: EnrichedNode[];
+};
+function pathsEqual(a: number[], b: number[]) { return a.length === b.length && a.every((v, i) => v === b[i]); }
 
-  // Group rows into full-move rows for a two-column notation display —
-  // { num: 15, white?: {san,ply}, black?: {san,ply} }. Handles a game that
-  // starts on black-to-move (setup positions) by leaving white empty on
-  // the first row.
-  const fullMoves = useMemo(() => {
-    const groups: Array<{ num: number; white?: { san: string; ply: number }; black?: { san: string; ply: number } }> = [];
-    for (const r of rows) {
-      const bucket = groups[groups.length - 1];
-      if (r.turn === "w") {
-        groups.push({ num: r.num, white: { san: r.san, ply: r.ply } });
-      } else {
-        if (bucket && bucket.num === r.num && !bucket.black) {
-          bucket.black = { san: r.san, ply: r.ply };
-        } else {
-          groups.push({ num: r.num, black: { san: r.san, ply: r.ply } });
+// Compute the ply / moveNo / turn for the CURRENT node given the parent
+// board state — needed for correct row numbering when the pack begins mid-game.
+function ClassNotationPanel({ role }: { role: "coach" | "student" }) {
+  const { startFen, tree, cursorPath } = useClassMoveList();
+  // Enrich the wire tree with SAN + ply metadata. All branches are rendered,
+  // not just the current line — that's the whole point of "moves tree".
+  const enriched = useMemo(() => {
+    const startTurn: "w" | "b" = (startFen.split(" ")[1] === "b" ? "b" : "w");
+    const startNum = Number(startFen.split(" ")[5] || "1");
+    const startPly = (startNum - 1) * 2 + (startTurn === "b" ? 1 : 0);
+    const walk = (nodes: SharedTreeNode[], parentFen: string, prefix: number[], plyBase: number): EnrichedNode[] => {
+      const out: EnrichedNode[] = [];
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i]!;
+        let san = "??";
+        let nextFen = parentFen;
+        try {
+          const c = new Chess(parentFen);
+          const applied = c.move({ from: n.move.from, to: n.move.to, promotion: (n.move.promotion as any) || "q" });
+          if (applied) { san = applied.san; nextFen = c.fen(); }
+        } catch { /* leave "??" */ }
+        const ply = plyBase;
+        const moveNo = Math.floor(ply / 2) + 1;
+        const turn: "w" | "b" = ply % 2 === 0 ? "w" : "b";
+        const childPath = [...prefix, i];
+        out.push({
+          san, path: childPath, ply, moveNo, turn,
+          children: walk(n.children, nextFen, childPath, plyBase + 1),
+        });
+      }
+      return out;
+    };
+    return { nodes: walk(tree, startFen, [], startPly), startPly, startNum, startTurn };
+  }, [startFen, tree]);
+
+  const clickable = role === "coach";
+  const activeRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => { activeRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, [cursorPath]);
+
+  const isActive = (path: number[]) => pathsEqual(path, cursorPath);
+  const onPick = (path: number[]) => { if (clickable) triggerClassSeek(path); };
+
+  // Render one INLINE variation line (recursive): `1. e4 e5 (variation) 2. Nf3`.
+  // Any node with siblings [1..] gets its own nested block below.
+  const renderInline = (n: EnrichedNode, includeNumber: boolean) => {
+    const active = isActive(n.path);
+    return (
+      <span key={n.path.join("-")} className="inline">
+        {includeNumber && n.turn === "w" && (
+          <span className="ml-1 mr-0.5 text-[11px] text-ink-500">{n.moveNo}.</span>
+        )}
+        {includeNumber && n.turn === "b" && (
+          <span className="ml-1 mr-0.5 text-[11px] text-ink-500">{n.moveNo}…</span>
+        )}
+        <button
+          type="button"
+          ref={active ? activeRef : undefined}
+          onClick={() => onPick(n.path)}
+          disabled={!clickable}
+          className={`rounded px-1 py-0.5 font-mono text-sm ${active ? "bg-brand-500/60 text-white" : "text-ink-100 hover:bg-ink-800"} ${clickable ? "cursor-pointer" : "cursor-default"}`}
+        >{n.san}</button>
+      </span>
+    );
+  };
+  const renderVariationLine = (root: EnrichedNode) => {
+    const out: any[] = [];
+    let cur: EnrichedNode | undefined = root;
+    let first = true;
+    while (cur) {
+      // Force a number every time turn switches OR this is the first node.
+      out.push(renderInline(cur, first || cur.turn === "w"));
+      first = false;
+      // Any sibling variations on this cur's children need a nested block.
+      if (cur.children.length > 1) {
+        for (let vi = 1; vi < cur.children.length; vi++) {
+          const v = cur.children[vi]!;
+          out.push(
+            <span key={"nested-" + v.path.join("-")} className="ml-1 inline-block rounded border-l-2 border-ink-700 pl-1 text-[12px] text-ink-300">
+              ({renderVariationLine(v)})
+            </span>
+          );
         }
       }
+      cur = cur.children[0];
     }
-    return groups;
-  }, [rows]);
+    return out;
+  };
 
-  // Auto-scroll the ACTIVE move into view when the cursor moves — matters
-  // most for long games where the current move would otherwise be off-screen.
-  const listRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const el = listRef.current?.querySelector<HTMLButtonElement>(`[data-ply="${cursorIdx}"]`);
-    el?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
-  }, [cursorIdx]);
+  // Build a Lichess-style two-column table for the MAINLINE (child[0] chain).
+  const mainRows = useMemo(() => {
+    type Cell = { node: EnrichedNode; vars: EnrichedNode[] } | null;
+    type Row = { moveNo: number; white: Cell; black: Cell };
+    const rows: Row[] = [];
+    let node: EnrichedNode | undefined = enriched.nodes[0];
+    let curRow: Row | null = null;
+    while (node) {
+      const vars = node.children.slice(1);
+      if (node.turn === "w") {
+        curRow = { moveNo: node.moveNo, white: { node, vars }, black: null };
+        rows.push(curRow);
+      } else {
+        if (!curRow) {
+          curRow = { moveNo: node.moveNo, white: null, black: { node, vars } };
+          rows.push(curRow);
+        } else {
+          curRow.black = { node, vars };
+        }
+      }
+      node = node.children[0];
+    }
+    return rows;
+  }, [enriched.nodes]);
 
-  if (history.length === 0) {
+  // Rewind-to-start + jump-to-live pills.
+  const atStart = cursorPath.length === 0;
+  const atLive = useMemo(() => {
+    // "Live" = end of current mainline branch. Walk child[0] from cursor
+    // and check we can't extend further.
+    let cur = tree;
+    for (const idx of cursorPath) cur = (cur[idx]?.children) ?? [];
+    return cur.length === 0;
+  }, [tree, cursorPath]);
+
+  if (enriched.nodes.length === 0) {
     return (
-      <div className="shrink-0 border-t border-ink-800 bg-ink-950/60 px-3 py-1.5 text-[11px] text-ink-500">
+      <div className="shrink-0 border-t border-ink-800 bg-ink-950/60 px-3 py-2 text-[11px] text-ink-500">
         No moves yet — <span className="text-ink-400">notation appears here as the game unfolds.</span>
       </div>
     );
   }
 
-  const seek = (ply: number) => { if (role === "coach") triggerClassSeek(ply); };
-  const startBtnDisabled = role !== "coach";
+  const cellClass = (active: boolean) =>
+    `rounded px-1.5 py-0.5 text-left font-mono text-sm transition ${active ? "bg-brand-500/60 text-white" : "text-ink-100 hover:bg-ink-800"}`;
 
   return (
     <div className="shrink-0 border-t border-ink-800 bg-ink-950/60">
-      <div ref={listRef} className="flex items-center gap-0.5 overflow-x-auto whitespace-nowrap px-2 py-1.5 text-[12px] font-mono">
-        {/* "Start" pip — clicking rewinds to the startFen (ply 0). */}
+      {/* Header controls — Start / Live pills mirror /openings' ⏮ ⏭ nav. */}
+      <div className="flex items-center gap-2 border-b border-ink-800/70 px-3 py-1 text-[10px] uppercase tracking-widest text-ink-500">
+        <span>Moves</span>
+        <span className="text-ink-600">·</span>
         <button
           type="button"
-          data-ply={0}
-          onClick={() => seek(0)}
-          disabled={startBtnDisabled}
-          title={role === "coach" ? "Rewind to the starting position" : "Starting position"}
-          className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${cursorIdx === 0 ? "bg-brand-500/30 text-brand-100" : "text-ink-500 hover:text-ink-200"} ${startBtnDisabled ? "cursor-default" : "cursor-pointer"}`}
-        >
-          ⏮
-        </button>
-        {fullMoves.map((g) => (
-          <span key={g.num} className="inline-flex shrink-0 items-center gap-0.5">
-            <span className="pl-1 pr-0.5 text-ink-500">{g.num}.</span>
-            {g.white ? (
-              <button
-                type="button"
-                data-ply={g.white.ply}
-                onClick={() => seek(g.white!.ply)}
-                disabled={startBtnDisabled}
-                className={`rounded px-1 py-0.5 ${cursorIdx === g.white.ply ? "bg-brand-500/30 text-brand-100" : "text-ink-100 hover:text-white hover:bg-ink-800"} ${startBtnDisabled ? "cursor-default" : "cursor-pointer"}`}
-              >
-                {g.white.san}
-              </button>
-            ) : (
-              <span className="px-1 text-ink-600">…</span>
-            )}
-            {g.black && (
-              <button
-                type="button"
-                data-ply={g.black.ply}
-                onClick={() => seek(g.black!.ply)}
-                disabled={startBtnDisabled}
-                className={`rounded px-1 py-0.5 ${cursorIdx === g.black.ply ? "bg-brand-500/30 text-brand-100" : "text-ink-100 hover:text-white hover:bg-ink-800"} ${startBtnDisabled ? "cursor-default" : "cursor-pointer"}`}
-              >
-                {g.black.san}
-              </button>
-            )}
-          </span>
-        ))}
-        {/* Trailing "live" chip — coach can click to jump back to the latest
-         *  position after reviewing. Highlighted when cursor is at live. */}
+          onClick={() => onPick([])}
+          disabled={!clickable}
+          className={`rounded px-1.5 py-0.5 ${atStart ? "bg-brand-500/30 text-brand-100" : "text-ink-500 hover:text-ink-200"} ${clickable ? "cursor-pointer" : "cursor-default"}`}
+          title={clickable ? "Rewind to the starting position" : "Starting position"}
+        >⏮ Start</button>
         <button
           type="button"
-          data-ply={history.length}
-          onClick={() => seek(history.length)}
-          disabled={startBtnDisabled}
-          title={role === "coach" ? "Jump to the current live position" : "Live position"}
-          className={`ml-1 shrink-0 rounded px-1.5 py-0.5 text-[10px] ${cursorIdx === history.length ? "bg-emerald-500/30 text-emerald-100" : "text-ink-500 hover:text-ink-200"} ${startBtnDisabled ? "cursor-default" : "cursor-pointer"}`}
-        >
-          ⏭ Live
-        </button>
+          onClick={() => {
+            // Walk mainline from cursor to leaf and seek there.
+            let path = [...cursorPath];
+            let cur = tree;
+            for (const idx of path) cur = cur[idx]!.children;
+            while (cur.length > 0) { path.push(0); cur = cur[0]!.children; }
+            onPick(path);
+          }}
+          disabled={!clickable || atLive}
+          className={`rounded px-1.5 py-0.5 ${atLive ? "bg-emerald-500/30 text-emerald-100" : "text-ink-500 hover:text-ink-200"} ${clickable && !atLive ? "cursor-pointer" : "cursor-default"}`}
+          title={clickable ? "Jump to end of this line" : "End of line"}
+        >⏭ Live</button>
+      </div>
+      {/* Scrollable notation grid — sized for the board's right column on
+       *  desktop; falls back to a horizontal strip on very short viewports. */}
+      <div className="max-h-56 overflow-y-auto px-2 py-1.5">
+        {mainRows.map((row, i) => {
+          const wActive = row.white ? isActive(row.white.node.path) : false;
+          const bActive = row.black ? isActive(row.black.node.path) : false;
+          return (
+            <div key={i}>
+              <div className="grid grid-cols-[2rem_1fr_1fr] items-baseline gap-1">
+                <span className="text-right font-mono text-[11px] text-ink-500">{row.moveNo}.</span>
+                {row.white ? (
+                  <button
+                    ref={wActive ? activeRef : undefined}
+                    onClick={() => onPick(row.white!.node.path)}
+                    disabled={!clickable}
+                    className={cellClass(wActive)}
+                  >{row.white.node.san}</button>
+                ) : <span />}
+                {row.black ? (
+                  <button
+                    ref={bActive ? activeRef : undefined}
+                    onClick={() => onPick(row.black!.node.path)}
+                    disabled={!clickable}
+                    className={cellClass(bActive)}
+                  >{row.black.node.san}</button>
+                ) : <span />}
+              </div>
+              {/* Variations from white's move (Black-to-move sidelines). */}
+              {row.white?.vars.map((v, vi) => (
+                <div key={`wv${vi}`} className="my-1 ml-8 border-l-2 border-ink-700 pl-2 text-[13px] text-ink-300">
+                  {renderVariationLine(v)}
+                </div>
+              ))}
+              {/* Variations from black's move (White-to-move sidelines). */}
+              {row.black?.vars.map((v, vi) => (
+                <div key={`bv${vi}`} className="my-1 ml-8 border-l-2 border-ink-700 pl-2 text-[13px] text-ink-300">
+                  {renderVariationLine(v)}
+                </div>
+              ))}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -1218,10 +1315,11 @@ export default function ClassV2Page() {
               )}
             </div>
 
-            {/* Move-list strip — /openings-style notation from the current
-             *  startFen. Coach clicks navigate every client. Sits above the
-             *  controls footer, below the board. */}
-            <ClassNotationStrip role={role} />
+            {/* Move-list panel — /openings-style two-column mainline table
+             *  with inline variation branches (server tree, dd67193 → this
+             *  commit). Coach clicks any chip seek the whole room; students
+             *  see it read-only. */}
+            <ClassNotationPanel role={role} />
 
             {/* Controls footer — mic / cam / screen + hand / chat / reactions,
              *  sits UNDER the board so nothing overlaps pieces. */}
