@@ -29,7 +29,29 @@ type PackListItem = {
   currentFen: string;
   recipientCount: number;
   sentByMe: boolean;
+  maiaRating: number | null;
+  maiaBand: string | null;
 };
+
+// Colored difficulty pill. Matches the same buckets Lichess uses for puzzle
+// difficulty so a coach who's used to Lichess gets a familiar signal.
+function DifficultyChip({ rating, band }: { rating: number | null; band: string | null }) {
+  if (rating == null) return (
+    <span className="rounded-full border border-ink-700 bg-ink-800/60 px-2 py-0.5 text-[10px] text-ink-500">
+      Rating…
+    </span>
+  );
+  const tone =
+    rating < 1200 ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-200"
+    : rating < 1600 ? "border-lime-500/50 bg-lime-500/15 text-lime-200"
+    : rating < 2000 ? "border-amber-500/50 bg-amber-500/15 text-amber-200"
+    : "border-rose-500/50 bg-rose-500/15 text-rose-200";
+  return (
+    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${tone}`} title={`Auto-rated by Maia · ${band ?? ""}`}>
+      🧠 {rating}
+    </span>
+  );
+}
 type PackListResp = { packs: PackListItem[] };
 type BestAttempt = { scorePct: number; correctCount: number; totalPly: number; tookMs: number; finishedAt: string };
 type PackDetail = PackListItem & {
@@ -140,8 +162,11 @@ function OnlineClassList({ packs }: { packs: PackListItem[] }) {
                       </span>
                     )}
                   </div>
-                  <div className="mt-2 flex items-center justify-between text-[10px] text-ink-500">
-                    <span>{new Date(p.sentAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</span>
+                  <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-ink-500">
+                    <div className="flex items-center gap-1.5">
+                      <span>{new Date(p.sentAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</span>
+                      <DifficultyChip rating={p.maiaRating} band={p.maiaBand} />
+                    </div>
                     <span>{p.recipientCount} student{p.recipientCount === 1 ? "" : "s"}</span>
                   </div>
                 </div>
@@ -395,8 +420,9 @@ export function NotebookPackDetailPage() {
         <Link to="/notebook" className="rounded-lg border border-ink-700 bg-ink-900 px-3 py-1.5 text-xs text-ink-200 hover:bg-ink-800">← Notebook</Link>
         <div className="min-w-0 flex-1">
           <h1 className="truncate font-display text-xl font-bold text-white">{data.title}</h1>
-          <div className="mt-0.5 truncate text-xs text-ink-400">
-            {data.sentByMe ? "You sent this" : `From ${data.coachName}`} · {data.classTitle} · {new Date(data.sentAt).toLocaleString()}
+          <div className="mt-0.5 flex items-center gap-2 truncate text-xs text-ink-400">
+            <span>{data.sentByMe ? "You sent this" : `From ${data.coachName}`} · {data.classTitle} · {new Date(data.sentAt).toLocaleString()}</span>
+            <DifficultyChip rating={data.maiaRating} band={data.maiaBand} />
           </div>
         </div>
       </div>

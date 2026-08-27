@@ -20,6 +20,35 @@ import { Connection } from "mongoose";
 import { Chess } from "chess.js";
 import { randomBytes } from "crypto";
 import { resolveEligibility, isStudentEligible } from "./class-eligibility";
+import * as http from "http";
+
+// Fire-and-forget Maia difficulty rating. book-engine at 127.0.0.1:4101
+// exposes /rate?fen=<url-fen>&sol=<uci> and returns { rating, band, ... }.
+// Called AFTER the pack is inserted so a slow engine never blocks the
+// coach's send. Writes maiaRating + maiaBand back onto the pack row when
+// the response arrives.
+const BOOK_ENGINE_HOST = process.env.CHESSGURU_BOOK_ENGINE_HOST ?? "127.0.0.1";
+const BOOK_ENGINE_PORT = Number(process.env.CHESSGURU_BOOK_ENGINE_PORT ?? "4101");
+function requestMaiaRating(fen: string, uciSol: string, cb: (r: { rating: number; band?: string } | null) => void) {
+  try {
+    const path = `/rate?fen=${encodeURIComponent(fen)}&sol=${encodeURIComponent(uciSol)}`;
+    const req = http.request({ host: BOOK_ENGINE_HOST, port: BOOK_ENGINE_PORT, path, method: "GET", timeout: 12_000 }, (res) => {
+      let buf = "";
+      res.setEncoding("utf8");
+      res.on("data", (c) => { buf += c; if (buf.length > 32_000) req.destroy(); });
+      res.on("end", () => {
+        try {
+          const j = JSON.parse(buf);
+          if (j && typeof j.rating === "number") cb({ rating: Math.round(j.rating), band: typeof j.band === "string" ? j.band : undefined });
+          else cb(null);
+        } catch { cb(null); }
+      });
+    });
+    req.on("error", () => cb(null));
+    req.on("timeout", () => { try { req.destroy(); } catch { /* */ } cb(null); });
+    req.end();
+  } catch { cb(null); }
+}
 
 const ROOM_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const PACK_ID_RE = /^pp_[A-Za-z0-9_-]{6,32}$/;
@@ -151,7 +180,25 @@ export class ClassPositionPacksController {
       cursorIdx: capped,
       currentFen,
       recipientUserIds: recipients,
+      maiaRating: null as number | null,
+      maiaBand: null as string | null,
     });
+    // Fire-and-forget Maia rating: rate the STARTING position with the
+    // first move as the expected solution — that's the "puzzle" the coach
+    // was setting up. Runs after the response is sent so a slow engine
+    // never blocks send. Silently no-op if history is empty.
+    if (history.length > 0) {
+      const first = history[0]!;
+      const sol = `${first.from}${first.to}${first.promotion ?? ""}`;
+      const rateFor = startFen;
+      const packs = this.packs();
+      setImmediate(() => {
+        requestMaiaRating(rateFor, sol, (r) => {
+          if (!r) return;
+          void packs.updateOne({ _id: packId as any }, { $set: { maiaRating: r.rating, maiaBand: r.band ?? null } });
+        });
+      });
+    }
     return { ok: true, packId, sentTo: recipients.length };
   }
 }
@@ -199,6 +246,8 @@ export class NotebookController {
         currentFen: r.currentFen,
         recipientCount: Array.isArray(r.recipientUserIds) ? r.recipientUserIds.length : 0,
         sentByMe: r.coachId === userId,
+        maiaRating: typeof r.maiaRating === "number" ? r.maiaRating : null,
+        maiaBand: typeof r.maiaBand === "string" ? r.maiaBand : null,
       })),
     };
   }
@@ -239,6 +288,8 @@ export class NotebookController {
       currentFen: row.currentFen,
       recipientCount: Array.isArray(row.recipientUserIds) ? row.recipientUserIds.length : 0,
       sentByMe: row.coachId === userId,
+      maiaRating: typeof row.maiaRating === "number" ? row.maiaRating : null,
+      maiaBand: typeof row.maiaBand === "string" ? row.maiaBand : null,
       bestAttempt: bestAttempt ? {
         scorePct: bestAttempt.scorePct,
         correctCount: bestAttempt.correctCount,
