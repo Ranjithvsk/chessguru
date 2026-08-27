@@ -115,7 +115,7 @@ import FeedbackUITestPage from "./pages/FeedbackUITest";
 import BookPage from "./pages/Book";
 import ClassReplayPage from "./pages/ClassReplay";
 import ClassV2Page from "./pages/ClassV2";
-import NotebookPage, { NotebookPackDetailPage } from "./pages/Notebook";
+import NotebookPage, { NotebookPackDetailPage, NotebookReviseSessionPage } from "./pages/Notebook";
 import CoachPublicPage from "./pages/CoachPublic";
 import CoachProfileEditPage from "./pages/CoachEdit";
 import AcademyPublicPage from "./pages/AcademyPublic";
@@ -252,6 +252,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="class-v2/:room" element={<ClassV2Page />} />
             <Route path="notebook" element={<ErrorBoundary label="Notebook"><NotebookPage /></ErrorBoundary>} />
             <Route path="notebook/:packId" element={<ErrorBoundary label="Notebook pack"><NotebookPackDetailPage /></ErrorBoundary>} />
+            <Route path="notebook/:packId/revise" element={<ErrorBoundary label="Revise pack"><NotebookReviseSessionPage /></ErrorBoundary>} />
             <Route path="coach-profile/edit" element={<CoachProfileEditPage />} />
             <Route path="academy-profile/edit" element={<AcademyProfileEditPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />

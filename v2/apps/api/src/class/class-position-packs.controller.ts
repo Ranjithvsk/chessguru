@@ -162,6 +162,8 @@ export class ClassPositionPacksController {
 export class NotebookController {
   constructor(@InjectConnection() private readonly conn: Connection) {}
   private packs() { return this.conn.db!.collection("classPositionPacks"); }
+  private attempts() { return this.conn.db!.collection("notebookReviseAttempts"); }
+  private users() { return this.conn.db!.collection("users"); }
 
   /** GET /api/me/notebook — every position pack sent to the caller, most
    *  recent first, plus the caller's own sent packs (so a coach sees what
@@ -217,6 +219,12 @@ export class NotebookController {
     const isCoach = row.coachId === userId;
     const isOwnerHere = role === "academy_owner" && mineAcademy && row.academyId === mineAcademy;
     if (!isRecipient && !isCoach && !isOwnerHere) throw new NotFoundException();
+    // Best-score-so-far for this user on this pack — lets the revise page pre-
+    // show "Your best 8/10" without a second round-trip.
+    const bestAttempt: any = await this.attempts()
+      .find({ packId, userId })
+      .sort({ scorePct: -1, tookMs: 1 })
+      .limit(1).toArray().then((r) => r[0] ?? null);
     return {
       _id: String(row._id),
       classId: row.classId,
@@ -231,6 +239,127 @@ export class NotebookController {
       currentFen: row.currentFen,
       recipientCount: Array.isArray(row.recipientUserIds) ? row.recipientUserIds.length : 0,
       sentByMe: row.coachId === userId,
+      bestAttempt: bestAttempt ? {
+        scorePct: bestAttempt.scorePct,
+        correctCount: bestAttempt.correctCount,
+        totalPly: bestAttempt.totalPly,
+        tookMs: bestAttempt.tookMs,
+        finishedAt: bestAttempt.finishedAt,
+      } : null,
     };
+  }
+
+  /** POST /api/notebook/:packId/revise — student submits the result of a
+   *  revise attempt. Body: { correctCount, totalPly, tookMs, mistakes? }.
+   *  Server clamps + recomputes scorePct so a rogue client can't inflate.
+   *  Every attempt is stored (not just personal-best) so the coach can see
+   *  a student's progression over time in Phase 3. */
+  @Post("notebook/:packId/revise")
+  async recordRevise(@Param("packId") packId: string, @Body() body: any, @Req() req: any) {
+    if (!PACK_ID_RE.test(packId)) throw new BadRequestException("bad pack id");
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) throw new UnauthorizedException();
+    const pack: any = await this.packs().findOne({ _id: packId as any });
+    if (!pack) throw new NotFoundException();
+    // Only recipients can revise — a coach reviewing their own pack doesn't
+    // need a score row (and would drown their own leaderboard). Academy
+    // owner is also excluded from scoring.
+    const isRecipient = Array.isArray(pack.recipientUserIds) && pack.recipientUserIds.includes(userId);
+    if (!isRecipient) throw new ForbiddenException("only recipients can revise this pack");
+
+    const totalPly = Math.max(0, Math.min(Number(body?.totalPly) || 0, MAX_HISTORY));
+    if (totalPly === 0) throw new BadRequestException("nothing to revise");
+    const correctCount = Math.max(0, Math.min(Number(body?.correctCount) || 0, totalPly));
+    const tookMs = Math.max(0, Math.min(Number(body?.tookMs) || 0, 24 * 3600 * 1000));
+    const mistakes = Array.isArray(body?.mistakes)
+      ? body.mistakes.slice(0, 200).map((m: any) => ({
+          ply: Math.max(0, Math.min(Number(m?.ply) || 0, totalPly)),
+          expected: typeof m?.expected === "string" ? m.expected.slice(0, 8) : "",
+          got: typeof m?.got === "string" ? m.got.slice(0, 8) : "",
+        }))
+      : [];
+    const scorePct = Math.round((correctCount / totalPly) * 100);
+
+    await this.attempts().insertOne({
+      packId,
+      userId,
+      academyId: pack.academyId ?? null,
+      coachId: pack.coachId,
+      classId: pack.classId,
+      startedAt: new Date(Date.now() - tookMs),
+      finishedAt: new Date(),
+      correctCount, totalPly, tookMs, mistakes, scorePct,
+    });
+    return { ok: true, scorePct, correctCount, totalPly };
+  }
+
+  /** GET /api/me/notebook/attempts — every revise attempt the caller has
+   *  made, most recent first. Powers a "Recent revisions" strip on the
+   *  Notebook page and per-pack "Your last try" pill. */
+  @Get("me/notebook/attempts")
+  async myAttempts(@Req() req: any) {
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) return { attempts: [] };
+    const rows = await this.attempts()
+      .find({ userId })
+      .sort({ finishedAt: -1 })
+      .limit(200)
+      .toArray();
+    return { attempts: rows.map((r: any) => ({
+      packId: r.packId,
+      scorePct: r.scorePct,
+      correctCount: r.correctCount,
+      totalPly: r.totalPly,
+      tookMs: r.tookMs,
+      finishedAt: r.finishedAt,
+    })) };
+  }
+
+  /** GET /api/academy/notebook-leaderboard — top revisers in the caller's
+   *  academy, ranked by sum of best-per-pack scorePct (so someone who nails
+   *  10 packs at 100% out-scores someone who half-heartedly tried 20).
+   *  Ties broken by number-of-packs-revised desc, then total ms asc. */
+  @Get("academy/notebook-leaderboard")
+  async leaderboard(@Req() req: any) {
+    const academyId: string | null = req?.session?.academyId ?? null;
+    if (!academyId) return { rows: [] };
+    // Aggregate: for each (userId, packId) keep the best attempt, then
+    // sum those bests per user. $group-then-$group in one pipeline.
+    const raw = await this.attempts().aggregate([
+      { $match: { academyId } },
+      { $sort: { userId: 1, packId: 1, scorePct: -1, tookMs: 1 } },
+      { $group: {
+          _id: { userId: "$userId", packId: "$packId" },
+          bestScore: { $first: "$scorePct" },
+          bestMs:    { $first: "$tookMs" },
+      } },
+      { $group: {
+          _id: "$_id.userId",
+          totalScore: { $sum: "$bestScore" },
+          packsRevised: { $sum: 1 },
+          totalMs: { $sum: "$bestMs" },
+      } },
+      { $sort: { totalScore: -1, packsRevised: -1, totalMs: 1 } },
+      { $limit: 100 },
+    ]).toArray();
+    if (!raw.length) return { rows: [] };
+    const userIds = raw.map((r: any) => r._id);
+    const users: any[] = await this.users().find(
+      { _id: { $in: userIds } },
+      { projection: { username: 1, name: 1 } },
+    ).toArray();
+    const byId = new Map(users.map((u: any) => [String(u._id), u]));
+    return { rows: raw.map((r: any, i: number) => {
+      const u = byId.get(String(r._id));
+      return {
+        rank: i + 1,
+        userId: r._id,
+        username: u?.username ?? r._id,
+        name: u?.name ?? u?.username ?? r._id,
+        totalScore: r.totalScore,
+        packsRevised: r.packsRevised,
+        avgScore: Math.round(r.totalScore / r.packsRevised),
+      };
+    }) };
   }
 }
