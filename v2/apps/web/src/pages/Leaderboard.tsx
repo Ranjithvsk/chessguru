@@ -5,7 +5,7 @@
 //
 // Route: /academy/leaderboard
 import { useEffect, useRef, useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, get } from "../lib/api";
 import { getAcademyOpeningLeaderboard, type AcademyOpeningLeaderboardRow } from "../lib/opening-trainer-api";
@@ -381,7 +381,11 @@ export default function LeaderboardPage() {
   // For admins, load the fleet-wide academy list and let them switch which
   // academy's leaderboard to view. Non-admins never see the dropdown.
   const isSuperAdmin = !!auth?.admin;
-  const [pickedAcademy, setPickedAcademy] = useState<string>("");   // "" = use session academyId
+  // Deep-linkable initial pick — /academy/leaderboard?academy=__all__ from
+  // the /admin/users "View as leaderboard" button lands with all-users
+  // pre-selected. Non-admins ignore the param server-side anyway.
+  const [urlParams] = useSearchParams();
+  const [pickedAcademy, setPickedAcademy] = useState<string>(() => urlParams.get("academy") || "");
   const academiesQ = useQuery({
     queryKey: ["admin-academies"],
     queryFn: () => get<Array<{ id: string; name: string; studentCount: number }>>("/api/admin/academies"),

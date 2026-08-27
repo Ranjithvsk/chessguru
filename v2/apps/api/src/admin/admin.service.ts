@@ -34,7 +34,12 @@ export class AdminService {
       .sort((a, b) => b.studentCount - a.studentCount);
     // Virtual bucket for non-academy self-signup users. Uses a sentinel id
     // "__platform__" — buildLeaderboard swaps this to `academyId: null` filter.
+    // "All combined" bucket = every student across every tenant + the
+    // standalone bucket. Owner ask 2026-08-27 — ranjith wants the fleet
+    // leaderboard in the same styled UI, not just the flat /admin/users table.
+    const grandTotal = rows.reduce((s, a) => s + a.studentCount, 0) + standaloneCount;
     return [
+      { id: "__all__", name: "🌐 All ChessGuru users", studentCount: grandTotal },
       { id: "__platform__", name: "ChessGuru (no academy)", studentCount: standaloneCount },
       ...rows,
     ];

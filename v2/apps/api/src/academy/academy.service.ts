@@ -3201,8 +3201,9 @@ Thank you!`;
     // academy)").
     const isAdminUser = isAdmin(userId);
     const isPlatformBucket = isAdminUser && opts.academy === "__platform__";
-    const academyId: string | undefined = isPlatformBucket
-      ? "__platform__"                                                    // sentinel — resolved to $eq null in roster query below
+    const isAllBucket = isAdminUser && opts.academy === "__all__";
+    const academyId: string | undefined = (isPlatformBucket || isAllBucket)
+      ? String(opts.academy)                                              // sentinel — resolved in the roster filter below
       : (isAdminUser && opts.academy ? String(opts.academy) : session?.academyId);
     if (!academyId) throw new ForbiddenException("sign in first");
 
@@ -3224,15 +3225,22 @@ Thank you!`;
       period === "180d"     ? new Date(now - 180 * dayMs) :
                               new Date(now - 365 * dayMs);
 
-    // Roster — every student in the academy. Platform bucket = users with
-    // NO academyId AND no restrictive role (self-signup users often have
-    // role missing entirely).
-    const rosterFilter: any = isPlatformBucket
-      ? { $and: [
-          { $or: [{ academyId: null }, { academyId: { $exists: false } }] },
-          { $or: [{ role: "student" }, { role: { $exists: false } }, { role: null }] },
+    // Roster — every student in the academy. Special buckets:
+    //   __platform__ = self-signup users with no academyId (role optional)
+    //   __all__      = every ChessGuru user (across all academies + standalone)
+    //                  — the fleet-wide leaderboard view for super-admins.
+    const rosterFilter: any = isAllBucket
+      ? { $or: [
+          { role: "student" },
+          { role: { $exists: false } },
+          { role: null },
         ] }
-      : { academyId, role: "student" };
+      : isPlatformBucket
+        ? { $and: [
+            { $or: [{ academyId: null }, { academyId: { $exists: false } }] },
+            { $or: [{ role: "student" }, { role: { $exists: false } }, { role: null }] },
+          ] }
+        : { academyId, role: "student" };
     let students: any[] = await this.users()
       .find(rosterFilter, { projection: { _id: 1, username: 1, name: 1, coachId: 1, dailyPuzzleStreak: 1 } })
       .toArray();

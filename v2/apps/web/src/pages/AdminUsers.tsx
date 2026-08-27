@@ -41,9 +41,22 @@ export default function AdminUsersPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="font-display text-2xl text-white">Admin</h1>
-        <p className="text-sm text-ink-400">ChessGuru — users &amp; activity</p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="font-display text-2xl text-white">Admin</h1>
+          <p className="text-sm text-ink-400">ChessGuru — users &amp; activity</p>
+        </div>
+        {/* Toggle: same data set can be viewed as the styled leaderboard so
+            each user gets the ChessGuru Score + achievements + gradients
+            treatment. "__all__" is a super-admin sentinel that combines
+            every academy + standalone signups. Owner ask 2026-08-27. */}
+        <Link
+          to="/academy/leaderboard?academy=__all__"
+          className="inline-flex items-center gap-2 rounded-lg border border-brand-500/40 bg-brand-500/15 px-3 py-2 text-sm font-semibold text-brand-100 hover:bg-brand-500/25"
+          title="Same users, rendered as the ChessGuru leaderboard — click any user for their full profile card"
+        >
+          🏆 View as leaderboard →
+        </Link>
       </div>
 
       {/* ── Overview dashboard ── */}
