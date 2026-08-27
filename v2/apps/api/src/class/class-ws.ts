@@ -59,6 +59,9 @@ type ClientFrame =
   | { type: "lock"; locked: boolean }       // coach only — student moves are dropped when true
   | { type: "takeback" }                    // coach only — pops the last move (legacy: destructive)
   | { type: "seek"; cursorIdx?: number; path?: number[] }     // coach only — jump cursor to a specific ply (0 = startFen, history.length = live) OR to a tree path
+  | { type: "promote-variation"; path: number[] }             // coach only — swap node at path with sibling to its left (one step toward mainline)
+  | { type: "make-mainline"; path: number[] }                 // coach only — for every ancestor along path with idx>0, swap into position 0
+  | { type: "delete-from"; path: number[] }                   // coach only — remove node at path + subtree; cursor moves to parent
   | { type: "stepBack" }                    // coach only — cursor--, keeps history so students can step forward again
   | { type: "stepForward" }                 // coach only — cursor++
   | { type: "annot"; shapes: Shape[] }      // arrows/circles — anyone can annotate
@@ -341,20 +344,64 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       //     token (the old one gets orphaned — reload from a stale tab will
       //     fail its match and land as student, which is correct)
       //   * otherwise -> student
+      // Immediate role decision — server sends this role right away. If the
+      // synchronous checks don't promote to coach but the caller's userId
+      // matches the class creator (per classSchedules/announcements), we
+      // upgrade to coach ASYNCHRONOUSLY after the DB lookup. Owner report
+      // 2026-08-27: coach refresh loses every function — the previous
+      // synchronous "intendedRole===coach && !room.coach" path failed when
+      // the old ws's close event hadn't fired yet, so room.coach still
+      // pointed at the dead socket and coach fell through to student.
+      let resolvedSynchronously = false;
       if (frame.coachToken && room.coachToken && frame.coachToken === room.coachToken) {
         socketRole.set(ws, "coach"); room.coach = ws;
         send({ type: "role", role: "coach", coachToken: room.coachToken });
+        resolvedSynchronously = true;
       } else if (!room.coachToken) {
         room.coachToken = mintCoachToken();
         socketRole.set(ws, "coach"); room.coach = ws;
         send({ type: "role", role: "coach", coachToken: room.coachToken });
+        resolvedSynchronously = true;
       } else if (frame.intendedRole === "coach" && !room.coach) {
         room.coachToken = mintCoachToken();
         socketRole.set(ws, "coach"); room.coach = ws;
         send({ type: "role", role: "coach", coachToken: room.coachToken });
+        resolvedSynchronously = true;
       } else {
         socketRole.set(ws, "student");
         send({ type: "role", role: "student" });
+      }
+      // Session-based coach re-auth. If the caller's session identifies them
+      // as the class's creator (or academy_owner), promote to coach even if
+      // the token didn't match — covers "coach refresh, room.coach stale
+      // because old close hasn't fired" AND "coach cleared localStorage".
+      // Runs off the DB, so async — the immediate role frame already went
+      // out; we upgrade + send a fresh role frame if needed.
+      if (!resolvedSynchronously && frame.intendedRole === "coach") {
+        const uidForCoach = typeof frame.userId === "string" ? frame.userId : null;
+        if (uidForCoach && dbConn?.db) {
+          void (async () => {
+            try {
+              const [klass, announce] = await Promise.all([
+                dbConn!.db!.collection("classSchedules").findOne({ _id: roomId as any }, { projection: { createdByUserId: 1, academyId: 1 } }),
+                dbConn!.db!.collection("classLiveAnnouncements").findOne({ _id: roomId as any }, { projection: { coachUserId: 1, academyId: 1 } }),
+              ]);
+              const creator: string | null = (klass as any)?.createdByUserId ?? (announce as any)?.coachUserId ?? null;
+              if (creator && creator === uidForCoach) {
+                // Boot the stale coach socket (if the pointer is a dead one
+                // it's a no-op close; if it's a live one, this is a coach
+                // takeover — same behaviour as re-claim after End Class).
+                if (room.coach && room.coach !== ws) {
+                  try { room.coach.close(1000, "coach_takeover"); } catch { /* */ }
+                }
+                room.coachToken = mintCoachToken();
+                socketRole.set(ws, "coach");
+                room.coach = ws;
+                send({ type: "role", role: "coach", coachToken: room.coachToken });
+              }
+            } catch { /* silent — student role stays */ }
+          })();
+        }
       }
       // Attendance: identity comes from the hello frame (client reads it from the
       // session on its side). Anonymous joiners land as "Guest" and are keyed by
@@ -443,6 +490,81 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       // Idempotent — same path means no-op broadcast.
       if (nextPath.length === room.cursorPath.length && nextPath.every((v, i) => v === room.cursorPath[i])) return;
       room.cursorPath = nextPath;
+      recomputeFromTree(room);
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      return;
+    }
+
+    if (frame.type === "promote-variation" || frame.type === "make-mainline" || frame.type === "delete-from") {
+      // Coach-only tree edits — mirror useFreePlay's promoteVariation /
+      // makeMainLine / deleteFrom semantics so the Dream Meet notation
+      // matches /openings analysis exactly.
+      if (!isCoach()) return;
+      const p = (frame as any).path;
+      if (!Array.isArray(p) || p.length === 0) return;
+      // Validate path indices before mutating.
+      const cleaned: number[] = [];
+      let cur = room.tree;
+      for (const raw of p) {
+        const idx = Math.trunc(Number(raw));
+        if (!Number.isFinite(idx) || idx < 0 || idx >= cur.length) return;
+        cleaned.push(idx);
+        cur = cur[idx]!.children;
+      }
+      if (frame.type === "promote-variation") {
+        const k = cleaned[cleaned.length - 1]!;
+        if (k <= 0) return;   // already mainline at this branch point
+        // Walk to the parent children[] array (by ref).
+        let parentArr = room.tree;
+        for (let i = 0; i < cleaned.length - 1; i++) parentArr = parentArr[cleaned[i]!]!.children;
+        [parentArr[k - 1], parentArr[k]] = [parentArr[k]!, parentArr[k - 1]!];
+        // Cursor: if current cursorPath starts with the moved node's path,
+        // adjust the index at this depth from k → k-1 so the cursor follows.
+        if (room.cursorPath.length >= cleaned.length &&
+            cleaned.slice(0, -1).every((v, i) => v === room.cursorPath[i]) &&
+            room.cursorPath[cleaned.length - 1] === k) {
+          room.cursorPath = [...cleaned.slice(0, -1), k - 1, ...room.cursorPath.slice(cleaned.length)];
+        }
+      } else if (frame.type === "make-mainline") {
+        // For every ancestor along cleaned whose index > 0, swap into slot 0.
+        let arr = room.tree;
+        const nextCursor: number[] = [];
+        // Track how the caller's cursor changes: whenever a slot 0 swap
+        // moves the coach's cursor's node, remap accordingly.
+        for (let i = 0; i < cleaned.length; i++) {
+          const k = cleaned[i]!;
+          if (k > 0) {
+            [arr[0], arr[k]] = [arr[k]!, arr[0]!];
+            // If cursor at this depth was pointing at either k or 0, remap.
+            if (room.cursorPath.length > i && cleaned.slice(0, i).every((v, j) => v === room.cursorPath[j])) {
+              const c = room.cursorPath[i]!;
+              if (c === 0)      room.cursorPath = [...room.cursorPath.slice(0, i), k, ...room.cursorPath.slice(i + 1)];
+              else if (c === k) room.cursorPath = [...room.cursorPath.slice(0, i), 0, ...room.cursorPath.slice(i + 1)];
+            }
+          }
+          nextCursor.push(0);
+          arr = arr[0]!.children;
+        }
+        // Prefer the promoted node itself as new cursor unless the
+        // coach's cursor is deeper — keep them there.
+        if (room.cursorPath.length <= cleaned.length) room.cursorPath = nextCursor;
+      } else {
+        // delete-from: splice node at cleaned out of its parent's children[].
+        let parentArr = room.tree;
+        for (let i = 0; i < cleaned.length - 1; i++) parentArr = parentArr[cleaned[i]!]!.children;
+        const k = cleaned[cleaned.length - 1]!;
+        parentArr.splice(k, 1);
+        // If cursor was inside the deleted subtree, move it to the parent.
+        if (room.cursorPath.length >= cleaned.length &&
+            cleaned.every((v, i) => v === room.cursorPath[i])) {
+          room.cursorPath = cleaned.slice(0, -1);
+        } else if (room.cursorPath.length >= cleaned.length &&
+                   cleaned.slice(0, -1).every((v, i) => v === room.cursorPath[i]) &&
+                   (room.cursorPath[cleaned.length - 1] ?? -1) > k) {
+          // Cursor was on a later sibling — shift its index down by 1.
+          room.cursorPath = [...cleaned.slice(0, -1), room.cursorPath[cleaned.length - 1]! - 1, ...room.cursorPath.slice(cleaned.length)];
+        }
+      }
       recomputeFromTree(room);
       broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
       return;

@@ -96,6 +96,16 @@ type SeekFn = (arg: number | number[]) => void;
 let _seekFn: SeekFn | null = null;
 export function triggerClassSeek(arg: number | number[]) { _seekFn?.(arg); }
 
+// Coach tree ops — right-click menu on any move in the notation panel.
+// Mirrors /openings analysis: Promote variation / Make main line / Delete.
+type PathFn = (path: number[]) => void;
+let _promoteFn: PathFn | null = null;
+let _mainlineFn: PathFn | null = null;
+let _deleteFn: PathFn | null = null;
+export function triggerClassPromoteVariation(path: number[]) { _promoteFn?.(path); }
+export function triggerClassMakeMainline(path: number[]) { _mainlineFn?.(path); }
+export function triggerClassDeleteFrom(path: number[]) { _deleteFn?.(path); }
+
 // Room lock state (whether students can move pieces). Default = LOCKED —
 // students can never accidentally scramble the board mid-lesson (owner
 // 2026-08-12). Coach's footer button toggles it for interactive practice.
@@ -701,12 +711,34 @@ export default function SharedClassBoard(
       ws.send(JSON.stringify(body));
     } catch { /* */ }
   };
-  // Register the module-scoped seek fn so the notation panel (rendered up in
-  // ClassV2, without direct ws access) can drive the cursor. Clear on unmount
-  // so a stale ws reference doesn't linger after leaving the class.
+  // Coach-only tree edits — mirror /openings context menu ops.
+  const sendTreeOp = (type: "promote-variation" | "make-mainline" | "delete-from") => (path: number[]) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!Array.isArray(path) || path.length === 0) return;
+    try {
+      const cleanPath = path.map((n) => Math.max(0, Math.floor(Number(n) || 0)));
+      ws.send(JSON.stringify({ type, path: cleanPath }));
+    } catch { /* */ }
+  };
+  const sendPromote = sendTreeOp("promote-variation");
+  const sendMainline = sendTreeOp("make-mainline");
+  const sendDelete = sendTreeOp("delete-from");
+
+  // Register the module-scoped seek + tree-op fns so the notation panel
+  // (rendered up in ClassV2, without direct ws access) can drive them.
+  // Clear on unmount so a stale ws reference doesn't linger after leaving.
   useEffect(() => {
     _seekFn = sendSeek;
-    return () => { if (_seekFn === sendSeek) _seekFn = null; };
+    _promoteFn = sendPromote;
+    _mainlineFn = sendMainline;
+    _deleteFn = sendDelete;
+    return () => {
+      if (_seekFn === sendSeek) _seekFn = null;
+      if (_promoteFn === sendPromote) _promoteFn = null;
+      if (_mainlineFn === sendMainline) _mainlineFn = null;
+      if (_deleteFn === sendDelete) _deleteFn = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const sendLock = (nextLocked: boolean) => {

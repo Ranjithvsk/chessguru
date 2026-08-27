@@ -17,7 +17,7 @@ import {
 import { Track, DataPacket_Kind } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
-import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, triggerClassSeek, type SharedTreeNode } from "../components/SharedClassBoard";
+import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, triggerClassSeek, triggerClassPromoteVariation, triggerClassMakeMainline, triggerClassDeleteFrom, type SharedTreeNode } from "../components/SharedClassBoard";
 import { Chess } from "chess.js";
 import AudiencePickerModal from "../components/AudiencePickerModal";
 
@@ -817,6 +817,54 @@ function ClassNotationPanel({ role }: { role: "coach" | "student" }) {
   const isActive = (path: number[]) => pathsEqual(path, cursorPath);
   const onPick = (path: number[]) => { if (clickable) triggerClassSeek(path); };
 
+  // Right-click context menu — Promote variation / Make main line / Delete /
+  // Copy PGN. Mirrors OpeningExplorer's move-menu. Coach-only; students'
+  // right-clicks fall through to browser default.
+  const [ctxMenu, setCtxMenu] = useState<{ path: number[]; x: number; y: number } | null>(null);
+  const closeCtx = () => setCtxMenu(null);
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.closest("[data-notation-ctxmenu]")) return;
+      closeCtx();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeCtx(); };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("mousedown", onDown); window.removeEventListener("keydown", onKey); };
+  }, [ctxMenu]);
+  const onContext = (path: number[], e: React.MouseEvent) => {
+    if (!clickable) return;
+    e.preventDefault();
+    setCtxMenu({ path, x: e.clientX, y: e.clientY });
+  };
+  // Copy PGN of the current line up to `path` — reuses the SAN we already
+  // computed in `enriched.nodes`. Walk the mainline path down to the target.
+  const sansAtPath = (target: number[]): string[] => {
+    const out: string[] = [];
+    let nodes = enriched.nodes;
+    for (const idx of target) {
+      const n = nodes[idx];
+      if (!n) break;
+      out.push(n.san);
+      nodes = n.children;
+    }
+    return out;
+  };
+  const formatPgn = (sans: string[], startTurn: "w" | "b", startNum: number): string => {
+    const parts: string[] = [];
+    let num = startNum, whiteToMove = startTurn === "w";
+    for (let i = 0; i < sans.length; i++) {
+      if (whiteToMove) parts.push(`${num}. ${sans[i]}`);
+      else if (i === 0) parts.push(`${num}... ${sans[i]}`);
+      else parts.push(sans[i]!);
+      if (!whiteToMove) num++;
+      whiteToMove = !whiteToMove;
+    }
+    return parts.join(" ");
+  };
+
   // Render one INLINE variation line (recursive): `1. e4 e5 (variation) 2. Nf3`.
   // Any node with siblings [1..] gets its own nested block below.
   const renderInline = (n: EnrichedNode, includeNumber: boolean) => {
@@ -833,6 +881,7 @@ function ClassNotationPanel({ role }: { role: "coach" | "student" }) {
           type="button"
           ref={active ? activeRef : undefined}
           onClick={() => onPick(n.path)}
+          onContextMenu={(e) => onContext(n.path, e)}
           disabled={!clickable}
           className={`rounded px-1 py-0.5 font-mono text-sm ${active ? "bg-brand-500/60 text-white" : "text-ink-100 hover:bg-ink-800"} ${clickable ? "cursor-pointer" : "cursor-default"}`}
         >{n.san}</button>
@@ -956,6 +1005,7 @@ function ClassNotationPanel({ role }: { role: "coach" | "student" }) {
                   <button
                     ref={wActive ? activeRef : undefined}
                     onClick={() => onPick(row.white!.node.path)}
+                    onContextMenu={(e) => onContext(row.white!.node.path, e)}
                     disabled={!clickable}
                     className={cellClass(wActive)}
                   >{row.white.node.san}</button>
@@ -964,6 +1014,7 @@ function ClassNotationPanel({ role }: { role: "coach" | "student" }) {
                   <button
                     ref={bActive ? activeRef : undefined}
                     onClick={() => onPick(row.black!.node.path)}
+                    onContextMenu={(e) => onContext(row.black!.node.path, e)}
                     disabled={!clickable}
                     className={cellClass(bActive)}
                   >{row.black.node.san}</button>
@@ -985,6 +1036,60 @@ function ClassNotationPanel({ role }: { role: "coach" | "student" }) {
           );
         })}
       </div>
+      {ctxMenu && (() => {
+        // isVariation = any index in the path > 0 (i.e., not the mainline
+        // choice at some branch point). Mainline nodes only get Delete +
+        // Copy PGN; variations get Promote / Make main line too.
+        const isVariation = ctxMenu.path.some((k) => k > 0);
+        const menuW = 220, menuH = 200;
+        const x = Math.min(ctxMenu.x, window.innerWidth - menuW - 8);
+        const y = Math.min(ctxMenu.y, window.innerHeight - menuH - 8);
+        const doAndClose = (fn: () => void) => { fn(); closeCtx(); };
+        return createPortal(
+          <div
+            data-notation-ctxmenu
+            role="menu"
+            className="fixed z-[80] min-w-[210px] rounded-md border border-ink-700 bg-ink-900 py-1 text-sm text-ink-200 shadow-2xl"
+            style={{ left: x, top: y }}
+          >
+            {isVariation && (
+              <button role="menuitem"
+                onClick={() => doAndClose(() => triggerClassPromoteVariation(ctxMenu.path))}
+                className="block w-full px-3 py-1.5 text-left hover:bg-ink-800">
+                Promote variation
+              </button>
+            )}
+            {isVariation && (
+              <button role="menuitem"
+                onClick={() => doAndClose(() => triggerClassMakeMainline(ctxMenu.path))}
+                className="block w-full px-3 py-1.5 text-left hover:bg-ink-800">
+                Make main line
+              </button>
+            )}
+            {isVariation && <div className="my-1 border-t border-ink-800" />}
+            <button role="menuitem"
+              onClick={() => doAndClose(() => {
+                if (confirm("Delete this move and everything after it for the whole class?")) {
+                  triggerClassDeleteFrom(ctxMenu.path);
+                }
+              })}
+              className="block w-full px-3 py-1.5 text-left text-rose-300 hover:bg-ink-800">
+              Delete from here
+            </button>
+            <div className="my-1 border-t border-ink-800" />
+            <button role="menuitem"
+              onClick={() => doAndClose(() => {
+                const sans = sansAtPath(ctxMenu.path);
+                const pgn = formatPgn(sans, enriched.startTurn, enriched.startNum);
+                try { navigator.clipboard?.writeText(pgn); } catch { /* clipboard blocked — noop */ }
+              })}
+              className="block w-full px-3 py-1.5 text-left hover:bg-ink-800">
+              Copy PGN to here
+            </button>
+          </div>,
+          document.body,
+        );
+      })()}
     </div>
   );
 }
