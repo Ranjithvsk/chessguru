@@ -864,9 +864,11 @@ export function NotebookReviseSessionPage() {
           <Board
             fen={fen}
             orientation={orientation}
+            turnColor={gameRef.current.turn() === "w" ? "white" : "black"}
             movableColor={finished ? undefined : (gameRef.current.turn() === "w" ? "white" : "black")}
             dests={dests as any}
             coordinates
+            showDests
             onMove={onMove}
           />
           {feedback && (
