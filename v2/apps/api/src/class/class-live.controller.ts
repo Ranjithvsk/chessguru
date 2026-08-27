@@ -462,13 +462,22 @@ export class ClassLiveController {
     // batchStudentIds explicitly populated). Coaches / owners still see
     // every announcement so they can supervise / clean up stalled rooms.
     let visible = rows;
-    if (meRole === "student") {
+    // Owner-fixed 2026-08-27: coaches used to see EVERY live announcement in
+    // their academy — including private 1-on-1s they weren't invited to.
+    // Raagul was getting "Join now" popups for gunachess's ad-hoc class with
+    // deepakcharanv on its roster. Now coaches only see their OWN room OR a
+    // room where they were explicitly added to the audience. Owners still
+    // see everything (their supervisory role still needs the visibility).
+    if (meRole === "student" || meRole === "coach") {
       const roomIds = rows.map((r: any) => r._id);
       const schedules = await this.conn.db!.collection("classSchedules")
         .find({ _id: { $in: roomIds } }, { projection: { _id: 1, audienceKind: 1, batchStudentIds: 1 } })
         .toArray();
       const scheduleById = new Map(schedules.map((s: any) => [String(s._id), s]));
       const checks = await Promise.all(rows.map(async (r: any) => {
+        // A coach always sees their OWN live room, regardless of audience
+        // picker state — they're the one running it.
+        if (meRole === "coach" && meUid && r.coachUserId === meUid) return true;
         const sched: any = scheduleById.get(String(r._id));
         // Audience must be explicitly picked — no picker done = no banner.
         const audiencePicked = !!sched && (sched.audienceKind || (Array.isArray(sched.batchStudentIds) && sched.batchStudentIds.length > 0));
