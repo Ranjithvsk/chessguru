@@ -63,7 +63,7 @@ export interface RandomPuzzleOpts { theme: string; rating: number; difficulty: D
   exactRating?: number;
 }
 export interface MasterPlayer { name: string; count: number; }
-export interface CompleteBody { win: boolean; hint: boolean; difficulty: Difficulty; userId: string | null; mode?: "puzzle" | "blindfold"; rating?: number; deviation?: number; theme?: string; ms?: number; wrong?: string; daily?: boolean; }
+export interface CompleteBody { win: boolean; hint: boolean; difficulty: Difficulty; userId: string | null; mode?: "puzzle" | "blindfold"; rating?: number; deviation?: number; theme?: string; ms?: number; moves_ms?: number[]; wrong?: string; daily?: boolean; }
 export interface AuthResult { ok: boolean; error?: string; }
 
 export interface Overview { total: number; engineGenerated: number; verified: number; engineGames: number; pools: { bfPools: number; piecePools: number; paths: number }; users: number; }
@@ -75,8 +75,10 @@ export interface HistoryItem {
   ratingDiff: number | null; ratingAfter: number | null;
   puzzleRating: number | null; themes: string[]; mode: string; sel?: string | null;
   ms?: number | null;
+  movesMs?: number[] | null;  // per-move deltas: [firstMoveMs, gap1→2, gap2→3, ...]
   wrong?: string | null;    // UCI of the wrong move played (only set on misses)
   best?: string | null;     // UCI of the expected first move — for the "best was X" callout
+  dubious?: true;           // flagged suspicious solve (fast win on much-harder puzzle)
   fen: string | null; lastMove: string | null; orientation: "white" | "black";
 }
 export interface HistoryReport {

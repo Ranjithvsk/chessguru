@@ -250,8 +250,10 @@ export class MiscController {
         ratingAfter: typeof r.r === "number" ? r.r : null,
         puzzleRating, themes, mode: r.k ?? "puzzle", sel: r.sel ?? null,
         ms: typeof r.ms === "number" ? r.ms : null,   // solve time in ms (null on legacy rows)
+        movesMs: Array.isArray(r.mv_ms) ? r.mv_ms : null,  // per-move deltas [firstMoveMs, gap1→2, ...]
         wrong: typeof r.wr === "string" ? r.wr : null, // UCI of the wrong move played (misses only)
         best: !r.w ? bestOf(p) : null,                // expected first move — for the "best was X" callout
+        dubious: r.dub === true ? true : undefined,    // suspicious solve flag (fast win on much-harder puzzle)
         ...miniOf(p),
       };
     });

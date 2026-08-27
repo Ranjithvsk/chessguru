@@ -221,9 +221,29 @@ const LazyMini = React.memo(function LazyMini({ it, onOpen }: { it: HistoryItem;
           )}
           {tTier && typeof it.ms === "number" && (
             <span className="flex items-center gap-0.5 text-[10px] text-ink-400"
-                  title="Time to solve this puzzle">
+                  // Per-move breakdown in the hover tooltip. "1st move: 12s · 12→23 · 23→8 …"
+                  // First entry is time from puzzle-load to your first click; subsequent
+                  // entries are wall-clock between your successive correct moves
+                  // (each includes the ~450ms opponent reply animation).
+                  title={
+                    Array.isArray(it.movesMs) && it.movesMs.length > 0
+                      ? (() => {
+                          const ord = (i: number) => ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th"][i] ?? `${i + 1}th`;
+                          const sum = it.movesMs.reduce((a, b) => a + b, 0);
+                          const lines = it.movesMs.map((d, i) => `${ord(i)} move: ${(d / 1000).toFixed(1)}s`);
+                          lines.push("—");
+                          lines.push(`Total (from puzzle load): ${fmtMs(it.ms!)}`);
+                          lines.push(`Sum of moves: ${(sum / 1000).toFixed(1)}s`);
+                          return lines.join("\n");
+                        })()
+                      : `Total time to solve: ${fmtMs(it.ms)}`
+                  }>
               <span>{tTier.emoji}</span><span className="tabular-nums">{fmtMs(it.ms)}</span>
             </span>
+          )}
+          {it.dubious && (
+            <span className="rounded bg-amber-500/30 px-1 text-[10px] font-bold text-amber-200"
+                  title="Suspicious solve: fast win on a puzzle much harder than your rating">⚠</span>
           )}
         </span>
       </div>

@@ -69,6 +69,12 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   const failed = useRef(false);
   const hinted = useRef(false);
   // Solve clock: startedAt stamped when a NEW puzzle loads (skipped for reviews).
+  // Per-move timestamps: moveTsRef captures Date.now() at each CORRECT user move.
+  // The deltas — [firstMoveMs, gap1→2, gap2→3, ...] — are sent to the server as
+  // `moves_ms` alongside the total `ms`. Owner ask 2026-08-27: needed for
+  // cheat detection (engine users have flat, near-constant inter-move gaps —
+  // legit humans' gaps rise on complex positions).
+  const moveTsRef = useRef<number[]>([]);
   // Frozen into solveMs on first submit so subsequent hint/replay clicks don't reset it.
   const startedAtRef = useRef<number | null>(null);
   const solveMsRef = useRef<number | null>(null);
@@ -149,6 +155,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
       startedAtRef.current = Date.now();
       solveMsRef.current = null;
       setSolveMs(null);
+      moveTsRef.current = [];
       wrongMoveRef.current = null;
       try { if (puzzle.id) localStorage.setItem(STORE_KEY, JSON.stringify({ id: puzzle.id, theme, maxPc: maxPc ?? 0 })); } catch { /* */ }
     }
@@ -161,6 +168,17 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
     // (guest review, edge cases).
     const ms = solveMsRef.current ?? (startedAtRef.current != null ? Date.now() - startedAtRef.current : null);
     if (solveMsRef.current == null && ms != null) { solveMsRef.current = ms; setSolveMs(ms); }
+    // Per-move deltas: [firstMoveMs, gap1→2, gap2→3, ...]. First entry is time
+    // from puzzle-load to first move; subsequent entries include the ~450ms
+    // oppReply animation baked in (we're measuring wall-clock between user
+    // moves, which is what any cheat-detection wants — engines produce flat
+    // gaps regardless of position complexity).
+    let movesMs: number[] | undefined;
+    if (startedAtRef.current != null && moveTsRef.current.length > 0) {
+      const anchors = [startedAtRef.current, ...moveTsRef.current];
+      movesMs = [];
+      for (let i = 1; i < anchors.length; i++) movesMs.push(anchors[i] - anchors[i - 1]);
+    }
     // Practice mode: retrying a puzzle you've already reviewed shouldn't move your
     // rating (you already know the answer). Freeze the clock display but skip the API.
     if (practiceRef.current) return;
@@ -168,6 +186,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
       win, hint: hinted.current, difficulty, userId, theme,
       mode, rating: displayRating, deviation: 200,
       ...(ms != null ? { ms } : {}),
+      ...(movesMs && movesMs.length ? { moves_ms: movesMs } : {}),
       ...(wrongMoveRef.current ? { wrong: wrongMoveRef.current } : {}),
     }).then((r) => {
       if (typeof r.ratingDiff === "number") setRatingDiff(r.ratingDiff);
@@ -211,6 +230,8 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
       const promo = promotion ?? (exp[4] as any) ?? "q";
       game.current.move({ from, to, promotion: promo });
       idx.current += 1;
+      // Stamp the timestamp of this correct user move for per-move timing.
+      moveTsRef.current.push(Date.now());
       setLastMove([from, to]);
       setFen(game.current.fen());
       if (idx.current >= solution.current.length) { finish(); return; }
@@ -226,6 +247,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
       if (mates) {
         game.current.move({ from, to, promotion: promo });
         idx.current = solution.current.length;
+        moveTsRef.current.push(Date.now());
         setLastMove([from, to]);
         setFen(game.current.fen());
         finish();

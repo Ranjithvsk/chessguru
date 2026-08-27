@@ -753,7 +753,7 @@ export class PuzzlesService {
     }
   }
 
-  async complete(id: string, body: { win: boolean; userId?: string | null; hint?: boolean; mode?: string; rating?: number; deviation?: number; theme?: string; ms?: number; wrong?: string; daily?: boolean }) {
+  async complete(id: string, body: { win: boolean; userId?: string | null; hint?: boolean; mode?: string; rating?: number; deviation?: number; theme?: string; ms?: number; moves_ms?: number[]; wrong?: string; daily?: boolean }) {
     const pz = await this.col().findOne({ _id: id as any });
     if (!pz) return null;
     await this.col().updateOne({ _id: id as any }, { $inc: { plays: 1 } });
@@ -895,6 +895,18 @@ export class PuzzlesService {
       // theme-median stats later.
       const msRaw = typeof body.ms === "number" && isFinite(body.ms) ? Math.round(body.ms) : null;
       const ms = msRaw != null && msRaw >= 0 && msRaw <= 30 * 60 * 1000 ? msRaw : null;
+      // Per-move deltas from the client. Sanity-clamp each entry to
+      // [0, 30min] to reject clock skew / tabbed-away sessions; cap the
+      // array at 32 entries (deepest puzzle line we serve is well under
+      // that). Owner ask 2026-08-27: needed for cheat detection —
+      // engine users show flat inter-move gaps regardless of position.
+      const mvRaw = Array.isArray(body.moves_ms) ? body.moves_ms : null;
+      const mv_ms = mvRaw
+        ? mvRaw
+            .slice(0, 32)
+            .map((n) => (typeof n === "number" && isFinite(n) ? Math.round(n) : -1))
+            .filter((n) => n >= 0 && n <= 30 * 60 * 1000)
+        : null;
       // Wrong move (UCI, e.g. "e2e4" / "e7e8q"). Only stored on losses; validated
       // to a 4-5 char UCI so we never persist arbitrary user input on the rounds row.
       const wrongRaw = typeof body.wrong === "string" ? body.wrong.trim().toLowerCase() : "";
@@ -911,6 +923,7 @@ export class PuzzlesService {
           k: key,                                             // "puzzle" | "blindfold"
           sel: body.theme ?? null,                            // selected filter ("mix" = All themes)
           ...(ms != null ? { ms } : {}),                      // solve time in ms (missing on older rows)
+          ...(mv_ms && mv_ms.length ? { mv_ms } : {}),        // per-move deltas — [t1, t2-t1, ...]
           ...(wrong != null ? { wr: wrong } : {}),            // wrong-move UCI (misses only, missing on wins)
           ...(dubious ? { dub: true } : {}),                  // flagged suspicious solve (fast win on >+300 pr)
         } },
