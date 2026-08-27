@@ -62,6 +62,7 @@ type ClientFrame =
   | { type: "promote-variation"; path: number[] }             // coach only — swap node at path with sibling to its left (one step toward mainline)
   | { type: "make-mainline"; path: number[] }                 // coach only — for every ancestor along path with idx>0, swap into position 0
   | { type: "delete-from"; path: number[] }                   // coach only — remove node at path + subtree; cursor moves to parent
+  | { type: "load-tree"; startFen?: string; tree: TreeNode[]; cursorPath?: number[] }  // coach only — replace tree wholesale (Teach Opening: repertoire / corpus / etc.)
   | { type: "stepBack" }                    // coach only — cursor--, keeps history so students can step forward again
   | { type: "stepForward" }                 // coach only — cursor++
   | { type: "annot"; shapes: Shape[] }      // arrows/circles — anyone can annotate
@@ -490,6 +491,64 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       // Idempotent — same path means no-op broadcast.
       if (nextPath.length === room.cursorPath.length && nextPath.every((v, i) => v === room.cursorPath[i])) return;
       room.cursorPath = nextPath;
+      recomputeFromTree(room);
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      return;
+    }
+
+    if (frame.type === "load-tree") {
+      // Coach-only wholesale replace — used by Teach Opening (loading a
+      // repertoire entry or a corpus opening into the class board). We
+      // structurally clone the incoming tree so a rogue client can't hand
+      // us shared references that mutate on the room later.
+      if (!isCoach()) return;
+      const rawTree = (frame as any).tree;
+      if (!Array.isArray(rawTree)) return;
+      // Sanitize + budget-cap the tree (600 nodes across all branches so a
+      // typo of an entry's tree can't blow up state or bandwidth).
+      let budget = 600;
+      const clone = (nodes: any[]): TreeNode[] => {
+        const out: TreeNode[] = [];
+        for (const n of nodes) {
+          if (budget <= 0) break;
+          if (!n || typeof n !== "object") continue;
+          const mv = n.move;
+          if (!mv || typeof mv.from !== "string" || typeof mv.to !== "string") continue;
+          if (!/^[a-h][1-8]$/.test(mv.from) || !/^[a-h][1-8]$/.test(mv.to)) continue;
+          const promo = mv.promotion;
+          const move: Move = {
+            from: mv.from, to: mv.to,
+            promotion: (typeof promo === "string" && /^[qrbn]$/i.test(promo)) ? promo.toLowerCase() : undefined,
+          };
+          budget--;
+          const kids = Array.isArray(n.children) ? clone(n.children) : [];
+          out.push({ move, children: kids });
+        }
+        return out;
+      };
+      const cleanTree = clone(rawTree);
+      // Validate startFen — if provided, must parse; else keep current room.startFen.
+      let cleanStartFen = room.startFen;
+      const rawStart = (frame as any).startFen;
+      if (typeof rawStart === "string" && rawStart.length > 0) {
+        try { cleanStartFen = new Chess(rawStart).fen(); } catch { return; }
+      }
+      // Validate cursorPath — clamp to what the tree can navigate.
+      const rawCursor = (frame as any).cursorPath;
+      const cleanCursorPath: number[] = [];
+      if (Array.isArray(rawCursor)) {
+        let cur = cleanTree;
+        for (const raw of rawCursor) {
+          const idx = Math.trunc(Number(raw));
+          if (!Number.isFinite(idx) || idx < 0 || idx >= cur.length) break;
+          cleanCursorPath.push(idx);
+          cur = cur[idx]!.children;
+        }
+      }
+      room.startFen = cleanStartFen;
+      room.tree = cleanTree;
+      room.cursorPath = cleanCursorPath;
+      room.shapes = [];   // stale arrows meaningless in a fresh position
       recomputeFromTree(room);
       broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
       return;

@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Navigate, useParams, useSearchParams, Link, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   LiveKitRoom, RoomAudioRenderer, ControlBar,
   GridLayout, ParticipantTile, useTracks, useParticipants,
@@ -17,7 +17,12 @@ import {
 import { Track, DataPacket_Kind } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
-import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, triggerClassSeek, triggerClassPromoteVariation, triggerClassMakeMainline, triggerClassDeleteFrom, type SharedTreeNode } from "../components/SharedClassBoard";
+import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, triggerClassSeek, triggerClassPromoteVariation, triggerClassMakeMainline, triggerClassDeleteFrom, triggerClassLoadTree, type SharedTreeNode } from "../components/SharedClassBoard";
+import { OPENINGS, findOpeningForLine, openingBySlug, type Opening } from "../lib/openings";
+import { fetchExplorer, type ExplorerData, type ExplorerMove } from "../lib/explorer";
+import { listRepertoire, addRepertoire, shareRepertoire, type RepertoireEntry, type RepMoveNode } from "../lib/repertoire-api";
+import { OpeningIdeaPanel } from "../components/OpeningIdeaPanel";
+import { activateRepertoireEntry } from "../lib/cards";
 import { Chess } from "chess.js";
 import AudiencePickerModal from "../components/AudiencePickerModal";
 
@@ -777,8 +782,74 @@ function pathsEqual(a: number[], b: number[]) { return a.length === b.length && 
 
 // Compute the ply / moveNo / turn for the CURRENT node given the parent
 // board state — needed for correct row numbering when the pack begins mid-game.
-function ClassNotationPanel({ role }: { role: "coach" | "student" }) {
+function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "student" }) {
   const { startFen, tree, cursorPath } = useClassMoveList();
+  // Save-to-repertoire dialog — whole tree from header chip OR sub-tree
+  // from right-click "Save from here". Coach only.
+  const [saveDialog, setSaveDialog] = useState<{ fromPath: number[] } | null>(null);
+  const [ideaOpen, setIdeaOpen] = useState(false);
+  const [memoToast, setMemoToast] = useState<string | null>(null);
+  useEffect(() => { if (!memoToast) return; const t = setTimeout(() => setMemoToast(null), 2000); return () => clearTimeout(t); }, [memoToast]);
+
+  // Opening name lookup — match the CURRENT-CURSOR line against the corpus so
+  // the header shows "ECO · Name" as the coach explores. Uses the same
+  // findOpeningForLine helper as /openings.
+  const currentSans = useMemo(() => {
+    try {
+      const c = new Chess(startFen);
+      const sans: string[] = [];
+      let nodes = tree;
+      for (const idx of cursorPath) {
+        const n = nodes[idx];
+        if (!n) break;
+        const applied = c.move({ from: n.move.from, to: n.move.to, promotion: (n.move.promotion as any) || "q" });
+        if (!applied) break;
+        sans.push(applied.san);
+        nodes = n.children;
+      }
+      return sans;
+    } catch { return []; }
+  }, [startFen, tree, cursorPath]);
+  const matchedOpening = useMemo(() => currentSans.length > 0 ? findOpeningForLine(currentSans) : null, [currentSans]);
+
+  // Keyboard nav (coach only): ← → walk mainline; ↑ ↓ switch variation
+  // at current branch. Mirrors /openings keyboard shortcuts.
+  useEffect(() => {
+    if (role !== "coach") return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLElement && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable)) return;
+      if (e.key === "ArrowLeft") { e.preventDefault(); triggerClassBoardAction("stepBack"); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); triggerClassBoardAction("stepForward"); }
+      else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        // Sibling switch: replace last cursor index with prev / next sibling.
+        if (cursorPath.length === 0) return;
+        let parentArr = tree;
+        for (let i = 0; i < cursorPath.length - 1; i++) parentArr = parentArr[cursorPath[i]!]!.children;
+        const k = cursorPath[cursorPath.length - 1]!;
+        const dir = e.key === "ArrowUp" ? -1 : 1;
+        const nk = k + dir;
+        if (nk < 0 || nk >= parentArr.length) return;
+        e.preventDefault();
+        triggerClassSeek([...cursorPath.slice(0, -1), nk]);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [role, tree, cursorPath]);
+
+  const memorize = () => {
+    if (currentSans.length === 0) return;
+    const name = matchedOpening?.name || `Line from class ${new Date().toLocaleDateString()}`;
+    // activateRepertoireEntry needs an entry-like object; craft a synthetic
+    // client-side entry from the current mainline. Also POST to
+    // /api/my/repertoire so it survives across devices.
+    void addRepertoire({ name, kind: "line" as const, sans: currentSans }).then((r) => {
+      if (r?.entry) {
+        activateRepertoireEntry(r.entry);
+        setMemoToast(`🧠 Added "${r.entry.name}" to your Opening Trainer`);
+      }
+    }).catch(() => setMemoToast("Could not save to trainer"));
+  };
   // Enrich the wire tree with SAN + ply metadata. All branches are rendered,
   // not just the current line — that's the whole point of "moves tree".
   const enriched = useMemo(() => {
@@ -990,6 +1061,34 @@ function ClassNotationPanel({ role }: { role: "coach" | "student" }) {
           className={`rounded px-1.5 py-0.5 ${atLive ? "bg-emerald-500/30 text-emerald-100" : "text-ink-500 hover:text-ink-200"} ${clickable && !atLive ? "cursor-pointer" : "cursor-default"}`}
           title={clickable ? "Jump to end of this line" : "End of line"}
         >⏭ Live</button>
+        {matchedOpening && (
+          <button
+            type="button"
+            onClick={() => setIdeaOpen(true)}
+            className="ml-2 truncate rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-sky-200 hover:bg-sky-500/25"
+            title="Show the opening's idea + Wikibooks excerpt"
+          >
+            <span className="font-mono">{matchedOpening.eco}</span> · {matchedOpening.name} ▸
+          </button>
+        )}
+        <div className="ml-auto flex items-center gap-1">
+          {tree.length > 0 && currentSans.length > 0 && (
+            <button
+              type="button"
+              onClick={memorize}
+              className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-fuchsia-300 hover:bg-fuchsia-500/15 hover:text-fuchsia-100"
+              title="Add this line to your personal Opening Trainer for spaced-repetition drill"
+            >🧠 Memorize</button>
+          )}
+          {clickable && tree.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setSaveDialog({ fromPath: [] })}
+              className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-emerald-300 hover:bg-emerald-500/15 hover:text-emerald-100"
+              title="Save the current tree to your repertoire (with option to share with class)"
+            >💾 Save</button>
+          )}
+        </div>
       </div>
       {/* Scrollable notation grid — flex-1 so it takes whatever height is
        *  left after the header, and scrolls INSIDE the fixed outer cap. */}
@@ -1086,10 +1185,494 @@ function ClassNotationPanel({ role }: { role: "coach" | "student" }) {
               className="block w-full px-3 py-1.5 text-left hover:bg-ink-800">
               Copy PGN to here
             </button>
+            <button role="menuitem"
+              onClick={() => doAndClose(() => setSaveDialog({ fromPath: ctxMenu.path }))}
+              className="block w-full px-3 py-1.5 text-left text-emerald-300 hover:bg-ink-800">
+              💾 Save from here to repertoire
+            </button>
           </div>,
           document.body,
         );
       })()}
+      {saveDialog && (
+        <SaveToRepertoireDialog
+          room={room}
+          startFen={startFen}
+          tree={tree}
+          fromPath={saveDialog.fromPath}
+          onClose={() => setSaveDialog(null)}
+        />
+      )}
+      {ideaOpen && matchedOpening && createPortal(
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setIdeaOpen(false)}>
+          <div className="w-full max-w-2xl overflow-y-auto rounded-2xl border border-sky-500/40 bg-ink-950 p-4 shadow-2xl max-h-[85vh]" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-2 flex items-baseline justify-between">
+              <div className="font-display text-base text-sky-200">📚 <span className="font-mono">{matchedOpening.eco}</span> · {matchedOpening.name}</div>
+              <button onClick={() => setIdeaOpen(false)} className="rounded-md p-1 text-xl leading-none text-ink-400 hover:text-white">×</button>
+            </div>
+            <OpeningIdeaPanel opening={matchedOpening} compact={false} />
+          </div>
+        </div>,
+        document.body,
+      )}
+      {memoToast && (
+        <div className="pointer-events-none fixed left-1/2 top-6 z-[75] -translate-x-1/2 rounded-full border border-fuchsia-500/60 bg-fuchsia-500/25 px-4 py-2 text-sm font-semibold text-fuchsia-50 shadow-lg backdrop-blur">
+          {memoToast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// TEACH OPENING — coach clicks 📖 Teach opening → modal with 3 tabs:
+//   1. My Repertoire (saved lines from /api/my/repertoire)
+//   2. Find opening (search over the corpus in lib/openings)
+//   3. Master games at current position (WDL + top moves via fetchExplorer)
+// After picking, the entry's SANs/tree are shipped to class-ws via a
+// load-tree frame — server replaces room.tree + startFen wholesale, every
+// student sees the loaded position + tree instantly.
+//
+// Also: notation panel gets a 💾 Save to repertoire chip (coach only) and
+// the right-click menu gets 💾 Save from here (add-on A: auto-suggest name).
+// After saving, coach can auto-share with the class audience so the entry
+// lands in every student's Opening Trainer immediately (add-on B).
+// ─────────────────────────────────────────────────────────────────────
+
+// Convert an Opening (corpus, pgnStart = SAN[]) to a straight-line tree the
+// class-ws server understands. All corpus entries begin from the standard
+// starting position (implicit startFen).
+function sansToStraightTree(startFen: string, sans: string[]): SharedTreeNode[] {
+  try {
+    const c = new Chess(startFen);
+    const nodes: SharedTreeNode[] = [];
+    for (const san of sans) {
+      const applied = c.move(san);
+      if (!applied) break;
+      nodes.push({ move: { from: applied.from, to: applied.to, promotion: applied.promotion }, children: [] });
+    }
+    for (let i = nodes.length - 1; i > 0; i--) nodes[i - 1]!.children = [nodes[i]!];
+    return nodes.length > 0 ? [nodes[0]!] : [];
+  } catch { return []; }
+}
+// Convert a repertoire tree (RepMoveNode with san strings + children) into
+// the ws server's move-based tree by replaying the SANs from startFen. Each
+// recursion clones a chess.js instance so sibling branches don't share state.
+function repTreeToWsTree(startFen: string, roots: RepMoveNode[]): SharedTreeNode[] {
+  const walk = (nodes: RepMoveNode[], fen: string): SharedTreeNode[] => {
+    const out: SharedTreeNode[] = [];
+    for (const n of nodes) {
+      try {
+        const c = new Chess(fen);
+        const applied = c.move(n.san);
+        if (!applied) continue;
+        out.push({
+          move: { from: applied.from, to: applied.to, promotion: applied.promotion },
+          children: n.children?.length ? walk(n.children, c.fen()) : [],
+        });
+      } catch { /* skip malformed */ }
+    }
+    return out;
+  };
+  return walk(roots, startFen);
+}
+// Convert an active ws tree back to a repertoire tree (SAN-based) for saving.
+// Walks the sub-tree starting at `fromPath` so the coach can save a specific
+// variation via right-click "Save from here to repertoire".
+function wsTreeToRepTree(startFen: string, tree: SharedTreeNode[], fromPath: number[] = []): { startFen: string; sans: string[]; tree: RepMoveNode[] } {
+  // First replay startFen + fromPath to get the base position for the save.
+  let baseFen = startFen;
+  let cur = tree;
+  const sansToBase: string[] = [];
+  try {
+    const c = new Chess(startFen);
+    for (const idx of fromPath) {
+      const n = cur[idx];
+      if (!n) break;
+      const applied = c.move({ from: n.move.from, to: n.move.to, promotion: (n.move.promotion as any) || "q" });
+      if (!applied) break;
+      sansToBase.push(applied.san);
+      cur = n.children;
+    }
+    baseFen = c.fen();
+  } catch { /* leave as start */ }
+  // Now walk cur (children at fromPath) recursively.
+  const walk = (nodes: SharedTreeNode[], fen: string): RepMoveNode[] => {
+    const out: RepMoveNode[] = [];
+    for (const n of nodes) {
+      try {
+        const c = new Chess(fen);
+        const applied = c.move({ from: n.move.from, to: n.move.to, promotion: (n.move.promotion as any) || "q" });
+        if (!applied) continue;
+        out.push({ san: applied.san, children: n.children?.length ? walk(n.children, c.fen()) : [] });
+      } catch { /* skip */ }
+    }
+    return out;
+  };
+  return { startFen: baseFen, sans: sansToBase, tree: walk(cur, baseFen) };
+}
+// Mainline SAN[] from the ws tree — for auto-name suggestion (findOpeningForLine).
+function mainlineSans(startFen: string, tree: SharedTreeNode[]): string[] {
+  try {
+    const c = new Chess(startFen);
+    const sans: string[] = [];
+    let nodes = tree;
+    while (nodes.length > 0) {
+      const n = nodes[0]!;
+      const applied = c.move({ from: n.move.from, to: n.move.to, promotion: (n.move.promotion as any) || "q" });
+      if (!applied) break;
+      sans.push(applied.san);
+      nodes = n.children;
+    }
+    return sans;
+  } catch { return []; }
+}
+
+const STANDARD_START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+function TeachOpeningModal({ room, role, onClose }: { room: string; role: "coach" | "student"; onClose: () => void }) {
+  void role;   // (coach-only render — caller gates)
+  const { data: rep } = useQuery({
+    queryKey: ["my-repertoire"],
+    queryFn: listRepertoire,
+    staleTime: 60_000,
+  });
+  const { startFen, tree, cursorPath } = useClassMoveList();
+  // Current FEN at cursor — the master-games tab queries against this.
+  const currentFen = useMemo(() => {
+    try {
+      const c = new Chess(startFen);
+      let nodes = tree;
+      for (const idx of cursorPath) {
+        const n = nodes[idx];
+        if (!n) break;
+        c.move({ from: n.move.from, to: n.move.to, promotion: (n.move.promotion as any) || "q" });
+        nodes = n.children;
+      }
+      return c.fen();
+    } catch { return startFen; }
+  }, [startFen, tree, cursorPath]);
+
+  type Tab = "repertoire" | "find" | "masters";
+  const [tab, setTab] = useState<Tab>("repertoire");
+  const [q, setQ] = useState("");
+  const [shareAfterLoad, setShareAfterLoad] = useState(true);      // add-on B default
+  const [forceTrain, setForceTrain] = useState(false);             // add-on B extra
+  const [loading, setLoading] = useState<string | null>(null);     // shows spinner on the row being loaded
+  const [toast, setToast] = useState<string | null>(null);
+  useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 2500); return () => clearTimeout(t); }, [toast]);
+
+  const filteredCorpus = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return OPENINGS.slice(0, 60);
+    return OPENINGS.filter((o) =>
+      o.name.toLowerCase().includes(needle) ||
+      o.eco.toLowerCase().includes(needle) ||
+      o.pgnStart.join(" ").toLowerCase().includes(needle)
+    ).slice(0, 60);
+  }, [q]);
+  const filteredRep = useMemo(() => {
+    const list = rep?.entries ?? [];
+    const needle = q.trim().toLowerCase();
+    if (!needle) return list;
+    return list.filter((e) => (e.name || "").toLowerCase().includes(needle) || (e.slug || "").toLowerCase().includes(needle));
+  }, [rep, q]);
+
+  // Master games at position — /api/explorer with db=masters. Only fires
+  // when the masters tab is open + a real position is loaded.
+  const { data: mastersData, isFetching: mastersFetching } = useQuery({
+    queryKey: ["class-masters", currentFen],
+    queryFn: () => fetchExplorer(currentFen, "masters"),
+    enabled: tab === "masters",
+    staleTime: 30_000,
+  });
+
+  const loadIntoClass = async (label: string, newStartFen: string, wsTree: SharedTreeNode[], repEntry?: RepertoireEntry) => {
+    setLoading(label);
+    try {
+      triggerClassLoadTree({ startFen: newStartFen, tree: wsTree, cursorPath: [] });
+      // Add-on B: share the loaded repertoire entry with the class audience
+      // so it lands in every student's Opening Trainer.
+      if (shareAfterLoad && repEntry?._id) {
+        try {
+          // Fetch the class row for its audience — batch/individuals — then
+          // share the entry with those studentIds.
+          const klass = await fetch(`/v2api/api/class/schedule/${encodeURIComponent(room)}`, { credentials: "include" }).then((r) => r.ok ? r.json() : null);
+          const studentIds: string[] = Array.isArray(klass?.batchStudentIds) ? klass.batchStudentIds : [];
+          if (studentIds.length > 0) {
+            await shareRepertoire(repEntry._id, studentIds, forceTrain);
+            setToast(`📖 Loaded & shared with ${studentIds.length} student${studentIds.length === 1 ? "" : "s"}`);
+          } else {
+            setToast(`📖 Loaded to class board`);
+          }
+        } catch { setToast(`📖 Loaded (share failed)`); }
+      } else {
+        setToast(`📖 Loaded to class board`);
+      }
+      setTimeout(onClose, 800);
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const loadFromRep = (e: RepertoireEntry) => {
+    // If entry has a tree, replay it. Otherwise walk sans.
+    const wsTree = e.tree && e.tree.length > 0
+      ? repTreeToWsTree(STANDARD_START_FEN, e.tree)
+      : sansToStraightTree(STANDARD_START_FEN, e.sans ?? []);
+    void loadIntoClass(e._id, STANDARD_START_FEN, wsTree, e);
+  };
+  const loadFromCorpus = (o: Opening) => {
+    const wsTree = sansToStraightTree(STANDARD_START_FEN, o.pgnStart);
+    void loadIntoClass(o.slug, STANDARD_START_FEN, wsTree);
+  };
+  // Add-on D: click a master-move → append it as a NEW variation from cursor.
+  // The move goes through the normal move handler (which forks if it exists
+  // as sibling, appends otherwise).
+  const playMasterMove = (mv: ExplorerMove) => {
+    try {
+      // ExplorerMove has UCI like "e2e4"; parse to from/to/promotion.
+      const uci = mv.uci;
+      if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(uci)) return;
+      const from = uci.slice(0, 2), to = uci.slice(2, 4), promo = uci.length > 4 ? uci[4] : undefined;
+      // Trigger the same ws move that a coach drag would trigger. The class
+      // board's own onMove is inside SharedClassBoard — simplest is to fire
+      // a direct ws send here. We piggyback on triggerClassLoadTree? No —
+      // it'd wipe the tree. Use a fresh path in the notation panel: send
+      // a move frame via the same channel. Simpler: append child to tree
+      // client-side then load-tree it? That'd cause a race. Cleanest is to
+      // fire the wsRef.current from SharedClassBoard — expose it.
+      // For simplicity: use load-tree with the current tree + one appended
+      // child at cursor. The server sanitizes + broadcasts.
+      const nextTree: SharedTreeNode[] = JSON.parse(JSON.stringify(tree));
+      let parent = nextTree;
+      for (let i = 0; i < cursorPath.length; i++) parent = parent[cursorPath[i]!]!.children;
+      // Skip if already exists (server would also dedupe).
+      const existing = parent.findIndex((n) => n.move.from === from && n.move.to === to && (n.move.promotion || "q") === (promo || "q"));
+      let newIdx = existing;
+      if (existing < 0) {
+        parent.push({ move: { from, to, promotion: promo }, children: [] });
+        newIdx = parent.length - 1;
+      }
+      const newCursor = [...cursorPath, newIdx];
+      triggerClassLoadTree({ startFen, tree: nextTree, cursorPath: newCursor });
+      setToast(`✓ Played ${mv.san}`);
+    } catch { /* silent */ }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onKeyDown={(e) => { if (e.key === "Escape") onClose(); }} tabIndex={-1}>
+      <div className="flex w-full max-w-2xl flex-col rounded-2xl border border-brand-500/40 bg-gradient-to-br from-ink-900 to-ink-950 p-5 shadow-2xl max-h-[85vh]">
+        <div className="mb-3 flex items-baseline justify-between">
+          <div className="font-display text-lg font-bold text-white">📖 Teach opening</div>
+          <button onClick={onClose} className="rounded-md p-1 text-xl leading-none text-ink-400 hover:text-white">×</button>
+        </div>
+        <div className="mb-3 flex gap-1 rounded-lg border border-ink-700 bg-ink-800/60 p-1 text-xs">
+          {(["repertoire", "find", "masters"] as Tab[]).map((t) => (
+            <button key={t} onClick={() => setTab(t)}
+              className={`flex-1 rounded-md px-3 py-1.5 font-semibold transition ${tab === t ? "bg-brand-500/30 text-brand-100" : "text-ink-300 hover:text-white"}`}
+            >
+              {t === "repertoire" ? "🗂 My Repertoire" : t === "find" ? "🔍 Find opening" : "♞ Master games"}
+            </button>
+          ))}
+        </div>
+        {(tab === "repertoire" || tab === "find") && (
+          <input type="text" value={q} onChange={(e) => setQ(e.target.value)}
+            placeholder={tab === "repertoire" ? "Search my saved lines…" : "Search openings (name, ECO, moves)…"}
+            className="mb-2 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none"
+          />
+        )}
+        <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-ink-800 bg-ink-950/60">
+          {tab === "repertoire" && (
+            filteredRep.length === 0 ? (
+              <div className="p-4 text-xs text-ink-500">
+                {rep ? "No saved lines yet. Save one from any position via the notation panel's 💾 chip." : "Loading…"}
+              </div>
+            ) : (
+              <div className="divide-y divide-ink-800">
+                {filteredRep.map((e) => (
+                  <div key={e._id} className="flex items-center gap-3 px-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm text-white">{e.name || "Untitled"}</div>
+                      <div className="truncate text-[10px] text-ink-500">
+                        {e.kind === "corpus" ? `Bookmark · ${e.slug ?? ""}` : `Line · ${(e.sans || []).length} moves`}
+                        {e.forceTrain && " · ⚡ force-train"}
+                      </div>
+                    </div>
+                    <button onClick={() => loadFromRep(e)} disabled={!!loading}
+                      className="shrink-0 rounded-md bg-brand-500 px-3 py-1 text-xs font-bold text-white hover:bg-brand-400 disabled:opacity-60">
+                      {loading === e._id ? "Loading…" : "Load"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )
+          )}
+          {tab === "find" && (
+            <div className="divide-y divide-ink-800">
+              {filteredCorpus.map((o) => (
+                <div key={o.slug} className="flex items-center gap-3 px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm text-white">{o.name}</div>
+                    <div className="truncate text-[10px] text-ink-500">{o.eco} · {o.pgnStart.join(" ")}</div>
+                  </div>
+                  <button onClick={() => loadFromCorpus(o)} disabled={!!loading}
+                    className="shrink-0 rounded-md bg-brand-500 px-3 py-1 text-xs font-bold text-white hover:bg-brand-400 disabled:opacity-60">
+                    {loading === o.slug ? "Loading…" : "Load"}
+                  </button>
+                </div>
+              ))}
+              {filteredCorpus.length === 0 && <div className="p-4 text-xs text-ink-500">No openings match.</div>}
+            </div>
+          )}
+          {tab === "masters" && (
+            <div className="p-3">
+              {mastersFetching && <div className="text-xs text-ink-500">Loading master games…</div>}
+              {mastersData && (
+                <>
+                  <div className="mb-2 text-[10px] uppercase tracking-widest text-ink-500">Position stats · {(mastersData.white + mastersData.draws + mastersData.black).toLocaleString()} games</div>
+                  <WdlBarInline w={mastersData.white} d={mastersData.draws} b={mastersData.black} />
+                  <div className="mt-3 space-y-1">
+                    {(mastersData.moves ?? []).slice(0, 8).map((m: ExplorerMove) => {
+                      const total = m.white + m.draws + m.black;
+                      const wPct = total ? Math.round((m.white / total) * 100) : 0;
+                      return (
+                        <button key={m.uci} onClick={() => playMasterMove(m)}
+                          className="flex w-full items-center gap-3 rounded-md border border-ink-800 bg-ink-900 px-3 py-1.5 text-sm text-ink-100 hover:border-brand-500/40 hover:bg-ink-800"
+                          title="Play this move on the class board (creates a variation if it's a new line)">
+                          <span className="w-16 font-mono font-bold">{m.san}</span>
+                          <span className="w-24 text-right text-[11px] text-ink-400">{total.toLocaleString()}</span>
+                          <span className="flex-1"><WdlBarInline w={m.white} d={m.draws} b={m.black} /></span>
+                          <span className="w-10 text-right text-[10px] text-ink-500">{wPct}%W</span>
+                        </button>
+                      );
+                    })}
+                    {(!mastersData.moves || mastersData.moves.length === 0) && <div className="text-xs text-ink-500">No master games from this position.</div>}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+        {/* Add-on B controls — only relevant for tabs that load repertoire entries. */}
+        {tab === "repertoire" && (
+          <div className="mt-3 rounded-lg border border-ink-800 bg-ink-950/40 p-2 text-[11px]">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input type="checkbox" checked={shareAfterLoad} onChange={(e) => setShareAfterLoad(e.target.checked)} className="h-3.5 w-3.5 accent-brand-500" />
+              <span className="text-ink-200">Share with class audience after load</span>
+            </label>
+            {shareAfterLoad && (
+              <label className="mt-1 ml-6 flex cursor-pointer items-center gap-2">
+                <input type="checkbox" checked={forceTrain} onChange={(e) => setForceTrain(e.target.checked)} className="h-3.5 w-3.5 accent-amber-500" />
+                <span className="text-ink-300">⚡ Force into their Opening Trainer (they can't remove)</span>
+              </label>
+            )}
+          </div>
+        )}
+        {toast && <div className="mt-2 rounded-md border border-emerald-500/40 bg-emerald-500/15 px-3 py-1.5 text-center text-xs font-semibold text-emerald-100">{toast}</div>}
+      </div>
+    </div>
+  );
+}
+
+function WdlBarInline({ w, d, b }: { w: number; d: number; b: number }) {
+  const total = Math.max(1, w + d + b);
+  const pct = (n: number) => `${Math.round((n / total) * 100)}%`;
+  return (
+    <div className="flex h-3 w-full overflow-hidden rounded" title={`W ${w} · D ${d} · B ${b}`}>
+      <div style={{ width: pct(w) }} className="bg-emerald-400" />
+      <div style={{ width: pct(d) }} className="bg-ink-500" />
+      <div style={{ width: pct(b) }} className="bg-rose-600" />
+    </div>
+  );
+}
+
+// Save-to-Repertoire dialog — shared by the notation-header chip + the
+// right-click menu. `fromPath` chooses the sub-tree to save; empty [] saves
+// the whole current tree from startFen.
+function SaveToRepertoireDialog({ room, startFen, tree, fromPath, onClose }: { room: string; startFen: string; tree: SharedTreeNode[]; fromPath: number[]; onClose: () => void }) {
+  const qc = useQueryClient();
+  const { startFen: repFen, sans, tree: repTree } = useMemo(() => wsTreeToRepTree(startFen, tree, fromPath), [startFen, tree, fromPath]);
+  // Add-on A: auto-suggest name via findOpeningForLine.
+  const suggested = useMemo(() => {
+    const mainlineSuffix = (function walk(nodes: RepMoveNode[]): string[] {
+      const out: string[] = [];
+      let cur: RepMoveNode | undefined = nodes[0];
+      while (cur) { out.push(cur.san); cur = cur.children[0]; }
+      return out;
+    })(repTree);
+    const fullSans = [...sans, ...mainlineSuffix];
+    const hit = findOpeningForLine(fullSans);
+    return hit?.name ?? "";
+  }, [sans, repTree]);
+  const [name, setName] = useState<string>(suggested || "My line");
+  useEffect(() => { if (suggested) setName(suggested); }, [suggested]);
+  const [shareAfter, setShareAfter] = useState(true);
+  const [forceTrain, setForceTrain] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const save = async () => {
+    setSaving(true); setErr(null);
+    try {
+      const body: any = { name: name.trim() || "My line", kind: "line" as const, tree: repTree };
+      if (sans.length > 0 || repTree.length > 0) {
+        // Flatten mainline SANs for legacy readers.
+        const flat: string[] = [...sans];
+        let cur: RepMoveNode | undefined = repTree[0];
+        while (cur) { flat.push(cur.san); cur = cur.children[0]; }
+        body.sans = flat;
+      }
+      const r = await addRepertoire(body);
+      qc.invalidateQueries({ queryKey: ["my-repertoire"] });
+      if (shareAfter && r?.entry?._id) {
+        try {
+          const klass = await fetch(`/v2api/api/class/schedule/${encodeURIComponent(room)}`, { credentials: "include" }).then((x) => x.ok ? x.json() : null);
+          const studentIds: string[] = Array.isArray(klass?.batchStudentIds) ? klass.batchStudentIds : [];
+          if (studentIds.length > 0) await shareRepertoire(r.entry._id, studentIds, forceTrain);
+        } catch { /* toast still shows saved */ }
+      }
+      onClose();
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="fixed inset-0 z-[75] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onKeyDown={(e) => { if (e.key === "Escape") onClose(); }} tabIndex={-1}>
+      <div className="w-full max-w-md rounded-2xl border border-emerald-500/40 bg-gradient-to-br from-ink-900 to-ink-950 p-5 shadow-2xl">
+        <div className="mb-3 flex items-baseline justify-between">
+          <div className="font-display text-base font-bold text-white">💾 Save to repertoire</div>
+          <button onClick={onClose} className="rounded-md p-1 text-xl leading-none text-ink-400 hover:text-white">×</button>
+        </div>
+        <div className="mb-3 text-xs text-ink-400">
+          Saves {fromPath.length === 0 ? "the whole current tree" : `the sub-tree from move ${fromPath.length}`}
+          {suggested && <> · auto-named <span className="text-brand-300">{suggested}</span></>}
+        </div>
+        <label className="block text-[10px] font-bold uppercase tracking-widest text-ink-500">Name</label>
+        <input type="text" value={name} onChange={(e) => setName(e.target.value)} maxLength={140}
+          className="mt-1 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
+          autoFocus />
+        <div className="mt-3 rounded-lg border border-ink-800 bg-ink-950/40 p-2 text-[11px]">
+          <label className="flex cursor-pointer items-center gap-2">
+            <input type="checkbox" checked={shareAfter} onChange={(e) => setShareAfter(e.target.checked)} className="h-3.5 w-3.5 accent-brand-500" />
+            <span className="text-ink-200">Share with this class's students immediately</span>
+          </label>
+          {shareAfter && (
+            <label className="mt-1 ml-6 flex cursor-pointer items-center gap-2">
+              <input type="checkbox" checked={forceTrain} onChange={(e) => setForceTrain(e.target.checked)} className="h-3.5 w-3.5 accent-amber-500" />
+              <span className="text-ink-300">⚡ Force into their Opening Trainer</span>
+            </label>
+          )}
+        </div>
+        {err && <div className="mt-2 text-[12px] text-rose-400">{err}</div>}
+        <div className="mt-4 flex items-center gap-2">
+          <button onClick={save} disabled={saving}
+            className="flex-1 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow hover:brightness-110 disabled:opacity-60">
+            {saving ? "Saving…" : "💾 Save"}
+          </button>
+          <button onClick={onClose} className="rounded-lg border border-ink-700 bg-ink-800 px-4 py-2 text-sm text-ink-200 hover:bg-ink-700">Cancel</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1222,6 +1805,7 @@ export default function ClassV2Page() {
   const [audienceToast, setAudienceToast] = useState<string | null>(null);
   const [sendPositionOpen, setSendPositionOpen] = useState(false);
   const [sendPositionToast, setSendPositionToast] = useState<string | null>(null);
+  const [teachOpen, setTeachOpen] = useState(false);
   const { data: status, isLoading: statusLoading } = useQuery({
     queryKey: ["livekit-status"],
     queryFn: () => get<LKStatus>("/api/livekit/status"),
@@ -1441,6 +2025,9 @@ export default function ClassV2Page() {
                   }}
                 />
               )}
+              {role === "coach" && teachOpen && (
+                <TeachOpeningModal room={room} role={role} onClose={() => setTeachOpen(false)} />
+              )}
               {sendPositionToast && (
                 <div className="pointer-events-none absolute left-1/2 top-4 z-[65] -translate-x-1/2 rounded-full border border-emerald-500/60 bg-emerald-500/25 px-4 py-1.5 text-sm font-semibold text-emerald-50 shadow-lg backdrop-blur">
                   {sendPositionToast}
@@ -1452,7 +2039,7 @@ export default function ClassV2Page() {
              *  with inline variation branches (server tree, dd67193 → this
              *  commit). Coach clicks any chip seek the whole room; students
              *  see it read-only. */}
-            <ClassNotationPanel role={role} />
+            <ClassNotationPanel room={room} role={role} />
 
             {/* Controls footer — mic / cam / screen + hand / chat / reactions,
              *  sits UNDER the board so nothing overlaps pieces. */}
@@ -1499,6 +2086,15 @@ export default function ClassV2Page() {
                     className="rounded-full border border-emerald-500/50 bg-emerald-500/20 px-3 py-1.5 text-sm font-semibold text-emerald-100 hover:bg-emerald-500/30"
                   >
                     📤 Send position
+                  </button>
+                )}
+                {role === "coach" && (
+                  <button
+                    onClick={() => setTeachOpen(true)}
+                    title="Load an opening from your Repertoire / the corpus / master games at this position"
+                    className="rounded-full border border-sky-500/50 bg-sky-500/20 px-3 py-1.5 text-sm font-semibold text-sky-100 hover:bg-sky-500/30"
+                  >
+                    📖 Teach opening
                   </button>
                 )}
                 {role === "coach" && (

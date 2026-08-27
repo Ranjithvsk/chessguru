@@ -106,6 +106,14 @@ export function triggerClassPromoteVariation(path: number[]) { _promoteFn?.(path
 export function triggerClassMakeMainline(path: number[]) { _mainlineFn?.(path); }
 export function triggerClassDeleteFrom(path: number[]) { _deleteFn?.(path); }
 
+// Teach Opening — coach loads a whole tree into the class board (from
+// repertoire / corpus / master games). Wholesale replaces room.tree +
+// room.startFen + room.cursorPath server-side. startFen defaults to the
+// standard opening if omitted.
+type LoadTreeFn = (args: { startFen?: string; tree: SharedTreeNode[]; cursorPath?: number[] }) => void;
+let _loadTreeFn: LoadTreeFn | null = null;
+export function triggerClassLoadTree(args: { startFen?: string; tree: SharedTreeNode[]; cursorPath?: number[] }) { _loadTreeFn?.(args); }
+
 // Room lock state (whether students can move pieces). Default = LOCKED —
 // students can never accidentally scramble the board mid-lesson (owner
 // 2026-08-12). Coach's footer button toggles it for interactive practice.
@@ -724,6 +732,16 @@ export default function SharedClassBoard(
   const sendPromote = sendTreeOp("promote-variation");
   const sendMainline = sendTreeOp("make-mainline");
   const sendDelete = sendTreeOp("delete-from");
+  const sendLoadTree: LoadTreeFn = ({ startFen, tree, cursorPath }) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try {
+      const body: any = { type: "load-tree", tree };
+      if (typeof startFen === "string" && startFen.length > 0) body.startFen = startFen;
+      if (Array.isArray(cursorPath) && cursorPath.length > 0) body.cursorPath = cursorPath;
+      ws.send(JSON.stringify(body));
+    } catch { /* */ }
+  };
 
   // Register the module-scoped seek + tree-op fns so the notation panel
   // (rendered up in ClassV2, without direct ws access) can drive them.
@@ -733,11 +751,13 @@ export default function SharedClassBoard(
     _promoteFn = sendPromote;
     _mainlineFn = sendMainline;
     _deleteFn = sendDelete;
+    _loadTreeFn = sendLoadTree;
     return () => {
       if (_seekFn === sendSeek) _seekFn = null;
       if (_promoteFn === sendPromote) _promoteFn = null;
       if (_mainlineFn === sendMainline) _mainlineFn = null;
       if (_deleteFn === sendDelete) _deleteFn = null;
+      if (_loadTreeFn === sendLoadTree) _loadTreeFn = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
