@@ -79,6 +79,7 @@ export interface HistoryItem {
   wrong?: string | null;    // UCI of the wrong move played (only set on misses)
   best?: string | null;     // UCI of the expected first move — for the "best was X" callout
   dubious?: true;           // flagged suspicious solve (fast win on much-harder puzzle)
+  difficulty?: string | null;  // "easiest" | "easier" | "normal" | "harder" | "hardest" — null on pre-2026-08-27 rows
   fen: string | null; lastMove: string | null; orientation: "white" | "black";
 }
 export interface HistoryReport {

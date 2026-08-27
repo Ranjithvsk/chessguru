@@ -753,7 +753,7 @@ export class PuzzlesService {
     }
   }
 
-  async complete(id: string, body: { win: boolean; userId?: string | null; hint?: boolean; mode?: string; rating?: number; deviation?: number; theme?: string; ms?: number; moves_ms?: number[]; wrong?: string; daily?: boolean }) {
+  async complete(id: string, body: { win: boolean; userId?: string | null; hint?: boolean; mode?: string; rating?: number; deviation?: number; theme?: string; difficulty?: string; ms?: number; moves_ms?: number[]; wrong?: string; daily?: boolean }) {
     const pz = await this.col().findOne({ _id: id as any });
     if (!pz) return null;
     await this.col().updateOne({ _id: id as any }, { $inc: { plays: 1 } });
@@ -926,6 +926,10 @@ export class PuzzlesService {
           ...(mv_ms && mv_ms.length ? { mv_ms } : {}),        // per-move deltas — [t1, t2-t1, ...]
           ...(wrong != null ? { wr: wrong } : {}),            // wrong-move UCI (misses only, missing on wins)
           ...(dubious ? { dub: true } : {}),                  // flagged suspicious solve (fast win on >+300 pr)
+          // Difficulty the user was on when they solved this — stored so
+          // history tiles can show it (Easier/Easiest are practice-mode
+          // hints so kids can spot why their rating moved less).
+          ...(typeof body.difficulty === "string" && ["easiest","easier","normal","harder","hardest"].includes(body.difficulty) ? { df: body.difficulty } : {}),
         } },
         { upsert: true },
       );

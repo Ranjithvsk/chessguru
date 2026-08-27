@@ -254,6 +254,7 @@ export class MiscController {
         wrong: typeof r.wr === "string" ? r.wr : null, // UCI of the wrong move played (misses only)
         best: !r.w ? bestOf(p) : null,                // expected first move — for the "best was X" callout
         dubious: r.dub === true ? true : undefined,    // suspicious solve flag (fast win on much-harder puzzle)
+        difficulty: typeof r.df === "string" ? r.df : null,  // difficulty user picked (missing on pre-2026-08-27 rows)
         ...miniOf(p),
       };
     });

@@ -245,6 +245,23 @@ const LazyMini = React.memo(function LazyMini({ it, onOpen }: { it: HistoryItem;
             <span className="rounded bg-amber-500/30 px-1 text-[10px] font-bold text-amber-200"
                   title="Suspicious solve: fast win on a puzzle much harder than your rating">⚠</span>
           )}
+          {it.difficulty && it.difficulty !== "normal" && (() => {
+            // Small chip showing the difficulty the user was on for this solve.
+            // "normal" is the default → not worth showing; the others tell a
+            // story ("winning Easier ≠ rating gain"). Colour hints at the
+            // rating-impact intuition (green = harder = bigger swings up,
+            // amber = easier = practice-mode drift).
+            const label: Record<string, string> = { easiest: "E–", easier: "E", harder: "H", hardest: "H+" };
+            const isEasy = it.difficulty === "easier" || it.difficulty === "easiest";
+            const bg = isEasy ? "bg-amber-500/25 text-amber-200" : "bg-emerald-500/25 text-emerald-200";
+            const full: Record<string, string> = { easiest: "Easiest", easier: "Easier", harder: "Harder", hardest: "Hardest" };
+            return (
+              <span className={`rounded px-1 text-[10px] font-bold ${bg}`}
+                    title={`Difficulty when solved: ${full[it.difficulty]}${isEasy ? " — winning easier puzzles gives smaller rating changes" : " — winning harder puzzles gives bigger rating changes"}`}>
+                {label[it.difficulty]}
+              </span>
+            );
+          })()}
         </span>
       </div>
       {timingOpen && typeof it.ms === "number" && createPortal(

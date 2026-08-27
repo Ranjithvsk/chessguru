@@ -16,6 +16,18 @@ import { WeaknessCurriculumCard } from "../components/WeaknessCurriculumCard";
 
 type Ctx = { userId: string | null; rating: number };
 const DIFFS: Difficulty[] = ["easiest", "easier", "normal", "harder", "hardest"];
+// "Obvious" themes (mirror server `glicko.ts::OBVIOUS_THEMES`) — themes where
+// the title reveals the solution pattern, so Lichess weight table gives wins
+// only 0.10 weight and losses 0.40 (heavy asymmetry). Used to trigger the
+// "practice mode" warning in the sidebar so kids know rating will drift on
+// these picks even with good win rates.
+const OBVIOUS_THEMES = new Set<string>([
+  "enPassant", "attackingF2F7", "doubleCheck", "mateIn1", "castling",
+  "anastasiaMate", "arabianMate", "backRankMate", "balestraMate", "blindSwineMate",
+  "bodenMate", "cornerMate", "doubleBishopMate", "dovetailMate", "epauletteMate",
+  "hookMate", "killBoxMate", "pillsburysMate", "morphysMate", "operaMate",
+  "swallowstailMate", "triangleMate", "vukovicMate", "smotheredMate",
+]);
 // Non-tactical "meta" theme tags (game phase, endgame type, puzzle length,
 // eval goal, generic mate-in-N, source) — hidden so only real tactical motifs show.
 const META_THEMES = new Set<string>([
@@ -713,6 +725,28 @@ export default function PuzzlesPage() {
             className="w-full rounded-lg border border-ink-600 bg-ink-800 px-3 py-2 text-sm text-white">
             {DIFFS.map((d) => <option key={d} value={d}>{prettify(d)}</option>)}
           </select>
+          {/* Rating-drop warning (2026-08-27, owner ask): both Easier/Easiest
+              AND obvious-theme picks cost more rating on losses than they pay
+              on wins (Lichess weight table — kids won't figure this out on
+              their own). Show a single-panel amber banner explaining what to
+              pick for "true rating" mode. Mirrors Lichess's convention of
+              telling users the tradeoff. */}
+          {(difficulty === "easier" || difficulty === "easiest" || OBVIOUS_THEMES.has(theme)) && (
+            <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-snug text-amber-100">
+              <div className="mb-1 font-semibold text-amber-200">⚠️ Practice mode — rating may drop even on wins</div>
+              <ul className="space-y-0.5 text-amber-100/90">
+                {(difficulty === "easier" || difficulty === "easiest") && (
+                  <li>You're on <b>{prettify(difficulty)}</b> difficulty — puzzles are 300-600 pts below your level. Winning is expected, so wins barely raise rating; a loss drops it a lot.</li>
+                )}
+                {OBVIOUS_THEMES.has(theme) && (
+                  <li>You're on <b>{prettify(theme)}</b> — the title hints at the solution, so wins count for only 10% of a normal rating change but losses count for 40%.</li>
+                )}
+              </ul>
+              <div className="mt-1 text-amber-200/80">
+                For accurate rating: pick <b>Normal</b> + <b>All themes</b> or a neutral tag like <i>Middlegame</i> / <i>Endgame</i>.
+              </div>
+            </div>
+          )}
           <button onClick={g.next} disabled={g.isFetching}
             className="mt-3 w-full rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800 disabled:opacity-50">
             {g.isFetching ? "Loading…" : "New puzzle"}
