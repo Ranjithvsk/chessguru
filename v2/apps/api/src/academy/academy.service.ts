@@ -3194,10 +3194,16 @@ Thank you!`;
     // when the signed-in user is in ADMIN_USERS AND passes ?academy=<slug>,
     // scope the leaderboard to THAT academy instead of the caller's own.
     // Non-admins ignore the param — session.academyId still wins.
+    //
+    // Sentinel `__platform__` = the "no-academy" bucket: standalone users
+    // who signed up on chessguru.cc without an academy invite. Only admins
+    // can see this bucket (also visible on the picker as "ChessGuru (no
+    // academy)").
     const isAdminUser = isAdmin(userId);
-    const academyId: string | undefined = isAdminUser && opts.academy
-      ? String(opts.academy)
-      : session?.academyId;
+    const isPlatformBucket = isAdminUser && opts.academy === "__platform__";
+    const academyId: string | undefined = isPlatformBucket
+      ? "__platform__"                                                    // sentinel — resolved to $eq null in roster query below
+      : (isAdminUser && opts.academy ? String(opts.academy) : session?.academyId);
     if (!academyId) throw new ForbiddenException("sign in first");
 
     const period = ["today", "7d", "30d", "180d", "365d", "lifetime"].includes(periodRaw) ? periodRaw : "7d";
@@ -3218,9 +3224,17 @@ Thank you!`;
       period === "180d"     ? new Date(now - 180 * dayMs) :
                               new Date(now - 365 * dayMs);
 
-    // Roster — every student in the academy
+    // Roster — every student in the academy. Platform bucket = users with
+    // NO academyId AND no restrictive role (self-signup users often have
+    // role missing entirely).
+    const rosterFilter: any = isPlatformBucket
+      ? { $and: [
+          { $or: [{ academyId: null }, { academyId: { $exists: false } }] },
+          { $or: [{ role: "student" }, { role: { $exists: false } }, { role: null }] },
+        ] }
+      : { academyId, role: "student" };
     let students: any[] = await this.users()
-      .find({ academyId, role: "student" }, { projection: { _id: 1, username: 1, name: 1, coachId: 1, dailyPuzzleStreak: 1 } })
+      .find(rosterFilter, { projection: { _id: 1, username: 1, name: 1, coachId: 1, dailyPuzzleStreak: 1 } })
       .toArray();
     // Active boost — 1.5× multiplier on puzzles solved that match the theme
     // (or `k=blindfold` special case) for the current period ONLY. So a coach
