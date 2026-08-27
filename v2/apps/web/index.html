@@ -12,23 +12,25 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" id="cg-apple-title" content="ChessGuru" />
     <script>
-      // Tenant-aware branding + PWA. On non-canonical hosts (gunachess.com etc):
+      // Tenant-aware branding + PWA. On non-canonical hosts (gunachess.com)
+      // OR when a signed-in academy member is on a canonical host (chessguru.cc):
       //  1. SYNCHRONOUSLY apply cached brand from localStorage (title, apple
       //     title, apple icon, theme color) so the browser tab never flashes
       //     "ChessGuru" on repeat visits.
-      //  2. Swap <link rel="manifest"> to the tenant manifest endpoint.
-      //  3. Background-refresh the cache from /api/academy-page/by-domain so
-      //     next load picks up any tenant profile edits.
-      // Shares BRAND_CACHE_KEY with Navbar.useTenantBrand so the whole app
-      // agrees on the same tenant identity from one localStorage entry.
+      //  2. Swap <link rel="manifest"> to the tenant manifest endpoint so
+      //     installed PWA icon + name match the academy.
+      //  3. Background-refresh from /api/academy-page/by-domain OR /:slug so
+      //     next load picks up profile edits.
+      // 2026-08-27: session-fallback added so students on chessguru.cc apex
+      // (not their subdomain) also see academy branding. Same pattern as the
+      // Navbar's useTenantSlug session-fallback.
       (function () {
         try {
           var host = location.hostname.toLowerCase();
-          var canonical = /(^|\.)harinitharanjith\.com$/.test(host) || host === "localhost" || /^\d+\.\d+\.\d+\.\d+$/.test(host);
-          if (canonical) return;
-          var slug = host.split(".")[0];
+          var canonical = /(^|\.)(harinitharanjith\.com|chessguru\.(cc|com))$/.test(host) || host === "localhost" || /^\d+\.\d+\.\d+\.\d+$/.test(host);
+          var slugFromHost = canonical ? null : host.split(".")[0];
           var manifestLink = document.getElementById("cg-manifest");
-          if (manifestLink) manifestLink.setAttribute("href", "/v2api/api/academy-page/manifest?host=" + encodeURIComponent(host));
+
           var applyBrand = function (name, logo) {
             if (name) {
               document.title = name;
@@ -47,29 +49,75 @@
             var tc = document.getElementById("cg-theme-color");
             if (tc) tc.setAttribute("content", "#14a2b8");
           };
-          // (1) Synchronous cache hit
-          try {
-            var raw = localStorage.getItem("cg.tenant-brand");
-            if (raw) {
+
+          var pointManifestToSlug = function (slug) {
+            if (manifestLink && slug) manifestLink.setAttribute("href", "/v2api/api/academy-page/manifest?slug=" + encodeURIComponent(slug));
+          };
+
+          var applyCachedBrandForSlug = function (slug) {
+            try {
+              var raw = localStorage.getItem("cg.tenant-brand");
+              if (!raw) return false;
               var cache = JSON.parse(raw);
               var hit = cache && cache[slug];
-              if (hit && hit.name) applyBrand(hit.name, hit.logoUrl);
-            }
-          } catch (e) { /* ignore */ }
-          // (3) Background refresh
-          fetch("/v2api/api/academy-page/by-domain/" + encodeURIComponent(host))
+              if (hit && hit.name) { applyBrand(hit.name, hit.logoUrl); return true; }
+            } catch (e) { /* ignore */ }
+            return false;
+          };
+
+          var refreshBrandForSlug = function (slug) {
+            fetch("/v2api/api/academy-page/" + encodeURIComponent(slug))
+              .then(function (r) { return r.ok ? r.json() : null; })
+              .then(function (j) {
+                if (!j) return;
+                var name = (j.profile && j.profile.displayName) || (j.academy && j.academy.name);
+                var logo = (j.profile && j.profile.logoUrl) || null;
+                if (name) applyBrand(name, logo);
+                try {
+                  var raw2 = localStorage.getItem("cg.tenant-brand");
+                  var cache2 = raw2 ? JSON.parse(raw2) : {};
+                  cache2[slug] = { name: name || "", logoUrl: logo };
+                  localStorage.setItem("cg.tenant-brand", JSON.stringify(cache2));
+                } catch (e) { /* ignore */ }
+              })
+              .catch(function () { /* non-fatal */ });
+          };
+
+          // (A) Non-canonical host path — swap immediately from hostname.
+          if (slugFromHost) {
+            pointManifestToSlug(slugFromHost);
+            applyCachedBrandForSlug(slugFromHost);
+            refreshBrandForSlug(slugFromHost);
+            return;
+          }
+
+          // (B) Canonical host — try session-derived slug (chessguru.cc apex).
+          //     Hydrate synchronously from cached session-academy so the first
+          //     paint is already tenant-branded on repeat visits, then confirm
+          //     from /auth/me on refresh.
+          var cachedSessionSlug = null;
+          try { cachedSessionSlug = localStorage.getItem("cg.session-academy"); } catch (e) { /* ignore */ }
+          if (cachedSessionSlug) {
+            pointManifestToSlug(cachedSessionSlug);
+            applyCachedBrandForSlug(cachedSessionSlug);
+          }
+          fetch("/v2api/auth/me", { credentials: "include" })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (j) {
-              if (!j) return;
-              var name = (j.profile && j.profile.displayName) || (j.academy && j.academy.name);
-              var logo = (j.profile && j.profile.logoUrl) || null;
-              if (name) applyBrand(name, logo);
-              try {
-                var raw2 = localStorage.getItem("cg.tenant-brand");
-                var cache2 = raw2 ? JSON.parse(raw2) : {};
-                cache2[slug] = { name: name || "", logoUrl: logo };
-                localStorage.setItem("cg.tenant-brand", JSON.stringify(cache2));
-              } catch (e) { /* ignore */ }
+              var aid = j && j.academyId;
+              if (!aid) {
+                // logged out or non-academy user — leave defaults if not
+                // already swapped, and wipe cache so a stale seed doesn't
+                // haunt them.
+                try { localStorage.removeItem("cg.session-academy"); } catch (e) { /* ignore */ }
+                return;
+              }
+              try { localStorage.setItem("cg.session-academy", aid); } catch (e) { /* ignore */ }
+              if (aid !== cachedSessionSlug) {
+                pointManifestToSlug(aid);
+                applyCachedBrandForSlug(aid);
+              }
+              refreshBrandForSlug(aid);
             })
             .catch(function () { /* non-fatal */ });
         } catch (e) { /* non-fatal */ }

@@ -65,17 +65,26 @@ export class AcademyPublicController {
   @Header("Content-Type", "application/manifest+json")
   @Header("Cache-Control", "public, max-age=300")
   async manifest(@Req() req: any) {
+    // Two ways to identify the tenant: (a) ?slug=<academyId> — used by the
+    // index.html session-fallback branch when a signed-in student is on the
+    // apex chessguru.cc; (b) ?host=<hostname> — used on tenant custom
+    // domains (gunachess.com) where the slug is derivable from the URL.
+    const slugParam = String(req.query?.slug || "").toLowerCase().trim();
     const host = String(req.query?.host || req.headers?.host || "").toLowerCase().split(":")[0];
-    if (!host) throw new BadRequestException("bad host");
-    // Look up the tenant academy by custom domain OR by hostname first-label as
-    // fallback (gunachess.com → academy where ownerId="gunachess").
+    if (!slugParam && !host) throw new BadRequestException("bad host or slug");
     let hit: any = null;
-    try { hit = await this.domainSvc.lookupByDomain(host); } catch {}
-    if (!hit) {
-      // Fallback: hostname first-label as slug (works for tenant-native domains).
-      const slug = String(host.split(".")[0] || "");
-      if (slug) {
-        try { hit = { slug, data: await this.svc.getBySlug(slug) }; } catch { hit = null; }
+    if (slugParam) {
+      try { hit = { slug: slugParam, data: await this.svc.getBySlug(slugParam) }; } catch { hit = null; }
+    }
+    if (!hit && host) {
+      // Look up the tenant academy by custom domain OR by hostname first-label as
+      // fallback (gunachess.com → academy where ownerId="gunachess").
+      try { hit = await this.domainSvc.lookupByDomain(host); } catch {}
+      if (!hit) {
+        const slug = String(host.split(".")[0] || "");
+        if (slug) {
+          try { hit = { slug, data: await this.svc.getBySlug(slug) }; } catch { hit = null; }
+        }
       }
     }
     let name = "ChessGuru";
