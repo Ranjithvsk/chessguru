@@ -288,6 +288,12 @@ function PositionEditorModal(props: {
 
   const applyAndClose = () => { onApply(currentFen); onClose(); };
   const cancel = () => { onApply(initialFen); onClose(); };   // revert live edits when cancelling
+  // One-click "start a fresh game from move 1" — sets the standard opening
+  // position with white to move AND broadcasts + closes, so the coach doesn't
+  // have to click Start → ✓ Done separately. Handy when a class has gone
+  // through a bunch of variations and the coach wants a clean slate to
+  // begin a new game.
+  const startFreshGame = () => { const fresh = new Chess().fen(); onApply(fresh); onClose(); };
 
   const whiteRow = ["K","Q","R","B","N","P"];
   const blackRow = ["k","q","r","b","n","p"];
@@ -346,6 +352,13 @@ function PositionEditorModal(props: {
 
           {/* Right pane — palette + actions */}
           <div className="space-y-3">
+            <button
+              onClick={startFreshGame}
+              title="Reset to the standard opening position with white to move — students see a fresh game"
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow hover:bg-emerald-500"
+            >
+              ▶ Start a fresh game
+            </button>
             <div>
               <div className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-ink-500">Piece — tap then tap a square</div>
               <div className="flex flex-wrap justify-center gap-1.5">
