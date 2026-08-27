@@ -107,36 +107,84 @@ export default function AdminUsersPage() {
             <thead className="bg-ink-800 text-ink-300">
               <tr>
                 <th className="px-3 py-2">User</th>
-                <th className="px-3 py-2">Email</th>
-                <th className="px-3 py-2">Joined</th>
-                <th className="px-3 py-2">Last login</th>
+                <th className="px-3 py-2">Academy</th>
                 <th className="px-3 py-2">Puzzle</th>
-                <th className="px-3 py-2">Solves</th>
-                <th className="px-3 py-2">Win%</th>
+                <th className="px-3 py-2" title="Rating change last 7 days — red = bleeding despite good win%, green = gaining">7d Δ</th>
+                <th className="px-3 py-2" title="Wins/solves in the last 7 days">7d W%</th>
+                <th className="px-3 py-2" title="Puzzles played in the last 7 days">7d n</th>
+                <th className="px-3 py-2">Solves (all-time)</th>
+                <th className="px-3 py-2">All-time W%</th>
                 <th className="px-3 py-2">Study</th>
                 <th className="px-3 py-2">Last active</th>
+                <th className="px-3 py-2">Joined</th>
               </tr>
             </thead>
             <tbody>
-              {(users ?? []).map((u) => (
-                <tr key={u.username} onClick={() => setSel(u.username)}
-                  className={`cursor-pointer border-t border-ink-800 hover:bg-ink-800/60 ${sel === u.username ? "bg-ink-800" : ""}`}>
-                  <td className="px-3 py-2 font-medium text-white">{u.username}</td>
-                  <td className="px-3 py-2 text-ink-300">{u.email || "—"}</td>
-                  <td className="px-3 py-2 text-ink-400">{fmtDate(u.createdAt)}</td>
-                  <td className="px-3 py-2 text-ink-400">{fmtAgo(u.lastLogin)}</td>
-                  <td className="px-3 py-2">{u.puzzleRating ?? "—"}</td>
-                  <td className="px-3 py-2">{u.solves}</td>
-                  <td className="px-3 py-2">{u.solves ? Math.round((u.wins / u.solves) * 100) + "%" : "—"}</td>
-                  <td className="px-3 py-2" title={u.studySolves ? Math.round((u.studyWins / u.studySolves) * 100) + "% solved" : ""}>{u.studySolves || "—"}</td>
-                  <td className="px-3 py-2 text-ink-400">{fmtAgo(u.lastActive)}</td>
-                </tr>
-              ))}
-              {isLoading && <tr><td colSpan={9} className="px-3 py-6 text-center text-ink-400">Loading…</td></tr>}
-              {!isLoading && (users ?? []).length === 0 && <tr><td colSpan={9} className="px-3 py-6 text-center text-ink-400">No users.</td></tr>}
+              {(users ?? []).map((u) => {
+                const winRate7d = u.solves7d && u.solves7d > 0 ? Math.round(((u.wins7d ?? 0) / u.solves7d) * 100) : null;
+                // Bleeder = winRate ≥ 60% AND net7d < 0 (Lichess-style convergence tax visible)
+                const isBleeder = u.net7d != null && u.net7d < 0 && winRate7d != null && winRate7d >= 60;
+                const isGainer = u.net7d != null && u.net7d > 0;
+                const netColor = u.net7d == null ? "text-ink-500" : u.net7d < 0 ? "text-rose-300 font-bold" : "text-emerald-300";
+                return (
+                  <tr key={u.username} onClick={() => setSel(u.username)}
+                    className={`cursor-pointer border-t border-ink-800 hover:bg-ink-800/60 ${sel === u.username ? "bg-ink-800" : ""} ${isBleeder ? "bg-rose-500/5" : ""}`}>
+                    <td className="px-3 py-2 font-medium text-white" title={u.email || ""}>
+                      {u.username}
+                      {u.role && u.role !== "student" && (() => {
+                        // Role badge — makes coaches / owners stand out so ranjith
+                        // can eyeball the report and know who's actually a kid vs
+                        // a coach with their own high rating. Owner ask 2026-08-27.
+                        const label: Record<string, string> = {
+                          academy_owner: "OWNER",
+                          coach: "COACH",
+                          parent: "PARENT",
+                        };
+                        const cls: Record<string, string> = {
+                          academy_owner: "bg-brand-500/25 text-brand-200",
+                          coach: "bg-emerald-500/25 text-emerald-200",
+                          parent: "bg-amber-500/25 text-amber-200",
+                        };
+                        return (
+                          <span className={`ml-1 rounded px-1 py-0.5 text-[9px] font-bold tracking-wide ${cls[u.role] ?? "bg-ink-700 text-ink-300"}`}>
+                            {label[u.role] ?? u.role.toUpperCase()}
+                          </span>
+                        );
+                      })()}
+                      {isBleeder && <span className="ml-1 rounded bg-rose-500/25 px-1 text-[10px] font-bold text-rose-200" title="Losing rating despite ≥60% win rate — Lichess-style convergence for overrated user picking easier/obvious puzzles">⚠</span>}
+                    </td>
+                    <td className="px-3 py-2 text-[11px] text-ink-400">{u.academyId ?? "—"}</td>
+                    <td className="px-3 py-2 tabular-nums text-white">{u.puzzleRating ?? "—"}</td>
+                    <td className={`px-3 py-2 tabular-nums ${netColor}`}>
+                      {u.net7d == null ? "—" : (u.net7d > 0 ? `+${u.net7d}` : String(u.net7d))}
+                    </td>
+                    <td className="px-3 py-2 tabular-nums">{winRate7d != null ? `${winRate7d}%` : "—"}</td>
+                    <td className="px-3 py-2 tabular-nums text-ink-400">{u.solves7d ?? 0}</td>
+                    <td className="px-3 py-2 tabular-nums text-ink-400">{u.solves}</td>
+                    <td className="px-3 py-2 tabular-nums text-ink-400">{u.solves ? Math.round((u.wins / u.solves) * 100) + "%" : "—"}</td>
+                    <td className="px-3 py-2" title={u.studySolves ? Math.round((u.studyWins / u.studySolves) * 100) + "% solved" : ""}>{u.studySolves || "—"}</td>
+                    <td className="px-3 py-2 text-ink-400">{fmtAgo(u.lastActive)}</td>
+                    <td className="px-3 py-2 text-ink-400">{fmtDate(u.createdAt)}</td>
+                  </tr>
+                );
+              })}
+              {isLoading && <tr><td colSpan={11} className="px-3 py-6 text-center text-ink-400">Loading…</td></tr>}
+              {!isLoading && (users ?? []).length === 0 && <tr><td colSpan={11} className="px-3 py-6 text-center text-ink-400">No users.</td></tr>}
             </tbody>
           </table>
         </div>
+        {/* Aggregate summary — quick pulse for the fleet */}
+        {users && users.length > 0 && (
+          <div className="mt-3 grid gap-3 sm:grid-cols-4">
+            <Card label="Active 7d (10+)" value={users.filter(u => (u.solves7d ?? 0) >= 10).length} />
+            <Card label="Gaining rating" value={users.filter(u => (u.net7d ?? 0) > 0).length} />
+            <Card label="Bleeding (≥60% W% + net<0)" value={users.filter(u => {
+              const wr = u.solves7d && u.solves7d > 0 ? ((u.wins7d ?? 0) / u.solves7d) * 100 : 0;
+              return (u.net7d ?? 0) < 0 && wr >= 60;
+            }).length} sub="Lichess convergence tax — see legend" />
+            <Card label="Biggest 7d gain" value={"+" + Math.max(0, ...users.map(u => u.net7d ?? 0))} />
+          </div>
+        )}
       </section>
 
       {/* ── User detail ── */}

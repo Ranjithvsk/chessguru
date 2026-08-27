@@ -160,7 +160,7 @@ export const studyComplete = (id: string, win: boolean, rating: number) =>
   post<{ win: boolean; rating: number; ratingDiff: number; puzzleRating: number }>(`/api/study/${id}/complete`, { win, rating, deviation: 500 });
 
 // --- Admin: registered users + their activity (gated to admins server-side) ---
-export interface AdminUserRow { username: string; email: string | null; createdAt: string | null; lastLogin: string | null; puzzleRating: number | null; solves: number; wins: number; lastActive: string | null; studySolves: number; studyWins: number; study: Record<string, number>; }
+export interface AdminUserRow { username: string; email: string | null; academyId?: string | null; role?: string | null; createdAt: string | null; lastLogin: string | null; puzzleRating: number | null; solves: number; wins: number; lastActive: string | null; studySolves: number; studyWins: number; study: Record<string, number>; solves7d?: number; wins7d?: number; net7d?: number | null; }
 export const adminUsers = () => get<AdminUserRow[]>("/api/admin/users");
 export interface AdminOverview {
   users: { total: number; newToday: number; newWeek: number; active7d: number; active30d: number };

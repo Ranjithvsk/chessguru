@@ -66,6 +66,25 @@ export class AdminService {
       { $group: { _id: "$uid", solves: { $sum: 1 }, wins: { $sum: { $cond: ["$w", 1, 0] } }, last: { $max: "$d" } } },
     ]).toArray();
     const rm: Record<string, any> = {}; for (const r of agg) rm[String(r._id)] = r;
+    // Owner ask 2026-08-27: leaderboard dashboard needs recent-window
+    // rating trajectory so we can spot bleeders (high win% + falling rating)
+    // vs gainers at a glance. 7-day window per user: solves, wins, net
+    // rating change from oldest-round pre-rd to newest-round post-r.
+    const cutoff7d = new Date(Date.now() - 7 * 86400000);
+    const agg7d = await db.collection("rounds").aggregate([
+      { $match: { d: { $gte: cutoff7d } } },
+      { $project: { uid: { $arrayElemAt: [{ $split: ["$_id", ":"] }, 0] }, d: 1, w: 1, r: 1, rd: 1 } },
+      { $sort: { uid: 1, d: 1 } },
+      { $group: {
+          _id: "$uid",
+          solves7d: { $sum: 1 },
+          wins7d: { $sum: { $cond: ["$w", 1, 0] } },
+          firstR: { $first: "$r" }, firstRd: { $first: "$rd" },
+          lastR: { $last: "$r" },
+      } },
+    ]).toArray();
+    const r7m: Record<string, any> = {};
+    for (const r of agg7d) r7m[String(r._id)] = r;
     const sagg = await db.collection("study_rounds").aggregate([
       { $project: { uid: { $arrayElemAt: [{ $split: ["$_id", ":"] }, 0] }, d: 1, w: 1 } },
       { $group: { _id: "$uid", solves: { $sum: 1 }, wins: { $sum: { $cond: ["$w", 1, 0] } }, last: { $max: "$d" } } },
@@ -73,16 +92,28 @@ export class AdminService {
     const sm: Record<string, any> = {}; for (const r of sagg) sm[String(r._id)] = r;
     return users.map((u: any) => {
       const pf = pm[String(u._id)] || {}; const rd = rm[String(u._id)] || {}; const sd = sm[String(u._id)] || {};
+      const r7 = r7m[String(u._id)] || {};
       const study = pf.study ? Object.fromEntries(Object.entries(pf.study).map(([k, v]: any) => [k, Math.round(v?.gl?.r ?? 0)])) : {};
+      // 7d net rating change: start = firstRoundR - firstRoundRd (pre-round), end = lastRoundR (post-round).
+      const startR7d = typeof r7.firstR === "number" ? r7.firstR - (r7.firstRd || 0) : null;
+      const endR7d = typeof r7.lastR === "number" ? r7.lastR : null;
+      const net7d = startR7d != null && endR7d != null ? endR7d - startR7d : null;
       return {
         username: u.username, email: u.email || null, createdAt: u.createdAt || null,
+        academyId: u.academyId ?? null, role: u.role ?? null,
         puzzleRating: pf.puzzle?.gl?.r ? Math.round(pf.puzzle.gl.r) : null,
         solves: rd.solves ?? u.count ?? 0, wins: rd.wins ?? 0,
         studySolves: sd.solves ?? 0, studyWins: sd.wins ?? 0,
         lastActive: [rd.last, sd.last, pf.puzzle?.la].filter(Boolean).sort((a: any, b: any) => new Date(b).getTime() - new Date(a).getTime())[0] || null,
         lastLogin: u.lastLogin || null, study,
+        // Recent window (7d): rating trajectory + activity — powers the
+        // leaderboard bleeders/gainers view. All null when user hasn't
+        // played in the window.
+        solves7d: r7.solves7d ?? 0,
+        wins7d: r7.wins7d ?? 0,
+        net7d,
       };
-    }).sort((a: any, b: any) => b.solves - a.solves);
+    }).sort((a: any, b: any) => (b.net7d ?? -1e9) - (a.net7d ?? -1e9));
   }
 
   async userDetail(username: string) {
