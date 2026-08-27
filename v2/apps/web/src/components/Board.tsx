@@ -1,9 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Chessground } from "chessground";
 import type { Api } from "chessground/api";
 import type { Config } from "chessground/config";
-import type { Key, Color, Dests } from "chessground/types";
+import type { Key, Color, Dests, Role } from "chessground/types";
 import type { DrawShape } from "chessground/draw";
+import { CBURNETT_PIECES } from "./cburnett-pieces";
+
+export type Promotion = "q" | "r" | "b" | "n";
 
 /**
  * The single shared chess board for ChessGuru v2.
@@ -23,7 +26,7 @@ export interface BoardProps {
   blindfold?: boolean;                 // hide pieces (Blindfold mode)
   shapes?: DrawShape[];                // arrows/circles (hints, engine PV, coach annotations)
   onShapesChange?: (shapes: DrawShape[]) => void; // fires on user draw/clear (right-click)
-  onMove?: (from: Key, to: Key) => void;
+  onMove?: (from: Key, to: Key, promotion?: Promotion) => void;
   onPremove?: (from: Key, to: Key) => void;
   premovable?: boolean;
   /** Show chessground's legal-move dots when a piece is selected. Default false. */
@@ -61,6 +64,13 @@ export default function Board({
   const el = useRef<HTMLDivElement>(null);
   const api = useRef<Api | null>(null);
 
+  // Pending under-promotion picker. TKT-90 (2026-08-27): without this,
+  // chessground's `after` event fires with just (from,to) and callers
+  // silently defaulted to queen — every knight/rook/bishop-promotion
+  // puzzle was unsolvable. When we detect a pawn landing on rank 1/8,
+  // suspend the onMove callback until the user picks Q/R/B/N.
+  const [pending, setPending] = useState<{ from: Key; to: Key; color: Color } | null>(null);
+
   // chessground is created once, so its event handlers would capture the
   // first-render callbacks — when the puzzle is still loading, submit() closes
   // over an undefined puzzle and bails. Route events through refs kept current
@@ -70,6 +80,36 @@ export default function Board({
   const onSelectRef = useRef(onSelect);
   const onShapesChangeRef = useRef(onShapesChange);
   useEffect(() => { onMoveRef.current = onMove; onPremoveRef.current = onPremove; onSelectRef.current = onSelect; onShapesChangeRef.current = onShapesChange; });
+
+  // A pawn move to rank 8 (white) or rank 1 (black) is a promotion.
+  // We inspect the destination square's piece after chessground's animation
+  // settled — chessground stores the moving piece there without auto-promoting.
+  function isPromotion(from: Key, to: Key): { color: Color } | null {
+    const piece = api.current?.state.pieces.get(to);
+    if (!piece || piece.role !== "pawn") return null;
+    const lastRank = piece.color === "white" ? "8" : "1";
+    if (to[1] !== lastRank) return null;
+    // Sanity: pawn actually came from the adjacent rank.
+    void from;
+    return { color: piece.color };
+  }
+
+  function handleAfter(from: Key, to: Key) {
+    const p = isPromotion(from, to);
+    if (p) { setPending({ from, to, color: p.color }); return; }
+    onMoveRef.current?.(from, to);
+  }
+
+  function pick(role: Promotion) {
+    if (!pending) return;
+    const { from, to, color } = pending;
+    setPending(null);
+    // Reflect the choice on the board immediately so the render doesn't
+    // flash a pawn on rank 8 while the caller catches up via fen prop.
+    const roleFull: Role = role === "q" ? "queen" : role === "r" ? "rook" : role === "b" ? "bishop" : "knight";
+    api.current?.setPieces(new Map([[to, { role: roleFull, color, promoted: true }]]));
+    onMoveRef.current?.(from, to, role);
+  }
 
   // create once
   useEffect(() => {
@@ -89,7 +129,7 @@ export default function Board({
         color: movableColor,
         dests,
         showDests, // caller opts in (practice pages set true)
-        events: { after: (from, to) => onMoveRef.current?.(from, to) },
+        events: { after: (from, to) => handleAfter(from, to) },
       },
       premovable: {
         enabled: premovable,
@@ -130,11 +170,91 @@ export default function Board({
     api.current?.setShapes(shapes ?? []);
   }, [shapes]);
 
+  // Position the picker column above/below the promotion square in a way
+  // that always stays inside the board. The board is 8×8; each square is
+  // 12.5% of width/height. Orientation matters — chessground flips coords
+  // for black-at-bottom.
+  const pickerPos = pending ? (() => {
+    const file = pending.to.charCodeAt(0) - 97;              // a=0..h=7
+    const rank = Number(pending.to[1]) - 1;                  // 1=0..8=7
+    const col = orientation === "white" ? file : 7 - file;
+    const row = orientation === "white" ? 7 - rank : rank;   // top row = 0
+    // If the promotion square is on the top half, stack the picker downward;
+    // otherwise upward. The picker is 4 squares tall.
+    const downward = row <= 3;
+    const topStart = downward ? row : row - 3;
+    return { leftPct: col * 12.5, topPct: topStart * 12.5, downward };
+  })() : null;
+
+  const pickerOrder: Promotion[] = pickerPos?.downward
+    ? (pending?.color === "white" ? ["q", "n", "r", "b"] : ["q", "n", "r", "b"])
+    : (pending?.color === "white" ? ["b", "r", "n", "q"] : ["b", "r", "n", "q"]);
+
   return (
-    <div className={`cg-board-wrap ${blindfold ? "blindfold" : ""} ${className}`}>
+    <div className={`cg-board-wrap ${blindfold ? "blindfold" : ""} ${className}`} style={{ position: "relative" }}>
       <div ref={el} style={{ width: "100%", height: "100%" }} />
+      {pending && pickerPos && (
+        <div
+          role="dialog"
+          aria-label="Choose promotion piece"
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "absolute",
+            left: `${pickerPos.leftPct}%`,
+            top: `${pickerPos.topPct}%`,
+            width: "12.5%",
+            height: "50%",
+            zIndex: 30,
+            display: "flex",
+            flexDirection: "column",
+            background: "rgba(255,255,255,0.98)",
+            boxShadow: "0 2px 12px rgba(0,0,0,0.35)",
+            borderRadius: 4,
+            overflow: "hidden",
+          }}
+        >
+          {pickerOrder.map((r) => {
+            const roleFull: Role = r === "q" ? "queen" : r === "r" ? "rook" : r === "b" ? "bishop" : "knight";
+            return (
+              <button
+                key={r}
+                type="button"
+                onClick={() => pick(r)}
+                aria-label={roleFull}
+                style={{
+                  flex: 1,
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  padding: 0,
+                  position: "relative",
+                }}
+              >
+                <span
+                  className={`cg-promo-piece ${pending.color} ${roleFull}`}
+                  style={{
+                    position: "absolute",
+                    inset: 4,
+                    backgroundImage: `url(${pieceUrl(pending.color, roleFull)})`,
+                    backgroundSize: "contain",
+                    backgroundRepeat: "no-repeat",
+                    backgroundPosition: "center",
+                  }}
+                />
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
+}
+
+// Reuse the same cburnett SVGs the rest of the board uses (already bundled).
+function pieceUrl(color: Color, role: Role): string {
+  const letter = role === "knight" ? "N" : role.charAt(0).toUpperCase();
+  const key = color === "white" ? letter : letter.toLowerCase();
+  return CBURNETT_PIECES[key] || "";
 }
 
 /** Build chessground dests from a chess.js instance (shared helper). */

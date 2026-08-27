@@ -222,10 +222,38 @@ function Dropdown({ group }: { group: Group }) {
 interface Props { rating?: number; ratingProvisional?: boolean; username?: string; admin?: boolean; onLogout?: () => void; }
 
 // Detect the tenant slug from the URL (/a/:slug/*) OR from the custom domain
-// (gunachess.com → "gunachess"). Returns null when we're on the main ChessGuru
-// domain / localhost — no tenant chrome, keep default ChessGuru brand.
+// (gunachess.com → "gunachess"). Returns null only when we're on the main
+// ChessGuru domain / localhost AND the visitor is not signed in to an academy.
+// Session-fallback added 2026-08-27: TKT-90 follow-up — students browsing
+// chessguru.cc apex (not their tenant subdomain) were seeing generic
+// "ChessGuru" branding even though /auth/me knows their academyId. That
+// wire is now closed.
+const SESSION_ACADEMY_KEY = "cg.session-academy";
 function useTenantSlug(): string | null {
   const { pathname } = useLocation();
+  const [sessionAcademy, setSessionAcademy] = useState<string | null>(() => {
+    try { return localStorage.getItem(SESSION_ACADEMY_KEY); } catch { return null; }
+  });
+
+  // Refresh session academyId on mount. We accept a one-frame flash of the
+  // cached value on first paint; subsequent visits are instant.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${NAV_API_BASE}/auth/me`, { credentials: "include" })
+      .then((r) => r.ok ? r.json() : null)
+      .then((j) => {
+        if (cancelled) return;
+        const aid: string | null = j?.academyId ?? null;
+        setSessionAcademy(aid);
+        try {
+          if (aid) localStorage.setItem(SESSION_ACADEMY_KEY, aid);
+          else localStorage.removeItem(SESSION_ACADEMY_KEY);
+        } catch { /* ignore */ }
+      })
+      .catch(() => { /* keep the cached value on network failure */ });
+    return () => { cancelled = true; };
+  }, []);
+
   // /a/:slug/... — SPA path
   const m = pathname.match(/^\/a\/([^/]+)/);
   if (m) return decodeURIComponent(m[1]);
@@ -238,7 +266,8 @@ function useTenantSlug(): string | null {
       return h.split(".")[0];
     }
   }
-  return null;
+  // Signed-in student/coach/owner on the main domain — brand as their academy.
+  return sessionAcademy;
 }
 
 interface Brand { name: string; logoUrl: string | null }

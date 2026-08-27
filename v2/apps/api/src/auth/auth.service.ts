@@ -107,15 +107,37 @@ export class AuthService {
     return { ok: true };
   }
 
-  me(session: any) {
+  async me(session: any) {
     if (!session?.userId) return { loggedIn: false };
+    // Self-heal legacy sessions (2026-08-27): ~18% of live sessions on prod
+    // (46/259 at the time of TKT-90 branding fix) were created before we
+    // started stamping academyId onto session — so /auth/me returned null and
+    // the Navbar branded them as generic "ChessGuru" instead of their
+    // academy. Look up the user record when session.academyId is missing and
+    // rehydrate the session in-place so subsequent requests are fast.
+    let academyId: string | null = session.academyId ?? null;
+    let role: string | null = session.role ?? null;
+    if (!academyId) {
+      try {
+        const u = await this.users().findOne(
+          { _id: session.userId as any },
+          { projection: { academyId: 1, role: 1 } },
+        );
+        if (u?.academyId) {
+          academyId = u.academyId as string;
+          role = (u.role as string) ?? role;
+          session.academyId = academyId;
+          if (role) session.role = role;
+        }
+      } catch { /* keep null on lookup failure — non-fatal */ }
+    }
     return {
       loggedIn: true,
       username: session.username,
       userId: session.userId,
       admin: isAdmin(session.userId),
-      academyId: session.academyId ?? null,
-      role: session.role ?? null,
+      academyId,
+      role,
     };
   }
 

@@ -197,13 +197,19 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
     if (idx.current >= solution.current.length) finish();
   }, [finish]);
 
-  const onMove = useCallback((from: Key, to: Key) => {
+  // TKT-90 (2026-08-27): accept an optional promotion piece from the Board picker.
+  // Without it, under-promotion puzzles were unsolvable — we'd build uci as "e7e8"
+  // and compare against exp "e7e8n" which never matched, marking the correct
+  // knight-promotion attempt as wrong.
+  const onMove = useCallback((from: Key, to: Key, promotion?: "q" | "r" | "b" | "n") => {
     if (solved.current) return;
-    const uci = `${from}${to}`;
+    const uci = `${from}${to}${promotion ?? ""}`;
     const exp = solution.current[idx.current];
     setHintShapes([]);
-    if (uci === exp || `${uci}q` === exp) {
-      game.current.move({ from, to, promotion: (exp[4] as any) || "q" });
+    // Match either exact (incl. promotion suffix) or bare uci against a queen-promotion exp.
+    if (uci === exp || (!promotion && `${from}${to}q` === exp)) {
+      const promo = promotion ?? (exp[4] as any) ?? "q";
+      game.current.move({ from, to, promotion: promo });
       idx.current += 1;
       setLastMove([from, to]);
       setFen(game.current.fen());
@@ -214,10 +220,11 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
       // Lichess rule: ANY move that delivers checkmate solves the puzzle, even when it
       // deviates from the stored line — mate puzzles often have several mates (e.g.
       // #0PlNX ends in both Qxg8# and Rxg8#, but the line records only one of them).
+      const promo = promotion ?? "q";
       let mates = false;
-      try { const c = new Chess(game.current.fen()); const mv = c.move({ from, to, promotion: "q" }); mates = !!mv && c.isCheckmate(); } catch { mates = false; }
+      try { const c = new Chess(game.current.fen()); const mv = c.move({ from, to, promotion: promo }); mates = !!mv && c.isCheckmate(); } catch { mates = false; }
       if (mates) {
-        game.current.move({ from, to, promotion: "q" });
+        game.current.move({ from, to, promotion: promo });
         idx.current = solution.current.length;
         setLastMove([from, to]);
         setFen(game.current.fen());
@@ -255,7 +262,10 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
     }
     if (!mv) { try { mv = tmp.move(text); } catch { /* */ } }
     if (!mv) return false;
-    onMove(mv.from as Key, mv.to as Key);
+    // Forward the promotion piece from parsed SAN/UCI so blindfold text input
+    // ("e8=N") solves under-promotion puzzles too. TKT-90.
+    const promo = mv.promotion ? String(mv.promotion).toLowerCase() : undefined;
+    onMove(mv.from as Key, mv.to as Key, promo as "q" | "r" | "b" | "n" | undefined);
     return true;
   }, [onMove]);
 
