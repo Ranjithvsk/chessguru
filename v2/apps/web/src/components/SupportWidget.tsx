@@ -6,6 +6,11 @@
 // pos-api endpoint → central platform.support_ticket table → visible in
 // the super-admin inbox alongside all other tenant tickets.
 //
+// TKT-90 chat loop (2026-08-27): added a "Your tickets" tab so users can
+// see admin replies, reply back, and reopen resolved tickets — closing
+// the round-trip so the widget isn't fire-and-forget anymore. Also
+// shows a red dot on the ? button when there's an unread admin reply.
+//
 // Visual + behavioural PARITY with packages/support-widget/SupportWidget.tsx
 // (the pos/till/staff widget) — owner ask 2026-08-25 "make ? help and support
 // for dreamcy and chessguru same". Same colors, same layout, same silent
@@ -15,7 +20,7 @@
 //
 // Hidden on /class-v2/* + /call/* (video calls) so it doesn't cover the
 // controls.
-import { useState, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 
 const KINDS = [
@@ -27,6 +32,36 @@ const KINDS = [
 
 const MAX_SHOTS = 4;
 const BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
+const LAST_SEEN_KEY = "cg.support.lastSeenAt";
+
+type Reply = {
+  id: string;
+  ticketNo: string;
+  kind: string;
+  message: string;
+  screenshots: string[];
+  isAdminReply: boolean;
+  createdAt: string;
+  status?: string;
+};
+
+type MyTicket = {
+  id: string;
+  ticketNo: string;
+  seq: number;
+  app: string | null;
+  userId: string | null;
+  userName: string | null;
+  kind: string;
+  message: string;
+  screenshots: string[];
+  pageUrl: string | null;
+  contact: string | null;
+  status: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  replies: Reply[];
+};
 
 async function submitTicket(payload: Record<string, unknown>) {
   const r = await fetch(`${BASE}/api/support/ticket`, {
@@ -40,6 +75,13 @@ async function submitTicket(payload: Record<string, unknown>) {
   try { body = text ? JSON.parse(text) : null; } catch { /* not json */ }
   if (!r.ok) throw new Error(body?.message || `Send failed (${r.status})`);
   return body as { ticketNo?: string; id?: string };
+}
+
+async function fetchMyTickets(): Promise<MyTicket[]> {
+  const r = await fetch(`${BASE}/api/support/my-tickets`, { credentials: "include" });
+  if (!r.ok) throw new Error(`Load failed (${r.status})`);
+  const j = await r.json().catch(() => null);
+  return Array.isArray(j?.tickets) ? j.tickets : [];
 }
 
 async function compress(file: Blob): Promise<string | null> {
@@ -72,11 +114,49 @@ function parseTicketRef(v: string): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+function newestAdminReplyAt(tickets: MyTicket[]): number {
+  let max = 0;
+  for (const t of tickets) {
+    for (const r of t.replies) {
+      if (!r.isAdminReply) continue;
+      const ts = new Date(r.createdAt).getTime();
+      if (ts > max) max = ts;
+    }
+  }
+  return max;
+}
+
+function readLastSeen(): number {
+  try { return Number(localStorage.getItem(LAST_SEEN_KEY) || 0); } catch { return 0; }
+}
+function writeLastSeen(v: number): void {
+  try { localStorage.setItem(LAST_SEEN_KEY, String(v)); } catch { /* ignore */ }
+}
+function fmtWhen(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const days = Math.floor((Date.now() - d.getTime()) / 86400_000);
+    if (days === 0) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    if (days === 1) return "yesterday";
+    if (days < 7) return `${days}d ago`;
+    return d.toLocaleDateString();
+  } catch { return ""; }
+}
+function statusChip(status: string): { label: string; bg: string; fg: string } {
+  switch (status) {
+    case "RESOLVED": return { label: "resolved", bg: "#dcfce7", fg: "#166534" };
+    case "IN_PROGRESS": return { label: "in progress", bg: "#e0e7ff", fg: "#3730a3" };
+    case "CLOSED": return { label: "closed", bg: "#e2e8f0", fg: "#475569" };
+    default: return { label: "open", bg: "#fef3c7", fg: "#78350f" };
+  }
+}
+
 export default function SupportWidget() {
   const loc = useLocation();
   const hideOnPath = loc.pathname.startsWith("/class-v2/") || loc.pathname.startsWith("/call/");
 
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<"new" | "inbox">("new");
   const [kind, setKind] = useState<string>("BUG");
   const [message, setMessage] = useState("");
   const [contact, setContact] = useState("");
@@ -88,6 +168,40 @@ export default function SupportWidget() {
   const [ticketNo, setTicketNo] = useState<string | null>(null);
   const [err, setErr] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // "Your tickets" state
+  const [tickets, setTickets] = useState<MyTicket[]>([]);
+  const [ticketsLoading, setTicketsLoading] = useState(false);
+  const [ticketsErr, setTicketsErr] = useState("");
+  const [replyDrafts, setReplyDrafts] = useState<Record<number, string>>({});
+  const [replyBusy, setReplyBusy] = useState<Record<number, boolean>>({});
+  const [hasUnread, setHasUnread] = useState(false);
+
+  const loadTickets = useCallback(async (): Promise<MyTicket[]> => {
+    setTicketsLoading(true); setTicketsErr("");
+    try {
+      const list = await fetchMyTickets();
+      setTickets(list);
+      const newest = newestAdminReplyAt(list);
+      const unread = newest > readLastSeen();
+      setHasUnread(unread);
+      return list;
+    } catch (e) {
+      setTicketsErr(e instanceof Error ? e.message : "Couldn't load your tickets.");
+      return [];
+    } finally { setTicketsLoading(false); }
+  }, []);
+
+  // Background load on mount so the badge is accurate before the user opens the widget.
+  useEffect(() => { void loadTickets(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  // When the user opens the Inbox tab, mark all admin replies as seen.
+  useEffect(() => {
+    if (open && tab === "inbox" && tickets.length) {
+      const newest = newestAdminReplyAt(tickets);
+      if (newest > 0) { writeLastSeen(newest); setHasUnread(false); }
+    }
+  }, [open, tab, tickets]);
 
   if (hideOnPath) return null;
 
@@ -206,9 +320,29 @@ export default function SupportWidget() {
       setTicketNo(res.ticketNo ?? null);
       setDone(true);
       setMessage(""); setShots([]); setContact(""); setParentRef("");
+      // Refresh the inbox in the background so the new ticket appears in "Your tickets".
+      void loadTickets();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Couldn't send — please try again.");
     } finally { setBusy(false); }
+  }
+
+  async function replyTo(seq: number, ticketStatus: string) {
+    const draft = (replyDrafts[seq] ?? "").trim();
+    if (!draft) return;
+    setReplyBusy((x) => ({ ...x, [seq]: true }));
+    setTicketsErr("");
+    try {
+      // parentSeq on the server auto-reopens RESOLVED tickets to IN_PROGRESS.
+      // We still show the "will reopen" hint in the UI when status === RESOLVED.
+      await submitTicket({ kind: "CHAT", message: draft, parentSeq: seq });
+      setReplyDrafts((x) => ({ ...x, [seq]: "" }));
+      // Reload so the new reply + reopened status show up.
+      await loadTickets();
+      void ticketStatus; // status only used for UI hint (no-op here)
+    } catch (e) {
+      setTicketsErr(e instanceof Error ? e.message : "Couldn't send reply.");
+    } finally { setReplyBusy((x) => ({ ...x, [seq]: false })); }
   }
 
   return (
@@ -219,7 +353,10 @@ export default function SupportWidget() {
         title="Help & feedback"
         aria-label="Help & feedback"
         style={s.fab}
-      >?</button>
+      >
+        ?
+        {hasUnread && <span style={s.dot} aria-label="unread reply" />}
+      </button>
       {open && (
         <div data-support-widget="1" style={s.backdrop} onClick={() => setOpen(false)}>
           <div style={s.panel} onClick={(e) => e.stopPropagation()}>
@@ -232,8 +369,9 @@ export default function SupportWidget() {
                     Ticket {ticketNo}
                   </div>
                 )}
-                <div style={{ color: "#64748b", fontSize: 13, marginTop: 4 }}>Save this number for reference — our team will look into it.</div>
-                <button onClick={() => setOpen(false)} style={s.send}>Close</button>
+                <div style={{ color: "#64748b", fontSize: 13, marginTop: 4 }}>You'll see the reply here under "Your tickets" — no need to check email.</div>
+                <button onClick={() => { setDone(false); setTab("inbox"); void loadTickets(); }} style={{ ...s.send, background: "#0f172a" }}>Open your tickets</button>
+                <button onClick={() => setOpen(false)} style={{ ...s.send, marginTop: 8 }}>Close</button>
               </div>
             ) : (
               <>
@@ -241,56 +379,144 @@ export default function SupportWidget() {
                   <div style={{ fontWeight: 800, fontSize: 16, color: "#0f172a" }}>Help &amp; feedback</div>
                   <button onClick={() => setOpen(false)} style={s.x}>✕</button>
                 </div>
-                <div style={s.kinds}>
-                  {KINDS.map((t) => (
-                    <button key={t.k} onClick={() => setKind(t.k)} style={{ ...s.kind, ...(kind === t.k ? s.kindOn : {}) }}>{t.label}</button>
-                  ))}
+                <div style={s.tabs}>
+                  <button
+                    onClick={() => setTab("new")}
+                    style={{ ...s.tab, ...(tab === "new" ? s.tabOn : {}) }}
+                  >New ticket</button>
+                  <button
+                    onClick={() => { setTab("inbox"); void loadTickets(); }}
+                    style={{ ...s.tab, ...(tab === "inbox" ? s.tabOn : {}) }}
+                  >
+                    Your tickets{hasUnread && <span style={s.tabDot} />}
+                  </button>
                 </div>
-                <textarea
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  onPaste={onPaste}
-                  placeholder="Tell us what's happening… (Ctrl+V to paste a screenshot)"
-                  rows={4}
-                  style={s.ta}
-                />
-                <input
-                  value={contact}
-                  onChange={(e) => setContact(e.target.value)}
-                  placeholder="Your phone / email (optional)"
-                  style={s.inp}
-                />
-                <input
-                  value={parentRef}
-                  onChange={(e) => setParentRef(e.target.value)}
-                  placeholder="Following up on an earlier ticket? e.g. TKT-10 (optional)"
-                  style={s.inp}
-                />
-                <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-                  <button onClick={() => fileRef.current?.click()} disabled={shots.length >= MAX_SHOTS} style={{ ...s.shot, opacity: shots.length >= MAX_SHOTS ? 0.5 : 1 }}>📎 Add image</button>
-                  <button onClick={pasteFromClipboard} disabled={shots.length >= MAX_SHOTS} style={{ ...s.shot, opacity: shots.length >= MAX_SHOTS ? 0.5 : 1 }} title="Paste an image copied to the clipboard">📋 Paste</button>
-                  <button onClick={capturePage} disabled={capturing || shots.length >= MAX_SHOTS} style={{ ...s.shot, opacity: capturing || shots.length >= MAX_SHOTS ? 0.5 : 1 }} title="Capture the current page">{capturing ? "📸 Capturing…" : "📸 Capture page"}</button>
-                  <span style={{ marginLeft: "auto", color: "#94a3b8", fontSize: 12 }}>{shots.length}/{MAX_SHOTS}</span>
-                  <input ref={fileRef} type="file" accept="image/*" multiple onChange={(e) => onFiles(e.target.files)} style={{ display: "none" }} />
-                </div>
-                {shots.length > 0 && (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-                    {shots.map((src, i) => (
-                      <div key={i} style={{ position: "relative" }}>
-                        <img src={src} alt={`shot ${i + 1}`} style={{ maxHeight: 80, maxWidth: 120, borderRadius: 8, border: "1px solid #e2e8f0" }} />
-                        <button onClick={() => setShots((p) => p.filter((_, j) => j !== i))} title="Remove"
-                          style={{ position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%", border: "none", background: "#0f172a", color: "#fff", fontSize: 12, cursor: "pointer", boxShadow: "0 2px 4px rgba(0,0,0,0.25)" }}>✕</button>
+                {tab === "new" ? (
+                  <>
+                    <div style={s.kinds}>
+                      {KINDS.map((t) => (
+                        <button key={t.k} onClick={() => setKind(t.k)} style={{ ...s.kind, ...(kind === t.k ? s.kindOn : {}) }}>{t.label}</button>
+                      ))}
+                    </div>
+                    <textarea
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                      onPaste={onPaste}
+                      placeholder="Tell us what's happening… (Ctrl+V to paste a screenshot)"
+                      rows={4}
+                      style={s.ta}
+                    />
+                    <input
+                      value={contact}
+                      onChange={(e) => setContact(e.target.value)}
+                      placeholder="Your phone / email (optional)"
+                      style={s.inp}
+                    />
+                    <input
+                      value={parentRef}
+                      onChange={(e) => setParentRef(e.target.value)}
+                      placeholder="Following up on an earlier ticket? e.g. TKT-10 (optional)"
+                      style={s.inp}
+                    />
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+                      <button onClick={() => fileRef.current?.click()} disabled={shots.length >= MAX_SHOTS} style={{ ...s.shot, opacity: shots.length >= MAX_SHOTS ? 0.5 : 1 }}>📎 Add image</button>
+                      <button onClick={pasteFromClipboard} disabled={shots.length >= MAX_SHOTS} style={{ ...s.shot, opacity: shots.length >= MAX_SHOTS ? 0.5 : 1 }} title="Paste an image copied to the clipboard">📋 Paste</button>
+                      <button onClick={capturePage} disabled={capturing || shots.length >= MAX_SHOTS} style={{ ...s.shot, opacity: capturing || shots.length >= MAX_SHOTS ? 0.5 : 1 }} title="Capture the current page">{capturing ? "📸 Capturing…" : "📸 Capture page"}</button>
+                      <span style={{ marginLeft: "auto", color: "#94a3b8", fontSize: 12 }}>{shots.length}/{MAX_SHOTS}</span>
+                      <input ref={fileRef} type="file" accept="image/*" multiple onChange={(e) => onFiles(e.target.files)} style={{ display: "none" }} />
+                    </div>
+                    {shots.length > 0 && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                        {shots.map((src, i) => (
+                          <div key={i} style={{ position: "relative" }}>
+                            <img src={src} alt={`shot ${i + 1}`} style={{ maxHeight: 80, maxWidth: 120, borderRadius: 8, border: "1px solid #e2e8f0" }} />
+                            <button onClick={() => setShots((p) => p.filter((_, j) => j !== i))} title="Remove"
+                              style={{ position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%", border: "none", background: "#0f172a", color: "#fff", fontSize: 12, cursor: "pointer", boxShadow: "0 2px 4px rgba(0,0,0,0.25)" }}>✕</button>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
+                    {/* Owner ask 2026-08-25: prompt users to attach a screenshot
+                        so tickets are actionable without a follow-up round-trip. */}
+                    <div style={s.nudge}>
+                      📎 <b>Please attach a screenshot</b> for faster issue resolving.
+                    </div>
+                    {err && <div style={{ color: "#dc2626", fontSize: 13, marginTop: 8 }}>{err}</div>}
+                    <button onClick={send} disabled={busy} style={{ ...s.send, opacity: busy ? 0.6 : 1 }}>{busy ? "Sending…" : "Send"}</button>
+                  </>
+                ) : (
+                  <div style={{ maxHeight: "60vh", overflowY: "auto", marginTop: 4 }}>
+                    {ticketsLoading && <div style={{ color: "#64748b", fontSize: 13, padding: "10px 0" }}>Loading your tickets…</div>}
+                    {ticketsErr && <div style={{ color: "#dc2626", fontSize: 13, padding: "10px 0" }}>{ticketsErr}</div>}
+                    {!ticketsLoading && !ticketsErr && tickets.length === 0 && (
+                      <div style={{ color: "#64748b", fontSize: 13, textAlign: "center", padding: "20px 0" }}>
+                        You haven't filed any tickets yet.<br/>Use <b>New ticket</b> to start one.
+                      </div>
+                    )}
+                    {tickets.map((t) => {
+                      const chip = statusChip(t.status);
+                      const draft = replyDrafts[t.seq] ?? "";
+                      const isReopening = t.status === "RESOLVED";
+                      return (
+                        <div key={t.id} style={s.thread}>
+                          <div style={s.threadHead}>
+                            <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 13 }}>{t.ticketNo}</div>
+                            <div style={{ ...s.chip, background: chip.bg, color: chip.fg }}>{chip.label}</div>
+                            <div style={{ marginLeft: "auto", color: "#94a3b8", fontSize: 12 }}>{fmtWhen(t.createdAt)}</div>
+                          </div>
+                          <div style={{ ...s.msg, color: "#0f172a" }}>{t.message}</div>
+                          {t.screenshots.length > 0 && (
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                              {t.screenshots.slice(0, 4).map((src, i) => (
+                                <a key={i} href={src} target="_blank" rel="noreferrer">
+                                  <img src={src} alt="" style={{ maxHeight: 60, maxWidth: 90, borderRadius: 6, border: "1px solid #e2e8f0" }} />
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                          {t.replies.map((r) => (
+                            <div key={r.id} style={{ ...s.reply, ...(r.isAdminReply ? s.replyAdmin : s.replyUser) }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: r.isAdminReply ? "#166534" : "#334155", marginBottom: 2 }}>
+                                {r.isAdminReply ? "Support team" : "You"} · <span style={{ color: "#94a3b8", fontWeight: 400 }}>{fmtWhen(r.createdAt)}</span>
+                              </div>
+                              <div style={{ color: "#0f172a", whiteSpace: "pre-wrap", fontSize: 13 }}>{r.message}</div>
+                              {r.screenshots.length > 0 && (
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                                  {r.screenshots.slice(0, 4).map((src, i) => (
+                                    <a key={i} href={src} target="_blank" rel="noreferrer">
+                                      <img src={src} alt="" style={{ maxHeight: 50, maxWidth: 80, borderRadius: 6, border: "1px solid #e2e8f0" }} />
+                                    </a>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                          <div style={s.replyBox}>
+                            <textarea
+                              value={draft}
+                              onChange={(e) => setReplyDrafts((x) => ({ ...x, [t.seq]: e.target.value }))}
+                              placeholder={isReopening ? "Reply — this will reopen the ticket…" : "Reply…"}
+                              rows={2}
+                              style={{ ...s.ta, marginBottom: 0, borderColor: isReopening ? "#f59e0b" : "#cbd5e1" }}
+                            />
+                            {isReopening && (
+                              <div style={{ color: "#78350f", fontSize: 11, marginTop: 4 }}>
+                                💡 Sending a reply on a resolved ticket will reopen it.
+                              </div>
+                            )}
+                            <button
+                              onClick={() => replyTo(t.seq, t.status)}
+                              disabled={!draft.trim() || replyBusy[t.seq]}
+                              style={{ ...s.send, marginTop: 8, opacity: !draft.trim() || replyBusy[t.seq] ? 0.5 : 1, background: isReopening ? "#f59e0b" : "#008080" }}
+                            >
+                              {replyBusy[t.seq] ? "Sending…" : (isReopening ? "Reopen & reply" : "Send reply")}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
-                {/* Owner ask 2026-08-25: prompt users to attach a screenshot
-                    so tickets are actionable without a follow-up round-trip. */}
-                <div style={s.nudge}>
-                  📎 <b>Please attach a screenshot</b> for faster issue resolving.
-                </div>
-                {err && <div style={{ color: "#dc2626", fontSize: 13, marginTop: 8 }}>{err}</div>}
-                <button onClick={send} disabled={busy} style={{ ...s.send, opacity: busy ? 0.6 : 1 }}>{busy ? "Sending…" : "Send"}</button>
               </>
             )}
           </div>
@@ -304,10 +530,15 @@ export default function SupportWidget() {
 // so the dreamcy pos widget and ChessGuru widget look identical.
 const s: Record<string, React.CSSProperties> = {
   fab: { position: "fixed", right: 16, bottom: 16, width: 46, height: 46, borderRadius: "50%", border: "none", cursor: "pointer", zIndex: 9998, background: "rgba(35,0,81,0.55)", color: "#fff", fontSize: 22, fontWeight: 800, backdropFilter: "blur(4px)", boxShadow: "0 8px 24px rgba(2,6,23,0.35)", opacity: 0.55, transition: "opacity .15s, transform .15s" },
+  dot: { position: "absolute", top: 6, right: 6, width: 10, height: 10, borderRadius: "50%", background: "#ef4444", border: "2px solid #fff", boxShadow: "0 0 0 1px rgba(2,6,23,0.15)" },
   backdrop: { position: "fixed", inset: 0, background: "rgba(2,6,23,0.5)", display: "grid", placeItems: "end", zIndex: 9999, padding: 16 },
   panel: { width: "100%", maxWidth: 380, marginLeft: "auto", background: "#fff", borderRadius: 18, padding: 16, boxShadow: "0 24px 60px rgba(2,6,23,0.4)", fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" },
   head: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
   x: { border: "none", background: "#f1f5f9", borderRadius: 8, width: 30, height: 30, cursor: "pointer", color: "#475569", fontWeight: 700 },
+  tabs: { display: "grid", gridTemplateColumns: "1fr 1fr", background: "#f1f5f9", padding: 3, borderRadius: 10, marginBottom: 10 },
+  tab: { padding: "8px 4px", borderRadius: 8, border: "none", background: "transparent", color: "#475569", cursor: "pointer", fontSize: 13, fontWeight: 700, position: "relative" },
+  tabOn: { background: "#fff", color: "#230051", boxShadow: "0 1px 3px rgba(2,6,23,0.1)" },
+  tabDot: { position: "absolute", top: 4, right: 8, width: 8, height: 8, borderRadius: "50%", background: "#ef4444" },
   kinds: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 },
   kind: { padding: "9px 8px", borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff", color: "#334155", cursor: "pointer", fontSize: 13, fontWeight: 600 },
   kindOn: { background: "#230051", color: "#fff", borderColor: "#230051" },
@@ -316,4 +547,12 @@ const s: Record<string, React.CSSProperties> = {
   shot: { padding: "8px 12px", borderRadius: 10, border: "1px dashed #94a3b8", background: "#f8fafc", color: "#334155", cursor: "pointer", fontSize: 13, fontWeight: 600 },
   send: { width: "100%", marginTop: 12, padding: "12px 14px", borderRadius: 12, background: "#008080", color: "#fff", border: "none", cursor: "pointer", fontSize: 15, fontWeight: 800 },
   nudge: { marginTop: 10, padding: "8px 10px", background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 10, color: "#78350f", fontSize: 12, lineHeight: 1.4 },
+  thread: { border: "1px solid #e2e8f0", borderRadius: 12, padding: 10, marginBottom: 10, background: "#fff" },
+  threadHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 6 },
+  chip: { padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3 },
+  msg: { fontSize: 13, lineHeight: 1.4, whiteSpace: "pre-wrap", padding: "6px 8px", background: "#f8fafc", borderRadius: 8, borderLeft: "3px solid #cbd5e1" },
+  reply: { padding: "8px 10px", borderRadius: 8, marginTop: 6 },
+  replyAdmin: { background: "#dcfce7", borderLeft: "3px solid #166534" },
+  replyUser: { background: "#eef2ff", borderLeft: "3px solid #6366f1" },
+  replyBox: { marginTop: 10, paddingTop: 10, borderTop: "1px dashed #e2e8f0" },
 };

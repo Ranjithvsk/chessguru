@@ -15,11 +15,16 @@
 // We enrich the payload with the ChessGuru session identity (userId, name,
 // academy) BEFORE forwarding so super-admin sees who filed it.
 
-import { Body, Controller, HttpException, HttpStatus, Post, Req } from "@nestjs/common";
+import { Body, Controller, Get, HttpException, HttpStatus, Post, Req } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 
 const UPSTREAM = process.env.SUPPORT_UPSTREAM_URL || "https://pos.dreamcy.com/pos/support/ticket";
+// 2026-08-27 (TKT-90 chat loop): the "your tickets" tab of the widget calls
+// this GET endpoint. We proxy to pos-api's /pos/support/my-tickets using the
+// shared INTERNAL_API_SECRET so the student's session stays authoritative.
+const UPSTREAM_LIST = process.env.SUPPORT_UPSTREAM_LIST_URL || "https://pos.dreamcy.com/pos/support/my-tickets";
+const INTERNAL_TOKEN = process.env.DREAMCY_INTERNAL_TOKEN || process.env.SUPPORT_INTERNAL_TOKEN || "";
 const MAX_SHOTS = 4;
 const MAX_MESSAGE = 5000;
 const MAX_CONTACT = 200;
@@ -82,6 +87,11 @@ export class SupportController {
       pageUrl: pageUrl || undefined,
       app,
       parentSeq: typeof b.parentSeq === "number" && b.parentSeq > 0 ? Math.floor(b.parentSeq) : undefined,
+      // Stamp user identity on the ticket so the user's own "Your tickets"
+      // tab can find it. pos-api uses these as fallback when no pos-api JWT
+      // is present (our case — this proxy has no pos-api token). 2026-08-27.
+      userId: userId || undefined,
+      userName: username || undefined,
     };
 
     try {
@@ -109,6 +119,42 @@ export class SupportController {
       if (e instanceof HttpException) throw e;
       // Network / timeout — save locally so nothing is lost.
       await this.saveFallback(userId, academyId, upstreamPayload, 0, String((e as Error).message).slice(0, 300));
+      throw new HttpException("Support system is temporarily unreachable — try again in a minute.", HttpStatus.BAD_GATEWAY);
+    }
+  }
+
+  /** List the signed-in user's tickets + reply threads. Powers the "Your
+   *  tickets" tab of the widget. Anonymous callers get an empty list — a
+   *  ticket has to have a user identity for us to link it back. TKT-90. */
+  @Get("my-tickets")
+  async myTickets(@Req() req: any) {
+    const userId: string | null = req?.session?.userId ?? null;
+    const username: string | null = req?.session?.username ?? null;
+    const academyId: string | null = req?.session?.academyId ?? null;
+    if (!userId && !username) return { tickets: [] };
+
+    // Determine which app tag(s) this user's tickets landed under. Match how
+    // ticket() stamps `app` above:  chessguru-<academyId>  or  chessguru.
+    const app = academyId ? `chessguru-${academyId.slice(0, 30)}` : "chessguru";
+    const qs = new URLSearchParams();
+    if (userId) qs.set("userId", userId);
+    // userName is our fallback path for LEGACY tickets that predate the
+    // userId-stamping change — pos-api parses "👤 <userName>" from the
+    // message prefix.
+    if (username) qs.set("userName", username);
+    qs.set("app", app);
+
+    try {
+      const r = await fetch(`${UPSTREAM_LIST}?${qs.toString()}`, {
+        method: "GET",
+        headers: { "x-internal-token": INTERNAL_TOKEN },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!r.ok) throw new HttpException(`Support upstream returned ${r.status}`, HttpStatus.BAD_GATEWAY);
+      const j = (await r.json().catch(() => null)) as { tickets?: any[] } | null;
+      return { tickets: Array.isArray(j?.tickets) ? j!.tickets : [] };
+    } catch (e) {
+      if (e instanceof HttpException) throw e;
       throw new HttpException("Support system is temporarily unreachable — try again in a minute.", HttpStatus.BAD_GATEWAY);
     }
   }
