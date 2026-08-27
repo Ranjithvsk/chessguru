@@ -62,6 +62,15 @@ type MyAttempt = { packId: string; scorePct: number; correctCount: number; total
 type MyAttemptsResp = { attempts: MyAttempt[] };
 type LeaderboardRow = { rank: number; userId: string; username: string; name: string; totalScore: number; packsRevised: number; avgScore: number };
 type LeaderboardResp = { rows: LeaderboardRow[] };
+type PackScoreRow = {
+  userId: string; username: string; name: string;
+  attempts: number;
+  bestScore: number | null; bestCorrect: number | null; bestTotal: number | null;
+  bestMs: number | null; lastAt: string | null;
+};
+type PackScoresResp = { rows: PackScoreRow[] };
+type StudentLite = { userId: string; username: string; name: string };
+type StudentsLiteResp = { students: StudentLite[] };
 
 // Group packs by calendar-day so the list reads as "Today · Yesterday · Aug
 // 25" headers rather than one flat scroll — matches the notebook metaphor.
@@ -323,8 +332,20 @@ export default function NotebookPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
-      <div className="mb-6 flex items-baseline justify-between gap-3">
-        <h1 className="font-display text-2xl font-bold text-white">📓 Notebook</h1>
+      <div className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
+        <div className="flex items-baseline gap-3">
+          <h1 className="font-display text-2xl font-bold text-white">📓 Notebook</h1>
+          {(() => {
+            const now = Date.now();
+            const fresh = (data?.packs ?? []).filter((p) => !p.sentByMe && (now - new Date(p.sentAt).getTime()) < 24 * 3600 * 1000).length;
+            if (fresh === 0) return null;
+            return (
+              <span className="inline-flex animate-pulse items-center gap-1 rounded-full border border-emerald-400/50 bg-emerald-500/20 px-3 py-0.5 text-[11px] font-bold text-emerald-100">
+                ✨ {fresh} new
+              </span>
+            );
+          })()}
+        </div>
         <div className="text-xs text-ink-500">
           Positions your coach shares from live classes land here.
         </div>
@@ -381,11 +402,19 @@ export default function NotebookPage() {
 export function NotebookPackDetailPage() {
   const { packId = "" } = useParams();
   const navigate = useNavigate();
+  const qc = useQueryClient();
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareToast, setShareToast] = useState<string | null>(null);
   const { data, isLoading, error } = useQuery({
     queryKey: ["notebook-pack", packId],
     queryFn: () => get<PackDetail>(`/api/notebook/${encodeURIComponent(packId)}`),
     enabled: !!packId,
   });
+  useEffect(() => {
+    if (!shareToast) return;
+    const t = setTimeout(() => setShareToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [shareToast]);
 
   const notation = useMemo(() => {
     if (!data) return [];
@@ -471,7 +500,185 @@ export function NotebookPackDetailPage() {
                 </span>
               </div>
             )}
+            {data.sentByMe && (
+              <button
+                onClick={() => setShareOpen(true)}
+                className="mt-2 block w-full rounded-lg border border-brand-500/50 bg-brand-500/15 px-4 py-2 text-sm font-semibold text-brand-100 hover:bg-brand-500/25"
+              >
+                🔗 Share with more students
+              </button>
+            )}
           </div>
+        </div>
+        {data.sentByMe && <div className="md:col-span-2"><StudentProgressPanel packId={data._id} enabled={data.sentByMe} /></div>}
+      </div>
+      {shareOpen && (
+        <ShareForwardModal
+          packId={data._id}
+          onClose={() => setShareOpen(false)}
+          onDone={(n) => {
+            setShareOpen(false);
+            setShareToast(n === 0 ? "Everyone you picked is already on this pack." : `🔗 Added ${n} student${n === 1 ? "" : "s"}.`);
+            qc.invalidateQueries({ queryKey: ["notebook-pack", data._id] });
+            qc.invalidateQueries({ queryKey: ["notebook-pack-scores", data._id] });
+            qc.invalidateQueries({ queryKey: ["notebook"] });
+          }}
+        />
+      )}
+      {shareToast && (
+        <div className="pointer-events-none fixed left-1/2 top-6 z-[75] -translate-x-1/2 rounded-full border border-brand-500/60 bg-brand-500/25 px-4 py-2 text-sm font-semibold text-brand-50 shadow-lg backdrop-blur">
+          {shareToast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Coach-only student-progress panel — rendered on the pack detail page when
+// the caller sent the pack (or is an academy owner). Every recipient shows
+// up so the coach can see WHO hasn't revised yet.
+function StudentProgressPanel({ packId, enabled }: { packId: string; enabled: boolean }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["notebook-pack-scores", packId],
+    queryFn: () => get<PackScoresResp>(`/api/notebook/${encodeURIComponent(packId)}/scores`),
+    enabled,
+    staleTime: 15_000,
+  });
+  if (!enabled) return null;
+  const rows = data?.rows ?? [];
+  return (
+    <div className="mt-4 rounded-2xl border border-brand-500/30 bg-gradient-to-br from-ink-900 to-ink-950 p-4">
+      <div className="flex items-baseline justify-between">
+        <div className="font-display text-sm font-bold text-white">📊 Student progress</div>
+        <div className="text-[10px] text-ink-500">{rows.length} recipient{rows.length === 1 ? "" : "s"}</div>
+      </div>
+      {isLoading ? (
+        <div className="mt-3 text-xs text-ink-500">Loading…</div>
+      ) : rows.length === 0 ? (
+        <div className="mt-3 text-xs text-ink-500">No recipients on this pack.</div>
+      ) : (
+        <div className="mt-3 max-h-[360px] divide-y divide-ink-800 overflow-y-auto">
+          {rows.map((r) => {
+            const done = r.bestScore != null;
+            const scoreColor = !done ? "text-ink-500"
+              : r.bestScore! >= 90 ? "text-emerald-300"
+              : r.bestScore! >= 70 ? "text-brand-300"
+              : r.bestScore! >= 50 ? "text-amber-300" : "text-rose-300";
+            return (
+              <div key={r.userId} className="flex items-center gap-3 py-2">
+                <div className={`h-2 w-2 shrink-0 rounded-full ${done ? "bg-emerald-400" : "bg-ink-600"}`} />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm text-white">{r.name}</div>
+                  <div className="text-[10px] text-ink-500">
+                    {done ? `${r.attempts} attempt${r.attempts === 1 ? "" : "s"} · last ${new Date(r.lastAt!).toLocaleDateString()}` : "Not yet revised"}
+                  </div>
+                </div>
+                <div className={`shrink-0 font-mono text-base font-bold ${scoreColor}`}>
+                  {done ? `${r.bestScore}%` : "—"}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Share-forward modal — coach picks more students from the academy roster
+// and appends them as recipients on the pack. Auto-dedupes server-side via
+// $addToSet so re-picking someone is a no-op.
+function ShareForwardModal({ packId, onClose, onDone }: { packId: string; onClose: () => void; onDone: (added: number) => void }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["academy-students-lite"],
+    queryFn: () => get<StudentsLiteResp>("/api/academy/students-lite"),
+    staleTime: 60_000,
+  });
+  const [q, setQ] = useState("");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [sending, setSending] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const filtered = useMemo(() => {
+    const list = data?.students ?? [];
+    if (!q.trim()) return list;
+    const needle = q.trim().toLowerCase();
+    return list.filter((s) => s.name.toLowerCase().includes(needle) || s.username.toLowerCase().includes(needle));
+  }, [data, q]);
+  const toggle = (uid: string) => {
+    setPicked((prev) => {
+      const n = new Set(prev);
+      if (n.has(uid)) n.delete(uid); else n.add(uid);
+      return n;
+    });
+  };
+  const send = async () => {
+    setSending(true); setErr(null);
+    try {
+      const r = await fetch(`/v2api/api/notebook/${encodeURIComponent(packId)}/share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ recipientUserIds: [...picked] }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.message || `Share failed (${r.status})`);
+      onDone(Number(j?.added ?? picked.size));
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+      setSending(false);
+    }
+  };
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
+      tabIndex={-1}
+    >
+      <div className="flex w-full max-w-md flex-col rounded-2xl border border-brand-500/40 bg-gradient-to-br from-ink-900 to-ink-950 p-5 shadow-2xl max-h-[85vh]">
+        <div className="mb-3 flex items-baseline justify-between">
+          <div className="font-display text-lg font-bold text-white">🔗 Share with more students</div>
+          <button onClick={onClose} className="rounded-md p-1 text-xl leading-none text-ink-400 hover:text-white">×</button>
+        </div>
+        <input
+          type="text"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search by name or username…"
+          className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none"
+          autoFocus
+        />
+        <div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-lg border border-ink-800 bg-ink-950/60">
+          {isLoading ? (
+            <div className="p-4 text-xs text-ink-500">Loading roster…</div>
+          ) : filtered.length === 0 ? (
+            <div className="p-4 text-xs text-ink-500">No students match.</div>
+          ) : (
+            <div className="divide-y divide-ink-800">
+              {filtered.map((s) => {
+                const on = picked.has(s.userId);
+                return (
+                  <label key={s.userId} className={`flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-ink-800/60 ${on ? "bg-brand-500/10" : ""}`}>
+                    <input type="checkbox" checked={on} onChange={() => toggle(s.userId)} className="h-4 w-4 accent-brand-500" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm text-white">{s.name}</div>
+                      <div className="truncate text-[10px] text-ink-500">@{s.username}</div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        {err && <div className="mt-2 text-[12px] text-rose-400">{err}</div>}
+        <div className="mt-4 flex items-center gap-2">
+          <button
+            onClick={send}
+            disabled={sending || picked.size === 0}
+            className="flex-1 rounded-lg bg-gradient-to-r from-brand-500 to-emerald-500 px-4 py-2 text-sm font-bold text-white shadow hover:brightness-110 disabled:opacity-60"
+          >
+            {sending ? "Sending…" : `🔗 Share with ${picked.size}`}
+          </button>
+          <button onClick={onClose} className="rounded-lg border border-ink-700 bg-ink-800 px-4 py-2 text-sm text-ink-200 hover:bg-ink-700">Cancel</button>
         </div>
       </div>
     </div>
@@ -699,17 +906,24 @@ export function NotebookReviseSessionPage() {
             </>
           ) : (
             <>
-              <div className={`rounded-xl border p-4 text-center ${
-                scorePct >= 90 ? "border-emerald-500/50 bg-gradient-to-br from-emerald-500/20 to-emerald-500/5"
-                : scorePct >= 70 ? "border-brand-500/50 bg-gradient-to-br from-brand-500/20 to-brand-500/5"
+              <div className={`relative overflow-hidden rounded-xl border p-4 text-center ${
+                scorePct >= 90 ? "border-emerald-500/60 bg-gradient-to-br from-emerald-500/25 via-teal-500/15 to-emerald-500/5"
+                : scorePct >= 70 ? "border-brand-500/60 bg-gradient-to-br from-brand-500/25 via-sky-500/15 to-brand-500/5"
                 : scorePct >= 50 ? "border-amber-500/50 bg-gradient-to-br from-amber-500/20 to-amber-500/5"
                 : "border-rose-500/50 bg-gradient-to-br from-rose-500/20 to-rose-500/5"
               }`}>
-                <div className="text-4xl">{scorePct >= 90 ? "🏆" : scorePct >= 70 ? "👍" : scorePct >= 50 ? "💪" : "📚"}</div>
-                <div className="mt-2 font-display text-4xl font-bold text-white">{scorePct}%</div>
-                <div className="mt-1 text-sm text-ink-200">{correct} / {total} correct</div>
-                {posting && <div className="mt-2 text-[10px] text-ink-500">Saving…</div>}
-                {scoreResp && <div className="mt-2 text-[11px] text-emerald-300">✓ Score added to leaderboard</div>}
+                {scorePct >= 90 && (
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-40 blur-2xl">
+                    <div className="h-40 w-40 rounded-full bg-emerald-400" />
+                  </div>
+                )}
+                <div className={`relative text-5xl ${scorePct >= 90 ? "animate-bounce" : ""}`}>
+                  {scorePct >= 90 ? "🏆" : scorePct >= 70 ? "👍" : scorePct >= 50 ? "💪" : "📚"}
+                </div>
+                <div className="relative mt-2 font-display text-5xl font-black tracking-tight text-white drop-shadow">{scorePct}%</div>
+                <div className="relative mt-1 text-sm text-ink-100">{correct} / {total} correct</div>
+                {posting && <div className="relative mt-2 text-[10px] text-ink-500">Saving…</div>}
+                {scoreResp && <div className="relative mt-2 text-[11px] font-semibold text-emerald-200">✓ Score added to leaderboard</div>}
               </div>
               {mistakes.length > 0 && (
                 <div className="rounded-xl border border-ink-800 bg-ink-900/60 p-3">

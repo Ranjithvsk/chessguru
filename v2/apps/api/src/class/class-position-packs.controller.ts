@@ -344,6 +344,129 @@ export class NotebookController {
     return { ok: true, scorePct, correctCount, totalPly };
   }
 
+  /** GET /api/notebook/:packId/scores — coach (or academy owner) view of
+   *  which students revised the pack + best score / attempt count / when.
+   *  Every listed recipient shows up, even those with zero attempts, so the
+   *  coach can chase up who's ignoring the drills. Non-coach 403s. */
+  @Get("notebook/:packId/scores")
+  async packScores(@Param("packId") packId: string, @Req() req: any) {
+    if (!PACK_ID_RE.test(packId)) throw new BadRequestException("bad pack id");
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) throw new UnauthorizedException();
+    const pack: any = await this.packs().findOne({ _id: packId as any });
+    if (!pack) throw new NotFoundException();
+    const role: string | null = req.session.role ?? null;
+    const mineAcademy: string | null = req.session.academyId ?? null;
+    const isCoach = pack.coachId === userId;
+    const isOwnerHere = role === "academy_owner" && mineAcademy && pack.academyId === mineAcademy;
+    if (!isCoach && !isOwnerHere) throw new ForbiddenException("coach only");
+
+    const recipients: string[] = Array.isArray(pack.recipientUserIds) ? pack.recipientUserIds : [];
+    if (recipients.length === 0) return { rows: [] };
+    // Best attempt per student in one aggregate.
+    const agg = await this.attempts().aggregate([
+      { $match: { packId, userId: { $in: recipients } } },
+      { $sort: { userId: 1, scorePct: -1, tookMs: 1 } },
+      { $group: {
+          _id: "$userId",
+          bestScore: { $first: "$scorePct" },
+          bestCorrect: { $first: "$correctCount" },
+          bestTotal: { $first: "$totalPly" },
+          bestMs: { $first: "$tookMs" },
+          lastAt: { $max: "$finishedAt" },
+          attempts: { $sum: 1 },
+      } },
+    ]).toArray();
+    const byUser = new Map(agg.map((r: any) => [String(r._id), r]));
+    const users: any[] = await this.users().find(
+      { _id: { $in: recipients } as any },
+      { projection: { username: 1, name: 1 } },
+    ).toArray();
+    const userMeta = new Map(users.map((u: any) => [String(u._id), u]));
+
+    const rows = recipients.map((uid) => {
+      const s: any = byUser.get(uid);
+      const u: any = userMeta.get(uid);
+      return {
+        userId: uid,
+        username: u?.username ?? uid,
+        name: u?.name ?? u?.username ?? uid,
+        attempts: s?.attempts ?? 0,
+        bestScore: s?.bestScore ?? null,
+        bestCorrect: s?.bestCorrect ?? null,
+        bestTotal: s?.bestTotal ?? null,
+        bestMs: s?.bestMs ?? null,
+        lastAt: s?.lastAt ?? null,
+      };
+    }).sort((a, b) => {
+      // Best-first, unrevised (null) sink to the bottom so the coach's
+      // "who needs a nudge" list stays visible.
+      if (a.bestScore == null && b.bestScore == null) return a.name.localeCompare(b.name);
+      if (a.bestScore == null) return 1;
+      if (b.bestScore == null) return -1;
+      return (b.bestScore - a.bestScore) || ((a.bestMs ?? 0) - (b.bestMs ?? 0));
+    });
+    return { rows };
+  }
+
+  /** POST /api/notebook/:packId/share  — coach or academy owner appends
+   *  more recipients to an existing pack (share-forward from the notebook).
+   *  Body: { recipientUserIds: string[] }. $addToSet so duplicates no-op.
+   *  Recipients validated against session academy so a coach can't push a
+   *  pack into another tenant's user's inbox. */
+  @Post("notebook/:packId/share")
+  async share(@Param("packId") packId: string, @Body() body: any, @Req() req: any) {
+    if (!PACK_ID_RE.test(packId)) throw new BadRequestException("bad pack id");
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) throw new UnauthorizedException();
+    const pack: any = await this.packs().findOne({ _id: packId as any });
+    if (!pack) throw new NotFoundException();
+    const role: string | null = req.session.role ?? null;
+    const mineAcademy: string | null = req.session.academyId ?? null;
+    const isCoach = pack.coachId === userId;
+    const isOwnerHere = role === "academy_owner" && mineAcademy && pack.academyId === mineAcademy;
+    if (!isCoach && !isOwnerHere) throw new ForbiddenException("coach only");
+
+    const raw: string[] = Array.isArray(body?.recipientUserIds) ? body.recipientUserIds : [];
+    let cleaned = [...new Set(raw.filter((u) => typeof u === "string" && u.length > 0 && u.length < 64))] as string[];
+    if (cleaned.length === 0) throw new BadRequestException("no recipients");
+    // Only allow adding users that are in the same academy — blocks a
+    // cross-tenant push via the share endpoint.
+    if (pack.academyId) {
+      const inAcademy = await this.users().find(
+        { _id: { $in: cleaned } as any, academyId: pack.academyId },
+        { projection: { _id: 1 } },
+      ).toArray();
+      const allowed = new Set(inAcademy.map((u: any) => String(u._id)));
+      cleaned = cleaned.filter((u) => allowed.has(u));
+    }
+    if (cleaned.length === 0) throw new BadRequestException("no valid recipients");
+    const r = await this.packs().updateOne(
+      { _id: packId as any },
+      { $addToSet: { recipientUserIds: { $each: cleaned } } as any },
+    );
+    return { ok: true, added: cleaned.length, matched: r.matchedCount };
+  }
+
+  /** GET /api/academy/students-lite — thin roster for the share-picker.
+   *  { userId, username, name } for every student in the caller's academy,
+   *  minus the caller. Coach-only (students shouldn't need a roster list). */
+  @Get("academy/students-lite")
+  async studentsLite(@Req() req: any) {
+    const userId: string | null = req?.session?.userId ?? null;
+    const academyId: string | null = req?.session?.academyId ?? null;
+    const role: string | null = req?.session?.role ?? null;
+    if (!userId || !academyId) return { students: [] };
+    if (role !== "coach" && role !== "academy_owner") return { students: [] };
+    const rows = await this.users()
+      .find({ academyId, role: "student" }, { projection: { username: 1, name: 1 } })
+      .limit(500).toArray();
+    return { students: rows
+      .filter((u: any) => String(u._id) !== userId)
+      .map((u: any) => ({ userId: String(u._id), username: u.username ?? String(u._id), name: u.name ?? u.username ?? String(u._id) }))
+      .sort((a: any, b: any) => a.name.localeCompare(b.name)) };
+  }
+
   /** GET /api/me/notebook/attempts — every revise attempt the caller has
    *  made, most recent first. Powers a "Recent revisions" strip on the
    *  Notebook page and per-pack "Your last try" pill. */
