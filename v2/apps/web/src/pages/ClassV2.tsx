@@ -893,9 +893,14 @@ function ClassNotationPanel({ role }: { role: "coach" | "student" }) {
     `rounded px-1.5 py-0.5 text-left font-mono text-sm transition ${active ? "bg-brand-500/60 text-white" : "text-ink-100 hover:bg-ink-800"}`;
 
   return (
-    <div className="shrink-0 border-t border-ink-800 bg-ink-950/60">
+    // Fixed max-height so the notation panel NEVER pushes the board
+    // smaller as moves accumulate. Owner report 2026-08-27 (mobile/tab):
+    // "board size keeps shrinking until in-scroll comes for moves" — cap
+    // total panel height to a fixed ~5rem on phones, ~14rem on desktop.
+    // Overflow inside the scroll region takes over immediately.
+    <div className="flex shrink-0 flex-col overflow-hidden border-t border-ink-800 bg-ink-950/60 max-h-24 md:max-h-60">
       {/* Header controls — Start / Live pills mirror /openings' ⏮ ⏭ nav. */}
-      <div className="flex items-center gap-2 border-b border-ink-800/70 px-3 py-1 text-[10px] uppercase tracking-widest text-ink-500">
+      <div className="flex shrink-0 items-center gap-2 border-b border-ink-800/70 px-3 py-1 text-[10px] uppercase tracking-widest text-ink-500">
         <span>Moves</span>
         <span className="text-ink-600">·</span>
         <button
@@ -920,9 +925,9 @@ function ClassNotationPanel({ role }: { role: "coach" | "student" }) {
           title={clickable ? "Jump to end of this line" : "End of line"}
         >⏭ Live</button>
       </div>
-      {/* Scrollable notation grid — sized for the board's right column on
-       *  desktop; falls back to a horizontal strip on very short viewports. */}
-      <div className="max-h-56 overflow-y-auto px-2 py-1.5">
+      {/* Scrollable notation grid — flex-1 so it takes whatever height is
+       *  left after the header, and scrolls INSIDE the fixed outer cap. */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1.5">
         {mainRows.map((row, i) => {
           const wActive = row.white ? isActive(row.white.node.path) : false;
           const bActive = row.black ? isActive(row.black.node.path) : false;
