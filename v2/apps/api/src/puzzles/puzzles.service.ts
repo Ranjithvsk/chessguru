@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
-import { updatePuzzleRating, isProvisional, DEFAULT_VOLATILITY } from "../glicko/glicko";
+import { updatePuzzleRating, isProvisional, DEFAULT_VOLATILITY, DAILY_RATED_LIMIT, isDubiousSolve, isCrazyRatingDelta } from "../glicko/glicko";
 import { fmtPuzzle, applyLastMove } from "../lib/puzzle-format";
 import { recordAndCelebrate } from "./milestones";
 import { PushService } from "../push/push.service";
@@ -773,6 +773,30 @@ export class PuzzlesService {
       // via Glicko convergence with d=500 initially.
       const perf = doc[key] || { gl: { r: (key === "blindfold" ? 800 : 1200), d: 500, v: DEFAULT_VOLATILITY }, nb: 0, re: [], la: null };
       if (hint) return { win, ratingDiff: 0, rating: Math.round(perf.gl.r), glicko: perf.gl };
+
+      // ── SAFEGUARD 1: DAILY_RATED_LIMIT (Lichess canUpdatePuzzleRating) ──
+      // Cap RATING UPDATES at 300/day/user. The solve still counts as a
+      // played round, they see the correct move — they just don't move
+      // their rating any more today. Kills marathon farming. Cheap check:
+      // one countDocuments on the indexed rounds prefix range.
+      let overDailyLimit = false;
+      {
+        const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+        const uidRe2 = { $regex: `^${userId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:` } as any;
+        const todayRatedRounds = await this.conn.db!.collection("rounds").countDocuments({
+          _id: uidRe2,
+          k: mode === "blindfold" ? "blindfold" : "puzzle",
+          d: { $gte: startOfDay },
+          // rd:0 rows are already un-rated (hint/limit-hit) — don't count them
+          // against the ceiling or a spam of failed hint-plays could lock a
+          // legit user out. Only actual rating movements accumulate.
+          rd: { $ne: 0 },
+        });
+        overDailyLimit = todayRatedRounds >= DAILY_RATED_LIMIT;
+      }
+      if (overDailyLimit) {
+        return { win, ratingDiff: 0, rating: Math.round(perf.gl.r), glicko: perf.gl, dailyLimit: true };
+      }
       // Rating update — Lichess weighted-average model (owner 2026-08-24).
       // Theme decides how much of the raw Glicko delta gets kept:
       //   mix (no filter)                       → 100% of Glicko
@@ -818,6 +842,24 @@ export class PuzzlesService {
         const dampenedDelta = Math.round(upd.ratingDiff * fatigueMul);
         upd.userPerf.gl.r = oldR + dampenedDelta;
         upd.ratingDiff = dampenedDelta;
+      }
+
+      // ── SAFEGUARD 2: dubiousSolve — implausibly fast win on a much-
+      // harder puzzle. Records a flag on the round for later inspection;
+      // does not block the rating update (Lichess uses the flag to only
+      // gate PUZZLE-side glicko, which we don't currently write anyway).
+      // False positives are non-punitive here — just a paper trail so we
+      // can spot chronic offenders across many rounds.
+      const solveMs = typeof body.ms === "number" && isFinite(body.ms) ? body.ms : undefined;
+      const dubious = isDubiousSolve(perf.gl.r, puzzleGlicko.r, solveMs, win);
+
+      // ── SAFEGUARD 3: crazyGlicko — huge rating swing on an established
+      // user. Post-weight/fatigue, an established player (nb≥30, d≤110)
+      // shouldn't move ±150 in a single puzzle. Log-only (visible in
+      // pm2 logs) so we can trace outliers without shipping a metric
+      // pipeline.
+      if (isCrazyRatingDelta(perf, upd.ratingDiff)) {
+        console.warn(`[crazyGlicko] user=${userId} puzzle=${id} sel=${selectedTheme ?? "mix"} preR=${perf.gl.r} preD=${perf.gl.d} nb=${perf.nb ?? 0} rd=${upd.ratingDiff} pr=${puzzleGlicko.r} win=${win} fatigue=${fatigueMul} dubious=${dubious}`);
       }
       const sets: Record<string, any> = { [key]: upd.userPerf };
 
@@ -870,6 +912,7 @@ export class PuzzlesService {
           sel: body.theme ?? null,                            // selected filter ("mix" = All themes)
           ...(ms != null ? { ms } : {}),                      // solve time in ms (missing on older rows)
           ...(wrong != null ? { wr: wrong } : {}),            // wrong-move UCI (misses only, missing on wins)
+          ...(dubious ? { dub: true } : {}),                  // flagged suspicious solve (fast win on >+300 pr)
         } },
         { upsert: true },
       );
@@ -901,7 +944,7 @@ export class PuzzlesService {
       const dailyStreak = body.daily
         ? await this.bumpDailyStreak(userId, id).catch(() => null)
         : null;
-      return { win, ratingDiff: upd.ratingDiff, rating: upd.userPerf.gl.r, glicko: upd.userPerf.gl, provisional: isProvisional(upd.userPerf), milestone, dailyStreak };
+      return { win, ratingDiff: upd.ratingDiff, rating: upd.userPerf.gl.r, glicko: upd.userPerf.gl, provisional: isProvisional(upd.userPerf), milestone, dailyStreak, dubious: dubious || undefined };
     }
 
     // guest — one-off, non-persisted

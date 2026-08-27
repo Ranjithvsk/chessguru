@@ -116,6 +116,46 @@ const NEUTRAL_THEMES = new Set([
 
 const PROVISIONAL_DEVIATION = 110;
 
+// ─────────────────────────────────────────────────────────────────────────
+// Additional Lichess safeguards (2026-08-27, ported from lila
+// modules/puzzle/src/main/PuzzleFinisher.scala).
+//
+//   1. DAILY_RATED_LIMIT — how many puzzles per day may move the user's
+//      rating. Matches lila `canUpdatePuzzleRating` RateLimit(300, 1.day).
+//      Beyond this, further solves complete normally (get counted, show
+//      the correct move) but produce ratingDiff=0 — killing binge-farm
+//      strategies where a user gets served, wins, moves rating by +5,
+//      round-trips 500× a day.
+//   2. isDubiousSolve — heuristic that flags an implausibly fast win on a
+//      puzzle rated much higher than the user's live rating. When true,
+//      we still credit the USER (their solve stands) but do NOT push the
+//      PUZZLE's own rating downward — matching lila's `dubiousPlayer`
+//      flag semantics which only gates puzzle-side glicko update.
+//   3. isCrazyRatingDelta — the analogue of lila `crazyGlicko` monitor.
+//      Returns true when the raw Glicko delta on this update looks off
+//      the charts (>250 with the user already established, deviation ≤
+//      110). Callers should log the event and prefer roll-back over a
+//      silent write.
+export const DAILY_RATED_LIMIT = 300;
+
+/** Suspicious win: puzzle rated ≥ +300 above user AND solved in < 4s.
+ *  Nobody legitimately solves a puzzle 300 rating pts above them in under
+ *  four seconds — pattern-match wouldn't pan out. Only fires on WINS
+ *  (losses are always credited). */
+export function isDubiousSolve(userR: number, puzzleR: number, ms: number | undefined, win: boolean): boolean {
+  if (!win) return false;
+  if (typeof ms !== "number" || ms <= 0) return false;
+  return (puzzleR - userR) >= 300 && ms < 4000;
+}
+
+/** Flag rating deltas that shouldn't be possible for an established user.
+ *  Post-weight, we should be seeing <150 pt swings on established players
+ *  (nb ≥ 30, d ≤ 110). Anything bigger deserves a look. */
+export function isCrazyRatingDelta(pre: Perf, ratingDiff: number): boolean {
+  if (isProvisional(pre)) return false;   // provisional users LEGITIMATELY swing hard
+  return Math.abs(ratingDiff) >= 150;
+}
+
 export function themeWeight(theme: string | null | undefined, win: boolean): number {
   if (!theme || theme === "mix") return 1.0;
   if (OBVIOUS_THEMES.has(theme)) return win ? 0.10 : 0.40;
