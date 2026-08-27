@@ -204,6 +204,44 @@ export default function SupportWidget() {
     }
   }, [open, tab, tickets]);
 
+  // 2026-08-27 mobile keyboard fix: on Android/iOS the on-screen keyboard was
+  // covering the reply textarea because the panel is anchored bottom via
+  // `place-items:end`. Listen to visualViewport and shrink the modal's
+  // effective height to sit above the keyboard, then delegate to
+  // scrollIntoView so the focused textarea stays visible.
+  const [kbInset, setKbInset] = useState(0);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    const recompute = () => {
+      const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      setKbInset(inset);
+    };
+    vv.addEventListener("resize", recompute);
+    vv.addEventListener("scroll", recompute);
+    recompute();
+    return () => { vv.removeEventListener("resize", recompute); vv.removeEventListener("scroll", recompute); };
+  }, []);
+
+  // Any textarea inside the widget: on focus, wait for the keyboard animation
+  // and then scroll the field into view. Belt-and-braces with the kbInset
+  // above — visualViewport handles most modern browsers but iOS Safari
+  // sometimes reports late, so scrollIntoView is the safety net.
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const root = panelRef.current;
+    if (!root) return;
+    const onFocus = (e: FocusEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (!el || (el.tagName !== "TEXTAREA" && el.tagName !== "INPUT")) return;
+      // 300ms covers the keyboard slide-in on iOS/Android.
+      setTimeout(() => { el.scrollIntoView({ block: "center", behavior: "smooth" }); }, 300);
+    };
+    root.addEventListener("focusin", onFocus);
+    return () => { root.removeEventListener("focusin", onFocus); };
+  }, [open]);
+
   if (hideOnPath) return null;
 
   async function onFiles(files: FileList | null) {
@@ -363,8 +401,16 @@ export default function SupportWidget() {
         {hasUnread && <span style={s.dot} aria-label="unread reply" />}
       </button>
       {open && (
-        <div data-support-widget="1" style={s.backdrop} onClick={() => setOpen(false)}>
-          <div style={s.panel} onClick={(e) => e.stopPropagation()}>
+        <div
+          data-support-widget="1"
+          style={{ ...s.backdrop, paddingBottom: 16 + kbInset }}
+          onClick={() => setOpen(false)}
+        >
+          <div
+            ref={panelRef}
+            style={{ ...s.panel, maxHeight: `calc(100vh - ${32 + kbInset}px)`, overflowY: "auto" }}
+            onClick={(e) => e.stopPropagation()}
+          >
             {done ? (
               <div style={{ textAlign: "center", padding: "18px 6px" }}>
                 <div style={{ fontSize: 40 }}>✅</div>
@@ -452,7 +498,10 @@ export default function SupportWidget() {
                     <button onClick={send} disabled={busy} style={{ ...s.send, opacity: busy ? 0.6 : 1 }}>{busy ? "Sending…" : "Send"}</button>
                   </>
                 ) : (
-                  <div style={{ maxHeight: "60vh", overflowY: "auto", marginTop: 4 }}>
+                  // No inner maxHeight — the outer panel is the scroll container
+                  // (its height already tracks visualViewport so the keyboard
+                  // doesn't cover the reply textarea on mobile).
+                  <div style={{ marginTop: 4 }}>
                     {ticketsLoading && <div style={{ color: "#64748b", fontSize: 13, padding: "10px 0" }}>Loading your tickets…</div>}
                     {ticketsErr && <div style={{ color: "#dc2626", fontSize: 13, padding: "10px 0" }}>{ticketsErr}</div>}
                     {!ticketsLoading && !ticketsErr && tickets.length === 0 && (
