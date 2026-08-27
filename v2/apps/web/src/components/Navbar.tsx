@@ -61,7 +61,6 @@ const GROUPS: Group[] = [
       { to: "/blindfold", label: "🕶️ Blindfold", desc: "Solve without seeing the pieces" },
       { to: "/dashboard", label: "📊 My performance", desc: "Ratings, strengths & progress" },
       { to: "/history", label: "📜 My history", desc: "Every puzzle you've solved" },
-      { to: "/notebook", label: "📓 Notebook", desc: "Positions your coach sent during live classes" },
       { to: "/settings/accounts", label: "🔗 Linked accounts", desc: "Link Lichess + Chess.com" },
       { to: "/settings/face", label: "👤 Face check-in", desc: "One-time enrollment — walk past class camera to auto-mark present" },
     ],
@@ -98,6 +97,7 @@ const GROUPS: Group[] = [
     // User-generated retention loop (Slices 1–6): open-ended, personal.
     label: "Notebook", accent: "emerald", icon: "📓",
     items: [
+      { to: "/notebook", label: "📚 Online class", desc: "Positions your coach sent from live Dream Meet classes" },
       { to: "/studies", label: "📓 My Studies", desc: "Analyze games, teach concepts, opening notes" },
       { to: "/books", label: "📚 Books", desc: "Track chapters read, link studies to book positions" },
       { to: "/revise", label: "🎯 Revise", desc: "Daily spaced-repetition drill of your ⭐ positions" },
