@@ -28,6 +28,14 @@ export class AdminController {
   @Get("admin/users/:username")
   userDetail(@Param("username") username: string, @Req() req: any) { this.requireAdmin(req); return this.admin.userDetail(username); }
 
+  /** Super-admin picker for cross-academy leaderboard views (2026-08-27).
+   *  Returns [{ id, name, studentCount }] for every academy on the platform.
+   *  Ranjith_vsk uses this to pick which academy's leaderboard to view from
+   *  /academy/leaderboard when he's signed in as owner of chess-guru but
+   *  wants to see guna-chess-academy's ranking. Only admins can call. */
+  @Get("admin/academies")
+  academies(@Req() req: any) { this.requireAdmin(req); return this.admin.listAcademies(); }
+
   @Get("status/overview")
   overview(@Req() req: any) { this.requireAdmin(req); return this.admin.overview(); }
 

@@ -279,9 +279,9 @@ export class AcademyController {
    *  365d | lifetime. Returns rows with ChessGuru Score + rank + micro-
    *  champion callouts. */
   @Get("leaderboard")
-  leaderboard(@Req() req: any, @Query("period") period: string, @Query("bucket") bucket: string, @Query("sortBy") sortBy: string) {
+  leaderboard(@Req() req: any, @Query("period") period: string, @Query("bucket") bucket: string, @Query("sortBy") sortBy: string, @Query("academy") academy: string) {
     const sb = sortBy === "consistency" ? "consistency" : "score";
-    return this.svc.buildLeaderboard(req.session, String(period || "7d"), { bucket: bucket || undefined, sortBy: sb });
+    return this.svc.buildLeaderboard(req.session, String(period || "7d"), { bucket: bucket || undefined, sortBy: sb, academy: academy || undefined });
   }
 
   /** Achievement gallery for a student — any academy member can read.

@@ -377,6 +377,19 @@ export default function LeaderboardPage() {
   const [sortBy, setSortBy] = useState<"score" | "consistency">("score");
   const [showBoost, setShowBoost] = useState(false);
   const canManage = !!auth?.loggedIn && (auth.role === "academy_owner" || auth.role === "coach");
+  // Super-admin cross-academy picker (owner ask 2026-08-27, ranjith.vsk).
+  // For admins, load the fleet-wide academy list and let them switch which
+  // academy's leaderboard to view. Non-admins never see the dropdown.
+  const isSuperAdmin = !!auth?.admin;
+  const [pickedAcademy, setPickedAcademy] = useState<string>("");   // "" = use session academyId
+  const academiesQ = useQuery({
+    queryKey: ["admin-academies"],
+    queryFn: () => get<Array<{ id: string; name: string; studentCount: number }>>("/api/admin/academies"),
+    enabled: isSuperAdmin,
+    staleTime: 5 * 60_000,
+  });
+  const activeAcademyId = pickedAcademy || auth?.academyId || "";
+  const activeAcademyName = academiesQ.data?.find(a => a.id === activeAcademyId)?.name;
   // Students land on their own rating-bucket by default so they see peers
   // near their level. Coach/owner keep "all" so they see the whole roster.
   // Fires exactly once — after that, the user can freely switch tabs.
@@ -397,9 +410,14 @@ export default function LeaderboardPage() {
     }
   }, [auth?.loggedIn, auth?.role, myRating?.rating]);
   const q = useQuery({
-    queryKey: ["academy-leaderboard", period, bucket, sortBy],
-    queryFn: () => get<LeaderboardResp>(`/api/academy/leaderboard?period=${period}${bucket !== "all" ? `&bucket=${bucket}` : ""}${sortBy === "consistency" ? "&sortBy=consistency" : ""}`),
-    enabled: !!auth?.loggedIn && !!auth?.academyId,
+    queryKey: ["academy-leaderboard", period, bucket, sortBy, activeAcademyId],
+    queryFn: () => get<LeaderboardResp>(
+      `/api/academy/leaderboard?period=${period}`
+      + (bucket !== "all" ? `&bucket=${bucket}` : "")
+      + (sortBy === "consistency" ? "&sortBy=consistency" : "")
+      + (isSuperAdmin && pickedAcademy ? `&academy=${encodeURIComponent(pickedAcademy)}` : ""),
+    ),
+    enabled: !!auth?.loggedIn && (!!auth?.academyId || (isSuperAdmin && !!pickedAcademy)),
     staleTime: 60_000,
   });
   const startBoostMut = useMutation({
@@ -417,6 +435,24 @@ export default function LeaderboardPage() {
   });
 
   if (auth && !auth.loggedIn) return <Navigate to="/login?back=/academy/leaderboard" replace />;
+  // Super-admin without an academyId: show academy-picker instead of the
+  // "not in an academy" wall so they can view any tenant's leaderboard.
+  if (auth && !auth.academyId && isSuperAdmin) return (
+    <div className="mx-auto max-w-lg py-10 text-center">
+      <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-6">
+        <div className="text-3xl">🛡️</div>
+        <h1 className="mt-2 font-display text-xl text-white">Pick an academy (super-admin)</h1>
+        <p className="mt-2 text-sm text-ink-400">You're not a member of any academy; pick one to view its leaderboard.</p>
+        <select value={pickedAcademy} onChange={(e) => setPickedAcademy(e.target.value)}
+          className="mt-3 w-full rounded-lg border border-ink-600 bg-ink-800 px-3 py-2 text-sm text-white">
+          <option value="">— choose —</option>
+          {(academiesQ.data ?? []).map((a) => (
+            <option key={a.id} value={a.id}>{a.name} ({a.studentCount})</option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
   if (auth && !auth.academyId) return (
     <div className="mx-auto max-w-lg py-10 text-center">
       <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-6">
@@ -449,7 +485,24 @@ export default function LeaderboardPage() {
           <h1 className="font-display text-3xl bg-gradient-to-r from-amber-300 via-fuchsia-300 to-brand-300 bg-clip-text text-transparent">🏆 Academy Leaderboard</h1>
           <div className="mt-1 text-sm text-ink-400">
             {q.data?.studentCount ?? 0} students · ranked by Overall Score (0–100).
+            {isSuperAdmin && activeAcademyName && <span className="ml-2 rounded bg-brand-500/25 px-2 py-0.5 text-[11px] font-semibold text-brand-200">viewing: {activeAcademyName}</span>}
           </div>
+          {isSuperAdmin && (
+            // Super-admin cross-academy picker — visible only for admins.
+            // "" = use their own session academyId. Any other value swaps
+            // the leaderboard's scoping via ?academy= (server-side gated).
+            <div className="mt-2 flex items-center gap-2 text-xs text-ink-400">
+              <span className="rounded bg-ink-800 px-2 py-1 font-semibold text-ink-300">🛡️ admin</span>
+              <span>View academy:</span>
+              <select value={pickedAcademy} onChange={(e) => setPickedAcademy(e.target.value)}
+                className="rounded-lg border border-ink-600 bg-ink-800 px-2 py-1 text-xs text-white">
+                <option value="">— my academy ({auth?.academyId ?? "none"}) —</option>
+                {(academiesQ.data ?? []).map((a) => (
+                  <option key={a.id} value={a.id}>{a.name} ({a.studentCount} students)</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex overflow-hidden rounded-lg border border-ink-700 text-xs">

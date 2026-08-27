@@ -15,6 +15,7 @@ import { Connection } from "mongoose";
 import { randomBytes } from "crypto";
 import { sendMail } from "../lib/mail";
 import { ACHIEVEMENTS, type Achievement } from "./achievements.catalog";
+import { isAdmin } from "../admin/admins";
 
 const INVITE_TTL_DAYS = 7;
 
@@ -3186,10 +3187,18 @@ Thank you!`;
    *  Period options: today | 7d | 30d | 180d | 365d | lifetime. Some
    *  columns (current rating, peak rating, streak, longestStreak) are
    *  period-independent; the rest are windowed. */
-  async buildLeaderboard(session: any, periodRaw: string, opts: { bucket?: string; withDelta?: boolean; sortBy?: "score" | "consistency" } = {}) {
-    const academyId = session?.academyId;
+  async buildLeaderboard(session: any, periodRaw: string, opts: { bucket?: string; withDelta?: boolean; sortBy?: "score" | "consistency"; academy?: string } = {}) {
     const userId = session?.userId;
-    if (!userId || !academyId) throw new ForbiddenException("sign in first");
+    if (!userId) throw new ForbiddenException("sign in first");
+    // Super-admin cross-academy override (owner ask 2026-08-27, ranjith.vsk):
+    // when the signed-in user is in ADMIN_USERS AND passes ?academy=<slug>,
+    // scope the leaderboard to THAT academy instead of the caller's own.
+    // Non-admins ignore the param — session.academyId still wins.
+    const isAdminUser = isAdmin(userId);
+    const academyId: string | undefined = isAdminUser && opts.academy
+      ? String(opts.academy)
+      : session?.academyId;
+    if (!academyId) throw new ForbiddenException("sign in first");
 
     const period = ["today", "7d", "30d", "180d", "365d", "lifetime"].includes(periodRaw) ? periodRaw : "7d";
     // Rating buckets — uniform 200-point intervals, keyed by the lower

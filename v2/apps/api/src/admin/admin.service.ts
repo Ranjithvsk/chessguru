@@ -10,6 +10,23 @@ export class AdminService {
   private statsCache: { at: number; data: any } | null = null;
   private distCache: { at: number; data: any } | null = null;
 
+  /** All academies + their student counts — powers the super-admin picker on
+   *  /academy/leaderboard so ranjith can hop across tenants. 2026-08-27. */
+  async listAcademies(): Promise<Array<{ id: string; name: string; studentCount: number }>> {
+    const [acads, counts] = await Promise.all([
+      this.db().collection("academies").find({}, { projection: { _id: 1, name: 1 } }).toArray(),
+      this.db().collection("users").aggregate([
+        { $match: { academyId: { $ne: null }, role: "student" } },
+        { $group: { _id: "$academyId", n: { $sum: 1 } } },
+      ]).toArray(),
+    ]);
+    const cmap: Record<string, number> = {};
+    for (const c of counts) cmap[String(c._id)] = c.n;
+    return acads
+      .map((a: any) => ({ id: String(a._id), name: String(a.name ?? a._id), studentCount: cmap[String(a._id)] ?? 0 }))
+      .sort((a, b) => b.studentCount - a.studentCount);
+  }
+
   async overview() {
     if (this.statsCache && Date.now() - this.statsCache.at < 60_000) return this.statsCache.data;
     const [total, engineGenerated, verified, engineGames, bfPools, piecePools, paths, users] = await Promise.all([
