@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useOutletContext, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { Key } from "chessground/types";
@@ -173,6 +174,10 @@ function rdChip(rd: number): { chip: string; arrow: string; sign: string } {
 const LazyMini = React.memo(function LazyMini({ it, onOpen }: { it: HistoryItem; onOpen: (id: string) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [show, setShow] = useState(false);
+  // Per-tile "timing details" popover. Opened on tap of the time chip so the
+  // per-move breakdown is reachable on mobile too (title tooltips only work
+  // on hover / desktop). Owner ask 2026-08-27.
+  const [timingOpen, setTimingOpen] = useState(false);
   useEffect(() => {
     if (show || !ref.current) return;
     const io = new IntersectionObserver((es) => {
@@ -220,26 +225,21 @@ const LazyMini = React.memo(function LazyMini({ it, onOpen }: { it: HistoryItem;
             </span>
           )}
           {tTier && typeof it.ms === "number" && (
-            <span className="flex items-center gap-0.5 text-[10px] text-ink-400"
-                  // Per-move breakdown in the hover tooltip. "1st move: 12s · 12→23 · 23→8 …"
-                  // First entry is time from puzzle-load to your first click; subsequent
-                  // entries are wall-clock between your successive correct moves
-                  // (each includes the ~450ms opponent reply animation).
-                  title={
-                    Array.isArray(it.movesMs) && it.movesMs.length > 0
-                      ? (() => {
-                          const ord = (i: number) => ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th"][i] ?? `${i + 1}th`;
-                          const sum = it.movesMs.reduce((a, b) => a + b, 0);
-                          const lines = it.movesMs.map((d, i) => `${ord(i)} move: ${(d / 1000).toFixed(1)}s`);
-                          lines.push("—");
-                          lines.push(`Total (from puzzle load): ${fmtMs(it.ms!)}`);
-                          lines.push(`Sum of moves: ${(sum / 1000).toFixed(1)}s`);
-                          return lines.join("\n");
-                        })()
-                      : `Total time to solve: ${fmtMs(it.ms)}`
-                  }>
+            // Nested button so tapping the timing chip DOESN'T bubble up to
+            // the tile's replay-review click. On tap, opens a small modal
+            // with the per-move breakdown (works on both mobile + desktop).
+            // Desktop still gets the title tooltip as a bonus.
+            <button type="button"
+                    onClick={(e) => { e.stopPropagation(); setTimingOpen(true); }}
+                    className="flex items-center gap-0.5 rounded text-[10px] text-ink-400 hover:text-ink-200 focus:outline-none focus:ring-1 focus:ring-brand-400 focus:text-ink-200"
+                    aria-label="Show per-move solve times"
+                    title={
+                      Array.isArray(it.movesMs) && it.movesMs.length > 0
+                        ? "Tap for per-move breakdown"
+                        : `Total time to solve: ${fmtMs(it.ms)}`
+                    }>
               <span>{tTier.emoji}</span><span className="tabular-nums">{fmtMs(it.ms)}</span>
-            </span>
+            </button>
           )}
           {it.dubious && (
             <span className="rounded bg-amber-500/30 px-1 text-[10px] font-bold text-amber-200"
@@ -247,6 +247,62 @@ const LazyMini = React.memo(function LazyMini({ it, onOpen }: { it: HistoryItem;
           )}
         </span>
       </div>
+      {timingOpen && typeof it.ms === "number" && createPortal(
+        // Bottom-sheet-style modal — tap outside or the ✕ to close. Rendered
+        // via portal because the tile is a <button> and HTML disallows nested
+        // buttons (React would warn).
+        <div
+          onClick={(e) => { e.stopPropagation(); setTimingOpen(false); }}
+          className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/50 sm:items-center"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-t-2xl bg-ink-900 p-4 text-left shadow-2xl ring-1 ring-ink-700 sm:rounded-2xl"
+          >
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-sm font-bold text-ink-100">Per-move times</div>
+              <button type="button" onClick={() => setTimingOpen(false)}
+                className="rounded p-1 text-ink-400 hover:bg-ink-800 hover:text-ink-100" aria-label="Close">✕</button>
+            </div>
+            {Array.isArray(it.movesMs) && it.movesMs.length > 0 ? (
+              <>
+                <ul className="space-y-1 text-sm text-ink-200">
+                  {it.movesMs.map((d, i) => {
+                    const ord = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th"][i] ?? `${i + 1}th`;
+                    return (
+                      <li key={i} className="flex items-center justify-between border-b border-ink-800 py-1">
+                        <span className="text-ink-400">{ord} move</span>
+                        <span className="tabular-nums font-semibold">{(d / 1000).toFixed(1)}s</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <div className="mt-3 space-y-0.5 text-xs text-ink-300">
+                  <div className="flex items-center justify-between">
+                    <span>Total (from puzzle load):</span>
+                    <span className="tabular-nums font-bold text-ink-100">{fmtMs(it.ms!)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-ink-400">
+                    <span>Sum of moves:</span>
+                    <span className="tabular-nums">{(it.movesMs.reduce((a, b) => a + b, 0) / 1000).toFixed(1)}s</span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="text-sm text-ink-300">
+                <div className="flex items-center justify-between">
+                  <span>Total time:</span>
+                  <span className="tabular-nums font-bold text-ink-100">{fmtMs(it.ms)}</span>
+                </div>
+                <div className="mt-2 text-xs text-ink-400">
+                  Per-move timing wasn't captured for this solve (older row).
+                </div>
+              </div>
+            )}
+          </div>
+        </div>,
+        document.body,
+      )}
     </button>
   );
 });
