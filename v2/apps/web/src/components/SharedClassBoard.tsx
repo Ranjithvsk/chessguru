@@ -8,7 +8,7 @@
 // logged against the real student (the class-ws server writes classAttendance
 // on join) — same collection the academy roster's "✓ attended" reads.
 import { useEffect, useRef, useState } from "react";
-import { Chess } from "chess.js";
+import { Chess, validateFen } from "chess.js";
 import type { Key } from "chessground/types";
 import Board from "./Board";
 
@@ -149,6 +149,92 @@ const PIECE_LABEL: Record<string, string> = {
   k: "Black King", q: "Black Queen", r: "Black Rook", b: "Black Bishop", n: "Black Knight", p: "Black Pawn",
 };
 
+// Reject positions that no legal game could ever reach. Runs chess.js's
+// structural validateFen first (kings missing, kings duplicated, pawns on
+// edge rows, bad grid) then adds the checks chess.js is intentionally
+// permissive about: adjacent kings, side-not-to-move in check, both sides
+// in check, pawn/piece counts beyond what promotion allows.
+function describeIllegalPosition(fen: string): string | null {
+  const v = validateFen(fen);
+  if (!v.ok) {
+    const e = v.error || "Invalid FEN.";
+    if (/missing white king/i.test(e))     return "No white king on the board.";
+    if (/missing black king/i.test(e))     return "No black king on the board.";
+    if (/too many white kings/i.test(e))   return "Two (or more) white kings on the board — only one is allowed.";
+    if (/too many black kings/i.test(e))   return "Two (or more) black kings on the board — only one is allowed.";
+    if (/pawns are on the edge rows/i.test(e)) return "A pawn is on the 1st or 8th rank — pawns can never stand there.";
+    if (/side-to-move/i.test(e))           return "Side to move must be White or Black.";
+    if (/en-passant/i.test(e))             return "En-passant square is invalid for this position.";
+    if (/castling/i.test(e))               return "Castling availability doesn't match king / rook positions.";
+    return e.replace(/^Invalid FEN:\s*/i, "");
+  }
+
+  const parts = fen.trim().split(/\s+/);
+  const placement = parts[0] || "";
+  const turn = (parts[1] === "b" ? "b" : "w") as "w" | "b";
+  const grid = fenToGrid(placement);
+
+  // Piece counts (per color)
+  const c0 = { P:0,N:0,B:0,R:0,Q:0,K:0, p:0,n:0,b:0,r:0,q:0,k:0 };
+  let wK: [number, number] | null = null;
+  let bK: [number, number] | null = null;
+  for (let r = 0; r < 8; r++) {
+    const row = grid[r]!;
+    for (let c = 0; c < 8; c++) {
+      const p = row[c];
+      if (!p) continue;
+      if (p in c0) (c0 as any)[p]++;
+      if (p === "K") wK = [r, c];
+      else if (p === "k") bK = [r, c];
+    }
+  }
+
+  // Adjacent kings
+  if (wK && bK && Math.abs(wK[0] - bK[0]) <= 1 && Math.abs(wK[1] - bK[1]) <= 1) {
+    return "The two kings are on touching squares — kings must always be at least one square apart.";
+  }
+
+  // Too many pawns / total pieces
+  if (c0.P > 8) return `Too many white pawns (${c0.P}) — a side can have at most 8.`;
+  if (c0.p > 8) return `Too many black pawns (${c0.p}) — a side can have at most 8.`;
+  const wTotal = c0.P + c0.N + c0.B + c0.R + c0.Q + c0.K;
+  const bTotal = c0.p + c0.n + c0.b + c0.r + c0.q + c0.k;
+  if (wTotal > 16) return `Too many white pieces (${wTotal}) — a side can have at most 16.`;
+  if (bTotal > 16) return `Too many black pieces (${bTotal}) — a side can have at most 16.`;
+
+  // Promotion sanity: any extra piece beyond the initial stock must come from
+  // a promoted pawn, so `pawns + Σ max(0, count - initial)` still can't top 8.
+  const wExtra = Math.max(0, c0.Q - 1) + Math.max(0, c0.R - 2) + Math.max(0, c0.B - 2) + Math.max(0, c0.N - 2);
+  const bExtra = Math.max(0, c0.q - 1) + Math.max(0, c0.r - 2) + Math.max(0, c0.b - 2) + Math.max(0, c0.n - 2);
+  if (c0.P + wExtra > 8) return "White has more promoted pieces than the missing pawns could have produced.";
+  if (c0.p + bExtra > 8) return "Black has more promoted pieces than the missing pawns could have produced.";
+
+  // Side-not-to-move must not be in check — the side to move would just
+  // capture that king. Use chess.js by swapping the turn on a copy of the
+  // FEN, then asking whether the (swapped) side-to-move is in check.
+  let sideNotToMoveInCheck = false;
+  let sideToMoveInCheck = false;
+  try {
+    const swapped = [placement, turn === "w" ? "b" : "w", "-", "-", "0", "1"].join(" ");
+    sideNotToMoveInCheck = new Chess(swapped).isCheck();
+  } catch { /* structural checks above would've caught it */ }
+  try {
+    const same = [placement, turn, "-", "-", "0", "1"].join(" ");
+    sideToMoveInCheck = new Chess(same).isCheck();
+  } catch { /* */ }
+
+  if (sideNotToMoveInCheck && sideToMoveInCheck) {
+    return "Both kings are in check at the same time — impossible in a legal game.";
+  }
+  if (sideNotToMoveInCheck) {
+    return turn === "w"
+      ? "White to move, but the black king is already in check — Black would have moved into check, which isn't legal."
+      : "Black to move, but the white king is already in check — White would have moved into check, which isn't legal.";
+  }
+
+  return null;
+}
+
 function PositionEditorModal(props: {
   initialFen: string;
   onApply: (fen: string) => void;
@@ -165,6 +251,7 @@ function PositionEditorModal(props: {
   const [showFen, setShowFen] = useState<boolean>(false);
 
   const currentFen = gridToFen(grid, turn, initialCastling, initialEp);
+  const illegalErr = describeIllegalPosition(currentFen);
 
   // Live-broadcast every edit so students see the position being built up.
   // Debounced ~120ms to smooth rapid click sequences into one broadcast.
@@ -228,6 +315,12 @@ function PositionEditorModal(props: {
           <button onClick={cancel} title="Cancel (revert to the position that was there before)"
             className="rounded-md p-1 text-xl leading-none text-ink-400 hover:bg-ink-700 hover:text-white">×</button>
         </div>
+
+        {illegalErr && (
+          <div className="border-b border-amber-500/40 bg-amber-500/15 px-4 py-2 text-[12px] text-amber-100">
+            <span className="font-bold">⚠ Illegal position — </span>{illegalErr}
+          </div>
+        )}
 
         <div className="grid gap-4 p-4 md:grid-cols-[1fr_360px]">
           {/* Editor board (fills left column, capped) */}
@@ -308,7 +401,9 @@ function PositionEditorModal(props: {
             <div className="flex items-center gap-2 border-t border-ink-800 pt-3">
               <button
                 onClick={applyAndClose}
-                className="flex-1 rounded-lg bg-brand-500 px-4 py-2 text-sm font-bold text-white hover:bg-brand-400"
+                disabled={!!illegalErr}
+                title={illegalErr ? `Fix the illegal position first: ${illegalErr}` : "Apply this position to everyone"}
+                className={`flex-1 rounded-lg px-4 py-2 text-sm font-bold text-white ${illegalErr ? "cursor-not-allowed bg-ink-700 opacity-60" : "bg-brand-500 hover:bg-brand-400"}`}
               >
                 ✓ Done
               </button>

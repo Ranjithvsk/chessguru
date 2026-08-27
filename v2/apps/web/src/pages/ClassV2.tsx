@@ -6,6 +6,7 @@
 // Requires the API to have LIVEKIT_URL / _API_KEY / _API_SECRET envs. Until
 // those are set, the page renders a friendly "not configured yet" splash.
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Navigate, useParams, useSearchParams, Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -669,17 +670,23 @@ function CoachWaitingOverlay({ room, role }: { room: string; role: "coach" | "st
   );
 }
 
-// Floating camera PIP the coach/student can drag anywhere over the board.
-// Clamps inside its positioned parent (the stage) and remembers its spot.
+// Floating camera PIP the coach/student can drag anywhere on the screen.
+// `position: fixed` (viewport-anchored) so it never covers the board pieces
+// even when the board fills the whole container (mobile portrait). Owner
+// 2026-08-27: "the video opens inside the board, hides the board" — the
+// old `absolute in board container` default put the PIP in the top-right
+// of rank 8; new default sits in the bottom-right of the viewport just
+// above the footer bar. Storage key bumped so any stale drag position
+// from the old absolute-in-board era is discarded.
 function DraggableCameraPIP({ children }: { children: any }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(() => {
-    try { const v = localStorage.getItem("cg_pip_pos"); return v ? JSON.parse(v) : null; } catch { return null; }
+    try { const v = localStorage.getItem("cg_pip_pos_v2"); return v ? JSON.parse(v) : null; } catch { return null; }
   });
   const drag = useRef<{ dx: number; dy: number } | null>(null);
   useEffect(() => {
     if (!pos) return;
-    try { localStorage.setItem("cg_pip_pos", JSON.stringify(pos)); } catch { /* */ }
+    try { localStorage.setItem("cg_pip_pos_v2", JSON.stringify(pos)); } catch { /* */ }
   }, [pos]);
 
   const down = (e: any) => {
@@ -705,11 +712,16 @@ function DraggableCameraPIP({ children }: { children: any }) {
     try { el?.releasePointerCapture(e.pointerId); } catch { /* */ }
   };
 
+  // z-index 9999 + portal-to-body: chessground stacks squares + pieces inside
+  // its own contexts with transforms on the pieces layer; a fixed PIP that
+  // lives INSIDE that subtree gets trapped between the squares and pieces
+  // layers ("pip moves in between board and pieces"). Portaling to <body>
+  // and boosting the stack index puts it on top of everything.
   const style: any = pos
-    ? { position: "absolute", left: pos.x, top: pos.y, touchAction: "none" }
-    : { position: "absolute", right: 12, top: 12, touchAction: "none" };
+    ? { position: "fixed", left: pos.x, top: pos.y, touchAction: "none", zIndex: 9999 }
+    : { position: "fixed", right: 12, bottom: 96, touchAction: "none", zIndex: 9999 };
 
-  return (
+  const node = (
     <div
       ref={ref}
       onPointerDown={down}
@@ -724,6 +736,8 @@ function DraggableCameraPIP({ children }: { children: any }) {
       {children}
     </div>
   );
+
+  return typeof document !== "undefined" ? createPortal(node, document.body) : node;
 }
 
 export default function ClassV2Page() {
