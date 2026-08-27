@@ -870,6 +870,78 @@ function ClassNotationStrip({ role }: { role: "coach" | "student" }) {
   );
 }
 
+// Send-position modal — coach captures the CURRENT class board (startFen +
+// history + cursorIdx from useClassMoveList) and POSTs it to
+// /api/class/:room/send-position. Blank recipients = server sends to every
+// eligible student in the class (batch / individuals / coach's students).
+// Phase 2 will layer a per-student picker here.
+function SendPositionModal({ room, onClose, onSent }: { room: string; onClose: () => void; onSent: (n: number) => void }) {
+  const { startFen, history, cursorIdx } = useClassMoveList();
+  const [title, setTitle] = useState<string>("Position from class");
+  const [sending, setSending] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const send = async () => {
+    setSending(true); setErr(null);
+    try {
+      const r = await fetch(`/v2api/api/class/${encodeURIComponent(room)}/send-position`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ title, startFen, history, cursorIdx }),
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j?.message || `Send failed (${r.status})`);
+      }
+      const j = await r.json();
+      onSent(Number(j?.sentTo || 0));
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+      setSending(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
+      tabIndex={-1}
+    >
+      <div className="w-full max-w-md rounded-2xl border border-emerald-500/40 bg-gradient-to-br from-ink-900 to-ink-950 p-5 shadow-2xl">
+        <div className="mb-3 flex items-baseline justify-between">
+          <div className="font-display text-lg font-bold text-white">📤 Send position</div>
+          <button onClick={onClose} className="rounded-md p-1 text-xl leading-none text-ink-400 hover:text-white">×</button>
+        </div>
+        <div className="mb-4 text-xs text-ink-400">
+          Snapshots the current board + move list ({history.length} {history.length === 1 ? "move" : "moves"}) into every eligible student's Notebook under 📚 Online class.
+        </div>
+        <label className="block text-[10px] font-bold uppercase tracking-widest text-ink-500">Title</label>
+        <input
+          type="text"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          maxLength={140}
+          placeholder="e.g. Tactic from today"
+          className="mt-1 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500 focus:border-emerald-500 focus:outline-none"
+          autoFocus
+        />
+        {err && <div className="mt-2 text-[12px] text-rose-400">{err}</div>}
+        <div className="mt-5 flex items-center gap-2">
+          <button
+            onClick={send}
+            disabled={sending}
+            className="flex-1 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow hover:brightness-110 disabled:opacity-60"
+          >
+            {sending ? "Sending…" : "📤 Send to students"}
+          </button>
+          <button onClick={onClose} className="rounded-lg border border-ink-700 bg-ink-800 px-4 py-2 text-sm text-ink-200 hover:bg-ink-700">Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ClassV2Page() {
   const { room = "" } = useParams();
   const [sp] = useSearchParams();
@@ -918,6 +990,8 @@ export default function ClassV2Page() {
   // a batch). Coach can re-open via the footer 🎯 button to change mid-class.
   const [audiencePickerOpen, setAudiencePickerOpen] = useState(false);
   const [audienceToast, setAudienceToast] = useState<string | null>(null);
+  const [sendPositionOpen, setSendPositionOpen] = useState(false);
+  const [sendPositionToast, setSendPositionToast] = useState<string | null>(null);
   const { data: status, isLoading: statusLoading } = useQuery({
     queryKey: ["livekit-status"],
     queryFn: () => get<LKStatus>("/api/livekit/status"),
@@ -967,6 +1041,11 @@ export default function ClassV2Page() {
     const t = setTimeout(() => setAudienceToast(null), 3000);
     return () => clearTimeout(t);
   }, [audienceToast]);
+  useEffect(() => {
+    if (!sendPositionToast) return;
+    const t = setTimeout(() => setSendPositionToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [sendPositionToast]);
 
   if (authLoading || statusLoading) return <div className="py-16 text-center text-ink-400">Loading…</div>;
   if (!me?.loggedIn) return <Navigate to={`/login?back=${encodeURIComponent(location.pathname + location.search)}`} replace />;
@@ -1122,6 +1201,21 @@ export default function ClassV2Page() {
                   🎯 {audienceToast}
                 </div>
               )}
+              {role === "coach" && sendPositionOpen && (
+                <SendPositionModal
+                  room={room}
+                  onClose={() => setSendPositionOpen(false)}
+                  onSent={(n) => {
+                    setSendPositionOpen(false);
+                    setSendPositionToast(n === 0 ? "No students in class yet." : `📤 Sent to ${n} student${n === 1 ? "" : "s"}' Notebook.`);
+                  }}
+                />
+              )}
+              {sendPositionToast && (
+                <div className="pointer-events-none absolute left-1/2 top-4 z-[65] -translate-x-1/2 rounded-full border border-emerald-500/60 bg-emerald-500/25 px-4 py-1.5 text-sm font-semibold text-emerald-50 shadow-lg backdrop-blur">
+                  {sendPositionToast}
+                </div>
+              )}
             </div>
 
             {/* Move-list strip — /openings-style notation from the current
@@ -1165,6 +1259,15 @@ export default function ClassV2Page() {
                     className="rounded-full border border-brand-500/50 bg-brand-500/20 px-3 py-1.5 text-sm font-semibold text-brand-100 hover:bg-brand-500/30"
                   >
                     📋 Setup
+                  </button>
+                )}
+                {role === "coach" && (
+                  <button
+                    onClick={() => setSendPositionOpen(true)}
+                    title="Send the current board (with move list) to students' Notebook"
+                    className="rounded-full border border-emerald-500/50 bg-emerald-500/20 px-3 py-1.5 text-sm font-semibold text-emerald-100 hover:bg-emerald-500/30"
+                  >
+                    📤 Send position
                   </button>
                 )}
                 {role === "coach" && (

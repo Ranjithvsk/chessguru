@@ -61,6 +61,7 @@ const GROUPS: Group[] = [
       { to: "/blindfold", label: "🕶️ Blindfold", desc: "Solve without seeing the pieces" },
       { to: "/dashboard", label: "📊 My performance", desc: "Ratings, strengths & progress" },
       { to: "/history", label: "📜 My history", desc: "Every puzzle you've solved" },
+      { to: "/notebook", label: "📓 Notebook", desc: "Positions your coach sent during live classes" },
       { to: "/settings/accounts", label: "🔗 Linked accounts", desc: "Link Lichess + Chess.com" },
       { to: "/settings/face", label: "👤 Face check-in", desc: "One-time enrollment — walk past class camera to auto-mark present" },
     ],

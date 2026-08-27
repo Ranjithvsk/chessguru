@@ -84,6 +84,8 @@ import MyGameViewPage from "./pages/MyGameView";
 import MyInsightsPage, { StudentInsightsPage } from "./pages/MyInsights";
 import CoachBoardPage from "./pages/CoachBoard";
 import CoachClassPlanPage from "./pages/CoachClassPlan";
+import CoachChessdbPage from "./pages/CoachChessdb";
+import { StudentGameplayReviseListPage, StudentGameplayRevisePlayPage } from "./pages/StudentGameplayRevise";
 import ParentReportsListPage from "./pages/ParentReportsList";
 import ParentReportGeneratePage from "./pages/ParentReportGenerate";
 import ParentReportViewPage from "./pages/ParentReportView";
@@ -113,6 +115,7 @@ import FeedbackUITestPage from "./pages/FeedbackUITest";
 import BookPage from "./pages/Book";
 import ClassReplayPage from "./pages/ClassReplay";
 import ClassV2Page from "./pages/ClassV2";
+import NotebookPage, { NotebookPackDetailPage } from "./pages/Notebook";
 import CoachPublicPage from "./pages/CoachPublic";
 import CoachProfileEditPage from "./pages/CoachEdit";
 import AcademyPublicPage from "./pages/AcademyPublic";
@@ -209,6 +212,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="my-insights" element={<MyInsightsPage />} />
             <Route path="insights/students/:userId" element={<StudentInsightsPage />} />
             <Route path="coach-board" element={<CoachBoardPage />} />
+            <Route path="coach-board/chessdb" element={<CoachChessdbPage />} />
+            <Route path="revise/games" element={<StudentGameplayReviseListPage />} />
+            <Route path="revise/games/:id" element={<StudentGameplayRevisePlayPage />} />
             <Route path="coach-board/plan/:tag" element={<CoachClassPlanPage />} />
             <Route path="coach-board/reports" element={<ParentReportsListPage />} />
             <Route path="coach-board/reports/new/:studentId" element={<ParentReportGeneratePage />} />
@@ -244,6 +250,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="class/:id" element={<ClassIdRedirect />} />
             <Route path="class/:id/replay/:filename" element={<ClassReplayPage />} />
             <Route path="class-v2/:room" element={<ClassV2Page />} />
+            <Route path="notebook" element={<ErrorBoundary label="Notebook"><NotebookPage /></ErrorBoundary>} />
+            <Route path="notebook/:packId" element={<ErrorBoundary label="Notebook pack"><NotebookPackDetailPage /></ErrorBoundary>} />
             <Route path="coach-profile/edit" element={<CoachProfileEditPage />} />
             <Route path="academy-profile/edit" element={<AcademyProfileEditPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
