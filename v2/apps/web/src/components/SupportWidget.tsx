@@ -166,6 +166,7 @@ export default function SupportWidget() {
   const [capturing, setCapturing] = useState(false);
   const [done, setDone] = useState(false);
   const [ticketNo, setTicketNo] = useState<string | null>(null);
+  const [wasFollowUp, setWasFollowUp] = useState(false);
   const [err, setErr] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -317,7 +318,11 @@ export default function SupportWidget() {
         pageUrl: typeof location !== "undefined" ? location.pathname : undefined,
         parentSeq,
       });
-      setTicketNo(res.ticketNo ?? null);
+      // Owner ask 2026-08-27: a follow-up should confirm under the SAME
+      // ticket number the user typed, not a fresh child-row seq. The child
+      // seq is a DB detail — the user only knows their thread as TKT-<parent>.
+      setTicketNo(parentSeq ? `TKT-${parentSeq}` : (res.ticketNo ?? null));
+      setWasFollowUp(!!parentSeq);
       setDone(true);
       setMessage(""); setShots([]); setContact(""); setParentRef("");
       // Refresh the inbox in the background so the new ticket appears in "Your tickets".
@@ -363,10 +368,12 @@ export default function SupportWidget() {
             {done ? (
               <div style={{ textAlign: "center", padding: "18px 6px" }}>
                 <div style={{ fontSize: 40 }}>✅</div>
-                <div style={{ fontWeight: 800, fontSize: 18, margin: "6px 0", color: "#0f172a" }}>Thanks — we got it!</div>
+                <div style={{ fontWeight: 800, fontSize: 18, margin: "6px 0", color: "#0f172a" }}>
+                  {wasFollowUp ? "Reply added" : "Thanks — we got it!"}
+                </div>
                 {ticketNo && (
                   <div style={{ margin: "6px auto", display: "inline-block", background: "#f1f5f9", borderRadius: 10, padding: "6px 14px", fontWeight: 800, color: "#230051", letterSpacing: 0.5 }}>
-                    Ticket {ticketNo}
+                    {wasFollowUp ? "Reply on " : "Ticket "}{ticketNo}
                   </div>
                 )}
                 <div style={{ color: "#64748b", fontSize: 13, marginTop: 4 }}>You'll see the reply here under "Your tickets" — no need to check email.</div>
