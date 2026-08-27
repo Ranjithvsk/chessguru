@@ -291,11 +291,16 @@ function writeCachedBrand(slug: string, brand: Brand) {
     localStorage.setItem(BRAND_CACHE_KEY, JSON.stringify(cache));
   } catch { /* ignore */ }
 }
-function useTenantBrand(): Brand | null {
+function useTenantBrand(): { brand: Brand | null; slug: string | null } {
   const slug = useTenantSlug();
   // Hydrate synchronously from localStorage so repeat visits don't flash the
   // default "ChessGuru" label while the fetch is in flight. First-visit users
-  // still see one flash, but every subsequent load is instant.
+  // WILL race the fetch — the Navbar now guards against showing "ChessGuru"
+  // as the fallback text when slug is truthy (we know we're on a tenant, so
+  // an empty header is better than the wrong brand). Owner report 2026-08-27:
+  // deepakcharan + akshayprathab kept seeing "ChessGuru" flash on their
+  // phones on gunachess.com because the /api/academy-page fetch was slow
+  // enough that they screenshotted mid-flash.
   const [brand, setBrand] = useState<Brand | null>(() => slug ? readCachedBrand(slug) : null);
   useEffect(() => {
     if (!slug) { setBrand(null); return; }
@@ -315,14 +320,20 @@ function useTenantBrand(): Brand | null {
       .catch(() => { /* keep cached brand if the refresh fails */ });
     return () => { cancelled = true; };
   }, [slug]);
-  return brand;
+  return { brand, slug };
 }
 
 export default function Navbar({ rating, ratingProvisional, username, admin, onLogout }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const { pathname } = useLocation();
   useEffect(() => setMenuOpen(false), [pathname]); // navigating closes the drawer
-  const tenantBrand = useTenantBrand();
+  const { brand: tenantBrand, slug: tenantSlug } = useTenantBrand();
+  // If we know we're on a tenant (slug resolved) but the brand fetch is still
+  // in flight, show empty rather than "ChessGuru" — otherwise the header
+  // flashes wrong-brand until /api/academy-page resolves. Only fall back to
+  // "ChessGuru" when there IS no tenant context (chessguru.cc apex, no
+  // session, guest visitor).
+  const brandLabel = tenantBrand?.name || (tenantSlug ? "" : "ChessGuru");
 
   const adminLink = (to: string, label: string) => (
     <NavLink to={to}
@@ -373,7 +384,7 @@ export default function Navbar({ rating, ratingProvisional, username, admin, onL
           ) : (
             <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand-gradient text-white shadow-glow">♞</span>
           )}
-          <span className="font-display text-lg text-white">{tenantBrand?.name || "ChessGuru"}</span>
+          <span className="font-display text-lg text-white">{brandLabel}</span>
         </NavLink>
 
         <div className="ml-auto flex items-center gap-3 pl-2">
