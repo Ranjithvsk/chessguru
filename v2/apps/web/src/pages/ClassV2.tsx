@@ -1100,7 +1100,7 @@ function ClassNotationPanel({ role }: { role: "coach" | "student" }) {
 // eligible student in the class (batch / individuals / coach's students).
 // Phase 2 will layer a per-student picker here.
 function SendPositionModal({ room, onClose, onSent }: { room: string; onClose: () => void; onSent: (n: number) => void }) {
-  const { startFen, history, cursorIdx } = useClassMoveList();
+  const { startFen, history, cursorIdx, tree, cursorPath } = useClassMoveList();
   const [title, setTitle] = useState<string>("Position from class");
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -1112,7 +1112,7 @@ function SendPositionModal({ room, onClose, onSent }: { room: string; onClose: (
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ title, startFen, history, cursorIdx }),
+        body: JSON.stringify({ title, startFen, history, cursorIdx, tree, cursorPath }),
       });
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
@@ -1138,7 +1138,13 @@ function SendPositionModal({ room, onClose, onSent }: { room: string; onClose: (
           <button onClick={onClose} className="rounded-md p-1 text-xl leading-none text-ink-400 hover:text-white">×</button>
         </div>
         <div className="mb-4 text-xs text-ink-400">
-          Snapshots the current board + move list ({history.length} {history.length === 1 ? "move" : "moves"}) into every eligible student's Notebook under 📚 Online class.
+          Snapshots the current board + move list ({history.length} in this line{(() => {
+            const total = (function count(nodes: SharedTreeNode[]): number {
+              let n = 0; for (const c of nodes) n += 1 + count(c.children); return n;
+            })(tree);
+            const branches = total - history.length;
+            return branches > 0 ? `, + ${branches} in variations` : "";
+          })()}) into every eligible student's Notebook under 📚 Online class.
         </div>
         <label className="block text-[10px] font-bold uppercase tracking-widest text-ink-500">Title</label>
         <input

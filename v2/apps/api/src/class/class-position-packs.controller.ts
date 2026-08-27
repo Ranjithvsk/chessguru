@@ -56,6 +56,10 @@ const MAX_TITLE = 140;
 const MAX_HISTORY = 800;   // 400 full-moves of chess, well past any real class snippet
 
 type Move = { from: string; to: string; promotion?: string };
+// Tree node mirrors the class-ws Room.tree shape — { move, children }. Coach's
+// current variation state is captured in the pack so the Notebook detail can
+// render the full tree (mainline + branches), not just the linear line.
+type PackTreeNode = { move: Move; children: PackTreeNode[] };
 
 function newPackId(): string {
   return "pp_" + randomBytes(9).toString("base64url").slice(0, 12);
@@ -92,6 +96,58 @@ function cleanHistory(raw: unknown): Move[] {
   return out;
 }
 
+/** Recursively cleanse an incoming tree — same move sanitization as
+ *  cleanHistory, applied to the whole node tree. Total node count capped at
+ *  MAX_HISTORY across ALL branches so a rogue client can't send a 100k-node
+ *  tree that we then persist. Returns null if the tree shape isn't an
+ *  array so callers can fall back to the linear history path. */
+function cleanTree(raw: unknown): PackTreeNode[] | null {
+  if (!Array.isArray(raw)) return null;
+  let budget = MAX_HISTORY;
+  const walk = (nodes: unknown[]): PackTreeNode[] => {
+    const out: PackTreeNode[] = [];
+    for (const n of nodes) {
+      if (budget <= 0) break;
+      if (!n || typeof n !== "object") continue;
+      const mv = (n as any).move;
+      if (!mv || typeof mv.from !== "string" || typeof mv.to !== "string") continue;
+      if (!/^[a-h][1-8]$/.test(mv.from) || !/^[a-h][1-8]$/.test(mv.to)) continue;
+      const promo = mv.promotion;
+      const move: Move = {
+        from: mv.from, to: mv.to,
+        promotion: (typeof promo === "string" && /^[qrbn]$/i.test(promo)) ? promo.toLowerCase() : undefined,
+      };
+      budget--;
+      const kids = Array.isArray((n as any).children) ? walk((n as any).children) : [];
+      out.push({ move, children: kids });
+    }
+    return out;
+  };
+  return walk(raw);
+}
+/** Derive a linear history[] from a tree by walking cursorPath. Kept in sync
+ *  on the pack so old clients still see the current-line PGN without needing
+ *  to understand the tree. */
+function pathToHistory(tree: PackTreeNode[], path: number[]): Move[] {
+  const out: Move[] = [];
+  let cur = tree;
+  for (const idx of path) {
+    const n = cur[idx];
+    if (!n) break;
+    out.push(n.move);
+    cur = n.children;
+  }
+  return out;
+}
+/** Wrap a linear history[] as a straight-line tree (each node has one child
+ *  = the next move). Used when the coach's client only sent legacy fields. */
+function historyToTree(history: Move[]): PackTreeNode[] {
+  if (history.length === 0) return [];
+  const nodes: PackTreeNode[] = history.map((m) => ({ move: m, children: [] }));
+  for (let i = nodes.length - 1; i > 0; i--) nodes[i - 1]!.children = [nodes[i]!];
+  return [nodes[0]!];
+}
+
 @Controller("class")
 export class ClassPositionPacksController {
   constructor(@InjectConnection() private readonly conn: Connection) {}
@@ -126,9 +182,39 @@ export class ClassPositionPacksController {
     if (!isCreator && !isOwner) throw new ForbiddenException("only the class coach can send positions");
 
     // Validate + replay the position — chess.js throws on illegal FEN / move.
+    // Two paths accepted:
+    //  * NEW: body.tree + body.cursorPath (full variation tree, from the
+    //    class-ws Room). The pack captures the whole tree the coach was
+    //    exploring — Notebook detail renders it read-only.
+    //  * LEGACY: body.history (linear moves) — wrapped as a straight-line
+    //    tree so downstream views only ever deal with tree shape.
     const startFen = typeof body?.startFen === "string" ? body.startFen : "";
-    const history = cleanHistory(body?.history);
-    const cursorIdx = Number.isFinite(Number(body?.cursorIdx)) ? Number(body.cursorIdx) : history.length;
+    const rawTree = cleanTree(body?.tree);
+    const rawCursorPath: number[] = Array.isArray(body?.cursorPath)
+      ? body.cursorPath.map((n: any) => Math.trunc(Number(n))).filter((n: number) => Number.isFinite(n) && n >= 0).slice(0, 200)
+      : [];
+    let tree: PackTreeNode[];
+    let cursorPath: number[];
+    if (rawTree && rawTree.length > 0) {
+      tree = rawTree;
+      // Validate cursorPath against the tree; clamp on first miss.
+      const clean: number[] = [];
+      let cur = tree;
+      for (const idx of rawCursorPath) {
+        if (idx >= cur.length) break;
+        clean.push(idx); cur = cur[idx]!.children;
+      }
+      cursorPath = clean;
+    } else {
+      const legacyHistory = cleanHistory(body?.history);
+      tree = historyToTree(legacyHistory);
+      cursorPath = tree.length > 0 ? Array.from({ length: legacyHistory.length }, () => 0) : [];
+    }
+    // Derive linear history + capped cursor from tree + cursorPath so the
+    // rest of the pipeline (currentFen replay, Maia rating, notebook detail)
+    // still works uniformly.
+    const history = pathToHistory(tree, cursorPath);
+    const cursorIdx = cursorPath.length;
     let currentFen: string;
     let capped: number;
     try {
@@ -176,6 +262,10 @@ export class ClassPositionPacksController {
       sentAt: now,
       title,
       startFen,
+      // Tree + cursorPath — the new canonical shape. history + cursorIdx
+      // still stored as a derived convenience for older clients.
+      tree,
+      cursorPath,
       history,
       cursorIdx: capped,
       currentFen,
@@ -290,6 +380,13 @@ export class NotebookController {
       sentByMe: row.coachId === userId,
       maiaRating: typeof row.maiaRating === "number" ? row.maiaRating : null,
       maiaBand: typeof row.maiaBand === "string" ? row.maiaBand : null,
+      // Full tree — Notebook detail renders variations. Fall back to a
+      // straight-line tree derived from history for packs from before this
+      // migration.
+      tree: Array.isArray(row.tree) && row.tree.length > 0
+        ? row.tree
+        : historyToTree(Array.isArray(row.history) ? row.history : []),
+      cursorPath: Array.isArray(row.cursorPath) ? row.cursorPath : (Array.isArray(row.history) ? Array.from({ length: row.history.length }, () => 0) : []),
       bestAttempt: bestAttempt ? {
         scorePct: bestAttempt.scorePct,
         correctCount: bestAttempt.correctCount,

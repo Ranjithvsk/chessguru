@@ -54,9 +54,13 @@ function DifficultyChip({ rating, band }: { rating: number | null; band: string 
 }
 type PackListResp = { packs: PackListItem[] };
 type BestAttempt = { scorePct: number; correctCount: number; totalPly: number; tookMs: number; finishedAt: string };
+type PackMove = { from: string; to: string; promotion?: string };
+type PackTreeNode = { move: PackMove; children: PackTreeNode[] };
 type PackDetail = PackListItem & {
-  history: Array<{ from: string; to: string; promotion?: string }>;
+  history: PackMove[];
   bestAttempt: BestAttempt | null;
+  tree: PackTreeNode[];
+  cursorPath: number[];
 };
 type MyAttempt = { packId: string; scorePct: number; correctCount: number; totalPly: number; tookMs: number; finishedAt: string };
 type MyAttemptsResp = { attempts: MyAttempt[] };
@@ -184,6 +188,129 @@ function OnlineClassList({ packs }: { packs: PackListItem[] }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// Read-only /openings-style tree renderer for a pack — enriches each node
+// with SAN + move number, then walks it into a two-column mainline table
+// (child[0] chain) with inline variation branches below the ply that
+// spawned them. Highlights the pack's cursorPath as "the coach paused
+// here" so students see where the interesting position is.
+type PackEnriched = {
+  san: string; path: number[]; ply: number; moveNo: number; turn: "w" | "b";
+  children: PackEnriched[];
+};
+function useEnrichedPackTree(startFen: string, tree: PackTreeNode[]) {
+  return useMemo(() => {
+    const startTurn: "w" | "b" = startFen.split(" ")[1] === "b" ? "b" : "w";
+    const startNum = Number(startFen.split(" ")[5] || "1");
+    const startPly = (startNum - 1) * 2 + (startTurn === "b" ? 1 : 0);
+    const walk = (nodes: PackTreeNode[], parentFen: string, prefix: number[], plyBase: number): PackEnriched[] => {
+      const out: PackEnriched[] = [];
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i]!;
+        let san = "??"; let nextFen = parentFen;
+        try {
+          const c = new Chess(parentFen);
+          const applied = c.move({ from: n.move.from, to: n.move.to, promotion: (n.move.promotion as any) || "q" });
+          if (applied) { san = applied.san; nextFen = c.fen(); }
+        } catch { /* keep ?? */ }
+        const ply = plyBase;
+        const moveNo = Math.floor(ply / 2) + 1;
+        const turn: "w" | "b" = ply % 2 === 0 ? "w" : "b";
+        const childPath = [...prefix, i];
+        out.push({ san, path: childPath, ply, moveNo, turn, children: walk(n.children, nextFen, childPath, plyBase + 1) });
+      }
+      return out;
+    };
+    return { nodes: walk(tree, startFen, [], startPly), startNum, startTurn };
+  }, [startFen, tree]);
+}
+function packPathsEqual(a: number[], b: number[]) { return a.length === b.length && a.every((v, i) => v === b[i]); }
+function PackNotationTree({ startFen, tree, cursorPath }: { startFen: string; tree: PackTreeNode[]; cursorPath: number[] }) {
+  const { nodes } = useEnrichedPackTree(startFen, tree);
+  if (nodes.length === 0) return <div className="text-xs text-ink-500">No moves — just the position.</div>;
+
+  const renderInline = (n: PackEnriched, includeNumber: boolean): any => {
+    const active = packPathsEqual(n.path, cursorPath);
+    return (
+      <span key={n.path.join("-")} className="inline">
+        {includeNumber && n.turn === "w" && <span className="ml-1 mr-0.5 text-[11px] text-ink-500">{n.moveNo}.</span>}
+        {includeNumber && n.turn === "b" && <span className="ml-1 mr-0.5 text-[11px] text-ink-500">{n.moveNo}…</span>}
+        <span className={`rounded px-1 py-0.5 font-mono text-sm ${active ? "bg-brand-500/60 text-white" : "text-ink-100"}`}>{n.san}</span>
+      </span>
+    );
+  };
+  const renderVariationLine = (root: PackEnriched) => {
+    const out: any[] = [];
+    let cur: PackEnriched | undefined = root;
+    let first = true;
+    while (cur) {
+      out.push(renderInline(cur, first || cur.turn === "w"));
+      first = false;
+      if (cur.children.length > 1) {
+        for (let vi = 1; vi < cur.children.length; vi++) {
+          const v = cur.children[vi]!;
+          out.push(
+            <span key={"pn-" + v.path.join("-")} className="ml-1 inline-block rounded border-l-2 border-ink-700 pl-1 text-[12px] text-ink-300">
+              ({renderVariationLine(v)})
+            </span>
+          );
+        }
+      }
+      cur = cur.children[0];
+    }
+    return out;
+  };
+
+  // Two-column mainline table (child[0] chain).
+  type Cell = { node: PackEnriched; vars: PackEnriched[] } | null;
+  type Row = { moveNo: number; white: Cell; black: Cell };
+  const rows: Row[] = [];
+  let node: PackEnriched | undefined = nodes[0];
+  let curRow: Row | null = null;
+  while (node) {
+    const vars = node.children.slice(1);
+    if (node.turn === "w") {
+      curRow = { moveNo: node.moveNo, white: { node, vars }, black: null };
+      rows.push(curRow);
+    } else {
+      if (!curRow) {
+        curRow = { moveNo: node.moveNo, white: null, black: { node, vars } };
+        rows.push(curRow);
+      } else {
+        curRow.black = { node, vars };
+      }
+    }
+    node = node.children[0];
+  }
+  const cellClass = (active: boolean) => `rounded px-1.5 py-0.5 text-left font-mono text-sm ${active ? "bg-brand-500/60 text-white" : "text-ink-100"}`;
+  return (
+    <div>
+      {rows.map((row, i) => {
+        const wActive = row.white ? packPathsEqual(row.white.node.path, cursorPath) : false;
+        const bActive = row.black ? packPathsEqual(row.black.node.path, cursorPath) : false;
+        return (
+          <div key={i}>
+            <div className="grid grid-cols-[2rem_1fr_1fr] items-baseline gap-1">
+              <span className="text-right font-mono text-[11px] text-ink-500">{row.moveNo}.</span>
+              {row.white ? <span className={cellClass(wActive)}>{row.white.node.san}</span> : <span />}
+              {row.black ? <span className={cellClass(bActive)}>{row.black.node.san}</span> : <span />}
+            </div>
+            {row.white?.vars.map((v, vi) => (
+              <div key={`wv${vi}`} className="my-1 ml-8 border-l-2 border-ink-700 pl-2 text-[13px] text-ink-300">
+                {renderVariationLine(v)}
+              </div>
+            ))}
+            {row.black?.vars.map((v, vi) => (
+              <div key={`bv${vi}`} className="my-1 ml-8 border-l-2 border-ink-700 pl-2 text-[13px] text-ink-300">
+                {renderVariationLine(v)}
+              </div>
+            ))}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -462,18 +589,20 @@ export function NotebookPackDetailPage() {
           <div className="mt-2 truncate font-mono text-[10px] text-ink-500" title={data.currentFen}>{data.currentFen}</div>
         </div>
         <div className="rounded-2xl border border-ink-800 bg-ink-900/60 p-3 self-start">
-          <div className="text-[10px] font-bold uppercase tracking-widest text-ink-500">Moves</div>
-          <div className="mt-2 max-h-[420px] overflow-y-auto font-mono text-sm text-ink-100">
-            {notation.length === 0 ? (
-              <div className="text-xs text-ink-500">No moves — just the position.</div>
-            ) : (
-              notation.map((n) => (
-                <span key={n.ply} className="mr-1.5">
-                  {n.turn === "w" ? <span className="text-ink-500">{n.num}. </span> : (n.ply === 1 && <span className="text-ink-500">{n.num}… </span>)}
-                  <span>{n.san}</span>
-                </span>
-              ))
-            )}
+          <div className="flex items-baseline justify-between">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-ink-500">Moves</div>
+            {(() => {
+              const totalTree = (function count(nodes: PackTreeNode[]): number {
+                let n = 0; for (const c of nodes) n += 1 + count(c.children); return n;
+              })(data.tree);
+              const branches = totalTree - data.history.length;
+              return branches > 0 ? (
+                <span className="text-[10px] text-amber-300">+{branches} in variations</span>
+              ) : null;
+            })()}
+          </div>
+          <div className="mt-2 max-h-[420px] overflow-y-auto pr-1">
+            <PackNotationTree startFen={data.startFen} tree={data.tree} cursorPath={data.cursorPath ?? []} />
           </div>
           <div className="mt-4 border-t border-ink-800 pt-3">
             {data.history.length === 0 ? (
