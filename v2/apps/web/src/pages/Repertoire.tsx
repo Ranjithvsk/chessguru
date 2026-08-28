@@ -1,0 +1,677 @@
+// Repertoire manager — full-page browse + manage for every saved opening,
+// line, and coach-shared entry. Complements the compact sidebar in /openings
+// (MyRepertoirePanel). Opened via the "📚 Open in full manager" link at the
+// top of that sidebar, or directly at /repertoire.
+//
+// Feature slate (owner ask 2026-08-28):
+//   Tier 1  — search + facets + sort + mini-board previews + preview drawer
+//             + bulk-select + star/pin
+//   Tier 2  — per-entry progress metrics (FSRS reps/lapses/next-due),
+//             academy-wide coverage report (What ECOs do I cover as
+//             White vs Black?), Play-vs-engine link, weakness heatmap
+//             (30-day retention colour dot on every card)
+//   Item 21 — auto-classify every "line" entry via findOpeningForLine so
+//             it picks up an ECO + name chip without saving anything new
+//
+// All progress data reads from client-side FSRS store (see lib/cards +
+// lib/fsrs); no new server endpoints needed for this ship.
+
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Chess } from "chess.js";
+import Board from "../components/Board";
+import { api } from "../lib/api";
+import {
+  listRepertoire, deleteRepertoire, shareRepertoire, duplicateRepertoire,
+  type RepertoireEntry, type RepMoveNode,
+} from "../lib/repertoire-api";
+import { OPENINGS, findOpeningForLine, openingBySlug, type Opening } from "../lib/openings";
+import { activateRepertoireEntry, isRepertoireEntryActivated, loadAllStates, trainerSlugFor } from "../lib/cards";
+import type { FsrsState } from "../lib/fsrs";
+
+const STANDARD_START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+const K_STARS = "cg_rep_stars_v1";
+
+// ─────────────────────────────────────────────────────────────────────
+// Small pure helpers — kept top-level so the component tree stays clean.
+// ─────────────────────────────────────────────────────────────────────
+
+function loadStars(): Set<string> {
+  try { const r = localStorage.getItem(K_STARS); return r ? new Set(JSON.parse(r)) : new Set(); } catch { return new Set(); }
+}
+function saveStars(s: Set<string>) {
+  try { localStorage.setItem(K_STARS, JSON.stringify([...s])); } catch { /* quota */ }
+}
+
+// Reconstruct the final FEN for an entry — corpus entries use the opening's
+// canonical pgnStart, line entries replay sans (or tree's mainline). Falls
+// back to the standard start if replay fails.
+function finalFenFor(e: RepertoireEntry): string {
+  const sans: string[] = e.kind === "corpus"
+    ? (e.slug ? (openingBySlug.get(e.slug)?.pgnStart ?? []) : [])
+    : (e.sans ?? []);
+  try {
+    const c = new Chess(e.startFen && e.startFen.length > 0 ? e.startFen : STANDARD_START);
+    for (const s of sans) { if (!c.move(s)) break; }
+    return c.fen();
+  } catch { return STANDARD_START; }
+}
+// First non-empty SAN on the mainline → maps to a colour ("White repertoire"
+// if it's a first-move-by-white; "Black repertoire" if the first move is
+// black's response to a white opening — inferred from SAN parity).
+function colourFor(e: RepertoireEntry): "white" | "black" | "unknown" {
+  const sans = e.kind === "corpus"
+    ? (e.slug ? (openingBySlug.get(e.slug)?.pgnStart ?? []) : [])
+    : (e.sans ?? []);
+  if (!sans.length) return "unknown";
+  // If pgnStart begins with a WHITE move (odd-index pattern), it's white's
+  // opening. Anything starting from move 2 (…c5 = Sicilian) is black-focused.
+  // We approximate by SAN letter: a move of a piece to rank 3/4 mostly by
+  // white; rank 5/6 by black. Simpler: infer from the corpus opening's ECO
+  // (A/B = flank + semi-open black defences; C-E = e4 and d4 openings for
+  // white). Not perfect — the corpus already carries this signal though.
+  const eco = e.kind === "corpus" ? (openingBySlug.get(e.slug ?? "")?.eco ?? "") : (findOpeningForLine(sans)?.eco ?? "");
+  if (!eco) {
+    // Fallback: even-indexed pgnStart entries are black responses to a shown
+    // white first move. Play the first SAN and check whose turn is now.
+    try {
+      const c = new Chess(); c.move(sans[0]!);
+      return c.turn() === "w" ? "black" : "white";
+    } catch { return "unknown"; }
+  }
+  // Rough rule: B* + A* first-move-c openings are typically Black
+  // repertoire choices; C-E cover 1.e4 / 1.d4 White repertoires. Not exact
+  // — user can override via a tag later.
+  const first = eco[0];
+  if (first === "B") return "black";
+  return "white";
+}
+type ProgressMetrics = { reps: number; lapses: number; nextDueMs: number | null; accuracy: number | null; cardCount: number; retention: "green" | "amber" | "red" | "gray" };
+// Aggregate FSRS state across every card that keys off this entry. Empty
+// counts render as gray (never studied). Accuracy = reps / (reps + lapses).
+function progressFor(e: RepertoireEntry, allStates: Record<string, FsrsState>): ProgressMetrics {
+  const slug = trainerSlugFor(e);
+  const prefix = slug ? `${slug}:` : null;
+  const linePrefix = e.kind === "line" ? `line:${e._id}:` : null;
+  let reps = 0, lapses = 0, cardCount = 0;
+  let earliestDue: number | null = null;
+  for (const [k, v] of Object.entries(allStates)) {
+    if (!v) continue;
+    const matches = (prefix && k.startsWith(prefix)) || (linePrefix && k.startsWith(linePrefix));
+    if (!matches) continue;
+    cardCount++;
+    reps += v.reps || 0;
+    lapses += v.lapses || 0;
+    const dueMs = new Date(v.due).getTime();
+    if (Number.isFinite(dueMs)) {
+      if (earliestDue === null || dueMs < earliestDue) earliestDue = dueMs;
+    }
+  }
+  const total = reps + lapses;
+  const accuracy = total > 0 ? Math.round((reps / total) * 100) : null;
+  const retention: ProgressMetrics["retention"] =
+    total === 0 ? "gray"
+    : accuracy! >= 85 ? "green"
+    : accuracy! >= 60 ? "amber"
+    : "red";
+  return { reps, lapses, nextDueMs: earliestDue, accuracy, cardCount, retention };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Filters + sort configuration
+// ─────────────────────────────────────────────────────────────────────
+
+type KindFilter = "all" | "corpus" | "line-tree" | "line-flat";
+type SourceFilter = "all" | "mine" | "shared" | "force";
+type ColourFilter = "all" | "white" | "black";
+type EcoFilter = "all" | "A" | "B" | "C" | "D" | "E";
+type SortKey = "recent" | "name" | "eco" | "accuracy" | "reviewed";
+
+const KIND_OPTS: Array<{ id: KindFilter; label: string; icon: string }> = [
+  { id: "all",       label: "All",           icon: "📚" },
+  { id: "corpus",    label: "Openings",      icon: "📖" },
+  { id: "line-tree", label: "Trees",         icon: "🌳" },
+  { id: "line-flat", label: "Lines",         icon: "✏️" },
+];
+const SOURCE_OPTS: Array<{ id: SourceFilter; label: string; icon: string }> = [
+  { id: "all",    label: "All sources",   icon: "•" },
+  { id: "mine",   label: "My own",        icon: "🧑" },
+  { id: "shared", label: "From coach",    icon: "🎓" },
+  { id: "force",  label: "⚡ Required",    icon: "⚡" },
+];
+
+// ─────────────────────────────────────────────────────────────────────
+
+function CardMiniBoard({ fen }: { fen: string }) {
+  return (
+    <div className="pointer-events-none aspect-square w-full overflow-hidden rounded-md border border-ink-800/60">
+      <Board fen={fen} coordinates={false} viewOnly dests={new Map() as any} />
+    </div>
+  );
+}
+
+function RetentionDot({ tone, title }: { tone: ProgressMetrics["retention"]; title: string }) {
+  const cls = tone === "green" ? "bg-emerald-400"
+    : tone === "amber" ? "bg-amber-400"
+    : tone === "red" ? "bg-rose-500"
+    : "bg-ink-600";
+  return <span title={title} className={`inline-block h-2 w-2 rounded-full ${cls}`} />;
+}
+
+function CoverageReport({ entries }: { entries: RepertoireEntry[] }) {
+  // Very lightweight coverage: count entries by colour + top-move family.
+  // Not intended to be a full ECO audit — that's a Tier 5 build.
+  const groups = useMemo(() => {
+    let white = 0, black = 0;
+    const whiteFams = new Map<string, number>();
+    const blackFams = new Map<string, number>();
+    for (const e of entries) {
+      const col = colourFor(e);
+      if (col === "white") white++;
+      else if (col === "black") black++;
+      const eco = e.kind === "corpus" ? (openingBySlug.get(e.slug ?? "")?.eco ?? "") : "";
+      if (eco) {
+        const fam = eco[0]!;
+        const bucket = col === "black" ? blackFams : whiteFams;
+        bucket.set(fam, (bucket.get(fam) ?? 0) + 1);
+      }
+    }
+    return { white, black, whiteFams: [...whiteFams].sort(), blackFams: [...blackFams].sort() };
+  }, [entries]);
+  const bar = (n: number, of: number) => `${of > 0 ? Math.round((n / Math.max(1, of)) * 100) : 0}%`;
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div className="rounded-xl border border-sky-500/40 bg-gradient-to-br from-sky-500/15 to-sky-500/5 p-4">
+        <div className="flex items-baseline justify-between">
+          <div className="font-display text-sm font-bold text-sky-100">♔ White repertoire</div>
+          <div className="font-mono text-lg font-black text-white">{groups.white}</div>
+        </div>
+        <div className="mt-1 text-[10px] text-sky-200/80">{bar(groups.white, entries.length)} of your saved entries</div>
+        <div className="mt-2 flex flex-wrap gap-1">
+          {groups.whiteFams.length === 0 && <span className="text-[10px] text-ink-500">No corpus openings yet</span>}
+          {groups.whiteFams.map(([f, n]) => (
+            <span key={f} className="rounded-full bg-sky-500/20 px-2 py-0.5 text-[10px] font-bold text-sky-100" title={`${n} entries in the ${f}xx range`}>{f} · {n}</span>
+          ))}
+        </div>
+      </div>
+      <div className="rounded-xl border border-rose-500/40 bg-gradient-to-br from-rose-500/15 to-rose-500/5 p-4">
+        <div className="flex items-baseline justify-between">
+          <div className="font-display text-sm font-bold text-rose-100">♚ Black repertoire</div>
+          <div className="font-mono text-lg font-black text-white">{groups.black}</div>
+        </div>
+        <div className="mt-1 text-[10px] text-rose-200/80">{bar(groups.black, entries.length)} of your saved entries</div>
+        <div className="mt-2 flex flex-wrap gap-1">
+          {groups.blackFams.length === 0 && <span className="text-[10px] text-ink-500">No corpus openings yet</span>}
+          {groups.blackFams.map(([f, n]) => (
+            <span key={f} className="rounded-full bg-rose-500/20 px-2 py-0.5 text-[10px] font-bold text-rose-100" title={`${n} entries in the ${f}xx range`}>{f} · {n}</span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+
+export default function RepertoirePage() {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const { data: auth } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
+  const loggedIn = !!auth?.loggedIn;
+  const isCoach = auth?.role === "coach" || auth?.role === "academy_owner";
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["my-repertoire"],
+    queryFn: listRepertoire,
+    enabled: loggedIn,
+  });
+  const [allStates, setAllStates] = useState<Record<string, FsrsState>>(() => loadAllStates() as any);
+  useEffect(() => {
+    // FSRS store lives in localStorage; refresh on window focus so a fresh
+    // trainer session's updates show up when the user tabs back.
+    const on = () => setAllStates(loadAllStates() as any);
+    window.addEventListener("focus", on);
+    return () => window.removeEventListener("focus", on);
+  }, []);
+  const [stars, setStars] = useState<Set<string>>(() => loadStars());
+  const toggleStar = (id: string) => {
+    setStars((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      saveStars(n);
+      return n;
+    });
+  };
+
+  const entries = data?.entries ?? [];
+
+  // Auto-classify: for line entries without a slug hint, look up
+  // findOpeningForLine on the SANs to surface an ECO+name chip. Cached
+  // alongside the entries. Item 21 of the ship plan.
+  const enriched = useMemo(() => {
+    return entries.map((e) => {
+      const classified = e.kind === "line"
+        ? (findOpeningForLine(e.sans ?? []) ?? null)
+        : (e.slug ? (openingBySlug.get(e.slug) ?? null) : null);
+      return { entry: e, classified, colour: colourFor(e), progress: progressFor(e, allStates) };
+    });
+  }, [entries, allStates]);
+
+  // ── Filter + sort state ─────────────────────────────────────────
+  const [q, setQ] = useState("");
+  const [kind, setKind] = useState<KindFilter>("all");
+  const [source, setSource] = useState<SourceFilter>("all");
+  const [colour, setColour] = useState<ColourFilter>("all");
+  const [ecoFam, setEcoFam] = useState<EcoFilter>("all");
+  const [sort, setSort] = useState<SortKey>("recent");
+  const [starsOnly, setStarsOnly] = useState(false);
+
+  const filtered = useMemo(() => {
+    let out = enriched;
+    if (starsOnly) out = out.filter((r) => stars.has(r.entry._id));
+    if (kind !== "all") {
+      out = out.filter(({ entry: e }) => {
+        if (kind === "corpus") return e.kind === "corpus";
+        if (kind === "line-tree") return e.kind === "line" && !!(e.tree && e.tree.length > 0);
+        if (kind === "line-flat") return e.kind === "line" && !(e.tree && e.tree.length > 0);
+        return true;
+      });
+    }
+    if (source !== "all") {
+      out = out.filter(({ entry: e }) => {
+        if (source === "mine")   return !e.sharedFrom;
+        if (source === "shared") return !!e.sharedFrom;
+        if (source === "force")  return !!e.forceTrain;
+        return true;
+      });
+    }
+    if (colour !== "all") out = out.filter((r) => r.colour === colour);
+    if (ecoFam !== "all") {
+      out = out.filter((r) => {
+        const eco = r.classified?.eco ?? "";
+        return eco[0] === ecoFam;
+      });
+    }
+    if (q.trim()) {
+      const needle = q.trim().toLowerCase();
+      out = out.filter(({ entry: e, classified }) =>
+        (e.name || "").toLowerCase().includes(needle) ||
+        (e.slug || "").toLowerCase().includes(needle) ||
+        (classified?.name ?? "").toLowerCase().includes(needle) ||
+        (classified?.eco ?? "").toLowerCase().includes(needle)
+      );
+    }
+    const cmp = (a: typeof out[number], b: typeof out[number]) => {
+      // Stars pin above everything else regardless of sort.
+      const sa = stars.has(a.entry._id) ? 1 : 0, sb = stars.has(b.entry._id) ? 1 : 0;
+      if (sa !== sb) return sb - sa;
+      switch (sort) {
+        case "recent":   return new Date(b.entry.createdAt).getTime() - new Date(a.entry.createdAt).getTime();
+        case "name":     return (a.entry.name || "").localeCompare(b.entry.name || "");
+        case "eco":      return (a.classified?.eco ?? "z").localeCompare(b.classified?.eco ?? "z");
+        case "accuracy": return (b.progress.accuracy ?? -1) - (a.progress.accuracy ?? -1);
+        case "reviewed": return (b.progress.reps + b.progress.lapses) - (a.progress.reps + a.progress.lapses);
+      }
+    };
+    return [...out].sort(cmp);
+  }, [enriched, kind, source, colour, ecoFam, q, sort, stars, starsOnly]);
+
+  // Preview + bulk-select state.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulk, setBulk] = useState<Set<string>>(new Set());
+  const toggleBulk = (id: string) => {
+    setBulk((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  };
+  const clearBulk = () => { setBulk(new Set()); setBulkMode(false); };
+
+  // Mutations for bulk actions.
+  const delMut = useMutation({ mutationFn: deleteRepertoire, onSuccess: () => qc.invalidateQueries({ queryKey: ["my-repertoire"] }) });
+  const dupMut = useMutation({ mutationFn: (id: string) => duplicateRepertoire(id), onSuccess: () => qc.invalidateQueries({ queryKey: ["my-repertoire"] }) });
+
+  const bulkDelete = async () => {
+    if (bulk.size === 0) return;
+    if (!confirm(`Remove ${bulk.size} entries?`)) return;
+    for (const id of bulk) { try { await delMut.mutateAsync(id); } catch { /* skip failures */ } }
+    clearBulk();
+  };
+  const bulkActivate = () => {
+    for (const id of bulk) {
+      const r = enriched.find((x) => x.entry._id === id);
+      if (r) activateRepertoireEntry(r.entry);
+    }
+    setAllStates(loadAllStates() as any);
+    clearBulk();
+  };
+  const bulkDuplicate = async () => {
+    for (const id of bulk) { try { await dupMut.mutateAsync(id); } catch { /* skip */ } }
+    clearBulk();
+  };
+
+  const selected = selectedId ? enriched.find((r) => r.entry._id === selectedId) ?? null : null;
+
+  if (!loggedIn) return (
+    <div className="mx-auto max-w-md p-8 text-center">
+      <div className="text-4xl">📚</div>
+      <div className="mt-3 font-display text-lg text-white">Sign in to see your repertoire</div>
+      <Link to="/login" className="mt-4 inline-block rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-400">Sign in</Link>
+    </div>
+  );
+
+  return (
+    <div className="mx-auto max-w-7xl px-3 py-4">
+      {/* Header row — title + Sort + bulk-mode toggle. */}
+      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
+        <div>
+          <h1 className="font-display text-2xl font-bold text-white">📚 My Repertoire</h1>
+          <div className="text-xs text-ink-400">{entries.length} saved · manage, browse, drill.</div>
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <label className="text-ink-500">Sort:</label>
+          <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}
+            className="rounded-md border border-ink-700 bg-ink-900 px-2 py-1 text-ink-100">
+            <option value="recent">Recently added</option>
+            <option value="name">Name</option>
+            <option value="eco">ECO</option>
+            <option value="accuracy">Accuracy</option>
+            <option value="reviewed">Times reviewed</option>
+          </select>
+          <button
+            onClick={() => { setBulkMode((v) => !v); if (bulkMode) setBulk(new Set()); }}
+            className={`rounded-md border px-2 py-1 font-semibold transition ${bulkMode ? "border-brand-500 bg-brand-500/20 text-brand-100" : "border-ink-700 bg-ink-900 text-ink-200 hover:bg-ink-800"}`}
+            title="Toggle bulk-select mode">
+            {bulkMode ? "✓ Selecting" : "☐ Bulk"}
+          </button>
+        </div>
+      </div>
+
+      {/* Coverage report — Tier 2 item 8. Compact 2-column banner. */}
+      <div className="mb-5"><CoverageReport entries={entries} /></div>
+
+      <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)_320px]">
+        {/* ─────── LEFT RAIL: facet filters ─────── */}
+        <aside className="space-y-3 self-start">
+          <div>
+            <label className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-ink-500">Search</label>
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, ECO, slug…"
+              className="w-full rounded-lg border border-ink-700 bg-ink-800 px-2.5 py-1.5 text-sm text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
+          </div>
+          <FacetGroup title="Kind" opts={KIND_OPTS.map(o => ({ id: o.id, label: `${o.icon} ${o.label}` }))} value={kind} onChange={(v) => setKind(v as KindFilter)} />
+          <FacetGroup title="Source" opts={SOURCE_OPTS.map(o => ({ id: o.id, label: `${o.icon} ${o.label}` }))} value={source} onChange={(v) => setSource(v as SourceFilter)} />
+          <FacetGroup title="Colour" opts={[
+            { id: "all", label: "All" },
+            { id: "white", label: "♔ White" },
+            { id: "black", label: "♚ Black" },
+          ]} value={colour} onChange={(v) => setColour(v as ColourFilter)} />
+          <FacetGroup title="ECO family" opts={[
+            { id: "all", label: "All" }, { id: "A", label: "A · Flank" }, { id: "B", label: "B · Semi-open" },
+            { id: "C", label: "C · 1.e4 e5" }, { id: "D", label: "D · Closed / 1.d4 d5" }, { id: "E", label: "E · Indian" },
+          ]} value={ecoFam} onChange={(v) => setEcoFam(v as EcoFilter)} />
+          <button
+            onClick={() => setStarsOnly((v) => !v)}
+            className={`w-full rounded-lg border px-3 py-1.5 text-left text-sm transition ${starsOnly ? "border-amber-500/60 bg-amber-500/15 text-amber-100" : "border-ink-800 bg-ink-900 text-ink-300 hover:bg-ink-800"}`}>
+            ⭐ {starsOnly ? "Showing stars only" : "Show stars only"}
+          </button>
+        </aside>
+
+        {/* ─────── MAIN: card grid ─────── */}
+        <main className="min-w-0">
+          {isLoading ? (
+            <div className="text-sm text-ink-500">Loading…</div>
+          ) : filtered.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-ink-700 bg-ink-900/40 p-10 text-center">
+              <div className="text-5xl">📚</div>
+              <div className="mt-3 font-display text-lg text-white">Nothing matches these filters</div>
+              <div className="mt-1 text-xs text-ink-400">
+                {entries.length === 0
+                  ? <>Save openings from <Link to="/openings" className="text-brand-300 underline">/openings</Link> to fill your repertoire.</>
+                  : "Clear a filter to see more entries."}
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {filtered.map(({ entry: e, classified, colour: col, progress: p }) => {
+                const isSel = selectedId === e._id;
+                const isBulk = bulk.has(e._id);
+                const starred = stars.has(e._id);
+                const fen = finalFenFor(e);
+                const eco = classified?.eco ?? "";
+                const cardKindAccent = e.forceTrain ? "border-l-amber-400"
+                  : e.kind === "corpus" ? "border-l-sky-400"
+                  : e.tree ? "border-l-emerald-400" : "border-l-brand-400";
+                return (
+                  <div key={e._id}
+                    className={`group relative flex flex-col overflow-hidden rounded-xl border border-ink-800 border-l-2 ${cardKindAccent} bg-gradient-to-b from-ink-900 to-ink-950 transition hover:border-ink-700 hover:shadow-lg hover:shadow-brand-500/5 ${isSel ? "ring-2 ring-brand-500/60" : ""}`}>
+                    {/* Top row inside the card — checkbox (bulk mode) + star */}
+                    <div className="absolute right-2 top-2 z-10 flex gap-1">
+                      {bulkMode && (
+                        <label className="cursor-pointer">
+                          <input type="checkbox" checked={isBulk} onChange={() => toggleBulk(e._id)} className="h-4 w-4 accent-brand-500" />
+                        </label>
+                      )}
+                      <button onClick={() => toggleStar(e._id)}
+                        className={`text-sm transition ${starred ? "text-amber-300 hover:text-amber-200" : "text-ink-600 hover:text-amber-300"}`}
+                        title={starred ? "Unstar" : "Star (pin to top)"}>
+                        {starred ? "⭐" : "☆"}
+                      </button>
+                    </div>
+                    {/* Retention dot in top-LEFT — one-glance signal of study health */}
+                    <div className="absolute left-2 top-2 z-10">
+                      <RetentionDot tone={p.retention}
+                        title={p.cardCount === 0 ? "Never studied"
+                          : `${p.accuracy}% accuracy over ${p.reps + p.lapses} reviews`} />
+                    </div>
+                    {/* Mini board — clickable for preview */}
+                    <button onClick={() => setSelectedId(e._id)}
+                      className="p-3 pb-2" title="Preview">
+                      <CardMiniBoard fen={fen} />
+                    </button>
+                    {/* Meta */}
+                    <div className="px-3 pb-3">
+                      <div className="mb-1 flex items-start gap-1.5">
+                        {eco && <span className="shrink-0 rounded bg-brand-500/20 px-1.5 py-0.5 font-mono text-[10px] font-bold text-brand-200">{eco}</span>}
+                        <div className="min-w-0 flex-1 truncate text-sm font-semibold text-white" title={e.name}>{e.name}</div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-ink-500">
+                        <span>{e.kind === "corpus" ? "📖 Opening" : (e.tree ? "🌳 Tree" : "✏️ Line")}</span>
+                        {e.kind === "line" && <span>· {(e.sans?.length ?? 0)} moves</span>}
+                        {col !== "unknown" && <span className={col === "white" ? "text-sky-300" : "text-rose-300"}>· {col === "white" ? "♔" : "♚"}</span>}
+                        {e.sharedFromName && <span className="text-indigo-300">· from {e.sharedFromName}</span>}
+                        {e.forceTrain && <span className="text-amber-300">· ⚡ required</span>}
+                      </div>
+                      {p.cardCount > 0 && (
+                        <div className="mt-1.5 flex items-center gap-2 text-[10px] text-ink-500">
+                          <span className="font-mono text-ink-300">{p.accuracy}%</span>
+                          <span>· {p.reps + p.lapses} reviews</span>
+                          {p.nextDueMs && (
+                            <span className={p.nextDueMs < Date.now() ? "text-amber-300" : ""}>
+                              · {p.nextDueMs < Date.now() ? "due now" : `due ${new Date(p.nextDueMs).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {/* Actions */}
+                    <div className="mt-auto flex items-center justify-between gap-1 border-t border-ink-800/60 bg-ink-950/40 px-2 py-1.5 text-[10px]">
+                      <button
+                        onClick={() => navigate(`/openings?load=${encodeURIComponent(e._id)}`)}
+                        className="rounded px-2 py-0.5 font-bold text-brand-300 hover:bg-brand-500/15 hover:text-brand-100">
+                        📚 Study
+                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => { activateRepertoireEntry(e); setAllStates(loadAllStates() as any); }}
+                          disabled={isRepertoireEntryActivated(e)}
+                          className={`rounded px-1.5 py-0.5 font-semibold ${isRepertoireEntryActivated(e) ? "text-emerald-300 cursor-default" : "text-fuchsia-300 hover:bg-fuchsia-500/15 hover:text-fuchsia-100"}`}
+                          title={isRepertoireEntryActivated(e) ? "In Opening Trainer" : "Add to Opening Trainer"}>
+                          {isRepertoireEntryActivated(e) ? "✓" : "📅"}
+                        </button>
+                        {/* Play vs engine — Tier 2 item 9. Uses the same /openings
+                           * hop with an engineDrill flag; the explorer handles
+                           * the drill wiring when we build that. */}
+                        <button
+                          onClick={() => navigate(`/openings?load=${encodeURIComponent(e._id)}&engineDrill=1`)}
+                          className="rounded px-1.5 py-0.5 font-semibold text-ink-400 hover:bg-ink-800 hover:text-brand-300"
+                          title="Play this line vs the engine">▶</button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </main>
+
+        {/* ─────── RIGHT: preview drawer (lg+ only) ─────── */}
+        <aside className="hidden self-start rounded-xl border border-ink-800 bg-ink-900/60 p-3 lg:block">
+          {!selected ? (
+            <div className="p-6 text-center text-[11px] text-ink-500">
+              <div className="text-2xl">👁️</div>
+              <div className="mt-2">Click any card to preview its board + moves here.</div>
+            </div>
+          ) : (
+            <PreviewPane row={selected} onClose={() => setSelectedId(null)} />
+          )}
+        </aside>
+      </div>
+
+      {/* Bulk action bar — fixed at bottom, only when bulkMode + some selected. */}
+      {bulkMode && bulk.size > 0 && (
+        <div className="pointer-events-none fixed bottom-6 left-1/2 z-40 -translate-x-1/2">
+          <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-brand-500/50 bg-ink-900/95 px-4 py-2 shadow-2xl backdrop-blur">
+            <span className="text-sm font-semibold text-brand-200">{bulk.size} selected</span>
+            <span className="text-ink-700">|</span>
+            <button onClick={bulkActivate} className="rounded px-2 py-1 text-xs font-semibold text-fuchsia-300 hover:bg-fuchsia-500/15">📅 Add to Trainer</button>
+            <button onClick={bulkDuplicate} className="rounded px-2 py-1 text-xs font-semibold text-ink-200 hover:bg-ink-800">📋 Duplicate</button>
+            {isCoach && <BulkShareButton bulkIds={[...bulk]} entries={entries} onDone={clearBulk} />}
+            <button onClick={bulkDelete} className="rounded px-2 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-500/15">🗑 Delete</button>
+            <button onClick={clearBulk} className="rounded px-2 py-1 text-xs text-ink-500 hover:bg-ink-800">Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FacetGroup({ title, opts, value, onChange }: { title: string; opts: Array<{ id: string; label: string }>; value: string; onChange: (v: string) => void }) {
+  return (
+    <div>
+      <div className="mb-1 text-[10px] font-bold uppercase tracking-widest text-ink-500">{title}</div>
+      <div className="flex flex-wrap gap-1">
+        {opts.map((o) => (
+          <button key={o.id} onClick={() => onChange(o.id)}
+            className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold transition ${value === o.id ? "border-brand-500 bg-brand-500/25 text-white" : "border-ink-700 bg-ink-900 text-ink-300 hover:bg-ink-800"}`}>
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PreviewPane({ row, onClose }: { row: { entry: RepertoireEntry; classified: Opening | null; progress: ProgressMetrics }; onClose: () => void }) {
+  const { entry: e, classified, progress } = row;
+  const navigate = useNavigate();
+  const fen = finalFenFor(e);
+  // Notation: walk sans (or tree mainline).
+  const sansForPreview = useMemo(() => {
+    if (e.kind === "corpus") return openingBySlug.get(e.slug ?? "")?.pgnStart ?? [];
+    if (e.tree && e.tree.length > 0) {
+      const walk = (nodes: RepMoveNode[]): string[] => {
+        const out: string[] = [];
+        let cur: RepMoveNode | undefined = nodes[0];
+        while (cur) { out.push(cur.san); cur = cur.children[0]; }
+        return out;
+      };
+      return walk(e.tree);
+    }
+    return e.sans ?? [];
+  }, [e]);
+  return (
+    <div>
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate font-display text-sm font-bold text-white">{e.name}</div>
+          {classified && <div className="text-[10px] text-brand-300 font-mono">{classified.eco} · {classified.name}</div>}
+        </div>
+        <button onClick={onClose} className="text-ink-500 hover:text-white">×</button>
+      </div>
+      <div className="mb-2">
+        <Board fen={fen} coordinates viewOnly dests={new Map() as any} />
+      </div>
+      <div className="max-h-[180px] overflow-y-auto rounded-md border border-ink-800 bg-ink-950 p-2 font-mono text-xs text-ink-100">
+        {sansForPreview.length === 0 ? (
+          <span className="text-ink-500">No moves.</span>
+        ) : (
+          sansForPreview.map((san, i) => (
+            <span key={i} className="mr-1">
+              {i % 2 === 0 && <span className="text-ink-500">{Math.floor(i / 2) + 1}. </span>}
+              {san}{" "}
+            </span>
+          ))
+        )}
+      </div>
+      {progress.cardCount > 0 && (
+        <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[10px]">
+          <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 py-1.5">
+            <div className="font-mono text-base font-bold text-emerald-200">{progress.accuracy}%</div>
+            <div className="text-emerald-300/80">accuracy</div>
+          </div>
+          <div className="rounded-lg border border-ink-700 bg-ink-800/50 py-1.5">
+            <div className="font-mono text-base font-bold text-white">{progress.reps + progress.lapses}</div>
+            <div className="text-ink-400">reviews</div>
+          </div>
+          <div className="rounded-lg border border-ink-700 bg-ink-800/50 py-1.5">
+            <div className="font-mono text-base font-bold text-white">{progress.cardCount}</div>
+            <div className="text-ink-400">cards</div>
+          </div>
+        </div>
+      )}
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <button onClick={() => navigate(`/openings?load=${encodeURIComponent(e._id)}`)}
+          className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-bold text-white hover:bg-brand-400">
+          📚 Study
+        </button>
+        <button onClick={() => navigate(`/openings?load=${encodeURIComponent(e._id)}&engineDrill=1`)}
+          className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-1.5 text-xs font-semibold text-ink-200 hover:bg-ink-700">
+          ▶ vs engine
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function BulkShareButton({ bulkIds, entries, onDone }: { bulkIds: string[]; entries: RepertoireEntry[]; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 2500); return () => clearTimeout(t); }, [toast]);
+  const doShare = async () => {
+    // Fetch academy roster then confirm before firing.
+    setBusy(true);
+    try {
+      const roster = await fetch("/v2api/api/academy/students-lite", { credentials: "include" }).then((r) => r.json());
+      const studentIds: string[] = (roster.students ?? []).map((s: any) => s.userId);
+      if (studentIds.length === 0) { setToast("No students to share with."); return; }
+      if (!confirm(`Share ${bulkIds.length} entries with all ${studentIds.length} students?`)) return;
+      let ok = 0;
+      for (const id of bulkIds) {
+        try { await shareRepertoire(id, studentIds, false); ok++; } catch { /* skip */ }
+      }
+      setToast(`🎓 Shared ${ok}/${bulkIds.length}`);
+      onDone();
+    } catch {
+      setToast("Share failed");
+    } finally { setBusy(false); }
+  };
+  void entries;
+  return (
+    <>
+      <button onClick={doShare} disabled={busy}
+        className="rounded px-2 py-1 text-xs font-semibold text-brand-300 hover:bg-brand-500/15 disabled:opacity-60">
+        🎓 Share
+      </button>
+      {toast && <span className="text-xs text-emerald-300">{toast}</span>}
+    </>
+  );
+}

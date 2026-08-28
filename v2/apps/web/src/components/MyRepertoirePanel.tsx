@@ -13,6 +13,7 @@
 // helpers in lib/repertoire-api.ts.
 
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   listRepertoire, addRepertoire, deleteRepertoire, shareRepertoire,
@@ -131,7 +132,12 @@ export default function MyRepertoirePanel({ history, tree, activeOpening, onLoad
     <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-4">
       <div className="mb-2 flex items-baseline justify-between gap-2">
         <h2 className="font-display text-sm font-semibold text-white">🎯 My Repertoire</h2>
-        <span className="text-[10px] text-ink-500">{entries.length} saved</span>
+        <div className="flex items-center gap-2 text-[10px] text-ink-500">
+          <span>{entries.length} saved</span>
+          <Link to="/repertoire" className="rounded border border-brand-500/40 bg-brand-500/15 px-1.5 py-0.5 font-bold text-brand-200 hover:bg-brand-500/25" title="Open the full repertoire manager">
+            📚 Manage
+          </Link>
+        </div>
       </div>
 
       {/* Action row — save current line and/or save the corpus opening. */}

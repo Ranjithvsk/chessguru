@@ -116,6 +116,7 @@ import BookPage from "./pages/Book";
 import ClassReplayPage from "./pages/ClassReplay";
 import ClassV2Page from "./pages/ClassV2";
 import NotebookPage, { NotebookPackDetailPage, NotebookReviseSessionPage } from "./pages/Notebook";
+import RepertoirePage from "./pages/Repertoire";
 import CoachPublicPage from "./pages/CoachPublic";
 import CoachProfileEditPage from "./pages/CoachEdit";
 import AcademyPublicPage from "./pages/AcademyPublic";
@@ -182,6 +183,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="study/:id" element={<StudyTrainer />} />
             <Route path="opening" element={<OpeningPage />} />
             <Route path="openings" element={<OpeningsHub />} />
+            <Route path="repertoire" element={<ErrorBoundary label="Repertoire"><RepertoirePage /></ErrorBoundary>} />
             <Route path="engine-battle" element={<EngineBattlePage />} />
             <Route path="board-editor" element={<BoardEditorPage />} />
             <Route path="admin" element={<AdminPage />} />

@@ -72,6 +72,7 @@ const GROUPS: Group[] = [
     label: "Openings", accent: "sky", icon: "📖",
     items: [
       { to: "/openings", label: "📖 Openings", desc: "Notation, corpus, tree, repertoire, explorer" },
+      { to: "/repertoire", label: "📚 My Repertoire", desc: "Full manager — filters, sort, preview, bulk actions, coverage report" },
       { to: "/study/daily", label: "📅 Opening Trainer", desc: "Spaced-repetition review of your saved openings" },
     ],
   },
