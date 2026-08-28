@@ -1042,7 +1042,7 @@ function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "stu
     // total panel height to a fixed ~5rem on phones, ~14rem on desktop.
     // Overflow inside the scroll region takes over immediately.
     <div className="flex h-full shrink-0 flex-col overflow-hidden bg-ink-950/60 max-h-24 md:max-h-60 lg:max-h-none">
-      {/* Header controls — Start / Live pills mirror /openings' ⏮ ⏭ nav. */}
+      {/* Header row 1 — Moves label + Start/Live pills + repertoire actions. */}
       <div className="flex shrink-0 items-center gap-2 border-b border-ink-800/70 px-3 py-1 text-[10px] uppercase tracking-widest text-ink-500">
         <span>Moves</span>
         <span className="text-ink-600">·</span>
@@ -1067,16 +1067,6 @@ function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "stu
           className={`rounded px-1.5 py-0.5 ${atLive ? "bg-emerald-500/30 text-emerald-100" : "text-ink-500 hover:text-ink-200"} ${clickable && !atLive ? "cursor-pointer" : "cursor-default"}`}
           title={clickable ? "Jump to end of this line" : "End of line"}
         >⏭ Live</button>
-        {matchedOpening && (
-          <button
-            type="button"
-            onClick={() => setIdeaOpen(true)}
-            className="ml-2 truncate rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-sky-200 hover:bg-sky-500/25"
-            title="Show the opening's idea + Wikibooks excerpt"
-          >
-            <span className="font-mono">{matchedOpening.eco}</span> · {matchedOpening.name} ▸
-          </button>
-        )}
         <div className="ml-auto flex items-center gap-1">
           {/* Repertoire actions are opening-only: hide 💾 Save + 🧠 Memorize
            *  when a Setup Position (custom start FEN) is loaded. Setup packs
@@ -1101,6 +1091,21 @@ function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "stu
           )}
         </div>
       </div>
+      {/* Header row 2 — Opening name banner (full-width, always visible when
+       *  the current line matches a corpus opening). Kept on its OWN row so
+       *  the ECO+name never gets truncated by the nav pills. */}
+      {matchedOpening && (
+        <button
+          type="button"
+          onClick={() => setIdeaOpen(true)}
+          className="group flex shrink-0 items-center gap-2 border-b border-ink-800/70 bg-sky-500/5 px-3 py-1.5 text-left text-[11px] hover:bg-sky-500/15"
+          title="Show the opening's idea + Wikibooks excerpt"
+        >
+          <span className="rounded bg-sky-500/25 px-1.5 py-0.5 font-mono text-[10px] font-bold text-sky-100">{matchedOpening.eco}</span>
+          <span className="min-w-0 flex-1 truncate font-semibold text-sky-100">{matchedOpening.name}</span>
+          <span className="shrink-0 text-sky-300 opacity-70 group-hover:opacity-100">📚 ▸</span>
+        </button>
+      )}
       {/* Scrollable notation grid — flex-1 so it takes whatever height is
        *  left after the header, and scrolls INSIDE the fixed outer cap. */}
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1.5">
@@ -2071,7 +2076,7 @@ export default function ClassV2Page() {
                *  320px, full body height), stacks under the board on smaller
                *  screens (mobile / tablet) via lg:w-[320px] + w-full. Uses
                *  its own max-h cap on mobile so the board doesn't shrink. */}
-              <div className="shrink-0 border-t border-ink-800 lg:h-auto lg:w-[320px] lg:border-l lg:border-t-0">
+              <div className="shrink-0 border-t border-ink-800 lg:h-auto lg:w-[360px] lg:border-l lg:border-t-0">
                 <ClassNotationPanel room={room} role={role} />
               </div>
             </div>
