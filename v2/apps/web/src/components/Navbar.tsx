@@ -50,6 +50,7 @@ const GROUPS: Group[] = [
       { to: "/academy/performance", label: "📊 Student performance", desc: "Rating, tier, attendance dashboard per student" },
       { to: "/coach-board", label: "🧑‍🏫 Class Board", desc: "Student watchlist + class-plan generator" },
       { to: "/coach-board/reports", label: "📄 Parent reports", desc: "Monthly per-student progress reports" },
+      { to: "/fees", label: "💰 Fees", desc: "Collect tuition · WhatsApp reminders · receipts · reports" },
       { to: "/parent", label: "👪 Family portal", desc: "For parents — child's progress + billing (sign in with the parent account you were linked to)" },
     ],
   },
