@@ -24,7 +24,8 @@ import Board from "../components/Board";
 import { api } from "../lib/api";
 import {
   listRepertoire, addRepertoire, deleteRepertoire, shareRepertoire, updateRepertoire, duplicateRepertoire,
-  type RepertoireEntry, type RepMoveNode,
+  listRepertoireTrash, restoreRepertoire, listRepertoireVersions, rollbackRepertoire, pushToStudent,
+  type RepertoireEntry, type RepMoveNode, type RepertoireVersion,
 } from "../lib/repertoire-api";
 import { OPENINGS, findOpeningForLine, openingBySlug, type Opening } from "../lib/openings";
 import { activateRepertoireEntry, isRepertoireEntryActivated, loadAllStates, trainerSlugFor } from "../lib/cards";
@@ -350,6 +351,22 @@ export default function RepertoirePage() {
   };
   const [importOpen, setImportOpen] = useState(false);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [showTrash, setShowTrash] = useState(false);
+  const [versionsFor, setVersionsFor] = useState<RepertoireEntry | null>(null);
+  const [pushFor, setPushFor] = useState<RepertoireEntry | null>(null);
+  const { data: trashData } = useQuery({
+    queryKey: ["my-repertoire-trash"],
+    queryFn: listRepertoireTrash,
+    enabled: loggedIn && showTrash,
+    staleTime: 30_000,
+  });
+  const restoreMut = useMutation({
+    mutationFn: restoreRepertoire,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["my-repertoire"] });
+      qc.invalidateQueries({ queryKey: ["my-repertoire-trash"] });
+    },
+  });
 
   const entries = data?.entries ?? [];
 
@@ -537,9 +554,27 @@ export default function RepertoirePage() {
             title="Print-friendly PDF of the current filtered view">
             🖨️ Print
           </button>
+          <button onClick={() => setShowTrash((v) => !v)}
+            className={`rounded-md border px-2 py-1 font-semibold transition ${showTrash ? "border-rose-500 bg-rose-500/20 text-rose-100" : "border-ink-700 bg-ink-900 text-ink-300 hover:bg-ink-800"}`}
+            title="Toggle trash view — entries deleted in the last 30 days">
+            🗑 {showTrash ? "Trash on" : "Trash"}
+          </button>
         </div>
       </div>
 
+      {/* Trash view — replaces the main content when toggled on. Owner ask
+       *  2026-08-28. Auto-purges after 30 days via server list()'s
+       *  purgeTrash. */}
+      {showTrash ? (
+        <TrashView
+          entries={trashData?.entries ?? []}
+          onRestore={(id) => restoreMut.mutate(id)}
+          onPurgeNow={(id) => delMut.mutate(id)}
+          isLoading={!trashData}
+          onExit={() => setShowTrash(false)}
+        />
+      ) : (
+        <>
       {/* Coverage report — Tier 2 item 8. Compact 2-column banner. */}
       <div className="mb-5"><CoverageReport entries={entries} /></div>
 
@@ -692,13 +727,20 @@ export default function RepertoirePage() {
                           title={isRepertoireEntryActivated(e) ? "In Opening Trainer" : "Add to Opening Trainer"}>
                           {isRepertoireEntryActivated(e) ? "✓" : "📅"}
                         </button>
-                        {/* Play vs engine — Tier 2 item 9. Uses the same /openings
-                           * hop with an engineDrill flag; the explorer handles
-                           * the drill wiring when we build that. */}
                         <button
                           onClick={() => navigate(`/openings?load=${encodeURIComponent(e._id)}&engineDrill=1`)}
                           className="rounded px-1.5 py-0.5 font-semibold text-ink-400 hover:bg-ink-800 hover:text-brand-300"
                           title="Play this line vs the engine">▶</button>
+                        <button
+                          onClick={() => setVersionsFor(e)}
+                          className="rounded px-1.5 py-0.5 font-semibold text-ink-400 hover:bg-ink-800 hover:text-sky-300"
+                          title="Version history">🕘</button>
+                        {isCoach && !e.sharedFrom && (
+                          <button
+                            onClick={() => setPushFor(e)}
+                            className="rounded px-1.5 py-0.5 font-semibold text-ink-400 hover:bg-ink-800 hover:text-emerald-300"
+                            title="Push this line to one student's repertoire">👤</button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -721,8 +763,11 @@ export default function RepertoirePage() {
         </aside>
       </div>
 
+        </>
+      )}
+
       {/* Bulk action bar — fixed at bottom, only when bulkMode + some selected. */}
-      {bulkMode && bulk.size > 0 && (
+      {bulkMode && bulk.size > 0 && !showTrash && (
         <div className="pointer-events-none fixed bottom-6 left-1/2 z-40 -translate-x-1/2">
           <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-xl border border-brand-500/50 bg-ink-900/95 px-4 py-2 shadow-2xl backdrop-blur">
             <span className="text-sm font-semibold text-brand-200">{bulk.size} selected</span>
@@ -751,6 +796,8 @@ export default function RepertoirePage() {
         </div>
       )}
       {importOpen && <ImportPgnModal onClose={() => setImportOpen(false)} onDone={(n) => { setImportOpen(false); qc.invalidateQueries({ queryKey: ["my-repertoire"] }); alert(`Imported ${n} entries.`); }} />}
+      {versionsFor && <VersionsModal entry={versionsFor} onClose={() => setVersionsFor(null)} onRolled={() => { qc.invalidateQueries({ queryKey: ["my-repertoire"] }); setVersionsFor(null); }} />}
+      {pushFor && <PushToStudentModal entry={pushFor} onClose={() => setPushFor(null)} onDone={(n) => { setPushFor(null); alert(n === 0 ? "Not shared (skipped)." : `👤 Pushed to ${n} student.`); }} />}
       {/* Print-only stylesheet — hides chrome so the grid prints cleanly. */}
       <style>{`
         @media print {
@@ -971,5 +1018,186 @@ function BulkShareButton({ bulkIds, entries, onDone }: { bulkIds: string[]; entr
       </button>
       {toast && <span className="text-xs text-emerald-300">{toast}</span>}
     </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Tier 5.19 — Trash view
+// ─────────────────────────────────────────────────────────────────────
+function TrashView({ entries, onRestore, onPurgeNow, isLoading, onExit }: {
+  entries: RepertoireEntry[]; onRestore: (id: string) => void; onPurgeNow: (id: string) => void;
+  isLoading: boolean; onExit: () => void;
+}) {
+  return (
+    <div className="mb-5 rounded-2xl border border-rose-500/40 bg-gradient-to-br from-rose-500/5 to-ink-900 p-4">
+      <div className="mb-3 flex items-baseline justify-between">
+        <div>
+          <div className="font-display text-lg font-bold text-rose-100">🗑 Trash</div>
+          <div className="text-xs text-rose-200/70">Entries deleted in the last 30 days. After that, they're purged automatically on the next load.</div>
+        </div>
+        <button onClick={onExit} className="rounded-md border border-ink-700 bg-ink-800 px-2 py-1 text-xs text-ink-200 hover:bg-ink-700">← Back to repertoire</button>
+      </div>
+      {isLoading ? (
+        <div className="text-sm text-ink-500">Loading trash…</div>
+      ) : entries.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-ink-700 bg-ink-950/50 p-6 text-center text-sm text-ink-400">
+          Trash is empty.
+        </div>
+      ) : (
+        <ul className="divide-y divide-rose-500/10">
+          {entries.map((e) => (
+            <li key={e._id} className="flex items-center gap-3 py-2">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm text-white">{e.name}</div>
+                <div className="text-[10px] text-ink-500">
+                  {e.kind === "corpus" ? "Opening" : "Line"} · {(e as any).deletedAt ? `deleted ${new Date((e as any).deletedAt).toLocaleString()}` : "deleted"}
+                </div>
+              </div>
+              <button onClick={() => onRestore(e._id)}
+                className="rounded-md bg-emerald-500 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-400">♻ Restore</button>
+              <button onClick={() => { if (confirm(`Permanently purge "${e.name}"? This can't be undone.`)) onPurgeNow(e._id); }}
+                className="rounded-md border border-rose-500/50 bg-rose-500/10 px-3 py-1 text-xs font-semibold text-rose-200 hover:bg-rose-500/20">Purge now</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Tier 4.17 — Version history + rollback
+// ─────────────────────────────────────────────────────────────────────
+function VersionsModal({ entry, onClose, onRolled }: { entry: RepertoireEntry; onClose: () => void; onRolled: () => void }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["rep-versions", entry._id],
+    queryFn: () => listRepertoireVersions(entry._id),
+    staleTime: 15_000,
+  });
+  const [busy, setBusy] = useState<string | null>(null);
+  const rollback = async (v: RepertoireVersion) => {
+    if (!confirm(`Roll back "${entry.name}" to the snapshot from ${new Date(v.at).toLocaleString()}?`)) return;
+    setBusy(v._id);
+    try { await rollbackRepertoire(entry._id, v._id); onRolled(); }
+    catch (e: any) { alert(e?.message || "Rollback failed"); }
+    finally { setBusy(null); }
+  };
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onKeyDown={(e) => { if (e.key === "Escape") onClose(); }} tabIndex={-1}>
+      <div className="flex w-full max-w-lg flex-col rounded-2xl border border-sky-500/40 bg-gradient-to-br from-ink-900 to-ink-950 p-5 shadow-2xl max-h-[85vh]">
+        <div className="mb-3 flex items-baseline justify-between">
+          <div>
+            <div className="font-display text-base font-bold text-white">🕘 Version history</div>
+            <div className="text-[11px] text-ink-400">{entry.name}</div>
+          </div>
+          <button onClick={onClose} className="rounded-md p-1 text-xl leading-none text-ink-400 hover:text-white">×</button>
+        </div>
+        {isLoading ? (
+          <div className="text-sm text-ink-500">Loading…</div>
+        ) : (data?.versions ?? []).length === 0 ? (
+          <div className="rounded-lg border border-dashed border-ink-700 bg-ink-950/50 p-6 text-center text-sm text-ink-400">
+            No history yet — versions are recorded from your next edit onward.
+          </div>
+        ) : (
+          <ul className="min-h-0 flex-1 divide-y divide-ink-800 overflow-y-auto rounded-lg border border-ink-800 bg-ink-950/50">
+            {(data?.versions ?? []).map((v) => {
+              const kindIcon = v.kind === "edit" ? "✏️" : v.kind === "delete" ? "🗑" : "♻";
+              const sanCount = Array.isArray(v.snapshot?.sans) ? v.snapshot.sans!.length : 0;
+              const hasTree = Array.isArray(v.snapshot?.tree) && v.snapshot.tree!.length > 0;
+              return (
+                <li key={v._id} className="flex items-center gap-3 px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm text-white">
+                      <span className="mr-1">{kindIcon}</span>{v.snapshot.name || entry.name}
+                    </div>
+                    <div className="text-[10px] text-ink-500">
+                      {new Date(v.at).toLocaleString()} · {sanCount} moves{hasTree ? " · +variations" : ""}
+                      {v.snapshot.startFen && v.snapshot.startFen !== STANDARD_START ? " · setup" : ""}
+                      {v.snapshot.forceTrain ? " · ⚡" : ""}
+                    </div>
+                  </div>
+                  <button onClick={() => rollback(v)} disabled={!!busy}
+                    className="rounded-md border border-sky-500/50 bg-sky-500/15 px-2.5 py-1 text-[11px] font-bold text-sky-100 hover:bg-sky-500/25 disabled:opacity-60">
+                    {busy === v._id ? "…" : "♻ Restore this"}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Tier 4.16 — Push single entry to ONE student
+// ─────────────────────────────────────────────────────────────────────
+type StudentLite = { userId: string; username: string; name: string };
+function PushToStudentModal({ entry, onClose, onDone }: { entry: RepertoireEntry; onClose: () => void; onDone: (n: number) => void }) {
+  const { data } = useQuery({
+    queryKey: ["academy-students-lite"],
+    queryFn: () => fetch("/v2api/api/academy/students-lite", { credentials: "include" }).then((r) => r.ok ? r.json() : { students: [] }),
+    staleTime: 60_000,
+  });
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const roster: StudentLite[] = data?.students ?? [];
+  const filtered = useMemo(() => {
+    const n = q.trim().toLowerCase();
+    if (!n) return roster;
+    return roster.filter((s) => s.name.toLowerCase().includes(n) || s.username.toLowerCase().includes(n));
+  }, [roster, q]);
+  const doPush = async (studentId: string) => {
+    setBusy(true); setErr(null);
+    try {
+      const body: any = { name: entry.name, kind: entry.kind };
+      if (entry.kind === "corpus") body.slug = entry.slug;
+      else { body.sans = entry.sans ?? []; if (entry.tree) body.tree = entry.tree; }
+      await pushToStudent(studentId, body);
+      onDone(1);
+    } catch (e: any) {
+      setErr(e?.message || "Push failed");
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onKeyDown={(e) => { if (e.key === "Escape") onClose(); }} tabIndex={-1}>
+      <div className="flex w-full max-w-md flex-col rounded-2xl border border-emerald-500/40 bg-gradient-to-br from-ink-900 to-ink-950 p-5 shadow-2xl max-h-[80vh]">
+        <div className="mb-3 flex items-baseline justify-between">
+          <div>
+            <div className="font-display text-base font-bold text-white">👤 Push to student</div>
+            <div className="text-[11px] text-ink-400 truncate">{entry.name}</div>
+          </div>
+          <button onClick={onClose} className="rounded-md p-1 text-xl leading-none text-ink-400 hover:text-white">×</button>
+        </div>
+        <input type="text" value={q} onChange={(e) => setQ(e.target.value)}
+          placeholder="Search students…"
+          className="mb-2 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-1.5 text-sm text-white placeholder:text-ink-500 focus:border-emerald-500 focus:outline-none"
+          autoFocus />
+        <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-ink-800 bg-ink-950/60">
+          {filtered.length === 0 ? (
+            <div className="p-4 text-xs text-ink-500">No students match.</div>
+          ) : (
+            <div className="divide-y divide-ink-800">
+              {filtered.map((s) => (
+                <div key={s.userId} className="flex items-center gap-3 px-3 py-1.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm text-white">{s.name}</div>
+                    <div className="truncate text-[10px] text-ink-500">@{s.username}</div>
+                  </div>
+                  <button onClick={() => doPush(s.userId)} disabled={busy}
+                    className="rounded-md bg-emerald-500 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-400 disabled:opacity-60">
+                    Push
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        {err && <div className="mt-2 text-[12px] text-rose-400">{err}</div>}
+      </div>
+    </div>
   );
 }

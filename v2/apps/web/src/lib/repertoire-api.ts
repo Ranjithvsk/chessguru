@@ -84,6 +84,31 @@ export function shareRepertoire(id: string, studentIds: string[], forceTrain = f
     body: JSON.stringify({ studentIds, forceTrain }),
   });
 }
+export function listRepertoireTrash(): Promise<{ entries: RepertoireEntry[] }> {
+  return jf("/api/my/repertoire?trash=1");
+}
+export function restoreRepertoire(id: string): Promise<{ ok: boolean }> {
+  return jf(`/api/my/repertoire/${encodeURIComponent(id)}/restore`, { method: "POST" });
+}
+export interface RepertoireVersion {
+  _id: string;
+  entryId: string;
+  ownerId: string;
+  at: string;
+  kind: "edit" | "delete" | "restore";
+  by: string;
+  snapshot: {
+    name: string; kind: "corpus" | "line"; slug?: string | null;
+    sans?: string[] | null; tree?: RepMoveNode[] | null; notes?: string | null;
+    forceTrain?: boolean; startFen?: string | null;
+  };
+}
+export function listRepertoireVersions(id: string): Promise<{ versions: RepertoireVersion[] }> {
+  return jf(`/api/my/repertoire/${encodeURIComponent(id)}/versions`);
+}
+export function rollbackRepertoire(id: string, versionId: string): Promise<{ ok: boolean; entry: RepertoireEntry }> {
+  return jf(`/api/my/repertoire/${encodeURIComponent(id)}/rollback/${encodeURIComponent(versionId)}`, { method: "POST" });
+}
 export function pushToStudent(studentId: string, body: {
   name: string; kind: "corpus" | "line"; slug?: string; sans?: string[]; tree?: RepMoveNode[]; notes?: string | null;
 }): Promise<{ ok: boolean; entry: RepertoireEntry }> {

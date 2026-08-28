@@ -182,13 +182,51 @@ export class SavedLinesController {
   }
 
   private col() { return this.conn.db!.collection("myRepertoire"); }
+  private versionsCol() { return this.conn.db!.collection("myRepertoireVersions"); }
 
-  /** List every entry owned by the caller — newest first. */
+  /** Snapshot the CURRENT state of an entry before mutating — powers version
+   *  history + rollback. Owner ask 2026-08-28. Silent on error so a Mongo
+   *  hiccup on the audit write never blocks the actual edit. */
+  private async snapshotVersion(row: any, kind: "edit" | "delete" | "restore", by: string) {
+    if (!row) return;
+    try {
+      await this.versionsCol().insertOne({
+        _id: new Types.ObjectId().toHexString() as any,
+        entryId: String(row._id),
+        ownerId: String(row.ownerId),
+        at: new Date(),
+        kind,
+        by,
+        snapshot: {
+          name: row.name, kind: row.kind, slug: row.slug ?? null,
+          sans: row.sans ?? null, tree: row.tree ?? null, notes: row.notes ?? null,
+          forceTrain: !!row.forceTrain, startFen: row.startFen ?? null,
+        },
+      });
+    } catch { /* audit is best-effort */ }
+  }
+
+  /** Auto-purge trashed entries older than 30 days on every list call. Cheap
+   *  (one deleteMany with an indexable filter) so we don't need a separate
+   *  cron. Runs against the caller's OWN trash only — small blast radius. */
+  private async purgeTrash(userId: string) {
+    const cutoff = new Date(Date.now() - 30 * 86400_000);
+    try { await this.col().deleteMany({ ownerId: userId, deletedAt: { $lte: cutoff } }); } catch { /* silent */ }
+  }
+
+  /** List every entry owned by the caller — newest first. `?trash=1` returns
+   *  soft-deleted entries instead; default excludes them so old clients keep
+   *  showing only live rows without any change. */
   @Get()
   async list(@Req() req: any) {
     const me = requireLogin(req);
+    const wantTrash = String((req.query || {}).trash || "") === "1";
+    void this.purgeTrash(me.userId);   // fire-and-forget housekeeping
+    const filter: any = { ownerId: me.userId };
+    if (wantTrash) filter.deletedAt = { $ne: null };
+    else filter.deletedAt = { $exists: false };
     const rows: any[] = await this.col()
-      .find({ ownerId: me.userId }, { sort: { createdAt: -1 } })
+      .find(filter, { sort: { createdAt: -1 } })
       .limit(500).toArray();
     // Enrich sharedFrom with the coach's display name so the UI can show
     // "shared by Ranjith" without a second round-trip.
@@ -221,19 +259,87 @@ export class SavedLinesController {
   @Delete(":id")
   async remove(@Req() req: any, @Param("id") id: string) {
     const me = requireLogin(req);
-    // Students may not delete entries their coach shared with them —
-    // otherwise a wrong tap wipes homework the coach expected them to
-    // study (owner report 2026-08-20: harinit accidentally deleted a
-    // gunachess-shared repertoire; had to be restored from source).
-    // Coaches/owners can still delete anything they own (including
-    // things they were shared TO, e.g. from their academy owner).
-    const row: any = await this.col().findOne({ _id: id as any, ownerId: me.userId }, { projection: { sharedFrom: 1 } });
+    // Students may not delete entries their coach shared with them.
+    const row: any = await this.col().findOne({ _id: id as any, ownerId: me.userId });
     if (!row) return { ok: false };
     if (row.sharedFrom && me.role === "student") {
       throw new BadRequestException("Coach-shared entries can't be deleted by students. Ask your coach to unassign it.");
     }
-    const r = await this.col().deleteOne({ _id: id as any, ownerId: me.userId });
-    return { ok: r.deletedCount > 0 };
+    // Soft-delete (owner ask 2026-08-28) — 30-day trash before purge.
+    // Snapshot state so rollback still works after restore.
+    await this.snapshotVersion(row, "delete", me.userId);
+    const r = await this.col().updateOne(
+      { _id: id as any, ownerId: me.userId },
+      { $set: { deletedAt: new Date() } },
+    );
+    return { ok: r.matchedCount > 0 };
+  }
+
+  /** POST /api/my/repertoire/:id/restore — clear deletedAt on a trashed row
+   *  so it re-appears in the live list. 30-day trash auto-purge is
+   *  enforced by list()'s purgeTrash helper on every fetch. */
+  @Post(":id/restore")
+  async restore(@Req() req: any, @Param("id") id: string) {
+    const me = requireLogin(req);
+    const row: any = await this.col().findOne({ _id: id as any, ownerId: me.userId });
+    if (!row) throw new BadRequestException("not-found");
+    await this.snapshotVersion(row, "restore", me.userId);
+    const r = await this.col().updateOne(
+      { _id: id as any, ownerId: me.userId },
+      { $unset: { deletedAt: "" } },
+    );
+    return { ok: r.matchedCount > 0 };
+  }
+
+  /** GET /api/my/repertoire/:id/versions — audit trail for a single entry.
+   *  Newest-first, capped at 50. Used by the RepertoireVersionModal to
+   *  offer rollback. */
+  @Get(":id/versions")
+  async versions(@Req() req: any, @Param("id") id: string) {
+    const me = requireLogin(req);
+    // Ownership check (coach-shared reads-only for students still see history)
+    const row: any = await this.col().findOne({ _id: id as any, ownerId: me.userId }, { projection: { _id: 1 } });
+    if (!row) throw new BadRequestException("not-found");
+    const rows = await this.versionsCol()
+      .find({ entryId: String(id), ownerId: me.userId }, { sort: { at: -1 } })
+      .limit(50).toArray();
+    return { versions: rows };
+  }
+
+  /** POST /api/my/repertoire/:id/rollback/:versionId — apply an old
+   *  snapshot as the current state. Records a fresh version entry for
+   *  the rollback itself so the audit trail stays complete. */
+  @Post(":id/rollback/:versionId")
+  async rollback(@Req() req: any, @Param("id") id: string, @Param("versionId") versionId: string) {
+    const me = requireLogin(req);
+    const row: any = await this.col().findOne({ _id: id as any, ownerId: me.userId });
+    if (!row) throw new BadRequestException("not-found");
+    if (row.sharedFrom && me.role === "student") {
+      throw new BadRequestException("Coach-shared entries can't be rolled back on the student side.");
+    }
+    const ver: any = await this.versionsCol().findOne({ _id: versionId as any, entryId: String(id), ownerId: me.userId });
+    if (!ver) throw new BadRequestException("version-not-found");
+    // Snapshot the current state before rewriting so users can un-roll-back.
+    await this.snapshotVersion(row, "edit", me.userId);
+    const s = ver.snapshot ?? {};
+    const set: any = { updatedAt: new Date() };
+    if (s.name != null) set.name = s.name;
+    if (s.notes !== undefined) set.notes = s.notes;
+    if (s.sans !== undefined) set.sans = s.sans ?? null;
+    if (s.tree !== undefined) set.tree = s.tree ?? null;
+    if (s.forceTrain !== undefined) set.forceTrain = !!s.forceTrain;
+    if (s.startFen !== undefined) set.startFen = s.startFen ?? null;
+    // Explicit clears become $unset so the doc doesn't retain nulls that
+    // downstream normalizers can't tell from "unset".
+    const unset: any = {};
+    for (const k of ["sans", "tree", "notes", "startFen"] as const) {
+      if (set[k] === null) { delete set[k]; unset[k] = ""; }
+    }
+    const op: any = { $set: set };
+    if (Object.keys(unset).length) op.$unset = unset;
+    await this.col().updateOne({ _id: id as any, ownerId: me.userId }, op);
+    const fresh: any = await this.col().findOne({ _id: id as any });
+    return { ok: true, entry: fresh };
   }
 
   /** Coach → N students. Body: { studentIds: string[] }. Copies the entry
@@ -338,6 +444,10 @@ export class SavedLinesController {
     // Guard against a payload that patches nothing (would be a wasted write).
     const changed = Object.keys(patch).filter((k) => k !== "updatedAt");
     if (!changed.length) return { ok: true, changed: 0 };
+
+    // Snapshot current state to the versions audit log BEFORE the write so
+    // rollback can restore this exact shape later. Owner ask 2026-08-28.
+    await this.snapshotVersion(row, "edit", me.userId);
 
     // Apply. Also $unset tree when we explicitly cleared it (patch.tree null).
     const set: any = { ...patch };
