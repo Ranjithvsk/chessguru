@@ -811,6 +811,10 @@ function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "stu
     } catch { return []; }
   }, [startFen, tree, cursorPath]);
   const matchedOpening = useMemo(() => currentSans.length > 0 ? findOpeningForLine(currentSans) : null, [currentSans]);
+  // True only when the class board's tree begins at the standard opening —
+  // repertoire is opening-focused; setup positions (endgames, mid-game
+  // tactics) go through 📤 Send position → Notebook instead.
+  const isOpeningStart = startFen === STANDARD_START_FEN;
 
   // Keyboard nav (coach only): ← → walk mainline; ↑ ↓ switch variation
   // at current branch. Mirrors /openings keyboard shortcuts.
@@ -1074,7 +1078,12 @@ function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "stu
           </button>
         )}
         <div className="ml-auto flex items-center gap-1">
-          {tree.length > 0 && currentSans.length > 0 && (
+          {/* Repertoire actions are opening-only: hide 💾 Save + 🧠 Memorize
+           *  when a Setup Position (custom start FEN) is loaded. Setup packs
+           *  are one-off tactics / endgame studies — they're captured via
+           *  📤 Send position → Notebook, not the opening repertoire.
+           *  Owner ask 2026-08-28. */}
+          {isOpeningStart && tree.length > 0 && currentSans.length > 0 && (
             <button
               type="button"
               onClick={memorize}
@@ -1082,7 +1091,7 @@ function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "stu
               title="Add this line to your personal Opening Trainer for spaced-repetition drill"
             >🧠 Memorize</button>
           )}
-          {clickable && tree.length > 0 && (
+          {isOpeningStart && clickable && tree.length > 0 && (
             <button
               type="button"
               onClick={() => setSaveDialog({ fromPath: [] })}
@@ -1187,11 +1196,13 @@ function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "stu
               className="block w-full px-3 py-1.5 text-left hover:bg-ink-800">
               Copy PGN to here
             </button>
-            <button role="menuitem"
-              onClick={() => doAndClose(() => setSaveDialog({ fromPath: ctxMenu.path }))}
-              className="block w-full px-3 py-1.5 text-left text-emerald-300 hover:bg-ink-800">
-              💾 Save from here to repertoire
-            </button>
+            {isOpeningStart && (
+              <button role="menuitem"
+                onClick={() => doAndClose(() => setSaveDialog({ fromPath: ctxMenu.path }))}
+                className="block w-full px-3 py-1.5 text-left text-emerald-300 hover:bg-ink-800">
+                💾 Save from here to repertoire
+              </button>
+            )}
           </div>,
           document.body,
         );
