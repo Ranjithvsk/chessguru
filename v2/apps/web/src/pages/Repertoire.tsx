@@ -23,15 +23,17 @@ import { Chess } from "chess.js";
 import Board from "../components/Board";
 import { api } from "../lib/api";
 import {
-  listRepertoire, deleteRepertoire, shareRepertoire, duplicateRepertoire,
+  listRepertoire, addRepertoire, deleteRepertoire, shareRepertoire, updateRepertoire, duplicateRepertoire,
   type RepertoireEntry, type RepMoveNode,
 } from "../lib/repertoire-api";
 import { OPENINGS, findOpeningForLine, openingBySlug, type Opening } from "../lib/openings";
 import { activateRepertoireEntry, isRepertoireEntryActivated, loadAllStates, trainerSlugFor } from "../lib/cards";
 import type { FsrsState } from "../lib/fsrs";
+import { fetchExplorer, type ExplorerData, type ExplorerMove } from "../lib/explorer";
 
 const STANDARD_START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 const K_STARS = "cg_rep_stars_v1";
+const K_TAGS  = "cg_rep_tags_v1";     // { [entryId]: string[] } — Tier 5.18
 
 // ─────────────────────────────────────────────────────────────────────
 // Small pure helpers — kept top-level so the component tree stays clean.
@@ -42,6 +44,102 @@ function loadStars(): Set<string> {
 }
 function saveStars(s: Set<string>) {
   try { localStorage.setItem(K_STARS, JSON.stringify([...s])); } catch { /* quota */ }
+}
+// Tier 5.18 — user-defined tags, localStorage per browser. Not synced across
+// devices yet (needs a schema addition on the repertoire entry). Users can
+// still filter + bulk-tag today; migration to server-side is additive later.
+function loadTags(): Record<string, string[]> {
+  try { const r = localStorage.getItem(K_TAGS); return r ? JSON.parse(r) : {}; } catch { return {}; }
+}
+function saveTags(m: Record<string, string[]>) {
+  try { localStorage.setItem(K_TAGS, JSON.stringify(m)); } catch { /* quota */ }
+}
+// All tags across every entry — for the filter chip list.
+function allTagsFrom(map: Record<string, string[]>): string[] {
+  const s = new Set<string>();
+  for (const arr of Object.values(map)) for (const t of arr) s.add(t);
+  return [...s].sort();
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// PGN import / export helpers (Tier 3)
+// ─────────────────────────────────────────────────────────────────────
+
+// Minimal PGN splitter — splits on blank-line-separated games and returns
+// { headers: {}, sans: string[] } per game. Doesn't parse variations (that
+// belongs in a proper PGN library — a follow-up if the demand is real).
+function parsePgnGames(raw: string): Array<{ headers: Record<string, string>; sans: string[] }> {
+  const games: Array<{ headers: Record<string, string>; sans: string[] }> = [];
+  const chunks = raw.replace(/\r\n/g, "\n").split(/\n\n\s*(?=\[)/g);
+  for (const chunk of chunks) {
+    const headers: Record<string, string> = {};
+    const headerRe = /\[(\w+)\s+"([^"]*)"\]/g;
+    let m: RegExpExecArray | null;
+    while ((m = headerRe.exec(chunk)) !== null) headers[m[1]!] = m[2]!;
+    const movetext = chunk.replace(/\[[^\]]+\]/g, "")
+      .replace(/\{[^}]*\}/g, "")     // comments
+      .replace(/\([^()]*\)/g, "")    // shallow variations
+      .replace(/\d+\.(\.\.)?/g, "")  // move numbers
+      .replace(/\$\d+/g, "")         // NAGs
+      .replace(/(1-0|0-1|1\/2-1\/2|\*)\s*$/, "")
+      .trim();
+    if (!movetext) continue;
+    const rawSans = movetext.split(/\s+/).filter(Boolean);
+    // Validate the run through chess.js so a malformed game doesn't smuggle
+    // a bad line into the repertoire.
+    try {
+      const c = new Chess();
+      const cleanSans: string[] = [];
+      for (const s of rawSans) {
+        const applied = c.move(s);
+        if (!applied) break;
+        cleanSans.push(applied.san);
+      }
+      if (cleanSans.length > 0) games.push({ headers, sans: cleanSans });
+    } catch { /* skip broken game */ }
+  }
+  return games;
+}
+// Tier 3.12 — Lichess-study-compatible export. Lichess studies accept a PGN
+// with FEN header for non-standard starts. We build one PGN per entry and
+// concatenate with blank-line separators (Lichess splits into chapters).
+function toLichessStudyPgn(entries: RepertoireEntry[]): string {
+  const games: string[] = [];
+  for (const e of entries) {
+    const sans = e.kind === "corpus"
+      ? (openingBySlug.get(e.slug ?? "")?.pgnStart ?? [])
+      : (e.sans ?? []);
+    if (sans.length === 0 && e.kind === "line") continue;
+    const start = e.startFen && e.startFen.length > 0 ? e.startFen : STANDARD_START;
+    const isCustomStart = start !== STANDARD_START;
+    const headers = [
+      `[Event "${e.name.replace(/"/g, "'")}"]`,
+      `[Site "ChessGuru My Repertoire"]`,
+      `[White "?"]`, `[Black "?"]`,
+    ];
+    if (isCustomStart) {
+      headers.push(`[SetUp "1"]`, `[FEN "${start}"]`);
+    }
+    // Build the movetext with move numbers.
+    const c = new Chess(start);
+    const parts: string[] = [];
+    for (let i = 0; i < sans.length; i++) {
+      const applied = c.move(sans[i]!);
+      if (!applied) break;
+      const fullNo = Math.floor(i / 2) + Number(start.split(" ")[5] || "1");
+      if (i % 2 === 0) parts.push(`${fullNo}. ${applied.san}`);
+      else parts.push(applied.san);
+    }
+    games.push(headers.join("\n") + "\n\n" + parts.join(" ") + " *");
+  }
+  return games.join("\n\n");
+}
+function downloadText(filename: string, text: string) {
+  const blob = new Blob([text], { type: "application/x-chess-pgn" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 200);
 }
 
 // Reconstruct the final FEN for an entry — corpus entries use the opening's
@@ -243,6 +341,15 @@ export default function RepertoirePage() {
       return n;
     });
   };
+  const [tagsMap, setTagsMap] = useState<Record<string, string[]>>(() => loadTags());
+  const setEntryTags = (id: string, tags: string[]) => {
+    setTagsMap((prev) => {
+      const n = { ...prev }; if (tags.length === 0) delete n[id]; else n[id] = tags;
+      saveTags(n); return n;
+    });
+  };
+  const [importOpen, setImportOpen] = useState(false);
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
 
   const entries = data?.entries ?? [];
 
@@ -293,6 +400,7 @@ export default function RepertoirePage() {
         return eco[0] === ecoFam;
       });
     }
+    if (tagFilter) out = out.filter(({ entry: e }) => (tagsMap[e._id] ?? []).includes(tagFilter));
     if (q.trim()) {
       const needle = q.trim().toLowerCase();
       out = out.filter(({ entry: e, classified }) =>
@@ -315,7 +423,8 @@ export default function RepertoirePage() {
       }
     };
     return [...out].sort(cmp);
-  }, [enriched, kind, source, colour, ecoFam, q, sort, stars, starsOnly]);
+  }, [enriched, kind, source, colour, ecoFam, tagFilter, tagsMap, q, sort, stars, starsOnly]);
+  const allTags = useMemo(() => allTagsFrom(tagsMap), [tagsMap]);
 
   // Preview + bulk-select state.
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -329,6 +438,10 @@ export default function RepertoirePage() {
   // Mutations for bulk actions.
   const delMut = useMutation({ mutationFn: deleteRepertoire, onSuccess: () => qc.invalidateQueries({ queryKey: ["my-repertoire"] }) });
   const dupMut = useMutation({ mutationFn: (id: string) => duplicateRepertoire(id), onSuccess: () => qc.invalidateQueries({ queryKey: ["my-repertoire"] }) });
+  const forceMut = useMutation({
+    mutationFn: ({ id, force }: { id: string; force: boolean }) => updateRepertoire(id, { forceTrain: force }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["my-repertoire"] }),
+  });
 
   const bulkDelete = async () => {
     if (bulk.size === 0) return;
@@ -346,6 +459,30 @@ export default function RepertoirePage() {
   };
   const bulkDuplicate = async () => {
     for (const id of bulk) { try { await dupMut.mutateAsync(id); } catch { /* skip */ } }
+    clearBulk();
+  };
+  // Tier 4.15 — flip forceTrain on every selected. Only meaningful when the
+  // caller OWNS the entry (server checks) — copies to students will re-fan
+  // out to their inboxes with the updated flag.
+  const bulkForceTrain = async (force: boolean) => {
+    for (const id of bulk) { try { await forceMut.mutateAsync({ id, force }); } catch { /* skip */ } }
+    clearBulk();
+  };
+  // Tier 5.18 — assign a tag to every selected entry. Prompts for tag string;
+  // localStorage-scoped per browser (see K_TAGS).
+  const bulkTag = () => {
+    const tag = window.prompt("Tag name (e.g. '🔥 sharp' or 'exam-prep')")?.trim();
+    if (!tag) return;
+    setTagsMap((prev) => {
+      const n = { ...prev };
+      for (const id of bulk) {
+        const cur = new Set(n[id] ?? []);
+        cur.add(tag);
+        n[id] = [...cur];
+      }
+      saveTags(n);
+      return n;
+    });
     clearBulk();
   };
 
@@ -367,7 +504,7 @@ export default function RepertoirePage() {
           <h1 className="font-display text-2xl font-bold text-white">📚 My Repertoire</h1>
           <div className="text-xs text-ink-400">{entries.length} saved · manage, browse, drill.</div>
         </div>
-        <div className="flex items-center gap-2 text-xs">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
           <label className="text-ink-500">Sort:</label>
           <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}
             className="rounded-md border border-ink-700 bg-ink-900 px-2 py-1 text-ink-100">
@@ -382,6 +519,23 @@ export default function RepertoirePage() {
             className={`rounded-md border px-2 py-1 font-semibold transition ${bulkMode ? "border-brand-500 bg-brand-500/20 text-brand-100" : "border-ink-700 bg-ink-900 text-ink-200 hover:bg-ink-800"}`}
             title="Toggle bulk-select mode">
             {bulkMode ? "✓ Selecting" : "☐ Bulk"}
+          </button>
+          {/* Tier 3 toolbar — Import PGN / Export PGN / Print */}
+          <button onClick={() => setImportOpen(true)}
+            className="rounded-md border border-emerald-500/50 bg-emerald-500/10 px-2 py-1 font-semibold text-emerald-200 hover:bg-emerald-500/20"
+            title="Import lines from PGN — one entry per game">
+            📥 Import PGN
+          </button>
+          <button onClick={() => downloadText(`repertoire-${new Date().toISOString().slice(0,10)}.pgn`, toLichessStudyPgn(entries))}
+            disabled={entries.length === 0}
+            className="rounded-md border border-sky-500/50 bg-sky-500/10 px-2 py-1 font-semibold text-sky-200 hover:bg-sky-500/20 disabled:opacity-40"
+            title="Download the whole repertoire as a Lichess-study-compatible PGN">
+            📤 Export
+          </button>
+          <button onClick={() => { document.body.classList.add("rep-print"); setTimeout(() => { window.print(); document.body.classList.remove("rep-print"); }, 100); }}
+            className="rounded-md border border-ink-700 bg-ink-900 px-2 py-1 font-semibold text-ink-200 hover:bg-ink-800"
+            title="Print-friendly PDF of the current filtered view">
+            🖨️ Print
           </button>
         </div>
       </div>
@@ -413,6 +567,23 @@ export default function RepertoirePage() {
             className={`w-full rounded-lg border px-3 py-1.5 text-left text-sm transition ${starsOnly ? "border-amber-500/60 bg-amber-500/15 text-amber-100" : "border-ink-800 bg-ink-900 text-ink-300 hover:bg-ink-800"}`}>
             ⭐ {starsOnly ? "Showing stars only" : "Show stars only"}
           </button>
+          {allTags.length > 0 && (
+            <div>
+              <div className="mb-1 text-[10px] font-bold uppercase tracking-widest text-ink-500">Tags</div>
+              <div className="flex flex-wrap gap-1">
+                <button onClick={() => setTagFilter(null)}
+                  className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${tagFilter === null ? "border-brand-500 bg-brand-500/25 text-white" : "border-ink-700 bg-ink-900 text-ink-300 hover:bg-ink-800"}`}>
+                  All
+                </button>
+                {allTags.map((t) => (
+                  <button key={t} onClick={() => setTagFilter(t === tagFilter ? null : t)}
+                    className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${tagFilter === t ? "border-fuchsia-500 bg-fuchsia-500/25 text-white" : "border-ink-700 bg-ink-900 text-ink-300 hover:bg-ink-800"}`}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </aside>
 
         {/* ─────── MAIN: card grid ─────── */}
@@ -491,6 +662,20 @@ export default function RepertoirePage() {
                           )}
                         </div>
                       )}
+                      {(tagsMap[e._id] ?? []).length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {(tagsMap[e._id] ?? []).map((t) => (
+                            <button key={t} onClick={(ev) => { ev.stopPropagation();
+                              const cur = tagsMap[e._id] ?? [];
+                              setEntryTags(e._id, cur.filter((x) => x !== t));
+                            }}
+                              title={`Click to remove tag "${t}"`}
+                              className="rounded-full bg-fuchsia-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-fuchsia-200 hover:bg-fuchsia-500/30">
+                              {t} ×
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     {/* Actions */}
                     <div className="mt-auto flex items-center justify-between gap-1 border-t border-ink-800/60 bg-ink-950/40 px-2 py-1.5 text-[10px]">
@@ -539,17 +724,93 @@ export default function RepertoirePage() {
       {/* Bulk action bar — fixed at bottom, only when bulkMode + some selected. */}
       {bulkMode && bulk.size > 0 && (
         <div className="pointer-events-none fixed bottom-6 left-1/2 z-40 -translate-x-1/2">
-          <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-brand-500/50 bg-ink-900/95 px-4 py-2 shadow-2xl backdrop-blur">
+          <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-xl border border-brand-500/50 bg-ink-900/95 px-4 py-2 shadow-2xl backdrop-blur">
             <span className="text-sm font-semibold text-brand-200">{bulk.size} selected</span>
             <span className="text-ink-700">|</span>
             <button onClick={bulkActivate} className="rounded px-2 py-1 text-xs font-semibold text-fuchsia-300 hover:bg-fuchsia-500/15">📅 Add to Trainer</button>
             <button onClick={bulkDuplicate} className="rounded px-2 py-1 text-xs font-semibold text-ink-200 hover:bg-ink-800">📋 Duplicate</button>
+            <button onClick={bulkTag} className="rounded px-2 py-1 text-xs font-semibold text-fuchsia-300 hover:bg-fuchsia-500/15" title="Add a tag to every selected entry">🏷️ Tag</button>
             {isCoach && <BulkShareButton bulkIds={[...bulk]} entries={entries} onDone={clearBulk} />}
+            {isCoach && (
+              <>
+                <button onClick={() => bulkForceTrain(true)}
+                  className="rounded px-2 py-1 text-xs font-semibold text-amber-300 hover:bg-amber-500/15"
+                  title="Mark all selected as required-study (students can't remove from Opening Trainer)">
+                  ⚡ Require
+                </button>
+                <button onClick={() => bulkForceTrain(false)}
+                  className="rounded px-2 py-1 text-xs font-semibold text-ink-300 hover:bg-ink-800"
+                  title="Remove required-study flag on all selected">
+                  ⚡ Unrequire
+                </button>
+              </>
+            )}
             <button onClick={bulkDelete} className="rounded px-2 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-500/15">🗑 Delete</button>
             <button onClick={clearBulk} className="rounded px-2 py-1 text-xs text-ink-500 hover:bg-ink-800">Cancel</button>
           </div>
         </div>
       )}
+      {importOpen && <ImportPgnModal onClose={() => setImportOpen(false)} onDone={(n) => { setImportOpen(false); qc.invalidateQueries({ queryKey: ["my-repertoire"] }); alert(`Imported ${n} entries.`); }} />}
+      {/* Print-only stylesheet — hides chrome so the grid prints cleanly. */}
+      <style>{`
+        @media print {
+          body.rep-print aside, body.rep-print header, body.rep-print nav, body.rep-print footer,
+          body.rep-print [data-rep-hide-in-print], body.rep-print .no-print { display: none !important; }
+          body.rep-print { background: #fff !important; color: #000 !important; }
+          body.rep-print .bg-ink-900, body.rep-print .bg-ink-950, body.rep-print .bg-ink-800 { background: #fff !important; }
+          body.rep-print .text-white, body.rep-print .text-ink-100, body.rep-print .text-ink-200, body.rep-print .text-ink-300 { color: #000 !important; }
+          body.rep-print button { border: 1px solid #ccc !important; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// PGN import — Tier 3.11
+// ─────────────────────────────────────────────────────────────────────
+function ImportPgnModal({ onClose, onDone }: { onClose: () => void; onDone: (n: number) => void }) {
+  const [text, setText] = useState("");
+  const parsed = useMemo(() => text.trim() ? parsePgnGames(text) : [], [text]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const doImport = async () => {
+    if (parsed.length === 0) { setErr("Nothing to import."); return; }
+    setBusy(true); setErr(null);
+    let ok = 0;
+    for (const g of parsed) {
+      const name = g.headers.Event || g.headers.White || g.headers.Site || `Line — ${g.sans.slice(0, 3).join(" ")}`;
+      try {
+        await addRepertoire({ name: name.slice(0, 140), kind: "line", sans: g.sans });
+        ok++;
+      } catch { /* skip failure */ }
+    }
+    setBusy(false);
+    onDone(ok);
+  };
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onKeyDown={(e) => { if (e.key === "Escape") onClose(); }} tabIndex={-1}>
+      <div className="flex w-full max-w-2xl flex-col rounded-2xl border border-emerald-500/40 bg-gradient-to-br from-ink-900 to-ink-950 p-5 shadow-2xl max-h-[90vh]">
+        <div className="mb-3 flex items-baseline justify-between">
+          <div className="font-display text-lg font-bold text-white">📥 Import PGN</div>
+          <button onClick={onClose} className="rounded-md p-1 text-xl leading-none text-ink-400 hover:text-white">×</button>
+        </div>
+        <div className="mb-2 text-xs text-ink-400">Paste one or more PGN games. Each game becomes a separate repertoire entry. Comments + variations are stripped; only the mainline is saved (bring the tree in via Save-from-Dream Meet).</div>
+        <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder='[Event "Ruy Lopez"]\n\n1. e4 e5 2. Nf3 Nc6 3. Bb5 …'
+          className="flex-1 min-h-[220px] w-full rounded-lg border border-ink-700 bg-ink-900 p-3 font-mono text-[11px] text-white focus:border-emerald-500 focus:outline-none" />
+        <div className="mt-2 flex items-center justify-between text-[11px] text-ink-400">
+          <div>{parsed.length > 0 ? `Detected ${parsed.length} game${parsed.length === 1 ? "" : "s"}.` : "No games detected yet."}</div>
+          {parsed.length > 0 && <div className="text-ink-500">{parsed.reduce((s, g) => s + g.sans.length, 0)} moves total</div>}
+        </div>
+        {err && <div className="mt-2 text-[12px] text-rose-400">{err}</div>}
+        <div className="mt-4 flex items-center gap-2">
+          <button onClick={doImport} disabled={busy || parsed.length === 0}
+            className="flex-1 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow hover:brightness-110 disabled:opacity-60">
+            {busy ? "Importing…" : `📥 Import ${parsed.length}`}
+          </button>
+          <button onClick={onClose} className="rounded-lg border border-ink-700 bg-ink-800 px-4 py-2 text-sm text-ink-200 hover:bg-ink-700">Cancel</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -574,6 +835,14 @@ function PreviewPane({ row, onClose }: { row: { entry: RepertoireEntry; classifi
   const { entry: e, classified, progress } = row;
   const navigate = useNavigate();
   const fen = finalFenFor(e);
+  // Tier 5.20 — master games at the FINAL fen. Only queried when the drawer
+  // is open (row is set) so we don't fan out fetches for every card.
+  const { data: masters } = useQuery({
+    queryKey: ["rep-preview-masters", fen],
+    queryFn: () => fetchExplorer(fen, "masters"),
+    staleTime: 60_000,
+    enabled: !!fen,
+  });
   // Notation: walk sans (or tree mainline).
   const sansForPreview = useMemo(() => {
     if (e.kind === "corpus") return openingBySlug.get(e.slug ?? "")?.pgnStart ?? [];
@@ -638,6 +907,35 @@ function PreviewPane({ row, onClose }: { row: { entry: RepertoireEntry; classifi
           ▶ vs engine
         </button>
       </div>
+      {masters && (masters.white + masters.draws + masters.black) > 0 && (
+        <div className="mt-3 rounded-lg border border-ink-800 bg-ink-900/50 p-2">
+          <div className="mb-1 text-[10px] font-bold uppercase tracking-widest text-ink-500">♞ Master games at this position</div>
+          <div className="mb-1 flex items-center gap-2">
+            <span className="flex h-2 flex-1 overflow-hidden rounded" title={`+${masters.white} =${masters.draws} -${masters.black}`}>
+              <span className="bg-emerald-400" style={{ width: `${(masters.white / (masters.white + masters.draws + masters.black)) * 100}%` }} />
+              <span className="bg-ink-500" style={{ width: `${(masters.draws / (masters.white + masters.draws + masters.black)) * 100}%` }} />
+              <span className="bg-rose-600" style={{ width: `${(masters.black / (masters.white + masters.draws + masters.black)) * 100}%` }} />
+            </span>
+            <span className="text-[10px] text-ink-500">{(masters.white + masters.draws + masters.black).toLocaleString()}</span>
+          </div>
+          <div className="max-h-32 space-y-0.5 overflow-y-auto">
+            {(masters.moves ?? []).slice(0, 6).map((m: ExplorerMove) => {
+              const total = m.white + m.draws + m.black;
+              return (
+                <div key={m.uci} className="flex items-center gap-2 text-[10px]">
+                  <span className="w-12 font-mono font-bold text-ink-100">{m.san}</span>
+                  <span className="w-14 text-right text-ink-500">{total.toLocaleString()}</span>
+                  <span className="flex h-1.5 flex-1 overflow-hidden rounded" title={`+${m.white} =${m.draws} -${m.black}`}>
+                    <span className="bg-emerald-400" style={{ width: `${(m.white / total) * 100}%` }} />
+                    <span className="bg-ink-500" style={{ width: `${(m.draws / total) * 100}%` }} />
+                    <span className="bg-rose-600" style={{ width: `${(m.black / total) * 100}%` }} />
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
