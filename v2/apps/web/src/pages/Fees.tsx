@@ -29,7 +29,7 @@ const TILES = [
     title: "Invoices",
     desc: "Monthly bills, cash payments, reminders.",
     ring: "from-gold-500/40 via-gold-500/10 to-transparent",
-    live: false,
+    live: true,
   },
   {
     to: "/fees/payments",

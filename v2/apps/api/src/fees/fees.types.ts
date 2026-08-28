@@ -223,3 +223,166 @@ export const MAX_LATE_GRACE_DAYS = 30;
 export const MAX_BULK_ENROLL = 500;
 export const MIN_DISCOUNT_PCT = 0;
 export const MAX_DISCOUNT_PCT = 100;
+
+// ============================================================================
+// W2b — invoices + payments
+// ============================================================================
+
+export type InvoiceStatus = "DRAFT" | "SENT" | "PARTIAL" | "PAID" | "OVERDUE" | "WAIVED" | "CANCELLED";
+export type PaymentMethod = "UPI" | "CARD" | "CASH" | "BANK" | "WALLET" | "OFFSET";
+export type PaymentStatus = "PENDING" | "CAPTURED" | "FAILED" | "REFUNDED";
+
+/** Inline invoice line — snapshot of the head at generation time. Head names
+ *  and amounts are frozen here so an admin renaming a head later doesn't
+ *  retroactively rewrite historical invoices. */
+export interface InvoiceLine {
+  headId?: string;                     // optional — LATE fees may not tie to a head
+  name: string;
+  amountPaise: number;
+  kind: FeeHeadKind;
+  gstPct?: number;
+}
+
+export interface InvoiceDoc {
+  _id: ObjectId;
+  academyId: string;
+  enrollmentId: string;
+  planId: string;
+  programId: string;
+  studentUserId: string;
+  guardianUserId?: string;
+  invoiceNo: string;                   // e.g. "GUNA/2026-27/000042"
+  periodStart: Date;                   // month-first / one-off startOn
+  periodEnd: Date;                     // month-last / one-off startOn
+  lines: InvoiceLine[];
+  subtotalPaise: number;
+  discountPaise: number;
+  taxPaise: number;                    // GST split (0 for most academies)
+  totalPaise: number;                  // subtotal - discount + tax
+  paidPaise: number;                   // sum of PaymentAllocation.amountPaise on CAPTURED payments
+  dueOn: Date;
+  status: InvoiceStatus;
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  paidAt?: Date;
+  waivedAt?: Date;
+  waivedReason?: string;
+  cancelledAt?: Date;
+}
+
+export interface PaymentDoc {
+  _id: ObjectId;
+  academyId: string;
+  guardianUserId?: string;
+  amountPaise: number;
+  method: PaymentMethod;
+  pgProvider: "razorpay" | "paytm" | "manual";
+  pgOrderId?: string;
+  pgPaymentId?: string;
+  status: PaymentStatus;
+  receiptNo: string;
+  capturedAt?: Date;
+  note?: string;
+  createdBy: string;                   // userId of the recorder
+  createdAt: Date;
+}
+
+export interface PaymentAllocationDoc {
+  _id: ObjectId;
+  academyId: string;
+  paymentId: string;
+  invoiceId: string;
+  amountPaise: number;
+  createdAt: Date;
+}
+
+/** Atomic counter row per {academyId, kind}. Kinds: "invoice", "receipt". */
+export interface FeeCounterDoc {
+  _id: ObjectId;
+  academyId: string;
+  kind: "invoice" | "receipt";
+  seq: number;
+  fyStamp: string;                     // "2026-27" — resets seq on FY rollover
+}
+
+// -------- DTOs -------------------------------------------------------------
+
+export interface GenerateInvoicesInput {
+  planId: string;
+  upToDate?: string;                   // ISO — generate all periods with periodStart ≤ this. Defaults to today.
+}
+
+export interface InvoiceLineResponse {
+  headId?: string;
+  name: string;
+  amountPaise: number;
+  kind: FeeHeadKind;
+  gstPct?: number;
+}
+
+export interface InvoiceResponse {
+  id: string;
+  invoiceNo: string;
+  enrollmentId: string;
+  planId: string;
+  programId: string;
+  programName?: string;                // enriched on list/get
+  studentUserId: string;
+  studentName?: string;
+  guardianUserId?: string;
+  guardianName?: string;
+  guardianPhone?: string;
+  periodStart: string;
+  periodEnd: string;
+  lines: InvoiceLineResponse[];
+  subtotalPaise: number;
+  discountPaise: number;
+  taxPaise: number;
+  totalPaise: number;
+  paidPaise: number;
+  balancePaise: number;                // computed = total - paid (never negative)
+  dueOn: string;
+  status: InvoiceStatus;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+  paidAt?: string;
+  waivedAt?: string;
+  waivedReason?: string;
+  cancelledAt?: string;
+}
+
+export interface PaymentResponse {
+  id: string;
+  guardianUserId?: string;
+  amountPaise: number;
+  method: PaymentMethod;
+  pgProvider: "razorpay" | "paytm" | "manual";
+  status: PaymentStatus;
+  receiptNo: string;
+  capturedAt?: string;
+  note?: string;
+  createdAt: string;
+  allocations: Array<{ invoiceId: string; invoiceNo?: string; amountPaise: number }>;
+}
+
+export interface RecordManualPaymentInput {
+  invoiceIds: string[];                // one or many — FIFO allocation
+  amountPaise: number;
+  method: "CASH" | "BANK" | "UPI";     // manual entry — PG-tracked online payments come in W4+
+  capturedOn?: string;                 // ISO date — defaults to today
+  note?: string;
+}
+
+export interface WaiveInvoiceInput {
+  reason: string;
+}
+
+// -------- Validation limits ------------------------------------------------
+
+export const VALID_INVOICE_STATUSES: readonly InvoiceStatus[] = ["DRAFT", "SENT", "PARTIAL", "PAID", "OVERDUE", "WAIVED", "CANCELLED"] as const;
+export const VALID_MANUAL_METHODS: readonly ("CASH" | "BANK" | "UPI")[] = ["CASH", "BANK", "UPI"] as const;
+export const MAX_INVOICE_NOTE_LEN = 400;
+export const MAX_PAYMENT_NOTE_LEN = 200;
+export const MAX_WAIVE_REASON_LEN = 400;

@@ -18,7 +18,6 @@ import {
   type EnrollmentResponse,
   type PlanCadence,
   type PlanResponse,
-  type StudentPickRow,
   type UpsertPlanInput,
   feesApi,
   fmtRupees,
@@ -127,16 +126,21 @@ export default function FeesProgramDetailPage() {
 
       {/* ---- Enrollments ---- */}
       <section className="mt-6 rounded-2xl border border-ink-700 bg-ink-900/60 p-5">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-300">{t("Enrolled students")}</h2>
-          <button
-            onClick={() => setEnrolOpen(true)}
-            disabled={!plan}
-            title={plan ? "" : t("Save a plan first")}
-            className="inline-flex h-10 items-center gap-2 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 px-4 text-sm font-semibold text-white shadow-glow transition hover:brightness-110 disabled:opacity-50"
-          >
-            <span aria-hidden>＋</span>{t("Enrol students")}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {plan && enrollments.length > 0 && (
+              <GenerateInvoicesButton planId={plan.id} programId={p.id} />
+            )}
+            <button
+              onClick={() => setEnrolOpen(true)}
+              disabled={!plan}
+              title={plan ? "" : t("Save a plan first")}
+              className="inline-flex h-10 items-center gap-2 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 px-4 text-sm font-semibold text-white shadow-glow transition hover:brightness-110 disabled:opacity-50"
+            >
+              <span aria-hidden>＋</span>{t("Enrol students")}
+            </button>
+          </div>
         </div>
         {!plan && (
           <div className="rounded-xl border border-dashed border-ink-700 py-8 text-center text-sm text-ink-400">
@@ -513,4 +517,43 @@ function todayISO(): string {
 function clamp(n: number, min: number, max: number): number {
   if (!Number.isFinite(n)) return min;
   return Math.max(min, Math.min(max, n));
+}
+
+// ---- Generate invoices --------------------------------------------------
+
+function GenerateInvoicesButton({ planId, programId }: { planId: string; programId: string }) {
+  const nav = useNavigate();
+  const [toast, setToast] = useState<string | null>(null);
+  const gen = useMutation({
+    mutationFn: () => feesApi.generateInvoices(planId),
+    onSuccess: (r) => {
+      if (r.created === 0 && r.skipped === 0) {
+        setToast(t("Nothing to generate — try again after the plan's start date."));
+      } else if (r.created === 0) {
+        setToast(t(`Already generated (${r.skipped} skipped as duplicates).`));
+      } else {
+        setToast(t(`Generated ${r.created} invoice(s)${r.skipped > 0 ? ` · ${r.skipped} already existed` : ""}. Opening…`));
+        setTimeout(() => nav(`/fees/invoices?programId=${encodeURIComponent(programId)}`), 900);
+      }
+    },
+    onError: (e) => setToast(e instanceof Error ? e.message : t("Couldn't generate.")),
+  });
+  return (
+    <>
+      <button
+        onClick={() => gen.mutate()}
+        disabled={gen.isPending}
+        className="inline-flex h-10 items-center gap-2 rounded-xl border border-accent-500/50 bg-accent-500/10 px-4 text-sm font-semibold text-accent-300 transition hover:bg-accent-500/20 disabled:opacity-50"
+        title={t("Generate this period's invoices for every active enrolment")}
+      >
+        {gen.isPending ? "⏳" : "🧾"} {t("Generate invoices")}
+      </button>
+      {toast && (
+        <div role="status" className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-accent-500/40 bg-ink-950 px-4 py-2 text-sm text-accent-200 shadow-2xl">
+          {toast}
+          <button onClick={() => setToast(null)} className="ml-2 text-ink-400 hover:text-white">✕</button>
+        </div>
+      )}
+    </>
+  );
 }

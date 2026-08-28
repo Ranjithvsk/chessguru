@@ -19,12 +19,18 @@ import {
   CreateProgramInput,
   EnrollmentResponse,
   EnrollmentStatus,
+  FeeCounterDoc,
   FeeEnrollmentDoc,
   FeeHeadDoc,
   FeeHeadKind,
   FeePlanDoc,
   FeeProgramDoc,
+  GenerateInvoicesInput,
   HeadResponse,
+  InvoiceDoc,
+  InvoiceLine,
+  InvoiceResponse,
+  InvoiceStatus,
   MAX_AMOUNT_PAISE,
   MAX_BULK_ENROLL,
   MAX_DAY_OF_MONTH,
@@ -32,18 +38,27 @@ import {
   MAX_DISCOUNT_PCT,
   MAX_DUE_OFFSET_DAYS,
   MAX_HEADS_PER_PROGRAM,
+  MAX_INVOICE_NOTE_LEN,
   MAX_LATE_GRACE_DAYS,
   MAX_NAME_LEN,
+  MAX_PAYMENT_NOTE_LEN,
+  MAX_WAIVE_REASON_LEN,
   MIN_AMOUNT_PAISE,
   MIN_DAY_OF_MONTH,
   MIN_DISCOUNT_PCT,
+  PaymentAllocationDoc,
+  PaymentDoc,
+  PaymentResponse,
   PlanCadence,
   PlanResponse,
   ProgramResponse,
+  RecordManualPaymentInput,
   StudentPickRow,
   UpsertPlanInput,
   VALID_CADENCES,
   VALID_KINDS,
+  VALID_MANUAL_METHODS,
+  WaiveInvoiceInput,
 } from "./fees.types";
 
 interface Session {
@@ -60,6 +75,10 @@ export class FeesService {
   private heads()       { return this.conn.db!.collection<FeeHeadDoc>(COL.heads); }
   private plans()       { return this.conn.db!.collection<FeePlanDoc>(COL.plans); }
   private enrollments() { return this.conn.db!.collection<FeeEnrollmentDoc>(COL.enrollments); }
+  private invoices()    { return this.conn.db!.collection<InvoiceDoc>(COL.invoices); }
+  private payments()    { return this.conn.db!.collection<PaymentDoc>(COL.payments); }
+  private allocs()      { return this.conn.db!.collection<PaymentAllocationDoc>(COL.paymentAllocs); }
+  private counters()    { return this.conn.db!.collection<FeeCounterDoc>("fees_counters"); }
   // ChessGuru already models students + parents as users rows — we reuse.
   private users()       { return this.conn.db!.collection("users"); }
 
@@ -71,6 +90,15 @@ export class FeesService {
     await this.plans().createIndex({ academyId: 1, programId: 1 }, { unique: true });
     await this.enrollments().createIndex({ academyId: 1, planId: 1, studentUserId: 1 }, { unique: true });
     await this.enrollments().createIndex({ academyId: 1, status: 1, updatedAt: -1 });
+    // Idempotency guard: same enrollment + same period start = same invoice.
+    // Regenerating for a period is a noop instead of duplicate rows.
+    await this.invoices().createIndex({ academyId: 1, enrollmentId: 1, periodStart: 1 }, { unique: true });
+    await this.invoices().createIndex({ academyId: 1, status: 1, dueOn: 1 });
+    await this.invoices().createIndex({ academyId: 1, guardianUserId: 1, createdAt: -1 });
+    await this.payments().createIndex({ academyId: 1, createdAt: -1 });
+    await this.allocs().createIndex({ academyId: 1, invoiceId: 1 });
+    await this.allocs().createIndex({ academyId: 1, paymentId: 1 });
+    await this.counters().createIndex({ academyId: 1, kind: 1 }, { unique: true });
   }
 
   // ---- guards ---------------------------------------------------------------
@@ -565,6 +593,465 @@ export class FeesService {
         alreadyEnrolled: enrolledSet.has(sid),
       };
     });
+  }
+
+  // ==========================================================================
+  // W2b — Invoice generation
+  // ==========================================================================
+
+  /** India FY starts April. "2026-27" for any date Apr 2026 → Mar 2027. */
+  private fyStamp(d: Date): string {
+    const y = d.getFullYear();
+    const m = d.getMonth(); // 0=Jan
+    const start = m >= 3 ? y : y - 1;
+    const end = (start + 1) % 100;
+    return `${start}-${String(end).padStart(2, "0")}`;
+  }
+
+  /** Atomic per-academy invoice sequence. Resets on FY rollover. */
+  private async nextInvoiceSeq(academyId: string, now: Date): Promise<{ seq: number; fyStamp: string }> {
+    const fy = this.fyStamp(now);
+    // First: ensure the counter row exists with the current FY. If FY changed,
+    // reset seq. This is a two-step upsert — race is theoretically possible on
+    // FY rollover but has no correctness impact (worst case: one duplicate try
+    // that the invoiceNo uniqueness would catch — we retry once below).
+    await this.counters().updateOne(
+      { academyId, kind: "invoice", fyStamp: { $ne: fy } },
+      { $set: { seq: 0, fyStamp: fy } },
+      { upsert: false },
+    );
+    const r = await this.counters().findOneAndUpdate(
+      { academyId, kind: "invoice" },
+      { $inc: { seq: 1 }, $setOnInsert: { fyStamp: fy } },
+      { upsert: true, returnDocument: "after" },
+    );
+    // MongoDB driver 6.x returns the doc directly; older returns { value }.
+    // Handle both defensively — findOneAndUpdate typing varies across versions
+    // and we can't afford to blow up on a payment path.
+    const doc: FeeCounterDoc | undefined = (r && (r as unknown as { value?: FeeCounterDoc }).value) ?? (r as unknown as FeeCounterDoc | undefined);
+    if (!doc) throw new Error("Counter upsert returned nothing.");
+    return { seq: doc.seq, fyStamp: doc.fyStamp };
+  }
+
+  private async buildInvoiceNo(academyId: string, receiptPrefix: string, now: Date): Promise<string> {
+    const { seq, fyStamp } = await this.nextInvoiceSeq(academyId, now);
+    const padded = String(seq).padStart(6, "0");
+    return `${receiptPrefix}/${fyStamp}/${padded}`;
+  }
+
+  /** Compute {periodStart, periodEnd, dueOn} pairs to generate for a plan.
+   *  MONTHLY: from plan.startOn (bounded by plan.endOn) up through upToDate.
+   *  ONE_OFF: single period = {startOn, startOn}, only if in-window vs upToDate. */
+  private periodsForPlan(plan: FeePlanDoc, upToDate: Date): Array<{ periodStart: Date; periodEnd: Date; dueOn: Date }> {
+    if (plan.cadence === "ONE_OFF") {
+      const s = new Date(plan.startOn); s.setHours(0, 0, 0, 0);
+      if (s > upToDate) return [];
+      const due = new Date(s); due.setDate(due.getDate() + plan.dueOffsetDays);
+      return [{ periodStart: s, periodEnd: s, dueOn: due }];
+    }
+    if (plan.cadence !== "MONTHLY") return []; // TERM/CUSTOM — V2
+    const day = plan.dayOfMonth ?? 1;
+    const list: Array<{ periodStart: Date; periodEnd: Date; dueOn: Date }> = [];
+    const start = new Date(plan.startOn);
+    const end = plan.endOn ? new Date(plan.endOn) : upToDate;
+    const stopAt = end < upToDate ? end : upToDate;
+    // Walk one month at a time starting from the plan's first period.
+    let cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+    let safety = 0;
+    while (cursor <= stopAt && safety++ < 240) { // 20-year cap — hard safety
+      const periodStart = new Date(cursor.getFullYear(), cursor.getMonth(), day);
+      // Feb / short months — cap at month-length. new Date(y, m, 30) rolls into next month;
+      // instead ceil the day at the actual last day of the month.
+      const monthLen = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
+      periodStart.setDate(Math.min(day, monthLen));
+      periodStart.setHours(0, 0, 0, 0);
+      const periodEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
+      periodEnd.setHours(23, 59, 59, 999);
+      const dueOn = new Date(periodStart);
+      dueOn.setDate(dueOn.getDate() + plan.dueOffsetDays);
+      // Skip periods that end before the plan starts (day-of-month earlier than startOn's day).
+      if (periodEnd >= start && periodStart <= stopAt) list.push({ periodStart, periodEnd, dueOn });
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+    }
+    return list;
+  }
+
+  private computeInvoiceMath(lines: InvoiceLine[], enrollment: FeeEnrollmentDoc): { subtotal: number; discount: number; tax: number; total: number } {
+    const subtotal = lines.reduce((s, l) => s + l.amountPaise, 0);
+    let discount = 0;
+    if (typeof enrollment.discountPct === "number" && enrollment.discountPct > 0) {
+      discount = Math.round(subtotal * enrollment.discountPct / 100);
+    }
+    if (typeof enrollment.discountFlatPaise === "number" && enrollment.discountFlatPaise > 0) {
+      discount += enrollment.discountFlatPaise;
+    }
+    discount = Math.min(discount, subtotal); // never negative-total
+    const tax = lines.reduce((s, l) => {
+      if (!l.gstPct) return s;
+      return s + Math.round((l.amountPaise - Math.round(l.amountPaise * (enrollment.discountPct ?? 0) / 100)) * l.gstPct / 100);
+    }, 0);
+    const total = subtotal - discount + tax;
+    return { subtotal, discount, tax, total };
+  }
+
+  /** Generate invoices for all ACTIVE enrollments on a plan. Idempotent per
+   *  {enrollmentId, periodStart} via unique index — retrying returns
+   *  {created, skipped, alreadyExisted} without duplicates. */
+  async generateInvoices(session: Session, input: GenerateInvoicesInput): Promise<{ created: number; skipped: number }> {
+    const { academyId } = this.requireOwner(session);
+    const planId = this.oid(input?.planId);
+    const plan = await this.plans().findOne({ _id: planId, academyId });
+    if (!plan) throw new NotFoundException("Plan not found.");
+
+    // Cadence gate — TERM/CUSTOM disabled at MVP.
+    if (plan.cadence !== "MONTHLY" && plan.cadence !== "ONE_OFF") {
+      throw new BadRequestException(`${plan.cadence} cadence isn't supported yet — pick MONTHLY or ONE_OFF.`);
+    }
+
+    const upToDate = input?.upToDate ? this.assertDate(input.upToDate, "Up-to date") : new Date();
+    const periods = this.periodsForPlan(plan, upToDate);
+    if (periods.length === 0) return { created: 0, skipped: 0 };
+
+    // Load heads once — every enrollment on this plan shares the same head set.
+    const heads = await this.heads().find({ academyId, programId: plan.programId }).sort({ order: 1 }).toArray();
+    if (heads.length === 0) throw new BadRequestException("This program has no fee heads — add at least one before generating invoices.");
+    const templateLines: InvoiceLine[] = heads.map((h) => ({
+      headId: String(h._id),
+      name: h.name,
+      amountPaise: h.amountPaise,
+      kind: h.kind,
+      gstPct: h.gstPct,
+    }));
+
+    // Load active enrollments for this plan.
+    const enrollments = await this.enrollments().find({ academyId, planId: String(planId), status: "ACTIVE" }).toArray();
+    if (enrollments.length === 0) return { created: 0, skipped: 0 };
+
+    // Fetch academy meta for receipt prefix (falls back to first 4 letters of academyId).
+    const receiptPrefix = await this.receiptPrefixFor(academyId);
+
+    let created = 0;
+    let skipped = 0;
+    const now = new Date();
+
+    for (const enr of enrollments) {
+      const enrStart = new Date(enr.startsOn);
+      const enrEnd = enr.endsOn ? new Date(enr.endsOn) : null;
+
+      for (const period of periods) {
+        // Skip out-of-window periods for this enrolment.
+        if (period.periodEnd < enrStart) continue;
+        if (enrEnd && period.periodStart > enrEnd) continue;
+
+        // Fast path: skip if we already generated this invoice.
+        const existing = await this.invoices().findOne({ academyId, enrollmentId: String(enr._id), periodStart: period.periodStart });
+        if (existing) { skipped++; continue; }
+
+        const math = this.computeInvoiceMath(templateLines, enr);
+        const invoiceNo = await this.buildInvoiceNo(academyId, receiptPrefix, now);
+        const doc: Omit<InvoiceDoc, "_id"> = {
+          academyId,
+          enrollmentId: String(enr._id),
+          planId: String(planId),
+          programId: plan.programId,
+          studentUserId: enr.studentUserId,
+          guardianUserId: enr.guardianUserId,
+          invoiceNo,
+          periodStart: period.periodStart,
+          periodEnd: period.periodEnd,
+          lines: templateLines,
+          subtotalPaise: math.subtotal,
+          discountPaise: math.discount,
+          taxPaise: math.tax,
+          totalPaise: math.total,
+          paidPaise: 0,
+          dueOn: period.dueOn,
+          status: "SENT",              // MVP: skip DRAFT — go straight to SENT (owner "sends" by generating)
+          createdAt: now,
+          updatedAt: now,
+        };
+        try {
+          await this.invoices().insertOne(doc as InvoiceDoc);
+          created++;
+        } catch (e: unknown) {
+          // Unique-index race under concurrent generate calls → count as skipped, don't fail the batch.
+          if ((e as { code?: number })?.code === 11000) { skipped++; continue; }
+          throw e;
+        }
+      }
+    }
+    return { created, skipped };
+  }
+
+  private async receiptPrefixFor(academyId: string): Promise<string> {
+    // Prefer the academy's slug in caps as a stable receipt prefix. If the
+    // academy has an explicit branding row, we could honour a receiptPrefix
+    // field there — deferred to W6 settings UI.
+    const academy = await this.conn.db!.collection("academies").findOne(
+      { _id: this.tryOid(academyId) ?? undefined, ...(this.tryOid(academyId) ? {} : { slug: academyId }) },
+      { projection: { slug: 1 } as never },
+    );
+    const slug: string = (academy?.slug as string) || academyId || "ACAD";
+    return slug.toUpperCase().replace(/[^A-Z0-9]+/g, "").slice(0, 12) || "ACAD";
+  }
+
+  private tryOid(id: string): ObjectId | null {
+    try { return new ObjectId(id); } catch { return null; }
+  }
+
+  // ==========================================================================
+  // W2b — Invoice list + get + manual payment
+  // ==========================================================================
+
+  private shapeInvoice(i: InvoiceDoc, meta?: { programName?: string; studentName?: string; guardianName?: string; guardianPhone?: string }): InvoiceResponse {
+    return {
+      id: String(i._id),
+      invoiceNo: i.invoiceNo,
+      enrollmentId: i.enrollmentId,
+      planId: i.planId,
+      programId: i.programId,
+      programName: meta?.programName,
+      studentUserId: i.studentUserId,
+      studentName: meta?.studentName,
+      guardianUserId: i.guardianUserId,
+      guardianName: meta?.guardianName,
+      guardianPhone: meta?.guardianPhone,
+      periodStart: i.periodStart.toISOString(),
+      periodEnd: i.periodEnd.toISOString(),
+      lines: i.lines.map((l) => ({ headId: l.headId, name: l.name, amountPaise: l.amountPaise, kind: l.kind, gstPct: l.gstPct })),
+      subtotalPaise: i.subtotalPaise,
+      discountPaise: i.discountPaise,
+      taxPaise: i.taxPaise,
+      totalPaise: i.totalPaise,
+      paidPaise: i.paidPaise,
+      balancePaise: Math.max(0, i.totalPaise - i.paidPaise),
+      dueOn: i.dueOn.toISOString(),
+      status: i.status,
+      notes: i.notes,
+      createdAt: i.createdAt.toISOString(),
+      updatedAt: i.updatedAt.toISOString(),
+      paidAt: i.paidAt?.toISOString(),
+      waivedAt: i.waivedAt?.toISOString(),
+      waivedReason: i.waivedReason,
+      cancelledAt: i.cancelledAt?.toISOString(),
+    };
+  }
+
+  async listInvoices(session: Session, opts: { status?: InvoiceStatus; planId?: string; programId?: string; guardianUserId?: string; overdueOnly?: boolean } = {}): Promise<InvoiceResponse[]> {
+    const { academyId } = this.requireOwner(session);
+    const filter: Record<string, unknown> = { academyId };
+    if (opts.status) filter.status = opts.status;
+    if (opts.planId) filter.planId = String(this.oid(opts.planId));
+    if (opts.programId) filter.programId = String(this.oid(opts.programId));
+    if (opts.guardianUserId) filter.guardianUserId = opts.guardianUserId;
+    if (opts.overdueOnly) {
+      filter.status = { $in: ["SENT", "PARTIAL", "OVERDUE"] };
+      filter.dueOn = { $lt: new Date() };
+    }
+    const rows = await this.invoices().find(filter).sort({ dueOn: 1, createdAt: -1 }).limit(500).toArray();
+    if (rows.length === 0) return [];
+
+    // Batch resolve programs + students + guardians for the table.
+    const programIds = new Set(rows.map((r) => r.programId));
+    const studentIds = new Set(rows.map((r) => r.studentUserId));
+    const guardianIds = new Set(rows.map((r) => r.guardianUserId).filter((v): v is string => !!v));
+    const progOids = Array.from(programIds).map((s) => this.tryOid(s)).filter((v): v is ObjectId => !!v);
+    const stuOids  = Array.from(studentIds).map((s) => this.tryOid(s)).filter((v): v is ObjectId => !!v);
+    const guaOids  = Array.from(guardianIds).map((s) => this.tryOid(s)).filter((v): v is ObjectId => !!v);
+    const [programs, students, guardians] = await Promise.all([
+      progOids.length ? this.programs().find({ _id: { $in: progOids } }, { projection: { _id: 1, name: 1 } as never }).toArray() : Promise.resolve([]),
+      stuOids.length  ? this.users().find({ _id: { $in: stuOids } }, { projection: { _id: 1, name: 1, username: 1 } as never }).toArray()  : Promise.resolve([]),
+      guaOids.length  ? this.users().find({ _id: { $in: guaOids } }, { projection: { _id: 1, name: 1, username: 1, mobile: 1 } as never }).toArray() : Promise.resolve([]),
+    ]);
+    const programById  = new Map(programs.map((p) => [String(p._id), p]));
+    const studentById  = new Map(students.map((s) => [String(s._id), s]));
+    const guardianById = new Map(guardians.map((g) => [String(g._id), g]));
+    return rows.map((r) => this.shapeInvoice(r, {
+      programName: programById.get(r.programId)?.name,
+      studentName: studentById.get(r.studentUserId)?.name ?? studentById.get(r.studentUserId)?.username,
+      guardianName: r.guardianUserId ? (guardianById.get(r.guardianUserId)?.name ?? guardianById.get(r.guardianUserId)?.username) : undefined,
+      guardianPhone: r.guardianUserId ? guardianById.get(r.guardianUserId)?.mobile : undefined,
+    }));
+  }
+
+  async getInvoice(session: Session, id: string): Promise<{ invoice: InvoiceResponse; payments: PaymentResponse[] }> {
+    const { academyId } = this.requireOwner(session);
+    const _id = this.oid(id);
+    const inv = await this.invoices().findOne({ _id, academyId });
+    if (!inv) throw new NotFoundException("Invoice not found.");
+
+    // Enrich
+    const [program, student, guardian] = await Promise.all([
+      this.programs().findOne({ _id: this.oid(inv.programId), academyId }, { projection: { _id: 1, name: 1 } as never }),
+      this.users().findOne({ _id: this.tryOid(inv.studentUserId) ?? undefined }, { projection: { _id: 1, name: 1, username: 1 } as never }),
+      inv.guardianUserId ? this.users().findOne({ _id: this.tryOid(inv.guardianUserId) ?? undefined }, { projection: { _id: 1, name: 1, username: 1, mobile: 1 } as never }) : Promise.resolve(null),
+    ]);
+
+    // Payments allocated to this invoice.
+    const allocs = await this.allocs().find({ academyId, invoiceId: String(_id) }).toArray();
+    let paymentResponses: PaymentResponse[] = [];
+    if (allocs.length > 0) {
+      const payOids = Array.from(new Set(allocs.map((a) => a.paymentId))).map((s) => this.tryOid(s)).filter((v): v is ObjectId => !!v);
+      const payments = payOids.length ? await this.payments().find({ _id: { $in: payOids }, academyId }).sort({ createdAt: -1 }).toArray() : [];
+      paymentResponses = payments.map((p) => this.shapePayment(p, allocs.filter((a) => a.paymentId === String(p._id)).map((a) => ({ invoiceId: a.invoiceId, invoiceNo: inv.invoiceNo, amountPaise: a.amountPaise }))));
+    }
+
+    return {
+      invoice: this.shapeInvoice(inv, {
+        programName: program?.name,
+        studentName: student?.name ?? student?.username,
+        guardianName: guardian?.name ?? guardian?.username,
+        guardianPhone: guardian?.mobile,
+      }),
+      payments: paymentResponses,
+    };
+  }
+
+  private shapePayment(p: PaymentDoc, allocations: PaymentResponse["allocations"]): PaymentResponse {
+    return {
+      id: String(p._id),
+      guardianUserId: p.guardianUserId,
+      amountPaise: p.amountPaise,
+      method: p.method,
+      pgProvider: p.pgProvider,
+      status: p.status,
+      receiptNo: p.receiptNo,
+      capturedAt: p.capturedAt?.toISOString(),
+      note: p.note,
+      createdAt: p.createdAt.toISOString(),
+      allocations,
+    };
+  }
+
+  /** Record an offline payment (cash / bank transfer / UPI-received-on-QR).
+   *  FIFO-allocates across the provided invoice IDs. Any residual leftover
+   *  after all invoices settle is discarded for MVP — surfaces as an admin
+   *  warning in the response so the owner can pick that up. */
+  async recordManualPayment(session: Session, input: RecordManualPaymentInput): Promise<{ payment: PaymentResponse; leftoverPaise: number }> {
+    const { userId, academyId } = this.requireOwner(session);
+    if (typeof input?.amountPaise !== "number" || !Number.isInteger(input.amountPaise) || input.amountPaise < MIN_AMOUNT_PAISE) {
+      throw new BadRequestException("Amount must be a whole number of paise (≥ ₹1).");
+    }
+    if (!VALID_MANUAL_METHODS.includes(input?.method)) {
+      throw new BadRequestException(`Method must be one of: ${VALID_MANUAL_METHODS.join(", ")}.`);
+    }
+    const note = typeof input?.note === "string" && input.note.trim() ? input.note.trim().slice(0, MAX_PAYMENT_NOTE_LEN) : undefined;
+    const capturedAt = input?.capturedOn ? this.assertDate(input.capturedOn, "Captured on") : new Date();
+    const invoiceIds = Array.isArray(input?.invoiceIds) ? input.invoiceIds : [];
+    if (invoiceIds.length === 0) throw new BadRequestException("Pick at least one invoice.");
+
+    // Load invoices, ensure ours, ensure not cancelled/waived. FIFO by dueOn.
+    const oids = invoiceIds.map((s) => this.oid(s));
+    const invoices = await this.invoices().find({ _id: { $in: oids }, academyId }).sort({ dueOn: 1 }).toArray();
+    if (invoices.length !== invoiceIds.length) throw new BadRequestException("One or more invoices weren't found.");
+    for (const inv of invoices) {
+      if (inv.status === "CANCELLED" || inv.status === "WAIVED") {
+        throw new BadRequestException(`Invoice ${inv.invoiceNo} is ${inv.status.toLowerCase()} — can't take payment against it.`);
+      }
+    }
+
+    // Guardian derive: use the first invoice's guardian for the receipt row.
+    const guardianUserId: string | undefined = invoices[0]?.guardianUserId;
+
+    // Insert Payment row first (CAPTURED — manual entries are always captured).
+    const now = new Date();
+    const receiptNo = await this.buildReceiptNo(academyId, now);
+    const paymentRes = await this.payments().insertOne({
+      academyId,
+      guardianUserId,
+      amountPaise: input.amountPaise,
+      method: input.method,
+      pgProvider: "manual",
+      status: "CAPTURED",
+      receiptNo,
+      capturedAt,
+      note,
+      createdBy: userId,
+      createdAt: now,
+    } as PaymentDoc);
+    const paymentId = paymentRes.insertedId as ObjectId;
+
+    // FIFO allocate.
+    let remaining = input.amountPaise;
+    const alloc: PaymentAllocationDoc[] = [];
+    for (const inv of invoices) {
+      if (remaining <= 0) break;
+      const openBalance = Math.max(0, inv.totalPaise - inv.paidPaise);
+      if (openBalance === 0) continue;
+      const take = Math.min(openBalance, remaining);
+      alloc.push({ _id: new ObjectId(), academyId, paymentId: String(paymentId), invoiceId: String(inv._id), amountPaise: take, createdAt: now });
+      remaining -= take;
+    }
+    if (alloc.length > 0) {
+      await this.allocs().insertMany(alloc);
+      // Update each invoice's paidPaise + status atomically.
+      for (const a of alloc) {
+        const inv = invoices.find((i) => String(i._id) === a.invoiceId);
+        if (!inv) continue;
+        const newPaid = inv.paidPaise + a.amountPaise;
+        const newStatus: InvoiceStatus = newPaid >= inv.totalPaise ? "PAID" : "PARTIAL";
+        const upd: Record<string, unknown> = { paidPaise: newPaid, status: newStatus, updatedAt: now };
+        if (newStatus === "PAID") upd.paidAt = now;
+        await this.invoices().updateOne({ _id: inv._id, academyId }, { $set: upd });
+      }
+    }
+
+    const payment: PaymentDoc | null = await this.payments().findOne({ _id: paymentId, academyId });
+    if (!payment) throw new Error("Payment vanished immediately after insert.");
+    const shaped = this.shapePayment(payment, alloc.map((a) => ({
+      invoiceId: a.invoiceId,
+      invoiceNo: invoices.find((i) => String(i._id) === a.invoiceId)?.invoiceNo,
+      amountPaise: a.amountPaise,
+    })));
+    return { payment: shaped, leftoverPaise: remaining };
+  }
+
+  private async nextReceiptSeq(academyId: string, now: Date): Promise<{ seq: number; fyStamp: string }> {
+    const fy = this.fyStamp(now);
+    await this.counters().updateOne(
+      { academyId, kind: "receipt", fyStamp: { $ne: fy } },
+      { $set: { seq: 0, fyStamp: fy } },
+      { upsert: false },
+    );
+    const r = await this.counters().findOneAndUpdate(
+      { academyId, kind: "receipt" },
+      { $inc: { seq: 1 }, $setOnInsert: { fyStamp: fy } },
+      { upsert: true, returnDocument: "after" },
+    );
+    const doc: FeeCounterDoc | undefined = (r && (r as unknown as { value?: FeeCounterDoc }).value) ?? (r as unknown as FeeCounterDoc | undefined);
+    if (!doc) throw new Error("Receipt counter upsert returned nothing.");
+    return { seq: doc.seq, fyStamp: doc.fyStamp };
+  }
+
+  private async buildReceiptNo(academyId: string, now: Date): Promise<string> {
+    const { seq, fyStamp } = await this.nextReceiptSeq(academyId, now);
+    const prefix = await this.receiptPrefixFor(academyId);
+    return `${prefix}/${fyStamp}/R-${String(seq).padStart(6, "0")}`;
+  }
+
+  async waiveInvoice(session: Session, id: string, input: WaiveInvoiceInput): Promise<{ ok: true }> {
+    const { academyId } = this.requireOwner(session);
+    const _id = this.oid(id);
+    const reason = typeof input?.reason === "string" && input.reason.trim() ? input.reason.trim().slice(0, MAX_WAIVE_REASON_LEN) : undefined;
+    if (!reason) throw new BadRequestException("A waive reason is required.");
+    const now = new Date();
+    const r = await this.invoices().updateOne(
+      { _id, academyId, status: { $nin: ["CANCELLED", "WAIVED"] } },
+      { $set: { status: "WAIVED", waivedAt: now, waivedReason: reason, updatedAt: now } },
+    );
+    if (r.matchedCount === 0) throw new NotFoundException("Invoice not found or already closed.");
+    return { ok: true };
+  }
+
+  async cancelInvoice(session: Session, id: string): Promise<{ ok: true }> {
+    const { academyId } = this.requireOwner(session);
+    const _id = this.oid(id);
+    const inv = await this.invoices().findOne({ _id, academyId });
+    if (!inv) throw new NotFoundException("Invoice not found.");
+    if (inv.paidPaise > 0) throw new BadRequestException("Can't cancel an invoice with payments — waive it instead.");
+    const now = new Date();
+    await this.invoices().updateOne({ _id, academyId }, { $set: { status: "CANCELLED", cancelledAt: now, updatedAt: now } });
+    return { ok: true };
   }
 
   // ---- helpers --------------------------------------------------------------

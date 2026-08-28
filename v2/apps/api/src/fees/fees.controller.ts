@@ -19,7 +19,16 @@
 
 import { Body, Controller, Get, Param, Post, Put, Query, Req, UnauthorizedException } from "@nestjs/common";
 import { FeesService } from "./fees.service";
-import { BulkEnrollInput, CreateProgramInput, UpsertPlanInput, EnrollmentStatus } from "./fees.types";
+import {
+  BulkEnrollInput,
+  CreateProgramInput,
+  EnrollmentStatus,
+  GenerateInvoicesInput,
+  InvoiceStatus,
+  RecordManualPaymentInput,
+  UpsertPlanInput,
+  WaiveInvoiceInput,
+} from "./fees.types";
 
 @Controller("fees")
 export class FeesController {
@@ -109,5 +118,61 @@ export class FeesController {
   async studentsForEnroll(@Req() req: any, @Param("id") planId: string) {
     if (!req?.session?.userId) throw new UnauthorizedException();
     return { students: await this.svc.listStudentsForEnroll(req.session, planId) };
+  }
+
+  // ---- invoices -----------------------------------------------------------
+
+  @Post("invoices/generate")
+  async generateInvoices(@Req() req: any, @Body() body: GenerateInvoicesInput) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    return this.svc.generateInvoices(req.session, body);
+  }
+
+  @Get("invoices")
+  async listInvoices(
+    @Req() req: any,
+    @Query("status") status?: string,
+    @Query("planId") planId?: string,
+    @Query("programId") programId?: string,
+    @Query("guardianUserId") guardianUserId?: string,
+    @Query("overdueOnly") overdueOnly?: string,
+  ) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    const s: InvoiceStatus | undefined =
+      status === "DRAFT" || status === "SENT" || status === "PARTIAL" || status === "PAID" || status === "OVERDUE" || status === "WAIVED" || status === "CANCELLED"
+        ? (status as InvoiceStatus)
+        : undefined;
+    return {
+      invoices: await this.svc.listInvoices(req.session, {
+        status: s, planId, programId, guardianUserId,
+        overdueOnly: overdueOnly === "1" || overdueOnly === "true",
+      }),
+    };
+  }
+
+  @Get("invoices/:id")
+  async getInvoice(@Req() req: any, @Param("id") id: string) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    return this.svc.getInvoice(req.session, id);
+  }
+
+  @Post("invoices/:id/waive")
+  async waiveInvoice(@Req() req: any, @Param("id") id: string, @Body() body: WaiveInvoiceInput) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    return this.svc.waiveInvoice(req.session, id, body);
+  }
+
+  @Post("invoices/:id/cancel")
+  async cancelInvoice(@Req() req: any, @Param("id") id: string) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    return this.svc.cancelInvoice(req.session, id);
+  }
+
+  // ---- payments (manual) --------------------------------------------------
+
+  @Post("payments/manual")
+  async recordManualPayment(@Req() req: any, @Body() body: RecordManualPaymentInput) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    return this.svc.recordManualPayment(req.session, body);
   }
 }

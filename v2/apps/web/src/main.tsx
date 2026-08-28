@@ -43,6 +43,7 @@ import AcademyDashboardPage from "./pages/AcademyDashboard";
 import FeesLandingPage from "./pages/Fees";
 import FeesProgramsPage from "./pages/FeesPrograms";
 import FeesProgramDetailPage from "./pages/FeesProgramDetail";
+import FeesInvoicesPage from "./pages/FeesInvoices";
 import StudentsManagerPage from "./pages/StudentsManager";
 import StudentPerformancePage from "./pages/StudentPerformance";
 import BatchPerformancePage from "./pages/BatchPerformance";
@@ -238,6 +239,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="fees" element={<ErrorBoundary label="Fees"><FeesLandingPage /></ErrorBoundary>} />
             <Route path="fees/programs" element={<ErrorBoundary label="Fee programs"><FeesProgramsPage /></ErrorBoundary>} />
             <Route path="fees/programs/:id" element={<ErrorBoundary label="Fee program"><FeesProgramDetailPage /></ErrorBoundary>} />
+            <Route path="fees/invoices" element={<ErrorBoundary label="Fee invoices"><FeesInvoicesPage /></ErrorBoundary>} />
             <Route path="students" element={<StudentsManagerPage />} />
             <Route path="academy/performance" element={<ErrorBoundary label="Student performance"><AcademyPerformancePage /></ErrorBoundary>} />
             <Route path="academy/leaderboard" element={<ErrorBoundary label="Academy leaderboard"><LeaderboardPage /></ErrorBoundary>} />
