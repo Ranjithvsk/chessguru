@@ -59,7 +59,67 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (body ?? {}) as T;
 }
 
+export type PlanCadence = "ONE_OFF" | "MONTHLY" | "TERM" | "CUSTOM";
+export type EnrollmentStatus = "ACTIVE" | "PAUSED" | "ENDED";
+
+export interface PlanResponse {
+  id: string;
+  programId: string;
+  cadence: PlanCadence;
+  dayOfMonth?: number;
+  dueOffsetDays: number;
+  startOn: string;
+  endOn?: string;
+  lateFeeGraceDays: number;
+  updatedAt: string;
+}
+
+export interface UpsertPlanInput {
+  cadence: PlanCadence;
+  dayOfMonth?: number;
+  dueOffsetDays?: number;
+  startOn: string;                     // ISO YYYY-MM-DD
+  endOn?: string;
+  lateFeeGraceDays?: number;
+}
+
+export interface EnrollmentResponse {
+  id: string;
+  planId: string;
+  programId: string;
+  studentUserId: string;
+  studentName?: string;
+  guardianUserId?: string;
+  guardianName?: string;
+  guardianPhone?: string;
+  discountPct?: number;
+  discountFlatPaise?: number;
+  concessionReason?: string;
+  startsOn: string;
+  endsOn?: string;
+  status: EnrollmentStatus;
+  createdAt: string;
+}
+
+export interface BulkEnrollInput {
+  planId: string;
+  studentUserIds: string[];
+  discountPct?: number;
+  discountFlatPaise?: number;
+  concessionReason?: string;
+  startsOn?: string;
+}
+
+export interface StudentPickRow {
+  id: string;
+  name: string;
+  username?: string;
+  parentPhone?: string;
+  alreadyEnrolled: boolean;
+}
+
 export const feesApi = {
+  // ---- programs ------------------------------------------------------------
   listPrograms: (opts: { status?: "ACTIVE" | "ARCHIVED"; q?: string } = {}) => {
     const p = new URLSearchParams();
     if (opts.status) p.set("status", opts.status);
@@ -67,14 +127,35 @@ export const feesApi = {
     const qs = p.toString();
     return req<{ programs: ProgramResponse[] }>(`/api/fees/programs${qs ? `?${qs}` : ""}`);
   },
-
   getProgram: (id: string) => req<ProgramResponse>(`/api/fees/programs/${encodeURIComponent(id)}`),
-
   createProgram: (input: CreateProgramInput) =>
     req<ProgramResponse>(`/api/fees/programs`, { method: "POST", body: JSON.stringify(input) }),
-
   archiveProgram: (id: string) =>
     req<{ ok: true }>(`/api/fees/programs/${encodeURIComponent(id)}/archive`, { method: "POST" }),
+
+  // ---- plans (1:1 with program) -------------------------------------------
+  getPlan: (programId: string) =>
+    req<{ plan: PlanResponse | null }>(`/api/fees/programs/${encodeURIComponent(programId)}/plan`),
+  upsertPlan: (programId: string, input: UpsertPlanInput) =>
+    req<PlanResponse>(`/api/fees/programs/${encodeURIComponent(programId)}/plan`, { method: "PUT", body: JSON.stringify(input) }),
+
+  // ---- enrollments --------------------------------------------------------
+  listEnrollments: (opts: { planId?: string; studentUserId?: string; status?: EnrollmentStatus } = {}) => {
+    const p = new URLSearchParams();
+    if (opts.planId) p.set("planId", opts.planId);
+    if (opts.studentUserId) p.set("studentUserId", opts.studentUserId);
+    if (opts.status) p.set("status", opts.status);
+    const qs = p.toString();
+    return req<{ enrollments: EnrollmentResponse[] }>(`/api/fees/enrollments${qs ? `?${qs}` : ""}`);
+  },
+  bulkEnroll: (input: BulkEnrollInput) =>
+    req<{ enrolled: number; skipped: number; enrollments: EnrollmentResponse[] }>(`/api/fees/enrollments`, { method: "POST", body: JSON.stringify(input) }),
+  pauseEnrollment:  (id: string) => req<{ ok: true }>(`/api/fees/enrollments/${encodeURIComponent(id)}/pause`,  { method: "POST" }),
+  resumeEnrollment: (id: string) => req<{ ok: true }>(`/api/fees/enrollments/${encodeURIComponent(id)}/resume`, { method: "POST" }),
+  endEnrollment:    (id: string) => req<{ ok: true }>(`/api/fees/enrollments/${encodeURIComponent(id)}/end`,    { method: "POST" }),
+
+  studentsForEnroll: (planId: string) =>
+    req<{ students: StudentPickRow[] }>(`/api/fees/plans/${encodeURIComponent(planId)}/students-for-enroll`),
 };
 
 // ---- format helpers -------------------------------------------------------
