@@ -1054,6 +1054,111 @@ export class FeesService {
     return { ok: true };
   }
 
+  // ==========================================================================
+  // W2c — PDF (delegates layout to fees.pdf.ts)
+  // ==========================================================================
+
+  /** Build a branding context for the tenant. Falls back to slug-based defaults
+   *  if the academy hasn't filled in a Branding row. */
+  private async brandingFor(academyId: string): Promise<{ name: string; tagline?: string; contactLine?: string; footerLine?: string; logoBuffer?: Buffer }> {
+    const [academy, brand] = await Promise.all([
+      this.conn.db!.collection("academies").findOne(
+        { $or: [{ _id: this.tryOid(academyId) ?? undefined as unknown as ObjectId }, { slug: academyId }] },
+        { projection: { name: 1, slug: 1, tagline: 1, contactPhone: 1, contactEmail: 1 } as never },
+      ),
+      // AcademyBranding may or may not exist. Best-effort read of a common shape:
+      this.conn.db!.collection("academybrandings").findOne(
+        { academyId },
+        { projection: { brandName: 1, tagline: 1, logoDataUrl: 1 } as never },
+      ),
+    ]);
+    const name = (brand?.brandName as string) || (academy?.name as string) || "Chess Academy";
+    const tagline = (brand?.tagline as string) || (academy?.tagline as string) || undefined;
+    const parts: string[] = [];
+    if (academy?.contactPhone) parts.push(String(academy.contactPhone));
+    if (academy?.contactEmail) parts.push(String(academy.contactEmail));
+    const contactLine = parts.length ? parts.join(" · ") : undefined;
+    let logoBuffer: Buffer | undefined;
+    const dataUrl = brand?.logoDataUrl as string | undefined;
+    if (dataUrl && typeof dataUrl === "string" && dataUrl.startsWith("data:image/")) {
+      const b64 = dataUrl.split(",")[1] ?? "";
+      if (b64) { try { logoBuffer = Buffer.from(b64, "base64"); } catch { /* skip malformed */ } }
+    }
+    return { name, tagline, contactLine, logoBuffer };
+  }
+
+  /** Produce the invoice PDF as a Buffer. Delegates layout to fees.pdf.ts. */
+  async renderInvoicePdf(session: Session, invoiceId: string): Promise<{ buffer: Buffer; filename: string }> {
+    const { academyId } = this.requireOwner(session);
+    const _id = this.oid(invoiceId);
+    const inv = await this.invoices().findOne({ _id, academyId });
+    if (!inv) throw new NotFoundException("Invoice not found.");
+
+    const [student, guardian, program, branding] = await Promise.all([
+      this.users().findOne({ _id: this.tryOid(inv.studentUserId) ?? undefined as unknown as ObjectId }, { projection: { name: 1, username: 1 } as never }),
+      inv.guardianUserId ? this.users().findOne({ _id: this.tryOid(inv.guardianUserId) ?? undefined as unknown as ObjectId }, { projection: { name: 1, username: 1, mobile: 1 } as never }) : Promise.resolve(null),
+      this.programs().findOne({ _id: this.oid(inv.programId), academyId }, { projection: { name: 1 } as never }),
+      this.brandingFor(academyId),
+    ]);
+
+    // Runtime import so the pdfkit chunk stays out of hot paths that don't need it.
+    const { buildInvoicePdf } = await import("./fees.pdf");
+    const buffer = await buildInvoicePdf(inv, branding, {
+      studentName: (student?.name as string) ?? (student?.username as string) ?? "(unnamed)",
+      guardianName: (guardian?.name as string) ?? (guardian?.username as string) ?? undefined,
+      guardianPhone: (guardian?.mobile as string) ?? undefined,
+      programName: (program?.name as string) ?? undefined,
+    });
+    const filename = `${inv.invoiceNo.replace(/[^A-Za-z0-9_-]+/g, "_")}.pdf`;
+    return { buffer, filename };
+  }
+
+  /** Produce a receipt PDF for a payment. */
+  async renderReceiptPdf(session: Session, paymentId: string): Promise<{ buffer: Buffer; filename: string }> {
+    const { academyId } = this.requireOwner(session);
+    const _id = this.oid(paymentId);
+    const payment = await this.payments().findOne({ _id, academyId });
+    if (!payment) throw new NotFoundException("Payment not found.");
+    if (payment.status !== "CAPTURED") throw new BadRequestException("Only captured payments have receipts.");
+
+    const [allocs, guardian, branding] = await Promise.all([
+      this.allocs().find({ academyId, paymentId: String(_id) }).toArray(),
+      payment.guardianUserId ? this.users().findOne({ _id: this.tryOid(payment.guardianUserId) ?? undefined as unknown as ObjectId }, { projection: { name: 1, username: 1, mobile: 1 } as never }) : Promise.resolve(null),
+      this.brandingFor(academyId),
+    ]);
+
+    // Enrich each allocation with invoiceNo, studentName, periodLabel for the "applied to" table.
+    const invIds = allocs.map((a) => this.tryOid(a.invoiceId)).filter((v): v is ObjectId => !!v);
+    const invoicesRows = invIds.length ? await this.invoices().find({ _id: { $in: invIds }, academyId }).toArray() : [];
+    const studentOids = Array.from(new Set(invoicesRows.map((i) => i.studentUserId))).map((s) => this.tryOid(s)).filter((v): v is ObjectId => !!v);
+    const students = studentOids.length ? await this.users().find({ _id: { $in: studentOids } }, { projection: { name: 1, username: 1 } as never }).toArray() : [];
+    const studentById = new Map(students.map((s) => [String(s._id), s]));
+
+    const lookup = new Map<string, { invoiceNo: string; studentName?: string; programName?: string; periodLabel?: string }>();
+    for (const iv of invoicesRows) {
+      const s = studentById.get(iv.studentUserId);
+      const start = iv.periodStart;
+      const end = iv.periodEnd;
+      const periodLabel = start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear()
+        ? start.toLocaleDateString("en-IN", { month: "long", year: "numeric" })
+        : `${start.toLocaleDateString("en-IN", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" })}`;
+      lookup.set(String(iv._id), {
+        invoiceNo: iv.invoiceNo,
+        studentName: (s?.name as string) ?? (s?.username as string) ?? undefined,
+        periodLabel,
+      });
+    }
+
+    const { buildReceiptPdf } = await import("./fees.pdf");
+    const buffer = await buildReceiptPdf(payment, allocs, branding, {
+      guardianName: (guardian?.name as string) ?? (guardian?.username as string) ?? undefined,
+      guardianPhone: (guardian?.mobile as string) ?? undefined,
+      invoiceLookup: lookup,
+    });
+    const filename = `${payment.receiptNo.replace(/[^A-Za-z0-9_-]+/g, "_")}.pdf`;
+    return { buffer, filename };
+  }
+
   // ---- helpers --------------------------------------------------------------
 
   private oid(id: string): ObjectId {

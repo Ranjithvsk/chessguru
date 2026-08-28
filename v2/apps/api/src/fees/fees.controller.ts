@@ -17,7 +17,10 @@
 // Auth: same session-cookie model every ChessGuru controller uses.
 // Every write goes through FeesService which enforces academyId scoping.
 
-import { Body, Controller, Get, Param, Post, Put, Query, Req, UnauthorizedException } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put, Query, Req, Res, UnauthorizedException } from "@nestjs/common";
+// NestJS-on-Express: `res` is an express Response. We type it loosely as `any`
+// to avoid a compile-time dep on @types/express (not directly installed in this
+// workspace; the transitive types don't get picked up cleanly by tsc).
 import { FeesService } from "./fees.service";
 import {
   BulkEnrollInput,
@@ -174,5 +177,27 @@ export class FeesController {
   async recordManualPayment(@Req() req: any, @Body() body: RecordManualPaymentInput) {
     if (!req?.session?.userId) throw new UnauthorizedException();
     return this.svc.recordManualPayment(req.session, body);
+  }
+
+  // ---- PDFs ---------------------------------------------------------------
+
+  @Get("invoices/:id/pdf")
+  async invoicePdf(@Req() req: any, @Param("id") id: string, @Res() res: any) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    const { buffer, filename } = await this.svc.renderInvoicePdf(req.session, id);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.end(buffer);
+  }
+
+  @Get("payments/:id/receipt.pdf")
+  async receiptPdf(@Req() req: any, @Param("id") id: string, @Res() res: any) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    const { buffer, filename } = await this.svc.renderReceiptPdf(req.session, id);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.end(buffer);
   }
 }

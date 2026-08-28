@@ -251,6 +251,10 @@ export const feesApi = {
   // ---- payments (manual) -----------------------------------------
   recordManualPayment: (input: RecordManualPaymentInput) =>
     req<{ payment: PaymentResponse; leftoverPaise: number }>(`/api/fees/payments/manual`, { method: "POST", body: JSON.stringify(input) }),
+
+  // ---- PDF URLs (browser opens directly, cookies auth in-flight) -
+  invoicePdfUrl: (id: string) => `${BASE}/api/fees/invoices/${encodeURIComponent(id)}/pdf`,
+  receiptPdfUrl: (paymentId: string) => `${BASE}/api/fees/payments/${encodeURIComponent(paymentId)}/receipt.pdf`,
 };
 
 // ---- invoice-status meta (labels + colour classes) -----------------------

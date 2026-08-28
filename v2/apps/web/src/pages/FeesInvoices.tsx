@@ -289,6 +289,16 @@ function InvoiceDrawer({ id, onClose }: { id: string; onClose: () => void }) {
                   💵 {t("Mark cash / bank payment")}
                 </button>
               )}
+              <div className="mb-2 flex gap-2">
+                <a
+                  href={feesApi.invoicePdfUrl(data.invoice.id)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-xl border border-brand-500/50 bg-brand-500/10 text-sm font-semibold text-brand-200 transition hover:bg-brand-500/20"
+                >
+                  📄 {t("Download PDF")}
+                </a>
+              </div>
               <div className="flex gap-2">
                 {data.invoice.status !== "CANCELLED" && data.invoice.status !== "WAIVED" && (
                   <WaiveButton id={data.invoice.id} onDone={() => { qc.invalidateQueries({ queryKey: ["fees.invoice", id] }); qc.invalidateQueries({ queryKey: ["fees.invoices"] }); }} />
@@ -314,8 +324,8 @@ function InvoiceDrawer({ id, onClose }: { id: string; onClose: () => void }) {
 
 function PaymentLine({ p }: { p: PaymentResponse }) {
   return (
-    <li className="flex items-start justify-between border-b border-ink-800 px-3 py-2 last:border-none">
-      <div>
+    <li className="flex items-start justify-between gap-3 border-b border-ink-800 px-3 py-2 last:border-none">
+      <div className="min-w-0 flex-1">
         <div className="text-sm text-ink-100 tabular-nums">{fmtRupees(p.amountPaise)}</div>
         <div className="text-[11px] uppercase tracking-wider text-ink-400">
           {p.method}
@@ -325,8 +335,19 @@ function PaymentLine({ p }: { p: PaymentResponse }) {
         <div className="text-[11px] text-ink-500">{p.receiptNo}</div>
         {p.note && <div className="mt-0.5 text-xs text-ink-300">{p.note}</div>}
       </div>
-      <div className="text-right text-[11px] text-ink-400">
-        {p.allocations.map((a, i) => <div key={i}>→ {a.invoiceNo ?? a.invoiceId.slice(-6)}: {fmtRupees(a.amountPaise)}</div>)}
+      <div className="flex flex-col items-end gap-1">
+        <a
+          href={feesApi.receiptPdfUrl(p.id)}
+          target="_blank"
+          rel="noreferrer"
+          title={t("Download receipt PDF")}
+          className="inline-flex h-7 items-center gap-1 rounded-lg border border-accent-500/40 bg-accent-500/10 px-2 text-[11px] font-semibold text-accent-300 hover:bg-accent-500/20"
+        >
+          📄 {t("Receipt")}
+        </a>
+        <div className="text-right text-[11px] text-ink-400">
+          {p.allocations.map((a, i) => <div key={i}>→ {a.invoiceNo ?? a.invoiceId.slice(-6)}: {fmtRupees(a.amountPaise)}</div>)}
+        </div>
       </div>
     </li>
   );
