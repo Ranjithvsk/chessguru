@@ -761,6 +761,29 @@ export default function SharedClassBoard(
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Mouse-wheel over the board scrubs the class-ws cursor — same UX as
+  // /openings analysis (owner 2026-08-28). Coach only; students' scrolls
+  // fall through to normal page scroll. Throttled at 120 ms so a trackpad
+  // flick doesn't jump five plies. Native non-passive listener so
+  // preventDefault actually blocks page scroll.
+  const lastWheelTs = useRef<number>(0);
+  useEffect(() => {
+    if (role !== "coach") return;
+    const wrap = boardWrapRef.current?.querySelector(".cg-board-wrap") as HTMLElement | null;
+    if (!wrap) return;
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) < 4) return;
+      const now = Date.now();
+      if (now - lastWheelTs.current < 120) { e.preventDefault(); return; }
+      lastWheelTs.current = now;
+      e.preventDefault();
+      if (e.deltaY > 0) sendStepForward(); else sendStepBack();
+    };
+    wrap.addEventListener("wheel", onWheel, { passive: false });
+    return () => wrap.removeEventListener("wheel", onWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role, fen]);   // rebind when the chessground DOM regenerates on fen change
   const sendLock = (nextLocked: boolean) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
