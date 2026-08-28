@@ -228,17 +228,28 @@ function useEnrichedPackTree(startFen: string, tree: PackTreeNode[]) {
   }, [startFen, tree]);
 }
 function packPathsEqual(a: number[], b: number[]) { return a.length === b.length && a.every((v, i) => v === b[i]); }
-function PackNotationTree({ startFen, tree, cursorPath }: { startFen: string; tree: PackTreeNode[]; cursorPath: number[] }) {
+function PackNotationTree({ startFen, tree, cursorPath, onPick }: { startFen: string; tree: PackTreeNode[]; cursorPath: number[]; onPick?: (path: number[]) => void }) {
   const { nodes } = useEnrichedPackTree(startFen, tree);
+  const activeRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => { activeRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, [cursorPath]);
   if (nodes.length === 0) return <div className="text-xs text-ink-500">No moves — just the position.</div>;
 
   const renderInline = (n: PackEnriched, includeNumber: boolean): any => {
     const active = packPathsEqual(n.path, cursorPath);
+    const Component: any = onPick ? "button" : "span";
+    const componentProps = onPick ? {
+      type: "button",
+      onClick: () => onPick(n.path),
+      ref: active ? activeRef : undefined,
+      className: `rounded px-1 py-0.5 font-mono text-sm cursor-pointer ${active ? "bg-brand-500/60 text-white" : "text-ink-100 hover:bg-ink-800"}`,
+    } : {
+      className: `rounded px-1 py-0.5 font-mono text-sm ${active ? "bg-brand-500/60 text-white" : "text-ink-100"}`,
+    };
     return (
       <span key={n.path.join("-")} className="inline">
         {includeNumber && n.turn === "w" && <span className="ml-1 mr-0.5 text-[11px] text-ink-500">{n.moveNo}.</span>}
         {includeNumber && n.turn === "b" && <span className="ml-1 mr-0.5 text-[11px] text-ink-500">{n.moveNo}…</span>}
-        <span className={`rounded px-1 py-0.5 font-mono text-sm ${active ? "bg-brand-500/60 text-white" : "text-ink-100"}`}>{n.san}</span>
+        <Component {...componentProps}>{n.san}</Component>
       </span>
     );
   };
@@ -285,7 +296,15 @@ function PackNotationTree({ startFen, tree, cursorPath }: { startFen: string; tr
     }
     node = node.children[0];
   }
-  const cellClass = (active: boolean) => `rounded px-1.5 py-0.5 text-left font-mono text-sm ${active ? "bg-brand-500/60 text-white" : "text-ink-100"}`;
+  const cellClass = (active: boolean) => `rounded px-1.5 py-0.5 text-left font-mono text-sm ${active ? "bg-brand-500/60 text-white" : "text-ink-100"} ${onPick ? "cursor-pointer hover:bg-ink-800" : ""}`;
+  const renderCell = (c: { node: PackEnriched; vars: PackEnriched[] }, active: boolean) => {
+    if (onPick) return (
+      <button type="button" ref={active ? activeRef : undefined}
+        onClick={() => onPick(c.node.path)}
+        className={cellClass(active)}>{c.node.san}</button>
+    );
+    return <span className={cellClass(active)}>{c.node.san}</span>;
+  };
   return (
     <div>
       {rows.map((row, i) => {
@@ -295,8 +314,8 @@ function PackNotationTree({ startFen, tree, cursorPath }: { startFen: string; tr
           <div key={i}>
             <div className="grid grid-cols-[2rem_1fr_1fr] items-baseline gap-1">
               <span className="text-right font-mono text-[11px] text-ink-500">{row.moveNo}.</span>
-              {row.white ? <span className={cellClass(wActive)}>{row.white.node.san}</span> : <span />}
-              {row.black ? <span className={cellClass(bActive)}>{row.black.node.san}</span> : <span />}
+              {row.white ? renderCell(row.white, wActive) : <span />}
+              {row.black ? renderCell(row.black, bActive) : <span />}
             </div>
             {row.white?.vars.map((v, vi) => (
               <div key={`wv${vi}`} className="my-1 ml-8 border-l-2 border-ink-700 pl-2 text-[13px] text-ink-300">
@@ -532,16 +551,112 @@ export function NotebookPackDetailPage() {
   const qc = useQueryClient();
   const [shareOpen, setShareOpen] = useState(false);
   const [shareToast, setShareToast] = useState<string | null>(null);
+  // Local cursor for keyboard / wheel / click navigation of the pack's tree.
+  // Independent of what the coach paused on — students can walk through
+  // the whole tree at their own pace. Defaults to the coach's cursor on
+  // first load so "this is where the coach paused" is the starting view.
+  const [cursor, setCursor] = useState<number[] | null>(null);
+  const boardBoxRef = useRef<HTMLDivElement | null>(null);
   const { data, isLoading, error } = useQuery({
     queryKey: ["notebook-pack", packId],
     queryFn: () => get<PackDetail>(`/api/notebook/${encodeURIComponent(packId)}`),
     enabled: !!packId,
   });
+  useEffect(() => { if (data) setCursor(data.cursorPath ?? []); }, [data?._id]);
   useEffect(() => {
     if (!shareToast) return;
     const t = setTimeout(() => setShareToast(null), 3000);
     return () => clearTimeout(t);
   }, [shareToast]);
+
+  // Local fen at the current cursor — replays startFen + walk(cursor) via
+  // chess.js. Used by the board render below (falls back to data.currentFen
+  // if replay fails).
+  const displayFen = useMemo(() => {
+    if (!data) return "";
+    const path = cursor ?? data.cursorPath ?? [];
+    try {
+      const c = new Chess(data.startFen);
+      let nodes = data.tree;
+      for (const idx of path) {
+        const n = nodes[idx];
+        if (!n) break;
+        c.move({ from: n.move.from, to: n.move.to, promotion: (n.move.promotion as any) || "q" });
+        nodes = n.children;
+      }
+      return c.fen();
+    } catch { return data.currentFen; }
+  }, [data, cursor]);
+
+  // Keyboard nav: ← → walk mainline; ↑ ↓ switch sibling; Home/End jump.
+  // Same shortcuts /openings uses. Ignored when a text input has focus.
+  useEffect(() => {
+    if (!data) return;
+    const h = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      const cur = cursor ?? [];
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        if (cur.length > 0) setCursor(cur.slice(0, -1));
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        let nodes = data.tree;
+        for (const idx of cur) nodes = nodes[idx]?.children ?? [];
+        if (nodes.length > 0) setCursor([...cur, 0]);
+      } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        if (cur.length === 0) return;
+        let parent = data.tree;
+        for (let i = 0; i < cur.length - 1; i++) parent = parent[cur[i]!]?.children ?? [];
+        const k = cur[cur.length - 1]!;
+        const dir = e.key === "ArrowUp" ? -1 : 1;
+        const nk = k + dir;
+        if (nk < 0 || nk >= parent.length) return;
+        e.preventDefault();
+        setCursor([...cur.slice(0, -1), nk]);
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        setCursor([]);
+      } else if (e.key === "End") {
+        e.preventDefault();
+        // Walk mainline (child[0]) from cursor to leaf.
+        const next = [...cur];
+        let nodes = data.tree;
+        for (const idx of cur) nodes = nodes[idx]?.children ?? [];
+        while (nodes.length > 0) { next.push(0); nodes = nodes[0]!.children; }
+        setCursor(next);
+      }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [data, cursor]);
+
+  // Mouse-wheel over the board scrubs the local cursor (same UX as /openings
+  // and Dream Meet). Native non-passive so page scroll gets blocked while
+  // the pointer is on the board. Throttled at 120 ms.
+  const lastWheelTs = useRef<number>(0);
+  useEffect(() => {
+    if (!data) return;
+    const wrap = boardBoxRef.current?.querySelector(".cg-board-wrap") as HTMLElement | null;
+    if (!wrap) return;
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) < 4) return;
+      const now = Date.now();
+      if (now - lastWheelTs.current < 120) { e.preventDefault(); return; }
+      lastWheelTs.current = now;
+      e.preventDefault();
+      const cur = cursor ?? [];
+      if (e.deltaY > 0) {
+        let nodes = data.tree;
+        for (const idx of cur) nodes = nodes[idx]?.children ?? [];
+        if (nodes.length > 0) setCursor([...cur, 0]);
+      } else if (cur.length > 0) {
+        setCursor(cur.slice(0, -1));
+      }
+    };
+    wrap.addEventListener("wheel", onWheel, { passive: false });
+    return () => wrap.removeEventListener("wheel", onWheel);
+  }, [data, cursor, displayFen]);
 
   const notation = useMemo(() => {
     if (!data) return [];
@@ -584,9 +699,12 @@ export function NotebookPackDetailPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_280px]">
-        <div className="rounded-2xl border border-ink-800 bg-ink-950/60 p-3 shadow-lg">
-          <Board fen={data.currentFen} coordinates viewOnly dests={new Map() as any} />
-          <div className="mt-2 truncate font-mono text-[10px] text-ink-500" title={data.currentFen}>{data.currentFen}</div>
+        <div ref={boardBoxRef} className="rounded-2xl border border-ink-800 bg-ink-950/60 p-3 shadow-lg">
+          <Board fen={displayFen} coordinates viewOnly dests={new Map() as any} />
+          <div className="mt-2 truncate font-mono text-[10px] text-ink-500" title={displayFen}>{displayFen}</div>
+          <div className="mt-1 text-[10px] text-ink-500">
+            ← → walk · ↑ ↓ variation · Home/End jump · scroll board or click a move
+          </div>
         </div>
         <div className="rounded-2xl border border-ink-800 bg-ink-900/60 p-3 self-start">
           <div className="flex items-baseline justify-between">
@@ -602,7 +720,7 @@ export function NotebookPackDetailPage() {
             })()}
           </div>
           <div className="mt-2 max-h-[420px] overflow-y-auto pr-1">
-            <PackNotationTree startFen={data.startFen} tree={data.tree} cursorPath={data.cursorPath ?? []} />
+            <PackNotationTree startFen={data.startFen} tree={data.tree} cursorPath={cursor ?? data.cursorPath ?? []} onPick={setCursor} />
           </div>
           <div className="mt-4 border-t border-ink-800 pt-3">
             {data.history.length === 0 ? (
