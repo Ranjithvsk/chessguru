@@ -230,93 +230,134 @@ function List({
   // Local counter to force a re-render after activateOpening flips the
   // `isActivated` state (writes to localStorage, no built-in subscribe).
   const [activateNonce, setActivateNonce] = useState(0);
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  // Close kebab menu on outside click / Escape.
+  useEffect(() => {
+    if (!openMenu) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.closest("[data-rep-menu]")) return;
+      setOpenMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpenMenu(null); };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("mousedown", onDown); window.removeEventListener("keydown", onKey); };
+  }, [openMenu]);
   return (
-    <ul className="divide-y divide-ink-800/60">
+    <ul className="space-y-1.5">
       {entries.map((e) => {
-        // Corpus entries always have a slug; line entries are activatable
-        // when they carry some SAN moves. Owner ask 2026-08-20 — coach may
-        // share entries as line-kind (from "Save current line") and those
-        // should also be addable to the Opening Trainer.
         const activatable =
           (e.kind === "corpus" && !!e.slug) ||
           (e.kind === "line" && (e.sans?.length ?? 0) > 0);
-        // Re-read on each render / after activation so the button flips
-        // to the "activated" state without needing a page refresh.
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const _touch = activateNonce;
         const activated = activatable && isRepertoireEntryActivated(e);
+        // Left accent by kind: corpus=blue, line-with-tree=emerald, line=ink.
+        // Coach-shared forceTrain gets amber to signal "required study".
+        const accent = e.forceTrain
+          ? "border-l-amber-400"
+          : e.kind === "corpus"
+            ? "border-l-sky-400"
+            : e.tree ? "border-l-emerald-400" : "border-l-brand-400";
+        const kindIcon = e.kind === "corpus" ? "📖" : (e.tree ? "🌳" : "✏️");
+        const kindLabel = e.kind === "corpus"
+          ? `Opening · ${e.slug ?? ""}`
+          : `Line · ${(e.sans?.length ?? 0)} move${(e.sans?.length ?? 0) === 1 ? "" : "s"}${e.tree ? " · +variations" : ""}`;
         return (
-        <li key={e._id} className="group flex items-center gap-2 px-2 py-1.5 hover:bg-ink-900">
-          <button
-            onClick={() => onLoad(
-              e.kind === "corpus"
-                ? { slug: e.slug }
-                // Prefer the full tree when present so sidelines load with
-                // the entry (owner report 2026-08-19). Fall back to sans for
-                // pre-tree entries.
-                : { sans: e.sans, ...(e.tree ? { tree: e.tree } : {}) },
-            )}
-            className="min-w-0 flex-1 truncate text-left text-xs text-ink-100 hover:text-white">
-            <span className="mr-1">{e.kind === "corpus" ? "📖" : (e.tree ? "🌳" : "✏️")}</span>
-            {e.name}
-            {e.sharedFromName && (
-              <span className="ml-1 text-[10px] font-semibold text-indigo-300"> · from {e.sharedFromName}</span>
-            )}
-          </button>
-          {/* Add to Opening Trainer — visible for corpus entries only (line
-              entries have no corpus slug so the FSRS card generator has
-              nothing to key off). Works for both own and coach-suggested
-              entries (owner ask 2026-08-20). */}
-          {activatable && (
+          <li key={e._id}
+            className={`group relative overflow-visible rounded-lg border border-ink-800 border-l-2 ${accent} bg-ink-900/60 transition hover:border-ink-700 hover:bg-ink-800/80`}>
+            {/* Line 1: full-width tappable name — no siblings competing for
+                horizontal space so the name renders in full (owner ask
+                2026-08-28: "names are not visible in my repertoire"). */}
             <button
-              onClick={() => {
-                if (activated) return;
-                activateRepertoireEntry(e);
-                setActivateNonce((n) => n + 1);
-                onActivate?.(e.slug ?? e._id);
-              }}
-              disabled={activated}
-              className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${activated
-                ? "bg-emerald-500/20 text-emerald-300 cursor-default"
-                : "bg-brand-500/15 text-brand-300 ring-1 ring-brand-500/30 hover:bg-brand-500 hover:text-white"}`}
-              title={activated ? "Already in Opening Trainer" : "Add to Opening Trainer"}>
-              {activated ? "✓ In Trainer" : "📅 Add to Trainer"}
+              onClick={() => onLoad(
+                e.kind === "corpus"
+                  ? { slug: e.slug }
+                  : { sans: e.sans, ...(e.tree ? { tree: e.tree } : {}) },
+              )}
+              className="block w-full px-3 pt-2 text-left"
+              title="Load this line onto the board">
+              <div className="flex items-baseline gap-2">
+                <span aria-hidden>{kindIcon}</span>
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-white group-hover:text-white">
+                  {e.name}
+                </span>
+                {e.forceTrain && (
+                  <span className="shrink-0 rounded-full bg-amber-500/25 px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-200" title="Required study — flagged by your coach">⚡ Required</span>
+                )}
+              </div>
+              {/* Line 2: meta — kind + move count + share provenance. Small,
+                  muted, wraps if space is tight. */}
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-ink-500">
+                <span>{kindLabel}</span>
+                {e.sharedFromName && (
+                  <span className="text-indigo-300">· from {e.sharedFromName}</span>
+                )}
+              </div>
             </button>
-          )}
-          {/* Edit — owner-editable entries only. Coach-shared entries on a
-              student's side are read-only (they can Duplicate to fork).
-              Coaches can edit their own; edit propagates to every student
-              copy + fires an "updated" push. */}
-          {!e.sharedFrom && (
-            <button
-              onClick={() => onEdit(e)}
-              className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-brand-300"
-              title="Edit — changes fan out to every student you shared this with">✏️</button>
-          )}
-          {/* Duplicate — available on every entry (including coach-shared, so
-              students can fork one to edit). Creates a fresh entry owned by
-              the caller with no sharedFrom link. */}
-          <button
-            onClick={() => onDuplicate(e._id)}
-            className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-brand-300"
-            title="Duplicate — make an editable copy">📋</button>
-          {isCoach && !e.sharedFrom && (
-            <button
-              onClick={() => onShare(e)}
-              className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-brand-300"
-              title="Share with students">🎓</button>
-          )}
-          {/* Students can't delete a coach-shared entry — otherwise a wrong
-              tap wipes homework the coach expected them to study (owner
-              report 2026-08-20). Coaches keep the ability to remove
-              entries they were shared TO. */}
-          {!(e.sharedFrom && !isCoach) && (
-            <button
-              onClick={() => { if (confirm(`Remove "${e.name}"?`)) onDelete(e._id); }}
-              className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-ink-500 hover:bg-rose-500/20 hover:text-rose-300"
-              title="Delete">🗑</button>
-          )}
-        </li>
+            {/* Actions row — right-aligned pill for the primary CTA
+                (Add/Added Trainer), kebab for the rest. Kebab pops a small
+                menu so the resting card stays uncluttered. */}
+            <div className="flex items-center justify-end gap-1.5 px-2 pb-1.5 pt-1">
+              {activatable && (
+                <button
+                  onClick={(ev) => { ev.stopPropagation();
+                    if (activated) return;
+                    activateRepertoireEntry(e);
+                    setActivateNonce((n) => n + 1);
+                    onActivate?.(e.slug ?? e._id);
+                  }}
+                  disabled={activated}
+                  className={`shrink-0 rounded-md px-2 py-0.5 text-[10px] font-semibold transition ${activated
+                    ? "bg-emerald-500/20 text-emerald-300 cursor-default"
+                    : "bg-brand-500/15 text-brand-200 ring-1 ring-brand-500/30 hover:bg-brand-500 hover:text-white"}`}
+                  title={activated ? "Already in Opening Trainer" : "Add to Opening Trainer"}>
+                  {activated ? "✓ In Trainer" : "📅 Add"}
+                </button>
+              )}
+              <div className="relative" data-rep-menu>
+                <button
+                  onClick={(ev) => { ev.stopPropagation(); setOpenMenu(openMenu === e._id ? null : e._id); }}
+                  className="rounded px-1.5 py-0.5 text-sm text-ink-400 hover:bg-ink-800 hover:text-white"
+                  title="More"
+                  aria-label="More actions">⋮</button>
+                {openMenu === e._id && (
+                  <div className="absolute right-0 top-full z-40 mt-1 min-w-[180px] rounded-md border border-ink-700 bg-ink-950 py-1 text-sm shadow-2xl">
+                    {!e.sharedFrom && (
+                      <button
+                        onClick={() => { setOpenMenu(null); onEdit(e); }}
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ink-200 hover:bg-ink-800">
+                        <span>✏️</span> Edit
+                      </button>
+                    )}
+                    <button
+                      onClick={() => { setOpenMenu(null); onDuplicate(e._id); }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ink-200 hover:bg-ink-800">
+                      <span>📋</span> Duplicate
+                    </button>
+                    {isCoach && !e.sharedFrom && (
+                      <button
+                        onClick={() => { setOpenMenu(null); onShare(e); }}
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ink-200 hover:bg-ink-800">
+                        <span>🎓</span> Share with students
+                      </button>
+                    )}
+                    {!(e.sharedFrom && !isCoach) && (
+                      <>
+                        <div className="my-1 border-t border-ink-800" />
+                        <button
+                          onClick={() => { setOpenMenu(null); if (confirm(`Remove "${e.name}"?`)) onDelete(e._id); }}
+                          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-rose-300 hover:bg-ink-800">
+                          <span>🗑</span> Delete
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </li>
         );
       })}
     </ul>
