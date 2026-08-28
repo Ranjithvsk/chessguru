@@ -1041,7 +1041,7 @@ function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "stu
     // "board size keeps shrinking until in-scroll comes for moves" — cap
     // total panel height to a fixed ~5rem on phones, ~14rem on desktop.
     // Overflow inside the scroll region takes over immediately.
-    <div className="flex shrink-0 flex-col overflow-hidden border-t border-ink-800 bg-ink-950/60 max-h-24 md:max-h-60">
+    <div className="flex h-full shrink-0 flex-col overflow-hidden bg-ink-950/60 max-h-24 md:max-h-60 lg:max-h-none">
       {/* Header controls — Start / Live pills mirror /openings' ⏮ ⏭ nav. */}
       <div className="flex shrink-0 items-center gap-2 border-b border-ink-800/70 px-3 py-1 text-[10px] uppercase tracking-widest text-ink-500">
         <span>Moves</span>
@@ -1992,18 +1992,22 @@ export default function ClassV2Page() {
             </div>
           </div>
 
-          {/* Body: board on top, controls stacked BELOW it (not overlapping).
-           *  Camera PIP still floats over the board — it self-hides when
-           *  nobody is publishing (CameraPIPMaybe). */}
+          {/* Body: /openings-style layout — big board on the left, notation
+           *  as a right sidebar on lg+ screens. Stacks (board on top, notation
+           *  below) on mobile / tablet so the board stays big on small
+           *  viewports too. Footer controls sit under everything. Owner
+           *  2026-08-28: "board should be big, like in openings, realign
+           *  all other in left/right/bottom accordingly". */}
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-ink-950/40">
-            {/* Board area — self-sizes to the largest square that fits.
-             *  overflow-hidden clips any board that tries to grow past the
-             *  container. container-type:size gives SharedClassBoard's
-             *  cqi/cqb-based sizing an actual box to measure against. */}
-            <div
-              className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-2"
-              style={{ containerType: 'size' } as any}
-            >
+            <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+              {/* Board area — self-sizes to the largest square that fits.
+               *  overflow-hidden clips any board that tries to grow past the
+               *  container. container-type:size gives SharedClassBoard's
+               *  cqi/cqb-based sizing an actual box to measure against. */}
+              <div
+                className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-2"
+                style={{ containerType: 'size' } as any}
+              >
               <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} onClassEnded={onClassEnded} intendedRole={role} />
               {endedMsg && (
                 <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center bg-ink-950/85 p-6 text-center">
@@ -2061,13 +2065,16 @@ export default function ClassV2Page() {
                   {sendPositionToast}
                 </div>
               )}
-            </div>
+              </div>
 
-            {/* Move-list panel — /openings-style two-column mainline table
-             *  with inline variation branches (server tree, dd67193 → this
-             *  commit). Coach clicks any chip seek the whole room; students
-             *  see it read-only. */}
-            <ClassNotationPanel room={room} role={role} />
+              {/* Move-list panel — /openings-style. Sidebar on lg+ (fixed
+               *  320px, full body height), stacks under the board on smaller
+               *  screens (mobile / tablet) via lg:w-[320px] + w-full. Uses
+               *  its own max-h cap on mobile so the board doesn't shrink. */}
+              <div className="shrink-0 border-t border-ink-800 lg:h-auto lg:w-[320px] lg:border-l lg:border-t-0">
+                <ClassNotationPanel room={room} role={role} />
+              </div>
+            </div>
 
             {/* Controls footer — mic / cam / screen + hand / chat / reactions,
              *  sits UNDER the board so nothing overlaps pieces. */}
