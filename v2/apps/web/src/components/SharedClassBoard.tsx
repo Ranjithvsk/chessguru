@@ -851,20 +851,20 @@ export default function SharedClassBoard(
 
   const lastMoveTuple: [Key, Key] | undefined = lastMove ? [lastMove.from as Key, lastMove.to as Key] : undefined;
 
-  // Board sizes to the LARGEST square that fits the viewport — same pattern
-  // /puzzles uses (owner 2026-08-28: "board is not big enough like in
-  // opening or puzzle trainer"). aspect-square + w-full grows the board to
-  // 100% of its column, capped by (100dvh - chrome) so it stays square and
-  // never scrolls off screen. Previous cqi/cqb approach had containerType
-  // AND width:min(100cqi,100cqb) on the SAME element — cyclical, browsers
-  // gave it undefined / zero size.
+  // Board sizes to the LARGEST square that fits the PARENT — using container
+  // queries against the parent's containerType:'size' slot (see ClassV2 body).
+  // Width = min(parent-width, parent-height); aspect-ratio locks the height.
+  // Fixes the previous dvh-based cap that let the board overflow the parent
+  // vertically (owner 2026-08-28: "board is cut in top and bottom" — my
+  // maxHeight was based on VIEWPORT height, not the actual slot). Now uses
+  // cqi/cqb which read the parent's real dimensions directly.
   return (
     <div
       ref={boardWrapRef}
-      className="relative mx-auto aspect-square w-full"
+      className="relative mx-auto"
       style={{
-        maxWidth: 'min(100%, calc(100dvh - 10rem))',
-        maxHeight: 'calc(100dvh - 10rem)',
+        width: 'min(100cqi, 100cqb)',
+        aspectRatio: '1',
       } as any}
       onPointerMove={onBoardPointerMove}
       onPointerLeave={onBoardPointerLeave}

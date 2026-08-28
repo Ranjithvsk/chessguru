@@ -1931,8 +1931,13 @@ export default function ClassV2Page() {
   if (!tokenData) return <div className="py-16 text-center text-ink-400">Joining {room}…</div>;
 
   return (
-    <div className="mx-auto max-w-6xl">
-      <div className="flex h-[90vh] min-h-[560px] flex-col overflow-hidden rounded-2xl border border-ink-700 bg-ink-900/60 shadow-xl" data-lk-theme="default">
+    <div className="mx-auto w-full">
+      {/* Full-viewport class shell (owner 2026-08-28: "board still not big
+       *  like openings/puzzles"). Was capped at max-w-6xl + h-[90vh] which
+       *  shrank the flex-1 board slot on desktop. Now the class uses the
+       *  full viewport minus the site navbar (~3.5rem) so the board grows
+       *  to match /puzzles + /openings. */}
+      <div className="flex h-[calc(100dvh-3.5rem)] min-h-[560px] flex-col overflow-hidden rounded-none border-0 bg-ink-900/60 shadow-xl md:rounded-2xl md:border md:border-ink-700" data-lk-theme="default">
         <LiveKitRoom
           serverUrl={tokenData.url}
           token={tokenData.token}
