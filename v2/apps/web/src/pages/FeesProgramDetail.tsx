@@ -212,19 +212,29 @@ function PlanPanel({ programId, plan, isLoading, onSaved }: { programId: string;
   const [startOn, setStartOn] = useState<string>(plan?.startOn ? plan.startOn.slice(0, 10) : todayISO());
   const [endOn, setEndOn] = useState<string>(plan?.endOn ? plan.endOn.slice(0, 10) : "");
   const [lateGrace, setLateGrace] = useState<number>(plan?.lateFeeGraceDays ?? 7);
+  const [lateFeeRupees, setLateFeeRupees] = useState<string>(plan?.lateFeeAmountPaise ? String(plan.lateFeeAmountPaise / 100) : "");
   const [err, setErr] = useState<string | null>(null);
 
+  const lateFeePaise = (() => {
+    const cleaned = lateFeeRupees.replace(/[₹,\s]/g, "").trim();
+    if (!cleaned) return 0;
+    const n = Number(cleaned);
+    if (!Number.isFinite(n) || n < 0) return -1;
+    return Math.round(n * 100);
+  })();
+
   const dirty = useMemo(() => {
-    if (!plan) return cadence !== "MONTHLY" || dayOfMonth !== 1 || dueOffset !== 10 || !!endOn || lateGrace !== 7 || startOn !== todayISO();
+    if (!plan) return cadence !== "MONTHLY" || dayOfMonth !== 1 || dueOffset !== 10 || !!endOn || lateGrace !== 7 || startOn !== todayISO() || lateFeePaise > 0;
     return (
       plan.cadence !== cadence ||
       (plan.dayOfMonth ?? 1) !== dayOfMonth ||
       plan.dueOffsetDays !== dueOffset ||
       plan.startOn.slice(0, 10) !== startOn ||
       (plan.endOn?.slice(0, 10) ?? "") !== endOn ||
-      plan.lateFeeGraceDays !== lateGrace
+      plan.lateFeeGraceDays !== lateGrace ||
+      (plan.lateFeeAmountPaise ?? 0) !== Math.max(0, lateFeePaise)
     );
-  }, [plan, cadence, dayOfMonth, dueOffset, startOn, endOn, lateGrace]);
+  }, [plan, cadence, dayOfMonth, dueOffset, startOn, endOn, lateGrace, lateFeePaise]);
 
   const save = useMutation({
     mutationFn: (body: UpsertPlanInput) => feesApi.upsertPlan(programId, body),
@@ -307,6 +317,25 @@ function PlanPanel({ programId, plan, isLoading, onSaved }: { programId: string;
               <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-ink-300">{t("Late-fee grace")} <span className="normal-case text-ink-500">({t("days")})</span></span>
               <input type="number" min={0} max={30} value={lateGrace} onChange={(e) => setLateGrace(clamp(parseInt(e.target.value || "0", 10), 0, 30))} className="h-11 w-full rounded-xl border border-ink-700 bg-ink-900 px-4 text-sm text-ink-100 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30" />
             </label>
+
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-ink-300">{t("Late fee amount")} <span className="normal-case text-ink-500">({t("optional")})</span></span>
+              <div className="relative">
+                <span className="pointer-events-none absolute inset-y-0 left-4 grid place-items-center text-xs text-ink-400">₹</span>
+                <input
+                  value={lateFeeRupees}
+                  onChange={(e) => setLateFeeRupees(e.target.value.replace(/[^\d.,]/g, ""))}
+                  inputMode="decimal"
+                  placeholder="0"
+                  className="h-11 w-full rounded-xl border border-ink-700 bg-ink-900 pl-8 pr-4 text-sm text-ink-100 placeholder:text-ink-500 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                />
+              </div>
+              <span className="mt-1 block text-[11px] text-ink-500">
+                {lateFeePaise > 0
+                  ? t(`Auto-added after ${lateGrace} day${lateGrace === 1 ? "" : "s"} past due.`)
+                  : t("Leave blank to disable auto late-fee.")}
+              </span>
+            </label>
           </div>
 
           {err && <div role="alert" className="mt-3 rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{err}</div>}
@@ -314,7 +343,18 @@ function PlanPanel({ programId, plan, isLoading, onSaved }: { programId: string;
           <div className="mt-4 flex items-center justify-end gap-2">
             {!plan && <span className="mr-auto text-[11px] text-gold-400">{t("No plan yet — save one before enrolling students.")}</span>}
             <button
-              onClick={() => save.mutate({ cadence, dayOfMonth: cadence === "MONTHLY" ? dayOfMonth : undefined, dueOffsetDays: dueOffset, startOn, endOn: endOn || undefined, lateFeeGraceDays: lateGrace })}
+              onClick={() => {
+                if (lateFeePaise < 0) { setErr(t("Late fee amount must be a positive number.")); return; }
+                save.mutate({
+                  cadence,
+                  dayOfMonth: cadence === "MONTHLY" ? dayOfMonth : undefined,
+                  dueOffsetDays: dueOffset,
+                  startOn,
+                  endOn: endOn || undefined,
+                  lateFeeGraceDays: lateGrace,
+                  lateFeeAmountPaise: lateFeePaise > 0 ? lateFeePaise : 0,
+                });
+              }}
               disabled={save.isPending || !dirty && !!plan}
               className="inline-flex h-11 items-center gap-2 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 px-5 text-sm font-semibold text-white shadow-glow transition hover:brightness-110 disabled:opacity-50"
             >

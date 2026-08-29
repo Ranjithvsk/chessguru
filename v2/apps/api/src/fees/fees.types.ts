@@ -122,7 +122,8 @@ export interface FeePlanDoc {
   startOn: Date;
   endOn?: Date;                        // null = open-ended
   lateFeeGraceDays: number;            // default 7 — grace before late-fee cron fires
-  lateFeeHeadId?: string;              // which head to auto-add on overdue > grace (V2)
+  lateFeeAmountPaise?: number;         // flat late fee to append after grace. 0 / undefined = disabled
+  lateFeeHeadId?: string;              // reserved — for tying to a real head (V2)
   createdAt: Date;
   updatedAt: Date;
 }
@@ -158,6 +159,7 @@ export interface UpsertPlanInput {
   startOn: string;                     // ISO date
   endOn?: string;
   lateFeeGraceDays?: number;
+  lateFeeAmountPaise?: number;         // 0 / undefined disables late fee
 }
 
 export interface PlanResponse {
@@ -169,6 +171,7 @@ export interface PlanResponse {
   startOn: string;
   endOn?: string;
   lateFeeGraceDays: number;
+  lateFeeAmountPaise?: number;
   updatedAt: string;
 }
 
@@ -269,6 +272,7 @@ export interface InvoiceDoc {
   waivedAt?: Date;
   waivedReason?: string;
   cancelledAt?: Date;
+  lateFeeAppliedAt?: Date;             // set by the late-fee cron after appending the LATE line
 }
 
 export interface PaymentDoc {

@@ -6,12 +6,13 @@ import { Module, OnModuleInit } from "@nestjs/common";
 import { FeesController } from "./fees.controller";
 import { FeesService } from "./fees.service";
 import { FeesReminderCron } from "./fees.reminder-cron.service";
+import { FeesLateFeeCron } from "./fees.late-fee-cron.service";
 import { FeesPortalController, FeesWebhookController } from "./fees.portal.controller";
 import { FeesPortalService } from "./fees.portal.service";
 
 @Module({
   controllers: [FeesController, FeesPortalController, FeesWebhookController],
-  providers: [FeesService, FeesReminderCron, FeesPortalService],
+  providers: [FeesService, FeesReminderCron, FeesLateFeeCron, FeesPortalService],
   exports: [FeesService],
 })
 export class FeesModule implements OnModuleInit {

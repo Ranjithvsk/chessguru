@@ -339,6 +339,7 @@ export class FeesService {
       startOn: p.startOn.toISOString(),
       endOn: p.endOn?.toISOString(),
       lateFeeGraceDays: p.lateFeeGraceDays,
+      lateFeeAmountPaise: p.lateFeeAmountPaise,
       updatedAt: p.updatedAt.toISOString(),
     };
   }
@@ -372,6 +373,18 @@ export class FeesService {
     const lateFeeGraceDays = (typeof input?.lateFeeGraceDays === "number" && Number.isInteger(input.lateFeeGraceDays) && input.lateFeeGraceDays >= 0 && input.lateFeeGraceDays <= MAX_LATE_GRACE_DAYS)
       ? input.lateFeeGraceDays
       : 7;
+    // Late fee amount — flat paise; 0/undefined disables the auto-cron for this plan.
+    // Same paise-integer discipline as head amounts. Cap = ₹1,00,000 (MAX_AMOUNT_PAISE)
+    // so a typo can't email parents "fee ₹5 crore" while we sleep.
+    let lateFeeAmountPaise: number | undefined;
+    if (input?.lateFeeAmountPaise !== undefined && input.lateFeeAmountPaise !== null) {
+      if (typeof input.lateFeeAmountPaise !== "number" || !Number.isFinite(input.lateFeeAmountPaise) || !Number.isInteger(input.lateFeeAmountPaise)) {
+        throw new BadRequestException("Late fee amount must be a whole number in paise (e.g. ₹50 = 5000).");
+      }
+      if (input.lateFeeAmountPaise < 0) throw new BadRequestException("Late fee amount can't be negative.");
+      if (input.lateFeeAmountPaise > MAX_AMOUNT_PAISE) throw new BadRequestException("Late fee amount exceeds the per-head cap (₹1,00,000).");
+      lateFeeAmountPaise = input.lateFeeAmountPaise === 0 ? undefined : input.lateFeeAmountPaise;
+    }
 
     const now = new Date();
     const filter = { academyId, programId: String(pid) };
@@ -383,6 +396,7 @@ export class FeesService {
         startOn,
         endOn,
         lateFeeGraceDays,
+        lateFeeAmountPaise,
         updatedAt: now,
       },
       $setOnInsert: { academyId, programId: String(pid), createdAt: now },

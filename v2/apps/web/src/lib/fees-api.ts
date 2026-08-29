@@ -71,6 +71,7 @@ export interface PlanResponse {
   startOn: string;
   endOn?: string;
   lateFeeGraceDays: number;
+  lateFeeAmountPaise?: number;
   updatedAt: string;
 }
 
@@ -81,6 +82,7 @@ export interface UpsertPlanInput {
   startOn: string;                     // ISO YYYY-MM-DD
   endOn?: string;
   lateFeeGraceDays?: number;
+  lateFeeAmountPaise?: number;
 }
 
 export interface EnrollmentResponse {
