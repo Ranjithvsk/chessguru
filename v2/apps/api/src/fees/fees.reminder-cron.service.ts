@@ -23,6 +23,7 @@ import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { ObjectId } from "mongodb";
 import { sendMail } from "../lib/mail";
+import { portalUrl } from "./fees.pg";
 import { COL, ReminderChannel, ReminderTemplate } from "./fees.types";
 
 const TICK_MS = 60_000;                     // once a minute
@@ -202,25 +203,35 @@ export class FeesReminderCron implements OnModuleInit {
     return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
   }
 
+  private payLinkFor(inv: any): string {
+    // Prefer the guardian parent-portal URL (parents can act on it — public,
+    // Razorpay-Checkout ready). Falls back to the admin URL only if
+    // PORTAL_TOKEN_SALT isn't set (dev / half-configured prod).
+    try {
+      if (inv.guardianUserId) return portalUrl(String(inv.academyId), String(inv.guardianUserId));
+    } catch { /* fall through */ }
+    return `${PUBLIC_ORIGIN}/fees/invoices?id=${String(inv._id)}`;
+  }
+
   private buildEmailText(inv: any, ctx: { guardianName: string; studentName: string; academyName: string; offset: number }): string {
     const balance = Math.max(0, (inv.totalPaise ?? 0) - (inv.paidPaise ?? 0));
     const dueStr = this.fmtDate(inv.dueOn instanceof Date ? inv.dueOn : new Date(inv.dueOn));
     const amtStr = this.fmtRupees(balance);
-    const openHere = `${PUBLIC_ORIGIN}/fees/invoices?id=${String(inv._id)}`;
+    const openHere = this.payLinkFor(inv);
     if (ctx.offset < 0) {
-      return `Hi ${ctx.guardianName},\n\nA friendly heads-up — ${ctx.studentName}'s fee is coming up.\n\n  Invoice: ${inv.invoiceNo}\n  Amount:  ${amtStr}\n  Due:     ${dueStr}\n\nView / pay: ${openHere}\n\nThank you!\n— ${ctx.academyName}`;
+      return `Hi ${ctx.guardianName},\n\nA friendly heads-up — ${ctx.studentName}'s fee is coming up.\n\n  Invoice: ${inv.invoiceNo}\n  Amount:  ${amtStr}\n  Due:     ${dueStr}\n\nPay in 30 seconds: ${openHere}\n\nThank you!\n— ${ctx.academyName}`;
     }
     if (ctx.offset === 0) {
-      return `Hi ${ctx.guardianName},\n\nToday is the due date for ${ctx.studentName}'s fee.\n\n  Invoice: ${inv.invoiceNo}\n  Amount:  ${amtStr}\n  Due:     ${dueStr}\n\nView / pay: ${openHere}\n\nThank you!\n— ${ctx.academyName}`;
+      return `Hi ${ctx.guardianName},\n\nToday is the due date for ${ctx.studentName}'s fee.\n\n  Invoice: ${inv.invoiceNo}\n  Amount:  ${amtStr}\n  Due:     ${dueStr}\n\nPay in 30 seconds: ${openHere}\n\nThank you!\n— ${ctx.academyName}`;
     }
-    return `Hi ${ctx.guardianName},\n\nGentle reminder — ${ctx.studentName}'s fee was due on ${dueStr} and is still outstanding.\n\n  Invoice: ${inv.invoiceNo}\n  Amount:  ${amtStr}\n\nView / pay: ${openHere}\n\nThank you!\n— ${ctx.academyName}`;
+    return `Hi ${ctx.guardianName},\n\nGentle reminder — ${ctx.studentName}'s fee was due on ${dueStr} and is still outstanding.\n\n  Invoice: ${inv.invoiceNo}\n  Amount:  ${amtStr}\n\nPay in 30 seconds: ${openHere}\n\nThank you!\n— ${ctx.academyName}`;
   }
 
   private buildEmailHtml(inv: any, ctx: { guardianName: string; studentName: string; academyName: string; offset: number }): string {
     const balance = Math.max(0, (inv.totalPaise ?? 0) - (inv.paidPaise ?? 0));
     const dueStr = this.fmtDate(inv.dueOn instanceof Date ? inv.dueOn : new Date(inv.dueOn));
     const amtStr = this.fmtRupees(balance);
-    const openHere = `${PUBLIC_ORIGIN}/fees/invoices?id=${String(inv._id)}`;
+    const openHere = this.payLinkFor(inv);
     const isOverdue = ctx.offset > 0;
     const heading = ctx.offset < 0 ? "Fee coming up" : ctx.offset === 0 ? "Fee due today" : "Fee overdue";
     const lead = ctx.offset < 0
@@ -247,7 +258,7 @@ export class FeesReminderCron implements OnModuleInit {
           <tr><td style="padding:6px 0;color:#64748b">Due</td><td style="padding:6px 0;color:#0f172a;text-align:right">${dueStr}</td></tr>
         </table>
 
-        <a href="${openHere}" style="display:inline-block;background:${accent};color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:700;font-size:14px">View invoice</a>
+        <a href="${openHere}" style="display:inline-block;background:${accent};color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:700;font-size:14px">Pay now →</a>
 
         <p style="margin:20px 0 0;color:#64748b;font-size:13px">Thank you!<br>— ${escapeHtml(ctx.academyName)}</p>
       </div>

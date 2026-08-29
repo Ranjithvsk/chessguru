@@ -9,7 +9,7 @@
 // Design per plan §DesignPrinciples: all 4 states, i18n-keyed strings,
 // currency via Intl, ≥ 44 px touch targets, no dark patterns.
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { feesApi, fmtRupees, type DashboardResponse, type ReminderTextResponse } from "../lib/fees-api";
@@ -177,31 +177,45 @@ function DefaulterRow({ d }: { d: DashboardResponse["topDefaulters"][number] }) 
   );
 }
 
-function RemindLink({ guardianPhone, guardianName, outstanding, guardianUserId }: { guardianPhone?: string; guardianName?: string; outstanding: number; guardianUserId?: string }) {
+function RemindLink({ guardianPhone, guardianUserId }: { guardianPhone?: string; guardianName?: string; outstanding: number; guardianUserId?: string }) {
   const qc = useQueryClient();
-  const log = useMutation({
-    mutationFn: () => feesApi.logReminder({ guardianUserId, channel: "WHATSAPP", template: "FEE_OVERDUE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["fees.dashboard"] }),
-  });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
-  if (!guardianPhone) {
+  if (!guardianPhone || !guardianUserId) {
     return <span className="text-[10px] uppercase tracking-wider text-ink-500">{t("no phone")}</span>;
   }
-  const digits = guardianPhone.replace(/\D+/g, "");
-  const e164 = digits.length === 10 ? "91" + digits : digits;
-  const text = `Hi ${guardianName ?? "there"}, gentle reminder — total outstanding is ${new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(outstanding / 100)}. Please pay when you can. Thank you!`;
-  const waLink = `https://wa.me/${e164}?text=${encodeURIComponent(text)}`;
+
+  // Fetch the server-composed text (with parent-portal URL) on click, then open
+  // wa.me. Server-side composition means the portal-link secret never leaves
+  // the API, and the same text gets logged + sent for every operator.
+  async function onClick(e: React.MouseEvent<HTMLAnchorElement>) {
+    e.preventDefault();
+    setBusy(true); setErr(null);
+    try {
+      const r = await feesApi.reminderTextGuardian(guardianUserId!, "WHATSAPP");
+      if (!r.waLink) { setErr(t("No phone on file for this guardian.")); return; }
+      void feesApi.logReminder({ guardianUserId, channel: "WHATSAPP", template: r.template }).catch(() => { /* best-effort */ });
+      qc.invalidateQueries({ queryKey: ["fees.dashboard"] });
+      window.open(r.waLink, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : t("Couldn't build reminder."));
+    } finally { setBusy(false); }
+  }
+
   return (
-    <a
-      href={waLink}
-      target="_blank"
-      rel="noreferrer"
-      onClick={() => log.mutate()}
-      className="inline-flex h-8 items-center gap-1 rounded-lg border border-accent-500/50 bg-accent-500/10 px-2.5 text-[11px] font-semibold text-accent-300 transition hover:bg-accent-500/20"
-      title={t("Open WhatsApp with a pre-filled reminder")}
-    >
-      🔔 {t("Remind")}
-    </a>
+    <>
+      <a
+        href="#"
+        onClick={onClick}
+        aria-disabled={busy}
+        className="inline-flex h-8 items-center gap-1 rounded-lg border border-accent-500/50 bg-accent-500/10 px-2.5 text-[11px] font-semibold text-accent-300 transition hover:bg-accent-500/20"
+        title={t("Open WhatsApp with a pre-filled reminder + pay link")}
+      >
+        🔔 {busy ? t("Opening…") : t("Remind")}
+      </a>
+      {err && <div role="alert" className="mt-1 text-[10px] text-red-300">{err}</div>}
+    </>
   );
 }
 

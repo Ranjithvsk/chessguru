@@ -1380,9 +1380,14 @@ export class FeesService {
     const balanceStr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: balance % 100 === 0 ? 0 : 2 }).format(balance / 100);
     const dueStr = inv.dueOn.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 
+    // Include the parent-portal magic link so the guardian can pay in three
+    // taps (WhatsApp → tap link → tap Pay). Silently omit if PORTAL_TOKEN_SALT
+    // isn't set (dev / half-configured prod); the text still reads sensibly.
+    const portalLine = inv.guardianUserId ? this.safePortalUrl(academyId, inv.guardianUserId) : "";
+    const payLine = portalLine ? `\nPay here: ${portalLine}` : "";
     const text = isOverdue
-      ? `Hi ${guardianName}, gentle reminder — ${studentName}'s fee (${inv.invoiceNo}, ${balanceStr}) was due on ${dueStr}. Please pay when you can. — ${academyName}`
-      : `Hi ${guardianName}, this is a friendly reminder — ${studentName}'s fee (${inv.invoiceNo}, ${balanceStr}) is due on ${dueStr}. Thank you! — ${academyName}`;
+      ? `Hi ${guardianName}, gentle reminder — ${studentName}'s fee (${inv.invoiceNo}, ${balanceStr}) was due on ${dueStr}.${payLine}\nThank you — ${academyName}`
+      : `Hi ${guardianName}, friendly reminder — ${studentName}'s fee (${inv.invoiceNo}, ${balanceStr}) is due on ${dueStr}.${payLine}\nThank you — ${academyName}`;
 
     let waLink = "";
     const phoneRaw = (guardian?.mobile as string) ?? "";
@@ -1401,6 +1406,65 @@ export class FeesService {
       guardianPhone: phoneRaw || undefined,
       guardianName: (guardian?.name as string) ?? (guardian?.username as string) ?? undefined,
     };
+  }
+
+  /** Guardian-level reminder — sums open balances across all invoices this
+   *  guardian is responsible for. Used by the dashboard's defaulter rows so
+   *  one 🔔 tap covers all of Aarav + Rhea's pending bills. */
+  async reminderTextForGuardian(session: Session, guardianUserId: string, channel: ReminderChannel = "WHATSAPP"): Promise<ReminderTextResponse> {
+    const { academyId } = this.requireOwner(session);
+    const [guardian, academy, openInvoices] = await Promise.all([
+      this.users().findOne({ _id: this.tryOid(guardianUserId) ?? undefined as unknown as ObjectId }, { projection: { name: 1, username: 1, mobile: 1 } as never }),
+      this.conn.db!.collection("academies").findOne(
+        { $or: [{ _id: this.tryOid(academyId) ?? undefined as unknown as ObjectId }, { slug: academyId }] },
+        { projection: { name: 1 } as never },
+      ),
+      this.invoices().find({ academyId, guardianUserId, status: { $in: ["SENT", "PARTIAL", "OVERDUE"] } }).sort({ dueOn: 1 }).toArray(),
+    ]);
+    if (!guardian) throw new NotFoundException("Guardian not found.");
+
+    const guardianName = (guardian?.name as string) ?? (guardian?.username as string) ?? "there";
+    const academyName = (academy?.name as string) ?? "Chess Academy";
+    const outstanding = openInvoices.reduce((s, i) => s + Math.max(0, i.totalPaise - i.paidPaise), 0);
+    const outstandingStr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: outstanding % 100 === 0 ? 0 : 2 }).format(outstanding / 100);
+    const count = openInvoices.length;
+    const oldestDue = openInvoices[0]?.dueOn ? openInvoices[0].dueOn.toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "";
+
+    const portalLine = this.safePortalUrl(academyId, guardianUserId);
+    const payLine = portalLine ? `\nPay here: ${portalLine}` : "";
+    const invoiceWord = count === 1 ? "invoice" : "invoices";
+    const text = count === 0
+      ? `Hi ${guardianName}, all fees are up to date. Thank you! — ${academyName}`
+      : `Hi ${guardianName}, gentle reminder — total outstanding is ${outstandingStr} across ${count} ${invoiceWord}${oldestDue ? ` (oldest due ${oldestDue})` : ""}.${payLine}\nThank you — ${academyName}`;
+
+    const template: ReminderTemplate = "FEE_OVERDUE";
+    let waLink = "";
+    const phoneRaw = (guardian?.mobile as string) ?? "";
+    if (channel === "WHATSAPP" && phoneRaw) {
+      const digits = phoneRaw.replace(/\D+/g, "");
+      const e164 = digits.length === 10 ? "91" + digits : digits;
+      waLink = `https://wa.me/${e164}?text=${encodeURIComponent(text)}`;
+    }
+    return {
+      waLink,
+      text,
+      template,
+      channel,
+      guardianPhone: phoneRaw || undefined,
+      guardianName: (guardian?.name as string) ?? (guardian?.username as string) ?? undefined,
+    };
+  }
+
+  /** Best-effort portal URL — swallows the "PORTAL_TOKEN_SALT unset" throw so
+   *  templates gracefully omit the Pay line in dev instead of crashing the
+   *  whole reminder path. */
+  private safePortalUrl(academyId: string, guardianUserId: string): string {
+    try {
+      // Runtime require to keep the service module dep-graph flat.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { portalUrl } = require("./fees.pg");
+      return portalUrl(academyId, guardianUserId);
+    } catch { return ""; }
   }
 
   /** Record a click on the reminder button — unique(invoiceId, channel, day)

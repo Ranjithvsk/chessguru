@@ -366,6 +366,8 @@ export const feesApi = {
   dashboard: () => req<DashboardResponse>(`/api/fees/dashboard`),
   reminderText: (invoiceId: string, channel: ReminderChannel = "WHATSAPP") =>
     req<ReminderTextResponse>(`/api/fees/invoices/${encodeURIComponent(invoiceId)}/reminder-text?channel=${channel}`),
+  reminderTextGuardian: (guardianUserId: string, channel: ReminderChannel = "WHATSAPP") =>
+    req<ReminderTextResponse>(`/api/fees/guardian/${encodeURIComponent(guardianUserId)}/reminder-text?channel=${channel}`),
   logReminder: (input: LogReminderInput) =>
     req<{ ok: true; alreadyToday: boolean }>(`/api/fees/reminders`, { method: "POST", body: JSON.stringify(input) }),
 };

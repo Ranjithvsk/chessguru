@@ -218,6 +218,13 @@ export class FeesController {
     return this.svc.reminderTextForInvoice(req.session, id, ch);
   }
 
+  @Get("guardian/:userId/reminder-text")
+  async reminderTextGuardian(@Req() req: any, @Param("userId") userId: string, @Query("channel") channel?: string) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    const ch: ReminderChannel = (channel === "SMS" || channel === "EMAIL") ? channel : "WHATSAPP";
+    return this.svc.reminderTextForGuardian(req.session, userId, ch);
+  }
+
   @Post("reminders")
   async logReminder(@Req() req: any, @Body() body: LogReminderInput) {
     if (!req?.session?.userId) throw new UnauthorizedException();
