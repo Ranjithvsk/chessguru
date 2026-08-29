@@ -17,7 +17,7 @@
 // Auth: same session-cookie model every ChessGuru controller uses.
 // Every write goes through FeesService which enforces academyId scoping.
 
-import { Body, Controller, Get, Param, Post, Put, Query, Req, Res, UnauthorizedException } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Put, Query, Req, Res, UnauthorizedException } from "@nestjs/common";
 // NestJS-on-Express: `res` is an express Response. We type it loosely as `any`
 // to avoid a compile-time dep on @types/express (not directly installed in this
 // workspace; the transitive types don't get picked up cleanly by tsc).
@@ -31,6 +31,7 @@ import {
   LogReminderInput,
   RecordManualPaymentInput,
   ReminderChannel,
+  UpdateFeeSettingsInput,
   UpsertPlanInput,
   WaiveInvoiceInput,
 } from "./fees.types";
@@ -223,6 +224,20 @@ export class FeesController {
     if (!req?.session?.userId) throw new UnauthorizedException();
     const ch: ReminderChannel = (channel === "SMS" || channel === "EMAIL") ? channel : "WHATSAPP";
     return this.svc.reminderTextForGuardian(req.session, userId, ch);
+  }
+
+  // ---- per-tenant settings (W4e) -----------------------------------------
+
+  @Get("settings")
+  async getSettings(@Req() req: any) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    return this.svc.getSettings(req.session);
+  }
+
+  @Patch("settings")
+  async updateSettings(@Req() req: any, @Body() body: UpdateFeeSettingsInput) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    return this.svc.updateSettings(req.session, body);
   }
 
   @Post("reminders")

@@ -240,6 +240,31 @@ export interface LogReminderInput {
   template?: ReminderTemplate;
 }
 
+export interface FeeSettingsResponse {
+  academyId: string;
+  razorpayKeyId?: string;
+  razorpayKeySecretSet: boolean;
+  razorpayWebhookSecretSet: boolean;
+  gstin?: string;
+  legalName?: string;
+  panNo?: string;
+  receiptPrefix?: string;
+  bankAccountLast4?: string;
+  updatedAt?: string;
+  webhookUrl: string;
+}
+
+export interface UpdateFeeSettingsInput {
+  razorpayKeyId?: string | null;
+  razorpayKeySecret?: string | null;
+  razorpayWebhookSecret?: string | null;
+  gstin?: string | null;
+  legalName?: string | null;
+  panNo?: string | null;
+  receiptPrefix?: string | null;
+  bankAccountLast4?: string | null;
+}
+
 // ---- W4b: parent portal + Razorpay ----------------------------------------
 
 export interface PortalInvoiceLine {
@@ -370,6 +395,11 @@ export const feesApi = {
     req<ReminderTextResponse>(`/api/fees/invoices/${encodeURIComponent(invoiceId)}/reminder-text?channel=${channel}`),
   reminderTextGuardian: (guardianUserId: string, channel: ReminderChannel = "WHATSAPP") =>
     req<ReminderTextResponse>(`/api/fees/guardian/${encodeURIComponent(guardianUserId)}/reminder-text?channel=${channel}`),
+
+  // ---- settings (W4e) -------------------------------------------
+  getSettings: () => req<FeeSettingsResponse>(`/api/fees/settings`),
+  updateSettings: (patch: UpdateFeeSettingsInput) =>
+    req<FeeSettingsResponse>(`/api/fees/settings`, { method: "PATCH", body: JSON.stringify(patch) }),
   logReminder: (input: LogReminderInput) =>
     req<{ ok: true; alreadyToday: boolean }>(`/api/fees/reminders`, { method: "POST", body: JSON.stringify(input) }),
 };

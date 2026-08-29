@@ -42,7 +42,8 @@ async function bootstrap() {
   // Razorpay webhook: preserve the raw JSON body on req.rawBody so signature
   // verification uses the exact bytes RZP signed. The verify() hook fires
   // BEFORE JSON is parsed, so req.body still works normally for the handler.
-  // Signed with the RAZORPAY_WEBHOOK_SECRET set once in the RZP dashboard.
+  // Per-tenant secret lookup happens in fees.portal.service — the URL carries
+  // the tenant identifier (…/webhook/razorpay/<academyId>).
   app.use("/api/fees/webhook/razorpay", expressLib.json({
     limit: "256kb",
     verify: (req: any, _res: any, buf: Buffer) => { req.rawBody = buf; },

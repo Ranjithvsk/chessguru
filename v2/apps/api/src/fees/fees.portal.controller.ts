@@ -4,6 +4,7 @@
 // of the magic-link model.
 
 import { Body, Controller, ForbiddenException, Get, Param, Post, Query, Req, Res } from "@nestjs/common";
+// Param is used by both controllers below; keep it in the top import.
 import { FeesPortalService } from "./fees.portal.service";
 import { CreateCheckoutOrderInput } from "./fees.types";
 
@@ -46,22 +47,20 @@ export class FeesPortalController {
 export class FeesWebhookController {
   constructor(private readonly svc: FeesPortalService) {}
 
-  @Post("razorpay")
-  async razorpay(@Req() req: any, @Res() res: any) {
+  // Per-tenant webhook URL: each academy configures
+  // https://chessguru.cc/v2api/api/fees/webhook/razorpay/<academyId> in their
+  // own Razorpay dashboard, using their own webhook secret stored in
+  // fees_settings. Multi-tenant safe.
+  @Post("razorpay/:academyId")
+  async razorpay(@Req() req: any, @Res() res: any, @Param("academyId") academyId: string) {
     const sig = String(req.headers["x-razorpay-signature"] ?? "").trim();
-    // rawBody is populated by the raw-body middleware wired up in main.ts (see
-    // that file for the express.raw() route matcher). Falls back to
-    // JSON.stringify of body only if the middleware missed us — that path
-    // will fail signature verification, but the error is clean.
     const raw: string = (req.rawBody as Buffer | string | undefined)
       ? (typeof req.rawBody === "string" ? req.rawBody : (req.rawBody as Buffer).toString("utf8"))
       : JSON.stringify(req.body ?? {});
     try {
-      const r = await this.svc.handleWebhook(raw, sig);
+      const r = await this.svc.handleWebhook(raw, sig, academyId);
       res.status(200).json(r);
     } catch (e) {
-      // RZP will retry on 5xx. Return 4xx for bad signatures + bad payloads so
-      // we don't get retried forever on garbage. Log for the ops dashboard.
       const status = (e as { status?: number })?.status ?? 400;
       console.warn("[fees-webhook] rejected:", (e as Error).message);
       res.status(status).json({ ok: false, error: (e as Error).message });

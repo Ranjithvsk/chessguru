@@ -41,6 +41,9 @@ export default function FeesDashboardPage() {
           <Link to="/fees/invoices" className="inline-flex h-10 items-center gap-2 rounded-xl border border-ink-700 bg-ink-900/60 px-4 text-sm font-semibold text-ink-200 hover:border-brand-500/60 hover:text-white">
             🧾 {t("Invoices")}
           </Link>
+          <Link to="/fees/settings" className="inline-flex h-10 items-center gap-2 rounded-xl border border-ink-700 bg-ink-900/60 px-4 text-sm font-semibold text-ink-200 hover:border-brand-500/60 hover:text-white" title={t("Payments, GSTIN, receipt config")}>
+            ⚙️
+          </Link>
         </div>
       </header>
 

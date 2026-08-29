@@ -27,11 +27,12 @@ import {
 } from "./fees.types";
 import {
   createOrder as rzpCreateOrder,
-  isConfigured as rzpIsConfigured,
+  isConfigured as rzpIsConfiguredFromEnv,
   readRazorpayCredentials,
   verifyPortalToken,
   verifyWebhookSignature,
 } from "./fees.pg";
+import type { FeeSettingsDoc } from "./fees.types";
 import { sendMail } from "../lib/mail";
 
 @Injectable()
@@ -46,6 +47,21 @@ export class FeesPortalService {
   private academyBrand(){ return this.conn.db!.collection("academybrandings"); }
   private counters()    { return this.conn.db!.collection("fees_counters"); }
   private programs()    { return this.conn.db!.collection("fees_programs"); }
+  private settings()    { return this.conn.db!.collection<FeeSettingsDoc>(COL.settings); }
+
+  /** Per-tenant Razorpay creds — DB (fees_settings) first, env fallback for
+   *  single-tenant / dev boxes. Returns null if neither has been configured. */
+  private async credsForTenant(academyId: string): Promise<{ keyId: string; keySecret: string; webhookSecret: string } | null> {
+    const s = await this.settings().findOne({ academyId });
+    if (s?.razorpayKeyId && s?.razorpayKeySecret && s?.razorpayWebhookSecret) {
+      return { keyId: s.razorpayKeyId, keySecret: s.razorpayKeySecret, webhookSecret: s.razorpayWebhookSecret };
+    }
+    return readRazorpayCredentials();
+  }
+  private async rzpAvailableForTenant(academyId: string): Promise<boolean> {
+    const c = await this.credsForTenant(academyId);
+    return c !== null;
+  }
 
   // ---- token resolve ---------------------------------------------------
 
@@ -124,7 +140,7 @@ export class FeesPortalService {
       invoices,
       currency: "INR",
       totalOutstandingPaise: totalOutstanding,
-      razorpayAvailable: rzpIsConfigured(),
+      razorpayAvailable: await this.rzpAvailableForTenant(academyId),
     };
   }
 
@@ -136,7 +152,7 @@ export class FeesPortalService {
       throw new BadRequestException("Pick at least one invoice to pay.");
     }
     if (invoiceIds.length > 20) throw new BadRequestException("Too many invoices in one checkout (max 20).");
-    const creds = readRazorpayCredentials();
+    const creds = await this.credsForTenant(academyId);
     if (!creds) throw new BadRequestException("Online payment isn't configured yet. Please pay the academy directly.");
 
     const oids = invoiceIds.map((s) => this.oid(s));
@@ -173,6 +189,7 @@ export class FeesPortalService {
         guardianUserId,
         invoiceIds: invoiceIds.slice(0, 20).join(","),   // comma-separated for compactness
       },
+      creds: { keyId: creds.keyId, keySecret: creds.keySecret },
     });
 
     return {
@@ -192,8 +209,13 @@ export class FeesPortalService {
   /** Verifies the signature, extracts payment.captured / payment.failed events,
    *  and (on capture) inserts a Payment row + FIFO-allocates to invoices.
    *  Idempotent — pgPaymentId unique per academyId means retries collapse. */
-  async handleWebhook(rawBody: string, signatureHeader: string): Promise<{ ok: true; handled: string; note?: string }> {
-    if (!verifyWebhookSignature(rawBody, signatureHeader)) {
+  async handleWebhook(rawBody: string, signatureHeader: string, academyIdFromUrl: string): Promise<{ ok: true; handled: string; note?: string }> {
+    // Look up tenant's webhook secret from settings (fees_settings.razorpayWebhookSecret).
+    // Env fallback keeps single-tenant / dev flows working. Signature verified BEFORE
+    // we parse or act on anything.
+    const creds = await this.credsForTenant(academyIdFromUrl);
+    if (!creds) throw new ForbiddenException("No Razorpay webhook secret configured for this academy.");
+    if (!verifyWebhookSignature(rawBody, signatureHeader, creds.webhookSecret)) {
       throw new ForbiddenException("Bad signature.");
     }
     let payload: {
@@ -214,11 +236,17 @@ export class FeesPortalService {
     }
 
     const notes = p.notes ?? {};
-    const academyId = notes.academyId;
+    // Cross-check that the notes.academyId matches the URL param. Both are
+    // signed (URL by us implicitly, notes by RZP via HMAC) but the URL is
+    // the authoritative tenant selector — never trust notes to route.
+    const academyId = academyIdFromUrl;
+    if (notes.academyId && notes.academyId !== academyId) {
+      return { ok: true, handled: event, note: "notes.academyId mismatch — ignored" };
+    }
     const guardianUserId = notes.guardianUserId;
     const invoiceIdsStr = notes.invoiceIds ?? "";
     const invoiceIds = invoiceIdsStr.split(",").map((s) => s.trim()).filter(Boolean);
-    if (!academyId || !guardianUserId || invoiceIds.length === 0) {
+    if (!guardianUserId || invoiceIds.length === 0) {
       return { ok: true, handled: event, note: "missing notes — signed but unusable, ignored" };
     }
 

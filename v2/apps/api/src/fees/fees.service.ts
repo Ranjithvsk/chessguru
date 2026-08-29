@@ -26,6 +26,8 @@ import {
   FeeHeadKind,
   FeePlanDoc,
   FeeProgramDoc,
+  FeeSettingsDoc,
+  FeeSettingsResponse,
   GenerateInvoicesInput,
   HeadResponse,
   InvoiceDoc,
@@ -37,6 +39,7 @@ import {
   ReminderLogDoc,
   ReminderTemplate,
   ReminderTextResponse,
+  UpdateFeeSettingsInput,
   MAX_AMOUNT_PAISE,
   MAX_BULK_ENROLL,
   MAX_DAY_OF_MONTH,
@@ -86,6 +89,7 @@ export class FeesService {
   private payments()    { return this.conn.db!.collection<PaymentDoc>(COL.payments); }
   private allocs()      { return this.conn.db!.collection<PaymentAllocationDoc>(COL.paymentAllocs); }
   private reminders()   { return this.conn.db!.collection<ReminderLogDoc>(COL.reminders); }
+  private settings()    { return this.conn.db!.collection<FeeSettingsDoc>(COL.settings); }
   private counters()    { return this.conn.db!.collection<FeeCounterDoc>("fees_counters"); }
   // ChessGuru already models students + parents as users rows — we reuse.
   private users()       { return this.conn.db!.collection("users"); }
@@ -114,6 +118,9 @@ export class FeesService {
       { unique: true, partialFilterExpression: { invoiceId: { $exists: true } } },
     );
     await this.reminders().createIndex({ academyId: 1, sentAt: -1 });
+    // One settings doc per tenant — unique index prevents duplicates from
+    // racing owners saving simultaneously.
+    await this.settings().createIndex({ academyId: 1 }, { unique: true });
   }
 
   // ---- guards ---------------------------------------------------------------
@@ -813,9 +820,9 @@ export class FeesService {
   }
 
   private async receiptPrefixFor(academyId: string): Promise<string> {
-    // Prefer the academy's slug in caps as a stable receipt prefix. If the
-    // academy has an explicit branding row, we could honour a receiptPrefix
-    // field there — deferred to W6 settings UI.
+    // Owner-set override from fees_settings wins. Falls back to slug-derived.
+    const settings = await this.settings().findOne({ academyId }, { projection: { receiptPrefix: 1 } as never });
+    if (settings?.receiptPrefix) return settings.receiptPrefix;
     const academy = await this.conn.db!.collection("academies").findOne(
       { _id: this.tryOid(academyId) ?? undefined, ...(this.tryOid(academyId) ? {} : { slug: academyId }) },
       { projection: { slug: 1 } as never },
@@ -1528,6 +1535,95 @@ export class FeesService {
       }
       throw e;
     }
+  }
+
+  // ==========================================================================
+  // W4e — per-tenant settings
+  // ==========================================================================
+
+  /** Best-effort settings lookup — used by portal / cron paths that need
+   *  per-tenant Razorpay credentials. Never throws. Returns null if the
+   *  tenant hasn't saved anything yet. */
+  async readSettings(academyId: string): Promise<FeeSettingsDoc | null> {
+    return this.settings().findOne({ academyId });
+  }
+
+  private webhookUrlFor(academyId: string): string {
+    const origin = process.env.CHESSGURU_PUBLIC_ORIGIN ?? "https://chessguru.cc";
+    return `${origin}/v2api/api/fees/webhook/razorpay/${encodeURIComponent(academyId)}`;
+  }
+
+  private shapeSettings(academyId: string, doc: FeeSettingsDoc | null): FeeSettingsResponse {
+    return {
+      academyId,
+      razorpayKeyId: doc?.razorpayKeyId,
+      razorpayKeySecretSet: !!doc?.razorpayKeySecret,
+      razorpayWebhookSecretSet: !!doc?.razorpayWebhookSecret,
+      gstin: doc?.gstin,
+      legalName: doc?.legalName,
+      panNo: doc?.panNo,
+      receiptPrefix: doc?.receiptPrefix,
+      bankAccountLast4: doc?.bankAccountLast4,
+      updatedAt: doc?.updatedAt?.toISOString(),
+      webhookUrl: this.webhookUrlFor(academyId),
+    };
+  }
+
+  async getSettings(session: Session): Promise<FeeSettingsResponse> {
+    const { academyId } = this.requireOwner(session);
+    const doc = await this.settings().findOne({ academyId });
+    return this.shapeSettings(academyId, doc);
+  }
+
+  async updateSettings(session: Session, input: UpdateFeeSettingsInput): Promise<FeeSettingsResponse> {
+    const { userId, academyId } = this.requireOwner(session);
+    // Build a $set / $unset patch. `null` explicitly clears; `undefined`
+    // leaves untouched. String fields trimmed + length-capped.
+    const set: Record<string, unknown> = { updatedAt: new Date(), updatedBy: userId };
+    const unset: Record<string, "" > = {};
+
+    const strField = (key: keyof UpdateFeeSettingsInput, dbKey: string, opts: { max: number; upper?: boolean; digitsOnly?: boolean } = { max: 100 }) => {
+      const v = input[key];
+      if (v === undefined) return;
+      if (v === null) { unset[dbKey] = ""; return; }
+      if (typeof v !== "string") throw new BadRequestException(`${dbKey} must be text.`);
+      let trimmed = v.trim();
+      if (opts.upper) trimmed = trimmed.toUpperCase();
+      if (opts.digitsOnly) trimmed = trimmed.replace(/\D+/g, "");
+      if (trimmed.length === 0) { unset[dbKey] = ""; return; }
+      if (trimmed.length > opts.max) throw new BadRequestException(`${dbKey} is too long (max ${opts.max}).`);
+      set[dbKey] = trimmed;
+    };
+
+    strField("razorpayKeyId", "razorpayKeyId", { max: 120 });
+    strField("razorpayKeySecret", "razorpayKeySecret", { max: 200 });
+    strField("razorpayWebhookSecret", "razorpayWebhookSecret", { max: 200 });
+    strField("gstin", "gstin", { max: 20, upper: true });
+    strField("legalName", "legalName", { max: 120 });
+    strField("panNo", "panNo", { max: 15, upper: true });
+    strField("receiptPrefix", "receiptPrefix", { max: 12, upper: true });
+    strField("bankAccountLast4", "bankAccountLast4", { max: 4, digitsOnly: true });
+
+    // GSTIN sanity — 15 chars, alphanumeric. Only validate when caller provided one.
+    if (typeof set.gstin === "string" && !/^[0-9A-Z]{15}$/.test(set.gstin as string)) {
+      throw new BadRequestException("GSTIN must be 15 uppercase alphanumeric characters.");
+    }
+    if (typeof set.panNo === "string" && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(set.panNo as string)) {
+      throw new BadRequestException("PAN must look like ABCDE1234F.");
+    }
+    if (typeof set.bankAccountLast4 === "string" && !/^\d{4}$/.test(set.bankAccountLast4 as string)) {
+      throw new BadRequestException("Bank account last 4 must be 4 digits.");
+    }
+    if (typeof set.receiptPrefix === "string" && !/^[A-Z0-9]{2,12}$/.test(set.receiptPrefix as string)) {
+      throw new BadRequestException("Receipt prefix must be 2–12 uppercase letters/digits.");
+    }
+
+    const patch: Record<string, unknown> = { $set: set, $setOnInsert: { academyId } };
+    if (Object.keys(unset).length > 0) patch.$unset = unset;
+
+    await this.settings().updateOne({ academyId }, patch, { upsert: true });
+    const doc = await this.settings().findOne({ academyId });
+    return this.shapeSettings(academyId, doc);
   }
 
   // ---- helpers --------------------------------------------------------------

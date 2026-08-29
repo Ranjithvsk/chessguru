@@ -470,6 +470,64 @@ export const VALID_REMINDER_CHANNELS: readonly ReminderChannel[] = ["WHATSAPP", 
 export const VALID_REMINDER_TEMPLATES: readonly ReminderTemplate[] = ["FEE_DUE", "FEE_OVERDUE", "PAYMENT_ACK"] as const;
 
 // ============================================================================
+// W4e — per-tenant settings
+// ============================================================================
+
+/** One doc per academyId. Every field optional so the tenant can save
+ *  partial settings without a giant form-wide validation.
+ *
+ *  Trust boundary: Razorpay secrets are stored in plaintext in Mongo — same
+ *  trust boundary as the API's .env (physical VM access = both leak). If we
+ *  ever run untrusted admin sessions or move to shared infra, wrap in
+ *  envelope-encryption (KMS per tenant, deferred to world-class §Security).
+ */
+export interface FeeSettingsDoc {
+  _id: ObjectId;
+  academyId: string;
+  // Payments
+  razorpayKeyId?: string;
+  razorpayKeySecret?: string;
+  razorpayWebhookSecret?: string;
+  // Business
+  gstin?: string;
+  legalName?: string;
+  panNo?: string;
+  // Receipts
+  receiptPrefix?: string;              // overrides slug-derived default
+  bankAccountLast4?: string;           // display-only; adds trust to receipts
+  // Audit
+  updatedAt: Date;
+  updatedBy: string;                   // userId of the last saver
+}
+
+/** Response never echoes secrets — only whether each is set. Owner uses
+ *  "Replace" to re-enter. */
+export interface FeeSettingsResponse {
+  academyId: string;
+  razorpayKeyId?: string;              // key_id is not a secret; safe to echo
+  razorpayKeySecretSet: boolean;
+  razorpayWebhookSecretSet: boolean;
+  gstin?: string;
+  legalName?: string;
+  panNo?: string;
+  receiptPrefix?: string;
+  bankAccountLast4?: string;
+  updatedAt?: string;
+  webhookUrl: string;                  // computed — Razorpay dashboard config helper
+}
+
+export interface UpdateFeeSettingsInput {
+  razorpayKeyId?: string | null;       // null → clear
+  razorpayKeySecret?: string | null;
+  razorpayWebhookSecret?: string | null;
+  gstin?: string | null;
+  legalName?: string | null;
+  panNo?: string | null;
+  receiptPrefix?: string | null;
+  bankAccountLast4?: string | null;
+}
+
+// ============================================================================
 // W4b — Parent portal + Razorpay
 // ============================================================================
 

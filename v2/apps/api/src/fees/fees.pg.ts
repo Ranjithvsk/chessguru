@@ -34,13 +34,16 @@ export function isConfigured(): boolean {
   return readRazorpayCredentials() !== null;
 }
 
-/** POST https://api.razorpay.com/v1/orders — creates a new payment order. */
+/** POST https://api.razorpay.com/v1/orders — creates a new payment order.
+ *  Credentials must be passed explicitly; per-tenant secrets come from
+ *  FeesService.getSettings (env is only a fallback for single-tenant / dev). */
 export async function createOrder(input: {
   amountPaise: number;
   receipt: string;                       // ≤ 40 chars — we pass invoiceIds hash
   notes: Record<string, string>;         // stored on order, echoed in webhook payload
+  creds?: { keyId: string; keySecret: string };  // overrides env fallback
 }): Promise<{ id: string; amount: number; currency: string; receipt: string }> {
-  const creds = readRazorpayCredentials();
+  const creds = input.creds ?? readRazorpayCredentials();
   if (!creds) throw new Error("Razorpay is not configured (env keys missing).");
   const auth = Buffer.from(`${creds.keyId}:${creds.keySecret}`).toString("base64");
   const body = {
@@ -69,13 +72,17 @@ export async function createOrder(input: {
 }
 
 /** Verify the X-Razorpay-Signature header against the raw request body.
- *  Returns true only when the sha256 HMAC (webhook_secret, rawBody) matches
- *  the header. Constant-time comparison via crypto.timingSafeEqual. */
-export function verifyWebhookSignature(rawBody: string | Buffer, headerSignature: string): boolean {
-  const creds = readRazorpayCredentials();
-  if (!creds) return false;
+ *  Returns true only when sha256 HMAC(webhookSecret, rawBody) matches header.
+ *  Constant-time comparison via crypto.timingSafeEqual.
+ *
+ *  Signature — tenant secret is passed in. Multi-tenant: each tenant
+ *  configures their own webhook URL (…/webhook/razorpay/:academyId) with
+ *  their own secret stored in fees_settings. Env is a single-tenant fallback. */
+export function verifyWebhookSignature(rawBody: string | Buffer, headerSignature: string, secret?: string): boolean {
+  const useSecret = secret ?? readRazorpayCredentials()?.webhookSecret;
+  if (!useSecret) return false;
   const bodyStr = typeof rawBody === "string" ? rawBody : rawBody.toString("utf8");
-  const expected = crypto.createHmac("sha256", creds.webhookSecret).update(bodyStr).digest("hex");
+  const expected = crypto.createHmac("sha256", useSecret).update(bodyStr).digest("hex");
   const a = Buffer.from(expected, "hex");
   const b = Buffer.from((headerSignature || "").trim(), "hex");
   if (a.length !== b.length) return false;
