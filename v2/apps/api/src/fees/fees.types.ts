@@ -464,3 +464,56 @@ export interface ReminderTextResponse {
 
 export const VALID_REMINDER_CHANNELS: readonly ReminderChannel[] = ["WHATSAPP", "SMS", "EMAIL"] as const;
 export const VALID_REMINDER_TEMPLATES: readonly ReminderTemplate[] = ["FEE_DUE", "FEE_OVERDUE", "PAYMENT_ACK"] as const;
+
+// ============================================================================
+// W4b — Parent portal + Razorpay
+// ============================================================================
+
+export interface PortalInvoiceLine {
+  id: string;
+  invoiceNo: string;
+  studentName?: string;
+  programName?: string;
+  periodLabel: string;
+  totalPaise: number;
+  paidPaise: number;
+  balancePaise: number;
+  dueOn: string;                       // ISO
+  status: InvoiceStatus;
+  overdue: boolean;
+}
+
+export interface PortalResponse {
+  guardianName: string;
+  guardianPhone?: string;
+  academyName: string;
+  academyTagline?: string;
+  invoices: PortalInvoiceLine[];
+  currency: "INR";
+  totalOutstandingPaise: number;
+  razorpayAvailable: boolean;          // false when keys not configured
+}
+
+export interface CreateCheckoutOrderInput {
+  invoiceIds: string[];
+}
+
+export interface CreateCheckoutOrderResponse {
+  razorpayKeyId: string;
+  razorpayOrderId: string;
+  amountPaise: number;
+  currency: "INR";
+  guardianName?: string;
+  guardianPhone?: string;
+  invoiceIds: string[];
+  academyName: string;
+}
+
+export interface PortalPaymentSummary {
+  id: string;
+  receiptNo: string;
+  amountPaise: number;
+  method: PaymentMethod;
+  capturedAt: string;
+  invoiceNos: string[];
+}

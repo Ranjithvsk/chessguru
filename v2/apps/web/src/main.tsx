@@ -44,6 +44,7 @@ import FeesLandingPage from "./pages/Fees";
 import FeesProgramsPage from "./pages/FeesPrograms";
 import FeesProgramDetailPage from "./pages/FeesProgramDetail";
 import FeesInvoicesPage from "./pages/FeesInvoices";
+import ParentPayPage from "./pages/parent/PayHome";
 import StudentsManagerPage from "./pages/StudentsManager";
 import StudentPerformancePage from "./pages/StudentPerformance";
 import BatchPerformancePage from "./pages/BatchPerformance";
@@ -156,6 +157,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           {/* Public academy landing — also standalone (no App chrome) so it reads
               like a chessiverse-style creator page, matching CoachPublic. */}
           <Route path="academy-page/:slug" element={<AcademyPublicPage />} />
+          {/* Parent fees portal — public magic-link, no App chrome (parents
+              never see the coach navbar; it's a payment landing). */}
+          <Route path="pay/:token" element={<ParentPayPage />} />
           <Route element={<App />}>
             <Route index element={<PuzzlesPage />} />
             <Route path="play" element={<PlayPage />} />

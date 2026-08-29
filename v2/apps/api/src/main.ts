@@ -39,6 +39,14 @@ async function bootstrap() {
   // Class-recording upload is an application/octet-stream body up to 500MB (~2h of
   // browser MediaRecorder at typical bitrates). Scoped to that ONE endpoint so the
   // default JSON body-parser limits still protect every other route.
+  // Razorpay webhook: preserve the raw JSON body on req.rawBody so signature
+  // verification uses the exact bytes RZP signed. The verify() hook fires
+  // BEFORE JSON is parsed, so req.body still works normally for the handler.
+  // Signed with the RAZORPAY_WEBHOOK_SECRET set once in the RZP dashboard.
+  app.use("/api/fees/webhook/razorpay", expressLib.json({
+    limit: "256kb",
+    verify: (req: any, _res: any, buf: Buffer) => { req.rawBody = buf; },
+  }));
   app.use("/api/class/:id/recording", expressLib.raw({ type: "application/octet-stream", limit: "500mb" }));
   // Snap audio clip is a short (<=30s) coach mic recording uploaded alongside
   // the snap FEN. 5MB cap comfortably covers webm/opus at 128kbps for 30s.

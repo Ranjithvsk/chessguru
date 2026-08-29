@@ -238,6 +238,60 @@ export interface LogReminderInput {
   template?: ReminderTemplate;
 }
 
+// ---- W4b: parent portal + Razorpay ----------------------------------------
+
+export interface PortalInvoiceLine {
+  id: string;
+  invoiceNo: string;
+  studentName?: string;
+  programName?: string;
+  periodLabel: string;
+  totalPaise: number;
+  paidPaise: number;
+  balancePaise: number;
+  dueOn: string;
+  status: InvoiceStatus;
+  overdue: boolean;
+}
+
+export interface PortalResponse {
+  guardianName: string;
+  guardianPhone?: string;
+  academyName: string;
+  academyTagline?: string;
+  invoices: PortalInvoiceLine[];
+  currency: "INR";
+  totalOutstandingPaise: number;
+  razorpayAvailable: boolean;
+}
+
+export interface CheckoutOrderResponse {
+  razorpayKeyId: string;
+  razorpayOrderId: string;
+  amountPaise: number;
+  currency: "INR";
+  guardianName?: string;
+  guardianPhone?: string;
+  invoiceIds: string[];
+  academyName: string;
+}
+
+export const portalApi = {
+  view: (token: string, guardianUserId: string, academyId: string) =>
+    req<PortalResponse>(`/api/fees/portal/${encodeURIComponent(token)}?g=${encodeURIComponent(guardianUserId)}&a=${encodeURIComponent(academyId)}`),
+
+  checkout: (token: string, guardianUserId: string, academyId: string, invoiceIds: string[]) =>
+    req<CheckoutOrderResponse>(
+      `/api/fees/portal/${encodeURIComponent(token)}/checkout?g=${encodeURIComponent(guardianUserId)}&a=${encodeURIComponent(academyId)}`,
+      { method: "POST", body: JSON.stringify({ invoiceIds }) },
+    ),
+
+  payments: (token: string, guardianUserId: string, academyId: string) =>
+    req<{ payments: Array<{ id: string; receiptNo: string; amountPaise: number; method: PaymentMethod; capturedAt: string; invoiceNos: string[] }> }>(
+      `/api/fees/portal/${encodeURIComponent(token)}/payments?g=${encodeURIComponent(guardianUserId)}&a=${encodeURIComponent(academyId)}`,
+    ),
+};
+
 export const feesApi = {
   // ---- programs ------------------------------------------------------------
   listPrograms: (opts: { status?: "ACTIVE" | "ARCHIVED"; q?: string } = {}) => {
