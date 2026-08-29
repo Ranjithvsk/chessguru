@@ -9,6 +9,11 @@
     "outDir": "dist",
     "baseUrl": ".",
     "noEmit": false,
+    // A service — never consumed as a library. Skipping .d.ts emission avoids
+    // TS2742 "type cannot be named without a reference to .pnpm/…" errors that
+    // pnpm's isolated store surfaces on every service returning a raw Mongo
+    // Collection type (43 sites across the codebase). Zero runtime impact.
+    "declaration": false,
     "paths": {
       "@chessguru/types": ["../../packages/types/src/index.ts"]
     }

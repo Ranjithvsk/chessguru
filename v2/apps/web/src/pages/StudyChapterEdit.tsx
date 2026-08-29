@@ -377,6 +377,7 @@ function MoveTree({ moves, currentId, onJump }: { moves: MoveNode[]; currentId: 
     const kids = childrenOf(moves, fromId);
     if (!kids.length) return;
     const main = kids.find((k) => k.isMainLine) ?? kids[0];
+    if (!main) return;
     const branches = kids.filter((k) => k.id !== main.id);
 
     // Move number: only white plays print "1." — black continues on same line.
@@ -424,6 +425,7 @@ function VariationTail({ moves, fromId, currentId, onJump, depth }: {
   const kids = childrenOf(moves, fromId);
   if (!kids.length) return null;
   const main = kids.find((k) => k.isMainLine) ?? kids[0];
+  if (!main) return null;
   const num = Math.ceil(main.ply / 2);
   const isWhite = main.ply % 2 === 1;
   return (
