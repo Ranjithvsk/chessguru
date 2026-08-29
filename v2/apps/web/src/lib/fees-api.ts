@@ -186,6 +186,58 @@ export interface RecordManualPaymentInput {
   note?: string;
 }
 
+// ---- W3-lite: dashboard + reminders ---------------------------------------
+
+export type ReminderChannel = "WHATSAPP" | "SMS" | "EMAIL";
+export type ReminderTemplate = "FEE_DUE" | "FEE_OVERDUE" | "PAYMENT_ACK";
+
+export interface DashboardResponse {
+  currency: "INR";
+  now: string;
+  monthLabel: string;
+  collectedMonthPaise: number;
+  overdueCountInvoices: number;
+  overdueBalancePaise: number;
+  expectedNext7dPaise: number;
+  totalActiveEnrollments: number;
+  topDefaulters: Array<{
+    guardianUserId?: string;
+    guardianName?: string;
+    guardianPhone?: string;
+    studentNames: string[];
+    invoiceCount: number;
+    outstandingPaise: number;
+    oldestDueOn: string;
+  }>;
+  recentPayments: Array<{
+    id: string;
+    amountPaise: number;
+    method: PaymentMethod;
+    receiptNo: string;
+    guardianName?: string;
+    capturedAt: string;
+    invoiceNos: string[];
+  }>;
+  collectionByDay: Array<{ day: string; collectedPaise: number }>;
+  lastReminderAt: string | null;
+}
+
+export interface ReminderTextResponse {
+  waLink: string;
+  text: string;
+  template: ReminderTemplate;
+  channel: ReminderChannel;
+  guardianPhone?: string;
+  guardianName?: string;
+}
+
+export interface LogReminderInput {
+  invoiceId?: string;
+  guardianUserId?: string;
+  channel: ReminderChannel;
+  template?: ReminderTemplate;
+}
+
 export const feesApi = {
   // ---- programs ------------------------------------------------------------
   listPrograms: (opts: { status?: "ACTIVE" | "ARCHIVED"; q?: string } = {}) => {
@@ -255,6 +307,13 @@ export const feesApi = {
   // ---- PDF URLs (browser opens directly, cookies auth in-flight) -
   invoicePdfUrl: (id: string) => `${BASE}/api/fees/invoices/${encodeURIComponent(id)}/pdf`,
   receiptPdfUrl: (paymentId: string) => `${BASE}/api/fees/payments/${encodeURIComponent(paymentId)}/receipt.pdf`,
+
+  // ---- W3-lite: dashboard + reminders --------------------------
+  dashboard: () => req<DashboardResponse>(`/api/fees/dashboard`),
+  reminderText: (invoiceId: string, channel: ReminderChannel = "WHATSAPP") =>
+    req<ReminderTextResponse>(`/api/fees/invoices/${encodeURIComponent(invoiceId)}/reminder-text?channel=${channel}`),
+  logReminder: (input: LogReminderInput) =>
+    req<{ ok: true; alreadyToday: boolean }>(`/api/fees/reminders`, { method: "POST", body: JSON.stringify(input) }),
 };
 
 // ---- invoice-status meta (labels + colour classes) -----------------------

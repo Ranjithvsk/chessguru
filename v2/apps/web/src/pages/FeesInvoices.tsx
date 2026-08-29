@@ -298,6 +298,9 @@ function InvoiceDrawer({ id, onClose }: { id: string; onClose: () => void }) {
                 >
                   📄 {t("Download PDF")}
                 </a>
+                {data.invoice.balancePaise > 0 && data.invoice.status !== "CANCELLED" && data.invoice.status !== "WAIVED" && (
+                  <RemindOnWhatsApp invoiceId={data.invoice.id} />
+                )}
               </div>
               <div className="flex gap-2">
                 {data.invoice.status !== "CANCELLED" && data.invoice.status !== "WAIVED" && (
@@ -542,6 +545,47 @@ function ErrorCard({ message, onRetry }: { message: string; onRetry: () => void 
       <h3 className="text-lg font-semibold text-ink-100">{message}</h3>
       <button onClick={onRetry} className="mt-4 h-10 rounded-xl border border-red-500/50 bg-red-500/10 px-4 text-sm font-semibold text-red-200 hover:bg-red-500/20">{t("Retry")}</button>
     </div>
+  );
+}
+
+// Open WhatsApp with a server-composed reminder text + log the click.
+// Fetches the text lazily on tap so we don't waste a server call per open drawer.
+function RemindOnWhatsApp({ invoiceId }: { invoiceId: string }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const qc = useQueryClient();
+
+  async function onClick(e: React.MouseEvent<HTMLButtonElement>) {
+    e.preventDefault();
+    setBusy(true); setErr(null);
+    try {
+      const r = await feesApi.reminderText(invoiceId, "WHATSAPP");
+      if (!r.waLink) {
+        setErr(t("This guardian has no phone on file. Add one in the Academy page first."));
+        return;
+      }
+      // Fire the log call in parallel; don't block the WhatsApp open.
+      void feesApi.logReminder({ invoiceId, channel: "WHATSAPP", template: r.template }).catch(() => { /* swallow — log is best-effort */ });
+      qc.invalidateQueries({ queryKey: ["fees.dashboard"] });
+      // Open in a new tab.
+      window.open(r.waLink, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : t("Couldn't build a reminder."));
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <>
+      <button
+        onClick={onClick}
+        disabled={busy}
+        className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-xl border border-accent-500/50 bg-accent-500/10 text-sm font-semibold text-accent-300 transition hover:bg-accent-500/20 disabled:opacity-50"
+        title={t("Open WhatsApp with a pre-filled reminder message")}
+      >
+        🔔 {busy ? t("Opening…") : t("Remind on WhatsApp")}
+      </button>
+      {err && <div role="alert" className="mt-2 w-full rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">{err}</div>}
+    </>
   );
 }
 

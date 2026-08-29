@@ -17,6 +17,7 @@ import {
   BulkEnrollInput,
   COL,
   CreateProgramInput,
+  DashboardResponse,
   EnrollmentResponse,
   EnrollmentStatus,
   FeeCounterDoc,
@@ -31,6 +32,11 @@ import {
   InvoiceLine,
   InvoiceResponse,
   InvoiceStatus,
+  LogReminderInput,
+  ReminderChannel,
+  ReminderLogDoc,
+  ReminderTemplate,
+  ReminderTextResponse,
   MAX_AMOUNT_PAISE,
   MAX_BULK_ENROLL,
   MAX_DAY_OF_MONTH,
@@ -58,6 +64,7 @@ import {
   VALID_CADENCES,
   VALID_KINDS,
   VALID_MANUAL_METHODS,
+  VALID_REMINDER_CHANNELS,
   WaiveInvoiceInput,
 } from "./fees.types";
 
@@ -78,6 +85,7 @@ export class FeesService {
   private invoices()    { return this.conn.db!.collection<InvoiceDoc>(COL.invoices); }
   private payments()    { return this.conn.db!.collection<PaymentDoc>(COL.payments); }
   private allocs()      { return this.conn.db!.collection<PaymentAllocationDoc>(COL.paymentAllocs); }
+  private reminders()   { return this.conn.db!.collection<ReminderLogDoc>(COL.reminders); }
   private counters()    { return this.conn.db!.collection<FeeCounterDoc>("fees_counters"); }
   // ChessGuru already models students + parents as users rows — we reuse.
   private users()       { return this.conn.db!.collection("users"); }
@@ -99,6 +107,13 @@ export class FeesService {
     await this.allocs().createIndex({ academyId: 1, invoiceId: 1 });
     await this.allocs().createIndex({ academyId: 1, paymentId: 1 });
     await this.counters().createIndex({ academyId: 1, kind: 1 }, { unique: true });
+    // Anti-spam: one reminder per invoice per channel per calendar day.
+    // Partial index so PAYMENT_ACK / non-invoice reminders don't collide.
+    await this.reminders().createIndex(
+      { academyId: 1, invoiceId: 1, channel: 1, sentOn: 1 },
+      { unique: true, partialFilterExpression: { invoiceId: { $exists: true } } },
+    );
+    await this.reminders().createIndex({ academyId: 1, sentAt: -1 });
   }
 
   // ---- guards ---------------------------------------------------------------
@@ -1157,6 +1172,284 @@ export class FeesService {
     });
     const filename = `${payment.receiptNo.replace(/[^A-Za-z0-9_-]+/g, "_")}.pdf`;
     return { buffer, filename };
+  }
+
+  // ==========================================================================
+  // W3-lite — dashboard + reminders
+  // ==========================================================================
+
+  /** IST YYYY-MM-DD stamp used as the "sentOn" grouping key. Every
+   *  reminder-log unique index and every daily-collection bucket uses this. */
+  private istDayStamp(d: Date): string {
+    // IST is UTC+5:30 with no DST — just shift and slice.
+    const ms = d.getTime() + 5.5 * 60 * 60 * 1000;
+    const shifted = new Date(ms);
+    return shifted.toISOString().slice(0, 10);
+  }
+  private startOfIstMonth(now: Date): Date {
+    const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+    const y = ist.getUTCFullYear(); const m = ist.getUTCMonth();
+    return new Date(Date.UTC(y, m, 1) - 5.5 * 60 * 60 * 1000);
+  }
+
+  async dashboard(session: Session): Promise<DashboardResponse> {
+    const { academyId } = this.requireOwner(session);
+    const now = new Date();
+    const monthStart = this.startOfIstMonth(now);
+    const in7d = new Date(now.getTime() + 7 * 86400_000);
+    const in30dAgo = new Date(now.getTime() - 30 * 86400_000);
+
+    // Aggregate all sections in parallel — dashboard is a hot page, keep total < 200 ms at 500 invoices.
+    const [
+      capturedThisMonth,
+      overdue,
+      expected,
+      activeEnrol,
+      recentPaymentsRaw,
+      collectionByDayRaw,
+      lastReminder,
+    ] = await Promise.all([
+      // Sum of PAID/PARTIAL invoice paidPaise where paidAt ≥ monthStart is easier via allocations directly.
+      this.allocs().aggregate([
+        { $match: { academyId } },
+        { $lookup: { from: COL.payments, localField: "paymentId", foreignField: "_id", as: "p" } },
+        { $unwind: "$p" },
+        { $match: { "p.academyId": academyId, "p.status": "CAPTURED", "p.capturedAt": { $gte: monthStart } } },
+        { $group: { _id: null, total: { $sum: "$amountPaise" } } },
+      ]).toArray(),
+
+      this.invoices().aggregate([
+        { $match: { academyId, status: { $in: ["SENT", "PARTIAL", "OVERDUE"] }, dueOn: { $lt: now } } },
+        { $group: { _id: null, count: { $sum: 1 }, balance: { $sum: { $subtract: ["$totalPaise", "$paidPaise"] } } } },
+      ]).toArray(),
+
+      this.invoices().aggregate([
+        { $match: { academyId, status: { $in: ["SENT", "PARTIAL"] }, dueOn: { $gte: now, $lte: in7d } } },
+        { $group: { _id: null, total: { $sum: { $subtract: ["$totalPaise", "$paidPaise"] } } } },
+      ]).toArray(),
+
+      this.enrollments().countDocuments({ academyId, status: "ACTIVE" }),
+
+      this.payments().find({ academyId, status: "CAPTURED" }).sort({ capturedAt: -1 }).limit(10).toArray(),
+
+      this.allocs().aggregate([
+        { $match: { academyId, createdAt: { $gte: in30dAgo } } },
+        { $lookup: { from: COL.payments, localField: "paymentId", foreignField: "_id", as: "p" } },
+        { $unwind: "$p" },
+        { $match: { "p.status": "CAPTURED" } },
+        // Bucket by IST day. addFields + $dateToString with IST offset.
+        { $addFields: { dayKey: {
+          $dateToString: {
+            format: "%Y-%m-%d",
+            date: { $add: ["$p.capturedAt", 5.5 * 60 * 60 * 1000] },
+          },
+        } } },
+        { $group: { _id: "$dayKey", collectedPaise: { $sum: "$amountPaise" } } },
+        { $project: { _id: 0, day: "$_id", collectedPaise: 1 } },
+        { $sort: { day: 1 } },
+      ]).toArray(),
+
+      this.reminders().find({ academyId }).sort({ sentAt: -1 }).limit(1).next(),
+    ]);
+
+    // ---- Top 5 defaulters — group open balance by guardianUserId
+    const defAgg = await this.invoices().aggregate([
+      { $match: { academyId, status: { $in: ["SENT", "PARTIAL", "OVERDUE"] }, guardianUserId: { $exists: true, $ne: null } } },
+      { $group: {
+        _id: "$guardianUserId",
+        outstanding: { $sum: { $subtract: ["$totalPaise", "$paidPaise"] } },
+        count: { $sum: 1 },
+        studentIds: { $addToSet: "$studentUserId" },
+        oldestDueOn: { $min: "$dueOn" },
+      } },
+      { $sort: { outstanding: -1 } },
+      { $limit: 5 },
+    ]).toArray();
+
+    // Enrich defaulters with guardian + student names in two batched lookups.
+    const gOids: ObjectId[] = [];
+    const sOids: ObjectId[] = [];
+    for (const d of defAgg) {
+      const g = this.tryOid(String(d._id)); if (g) gOids.push(g);
+      for (const s of (d.studentIds ?? [])) {
+        const so = this.tryOid(String(s)); if (so) sOids.push(so);
+      }
+    }
+    const [gs, ss] = await Promise.all([
+      gOids.length ? this.users().find({ _id: { $in: gOids } }, { projection: { name: 1, username: 1, mobile: 1 } as never }).toArray() : Promise.resolve([]),
+      sOids.length ? this.users().find({ _id: { $in: sOids } }, { projection: { name: 1, username: 1 } as never }).toArray() : Promise.resolve([]),
+    ]);
+    const gById = new Map(gs.map((x) => [String(x._id), x]));
+    const sById = new Map(ss.map((x) => [String(x._id), x]));
+
+    const topDefaulters = defAgg.map((d) => {
+      const g = gById.get(String(d._id));
+      const studentNames = (d.studentIds ?? []).map((sid: string) => {
+        const s = sById.get(String(sid));
+        return (s?.name as string) ?? (s?.username as string) ?? "—";
+      });
+      return {
+        guardianUserId: String(d._id),
+        guardianName: (g?.name as string) ?? (g?.username as string) ?? undefined,
+        guardianPhone: (g?.mobile as string) ?? undefined,
+        studentNames,
+        invoiceCount: d.count,
+        outstandingPaise: d.outstanding,
+        oldestDueOn: (d.oldestDueOn instanceof Date ? d.oldestDueOn : new Date(d.oldestDueOn)).toISOString(),
+      };
+    });
+
+    // Recent payments — enrich with guardian name + allocated invoice numbers.
+    const payIds = recentPaymentsRaw.map((p) => String(p._id));
+    const [payGs, payAllocs] = await Promise.all([
+      recentPaymentsRaw.length ? this.users().find(
+        { _id: { $in: recentPaymentsRaw.map((p) => this.tryOid(p.guardianUserId ?? "")).filter((v): v is ObjectId => !!v) } },
+        { projection: { name: 1, username: 1 } as never },
+      ).toArray() : Promise.resolve([]),
+      payIds.length ? this.allocs().find({ academyId, paymentId: { $in: payIds } }).toArray() : Promise.resolve([]),
+    ]);
+    const payGById = new Map(payGs.map((x) => [String(x._id), x]));
+    const invIdSet = new Set(payAllocs.map((a) => a.invoiceId));
+    const payInvs = invIdSet.size ? await this.invoices().find(
+      { academyId, _id: { $in: Array.from(invIdSet).map((s) => this.tryOid(s)).filter((v): v is ObjectId => !!v) } },
+      { projection: { invoiceNo: 1 } as never },
+    ).toArray() : [];
+    const invNoById = new Map(payInvs.map((i) => [String(i._id), i.invoiceNo as string]));
+
+    const recentPayments = recentPaymentsRaw.map((p) => {
+      const g = p.guardianUserId ? payGById.get(String(p.guardianUserId)) : undefined;
+      const nos = payAllocs.filter((a) => a.paymentId === String(p._id))
+        .map((a) => invNoById.get(a.invoiceId))
+        .filter((v): v is string => !!v);
+      return {
+        id: String(p._id),
+        amountPaise: p.amountPaise,
+        method: p.method,
+        receiptNo: p.receiptNo,
+        guardianName: (g?.name as string) ?? (g?.username as string) ?? undefined,
+        capturedAt: (p.capturedAt ?? p.createdAt).toISOString(),
+        invoiceNos: nos,
+      };
+    });
+
+    const monthLabel = monthStart.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+
+    return {
+      currency: "INR",
+      now: now.toISOString(),
+      monthLabel,
+      collectedMonthPaise: capturedThisMonth[0]?.total ?? 0,
+      overdueCountInvoices: overdue[0]?.count ?? 0,
+      overdueBalancePaise: overdue[0]?.balance ?? 0,
+      expectedNext7dPaise: expected[0]?.total ?? 0,
+      totalActiveEnrollments: activeEnrol,
+      topDefaulters,
+      recentPayments,
+      collectionByDay: collectionByDayRaw.map((r) => ({ day: r.day as string, collectedPaise: r.collectedPaise as number })),
+      lastReminderAt: lastReminder?.sentAt ? lastReminder.sentAt.toISOString() : null,
+    };
+  }
+
+  // ---- Reminder text + wa.me link -----------------------------------------
+
+  /** Compose the WhatsApp reminder text + wa.me deep-link. Identical output on
+   *  server + client (client builds its own URL when user clicks — we reuse the
+   *  server helper via GET so the anti-spam counter uses the same wording). */
+  async reminderTextForInvoice(session: Session, invoiceId: string, channel: ReminderChannel = "WHATSAPP"): Promise<ReminderTextResponse> {
+    const { academyId } = this.requireOwner(session);
+    const _id = this.oid(invoiceId);
+    const inv = await this.invoices().findOne({ _id, academyId });
+    if (!inv) throw new NotFoundException("Invoice not found.");
+
+    const [student, guardian, academy] = await Promise.all([
+      this.users().findOne({ _id: this.tryOid(inv.studentUserId) ?? undefined as unknown as ObjectId }, { projection: { name: 1, username: 1 } as never }),
+      inv.guardianUserId ? this.users().findOne({ _id: this.tryOid(inv.guardianUserId) ?? undefined as unknown as ObjectId }, { projection: { name: 1, username: 1, mobile: 1 } as never }) : Promise.resolve(null),
+      this.conn.db!.collection("academies").findOne(
+        { $or: [{ _id: this.tryOid(academyId) ?? undefined as unknown as ObjectId }, { slug: academyId }] },
+        { projection: { name: 1 } as never },
+      ),
+    ]);
+
+    const balance = Math.max(0, inv.totalPaise - inv.paidPaise);
+    const isOverdue = balance > 0 && (inv.status === "SENT" || inv.status === "PARTIAL") && inv.dueOn < new Date();
+    const template: ReminderTemplate = isOverdue ? "FEE_OVERDUE" : "FEE_DUE";
+
+    const guardianName = (guardian?.name as string) ?? (guardian?.username as string) ?? "there";
+    const studentName = (student?.name as string) ?? (student?.username as string) ?? "your child";
+    const academyName = (academy?.name as string) ?? "Chess Academy";
+    const balanceStr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: balance % 100 === 0 ? 0 : 2 }).format(balance / 100);
+    const dueStr = inv.dueOn.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+
+    const text = isOverdue
+      ? `Hi ${guardianName}, gentle reminder — ${studentName}'s fee (${inv.invoiceNo}, ${balanceStr}) was due on ${dueStr}. Please pay when you can. — ${academyName}`
+      : `Hi ${guardianName}, this is a friendly reminder — ${studentName}'s fee (${inv.invoiceNo}, ${balanceStr}) is due on ${dueStr}. Thank you! — ${academyName}`;
+
+    let waLink = "";
+    const phoneRaw = (guardian?.mobile as string) ?? "";
+    if (channel === "WHATSAPP" && phoneRaw) {
+      // Strip everything non-digit; if 10-digit assume India (+91).
+      const digits = phoneRaw.replace(/\D+/g, "");
+      const e164 = digits.length === 10 ? "91" + digits : digits;
+      waLink = `https://wa.me/${e164}?text=${encodeURIComponent(text)}`;
+    }
+
+    return {
+      waLink,
+      text,
+      template,
+      channel,
+      guardianPhone: phoneRaw || undefined,
+      guardianName: (guardian?.name as string) ?? (guardian?.username as string) ?? undefined,
+    };
+  }
+
+  /** Record a click on the reminder button — unique(invoiceId, channel, day)
+   *  prevents double-log spam even if the operator double-clicks. */
+  async logReminder(session: Session, input: LogReminderInput): Promise<{ ok: true; alreadyToday: boolean }> {
+    const { userId, academyId } = this.requireOwner(session);
+    const channel = input?.channel;
+    if (!channel || !VALID_REMINDER_CHANNELS.includes(channel)) {
+      throw new BadRequestException(`Channel must be one of: ${VALID_REMINDER_CHANNELS.join(", ")}.`);
+    }
+    if (!input.invoiceId && !input.guardianUserId) {
+      throw new BadRequestException("Give either an invoiceId or a guardianUserId.");
+    }
+    let template: ReminderTemplate = input.template ?? "FEE_DUE";
+    let guardianUserId = input.guardianUserId;
+
+    if (input.invoiceId) {
+      const _id = this.oid(input.invoiceId);
+      const inv = await this.invoices().findOne({ _id, academyId }, { projection: { guardianUserId: 1, status: 1, dueOn: 1 } as never });
+      if (!inv) throw new NotFoundException("Invoice not found.");
+      guardianUserId = guardianUserId ?? (inv.guardianUserId as string | undefined);
+      if (!input.template) {
+        const overdue = inv.dueOn instanceof Date ? inv.dueOn < new Date() : new Date(inv.dueOn as unknown as string) < new Date();
+        template = overdue ? "FEE_OVERDUE" : "FEE_DUE";
+      }
+    }
+
+    const now = new Date();
+    const doc: Omit<ReminderLogDoc, "_id"> = {
+      academyId,
+      invoiceId: input.invoiceId,
+      guardianUserId,
+      channel,
+      template,
+      sentAt: now,
+      sentOn: this.istDayStamp(now),
+      actorUserId: userId,
+      status: "SENT",
+    };
+    try {
+      await this.reminders().insertOne(doc as ReminderLogDoc);
+      return { ok: true, alreadyToday: false };
+    } catch (e: unknown) {
+      if ((e as { code?: number })?.code === 11000) {
+        // Duplicate unique-key = already logged today for this invoice+channel.
+        return { ok: true, alreadyToday: true };
+      }
+      throw e;
+    }
   }
 
   // ---- helpers --------------------------------------------------------------

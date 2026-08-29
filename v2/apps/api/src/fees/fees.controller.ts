@@ -28,7 +28,9 @@ import {
   EnrollmentStatus,
   GenerateInvoicesInput,
   InvoiceStatus,
+  LogReminderInput,
   RecordManualPaymentInput,
+  ReminderChannel,
   UpsertPlanInput,
   WaiveInvoiceInput,
 } from "./fees.types";
@@ -199,5 +201,26 @@ export class FeesController {
     res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
     res.setHeader("Cache-Control", "private, no-store");
     res.end(buffer);
+  }
+
+  // ---- dashboard + reminders (W3-lite) -----------------------------------
+
+  @Get("dashboard")
+  async dashboard(@Req() req: any) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    return this.svc.dashboard(req.session);
+  }
+
+  @Get("invoices/:id/reminder-text")
+  async reminderText(@Req() req: any, @Param("id") id: string, @Query("channel") channel?: string) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    const ch: ReminderChannel = (channel === "SMS" || channel === "EMAIL") ? channel : "WHATSAPP";
+    return this.svc.reminderTextForInvoice(req.session, id, ch);
+  }
+
+  @Post("reminders")
+  async logReminder(@Req() req: any, @Body() body: LogReminderInput) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    return this.svc.logReminder(req.session, body);
   }
 }

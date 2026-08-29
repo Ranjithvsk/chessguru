@@ -19,7 +19,7 @@ export const COL = {
   invoices: "fees_invoices",
   payments: "fees_payments",
   paymentAllocs: "fees_payment_allocations",
-  reminders: "fees_reminder_log",
+  reminders: "fees_reminders",
   refunds: "fees_refunds",
   settings: "fees_settings",
   wallets: "fees_wallets",
@@ -386,3 +386,81 @@ export const VALID_MANUAL_METHODS: readonly ("CASH" | "BANK" | "UPI")[] = ["CASH
 export const MAX_INVOICE_NOTE_LEN = 400;
 export const MAX_PAYMENT_NOTE_LEN = 200;
 export const MAX_WAIVE_REASON_LEN = 400;
+
+// ============================================================================
+// W3-lite — dashboard + reminders
+// ============================================================================
+
+export type ReminderChannel = "WHATSAPP" | "SMS" | "EMAIL";
+export type ReminderTemplate = "FEE_DUE" | "FEE_OVERDUE" | "PAYMENT_ACK";
+
+/** Anti-spam guard: unique(invoiceId, channel, sentOn) — one reminder per
+ *  invoice per channel per calendar day. sentOn is a YYYY-MM-DD string in
+ *  IST so a single owner-click doesn't nag twice within the same day. */
+export interface ReminderLogDoc {
+  _id: ObjectId;
+  academyId: string;
+  invoiceId?: string;
+  guardianUserId?: string;
+  channel: ReminderChannel;
+  template: ReminderTemplate;
+  sentAt: Date;
+  sentOn: string;                      // "YYYY-MM-DD" in IST
+  actorUserId: string;                 // whoever clicked in the admin UI
+  status: "SENT" | "FAILED";
+  errorText?: string;
+}
+
+// ---- DTOs -------------------------------------------------------------------
+
+export interface DashboardResponse {
+  currency: "INR";
+  now: string;                         // ISO
+  monthLabel: string;                  // "September 2026"
+  collectedMonthPaise: number;         // sum of CAPTURED payment allocations this month
+  overdueCountInvoices: number;
+  overdueBalancePaise: number;         // sum of open balance on OVERDUE + past-due SENT/PARTIAL
+  expectedNext7dPaise: number;         // total open balance on invoices due in next 7 days
+  totalActiveEnrollments: number;
+  topDefaulters: Array<{
+    guardianUserId?: string;
+    guardianName?: string;
+    guardianPhone?: string;
+    studentNames: string[];
+    invoiceCount: number;
+    outstandingPaise: number;
+    oldestDueOn: string;               // ISO
+  }>;
+  recentPayments: Array<{
+    id: string;
+    amountPaise: number;
+    method: PaymentMethod;
+    receiptNo: string;
+    guardianName?: string;
+    capturedAt: string;                // ISO
+    invoiceNos: string[];              // via allocations
+  }>;
+  collectionByDay: Array<{ day: string; collectedPaise: number }>;   // last 30 days, IST
+  lastReminderAt: string | null;
+}
+
+export interface LogReminderInput {
+  invoiceId?: string;
+  guardianUserId?: string;
+  channel: ReminderChannel;
+  template?: ReminderTemplate;         // defaults to FEE_DUE / FEE_OVERDUE by due status
+}
+
+export interface ReminderTextResponse {
+  waLink: string;                      // "https://wa.me/91…?text=…" — ready to open in new tab
+  text: string;                        // decoded — shown in a preview tooltip
+  template: ReminderTemplate;
+  channel: ReminderChannel;
+  guardianPhone?: string;              // convenience for the client (badge)
+  guardianName?: string;
+}
+
+// ---- validation -------------------------------------------------------------
+
+export const VALID_REMINDER_CHANNELS: readonly ReminderChannel[] = ["WHATSAPP", "SMS", "EMAIL"] as const;
+export const VALID_REMINDER_TEMPLATES: readonly ReminderTemplate[] = ["FEE_DUE", "FEE_OVERDUE", "PAYMENT_ACK"] as const;
