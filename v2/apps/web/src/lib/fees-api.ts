@@ -402,7 +402,30 @@ export const feesApi = {
     req<FeeSettingsResponse>(`/api/fees/settings`, { method: "PATCH", body: JSON.stringify(patch) }),
   logReminder: (input: LogReminderInput) =>
     req<{ ok: true; alreadyToday: boolean }>(`/api/fees/reminders`, { method: "POST", body: JSON.stringify(input) }),
+
+  // ---- reports (W4f) --------------------------------------------
+  collectionByMonth: (months = 12) =>
+    req<CollectionByMonthResponse>(`/api/fees/reports/collection-by-month?months=${months}`),
+  collectionByHead: () =>
+    req<CollectionByHeadResponse>(`/api/fees/reports/collection-by-head`),
+  defaultersAged: () =>
+    req<DefaultersAgedResponse>(`/api/fees/reports/defaulters-aged`),
 };
+
+export interface CollectionByMonthResponse {
+  currency: "INR";
+  months: Array<{ month: string; label: string; collectedPaise: number; invoicedPaise: number }>;
+}
+export interface CollectionByHeadResponse {
+  currency: "INR";
+  breakdown: Array<{ kind: FeeHeadKind; label: string; collectedPaise: number; invoicedPaise: number }>;
+  totalCollectedPaise: number;
+}
+export interface DefaultersAgedResponse {
+  currency: "INR";
+  buckets: Array<{ key: "0-30" | "30-60" | "60-90" | "90+"; label: string; invoiceCount: number; outstandingPaise: number; guardianCount: number }>;
+  totalOutstandingPaise: number;
+}
 
 // ---- invoice-status meta (labels + colour classes) -----------------------
 

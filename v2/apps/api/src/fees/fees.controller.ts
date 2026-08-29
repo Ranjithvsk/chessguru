@@ -245,4 +245,25 @@ export class FeesController {
     if (!req?.session?.userId) throw new UnauthorizedException();
     return this.svc.logReminder(req.session, body);
   }
+
+  // ---- reports (W4f) -----------------------------------------------------
+
+  @Get("reports/collection-by-month")
+  async reportsCollectionByMonth(@Req() req: any, @Query("months") months?: string) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    const n = months ? Math.max(1, Math.min(24, parseInt(months, 10) || 12)) : 12;
+    return this.svc.collectionByMonth(req.session, { months: n });
+  }
+
+  @Get("reports/collection-by-head")
+  async reportsCollectionByHead(@Req() req: any) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    return this.svc.collectionByHead(req.session);
+  }
+
+  @Get("reports/defaulters-aged")
+  async reportsDefaultersAged(@Req() req: any) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    return this.svc.defaultersAged(req.session);
+  }
 }

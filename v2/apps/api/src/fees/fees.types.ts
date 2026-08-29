@@ -528,6 +528,43 @@ export interface UpdateFeeSettingsInput {
 }
 
 // ============================================================================
+// W4f — reports
+// ============================================================================
+
+export interface CollectionByMonthResponse {
+  currency: "INR";
+  months: Array<{
+    month: string;                     // "2026-09" — ISO year-month, IST bucket
+    label: string;                     // "Sep 2026"
+    collectedPaise: number;            // captured payments in this IST month
+    invoicedPaise: number;             // invoices generated in this IST month (total, not balance)
+  }>;
+}
+
+export interface CollectionByHeadResponse {
+  currency: "INR";
+  breakdown: Array<{
+    kind: FeeHeadKind;
+    label: string;                     // human-friendly
+    collectedPaise: number;            // via payment_allocations ⨝ invoice_lines
+    invoicedPaise: number;             // sum of line amounts across invoices in the range
+  }>;
+  totalCollectedPaise: number;
+}
+
+export interface DefaultersAgedResponse {
+  currency: "INR";
+  buckets: Array<{
+    key: "0-30" | "30-60" | "60-90" | "90+";
+    label: string;
+    invoiceCount: number;
+    outstandingPaise: number;
+    guardianCount: number;
+  }>;
+  totalOutstandingPaise: number;
+}
+
+// ============================================================================
 // W4b — Parent portal + Razorpay
 // ============================================================================
 

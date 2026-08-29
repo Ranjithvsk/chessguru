@@ -39,6 +39,9 @@ import {
   ReminderLogDoc,
   ReminderTemplate,
   ReminderTextResponse,
+  CollectionByHeadResponse,
+  CollectionByMonthResponse,
+  DefaultersAgedResponse,
   UpdateFeeSettingsInput,
   MAX_AMOUNT_PAISE,
   MAX_BULK_ENROLL,
@@ -1626,10 +1629,147 @@ export class FeesService {
     return this.shapeSettings(academyId, doc);
   }
 
+  // ==========================================================================
+  // W4f — reports (aggregates)
+  // ==========================================================================
+
+  async collectionByMonth(session: Session, opts: { months?: number } = {}): Promise<CollectionByMonthResponse> {
+    const { academyId } = this.requireOwner(session);
+    const n = clamp(opts.months ?? 12, 1, 24);
+    const now = new Date();
+    // "IST-anchored" bucketing — sum captured payments per calendar-month IST.
+    // Same trick used elsewhere: $add 5.5h then $dateToString YYYY-MM.
+    const start = new Date(now.getTime() - n * 31 * 86400_000);   // wide, then filter labels
+    const [collected, invoiced] = await Promise.all([
+      this.allocs().aggregate([
+        { $match: { academyId, createdAt: { $gte: start } } },
+        { $lookup: { from: COL.payments, localField: "paymentId", foreignField: "_id", as: "p" } },
+        { $unwind: "$p" },
+        { $match: { "p.status": "CAPTURED", "p.capturedAt": { $gte: start } } },
+        { $addFields: { m: { $dateToString: { format: "%Y-%m", date: { $add: ["$p.capturedAt", 5.5 * 60 * 60 * 1000] } } } } },
+        { $group: { _id: "$m", collectedPaise: { $sum: "$amountPaise" } } },
+      ]).toArray(),
+      this.invoices().aggregate([
+        { $match: { academyId, createdAt: { $gte: start }, status: { $nin: ["CANCELLED"] } } },
+        { $addFields: { m: { $dateToString: { format: "%Y-%m", date: { $add: ["$createdAt", 5.5 * 60 * 60 * 1000] } } } } },
+        { $group: { _id: "$m", invoicedPaise: { $sum: "$totalPaise" } } },
+      ]).toArray(),
+    ]);
+    const collMap = new Map(collected.map((r) => [r._id as string, r.collectedPaise as number]));
+    const invMap = new Map(invoiced.map((r) => [r._id as string, r.invoicedPaise as number]));
+
+    // Build the last-N-months backbone (fills zero for months with no activity).
+    const months: CollectionByMonthResponse["months"] = [];
+    const cur = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+    for (let i = n - 1; i >= 0; i--) {
+      const d = new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() - i, 1));
+      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+      months.push({
+        month: key,
+        label: d.toLocaleDateString("en-IN", { month: "short", year: "numeric" }),
+        collectedPaise: collMap.get(key) ?? 0,
+        invoicedPaise: invMap.get(key) ?? 0,
+      });
+    }
+    return { currency: "INR", months };
+  }
+
+  async collectionByHead(session: Session): Promise<CollectionByHeadResponse> {
+    const { academyId } = this.requireOwner(session);
+    // Approach: for every invoice, we have the full lines snapshot. Collected
+    // per head is more complex (allocations are per-invoice, not per-line).
+    // For MVP we distribute collected proportionally to each head's share of
+    // the invoice total. That's the honest interpretation for a mixed-invoice
+    // FIFO allocator — "how much of the ₹X collected went to Tuition vs Exam."
+    const rows = await this.invoices().aggregate([
+      { $match: { academyId, status: { $nin: ["CANCELLED"] } } },
+      { $unwind: "$lines" },
+      // For each line, "collected" is (paidPaise / totalPaise) × line.amountPaise
+      { $addFields: {
+        lineFrac: { $cond: [{ $gt: ["$totalPaise", 0] }, { $divide: ["$lines.amountPaise", "$totalPaise"] }, 0] },
+        lineCollected: { $round: [{ $multiply: ["$paidPaise", { $cond: [{ $gt: ["$totalPaise", 0] }, { $divide: ["$lines.amountPaise", "$totalPaise"] }, 0] }] }, 0] },
+      } },
+      { $group: {
+        _id: "$lines.kind",
+        invoicedPaise: { $sum: "$lines.amountPaise" },
+        collectedPaise: { $sum: "$lineCollected" },
+      } },
+      { $sort: { collectedPaise: -1 } },
+    ]).toArray();
+
+    const KIND_LABEL: Record<FeeHeadKind, string> = {
+      TUITION: "Tuition", EXAM: "Exam", BOOK: "Book", LATE: "Late fee", OTHER: "Other",
+    };
+    const breakdown = rows.map((r) => ({
+      kind: r._id as FeeHeadKind,
+      label: KIND_LABEL[r._id as FeeHeadKind] ?? String(r._id),
+      collectedPaise: r.collectedPaise as number,
+      invoicedPaise: r.invoicedPaise as number,
+    }));
+    const totalCollectedPaise = breakdown.reduce((s, r) => s + r.collectedPaise, 0);
+    return { currency: "INR", breakdown, totalCollectedPaise };
+  }
+
+  async defaultersAged(session: Session): Promise<DefaultersAgedResponse> {
+    const { academyId } = this.requireOwner(session);
+    const now = new Date();
+    // Open invoices with a balance, bucketed by (now - dueOn) age in days.
+    const rows = await this.invoices().aggregate([
+      { $match: { academyId, status: { $in: ["SENT", "PARTIAL", "OVERDUE"] }, dueOn: { $lt: now } } },
+      { $addFields: {
+        ageDays: { $floor: { $divide: [{ $subtract: [now, "$dueOn"] }, 86400_000] } },
+        balancePaise: { $subtract: ["$totalPaise", "$paidPaise"] },
+      } },
+      { $addFields: {
+        bucket: { $switch: {
+          branches: [
+            { case: { $lt: ["$ageDays", 30] }, then: "0-30" },
+            { case: { $lt: ["$ageDays", 60] }, then: "30-60" },
+            { case: { $lt: ["$ageDays", 90] }, then: "60-90" },
+          ],
+          default: "90+",
+        } },
+      } },
+      { $group: {
+        _id: "$bucket",
+        invoiceCount: { $sum: 1 },
+        outstandingPaise: { $sum: "$balancePaise" },
+        guardianSet: { $addToSet: "$guardianUserId" },
+      } },
+      { $project: { _id: 1, invoiceCount: 1, outstandingPaise: 1, guardianCount: { $size: "$guardianSet" } } },
+    ]).toArray();
+
+    const BUCKET_ORDER: Array<{ key: DefaultersAgedResponse["buckets"][number]["key"]; label: string }> = [
+      { key: "0-30",  label: "0–30 days" },
+      { key: "30-60", label: "30–60 days" },
+      { key: "60-90", label: "60–90 days" },
+      { key: "90+",   label: "90+ days" },
+    ];
+    const rowMap = new Map(rows.map((r) => [r._id as string, r]));
+    const buckets = BUCKET_ORDER.map((b) => {
+      const row = rowMap.get(b.key);
+      return {
+        key: b.key,
+        label: b.label,
+        invoiceCount: (row?.invoiceCount as number) ?? 0,
+        outstandingPaise: (row?.outstandingPaise as number) ?? 0,
+        guardianCount: (row?.guardianCount as number) ?? 0,
+      };
+    });
+    const totalOutstandingPaise = buckets.reduce((s, r) => s + r.outstandingPaise, 0);
+    return { currency: "INR", buckets, totalOutstandingPaise };
+  }
+
   // ---- helpers --------------------------------------------------------------
 
   private oid(id: string): ObjectId {
     try { return new ObjectId(id); }
     catch { throw new BadRequestException("That's not a valid ID."); }
   }
+}
+
+// module-level clamp used by report opts
+function clamp(n: number, min: number, max: number): number {
+  if (!Number.isFinite(n)) return min;
+  return Math.max(min, Math.min(max, Math.round(n)));
 }
