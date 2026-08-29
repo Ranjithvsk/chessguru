@@ -24,6 +24,7 @@ _Created 2026-05-29 · expanded the same day with a full codebase read. Live: ht
 - [09-links-libraries-resources.md](knowledge/09-links-libraries-resources.md) — URLs, libraries, external services, upstream ports
 - ⚠️ [10-known-issues-and-risks.md](knowledge/10-known-issues-and-risks.md) — consolidated bug/security register (read this)
 - ⭐ [11-working-rules.md](knowledge/11-working-rules.md) — **commit & documentation discipline (change→note→commit; ideas→folder)**
+- 🚀 [17-v2-deploy-playbook.md](knowledge/17-v2-deploy-playbook.md) — **step-by-step deploy for v2 (NestJS + Vite): merge → build → rsync → restart → smoke → session note**
 
 ## Decisions (ADRs)
 - [ADR-0001](decisions/ADR-0001-server3-is-the-entrypoint.md) — `server3.js` is the only live entrypoint; routes load inside the connect callback
