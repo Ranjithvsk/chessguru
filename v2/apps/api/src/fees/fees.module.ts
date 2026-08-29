@@ -1,13 +1,15 @@
 // Fees module — see PROJECT_MASTER/plans/CHESSGURU-FEES-MVP.md for the full plan.
-// W1 exposes program + head CRUD only.
+// W1 exposes program + head CRUD; the module grew through W2 (invoices +
+// payments + PDFs) and W3-lite (dashboard + reminder cron).
 
 import { Module, OnModuleInit } from "@nestjs/common";
 import { FeesController } from "./fees.controller";
 import { FeesService } from "./fees.service";
+import { FeesReminderCron } from "./fees.reminder-cron.service";
 
 @Module({
   controllers: [FeesController],
-  providers: [FeesService],
+  providers: [FeesService, FeesReminderCron],
   exports: [FeesService],
 })
 export class FeesModule implements OnModuleInit {
