@@ -222,14 +222,17 @@ export class FeesService {
    *  string ID (unchanged) if the batch exists in this academy; throws
    *  BadRequestException on garbage / cross-tenant IDs. Accepts undefined
    *  (returns undefined) so caller can differentiate "clear the batch" (null)
-   *  from "leave alone" (undefined). */
+   *  from "leave alone" (undefined).
+   *
+   *  Note: academyBatches._id is a plain string like "batch-nbz4sjw0"
+   *  in this codebase (NOT an ObjectId), so we look it up by string. */
   private async resolveBatchId(academyId: string, raw: unknown): Promise<string | undefined | null> {
     if (raw === undefined) return undefined;
     if (raw === null || raw === "") return null;
     if (typeof raw !== "string") throw new BadRequestException("batchId must be a string.");
-    let oid: ObjectId;
-    try { oid = new ObjectId(raw); } catch { throw new BadRequestException("batchId isn't a valid id."); }
-    const batch = await this.batches().findOne({ _id: oid, academyId }, { projection: { _id: 1 } as never });
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const batch = await this.batches().findOne({ _id: trimmed as any, academyId }, { projection: { _id: 1 } as never });
     if (!batch) throw new BadRequestException("That batch isn't in this academy.");
     return String(batch._id);
   }
@@ -295,7 +298,7 @@ export class FeesService {
     const saved: FeeProgramDoc = { ...(programDoc as FeeProgramDoc), _id: programId as ObjectId };
     // Fetch batch name for the response so the caller doesn't need a
     // second round trip. Cheap — one projection lookup.
-    const batchName = batchIdOrNull ? (await this.batches().findOne({ _id: new ObjectId(batchIdOrNull) }, { projection: { name: 1 } as never }))?.name : undefined;
+    const batchName = batchIdOrNull ? (await this.batches().findOne({ _id: batchIdOrNull as any }, { projection: { name: 1 } as never }))?.name : undefined;
     return this.shapeProgram(saved, headDocs, batchName);
   }
 
@@ -327,7 +330,7 @@ export class FeesService {
 
     const heads = await this.heads().find({ academyId, programId: String(_id) }).sort({ order: 1 }).toArray();
     const fresh = (await this.programs().findOne({ _id, academyId }))!;
-    const batchName = fresh.batchId ? (await this.batches().findOne({ _id: new ObjectId(fresh.batchId) }, { projection: { name: 1 } as never }))?.name : undefined;
+    const batchName = fresh.batchId ? (await this.batches().findOne({ _id: fresh.batchId as any }, { projection: { name: 1 } as never }))?.name : undefined;
     return this.shapeProgram(fresh, heads, batchName);
   }
 
@@ -355,10 +358,8 @@ export class FeesService {
     // Also batch-fetch the batch names referenced by any program in this
     // page so we can render the batch chip without an N+1 lookup.
     const batchIds = programs.map((p) => p.batchId).filter((b): b is string => !!b);
-    const batchOids: ObjectId[] = [];
-    for (const b of batchIds) { try { batchOids.push(new ObjectId(b)); } catch { /* skip */ } }
-    const batchRows = batchOids.length
-      ? await this.batches().find({ _id: { $in: batchOids }, academyId }, { projection: { _id: 1, name: 1 } as never }).toArray()
+    const batchRows = batchIds.length
+      ? await this.batches().find({ _id: { $in: batchIds as any[] }, academyId }, { projection: { _id: 1, name: 1 } as never }).toArray()
       : [];
     const batchNameById = new Map(batchRows.map((b) => [String(b._id), b.name as string]));
     // shapeProgram gets a `[]` when a program has no heads — headCount/totalPaise
@@ -380,7 +381,7 @@ export class FeesService {
     if (!program) throw new NotFoundException("Program not found.");
     const heads = await this.heads().find({ academyId, programId: String(_id) }).sort({ order: 1 }).toArray();
     const batchName = program.batchId
-      ? (await this.batches().findOne({ _id: new ObjectId(program.batchId), academyId }, { projection: { name: 1 } as never }))?.name
+      ? (await this.batches().findOne({ _id: program.batchId as any, academyId }, { projection: { name: 1 } as never }))?.name
       : undefined;
     return this.shapeProgram(program, heads, batchName);
   }
@@ -431,9 +432,8 @@ export class FeesService {
 
     // Batch must still exist + belong to this academy (defense in depth —
     // batches can be deleted after being linked). Also grabs studentIds.
-    let batchOid: ObjectId;
-    try { batchOid = new ObjectId(program.batchId); } catch { throw new BadRequestException("Program's linked batch id is malformed."); }
-    const batch: any = await this.batches().findOne({ _id: batchOid, academyId });
+    // academyBatches._id is a plain string (e.g. "batch-nbz4sjw0"), not an ObjectId.
+    const batch: any = await this.batches().findOne({ _id: program.batchId as any, academyId });
     if (!batch) throw new BadRequestException("The batch linked to this program no longer exists. Edit the program to pick another.");
 
     // Plan must exist — every enrolment must be attached to a plan.
