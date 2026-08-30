@@ -782,13 +782,9 @@ export class FeesService {
 
     const startsOn = input?.startsOn ? this.assertDate(input.startsOn, "Start date") : new Date();
 
-    // Load students — filter to this academy + role=student. Ignore garbage IDs silently
-    // (bulk actions where one row is stale shouldn't fail the whole batch).
-    const studentOids: ObjectId[] = [];
-    for (const s of rawIds) {
-      try { studentOids.push(new ObjectId(s)); } catch { /* skip */ }
-    }
-    const students = await this.users().find({ _id: { $in: studentOids }, academyId, role: "student" }).toArray();
+    // Load students — filter to this academy + role=student.
+    // users._id is a plain string in this codebase, so we query by raw string.
+    const students = await this.users().find({ _id: { $in: rawIds as any[] }, academyId, role: "student" }).toArray();
     if (students.length === 0) throw new BadRequestException("None of the picked rows are students in this academy.");
 
     // Existing enrolments for this plan to compute skip set.
@@ -825,9 +821,7 @@ export class FeesService {
       // Enrich with student/guardian names for immediate UI update.
       const studentById = new Map(students.map((s) => [String(s._id), s]));
       const guardianIds = inserted.map((e) => e.guardianUserId).filter((v): v is string => !!v);
-      const guardianOids: ObjectId[] = [];
-      for (const g of guardianIds) { try { guardianOids.push(new ObjectId(g)); } catch { /* skip */ } }
-      const guardians = guardianOids.length ? await this.users().find({ _id: { $in: guardianOids } }).toArray() : [];
+      const guardians = guardianIds.length ? await this.users().find({ _id: { $in: guardianIds as any[] } }).toArray() : [];
       const guardianById = new Map(guardians.map((g) => [String(g._id), g]));
       enrollmentResponses = inserted.map((e, i) => {
         const st = studentById.get(e.studentUserId);
@@ -858,15 +852,15 @@ export class FeesService {
     if (rows.length === 0) return [];
 
     // Batch resolve student + guardian names for the table view.
-    const studentOids: ObjectId[] = [];
-    const guardianOids: ObjectId[] = [];
-    for (const r of rows) {
-      try { studentOids.push(new ObjectId(r.studentUserId)); } catch { /* skip */ }
-      if (r.guardianUserId) { try { guardianOids.push(new ObjectId(r.guardianUserId)); } catch { /* skip */ } }
-    }
+    // users._id is a plain string in this codebase — NOT ObjectId — so
+    // we query by the raw string. Wrapping in `new ObjectId(...)` would
+    // throw for every ID and silently drop them all (that's the bug this
+    // block used to hit: "Student Name Not Shown" on every row).
+    const studentIds = Array.from(new Set(rows.map((r) => r.studentUserId).filter(Boolean)));
+    const guardianIds = Array.from(new Set(rows.map((r) => r.guardianUserId).filter((v): v is string => !!v)));
     const [students, guardians] = await Promise.all([
-      studentOids.length ? this.users().find({ _id: { $in: studentOids } }, { projection: { _id: 1, name: 1, username: 1 } as never }).toArray() : Promise.resolve([]),
-      guardianOids.length ? this.users().find({ _id: { $in: guardianOids } }, { projection: { _id: 1, name: 1, username: 1, mobile: 1 } as never }).toArray() : Promise.resolve([]),
+      studentIds.length ? this.users().find({ _id: { $in: studentIds as any[] } }, { projection: { _id: 1, name: 1, username: 1 } as never }).toArray() : Promise.resolve([]),
+      guardianIds.length ? this.users().find({ _id: { $in: guardianIds as any[] } }, { projection: { _id: 1, name: 1, username: 1, mobile: 1 } as never }).toArray() : Promise.resolve([]),
     ]);
     const studentById = new Map(students.map((s) => [String(s._id), s]));
     const guardianById = new Map(guardians.map((g) => [String(g._id), g]));
@@ -913,9 +907,7 @@ export class FeesService {
     // Resolve first-parent phone in one batched query.
     const parentIds: string[] = [];
     for (const s of students) if (Array.isArray(s.parentIds) && s.parentIds.length > 0) parentIds.push(String(s.parentIds[0]));
-    const parentOids: ObjectId[] = [];
-    for (const p of parentIds) { try { parentOids.push(new ObjectId(p)); } catch { /* skip */ } }
-    const parents = parentOids.length ? await this.users().find({ _id: { $in: parentOids } }, { projection: { _id: 1, mobile: 1 } as never }).toArray() : [];
+    const parents = parentIds.length ? await this.users().find({ _id: { $in: parentIds as any[] } }, { projection: { _id: 1, mobile: 1 } as never }).toArray() : [];
     const parentById = new Map(parents.map((p) => [String(p._id), p]));
 
     return students.map((s) => {
@@ -1192,13 +1184,14 @@ export class FeesService {
     const programIds = new Set(rows.map((r) => r.programId));
     const studentIds = new Set(rows.map((r) => r.studentUserId));
     const guardianIds = new Set(rows.map((r) => r.guardianUserId).filter((v): v is string => !!v));
+    // programs._id is ObjectId; users._id is string.
     const progOids = Array.from(programIds).map((s) => this.tryOid(s)).filter((v): v is ObjectId => !!v);
-    const stuOids  = Array.from(studentIds).map((s) => this.tryOid(s)).filter((v): v is ObjectId => !!v);
-    const guaOids  = Array.from(guardianIds).map((s) => this.tryOid(s)).filter((v): v is ObjectId => !!v);
+    const stuIds = Array.from(studentIds);
+    const guaIds = Array.from(guardianIds);
     const [programs, students, guardians] = await Promise.all([
       progOids.length ? this.programs().find({ _id: { $in: progOids } }, { projection: { _id: 1, name: 1 } as never }).toArray() : Promise.resolve([]),
-      stuOids.length  ? this.users().find({ _id: { $in: stuOids } }, { projection: { _id: 1, name: 1, username: 1 } as never }).toArray()  : Promise.resolve([]),
-      guaOids.length  ? this.users().find({ _id: { $in: guaOids } }, { projection: { _id: 1, name: 1, username: 1, mobile: 1 } as never }).toArray() : Promise.resolve([]),
+      stuIds.length   ? this.users().find({ _id: { $in: stuIds as any[] } }, { projection: { _id: 1, name: 1, username: 1 } as never }).toArray() : Promise.resolve([]),
+      guaIds.length   ? this.users().find({ _id: { $in: guaIds as any[] } }, { projection: { _id: 1, name: 1, username: 1, mobile: 1 } as never }).toArray() : Promise.resolve([]),
     ]);
     const programById  = new Map(programs.map((p) => [String(p._id), p]));
     const studentById  = new Map(students.map((s) => [String(s._id), s]));
@@ -1220,8 +1213,8 @@ export class FeesService {
     // Enrich
     const [program, student, guardian] = await Promise.all([
       this.programs().findOne({ _id: this.oid(inv.programId), academyId }, { projection: { _id: 1, name: 1 } as never }),
-      this.users().findOne({ _id: this.tryOid(inv.studentUserId) ?? undefined }, { projection: { _id: 1, name: 1, username: 1 } as never }),
-      inv.guardianUserId ? this.users().findOne({ _id: this.tryOid(inv.guardianUserId) ?? undefined }, { projection: { _id: 1, name: 1, username: 1, mobile: 1 } as never }) : Promise.resolve(null),
+      this.users().findOne({ _id: inv.studentUserId as any }, { projection: { _id: 1, name: 1, username: 1 } as never }),
+      inv.guardianUserId ? this.users().findOne({ _id: inv.guardianUserId as any }, { projection: { _id: 1, name: 1, username: 1, mobile: 1 } as never }) : Promise.resolve(null),
     ]);
 
     // Payments allocated to this invoice.
@@ -1432,8 +1425,8 @@ export class FeesService {
     if (!inv) throw new NotFoundException("Invoice not found.");
 
     const [student, guardian, program, branding] = await Promise.all([
-      this.users().findOne({ _id: this.tryOid(inv.studentUserId) ?? undefined as unknown as ObjectId }, { projection: { name: 1, username: 1 } as never }),
-      inv.guardianUserId ? this.users().findOne({ _id: this.tryOid(inv.guardianUserId) ?? undefined as unknown as ObjectId }, { projection: { name: 1, username: 1, mobile: 1 } as never }) : Promise.resolve(null),
+      this.users().findOne({ _id: inv.studentUserId as any }, { projection: { name: 1, username: 1 } as never }),
+      inv.guardianUserId ? this.users().findOne({ _id: inv.guardianUserId as any }, { projection: { name: 1, username: 1, mobile: 1 } as never }) : Promise.resolve(null),
       this.programs().findOne({ _id: this.oid(inv.programId), academyId }, { projection: { name: 1 } as never }),
       this.brandingFor(academyId),
     ]);
@@ -1460,15 +1453,15 @@ export class FeesService {
 
     const [allocs, guardian, branding] = await Promise.all([
       this.allocs().find({ academyId, paymentId: String(_id) }).toArray(),
-      payment.guardianUserId ? this.users().findOne({ _id: this.tryOid(payment.guardianUserId) ?? undefined as unknown as ObjectId }, { projection: { name: 1, username: 1, mobile: 1 } as never }) : Promise.resolve(null),
+      payment.guardianUserId ? this.users().findOne({ _id: payment.guardianUserId as any }, { projection: { name: 1, username: 1, mobile: 1 } as never }) : Promise.resolve(null),
       this.brandingFor(academyId),
     ]);
 
     // Enrich each allocation with invoiceNo, studentName, periodLabel for the "applied to" table.
     const invIds = allocs.map((a) => this.tryOid(a.invoiceId)).filter((v): v is ObjectId => !!v);
     const invoicesRows = invIds.length ? await this.invoices().find({ _id: { $in: invIds }, academyId }).toArray() : [];
-    const studentOids = Array.from(new Set(invoicesRows.map((i) => i.studentUserId))).map((s) => this.tryOid(s)).filter((v): v is ObjectId => !!v);
-    const students = studentOids.length ? await this.users().find({ _id: { $in: studentOids } }, { projection: { name: 1, username: 1 } as never }).toArray() : [];
+    const stuIds = Array.from(new Set(invoicesRows.map((i) => i.studentUserId)));
+    const students = stuIds.length ? await this.users().find({ _id: { $in: stuIds as any[] } }, { projection: { name: 1, username: 1 } as never }).toArray() : [];
     const studentById = new Map(students.map((s) => [String(s._id), s]));
 
     const lookup = new Map<string, { invoiceNo: string; studentName?: string; programName?: string; periodLabel?: string }>();
@@ -1589,17 +1582,12 @@ export class FeesService {
     ]).toArray();
 
     // Enrich defaulters with guardian + student names in two batched lookups.
-    const gOids: ObjectId[] = [];
-    const sOids: ObjectId[] = [];
-    for (const d of defAgg) {
-      const g = this.tryOid(String(d._id)); if (g) gOids.push(g);
-      for (const s of (d.studentIds ?? [])) {
-        const so = this.tryOid(String(s)); if (so) sOids.push(so);
-      }
-    }
+    // users._id is a string in this codebase — query directly.
+    const gIds = defAgg.map((d) => String(d._id)).filter(Boolean);
+    const sIds = Array.from(new Set(defAgg.flatMap((d) => (d.studentIds ?? []).map(String))));
     const [gs, ss] = await Promise.all([
-      gOids.length ? this.users().find({ _id: { $in: gOids } }, { projection: { name: 1, username: 1, mobile: 1 } as never }).toArray() : Promise.resolve([]),
-      sOids.length ? this.users().find({ _id: { $in: sOids } }, { projection: { name: 1, username: 1 } as never }).toArray() : Promise.resolve([]),
+      gIds.length ? this.users().find({ _id: { $in: gIds as any[] } }, { projection: { name: 1, username: 1, mobile: 1 } as never }).toArray() : Promise.resolve([]),
+      sIds.length ? this.users().find({ _id: { $in: sIds as any[] } }, { projection: { name: 1, username: 1 } as never }).toArray() : Promise.resolve([]),
     ]);
     const gById = new Map(gs.map((x) => [String(x._id), x]));
     const sById = new Map(ss.map((x) => [String(x._id), x]));
@@ -1625,7 +1613,7 @@ export class FeesService {
     const payIds = recentPaymentsRaw.map((p) => String(p._id));
     const [payGs, payAllocs] = await Promise.all([
       recentPaymentsRaw.length ? this.users().find(
-        { _id: { $in: recentPaymentsRaw.map((p) => this.tryOid(p.guardianUserId ?? "")).filter((v): v is ObjectId => !!v) } },
+        { _id: { $in: recentPaymentsRaw.map((p) => p.guardianUserId).filter((v): v is string => !!v) as any[] } },
         { projection: { name: 1, username: 1 } as never },
       ).toArray() : Promise.resolve([]),
       payIds.length ? this.allocs().find({ academyId, paymentId: { $in: payIds } }).toArray() : Promise.resolve([]),
@@ -1684,8 +1672,8 @@ export class FeesService {
     if (!inv) throw new NotFoundException("Invoice not found.");
 
     const [student, guardian, academy] = await Promise.all([
-      this.users().findOne({ _id: this.tryOid(inv.studentUserId) ?? undefined as unknown as ObjectId }, { projection: { name: 1, username: 1 } as never }),
-      inv.guardianUserId ? this.users().findOne({ _id: this.tryOid(inv.guardianUserId) ?? undefined as unknown as ObjectId }, { projection: { name: 1, username: 1, mobile: 1 } as never }) : Promise.resolve(null),
+      this.users().findOne({ _id: inv.studentUserId as any }, { projection: { name: 1, username: 1 } as never }),
+      inv.guardianUserId ? this.users().findOne({ _id: inv.guardianUserId as any }, { projection: { name: 1, username: 1, mobile: 1 } as never }) : Promise.resolve(null),
       this.conn.db!.collection("academies").findOne(
         { $or: [{ _id: this.tryOid(academyId) ?? undefined as unknown as ObjectId }, { slug: academyId }] },
         { projection: { name: 1 } as never },
@@ -1736,7 +1724,7 @@ export class FeesService {
   async reminderTextForGuardian(session: Session, guardianUserId: string, channel: ReminderChannel = "WHATSAPP"): Promise<ReminderTextResponse> {
     const { academyId } = this.requireOwner(session);
     const [guardian, academy, openInvoices] = await Promise.all([
-      this.users().findOne({ _id: this.tryOid(guardianUserId) ?? undefined as unknown as ObjectId }, { projection: { name: 1, username: 1, mobile: 1 } as never }),
+      this.users().findOne({ _id: guardianUserId as any }, { projection: { name: 1, username: 1, mobile: 1 } as never }),
       this.conn.db!.collection("academies").findOne(
         { $or: [{ _id: this.tryOid(academyId) ?? undefined as unknown as ObjectId }, { slug: academyId }] },
         { projection: { name: 1 } as never },
