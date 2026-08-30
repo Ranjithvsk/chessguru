@@ -91,8 +91,15 @@ sudo -u ubuntu git -C /home/ubuntu/chessguru checkout origin/main -- \
   v2/apps/api/tsconfig.json \
   v2/apps/web/package.json \
   v2/apps/web/tsconfig.json \
+  v2/apps/web/index.html \
   v2/pnpm-lock.yaml
 ```
+
+⚠ `apps/web/index.html` is NOT under `src/` and NOT symlinked — same trap as
+package.json. Any change to the boot-safety-net script / meta tags / tenant-
+brand hydrator will silently NOT deploy unless this checkout runs. Discovered
+2026-08-30 when a fix to the safety-net timeout appeared in the source but
+kept building the old `TIMEOUT_MS = 6000` on ubuntu.
 
 Add any other tracked non-symlinked file your change touched (e.g. a new `scripts/*` file).
 
