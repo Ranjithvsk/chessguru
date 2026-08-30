@@ -844,6 +844,26 @@ export class PuzzlesService {
         upd.ratingDiff = dampenedDelta;
       }
 
+      // ── SAFEGUARD 4: nb-inflation on same-theme grinds (2026-08-30) ──
+      // Owner report: mageswaran grinded 200/200 smotheredMate solves in a
+      // single session — pattern-matches a 1-move mate in ~1.7s and his
+      // roster card shows a fake "721 puzzles solved" activity score.
+      // Rule: when a WIN is heavily fatigued (fatigueMul < 0.5, i.e. the
+      // student has already solved 15+ of THIS theme in the past 30 min),
+      // don't increment nb. The rounds row still upserts so the puzzle
+      // isn't re-served, and the rating still moves by the dampened amount —
+      // we just stop the solve counter from being farmable.
+      //
+      // Losses ALWAYS count in nb (legit misses even during a grind mean
+      // the student is actually engaged; ignoring them would hide poor
+      // performance the coach needs to see).
+      //
+      // "mix" mode is exempt (fatigueMul is always 1 there — mix rotates
+      // through themes so each solve is genuinely different).
+      if (win && fatigueMul < 0.5) {
+        upd.userPerf.nb = perf.nb || 0;   // roll back the +1 bump from updatePuzzleRating
+      }
+
       // ── SAFEGUARD 2: dubiousSolve — implausibly fast win on a much-
       // harder puzzle. Records a flag on the round for later inspection;
       // does not block the rating update (Lichess uses the flag to only
