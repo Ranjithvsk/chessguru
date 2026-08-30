@@ -71,6 +71,20 @@ export default function FeesProgramDetailPage() {
   const plan = planQ.data?.plan ?? null;
   const enrollments = enrolQ.data?.enrollments ?? [];
 
+  // Client-side status filter for the enrolments table. Default = ACTIVE so
+  // "who is being billed right now" is the first read. Ended shows history
+  // (students who left the batch — invoices they haven't paid still owed).
+  const [enrolFilter, setEnrolFilter] = useState<"ACTIVE" | "ENDED" | "PAUSED" | "ALL">("ACTIVE");
+  const enrolCounts = useMemo(() => {
+    const c = { ACTIVE: 0, PAUSED: 0, ENDED: 0 };
+    for (const e of enrollments) c[e.status] = (c[e.status] ?? 0) + 1;
+    return c;
+  }, [enrollments]);
+  const visibleEnrollments = useMemo(
+    () => enrolFilter === "ALL" ? enrollments : enrollments.filter((e) => e.status === enrolFilter),
+    [enrollments, enrolFilter],
+  );
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-10">
       {/* ---- Header ---- */}
@@ -128,8 +142,29 @@ export default function FeesProgramDetailPage() {
 
       {/* ---- Enrollments ---- */}
       <section className="mt-6 rounded-2xl border border-ink-700 bg-ink-900/60 p-5">
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-300">{t("Enrolled students")}</h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-300">{t("Enrolled students")}</h2>
+            {enrollments.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {([
+                  { key: "ACTIVE", label: t("Active"),  count: enrolCounts.ACTIVE, ring: "ring-accent-400/40 text-accent-300 bg-accent-500/10", active: "ring-accent-400/70 bg-accent-500/25 text-accent-200" },
+                  { key: "PAUSED", label: t("Paused"),  count: enrolCounts.PAUSED, ring: "ring-gold-400/40 text-gold-300 bg-gold-500/10",       active: "ring-gold-400/70 bg-gold-500/25 text-gold-200" },
+                  { key: "ENDED",  label: t("Ended"),   count: enrolCounts.ENDED,  ring: "ring-ink-600 text-ink-300 bg-ink-800",                 active: "ring-ink-500 bg-ink-700 text-ink-100" },
+                  { key: "ALL",    label: t("All"),     count: enrollments.length, ring: "ring-brand-400/30 text-brand-300 bg-brand-500/10",    active: "ring-brand-400/70 bg-brand-500/25 text-brand-100" },
+                ] as const).map((c) => (
+                  <button
+                    key={c.key}
+                    onClick={() => setEnrolFilter(c.key)}
+                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 transition ${enrolFilter === c.key ? c.active : c.ring} hover:brightness-125`}
+                  >
+                    {c.label}
+                    <span className={`rounded-full px-1.5 text-[10px] font-bold ${enrolFilter === c.key ? "bg-black/25" : "bg-black/40"}`}>{c.count}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             {plan && enrollments.length > 0 && (
               <GenerateInvoicesButton planId={plan.id} programId={p.id} />
@@ -181,9 +216,18 @@ export default function FeesProgramDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {enrollments.map((e) => <EnrollmentRow key={e.id} e={e} onChange={() => qc.invalidateQueries({ queryKey: ["fees.enrollments"] })} />)}
+                {visibleEnrollments.map((e) => <EnrollmentRow key={e.id} e={e} onChange={() => qc.invalidateQueries({ queryKey: ["fees.enrollments"] })} />)}
               </tbody>
             </table>
+            {visibleEnrollments.length === 0 && (
+              <div className="mt-2 rounded-xl border border-dashed border-ink-700 py-6 text-center text-xs text-ink-400">
+                {enrolFilter === "ENDED"
+                  ? t("No one has been un-enrolled yet.")
+                  : enrolFilter === "PAUSED"
+                    ? t("No enrolments are on pause.")
+                    : t("No active enrolments in this bucket.")}
+              </div>
+            )}
           </div>
         )}
       </section>
