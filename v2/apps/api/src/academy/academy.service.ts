@@ -16,6 +16,7 @@ import { randomBytes } from "crypto";
 import { sendMail } from "../lib/mail";
 import { ACHIEVEMENTS, type Achievement } from "./achievements.catalog";
 import { isAdmin } from "../admin/admins";
+import { FeesService } from "../fees/fees.service";
 
 const INVITE_TTL_DAYS = 7;
 
@@ -57,7 +58,12 @@ const escHtml = (s: string) => String(s).replace(/[&<>"']/g, (c) => (
 
 @Injectable()
 export class AcademyService {
-  constructor(@InjectConnection() private readonly conn: Connection) {}
+  constructor(
+    @InjectConnection() private readonly conn: Connection,
+    // FeesService for batch → enrolment auto-sync (2026-08-30). See
+    // AcademyModule import comment for why this is safe (no cycle).
+    private readonly fees: FeesService,
+  ) {}
 
   private invites() { return this.conn.db!.collection("academyInvites"); }
   private users()   { return this.conn.db!.collection("users"); }
@@ -807,11 +813,25 @@ export class AcademyService {
       );
     }
     // Drop from any batches in the ORIGINAL academy so recurring-class
-    // scheduling doesn't drag them back.
+    // scheduling doesn't drag them back. Collect affected batch IDs so we
+    // can drive the fees sync per-batch below.
+    const affectedBatches = await this.batches().find(
+      { academyId: g.academyId, studentIds: student._id },
+      { projection: { _id: 1 } as never },
+    ).toArray();
     await this.batches().updateMany(
       { academyId: g.academyId, studentIds: student._id },
       { $pull: { studentIds: student._id } as any, $set: { updatedAt: now } },
     );
+    // End every active fee enrolment for this student in this academy.
+    // Also fan out a per-batch sync so fee programs linked to any of the
+    // batches the student left recompute their roster. Non-fatal.
+    try {
+      await this.fees.endEnrollmentsForStudent(g.academyId, String(student._id));
+      for (const b of affectedBatches) {
+        try { await this.fees.syncBatchEnrollments(g.academyId, String(b._id), g.userId); } catch { /* per-batch best-effort */ }
+      }
+    } catch { /* fees is best-effort */ }
     return { ok: true, movedTo: fallback ? FALLBACK_ACADEMY : null };
   }
 
@@ -879,6 +899,10 @@ export class AcademyService {
         { $set: { coachId, updatedAt: now } },
       );
     }
+    // Sync fee enrolments — new batch might have been linked to a fee
+    // program in a race (unusual but possible), and this is also a
+    // no-op-safe way to catch any stray active enrolments. Non-fatal.
+    try { await this.fees.syncBatchEnrollments(g.academyId, String(doc._id), g.userId); } catch { /* fees is best-effort */ }
     return { ok: true, batch: doc };
   }
 
@@ -919,6 +943,13 @@ export class AcademyService {
         { $set: { coachId: finalCoachId, updatedAt: new Date() } },
       );
     }
+    // Sync fee enrolments to the fresh roster. Added students get ACTIVE
+    // enrolments in every fee program linked to this batch; removed
+    // students get their existing enrolments ENDED (invoices already
+    // billed remain owed — audit trail preserved). Non-fatal on error.
+    if (patch.studentIds || patch.coachUserId) {
+      try { await this.fees.syncBatchEnrollments(g.academyId, batchId, g.userId); } catch { /* fees is best-effort */ }
+    }
     return { ok: true };
   }
 
@@ -928,6 +959,10 @@ export class AcademyService {
     if (!existing) return { ok: false, error: "Batch not found." };
     if (g.role === "coach" && String(existing.coachUserId) !== g.userId) return { ok: false, error: "Not your batch." };
     await this.batches().deleteOne({ _id: batchId as any });
+    // With the batch gone, syncBatchEnrollments sees a missing batch → treats
+    // roster as empty → ends every ACTIVE enrolment on every linked fee
+    // program. Coach can still see billing history + defaulter data.
+    try { await this.fees.syncBatchEnrollments(g.academyId, batchId, g.userId); } catch { /* fees is best-effort */ }
     return { ok: true };
   }
 

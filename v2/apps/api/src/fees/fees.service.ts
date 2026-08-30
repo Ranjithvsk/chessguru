@@ -331,6 +331,22 @@ export class FeesService {
     const heads = await this.heads().find({ academyId, programId: String(_id) }).sort({ order: 1 }).toArray();
     const fresh = (await this.programs().findOne({ _id, academyId }))!;
     const batchName = fresh.batchId ? (await this.batches().findOne({ _id: fresh.batchId as any }, { projection: { name: 1 } as never }))?.name : undefined;
+
+    // If the batch link changed (attached OR swapped), sync enrolments.
+    // If it CLEARED (batchId → null), we leave existing enrolments alone —
+    // owner may want to keep billing them manually. syncBatchEnrollments
+    // only fires against a real batchId.
+    const prevBatchId = program.batchId ?? null;
+    const nextBatchId = fresh.batchId ?? null;
+    if (nextBatchId && nextBatchId !== prevBatchId) {
+      try {
+        const actor = session?.userId ?? "system";
+        await this.syncBatchEnrollments(academyId, nextBatchId, actor);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn("[fees] auto-sync after updateProgram failed:", e);
+      }
+    }
     return this.shapeProgram(fresh, heads, batchName);
   }
 
@@ -462,6 +478,117 @@ export class FeesService {
     };
   }
 
+  /** Reconcile enrolments against a batch's current roster. Called:
+   *   * From `upsertPlan` — auto-enrol on first plan save (owner doesn't
+   *     have to hit "Enrol from batch" for the initial fill).
+   *   * From `academy.updateBatch` (hook) — when the coach adds or removes
+   *     a student from the batch, the fee enrolments follow automatically.
+   *   * From `academy.removeStudent` — student leaving the academy ends
+   *     every one of their active enrolments.
+   *
+   *  Semantics:
+   *   * A student in the batch but NOT enrolled → new ACTIVE enrolment
+   *     starting today.
+   *   * A student enrolled but NOT in the batch → status → ENDED
+   *     (endsOn = today). We DO NOT delete — historical invoices must
+   *     stay attached to their enrolment for audit + defaulter reports.
+   *   * Every fee program linked to this batchId is reconciled.
+   *   * ENDED enrolments are left alone (they had their last cycle;
+   *     re-adding a student creates a fresh ACTIVE row).
+   *
+   *  Session-less: takes academyId directly so it can be invoked from
+   *  the academy module's write path without a request context. */
+  async syncBatchEnrollments(academyId: string, batchId: string, actorUserId: string): Promise<{ programs: number; enrolled: number; ended: number }> {
+    if (!academyId || !batchId) return { programs: 0, enrolled: 0, ended: 0 };
+    const batch: any = await this.batches().findOne({ _id: batchId as any, academyId });
+    const rosterIds: string[] = batch && Array.isArray(batch.studentIds) ? batch.studentIds.map(String) : [];
+
+    // Every fee program pointing at this batch. There can be many
+    // (e.g. Sunday Advanced Monthly + Sunday Advanced One-off camp).
+    const linkedPrograms = await this.programs().find({ academyId, batchId }).toArray();
+    if (linkedPrograms.length === 0) return { programs: 0, enrolled: 0, ended: 0 };
+
+    let totalEnrolled = 0;
+    let totalEnded = 0;
+    const now = new Date();
+
+    for (const program of linkedPrograms) {
+      const plan = await this.plans().findOne({ academyId, programId: String(program._id) });
+      // No plan yet? Nothing to sync onto. The next upsertPlan will fire
+      // syncBatchEnrollments itself and pick up the current roster.
+      if (!plan) continue;
+
+      const active = await this.enrollments().find({ academyId, planId: String(plan._id), status: "ACTIVE" }).toArray();
+      const activeIds = new Set(active.map((e) => e.studentUserId));
+      const rosterSet = new Set(rosterIds);
+
+      // Add — new roster members not yet enrolled. Resolve the student
+      // record so we can carry over guardianUserId (parent for magic-link
+      // portal). Missing users are silently skipped (roster can be stale).
+      const toAdd = rosterIds.filter((sid) => !activeIds.has(sid));
+      if (toAdd.length > 0) {
+        const studentOids = toAdd; // user _id is a string in this codebase.
+        const students = await this.users().find({ _id: { $in: studentOids as any[] }, academyId, role: "student" }).toArray();
+        if (students.length > 0) {
+          const toInsert: Omit<FeeEnrollmentDoc, "_id">[] = students.map((s: any) => {
+            const sid = String(s._id);
+            const guardianUserId: string | undefined = Array.isArray(s.parentIds) && s.parentIds.length > 0 ? String(s.parentIds[0]) : undefined;
+            return {
+              academyId,
+              planId: String(plan._id),
+              programId: String(program._id),
+              studentUserId: sid,
+              guardianUserId,
+              startsOn: now,
+              status: "ACTIVE",
+              createdAt: now,
+              updatedAt: now,
+              createdBy: actorUserId,
+            } as Omit<FeeEnrollmentDoc, "_id">;
+          });
+          try {
+            // Insert with unique-index tolerance — same student on same plan
+            // through two race paths races to a single row.
+            const r = await this.enrollments().insertMany(toInsert as FeeEnrollmentDoc[], { ordered: false });
+            totalEnrolled += r.insertedCount;
+          } catch (e: any) {
+            // E11000 = already enrolled via a concurrent path. Non-fatal.
+            if (e?.code !== 11000) throw e;
+            totalEnrolled += (e.result?.insertedCount ?? 0);
+          }
+        }
+      }
+
+      // End — enrolments whose student is no longer in the roster. We keep
+      // the row for audit; just mark ENDED so no new invoices generate.
+      // If the roster is empty AND the batch itself was deleted, ALL
+      // active enrolments end (that's a coach-intent decision).
+      const toEndIds = active.filter((e) => !rosterSet.has(e.studentUserId)).map((e) => String(e._id));
+      if (toEndIds.length > 0) {
+        const r = await this.enrollments().updateMany(
+          { academyId, _id: { $in: toEndIds.map((id) => new ObjectId(id)) as any } },
+          { $set: { status: "ENDED", endsOn: now, updatedAt: now } },
+        );
+        totalEnded += r.modifiedCount;
+      }
+    }
+
+    return { programs: linkedPrograms.length, enrolled: totalEnrolled, ended: totalEnded };
+  }
+
+  /** Called from academy.removeStudent when a student is removed from the
+   *  academy entirely — every one of their active enrolments (across every
+   *  program + plan) ends. Invoices remain owed. Session-less. */
+  async endEnrollmentsForStudent(academyId: string, studentUserId: string): Promise<{ ended: number }> {
+    if (!academyId || !studentUserId) return { ended: 0 };
+    const now = new Date();
+    const r = await this.enrollments().updateMany(
+      { academyId, studentUserId, status: "ACTIVE" },
+      { $set: { status: "ENDED", endsOn: now, updatedAt: now } },
+    );
+    return { ended: r.modifiedCount };
+  }
+
   async archiveProgram(session: Session, id: string): Promise<{ ok: true }> {
     const { academyId } = this.requireOwner(session);
     const _id = this.oid(id);
@@ -571,6 +698,20 @@ export class FeesService {
     await this.plans().updateOne(filter, upd, { upsert: true });
     const saved = await this.plans().findOne(filter);
     if (!saved) throw new Error("Plan upsert vanished.");    // should be impossible
+
+    // Auto-sync enrolments if the program is linked to a batch. Runs
+    // every plan save (adds new batch members, ends departed ones) so
+    // the owner never has to click "Enrol from batch" for the base fill.
+    // Failure is non-fatal — the plan save itself succeeded.
+    if (program.batchId) {
+      try {
+        const actor = session?.userId ?? "system";
+        await this.syncBatchEnrollments(academyId, program.batchId, actor);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn("[fees] auto-sync after upsertPlan failed:", e);
+      }
+    }
     return this.shapePlan(saved);
   }
 
