@@ -24,7 +24,9 @@ async function get<T>(path: string): Promise<T> {
 }
 
 export default function FeesBatchesPage() {
-  const meQ = useQuery({ queryKey: ["me"], queryFn: () => get<any>("/api/auth/me") });
+  // /auth/* is outside the /api global prefix — the endpoint is /auth/me,
+  // not /api/auth/me. (Same URL every other page uses via api.ts.)
+  const meQ = useQuery({ queryKey: ["me"], queryFn: () => get<any>("/auth/me") });
   const students = useQuery({ queryKey: ["academy-students"], queryFn: () => get<any[]>("/api/academy/students") });
   const coaches = useQuery({ queryKey: ["academy-coaches"], queryFn: () => get<any[]>("/api/academy/coaches") });
   const schedule = useQuery({ queryKey: ["academy-schedule"], queryFn: () => get<ScheduleResp>("/api/class/schedule") });
