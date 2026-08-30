@@ -931,26 +931,41 @@ export class PuzzlesService {
       // to a 4-5 char UCI so we never persist arbitrary user input on the rounds row.
       const wrongRaw = typeof body.wrong === "string" ? body.wrong.trim().toLowerCase() : "";
       const wrong = !win && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(wrongRaw) ? wrongRaw : null;
+      // nc = "not counted". Set when the solve was heavily fatigued
+      // (SAFEGUARD 4). Both the leaderboard aggregation and the roster
+      // puzzleSolves7d rollup filter these out so grind farming can't
+      // inflate visible activity numbers. Losses NEVER get flagged.
+      const notCounted = win && fatigueMul < 0.5;
+      const roundPatch: Record<string, any> = {
+        w: win,
+        d: new Date(),
+        rd: upd.ratingDiff,                                 // rating change this solve
+        r: Math.round(upd.userPerf.gl.r),                   // user rating after
+        pr: Math.round(puzzleGlicko.r ?? 1500),             // puzzle rating
+        th: Array.isArray(pz.themes) ? pz.themes : [],      // puzzle themes (for categorising)
+        k: key,                                             // "puzzle" | "blindfold"
+        sel: body.theme ?? null,                            // selected filter ("mix" = All themes)
+        ...(ms != null ? { ms } : {}),                      // solve time in ms (missing on older rows)
+        ...(mv_ms && mv_ms.length ? { mv_ms } : {}),        // per-move deltas — [t1, t2-t1, ...]
+        ...(wrong != null ? { wr: wrong } : {}),            // wrong-move UCI (misses only, missing on wins)
+        ...(dubious ? { dub: true } : {}),                  // flagged suspicious solve (fast win on >+300 pr)
+        // Difficulty the user was on when they solved this — stored so
+        // history tiles can show it (Easier/Easiest are practice-mode
+        // hints so kids can spot why their rating moved less).
+        ...(typeof body.difficulty === "string" && ["easiest","easier","normal","harder","hardest"].includes(body.difficulty) ? { df: body.difficulty } : {}),
+      };
+      const roundUpd: Record<string, any> = { $set: roundPatch };
+      // On WIN + heavy fatigue, mark nc:true. On WIN + no fatigue, unset any
+      // stale flag from a previous re-solve of the same puzzle (someone
+      // re-took a puzzle they earlier fatigue-grinded and this time did it
+      // normally — reward them). On loss, leave nc alone.
+      if (win) {
+        if (notCounted) roundPatch.nc = true;
+        else roundUpd.$unset = { nc: "" };
+      }
       await this.conn.db!.collection("rounds").updateOne(
         { _id: `${userId}:${id}` as any },
-        { $set: {
-          w: win,
-          d: new Date(),
-          rd: upd.ratingDiff,                                 // rating change this solve
-          r: Math.round(upd.userPerf.gl.r),                   // user rating after
-          pr: Math.round(puzzleGlicko.r ?? 1500),             // puzzle rating
-          th: Array.isArray(pz.themes) ? pz.themes : [],      // puzzle themes (for categorising)
-          k: key,                                             // "puzzle" | "blindfold"
-          sel: body.theme ?? null,                            // selected filter ("mix" = All themes)
-          ...(ms != null ? { ms } : {}),                      // solve time in ms (missing on older rows)
-          ...(mv_ms && mv_ms.length ? { mv_ms } : {}),        // per-move deltas — [t1, t2-t1, ...]
-          ...(wrong != null ? { wr: wrong } : {}),            // wrong-move UCI (misses only, missing on wins)
-          ...(dubious ? { dub: true } : {}),                  // flagged suspicious solve (fast win on >+300 pr)
-          // Difficulty the user was on when they solved this — stored so
-          // history tiles can show it (Easier/Easiest are practice-mode
-          // hints so kids can spot why their rating moved less).
-          ...(typeof body.difficulty === "string" && ["easiest","easier","normal","harder","hardest"].includes(body.difficulty) ? { df: body.difficulty } : {}),
-        } },
+        roundUpd,
         { upsert: true },
       );
       // Auto-credit homework. Owner ask 2026-08-25: Harini solved puzzles

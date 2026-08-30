@@ -2553,7 +2553,9 @@ Thank you!`;
     // students) it's cheap even without a per-user index.
     const weekAgo = new Date(now.getTime() - 7 * dayMs);
     const puzzleRows: any[] = await this.conn.db!.collection("rounds").aggregate([
-      { $match: { d: { $gte: weekAgo } } },
+      // nc:true = "not counted" (fatigue-flagged grind solve). Excluded so
+      // same-theme farming doesn't inflate the student card's activity number.
+      { $match: { d: { $gte: weekAgo }, nc: { $ne: true } } },
       { $project: {
           u: { $arrayElemAt: [{ $split: ["$_id", ":"] }, 0] },
           d: 1,
@@ -3313,7 +3315,9 @@ Thank you!`;
     const boostIsBlindfold = boostTheme === "blindfold";
     const roundAgg = await this.conn.db!.collection("rounds").aggregate([
       // Fast pre-filter on date if we have a cutoff (index-friendly).
-      ...(cutoff ? [{ $match: scanMatch }] : []),
+      // Also drop nc:true rows — fatigue-flagged same-theme grinds shouldn't
+      // count toward the leaderboard puzzles-solved number.
+      { $match: { ...(cutoff ? scanMatch : {}), nc: { $ne: true } } },
       { $project: {
           u: { $arrayElemAt: [{ $split: ["$_id", ":"] }, 0] },
           w: 1, ms: 1, th: 1, k: 1, d: 1,
@@ -3362,6 +3366,9 @@ Thank you!`;
     let lifetimeMap = new Map<string, { puzzlesLifetime: number; peakRating: number | null }>();
     if (period !== "lifetime") {
       const life = await this.conn.db!.collection("rounds").aggregate([
+        // Same nc:true exclusion — lifetime count should reflect real distinct
+        // puzzles solved, not farmed grinds.
+        { $match: { nc: { $ne: true } } },
         { $project: {
             u: { $arrayElemAt: [{ $split: ["$_id", ":"] }, 0] },
             r: 1,
