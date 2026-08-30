@@ -35,6 +35,9 @@ export default function FeesDashboardPage() {
           <p className="mt-1 max-w-xl text-sm text-ink-300">{t("Today's picture — collected, overdue, expected, and who to nudge next.")}</p>
         </div>
         <div className="flex items-center gap-2">
+          <Link to="/fees/batches" className="inline-flex h-10 items-center gap-2 rounded-xl border border-ink-700 bg-ink-900/60 px-4 text-sm font-semibold text-ink-200 hover:border-brand-500/60 hover:text-white" title={t("Group students under a coach for one-click enrolment")}>
+            👥 {t("Batches")}
+          </Link>
           <Link to="/fees/programs" className="inline-flex h-10 items-center gap-2 rounded-xl border border-ink-700 bg-ink-900/60 px-4 text-sm font-semibold text-ink-200 hover:border-brand-500/60 hover:text-white">
             🎓 {t("Programs")}
           </Link>

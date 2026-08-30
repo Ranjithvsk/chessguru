@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import QRCode from "qrcode";
+// qrcode import retired 2026-08-30 with the UPI QR invoice card.
 import Board from "../components/Board";
 import { api, classRoomPath } from "../lib/api";
 import { LiveStudentsPanel } from "../components/LiveStudentsPanel";
@@ -131,16 +131,9 @@ function AttendanceStrip({ days }: { days?: boolean[] }) {
   );
 }
 interface ClassRow { _id: string; title: string; coach: string; startAt: string; durationMin: number; mine?: boolean; attendedCount?: number; academyId?: string|null; summarySentAt?: string|null; autoSummary?: boolean; autoSummaryNote?: string; seriesId?: string|null; seriesIndex?: number; seriesTotal?: number; autoSummaryFailedAt?: string|null; autoSummaryFailedCount?: number; autoSummaryFailedError?: string; topics?: string[]; notes?: string; roomKind?: "call"|"meet"; batchId?: string | null }
-interface FeesConfig { monthlyFeePaise: number; upiVpa: string; upiPayeeName: string; canEdit: boolean }
-interface Invoice { _id: string; academyId: string; studentId: string; studentUsername: string; period: string; amountPaise: number; status: "pending"|"paid"|"waived"; generatedAt: string; paidAt?: string; paymentMethod?: string }
+// FeesConfig + Invoice interfaces retired 2026-08-30 — fees moved to /fees.
 function rupees(paise: number) { return (paise / 100).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }); }
-function upiIntent(o: { vpa: string; name: string; amountPaise: number; note: string }) {
-  const p = new URLSearchParams({
-    pa: o.vpa, pn: o.name, am: (o.amountPaise / 100).toFixed(2),
-    cu: "INR", tn: o.note,
-  });
-  return `upi://pay?${p.toString()}`;
-}
+// upiIntent retired 2026-08-30 with the InvoiceCard UPI QR.
 interface ScheduleResp { live: ClassRow[]; upcoming: ClassRow[] }
 function fmtStartAt(d: string) {
   const dt = new Date(d);
@@ -527,292 +520,9 @@ function NewDirectiveModal({ coaches, students, onClose }: { coaches: any[]; stu
   );
 }
 
-/** Batch = named list of students. Coach picks students → creates a batch →
- *  schedules classes for that batch in one form (recurring supported). */
-/** Upcoming-classes strip inside a batch card. Groups a series into a
- *  compact recurrence label (e.g. "Mon 6:00 PM · 60min ×12") and offers
- *  a ✕ button per row to cancel that class (single) or the whole future
- *  series. Owner ask 2026-08-18: "if class scheduled, show it on the
- *  batch tile — time, day of the week" + "show remove option in schedule". */
-function BatchClassStrip({ classes, onChanged }: { classes: ClassRow[]; onChanged?: () => void }) {
-  if (!classes.length) {
-    return <div className="mb-3 rounded border border-dashed border-ink-700 px-2 py-1.5 text-[11px] text-ink-500">No classes scheduled yet — hit 📅 below to add one.</div>;
-  }
-  // Group by (weekday, HH:MM, durationMin) — a recurring series lands on
-  // the same weekday+time so this collapses cleanly. Keep a representative
-  // ClassRow per group so the ✕ button knows which _id or seriesId to
-  // cancel (single classes cancel by _id, real series cancel by seriesId).
-  const groups = new Map<string, { label: string; count: number; nextAt: Date; rep: ClassRow }>();
-  const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  for (const c of classes) {
-    const d = new Date(c.startAt);
-    const key = `${d.getDay()}|${d.getHours()}:${d.getMinutes()}|${c.durationMin}`;
-    const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-    const label = `${WEEKDAY[d.getDay()]} ${time} · ${c.durationMin}min`;
-    const g = groups.get(key);
-    if (!g) groups.set(key, { label, count: 1, nextAt: d, rep: c });
-    else {
-      g.count += 1;
-      if (d < g.nextAt) { g.nextAt = d; g.rep = c; }
-    }
-  }
-  const rows = [...groups.values()].sort((a, b) => a.nextAt.getTime() - b.nextAt.getTime());
+// Batches (BatchClassStrip / BatchesPanel / ScheduleBatchModal) moved to
+// pages/FeesBatches.tsx on 2026-08-30.
 
-  const cancelGroup = async (g: { count: number; label: string; rep: ClassRow }) => {
-    const isSeries = g.count > 1 && !!g.rep.seriesId;
-    const msg = isSeries
-      ? `Cancel every FUTURE class in this "${g.label}" series (${g.count} classes)? Past classes are kept as history.`
-      : `Cancel this class ("${g.label}")?`;
-    if (!confirm(msg)) return;
-    const url = isSeries
-      ? `/v2api/api/class/schedule/series/${encodeURIComponent(g.rep.seriesId!)}`
-      : `/v2api/api/class/schedule/${encodeURIComponent(g.rep._id)}`;
-    const r = await fetch(url, { method: "DELETE", credentials: "include" });
-    if (r.ok) onChanged?.();
-    else {
-      const j = await r.json().catch(() => ({}));
-      alert(j?.message || "Couldn't cancel.");
-    }
-  };
-
-  return (
-    <div className="mb-3 space-y-1 rounded border border-ink-700 bg-ink-900/60 px-2 py-1.5">
-      {rows.slice(0, 3).map((g) => (
-        <div key={g.label} className="flex items-center gap-2 text-[11px]">
-          <span className="rounded-full bg-emerald-500/20 px-1.5 py-0.5 font-semibold text-emerald-200">📅</span>
-          <span className="flex-1 text-ink-200">{g.label}</span>
-          {g.count > 1 && <span className="text-[10px] tabular-nums text-ink-500">×{g.count}</span>}
-          <button onClick={() => cancelGroup(g)}
-            title={g.count > 1 ? "Cancel all future classes in this series" : "Cancel this class"}
-            className="ml-0.5 rounded px-1 py-0.5 text-[10px] text-ink-500 hover:bg-rose-500/15 hover:text-rose-300">
-            ✕
-          </button>
-        </div>
-      ))}
-      {rows.length > 3 && (
-        <div className="pt-0.5 text-[10px] text-ink-500">+ {rows.length - 3} more series</div>
-      )}
-    </div>
-  );
-}
-
-function BatchesPanel({ students, coaches = [], isOwner = false, classes = [] }: { students: any[]; coaches?: any[]; isOwner?: boolean; classes?: ClassRow[] }) {
-  const qc = useQueryClient();
-  const { data: batches = [], refetch } = useQuery({
-    queryKey: ["academy-batches"],
-    queryFn: async () => {
-      const r = await fetch("/v2api/api/academy/batches", { credentials: "include" });
-      return r.ok ? r.json() : [];
-    },
-  });
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [picked, setPicked] = useState<Set<string>>(new Set());
-  // Owner-only: which coach owns this batch. All students in the batch
-  // are re-assigned to this coach on save (owner ask 2026-08-18).
-  const [batchCoachId, setBatchCoachId] = useState("");
-  const [scheduleFor, setScheduleFor] = useState<any | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const startEdit = (b: any) => {
-    setEditingId(b._id);
-    setCreating(false);
-    setNewName(b.name || "");
-    setPicked(new Set((b.students || []).map((s: any) => String(s._id))));
-    setBatchCoachId(String(b.coachUserId || ""));
-  };
-  const cancelForm = () => { setCreating(false); setEditingId(null); setNewName(""); setPicked(new Set()); setBatchCoachId(""); };
-  const create = async () => {
-    if (!newName.trim() || picked.size === 0) return;
-    const url = editingId
-      ? `/v2api/api/academy/batches/${encodeURIComponent(editingId)}`
-      : "/v2api/api/academy/batches";
-    const body: any = { name: newName.trim(), studentIds: [...picked] };
-    if (isOwner && batchCoachId) body.coachUserId = batchCoachId;
-    const r = await fetch(url, {
-      method: "POST", credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const j = await r.json();
-    if (j?.ok) {
-      cancelForm();
-      refetch();
-      // Students' coachId also changed on the server — refresh the roster.
-      qc.invalidateQueries({ queryKey: ["academy-students"] });
-    } else alert(j?.error || (editingId ? "Couldn't save changes." : "Couldn't create batch."));
-  };
-  const remove = async (id: string, name: string) => {
-    if (!confirm(`Delete batch "${name}"? Existing scheduled classes stay.`)) return;
-    const r = await fetch(`/v2api/api/academy/batches/${encodeURIComponent(id)}/delete`, { method: "POST", credentials: "include" });
-    const j = await r.json();
-    if (j?.ok) refetch(); else alert(j?.error || "Couldn't delete.");
-  };
-  return (
-    <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-display text-lg text-white">👥 Batches <span className="ml-2 text-xs font-normal text-ink-400">({(batches as any[]).length})</span></h2>
-        {!creating && !editingId && (
-          <button onClick={() => setCreating(true)} className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500">+ New batch</button>
-        )}
-      </div>
-      {(creating || editingId) && (
-        <div className="mb-4 rounded-lg border border-brand-500/40 bg-brand-500/5 p-4">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-300">
-            {editingId ? "Edit batch" : "New batch"}
-          </div>
-          <label className="mb-1 block text-xs uppercase text-ink-400">Batch name</label>
-          <input
-            value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Monday Advanced Kids"
-            className="mb-3 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 placeholder-ink-500"
-          />
-          {isOwner && (
-            <>
-              <label className="mb-1 block text-xs uppercase text-ink-400">
-                Coach for this batch
-                <span className="ml-2 text-[10px] font-normal normal-case text-ink-500">every student in the batch is assigned to this coach on save</span>
-              </label>
-              <select
-                value={batchCoachId} onChange={(e) => setBatchCoachId(e.target.value)}
-                className="mb-3 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100"
-              >
-                <option value="">— pick a coach —</option>
-                {coaches.map((c: any) => (
-                  <option key={c._id} value={c._id}>{c.name || c.username}{c.isOwner ? " · Owner" : ""}</option>
-                ))}
-              </select>
-            </>
-          )}
-          <label className="mb-1 block text-xs uppercase text-ink-400">Pick students ({picked.size}/{students.length})</label>
-          <div className="mb-3 max-h-40 overflow-y-auto rounded-lg border border-ink-700 bg-ink-800 p-2">
-            {students.map((s) => (
-              <label key={s._id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm text-ink-100 hover:bg-ink-700">
-                <input
-                  type="checkbox"
-                  checked={picked.has(s._id)}
-                  onChange={(e) => {
-                    const next = new Set(picked);
-                    if (e.target.checked) next.add(s._id); else next.delete(s._id);
-                    setPicked(next);
-                  }}
-                />
-                {s.name || s.username}
-              </label>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <button onClick={create} disabled={!newName.trim() || picked.size === 0} className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-40">
-              {editingId ? "Save changes" : "Create"}
-            </button>
-            <button onClick={cancelForm} className="rounded-lg bg-ink-800 px-3 py-1.5 text-sm text-ink-200 hover:bg-ink-700">Cancel</button>
-          </div>
-        </div>
-      )}
-      {(batches as any[]).length === 0 && !creating && (
-        <p className="text-sm text-ink-400">No batches yet. Create one to schedule recurring classes for a group of students in a single form.</p>
-      )}
-      <div className="grid gap-3 sm:grid-cols-2">
-        {(batches as any[]).map((b: any) => (
-          <div key={b._id} className="rounded-lg border border-ink-700 bg-ink-800 p-4">
-            <div className="mb-1 flex items-center justify-between">
-              <div className="font-display text-base text-ink-100">{b.name}</div>
-              <div className="flex items-center gap-1.5">
-                <button onClick={() => startEdit(b)} title="Rename batch or change its student list"
-                  className="text-xs text-ink-500 hover:text-brand-300">✏️</button>
-                <button onClick={() => remove(b._id, b.name)} title="Delete batch" className="text-xs text-ink-500 hover:text-rose-300">🗑</button>
-              </div>
-            </div>
-            <div className="mb-3 text-xs text-ink-400">{(b.students || []).length} students · {(b.students || []).slice(0, 4).map((s: any) => s.name).join(", ")}{(b.students || []).length > 4 ? "…" : ""}</div>
-            <BatchClassStrip classes={classes.filter((c) => c.batchId === b._id)}
-              onChanged={() => qc.invalidateQueries({ queryKey: ["academy-schedule"] })} />
-            <div className="flex flex-wrap gap-2">
-              <button onClick={() => setScheduleFor(b)} className="rounded-lg border border-cyan-500/50 bg-cyan-500/15 px-3 py-1.5 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/25">📅 Schedule class</button>
-              <Link to={`/academy/batches/${encodeURIComponent(b._id)}/performance`}
-                className="rounded-lg border border-sky-500/50 bg-sky-500/15 px-3 py-1.5 text-sm font-semibold text-sky-100 hover:bg-sky-500/25">
-                📊 Batch report
-              </Link>
-            </div>
-          </div>
-        ))}
-      </div>
-      {scheduleFor && <ScheduleBatchModal batch={scheduleFor} onClose={() => { setScheduleFor(null); qc.invalidateQueries({ queryKey: ["schedule"] }); }} />}
-    </section>
-  );
-}
-
-function ScheduleBatchModal({ batch, onClose }: { batch: any; onClose: () => void }) {
-  const [title, setTitle] = useState(`${batch.name} class`);
-  const [startAt, setStartAt] = useState(() => {
-    const d = new Date(); d.setMinutes(0, 0, 0); d.setHours(d.getHours() + 1);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  });
-  const [durationMin, setDurationMin] = useState(60);
-  const [recurrence, setRecurrence] = useState<"none" | "weekly">("none");
-  const [recurrenceCount, setRecurrenceCount] = useState(4);
-  const [weekdays, setWeekdays] = useState<number[]>([]);
-  const toggleDay = (d: number) => setWeekdays((prev) => prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort());
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState("");
-  const submit = async () => {
-    setBusy(true); setMsg("");
-    try {
-      const r = await fetch(`/v2api/api/academy/batches/${encodeURIComponent(batch._id)}/schedule`, {
-        method: "POST", credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title.trim(), startAt: new Date(startAt).toISOString(), durationMin, recurrence, recurrenceCount, recurrenceWeekdays: weekdays, roomKind: "meet" }),
-      });
-      const j = await r.json();
-      if (j?.ok) { setMsg(`Scheduled ${j.count} class${j.count > 1 ? "es" : ""} for ${batch.name}.`); setTimeout(onClose, 1400); }
-      else setMsg(j?.error || "Couldn't schedule.");
-    } catch (e: any) { setMsg(e?.message || "Network error."); }
-    finally { setBusy(false); }
-  };
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4">
-      <div className="w-full max-w-md rounded-2xl border border-ink-700 bg-ink-900 p-5 shadow-2xl">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-display text-lg text-white">Schedule class for {batch.name}</h3>
-          <button onClick={onClose} className="text-ink-400 hover:text-white">✕</button>
-        </div>
-        <div className="mb-2 text-xs text-ink-400">{(batch.students || []).length} students in this batch</div>
-        <label className="mb-1 block text-xs uppercase text-ink-400">Class title</label>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} className="mb-3 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
-        <label className="mb-1 block text-xs uppercase text-ink-400">Start</label>
-        <input type="datetime-local" value={startAt} onChange={(e) => setStartAt(e.target.value)} className="mb-3 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
-        <label className="mb-1 block text-xs uppercase text-ink-400">Duration (min)</label>
-        <input type="number" min={5} max={600} value={durationMin} onChange={(e) => setDurationMin(Number(e.target.value))} className="mb-3 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
-        <label className="mb-1 block text-xs uppercase text-ink-400">Recurrence</label>
-        <div className="mb-3 flex gap-2">
-          <label className="flex items-center gap-1.5 text-sm text-white"><input type="radio" checked={recurrence === "none"} onChange={() => setRecurrence("none")} /> One-off</label>
-          <label className="flex items-center gap-1.5 text-sm text-white"><input type="radio" checked={recurrence === "weekly"} onChange={() => setRecurrence("weekly")} /> Weekly</label>
-        </div>
-        {recurrence === "weekly" && (
-          <>
-            <label className="mb-1 block text-xs uppercase text-ink-400">Days of week (blank = same weekday as Start)</label>
-            <div className="mb-3 flex flex-wrap gap-1.5">
-              {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((label, i) => (
-                <button
-                  key={i} onClick={() => toggleDay(i)}
-                  className={`rounded-full px-2.5 py-1 text-xs font-semibold ${weekdays.includes(i) ? "bg-brand-600 text-white" : "border border-ink-700 bg-ink-800 text-ink-300 hover:bg-ink-700"}`}
-                >{label}</button>
-              ))}
-            </div>
-            <div className="mb-3">
-              <label className="mb-1 block text-xs uppercase text-ink-400">How many classes total (max 52)</label>
-              <input type="number" min={1} max={52} value={recurrenceCount} onChange={(e) => setRecurrenceCount(Number(e.target.value))} className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white" />
-              <p className="mt-1 text-[11px] text-ink-500">Pick weekdays above for Mon/Wed/Fri-style schedules — leave blank for one class per week on the Start day.</p>
-            </div>
-          </>
-        )}
-        {msg && <p className={`mb-2 text-xs ${msg.startsWith("Scheduled") ? "text-emerald-300" : "text-rose-300"}`}>{msg}</p>}
-        <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-lg bg-ink-800 px-3 py-1.5 text-sm text-ink-200 hover:bg-ink-700">Cancel</button>
-          <button onClick={submit} disabled={busy || !title.trim()} className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-40">{busy ? "…" : "Schedule"}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /** Mark a student as attended for today. Idempotent per (coach, day). Ephemeral
  *  success state — button turns green with a check for 3s, then resets. */
@@ -2137,14 +1847,7 @@ export default function AcademyDashboardPage() {
     queryFn: () => get<SnapItem[]>("/api/academy/snaps"),
     enabled: canManage, refetchInterval: 60_000,
   });
-  const { data: feesConfig } = useQuery({
-    queryKey: ["academy-fees-config"], queryFn: () => get<FeesConfig>("/api/academy/fees/config"),
-    enabled: canManage,
-  });
-  const { data: invoices } = useQuery({
-    queryKey: ["academy-fees"], queryFn: () => get<Invoice[]>("/api/academy/fees?status=pending"),
-    enabled: canManage, refetchInterval: 30_000,
-  });
+  // Fees queries + form state moved to /fees + /fees/settings (2026-08-30).
 
   // Scheduler form
   const [classTitle, setClassTitle] = useState("");
@@ -2169,49 +1872,7 @@ export default function AcademyDashboardPage() {
     } catch { /* private mode */ }
   }, [lastAutoKey]);
   const [scheduleMsg, setScheduleMsg] = useState<{ tone: "ok"|"err"; text: string }|null>(null);
-  // Fees form + actions
-  const [feeRupees, setFeeRupees] = useState<string>("");
-  const [feeVpa, setFeeVpa] = useState("");
-  const [feePayeeName, setFeePayeeName] = useState("");
-  useEffect(() => {
-    if (feesConfig) {
-      setFeeRupees(feesConfig.monthlyFeePaise ? String(feesConfig.monthlyFeePaise / 100) : "");
-      setFeeVpa(feesConfig.upiVpa || "");
-      setFeePayeeName(feesConfig.upiPayeeName || "");
-    }
-  }, [feesConfig]);
-  const [feesMsg, setFeesMsg] = useState<{ tone: "ok"|"err"; text: string }|null>(null);
-  const saveFeesMut = useMutation({
-    mutationFn: () => fetch(`${BASE}/api/academy/fees/config`, {
-      method: "PUT", credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        monthlyFeePaise: Math.round(Number(feeRupees) * 100) || 0,
-        upiVpa: feeVpa, upiPayeeName: feePayeeName,
-      }),
-    }).then((r) => r.json()),
-    onSuccess: (r: any) => {
-      setFeesMsg(r.ok ? { tone: "ok", text: "Fees config saved." } : { tone: "err", text: r.error || "Save failed." });
-      qc.invalidateQueries({ queryKey: ["academy-fees-config"] });
-    },
-  });
-  const generateMut = useMutation({
-    mutationFn: () => post<{ ok: boolean; generated?: number; period?: string; pendingCount?: number; error?: string }>("/api/academy/fees/generate"),
-    onSuccess: (r) => {
-      setFeesMsg(r.ok
-        ? { tone: "ok", text: `Generated invoices for ${r.period} — ${r.pendingCount} still pending.` }
-        : { tone: "err", text: r.error || "Generate failed." });
-      qc.invalidateQueries({ queryKey: ["academy-fees"] });
-      qc.invalidateQueries({ queryKey: ["academy-students"] });
-    },
-  });
-  const markPaidMut = useMutation({
-    mutationFn: (id: string) => post<{ ok: boolean; error?: string }>(`/api/academy/fees/${encodeURIComponent(id)}/mark-paid`, { paymentMethod: "upi" }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["academy-fees"] });
-      qc.invalidateQueries({ queryKey: ["academy-students"] });
-    },
-  });
+  // Fees form + mutations moved to /fees + /fees/settings (2026-08-30).
 
   const scheduleMut = useMutation({
     mutationFn: () => post<{ _id: string; title: string }>("/api/class/schedule", {
@@ -2765,8 +2426,7 @@ export default function AcademyDashboardPage() {
               homework / student notes; coach sees their inbox) ── */}
       {canManage && <DirectivesPanel isOwner={isOwner} coaches={coaches ?? []} students={students} />}
 
-      {/* ── Batches (coach schedules classes for a saved student group) ── */}
-      {canManage && <BatchesPanel students={students} coaches={coaches ?? []} isOwner={isOwner} classes={[...(schedule?.live ?? []), ...(schedule?.upcoming ?? [])]} />}
+      {/* Batches management moved to /fees/batches (2026-08-30). */}
 
       {/* ── Upcoming + live classes ── */}
       <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
@@ -2799,99 +2459,8 @@ export default function AcademyDashboardPage() {
         )}
       </section>
 
-      {/* ── Fees + billing (owner + coach; read-only for coach) ── */}
-      {canManage && (
-        <>
-          {isOwner && (
-            <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
-              <div className="mb-3 flex items-baseline gap-3">
-                <h2 className="font-display text-lg text-white">💰 Fees config</h2>
-                <span className="text-xs text-ink-500">UPI-only for now (no Razorpay). Parents scan the QR to pay.</span>
-              </div>
-              <div className="grid gap-2 md:grid-cols-3">
-                <div>
-                  <label className="block text-[11px] font-semibold uppercase tracking-wide text-ink-400">Monthly fee (₹)</label>
-                  <input type="number" min="0" value={feeRupees} onChange={(e) => setFeeRupees(e.target.value)}
-                    placeholder="e.g. 2500"
-                    className="mt-1 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-semibold uppercase tracking-wide text-ink-400">UPI VPA</label>
-                  <input type="text" value={feeVpa} onChange={(e) => setFeeVpa(e.target.value.toLowerCase())}
-                    placeholder="academy@ybl"
-                    className="mt-1 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-semibold uppercase tracking-wide text-ink-400">Payee name</label>
-                  <input type="text" value={feePayeeName} onChange={(e) => setFeePayeeName(e.target.value)}
-                    placeholder="Academy name shown in UPI app"
-                    className="mt-1 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
-                </div>
-                <button disabled={saveFeesMut.isPending} onClick={() => saveFeesMut.mutate()}
-                  className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
-                  {saveFeesMut.isPending ? "Saving…" : "Save fees config"}
-                </button>
-                <button disabled={generateMut.isPending || !feesConfig?.monthlyFeePaise}
-                  onClick={() => generateMut.mutate()}
-                  className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-4 py-2 text-sm font-semibold text-brand-100 hover:bg-brand-500/20 disabled:opacity-50">
-                  {generateMut.isPending ? "Generating…" : "🧾 Generate this month's invoices"}
-                </button>
-              </div>
-              {feesMsg && <p className={`mt-2 text-xs ${feesMsg.tone === "ok" ? "text-emerald-300" : "text-rose-300"}`}>{feesMsg.text}</p>}
-            </section>
-          )}
-
-          <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
-            <div className="mb-3 flex items-baseline gap-3">
-              <h2 className="font-display text-lg text-white">💸 Pending invoices <span className="text-xs text-ink-500">({invoices?.length ?? 0})</span></h2>
-              {(invoices?.length ?? 0) > 0 && feesConfig && (
-                <span className="text-xs text-ink-500">Parents scan the QR to pay via UPI. You mark it paid after seeing the bank credit.</span>
-              )}
-              {(invoices?.length ?? 0) > 0 && (
-                <button onClick={() => {
-                  // CSV export -- coach hands to accountant / spouse / their
-                  // own accounting tool. AmountINR is human, Paise kept for
-                  // exact reconciliation with bank amounts.
-                  const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
-                  const header = ["Generated", "Period", "Student", "AmountINR", "Paise", "Status"];
-                  const lines = [header.map(esc).join(",")];
-                  for (const inv of invoices!) {
-                    lines.push([
-                      new Date(inv.generatedAt).toISOString(),
-                      inv.period,
-                      inv.studentUsername,
-                      (inv.amountPaise / 100).toFixed(2),
-                      String(inv.amountPaise),
-                      inv.status,
-                    ].map((c) => esc(String(c))).join(","));
-                  }
-                  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement("a");
-                  a.href = url; a.download = `invoices-pending-${new Date().toISOString().slice(0, 10)}.csv`;
-                  document.body.appendChild(a); a.click(); a.remove();
-                  setTimeout(() => URL.revokeObjectURL(url), 1000);
-                }}
-                  title="Download pending invoices as CSV"
-                  className="ml-auto rounded-full border border-ink-700 bg-ink-900 px-2.5 py-0.5 text-[11px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-ink-100">
-                  ⬇ CSV <span className="ml-1 opacity-70">{invoices!.length}</span>
-                </button>
-              )}
-            </div>
-            {(invoices?.length ?? 0) === 0 && <p className="text-sm text-ink-400">No pending invoices.</p>}
-            {(invoices?.length ?? 0) > 0 && (
-              <div className="grid gap-3 md:grid-cols-2">
-                {invoices!.map((inv) => (
-                  <InvoiceCard key={inv._id} inv={inv} config={feesConfig} isOwner={!!isOwner}
-                    onMarkPaid={() => markPaidMut.mutate(inv._id)}
-                    markPaidPending={markPaidMut.isPending}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-        </>
-      )}
+      {/* Fees config + pending-invoices widgets moved to /fees + /fees/settings
+          on 2026-08-30. The academy dashboard no longer duplicates them. */}
 
       {/* ── Recent recordings (owner + coach) ── */}
       {canManage && recordings && recordings.length > 0 && (
@@ -2958,59 +2527,8 @@ export default function AcademyDashboardPage() {
   );
 }
 
-// Invoice card with an inline UPI QR the parent scans. QR is generated
-// client-side (no external service). If UPI VPA isn't configured, we say so
-// so the owner knows to fill it in on the Fees config panel above.
-function InvoiceCard({ inv, config, isOwner, onMarkPaid, markPaidPending }: {
-  inv: Invoice; config?: FeesConfig; isOwner: boolean;
-  onMarkPaid: () => void; markPaidPending: boolean;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const vpa = config?.upiVpa || "";
-  const payee = config?.upiPayeeName || "";
-  const upiUrl = vpa ? upiIntent({
-    vpa, name: payee || "Academy",
-    amountPaise: inv.amountPaise,
-    note: `Fees ${inv.period} · ${inv.studentUsername}`,
-  }) : "";
-  useEffect(() => {
-    if (!upiUrl || !canvasRef.current) return;
-    QRCode.toCanvas(canvasRef.current, upiUrl, { width: 160, margin: 1, color: { dark: "#0f172a", light: "#ffffff" } })
-      .catch(() => {});
-  }, [upiUrl]);
-
-  return (
-    <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-3">
-      <div className="flex flex-wrap items-baseline gap-2">
-        <span className="font-semibold text-white">{inv.studentUsername}</span>
-        <span className="text-xs text-ink-500">· {inv.period}</span>
-        <span className="ml-auto text-lg font-bold tabular-nums text-rose-200">{rupees(inv.amountPaise)}</span>
-      </div>
-      <div className="mt-2 flex items-center gap-3">
-        {upiUrl ? (
-          <>
-            <canvas ref={canvasRef} width={160} height={160} className="rounded bg-white" />
-            <div className="flex-1 text-xs text-ink-300">
-              <div className="mb-1">Scan with any UPI app.</div>
-              <div className="text-[10px] text-ink-500 break-all">to: <b className="text-ink-300">{vpa}</b></div>
-              <a href={upiUrl} className="mt-2 inline-block text-brand-300 underline">Open in UPI app ↗</a>
-            </div>
-          </>
-        ) : (
-          <div className="text-xs text-amber-200">Set your UPI VPA in Fees config to render a QR here.</div>
-        )}
-      </div>
-      {isOwner && (
-        <div className="mt-2 flex justify-end gap-2">
-          <button onClick={onMarkPaid} disabled={markPaidPending}
-            className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">
-            {markPaidPending ? "…" : "✓ Mark paid"}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
+// InvoiceCard + UPI-QR component retired 2026-08-30 — invoices now surface at
+// /fees/invoices with the full pdf/waiver/reminder flow.
 
 // "Attendance today" card — quick who-came-to-class-today rollup for the
 // coach/owner. Owner asked 2026-08-12 for attendance on the academy home.

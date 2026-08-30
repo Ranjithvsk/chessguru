@@ -128,6 +128,7 @@ const FeesProgramDetailPage = lazy(() => import("./pages/FeesProgramDetail"));
 const FeesInvoicesPage      = lazy(() => import("./pages/FeesInvoices"));
 const FeesSettingsPage      = lazy(() => import("./pages/FeesSettings"));
 const FeesReportsPage       = lazy(() => import("./pages/FeesReports"));
+const FeesBatchesPage       = lazy(() => import("./pages/FeesBatches"));
 
 function LazyFallback() {
   return (
@@ -234,6 +235,7 @@ export default function AppRest() {
         <Route path="fees/invoices"       element={<ErrorBoundary label="Fee invoices"><Suspense fallback={<LazyFallback />}><FeesInvoicesPage /></Suspense></ErrorBoundary>} />
         <Route path="fees/settings"       element={<ErrorBoundary label="Fee settings"><Suspense fallback={<LazyFallback />}><FeesSettingsPage /></Suspense></ErrorBoundary>} />
         <Route path="fees/reports"        element={<ErrorBoundary label="Fee reports"><Suspense fallback={<LazyFallback />}><FeesReportsPage /></Suspense></ErrorBoundary>} />
+        <Route path="fees/batches"        element={<ErrorBoundary label="Fee batches"><Suspense fallback={<LazyFallback />}><FeesBatchesPage /></Suspense></ErrorBoundary>} />
         <Route path="students" element={<StudentsManagerPage />} />
         <Route path="academy/performance" element={<ErrorBoundary label="Student performance"><AcademyPerformancePage /></ErrorBoundary>} />
         <Route path="academy/leaderboard" element={<ErrorBoundary label="Academy leaderboard"><LeaderboardPage /></ErrorBoundary>} />
