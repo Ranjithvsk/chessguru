@@ -29,9 +29,12 @@ export default function FeesBatchesPage() {
   const coaches = useQuery({ queryKey: ["academy-coaches"], queryFn: () => get<any[]>("/api/academy/coaches") });
   const schedule = useQuery({ queryKey: ["academy-schedule"], queryFn: () => get<ScheduleResp>("/api/class/schedule") });
 
-  const me = meQ.data?.user;
-  const isOwner = me?.role === "academy_owner";
-  const canManage = isOwner || me?.role === "coach";
+  // /api/auth/me returns { loggedIn, userId, role, academyId, ... } flat — not
+  // nested under a `user` object. Same shape used by every other page.
+  const me = meQ.data;
+  const role = me?.role;
+  const isOwner = role === "academy_owner" || !!me?.admin;
+  const canManage = isOwner || role === "coach";
 
   if (meQ.isLoading || students.isLoading || coaches.isLoading || schedule.isLoading) {
     return (
