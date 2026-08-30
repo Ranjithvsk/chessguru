@@ -23,6 +23,8 @@ export interface ProgramResponse {
   description?: string;
   currency: "INR";
   status: "ACTIVE" | "ARCHIVED";
+  batchId?: string;
+  batchName?: string;
   createdAt: string;
   updatedAt: string;
   headCount: number;
@@ -33,12 +35,35 @@ export interface ProgramResponse {
 export interface CreateProgramInput {
   name: string;
   description?: string;
+  batchId?: string | null;
   heads?: Array<{
     name: string;
     amountPaise: number;
     kind: FeeHeadKind;
     gstPct?: number;
   }>;
+}
+
+/** PATCH payload for /api/fees/programs/:id. `null` on batchId clears the
+ *  link ("make this program academy-wide again"); `undefined` leaves it. */
+export interface UpdateProgramInput {
+  name?: string;
+  description?: string;
+  batchId?: string | null;
+}
+
+export interface FeeBatchPickerRow {
+  id: string;
+  name: string;
+  coachName?: string;
+  studentCount: number;
+}
+
+export interface BulkEnrollFromBatchResponse {
+  enrolled: number;
+  skipped: number;
+  batchName: string;
+  planId: string;
 }
 
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -331,8 +356,21 @@ export const feesApi = {
   getProgram: (id: string) => req<ProgramResponse>(`/api/fees/programs/${encodeURIComponent(id)}`),
   createProgram: (input: CreateProgramInput) =>
     req<ProgramResponse>(`/api/fees/programs`, { method: "POST", body: JSON.stringify(input) }),
+  updateProgram: (id: string, patch: UpdateProgramInput) =>
+    req<ProgramResponse>(`/api/fees/programs/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) }),
   archiveProgram: (id: string) =>
     req<{ ok: true }>(`/api/fees/programs/${encodeURIComponent(id)}/archive`, { method: "POST" }),
+
+  // ---- batches --------------------------------------------------------
+  /** Fetch batches for the program's batch dropdown / bulk-enrol picker. */
+  listBatches: () =>
+    req<{ batches: FeeBatchPickerRow[] }>(`/api/fees/batches`),
+  /** Enrol every student in the program's linked batch — one-click. */
+  bulkEnrollFromBatch: (programId: string, opts: { discountPct?: number; discountFlatPaise?: number } = {}) =>
+    req<BulkEnrollFromBatchResponse>(
+      `/api/fees/programs/${encodeURIComponent(programId)}/bulk-enroll-batch`,
+      { method: "POST", body: JSON.stringify(opts) },
+    ),
 
   // ---- plans (1:1 with program) -------------------------------------------
   getPlan: (programId: string) =>

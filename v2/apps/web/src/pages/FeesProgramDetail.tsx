@@ -16,6 +16,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type BulkEnrollInput,
   type EnrollmentResponse,
+  type FeeBatchPickerRow,
   type PlanCadence,
   type PlanResponse,
   type UpsertPlanInput,
@@ -80,10 +81,11 @@ export default function FeesProgramDetailPage() {
       </div>
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="mb-1 flex items-center gap-2">
+          <div className="mb-1 flex flex-wrap items-center gap-2">
             <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider ring-1 ${p.status === "ACTIVE" ? "bg-accent-500/15 text-accent-400 ring-accent-400/30" : "bg-ink-800 text-ink-400 ring-ink-700"}`}>
               {p.status === "ACTIVE" ? t("Active") : t("Archived")}
             </span>
+            <BatchLink program={p} onSaved={() => qc.invalidateQueries({ queryKey: ["fees.program", id] })} />
           </div>
           <h1 className="font-display text-3xl text-ink-100 sm:text-4xl">{p.name}</h1>
           {p.description && <p className="mt-1 max-w-2xl text-sm text-ink-300">{p.description}</p>}
@@ -131,6 +133,13 @@ export default function FeesProgramDetailPage() {
           <div className="flex flex-wrap items-center gap-2">
             {plan && enrollments.length > 0 && (
               <GenerateInvoicesButton planId={plan.id} programId={p.id} />
+            )}
+            {plan && p.batchId && (
+              <BulkEnrolFromBatchButton
+                programId={p.id}
+                batchName={p.batchName}
+                onDone={() => qc.invalidateQueries({ queryKey: ["fees.enrollments"] })}
+              />
             )}
             <button
               onClick={() => setEnrolOpen(true)}
@@ -591,6 +600,135 @@ function GenerateInvoicesButton({ planId, programId }: { planId: string; program
       {toast && (
         <div role="status" className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-accent-500/40 bg-ink-950 px-4 py-2 text-sm text-accent-200 shadow-2xl">
           {toast}
+          <button onClick={() => setToast(null)} className="ml-2 text-ink-400 hover:text-white">✕</button>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ---- Batch link chip + inline editor -----------------------------------
+// Shown in the page header. Click to attach / change / remove the batch.
+// A program's batch is the source-of-students for the one-click "bulk enrol"
+// button; changing it doesn't retro-modify existing enrolments.
+function BatchLink({ program, onSaved }: { program: { id: string; batchId?: string; batchName?: string }; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      {program.batchId ? (
+        <button
+          onClick={() => setOpen(true)}
+          className="inline-flex items-center gap-1.5 rounded-full bg-brand-500/10 px-2.5 py-0.5 text-[11px] font-medium text-brand-200 ring-1 ring-brand-400/30 hover:bg-brand-500/20"
+          title={t("Click to change the linked batch")}
+        >
+          <span aria-hidden>👥</span>
+          <span className="truncate">{program.batchName ?? t("Batch")}</span>
+          <span aria-hidden className="ml-1 text-ink-400">✎</span>
+        </button>
+      ) : (
+        <button
+          onClick={() => setOpen(true)}
+          className="inline-flex items-center gap-1 rounded-full border border-dashed border-ink-600 px-2.5 py-0.5 text-[11px] font-medium text-ink-400 hover:border-brand-400 hover:text-brand-200"
+        >
+          <span aria-hidden>👥</span>{t("Attach a batch")}
+        </button>
+      )}
+      {open && <BatchPickerModal program={program} onClose={() => setOpen(false)} onSaved={() => { setOpen(false); onSaved(); }} />}
+    </>
+  );
+}
+
+function BatchPickerModal({ program, onClose, onSaved }: { program: { id: string; batchId?: string }; onClose: () => void; onSaved: () => void }) {
+  const [batchId, setBatchId] = useState<string>(program.batchId ?? "");
+  const [err, setErr] = useState<string | null>(null);
+  const batchesQ = useQuery({ queryKey: ["fees.batches"], queryFn: () => feesApi.listBatches(), staleTime: 60_000 });
+  const batches: FeeBatchPickerRow[] = batchesQ.data?.batches ?? [];
+  const save = useMutation({
+    mutationFn: () => feesApi.updateProgram(program.id, { batchId: batchId || null }),
+    onSuccess: () => onSaved(),
+    onError: (e) => setErr(e instanceof Error ? e.message : t("Couldn't save.")),
+  });
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm" onClick={onClose} role="dialog" aria-modal>
+      <div className="w-full max-w-md rounded-2xl border border-ink-700 bg-ink-950 p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-start justify-between">
+          <div>
+            <h3 className="font-display text-lg text-ink-100">{t("Link a batch")}</h3>
+            <p className="mt-1 text-xs text-ink-400">{t("The program will inherit the batch's roster for one-click enrolment.")}</p>
+          </div>
+          <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-lg bg-ink-800 text-ink-300 hover:bg-ink-700 hover:text-white">✕</button>
+        </div>
+        <label className="mb-3 block">
+          <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-ink-300">{t("Batch")}</span>
+          <select
+            value={batchId}
+            onChange={(e) => setBatchId(e.target.value)}
+            className="h-11 w-full rounded-xl border border-ink-700 bg-ink-900 px-4 text-sm text-ink-100 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+          >
+            <option value="">{t("— None (academy-wide)")}</option>
+            {batches.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+                {typeof b.studentCount === "number" ? ` · ${b.studentCount} ${b.studentCount === 1 ? t("student") : t("students")}` : ""}
+                {b.coachName ? ` · ${b.coachName}` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+        {err && <div role="alert" className="mb-3 rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{err}</div>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="h-11 rounded-xl px-4 text-sm font-semibold text-ink-300 hover:bg-ink-800">{t("Cancel")}</button>
+          <button
+            onClick={() => save.mutate()}
+            disabled={save.isPending || batchId === (program.batchId ?? "")}
+            className="inline-flex h-11 items-center rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 px-5 text-sm font-semibold text-white shadow-glow disabled:opacity-50"
+          >
+            {save.isPending ? t("Saving…") : t("Save")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Bulk enrol from batch (one-click) ---------------------------------
+// Only shown when the program has a batch attached. Every student in the
+// batch is enrolled in the program's plan; already-enrolled students are
+// skipped (idempotent), which is what makes it safe to click even if a
+// student was added ad-hoc first.
+function BulkEnrolFromBatchButton({ programId, batchName, onDone }: { programId: string; batchName?: string; onDone: () => void }) {
+  const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const bulk = useMutation({
+    mutationFn: () => feesApi.bulkEnrollFromBatch(programId, {}),
+    onSuccess: (r) => {
+      setToast({
+        kind: "ok",
+        text: r.enrolled > 0
+          ? t(`Enrolled ${r.enrolled} from ${r.batchName}${r.skipped > 0 ? ` (${r.skipped} already enrolled)` : ""}.`)
+          : r.skipped > 0
+            ? t(`Everyone in ${r.batchName} is already enrolled.`)
+            : t(`No students in ${r.batchName} yet.`),
+      });
+      onDone();
+    },
+    onError: (e) => setToast({ kind: "err", text: e instanceof Error ? e.message : t("Bulk enrolment failed.") }),
+  });
+  return (
+    <>
+      <button
+        onClick={() => {
+          if (!window.confirm(t(`Enrol every student from "${batchName ?? "batch"}" into this program's plan? Already-enrolled students will be skipped.`))) return;
+          bulk.mutate();
+        }}
+        disabled={bulk.isPending}
+        className="inline-flex h-10 items-center gap-2 rounded-xl border border-brand-500/50 bg-brand-500/10 px-4 text-sm font-semibold text-brand-200 transition hover:bg-brand-500/20 disabled:opacity-50"
+        title={batchName ? t(`One-click: enrol everyone in ${batchName}`) : t("Enrol everyone in the linked batch")}
+      >
+        {bulk.isPending ? "⏳" : "👥"} {t("Enrol from batch")}
+      </button>
+      {toast && (
+        <div role="status" className={`fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl border px-4 py-2 text-sm shadow-2xl ${toast.kind === "ok" ? "border-accent-500/40 bg-ink-950 text-accent-200" : "border-red-500/40 bg-ink-950 text-red-200"}`}>
+          {toast.text}
           <button onClick={() => setToast(null)} className="ml-2 text-ink-400 hover:text-white">✕</button>
         </div>
       )}

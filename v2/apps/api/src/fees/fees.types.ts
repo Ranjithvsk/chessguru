@@ -37,6 +37,14 @@ export interface FeeProgramDoc {
   description?: string;
   currency: "INR";
   status: ProgramStatus;
+  /** Optional link to an `academyBatches` row. Powers the "enrol all
+   *  students from this batch" one-click on the program detail page +
+   *  the batch chip on the list. Null = program is academy-wide (a
+   *  one-off like a summer camp registration or private-class package
+   *  that any student can be added to individually). No lock — a
+   *  student can still be enrolled in multiple programs, e.g. their
+   *  regular batch + a summer class + a private-class package. */
+  batchId?: string;
   createdAt: Date;
   updatedAt: Date;
   createdBy: string;             // userId of the academy owner / fees admin
@@ -62,6 +70,7 @@ export interface FeeHeadDoc {
 export interface CreateProgramInput {
   name: string;
   description?: string;
+  batchId?: string | null;       // optional academyBatches._id
   heads?: Array<{
     name: string;
     amountPaise: number;
@@ -70,17 +79,48 @@ export interface CreateProgramInput {
   }>;
 }
 
+/** PATCH shape — same fields as create, but every field is optional and
+ *  only the ones present in the body are applied. Kept intentionally
+ *  narrow for MVP; heads are edited via a separate future endpoint. */
+export interface UpdateProgramInput {
+  name?: string;
+  description?: string;
+  batchId?: string | null;       // null clears; string sets; undefined leaves alone
+}
+
 export interface ProgramResponse {
   id: string;
   name: string;
   description?: string;
   currency: "INR";
   status: ProgramStatus;
+  batchId?: string;              // stringified; omitted when null in DB
+  batchName?: string;            // denormalised at read-time for the UI chip
   createdAt: string;
   updatedAt: string;
   headCount: number;
   totalPaise: number;            // sum of head amounts — a preview number for the list card
   heads?: HeadResponse[];        // included in single-program GET; omitted in list
+}
+
+/** Minimal shape returned by /api/fees/batches — powers the batch dropdown
+ *  on program-create + the picker on "bulk enrol from batch". We deliberately
+ *  don't return the whole batch doc (which includes studentIds arrays) here;
+ *  callers who need the roster hit /api/fees/programs/:id/bulk-enroll-batch. */
+export interface FeeBatchPickerRow {
+  id: string;
+  name: string;
+  coachName?: string;
+  studentCount: number;
+}
+
+/** Response for POST /api/fees/programs/:id/bulk-enroll-batch. Same shape as
+ *  the regular bulkEnroll response so the frontend can reuse the toast UX. */
+export interface BulkEnrollFromBatchResponse {
+  enrolled: number;
+  skipped: number;
+  batchName: string;
+  planId: string;
 }
 
 export interface HeadResponse {

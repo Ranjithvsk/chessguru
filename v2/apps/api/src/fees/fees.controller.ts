@@ -32,6 +32,7 @@ import {
   RecordManualPaymentInput,
   ReminderChannel,
   UpdateFeeSettingsInput,
+  UpdateProgramInput,
   UpsertPlanInput,
   WaiveInvoiceInput,
 } from "./fees.types";
@@ -64,6 +65,35 @@ export class FeesController {
   async archiveProgram(@Req() req: any, @Param("id") id: string) {
     if (!req?.session?.userId) throw new UnauthorizedException();
     return this.svc.archiveProgram(req.session, id);
+  }
+
+  @Patch("programs/:id")
+  async updateProgram(@Req() req: any, @Param("id") id: string, @Body() body: UpdateProgramInput) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    return this.svc.updateProgram(req.session, id, body);
+  }
+
+  /** Bulk enrol every student in the program's linked batch. Body accepts
+   *  optional discount fields that apply to every enrolment in this batch —
+   *  e.g. "everyone in the summer camp gets 10% off". */
+  @Post("programs/:id/bulk-enroll-batch")
+  async bulkEnrollFromBatch(
+    @Req() req: any,
+    @Param("id") id: string,
+    @Body() body: { discountPct?: number; discountFlatPaise?: number } = {},
+  ) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    return this.svc.bulkEnrollFromBatch(req.session, id, {
+      discountPct: typeof body?.discountPct === "number" ? body.discountPct : undefined,
+      discountFlatPaise: typeof body?.discountFlatPaise === "number" ? body.discountFlatPaise : undefined,
+    });
+  }
+
+  /** Batch dropdown used by program-create + program-edit forms. */
+  @Get("batches")
+  async listBatches(@Req() req: any) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    return { batches: await this.svc.listBatchesForFees(req.session) };
   }
 
   // ---- plans (1:1 with program) -------------------------------------------

@@ -66,7 +66,10 @@ import {
   ProgramResponse,
   RecordManualPaymentInput,
   StudentPickRow,
+  UpdateProgramInput,
   UpsertPlanInput,
+  FeeBatchPickerRow,
+  BulkEnrollFromBatchResponse,
   VALID_CADENCES,
   VALID_KINDS,
   VALID_MANUAL_METHODS,
@@ -96,6 +99,11 @@ export class FeesService {
   private counters()    { return this.conn.db!.collection<FeeCounterDoc>("fees_counters"); }
   // ChessGuru already models students + parents as users rows — we reuse.
   private users()       { return this.conn.db!.collection("users"); }
+  // academyBatches lives in the academy module; we read-only-touch it from
+  // fees for (a) the batch dropdown on program-create and (b) bulk enrol
+  // "all students from batch X". Never write here — batches are edited via
+  // the academy admin surface.
+  private batches()     { return this.conn.db!.collection("academyBatches"); }
 
   // Called on module init to make sure the indices we count on for tenant scoping
   // and lookup are present. Idempotent — createIndex is a no-op on second run.
@@ -191,7 +199,7 @@ export class FeesService {
     };
   }
 
-  private shapeProgram(p: FeeProgramDoc, heads?: FeeHeadDoc[]): ProgramResponse {
+  private shapeProgram(p: FeeProgramDoc, heads?: FeeHeadDoc[], batchName?: string): ProgramResponse {
     const list = heads ?? [];
     const totalPaise = list.reduce((s, h) => s + h.amountPaise, 0);
     return {
@@ -200,12 +208,30 @@ export class FeesService {
       description: p.description,
       currency: p.currency,
       status: p.status,
+      batchId: p.batchId,
+      batchName,
       createdAt: p.createdAt.toISOString(),
       updatedAt: p.updatedAt.toISOString(),
       headCount: list.length,
       totalPaise,
       heads: heads ? list.map((h) => this.shapeHead(h)) : undefined,
     };
+  }
+
+  /** Validate + normalise a batchId from a user-supplied input. Returns the
+   *  string ID (unchanged) if the batch exists in this academy; throws
+   *  BadRequestException on garbage / cross-tenant IDs. Accepts undefined
+   *  (returns undefined) so caller can differentiate "clear the batch" (null)
+   *  from "leave alone" (undefined). */
+  private async resolveBatchId(academyId: string, raw: unknown): Promise<string | undefined | null> {
+    if (raw === undefined) return undefined;
+    if (raw === null || raw === "") return null;
+    if (typeof raw !== "string") throw new BadRequestException("batchId must be a string.");
+    let oid: ObjectId;
+    try { oid = new ObjectId(raw); } catch { throw new BadRequestException("batchId isn't a valid id."); }
+    const batch = await this.batches().findOne({ _id: oid, academyId }, { projection: { _id: 1 } as never });
+    if (!batch) throw new BadRequestException("That batch isn't in this academy.");
+    return String(batch._id);
   }
 
   // ---- program CRUD ---------------------------------------------------------
@@ -228,6 +254,8 @@ export class FeesService {
       order: i,
     }));
 
+    const batchIdOrNull = await this.resolveBatchId(academyId, input?.batchId);
+
     const now = new Date();
     const programDoc: Omit<FeeProgramDoc, "_id"> = {
       academyId,
@@ -235,6 +263,10 @@ export class FeesService {
       description,
       currency: "INR",
       status: "ACTIVE",
+      // Only stamp batchId when explicitly set. Null returned by resolveBatchId
+      // means the caller passed null/"" — treat as "no batch"; we don't store
+      // an explicit null in the doc, we just omit the field.
+      ...(batchIdOrNull ? { batchId: batchIdOrNull } : {}),
       createdAt: now,
       updatedAt: now,
       createdBy: userId,
@@ -261,7 +293,42 @@ export class FeesService {
     }
 
     const saved: FeeProgramDoc = { ...(programDoc as FeeProgramDoc), _id: programId as ObjectId };
-    return this.shapeProgram(saved, headDocs);
+    // Fetch batch name for the response so the caller doesn't need a
+    // second round trip. Cheap — one projection lookup.
+    const batchName = batchIdOrNull ? (await this.batches().findOne({ _id: new ObjectId(batchIdOrNull) }, { projection: { name: 1 } as never }))?.name : undefined;
+    return this.shapeProgram(saved, headDocs, batchName);
+  }
+
+  /** PATCH /programs/:id — currently supports name / description / batchId
+   *  edits. Head-list edits are a separate future endpoint (touch the head
+   *  collection directly). Batch changes take effect on the NEXT bulk-enrol —
+   *  existing enrolments aren't retroactively re-scoped. */
+  async updateProgram(session: Session, id: string, input: UpdateProgramInput): Promise<ProgramResponse> {
+    const { academyId } = this.requireOwner(session);
+    const _id = this.oid(id);
+    const program = await this.programs().findOne({ _id, academyId });
+    if (!program) throw new NotFoundException("Program not found.");
+
+    const patch: Record<string, unknown> = { updatedAt: new Date() };
+    const unset: Record<string, unknown> = {};
+
+    if (input?.name !== undefined) patch.name = this.assertName(input.name);
+    if (input?.description !== undefined) patch.description = this.assertDescription(input.description);
+
+    if (input?.batchId !== undefined) {
+      const resolved = await this.resolveBatchId(academyId, input.batchId);
+      if (resolved === null) unset.batchId = "";
+      else patch.batchId = resolved;
+    }
+
+    const update: Record<string, unknown> = { $set: patch };
+    if (Object.keys(unset).length > 0) update.$unset = unset;
+    await this.programs().updateOne({ _id, academyId }, update);
+
+    const heads = await this.heads().find({ academyId, programId: String(_id) }).sort({ order: 1 }).toArray();
+    const fresh = (await this.programs().findOne({ _id, academyId }))!;
+    const batchName = fresh.batchId ? (await this.batches().findOne({ _id: new ObjectId(fresh.batchId) }, { projection: { name: 1 } as never }))?.name : undefined;
+    return this.shapeProgram(fresh, heads, batchName);
   }
 
   async listPrograms(session: Session, opts: { status?: string; q?: string } = {}): Promise<ProgramResponse[]> {
@@ -285,12 +352,22 @@ export class FeesService {
       arr.push(h);
       byProgram.set(h.programId, arr);
     }
+    // Also batch-fetch the batch names referenced by any program in this
+    // page so we can render the batch chip without an N+1 lookup.
+    const batchIds = programs.map((p) => p.batchId).filter((b): b is string => !!b);
+    const batchOids: ObjectId[] = [];
+    for (const b of batchIds) { try { batchOids.push(new ObjectId(b)); } catch { /* skip */ } }
+    const batchRows = batchOids.length
+      ? await this.batches().find({ _id: { $in: batchOids }, academyId }, { projection: { _id: 1, name: 1 } as never }).toArray()
+      : [];
+    const batchNameById = new Map(batchRows.map((b) => [String(b._id), b.name as string]));
     // shapeProgram gets a `[]` when a program has no heads — headCount/totalPaise
     // become 0. `heads` in the response is intentionally left undefined for the
     // list surface; the drawer/detail view fetches it.
     return programs.map((p) => {
       const list = byProgram.get(String(p._id)) ?? [];
-      const shaped = this.shapeProgram(p, list);
+      const batchName = p.batchId ? batchNameById.get(p.batchId) : undefined;
+      const shaped = this.shapeProgram(p, list, batchName);
       // strip full heads array from the list response
       return { ...shaped, heads: undefined };
     });
@@ -302,7 +379,87 @@ export class FeesService {
     const program = await this.programs().findOne({ _id, academyId });
     if (!program) throw new NotFoundException("Program not found.");
     const heads = await this.heads().find({ academyId, programId: String(_id) }).sort({ order: 1 }).toArray();
-    return this.shapeProgram(program, heads);
+    const batchName = program.batchId
+      ? (await this.batches().findOne({ _id: new ObjectId(program.batchId), academyId }, { projection: { name: 1 } as never }))?.name
+      : undefined;
+    return this.shapeProgram(program, heads, batchName);
+  }
+
+  // ==========================================================================
+  // Batch picker + bulk-enrol-from-batch
+  // ==========================================================================
+
+  /** Small dropdown-oriented response — id + name + coach name + student count.
+   *  Powers the "attach a batch to this program" picker on program-create and
+   *  the "which batch to enrol from" fallback UI. Read-only. */
+  async listBatchesForFees(session: Session): Promise<FeeBatchPickerRow[]> {
+    const { academyId } = this.requireOwner(session);
+    const rows = await this.batches()
+      .find({ academyId }, { projection: { _id: 1, name: 1, coachUserId: 1, studentIds: 1 } as never })
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .toArray();
+    if (rows.length === 0) return [];
+    // Resolve coach names in one batch. Coach is a `users` row.
+    const coachOids: ObjectId[] = [];
+    for (const r of rows) {
+      if (!r.coachUserId) continue;
+      try { coachOids.push(new ObjectId(String(r.coachUserId))); } catch { /* skip */ }
+    }
+    const coaches = coachOids.length
+      ? await this.users().find({ _id: { $in: coachOids } }, { projection: { name: 1, username: 1 } as never }).toArray()
+      : [];
+    const coachById = new Map(coaches.map((c: any) => [String(c._id), (c.name as string | undefined) ?? (c.username as string | undefined)]));
+    return rows.map((r: any) => ({
+      id: String(r._id),
+      name: String(r.name ?? ""),
+      coachName: r.coachUserId ? coachById.get(String(r.coachUserId)) : undefined,
+      studentCount: Array.isArray(r.studentIds) ? r.studentIds.length : 0,
+    }));
+  }
+
+  /** POST /api/fees/programs/:id/bulk-enroll-batch — enrol every student in
+   *  the program's linked batch into the program's plan. Skips students that
+   *  are already enrolled (idempotent). If the program has no batch attached,
+   *  400. If the program has no plan yet, 400. */
+  async bulkEnrollFromBatch(session: Session, programId: string, opts: { discountPct?: number; discountFlatPaise?: number } = {}): Promise<BulkEnrollFromBatchResponse> {
+    const { academyId } = this.requireOwner(session);
+    const pid = this.oid(programId);
+    const program = await this.programs().findOne({ _id: pid, academyId });
+    if (!program) throw new NotFoundException("Program not found.");
+    if (!program.batchId) throw new BadRequestException("This program isn't linked to a batch. Edit the program to attach one first.");
+
+    // Batch must still exist + belong to this academy (defense in depth —
+    // batches can be deleted after being linked). Also grabs studentIds.
+    let batchOid: ObjectId;
+    try { batchOid = new ObjectId(program.batchId); } catch { throw new BadRequestException("Program's linked batch id is malformed."); }
+    const batch: any = await this.batches().findOne({ _id: batchOid, academyId });
+    if (!batch) throw new BadRequestException("The batch linked to this program no longer exists. Edit the program to pick another.");
+
+    // Plan must exist — every enrolment must be attached to a plan.
+    const plan = await this.plans().findOne({ academyId, programId: String(pid) });
+    if (!plan) throw new BadRequestException("This program doesn't have a plan yet. Configure one first.");
+
+    const studentIds: string[] = Array.isArray(batch.studentIds) ? batch.studentIds.map(String) : [];
+    if (studentIds.length === 0) {
+      return { enrolled: 0, skipped: 0, batchName: String(batch.name ?? ""), planId: String(plan._id) };
+    }
+
+    // Reuse the existing bulk-enrol machinery — same validation, same idempotent
+    // "already enrolled? skip" behaviour. Passes discount opts straight through
+    // so bulk-enrol-from-batch can also apply a per-batch scholarship.
+    const res = await this.bulkEnroll(session, {
+      planId: String(plan._id),
+      studentUserIds: studentIds,
+      discountPct: opts.discountPct,
+      discountFlatPaise: opts.discountFlatPaise,
+    });
+    return {
+      enrolled: res.enrolled,
+      skipped: res.skipped,
+      batchName: String(batch.name ?? ""),
+      planId: String(plan._id),
+    };
   }
 
   async archiveProgram(session: Session, id: string): Promise<{ ok: true }> {

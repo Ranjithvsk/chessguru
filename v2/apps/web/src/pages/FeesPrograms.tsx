@@ -20,7 +20,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { feesApi, fmtRupees, parseRupeesInput, type CreateProgramInput, type FeeHeadKind, type ProgramResponse } from "../lib/fees-api";
+import { feesApi, fmtRupees, parseRupeesInput, type CreateProgramInput, type FeeHeadKind, type FeeBatchPickerRow, type ProgramResponse } from "../lib/fees-api";
 
 // Trivial in-file i18n placeholder — replaced by react-intl in M4. Keeps every
 // string discoverable via `t(` so the extraction script picks them all up.
@@ -142,7 +142,13 @@ function ProgramCard({ p, onOpen }: { p: ProgramResponse; onOpen: () => void }) 
         )}
       </div>
       {p.description && (
-        <p className="mb-4 line-clamp-2 text-sm text-ink-300">{p.description}</p>
+        <p className="mb-3 line-clamp-2 text-sm text-ink-300">{p.description}</p>
+      )}
+      {p.batchName && (
+        <div className="mb-3 inline-flex w-fit items-center gap-1.5 rounded-full bg-brand-500/10 px-2.5 py-1 text-[11px] font-medium text-brand-200 ring-1 ring-brand-400/30">
+          <span aria-hidden>👥</span>
+          <span className="truncate">{p.batchName}</span>
+        </div>
       )}
       <div className="mt-auto flex items-end justify-between">
         <div>
@@ -254,12 +260,21 @@ type DraftHead = { name: string; amountRupees: string; kind: FeeHeadKind };
 function CreateProgramModal({ onClose, onCreated }: { onClose: () => void; onCreated: (p: ProgramResponse) => void }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [batchId, setBatchId] = useState<string>("");    // "" = academy-wide (no batch)
   const [heads, setHeads] = useState<DraftHead[]>([
     { name: "Tuition", amountRupees: "", kind: "TUITION" },
   ]);
   const [err, setErr] = useState<string | null>(null);
 
   const total = heads.reduce((s, h) => s + (parseRupeesInput(h.amountRupees) ?? 0), 0);
+
+  // Batch picker — fetched once, cached; empty is fine (dropdown shows "None / academy-wide").
+  const batchesQ = useQuery({
+    queryKey: ["fees.batches"],
+    queryFn: () => feesApi.listBatches(),
+    staleTime: 60_000,
+  });
+  const batches: FeeBatchPickerRow[] = batchesQ.data?.batches ?? [];
 
   const create = useMutation({
     mutationFn: (input: CreateProgramInput) => feesApi.createProgram(input),
@@ -282,7 +297,12 @@ function CreateProgramModal({ onClose, onCreated }: { onClose: () => void; onCre
       if (paise === null || paise < 1) { setErr(t(`Head "${rawName}" needs an amount (e.g. 1800).`)); return; }
       validHeads.push({ name: rawName, amountPaise: paise, kind: h.kind });
     }
-    create.mutate({ name: name.trim(), description: description.trim() || undefined, heads: validHeads });
+    create.mutate({
+      name: name.trim(),
+      description: description.trim() || undefined,
+      batchId: batchId || null,
+      heads: validHeads,
+    });
   }
 
   function updateHead(i: number, patch: Partial<DraftHead>) {
@@ -336,6 +356,29 @@ function CreateProgramModal({ onClose, onCreated }: { onClose: () => void; onCre
             maxLength={400}
             className="w-full rounded-xl border border-ink-700 bg-ink-900 px-4 py-2 text-sm text-ink-100 placeholder:text-ink-500 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
           />
+        </label>
+
+        <label className="mb-4 block">
+          <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-ink-300">
+            {t("Attach to a batch")} <span className="normal-case text-ink-500">({t("optional")})</span>
+          </span>
+          <select
+            value={batchId}
+            onChange={(e) => setBatchId(e.target.value)}
+            className="h-11 w-full rounded-xl border border-ink-700 bg-ink-900 px-4 text-sm text-ink-100 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+          >
+            <option value="">{t("— None (academy-wide, enrol students individually)")}</option>
+            {batches.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+                {typeof b.studentCount === "number" ? ` · ${b.studentCount} ${b.studentCount === 1 ? t("student") : t("students")}` : ""}
+                {b.coachName ? ` · ${b.coachName}` : ""}
+              </option>
+            ))}
+          </select>
+          <span className="mt-1 block text-[11px] text-ink-500">
+            {t("Linking to a batch lets you enrol every student in it with one click. A student can still be added to other programs (summer class, private class) later.")}
+          </span>
         </label>
 
         <div className="mb-3 flex items-center justify-between">
