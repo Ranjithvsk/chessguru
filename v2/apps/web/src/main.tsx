@@ -40,13 +40,25 @@ import { PublicResultsHome, PublicResultsDetail } from "./pages/PublicResults";
 import PublicPlayer from "./pages/PublicPlayer";
 import PublicFederation from "./pages/PublicFederation";
 import AcademyDashboardPage from "./pages/AcademyDashboard";
-import FeesLandingPage from "./pages/Fees";
-import FeesProgramsPage from "./pages/FeesPrograms";
-import FeesProgramDetailPage from "./pages/FeesProgramDetail";
-import FeesInvoicesPage from "./pages/FeesInvoices";
-import FeesSettingsPage from "./pages/FeesSettings";
-import FeesReportsPage from "./pages/FeesReports";
-import ParentPayPage from "./pages/parent/PayHome";
+// Fees pages are lazy-loaded so the whole module (incl. recharts) stays out
+// of the initial bundle. Every user pays the initial-boot cost of the main
+// bundle; only fees users pay for fees.
+import { lazy, Suspense } from "react";
+const FeesLandingPage       = lazy(() => import("./pages/Fees"));
+const FeesProgramsPage      = lazy(() => import("./pages/FeesPrograms"));
+const FeesProgramDetailPage = lazy(() => import("./pages/FeesProgramDetail"));
+const FeesInvoicesPage      = lazy(() => import("./pages/FeesInvoices"));
+const FeesSettingsPage      = lazy(() => import("./pages/FeesSettings"));
+const FeesReportsPage       = lazy(() => import("./pages/FeesReports"));
+const ParentPayPage         = lazy(() => import("./pages/parent/PayHome"));
+// Small fallback for lazy chunks — brand-tinted spinner + tiny nudge.
+function LazyFallback() {
+  return (
+    <div className="grid min-h-[60vh] place-items-center">
+      <div className="animate-spin h-8 w-8 rounded-full border-2 border-ink-800 border-t-brand-500" />
+    </div>
+  );
+}
 import StudentsManagerPage from "./pages/StudentsManager";
 import StudentPerformancePage from "./pages/StudentPerformance";
 import BatchPerformancePage from "./pages/BatchPerformance";
@@ -161,7 +173,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="academy-page/:slug" element={<AcademyPublicPage />} />
           {/* Parent fees portal — public magic-link, no App chrome (parents
               never see the coach navbar; it's a payment landing). */}
-          <Route path="pay/:token" element={<ParentPayPage />} />
+          <Route path="pay/:token" element={<Suspense fallback={<LazyFallback />}><ParentPayPage /></Suspense>} />
           <Route element={<App />}>
             <Route index element={<PuzzlesPage />} />
             <Route path="play" element={<PlayPage />} />
@@ -242,12 +254,12 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="player/:fide_id" element={<PublicPlayer />} />
             <Route path="federation/:code" element={<PublicFederation />} />
             <Route path="academy" element={<AcademyDashboardPage />} />
-            <Route path="fees" element={<ErrorBoundary label="Fees"><FeesLandingPage /></ErrorBoundary>} />
-            <Route path="fees/programs" element={<ErrorBoundary label="Fee programs"><FeesProgramsPage /></ErrorBoundary>} />
-            <Route path="fees/programs/:id" element={<ErrorBoundary label="Fee program"><FeesProgramDetailPage /></ErrorBoundary>} />
-            <Route path="fees/invoices" element={<ErrorBoundary label="Fee invoices"><FeesInvoicesPage /></ErrorBoundary>} />
-            <Route path="fees/settings" element={<ErrorBoundary label="Fee settings"><FeesSettingsPage /></ErrorBoundary>} />
-            <Route path="fees/reports" element={<ErrorBoundary label="Fee reports"><FeesReportsPage /></ErrorBoundary>} />
+            <Route path="fees"                element={<ErrorBoundary label="Fees"><Suspense fallback={<LazyFallback />}><FeesLandingPage /></Suspense></ErrorBoundary>} />
+            <Route path="fees/programs"       element={<ErrorBoundary label="Fee programs"><Suspense fallback={<LazyFallback />}><FeesProgramsPage /></Suspense></ErrorBoundary>} />
+            <Route path="fees/programs/:id"   element={<ErrorBoundary label="Fee program"><Suspense fallback={<LazyFallback />}><FeesProgramDetailPage /></Suspense></ErrorBoundary>} />
+            <Route path="fees/invoices"       element={<ErrorBoundary label="Fee invoices"><Suspense fallback={<LazyFallback />}><FeesInvoicesPage /></Suspense></ErrorBoundary>} />
+            <Route path="fees/settings"       element={<ErrorBoundary label="Fee settings"><Suspense fallback={<LazyFallback />}><FeesSettingsPage /></Suspense></ErrorBoundary>} />
+            <Route path="fees/reports"        element={<ErrorBoundary label="Fee reports"><Suspense fallback={<LazyFallback />}><FeesReportsPage /></Suspense></ErrorBoundary>} />
             <Route path="students" element={<StudentsManagerPage />} />
             <Route path="academy/performance" element={<ErrorBoundary label="Student performance"><AcademyPerformancePage /></ErrorBoundary>} />
             <Route path="academy/leaderboard" element={<ErrorBoundary label="Academy leaderboard"><LeaderboardPage /></ErrorBoundary>} />

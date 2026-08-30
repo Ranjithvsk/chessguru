@@ -136,23 +136,73 @@
         } catch (e) { /* fall through */ }
       })();
     </script>
+    <style>
+      /* Inline styles for the loading + failure fallback so they render even
+         before the CSS bundle arrives (which is the whole point of the
+         safety net — the app hasn't booted yet). */
+      #cg-boot-status { position: fixed; inset: 0; display: grid; place-items: center; background: #0b0f19; color: #f1f5f9; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; text-align: center; padding: 24px; }
+      #cg-boot-status.hidden { display: none; }
+      #cg-boot-status .spinner { width: 42px; height: 42px; border-radius: 50%; border: 3px solid #1f2937; border-top-color: #6366f1; animation: cg-spin 800ms linear infinite; margin-bottom: 18px; }
+      #cg-boot-status .msg { font-size: 14px; color: #9ca3af; max-width: 320px; line-height: 1.5; }
+      #cg-boot-status .msg b { color: #f1f5f9; }
+      #cg-boot-status .actions { display: none; margin-top: 22px; gap: 8px; flex-wrap: wrap; justify-content: center; }
+      #cg-boot-status .actions button { border: 1px solid #374151; background: #111827; color: #f1f5f9; font-size: 13px; font-weight: 600; padding: 10px 16px; border-radius: 10px; cursor: pointer; }
+      #cg-boot-status .actions button.primary { background: linear-gradient(135deg, #4f46e5, #6366f1); border-color: transparent; }
+      #cg-boot-status.stuck .spinner { animation: none; border-top-color: #f59e0b; }
+      #cg-boot-status.stuck .actions { display: flex; }
+      #cg-boot-status.stuck .msg .waiting { display: none; }
+      @keyframes cg-spin { to { transform: rotate(360deg); } }
+    </style>
     <script>
-      // WHITE-SCREEN SAFETY NET (2026-08-15). If React hasn't rendered
-      // anything into #root within 6 seconds, force-recover: unregister ALL
-      // service workers + clear caches + reload. This escapes stuck SW
-      // states where a cached bundle references an asset that no longer
-      // exists on the server (which broke every device during Aug 15's
-      // rapid-deploy cycle).
+      // ---- White-screen safety net (2026-08-15, tightened 2026-08-30) -----
+      //
+      // The v2 bundle is large (~5 MB uncompressed / ~1 MB gzip) and Indian
+      // parents on 3G can easily need 10-12 s to download + parse it. The
+      // ORIGINAL 6-second cutoff was firing routinely on slow connections,
+      // even when the app WOULD have booted given another few seconds. First
+      // fire → clear caches + reload; second fire → "failed twice" dead-end
+      // screen telling the parent to close the tab. Guna hit this repeatedly
+      // yesterday.
+      //
+      // Fix:
+      //   * Timeout 6 s → 15 s (realistic for slow 3G given bundle size).
+      //   * Show an inline spinner + progress copy the whole time so the
+      //     parent sees "we're loading" instead of a white void.
+      //   * At 15 s if root is still empty, show a "still loading, wait or
+      //     hard-reset" screen with two buttons instead of dead-ending.
+      //   * "Wait longer" clears the recovery flag + hides the fallback so
+      //     the parent can wait another 30 s without losing progress.
+      //   * "Hard reset" is the OLD nuke-caches-and-reload behaviour, gated
+      //     behind an explicit tap so we never surprise-nuke a slow load.
       (function () {
-        setTimeout(function () {
-          try {
-            var root = document.getElementById("root");
-            if (root && root.childElementCount > 0) return;
-            if (sessionStorage.getItem("cg_recovered") === "1") {
-              document.body.innerHTML = "<div style='padding:20px;font-family:sans-serif'><h2>ChessGuru failed to load twice.</h2><p>Please close and reopen the browser tab, or try a different browser.</p></div>";
-              return;
-            }
-            sessionStorage.setItem("cg_recovered", "1");
+        var TIMEOUT_MS = 15000;
+        var status = null;
+        function ensureStatus() {
+          if (status) return status;
+          status = document.createElement("div");
+          status.id = "cg-boot-status";
+          status.innerHTML =
+            '<div>' +
+              '<div class="spinner"></div>' +
+              '<div class="msg">' +
+                '<div class="waiting"><b>Loading ChessGuru…</b><br>Hang on — first load can take a few seconds on slow connections.</div>' +
+                '<div class="stuck-msg" style="display:none"><b>Still loading.</b><br>Your connection is slow — wait a bit longer, or hard-reset to clear caches and try again.</div>' +
+              '</div>' +
+              '<div class="actions">' +
+                '<button class="primary" id="cg-wait">Wait longer</button>' +
+                '<button id="cg-reset">Hard reset</button>' +
+              '</div>' +
+            '</div>';
+          (document.body || document.documentElement).appendChild(status);
+          status.querySelector("#cg-wait").addEventListener("click", function () {
+            try { sessionStorage.removeItem("cg_recovered"); } catch (e) {}
+            status.classList.remove("stuck");
+            status.querySelector(".stuck-msg").style.display = "none";
+            status.querySelector(".waiting").style.display = "";
+            // Give React another full window before showing stuck again.
+            scheduleStuck(TIMEOUT_MS);
+          });
+          status.querySelector("#cg-reset").addEventListener("click", function () {
             (async function () {
               try {
                 if ("serviceWorker" in navigator) {
@@ -163,17 +213,49 @@
                   var keys = await caches.keys();
                   for (var j = 0; j < keys.length; j++) await caches.delete(keys[j]);
                 }
-              } catch (e) { /* recover anyway */ }
+                try { sessionStorage.removeItem("cg_recovered"); } catch (e) {}
+              } catch (e) {}
               location.reload();
             })();
-          } catch (e) { /* nothing else to do */ }
-        }, 6000);
-        window.addEventListener("load", function () {
-          setTimeout(function () {
+          });
+          return status;
+        }
+        function hideStatus() { if (status) status.classList.add("hidden"); }
+        function markStuck() {
+          var s = ensureStatus();
+          s.classList.add("stuck");
+          s.querySelector(".waiting").style.display = "none";
+          s.querySelector(".stuck-msg").style.display = "";
+        }
+        var stuckTimer = null;
+        function scheduleStuck(ms) {
+          if (stuckTimer) clearTimeout(stuckTimer);
+          stuckTimer = setTimeout(function () {
             var root = document.getElementById("root");
-            if (root && root.childElementCount > 0) sessionStorage.removeItem("cg_recovered");
-          }, 2000);
-        });
+            if (root && root.childElementCount > 0) { hideStatus(); return; }
+            markStuck();
+          }, ms);
+        }
+        // Show the spinner immediately, then either React takes over or we
+        // switch to the stuck state at TIMEOUT_MS.
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", ensureStatus, { once: true });
+        } else {
+          ensureStatus();
+        }
+        scheduleStuck(TIMEOUT_MS);
+        // Once React renders, hide the fallback.
+        var checkInterval = setInterval(function () {
+          var root = document.getElementById("root");
+          if (root && root.childElementCount > 0) {
+            hideStatus();
+            try { sessionStorage.removeItem("cg_recovered"); } catch (e) {}
+            clearInterval(checkInterval);
+            if (stuckTimer) { clearTimeout(stuckTimer); stuckTimer = null; }
+          }
+        }, 250);
+        // Give up polling after 60 s so we don't burn CPU forever.
+        setTimeout(function () { clearInterval(checkInterval); }, 60000);
       })();
     </script>
   </head>
