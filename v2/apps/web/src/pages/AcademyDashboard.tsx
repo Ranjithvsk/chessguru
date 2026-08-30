@@ -8,7 +8,7 @@
 //
 // All lists auto-refresh so accepted invites turn into real rows without a
 // manual reload.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 // qrcode import retired 2026-08-30 with the UPI QR invoice card.
@@ -50,6 +50,8 @@ interface Student {
   // Phase 8e: puzzle activity snapshot
   puzzleSolves7d?: number; lastPuzzleAt?: string|null;
   dailyStreakCurrent?: number; dailyStreakLongest?: number;
+  // 2026-08-30 — surfaced for the "no parent" filter on the roster card grid.
+  parentIds?: string[];
 }
 // Mini 30-day attendance strip — 30 tiny cells, green when present.
 /** Absent-of-week alert banner. Appears at the top of /academy when there are
@@ -2204,138 +2206,15 @@ export default function AcademyDashboardPage() {
         </section>
       )}
 
-      {/* ── Students (owner sees all, coach sees theirs) ── */}
+      {/* ── Students (owner sees all, coach sees theirs) — card grid ── */}
       {canManage && (
-        <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
-          <div className="mb-3 flex items-baseline justify-between gap-2">
-            <h2 className="font-display text-lg text-white">
-              👦 {isCoach ? "My students" : "Students"} <span className="text-xs text-ink-500">({studentsShown.length})</span>
-            </h2>
-            {studentsShown.length > 0 && (
-              <button onClick={() => {
-                // Roster snapshot: joined-when, contact, puzzle rating,
-                // attendance rollup, pending fees. Enough for a parent
-                // meeting or a report-card prep without opening the app.
-                const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
-                const header = ["Username", "Email", "CoachId", "JoinedAt", "LastLogin", "PuzzleRating",
-                  "AttendedTotal", "AttendedThisWeek", "LastAttendedAt", "PendingFeesINR", "OldestPendingPeriod"];
-                const lines = [header.map(esc).join(",")];
-                for (const s of studentsShown) {
-                  lines.push([
-                    s.username,
-                    s.email || "",
-                    s.coachId || "",
-                    s.createdAt ? new Date(s.createdAt).toISOString() : "",
-                    s.lastLogin ? new Date(s.lastLogin).toISOString() : "",
-                    s.puzzleRating != null ? String(s.puzzleRating) : "",
-                    s.attendedTotal != null ? String(s.attendedTotal) : "",
-                    s.attendedThisWeek != null ? String(s.attendedThisWeek) : "",
-                    s.lastAttendedAt ? new Date(s.lastAttendedAt).toISOString() : "",
-                    s.pendingFeesPaise != null ? (s.pendingFeesPaise / 100).toFixed(2) : "",
-                    s.oldestPendingPeriod || "",
-                  ].map((c) => esc(String(c))).join(","));
-                }
-                const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url; a.download = `students-${new Date().toISOString().slice(0, 10)}.csv`;
-                document.body.appendChild(a); a.click(); a.remove();
-                setTimeout(() => URL.revokeObjectURL(url), 1000);
-              }}
-                title="Download the student roster as CSV"
-                className="rounded-full border border-ink-700 bg-ink-900 px-2.5 py-0.5 text-[11px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-ink-100">
-                ⬇ CSV <span className="ml-1 opacity-70">{studentsShown.length}</span>
-              </button>
-            )}
-          </div>
-          {studentsShown.length === 0 && (
-            <p className="text-sm text-ink-400">
-              No students yet. {isCoach ? "Invite one above." : "Owners invite students and pick which coach they join."}
-            </p>
-          )}
-          {studentsShown.length > 0 && (
-            <div className="overflow-x-auto rounded-lg border border-ink-700">
-              <table className="min-w-full text-sm">
-                <thead className="bg-ink-800 text-xs uppercase tracking-wide text-ink-400">
-                  <tr>
-                    <th className="px-3 py-2 text-left">Name</th>
-                    <th className="px-3 py-2 text-left">Email</th>
-                    {isOwner && <th className="px-3 py-2 text-left">Coach</th>}
-                    <th className="px-3 py-2 text-left">Rating</th>
-                    <th className="px-3 py-2 text-left" title="Solves in last 7d · daily-puzzle streak">Puzzle activity</th>
-                    <th className="px-3 py-2 text-left" title="Classes attended (all-time · this week)">Attendance</th>
-                    <th className="px-3 py-2 text-left">Fees pending</th>
-                    <th className="px-3 py-2 text-left">Last active</th>
-                    <th className="px-3 py-2 text-right"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {studentsShown.map((s) => {
-                    const att = s.attendedTotal ?? 0;
-                    const wk  = s.attendedThisWeek ?? 0;
-                    return (
-                      <tr key={s._id} className="border-t border-ink-800">
-                        <td className="px-3 py-2 text-white">{s.name || s.username}{s.name && s.username && s.name !== s.username ? <span className="ml-2 text-[11px] font-normal text-ink-500">@{s.username}</span> : null}</td>
-                        <td className="px-3 py-2 text-ink-300">{s.email || "—"}</td>
-                        {isOwner && <td className="px-3 py-2 text-ink-300">{s.coachId ? (coachById[s.coachId] ?? s.coachId) : "—"}</td>}
-                        <td className="px-3 py-2 text-white tabular-nums">{s.puzzleRating ?? 1500}</td>
-                        <td className="px-3 py-2 tabular-nums" title={`Last solve: ${s.lastPuzzleAt ? new Date(s.lastPuzzleAt).toLocaleString() : "never"}`}>
-                          <div className="flex flex-col gap-0.5">
-                            {(s.puzzleSolves7d ?? 0) === 0 ? (
-                              <span className="text-ink-500">—</span>
-                            ) : (
-                              <span className="text-white">
-                                {s.puzzleSolves7d}
-                                <span className="ml-1 text-[10px] text-ink-400">/ 7d</span>
-                              </span>
-                            )}
-                            {(s.dailyStreakCurrent ?? 0) > 0 ? (
-                              <span className="text-[10px] text-orange-300">🔥 {s.dailyStreakCurrent}-day daily</span>
-                            ) : (s.dailyStreakLongest ?? 0) > 0 ? (
-                              <span className="text-[10px] text-ink-500">🔥 best {s.dailyStreakLongest}</span>
-                            ) : null}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 tabular-nums" title={`Last attended: ${s.lastAttendedAt ? new Date(s.lastAttendedAt).toLocaleString() : "never"}`}>
-                          <div className="flex flex-col gap-1">
-                            {att === 0 ? (
-                              <span className="text-ink-500">—</span>
-                            ) : (
-                              <span className="text-white">
-                                {att}
-                                {wk > 0 && <span className="ml-1 text-[10px] text-emerald-300">· {wk} this wk</span>}
-                              </span>
-                            )}
-                            <AttendanceStrip days={s.attendance30d} />
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 tabular-nums" title={s.oldestPendingPeriod ? `Oldest: ${s.oldestPendingPeriod}` : ""}>
-                          {(s.pendingFeesPaise ?? 0) === 0 ? (
-                            <span className="text-emerald-300">✓ paid</span>
-                          ) : (
-                            <span className="text-rose-300">{rupees(s.pendingFeesPaise!)}</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-ink-400">{fmtAgo(s.lastLogin)}</td>
-                        <td className="px-3 py-2 text-right">
-                          <div className="flex justify-end gap-2 text-xs">
-                            <Link to={`/dashboard?as=${encodeURIComponent(s.username)}`} className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-2 py-1 text-brand-100 hover:bg-brand-500/20">📊 Perf</Link>
-                            <Link to={`/history?as=${encodeURIComponent(s.username)}`} className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-2 py-1 text-brand-100 hover:bg-brand-500/20">📜 History</Link>
-                            <ResetPasswordButton studentId={s._id} name={s.name || s.username} />
-                            <MarkAttendedButton studentId={s._id} name={s.name || s.username} />
-                            <MergeStudentButton studentId={s._id} name={s.name || s.username} />
-                            <LinkParentButton studentId={s._id} name={s.name || s.username} />
-                            {isOwner && <AssignCoachDropdown studentId={s._id} currentCoachId={s.coachId} coaches={coaches ?? []} />}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
+        <StudentRoster
+          students={studentsShown}
+          coaches={coaches ?? []}
+          coachById={coachById}
+          isCoach={!!isCoach}
+          isOwner={!!isOwner}
+        />
       )}
 
       {/* Non-management shell (student view) */}
@@ -4469,6 +4348,355 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
         className={`rounded-lg px-3 py-1 text-xs font-semibold ${live ? "bg-emerald-600 text-white hover:bg-emerald-500" : "bg-brand-600 text-white hover:bg-brand-500"}`}>
         {live ? "Join now" : "Open class"}
       </Link>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// StudentRoster — replaces the wide 9-column table (2026-08-30).
+// Card grid + search + filter chips. Each card summarises rating, puzzle
+// activity, attendance strip + fees. Secondary actions collapse into a "⋯"
+// overflow menu so the primary Perf / History CTAs stay uncluttered.
+// ═══════════════════════════════════════════════════════════════════════════
+
+type RosterFilter = "ALL" | "ACTIVE_WEEK" | "FEES_DUE" | "NO_PARENT" | "INACTIVE_14D";
+
+function StudentRoster({
+  students, coaches, coachById, isCoach, isOwner,
+}: {
+  students: Student[];
+  coaches: Coach[];
+  coachById: Record<string, string>;
+  isCoach: boolean;
+  isOwner: boolean;
+}) {
+  const [q, setQ] = useState("");
+  const [filter, setFilter] = useState<RosterFilter>("ALL");
+  const [coachFilter, setCoachFilter] = useState<string>(""); // coachId, "" = all coaches
+
+  // Precompute per-filter counts so the chips show a meaningful number.
+  // NOTE: chip counts are against the FULL roster, not the search-filtered
+  // list, so the numbers stay stable while typing.
+  const counts = useMemo(() => {
+    const c = { ALL: students.length, ACTIVE_WEEK: 0, FEES_DUE: 0, NO_PARENT: 0, INACTIVE_14D: 0 };
+    const twoWeeksAgo = Date.now() - 14 * 86400_000;
+    for (const s of students) {
+      if ((s.attendedThisWeek ?? 0) > 0 || (s.puzzleSolves7d ?? 0) > 0) c.ACTIVE_WEEK += 1;
+      if ((s.pendingFeesPaise ?? 0) > 0) c.FEES_DUE += 1;
+      if (!Array.isArray(s.parentIds) || s.parentIds.length === 0) c.NO_PARENT += 1;
+      const lastActive = s.lastLogin ? new Date(s.lastLogin).getTime() : 0;
+      if (lastActive < twoWeeksAgo) c.INACTIVE_14D += 1;
+    }
+    return c;
+  }, [students]);
+
+  const visible = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const twoWeeksAgo = Date.now() - 14 * 86400_000;
+    return students.filter((s) => {
+      if (needle) {
+        const hay = `${s.name ?? ""} ${s.username} ${s.email ?? ""}`.toLowerCase();
+        if (!hay.includes(needle)) return false;
+      }
+      if (coachFilter && String(s.coachId ?? "") !== coachFilter) return false;
+      switch (filter) {
+        case "ACTIVE_WEEK": return (s.attendedThisWeek ?? 0) > 0 || (s.puzzleSolves7d ?? 0) > 0;
+        case "FEES_DUE":    return (s.pendingFeesPaise ?? 0) > 0;
+        case "NO_PARENT":   return !Array.isArray(s.parentIds) || s.parentIds.length === 0;
+        case "INACTIVE_14D": {
+          const t = s.lastLogin ? new Date(s.lastLogin).getTime() : 0;
+          return t < twoWeeksAgo;
+        }
+        default: return true;
+      }
+    });
+  }, [students, q, filter, coachFilter]);
+
+  const downloadCSV = () => {
+    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+    const header = ["Username", "Email", "CoachId", "JoinedAt", "LastLogin", "PuzzleRating",
+      "AttendedTotal", "AttendedThisWeek", "LastAttendedAt", "PendingFeesINR", "OldestPendingPeriod"];
+    const lines = [header.map(esc).join(",")];
+    for (const s of visible) {
+      lines.push([
+        s.username,
+        s.email || "",
+        s.coachId || "",
+        s.createdAt ? new Date(s.createdAt).toISOString() : "",
+        s.lastLogin ? new Date(s.lastLogin).toISOString() : "",
+        s.puzzleRating != null ? String(s.puzzleRating) : "",
+        s.attendedTotal != null ? String(s.attendedTotal) : "",
+        s.attendedThisWeek != null ? String(s.attendedThisWeek) : "",
+        s.lastAttendedAt ? new Date(s.lastAttendedAt).toISOString() : "",
+        s.pendingFeesPaise != null ? (s.pendingFeesPaise / 100).toFixed(2) : "",
+        s.oldestPendingPeriod || "",
+      ].map((c) => esc(String(c))).join(","));
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `students-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  return (
+    <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
+      {/* Header */}
+      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
+        <h2 className="font-display text-lg text-white">
+          👦 {isCoach ? "My students" : "Students"}
+          <span className="ml-2 text-xs text-ink-500">{visible.length} of {students.length}</span>
+        </h2>
+        {students.length > 0 && (
+          <button onClick={downloadCSV}
+            title="Download the filtered roster as CSV"
+            className="rounded-full border border-ink-700 bg-ink-950 px-2.5 py-0.5 text-[11px] font-semibold text-ink-400 hover:bg-ink-800 hover:text-ink-100">
+            ⬇ CSV <span className="ml-1 opacity-70">{visible.length}</span>
+          </button>
+        )}
+      </div>
+
+      {students.length === 0 ? (
+        <p className="text-sm text-ink-400">
+          No students yet. {isCoach ? "Invite one above." : "Owners invite students and pick which coach they join."}
+        </p>
+      ) : (
+        <>
+          {/* Search + filter chips */}
+          <div className="mb-4 flex flex-col gap-3">
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <span className="pointer-events-none absolute inset-y-0 left-3 grid place-items-center text-ink-500">🔍</span>
+                <input
+                  type="search" value={q} onChange={(e) => setQ(e.target.value)}
+                  placeholder="Search by name or username…"
+                  className="h-10 w-full rounded-xl border border-ink-700 bg-ink-950 pl-9 pr-3 text-sm text-ink-100 placeholder:text-ink-500 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                />
+              </div>
+              {isOwner && (
+                <select
+                  value={coachFilter} onChange={(e) => setCoachFilter(e.target.value)}
+                  title="Filter by coach"
+                  className="h-10 rounded-xl border border-ink-700 bg-ink-950 px-3 text-sm text-ink-200 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                >
+                  <option value="">👨‍🏫 All coaches</option>
+                  {coaches.map((c) => (
+                    <option key={c._id} value={c._id}>{c.username}{(c as any).isOwner ? " · Owner" : ""}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {([
+                { k: "ALL",          label: "All",             tone: "brand"  },
+                { k: "ACTIVE_WEEK",  label: "🔥 Active this wk", tone: "accent" },
+                { k: "FEES_DUE",     label: "💸 Fees due",      tone: "rose"   },
+                { k: "NO_PARENT",    label: "👪 No parent",     tone: "gold"   },
+                { k: "INACTIVE_14D", label: "💤 Inactive 14d+", tone: "ink"    },
+              ] as const).map((c) => {
+                const on = filter === c.k;
+                const idle = c.tone === "brand"  ? "ring-brand-400/30 text-brand-300 bg-brand-500/10"
+                           : c.tone === "accent" ? "ring-accent-400/30 text-accent-300 bg-accent-500/10"
+                           : c.tone === "rose"   ? "ring-rose-400/30 text-rose-300 bg-rose-500/10"
+                           : c.tone === "gold"   ? "ring-gold-400/30 text-gold-300 bg-gold-500/10"
+                           :                       "ring-ink-600 text-ink-300 bg-ink-800";
+                const active = c.tone === "brand"  ? "ring-brand-400/70 bg-brand-500/25 text-brand-100"
+                             : c.tone === "accent" ? "ring-accent-400/70 bg-accent-500/25 text-accent-100"
+                             : c.tone === "rose"   ? "ring-rose-400/70 bg-rose-500/25 text-rose-100"
+                             : c.tone === "gold"   ? "ring-gold-400/70 bg-gold-500/25 text-gold-100"
+                             :                       "ring-ink-500 bg-ink-700 text-ink-100";
+                const n = counts[c.k as keyof typeof counts];
+                return (
+                  <button key={c.k} onClick={() => setFilter(c.k as RosterFilter)}
+                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 transition ${on ? active : idle} hover:brightness-125`}>
+                    {c.label}
+                    <span className={`rounded-full px-1.5 text-[10px] font-bold ${on ? "bg-black/25" : "bg-black/40"}`}>{n}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Grid */}
+          {visible.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-ink-700 py-10 text-center text-sm text-ink-400">
+              No students match that filter.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {visible.map((s) => (
+                <StudentCard key={s._id} s={s} isOwner={isOwner}
+                  coachName={s.coachId ? (coachById[s.coachId] ?? s.coachId) : undefined}
+                  coaches={coaches}
+                />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+// ---- Individual card ----------------------------------------------------
+function StudentCard({ s, isOwner, coachName, coaches }: {
+  s: Student; isOwner: boolean; coachName?: string; coaches: Coach[];
+}) {
+  const displayName = s.name || s.username;
+  const showAt = s.name && s.username && s.name !== s.username;
+  const rating = s.puzzleRating ?? 1500;
+  const solves7d = s.puzzleSolves7d ?? 0;
+  const streak = s.dailyStreakCurrent ?? 0;
+  const attWk = s.attendedThisWeek ?? 0;
+  const feesPaise = s.pendingFeesPaise ?? 0;
+  const hasParent = Array.isArray(s.parentIds) && s.parentIds.length > 0;
+  const initials = (displayName.match(/[A-Za-z0-9]/g) || []).slice(0, 2).join("").toUpperCase() || "??";
+
+  // Rating tier → colour so a glance across the grid clusters students.
+  const ratingTone =
+    rating >= 2000 ? { chip: "bg-gold-500/15 text-gold-200 ring-gold-400/40", label: "🏆" } :
+    rating >= 1500 ? { chip: "bg-brand-500/15 text-brand-200 ring-brand-400/40", label: "🎯" } :
+    rating >= 1000 ? { chip: "bg-accent-500/15 text-accent-200 ring-accent-400/40", label: "🎯" } :
+                     { chip: "bg-ink-800 text-ink-300 ring-ink-600", label: "🎯" };
+
+  // Corner ribbons (top-right of card) for the two most important flags.
+  const feeOverdue = feesPaise > 0 && !!s.oldestPendingPeriod;
+
+  return (
+    <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-ink-700 bg-gradient-to-br from-ink-900 to-ink-950 p-4 transition hover:border-brand-500/50">
+      {/* Corner status ribbons */}
+      {feeOverdue && (
+        <span className="pointer-events-none absolute right-2 top-2 rounded-full bg-rose-500/20 px-2 py-0.5 text-[10px] font-semibold text-rose-200 ring-1 ring-rose-400/40" title={`Oldest pending period: ${s.oldestPendingPeriod}`}>
+          fee due
+        </span>
+      )}
+
+      {/* Header: avatar + name + coach chip */}
+      <div className="mb-3 flex items-start gap-3">
+        <div className={`grid h-11 w-11 shrink-0 place-items-center rounded-full text-sm font-bold ring-1 ${ratingTone.chip}`}>
+          {initials}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-semibold text-white">{displayName}</div>
+          {showAt && <div className="truncate text-[11px] text-ink-500">@{s.username}</div>}
+          <div className="mt-1 flex flex-wrap gap-1">
+            {coachName && (
+              <span className="rounded-full bg-ink-800 px-1.5 py-0.5 text-[10px] text-ink-300" title="Coach">
+                👨‍🏫 {coachName}
+              </span>
+            )}
+            {!hasParent && (
+              <span className="rounded-full bg-purple-500/15 px-1.5 py-0.5 text-[10px] text-purple-200 ring-1 ring-purple-400/30" title="No parent linked — fee reminders + parent portal won't work">
+                👪 no parent
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Stat pills row */}
+      <div className="mb-3 grid grid-cols-2 gap-2 text-[11px]">
+        <div className="rounded-lg bg-ink-800/60 px-2 py-1.5" title={`Last solve: ${s.lastPuzzleAt ? new Date(s.lastPuzzleAt).toLocaleString() : "never"}`}>
+          <div className="text-[10px] uppercase tracking-wider text-ink-400">Rating</div>
+          <div className="flex items-baseline gap-1">
+            <span className="text-base font-bold tabular-nums text-white">{rating}</span>
+            {streak > 0 && <span className="text-[10px] text-orange-300">🔥 {streak}d</span>}
+            {streak === 0 && solves7d > 0 && <span className="text-[10px] text-ink-400">{solves7d}/7d</span>}
+          </div>
+        </div>
+        <div className="rounded-lg bg-ink-800/60 px-2 py-1.5" title={`Last attended: ${s.lastAttendedAt ? new Date(s.lastAttendedAt).toLocaleString() : "never"}`}>
+          <div className="text-[10px] uppercase tracking-wider text-ink-400">Attendance</div>
+          <div className="flex items-baseline gap-1">
+            <span className="text-base font-bold tabular-nums text-white">{attWk}</span>
+            <span className="text-[10px] text-ink-400">/ wk</span>
+            {(s.attendedTotal ?? 0) > 0 && <span className="ml-auto text-[10px] text-ink-500">{s.attendedTotal} total</span>}
+          </div>
+        </div>
+        <div className="col-span-2 rounded-lg bg-ink-800/60 px-2 py-1.5">
+          <div className="mb-1 text-[10px] uppercase tracking-wider text-ink-400">Last 30 days</div>
+          <AttendanceStrip days={s.attendance30d} />
+        </div>
+      </div>
+
+      {/* Fees + last active row */}
+      <div className="mb-3 flex items-center justify-between text-[11px]">
+        {feesPaise === 0 ? (
+          <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-emerald-300 ring-1 ring-emerald-400/30">✓ fees paid</span>
+        ) : (
+          <span className="rounded-full bg-rose-500/15 px-2 py-0.5 font-semibold text-rose-200 ring-1 ring-rose-400/30" title={s.oldestPendingPeriod ? `Oldest: ${s.oldestPendingPeriod}` : ""}>
+            💸 {rupees(feesPaise)}
+          </span>
+        )}
+        <span className="text-ink-500">{fmtAgo(s.lastLogin)}</span>
+      </div>
+
+      {/* Primary actions + overflow */}
+      <div className="mt-auto flex items-center gap-2">
+        <Link to={`/dashboard?as=${encodeURIComponent(s.username)}`}
+          className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded-lg border border-brand-500/50 bg-brand-500/10 px-2 text-xs font-semibold text-brand-100 hover:bg-brand-500/20">
+          📊 Perf
+        </Link>
+        <Link to={`/history?as=${encodeURIComponent(s.username)}`}
+          className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded-lg border border-brand-500/50 bg-brand-500/10 px-2 text-xs font-semibold text-brand-100 hover:bg-brand-500/20">
+          📜 History
+        </Link>
+        <StudentOverflowMenu s={s} isOwner={isOwner} coaches={coaches} />
+      </div>
+    </div>
+  );
+}
+
+// ---- Overflow ⋯ menu (secondary + destructive actions) ------------------
+function StudentOverflowMenu({ s, isOwner, coaches }: { s: Student; isOwner: boolean; coaches: Coach[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <button onClick={() => setOpen((v) => !v)}
+        title="More actions"
+        className={`grid h-8 w-8 place-items-center rounded-lg border border-ink-600 bg-ink-800 text-lg text-ink-200 hover:bg-ink-700 ${open ? "ring-2 ring-brand-400/40" : ""}`}>
+        ⋯
+      </button>
+      {open && (
+        <div className="absolute bottom-full right-0 z-20 mb-2 flex w-56 flex-col gap-1 rounded-xl border border-ink-700 bg-ink-950 p-2 shadow-2xl">
+          <MenuBtnWrap onClick={() => setOpen(false)}>
+            <ResetPasswordButton studentId={s._id} name={s.name || s.username} />
+          </MenuBtnWrap>
+          <MenuBtnWrap onClick={() => setOpen(false)}>
+            <MarkAttendedButton studentId={s._id} name={s.name || s.username} />
+          </MenuBtnWrap>
+          <MenuBtnWrap onClick={() => setOpen(false)}>
+            <LinkParentButton studentId={s._id} name={s.name || s.username} />
+          </MenuBtnWrap>
+          <MenuBtnWrap onClick={() => setOpen(false)}>
+            <MergeStudentButton studentId={s._id} name={s.name || s.username} />
+          </MenuBtnWrap>
+          {isOwner && (
+            <MenuBtnWrap onClick={() => setOpen(false)}>
+              <AssignCoachDropdown studentId={s._id} currentCoachId={s.coachId} coaches={coaches} />
+            </MenuBtnWrap>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Small wrapper that makes existing action buttons full-width inside the
+// overflow menu without editing every action component. The pass-through
+// onClick closes the menu when the child fires; the child's own logic
+// (prompts, mutations) still runs.
+function MenuBtnWrap({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+  return (
+    <div onClick={onClick} className="rounded-lg [&>*]:!w-full [&>*]:!justify-start">
+      {children}
     </div>
   );
 }

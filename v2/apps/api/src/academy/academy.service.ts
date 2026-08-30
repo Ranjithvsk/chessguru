@@ -2498,7 +2498,7 @@ Thank you!`;
     const filter: any = { academyId: g.academyId, role: "student" };
     if (g.role === "coach") filter.coachId = g.userId;
     const rows = await this.users()
-      .find(filter, { projection: { _id: 1, username: 1, name: 1, email: 1, coachId: 1, createdAt: 1, lastLogin: 1, dailyPuzzleStreak: 1 } })
+      .find(filter, { projection: { _id: 1, username: 1, name: 1, email: 1, coachId: 1, createdAt: 1, lastLogin: 1, dailyPuzzleStreak: 1, parentIds: 1 } })
       .sort({ createdAt: -1 })
       .toArray();
     if (rows.length === 0) return [];
