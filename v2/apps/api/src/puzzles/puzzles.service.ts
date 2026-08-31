@@ -806,7 +806,8 @@ export class PuzzlesService {
       // Losses always heavier than wins → naturally anti-inflation.
       const selectedTheme = body.theme || null;
 
-      // Session fatigue (owner 2026-08-24): dampens SAME-THEME grinding only.
+      // Session fatigue (owner 2026-08-24, extended to losses 2026-08-31):
+      // dampens SAME-THEME grinding — SYMMETRIC on wins and losses.
       // Formula:
       //   themeFatigue = 1 / (1 + sameThemeSolves30min / 15)
       //   → 1st=1.00, 15th=0.50, 30th=0.33, 60th=0.20
@@ -819,14 +820,19 @@ export class PuzzlesService {
       //   incorrectly zeroed by earlier volume-fatigue design.
       // - Rotating between different themes → NO fatigue (theme-fatigue
       //   counts only same-theme solves).
-      // - Losses → always full weight (missing an "easy" puzzle mid-grind
-      //   is the correction lever).
+      // - Losses now ALSO dampened (owner 2026-08-31, akshayprathab report):
+      //   under wins-only fatigue, kid grinds 30 mateIn1s → gains ~+40 total
+      //   (dampened to 33% weight) → one fumble at full weight cost him −12
+      //   → net-negative even at 90%+ win rate. Under symmetric fatigue, if
+      //   the win signal is noisy (grind = pattern memorization not skill),
+      //   the loss signal is equally noisy in the same session — dampen both.
+      //   Mix and fresh-theme losses stay at full weight (still meaningful).
       //
       // Reference: deepakcharanv Aug 22 grinded 143 mateIn1s → +525 rating
       // under old model. Under this design mateIn1 gain drops to ~+124.
       // A kid who switches themes or plays mix gets full rewards.
       let fatigueMul = 1;
-      if (win && selectedTheme && selectedTheme !== "mix") {
+      if (selectedTheme && selectedTheme !== "mix") {
         const t30m = new Date(Date.now() - 30 * 60_000);
         const uidRe = { $regex: `^${userId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:` } as any;
         const themeCount = await this.conn.db!.collection("rounds").countDocuments({
@@ -836,8 +842,10 @@ export class PuzzlesService {
       }
 
       const upd = updatePuzzleRating(perf, puzzleGlicko, win, selectedTheme);
-      // Apply fatigue by scaling the delta down (never up).
-      if (fatigueMul < 1 && upd.ratingDiff > 0) {
+      // Apply fatigue by scaling the delta toward zero (never past it).
+      // Works for both wins (positive delta shrinks) and losses (negative delta
+      // shrinks in magnitude — a −12 loss becomes −4 at fatigueMul=0.33).
+      if (fatigueMul < 1 && upd.ratingDiff !== 0) {
         const oldR = perf.gl.r;
         const dampenedDelta = Math.round(upd.ratingDiff * fatigueMul);
         upd.userPerf.gl.r = oldR + dampenedDelta;
