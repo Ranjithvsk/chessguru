@@ -838,7 +838,17 @@ export class PuzzlesService {
         const themeCount = await this.conn.db!.collection("rounds").countDocuments({
           _id: uidRe, k: "puzzle", sel: selectedTheme, d: { $gte: t30m },
         });
-        if (themeCount > 0) fatigueMul = 1 / (1 + themeCount / 15);
+        // Difficulty-aware fatigue divisor (2026-08-31, deepakcharanv report):
+        // hardest/harder mode serves puzzles rated +300/+600 above the user,
+        // so raw Glicko deltas are ~3-4× larger. Fatigue applied at the same
+        // rate leaves grinders net-positive even at deep grind (46 hardest
+        // mateIn2 in one day → +99 pts under n/15 formula). Steeper divisor
+        // on higher tiers so the fatigue curve keeps up with the bigger raw
+        // gains. Normal/easier stays at 15 (existing behavior unchanged).
+        const div = body.difficulty === "hardest" ? 8
+                  : body.difficulty === "harder"  ? 10
+                  : 15;
+        if (themeCount > 0) fatigueMul = 1 / (1 + themeCount / div);
       }
 
       const upd = updatePuzzleRating(perf, puzzleGlicko, win, selectedTheme);
