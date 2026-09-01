@@ -161,38 +161,94 @@ function fmtDate(d?: string|null) { return d ? new Date(d).toLocaleDateString(un
  *  parent then sees their child on /parent (billing + progress). Owner ask
  *  2026-08-18: "parent portal with billing and progress reports". */
 function LinkParentButton({ studentId, name }: { studentId: string; name: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button onClick={() => setOpen(true)}
+        className="rounded-lg border border-purple-500/50 bg-purple-500/10 px-2 py-1 text-purple-100 hover:bg-purple-500/20"
+        title="Link a parent — they'll see this child's progress + billing on /parent">
+        👪 Parent
+      </button>
+      {open && <LinkParentModal studentId={studentId} childName={name} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+/** Structured parent-link form — replaces the old triple-prompt() flow.
+ *  Owner ask 2026-09-01: "option to add parent name and WhatsApp mobile
+ *  number of the parent". Backend accepts email OR mobile (or both).
+ *  Requires at least one contact so we can reach the parent for reminders. */
+function LinkParentModal({ studentId, childName, onClose }: { studentId: string; childName: string; onClose: () => void }) {
   const qc = useQueryClient();
+  const [displayName, setDisplayName] = useState("");
+  const [mobile, setMobile] = useState("");
+  const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
   const submit = async () => {
-    const parentName = prompt(`Link a parent to ${name}.\n\nParent's display name:`, "");
-    if (parentName === null) return;
-    const email = prompt(`Parent email for ${parentName || "the parent"}:`, "");
-    if (email === null || !email.trim()) return;
+    setErr(null);
+    if (!displayName.trim()) { setErr("Parent name is required."); return; }
+    if (!mobile.trim() && !email.trim()) { setErr("Give a WhatsApp mobile OR an email so we can reach the parent."); return; }
     setBusy(true);
     try {
       const r = await fetch(`/v2api/api/academy/students/${encodeURIComponent(studentId)}/link-parent`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ displayName: parentName.trim(), email: email.trim() }),
+        body: JSON.stringify({ displayName: displayName.trim(), mobile: mobile.trim(), email: email.trim() }),
       });
       const j = await r.json();
       if (j?.ok) {
+        qc.invalidateQueries({ queryKey: ["academy-students"] });
         const c = j.credentials;
         if (c) alert(`Parent linked. Share these credentials with them:\nusername: ${c.username}\npassword: ${c.password}\nlogin: https://harinitharanjith.com/login\n\nOnce signed in they see /parent with your child's progress + billing.`);
-        else alert(`Linked existing parent ${j.parent?.username || email} to ${name}. They already have an account.`);
-        qc.invalidateQueries({ queryKey: ["academy-students"] });
+        else alert(`Linked existing parent ${j.parent?.username || displayName} to ${childName}. They already have an account.`);
+        onClose();
       } else {
-        alert(j?.error || "Couldn't link parent.");
+        setErr(j?.error || "Couldn't link parent.");
       }
-    } catch (e: any) { alert(e?.message || "Network error."); }
+    } catch (e: any) { setErr(e?.message || "Network error."); }
     finally { setBusy(false); }
   };
   return (
-    <button onClick={submit} disabled={busy}
-      className="rounded-lg border border-purple-500/50 bg-purple-500/10 px-2 py-1 text-purple-100 hover:bg-purple-500/20 disabled:opacity-60"
-      title="Link a parent — they'll see this child's progress + billing on /parent">
-      {busy ? "…" : "👪 Parent"}
-    </button>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" role="dialog" aria-modal onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl border border-purple-500/40 bg-ink-950 p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-start justify-between">
+          <div>
+            <h3 className="font-display text-lg text-purple-100">👪 Link parent to {childName}</h3>
+            <p className="mt-1 text-xs text-ink-400">They'll see fees + progress on <span className="font-mono">/parent</span>. WhatsApp reminders will use the mobile below.</p>
+          </div>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg bg-ink-800 text-ink-300 hover:bg-ink-700">✕</button>
+        </div>
+        <label className="mb-3 block">
+          <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-ink-300">Parent name</span>
+          <input autoFocus value={displayName} onChange={(e) => setDisplayName(e.target.value)} maxLength={60} placeholder="e.g. Ravi Kumar"
+            className="h-10 w-full rounded-lg border border-ink-700 bg-ink-900 px-3 text-sm text-ink-100 focus:border-purple-500 focus:outline-none" />
+        </label>
+        <label className="mb-3 block">
+          <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-ink-300">
+            📱 WhatsApp mobile <span className="normal-case text-emerald-400">(recommended)</span>
+          </span>
+          <input value={mobile} onChange={(e) => setMobile(e.target.value)} placeholder="+91 98765 43210" inputMode="tel" autoComplete="tel"
+            className="h-10 w-full rounded-lg border border-ink-700 bg-ink-900 px-3 text-sm text-ink-100 focus:border-purple-500 focus:outline-none" />
+          <span className="mt-1 block text-[11px] text-ink-500">10-15 digits, optionally starting with country code (+91, +1, …).</span>
+        </label>
+        <label className="mb-4 block">
+          <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-ink-300">
+            Email <span className="normal-case text-ink-500">(optional — needed for the parent-portal magic link)</span>
+          </span>
+          <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="ravi@example.com" autoComplete="email"
+            className="h-10 w-full rounded-lg border border-ink-700 bg-ink-900 px-3 text-sm text-ink-100 focus:border-purple-500 focus:outline-none" />
+        </label>
+        {err && <div className="mb-3 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">{err}</div>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="h-10 rounded-lg px-4 text-sm font-semibold text-ink-300 hover:bg-ink-800">Cancel</button>
+          <button onClick={submit} disabled={busy}
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-gradient-to-r from-purple-600 to-purple-500 px-5 text-sm font-semibold text-white shadow-glow disabled:opacity-50">
+            {busy ? "Linking…" : "Link parent"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2185,6 +2241,7 @@ export default function AcademyDashboardPage() {
                     <th className="px-3 py-2 text-left">Joined</th>
                     <th className="px-3 py-2 text-left">Last login</th>
                     <th className="px-3 py-2 text-left"># students</th>
+                    <th className="px-3 py-2 text-right"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2197,6 +2254,9 @@ export default function AcademyDashboardPage() {
                         <td className="px-3 py-2 text-ink-400">{fmtDate(c.createdAt)}</td>
                         <td className="px-3 py-2 text-ink-400">{fmtAgo(c.lastLogin)}</td>
                         <td className="px-3 py-2 text-ink-300 tabular-nums">{n}</td>
+                        <td className="px-3 py-2 text-right">
+                          {!c.isOwner && <RemoveCoachButton coachId={c._id} name={c.username} studentCount={n} />}
+                        </td>
                       </tr>
                     );
                   })}
@@ -4533,19 +4593,28 @@ function StudentRoster({
             </div>
           </div>
 
-          {/* Grid */}
+          {/* Grid — capped at 10 with an inner scroll (owner ask 2026-09-01:
+              "display 10 students with in scroll" — keeps the academy page
+              length manageable when a roster grows past 20-30 students). */}
           {visible.length === 0 ? (
             <div className="rounded-xl border border-dashed border-ink-700 py-10 text-center text-sm text-ink-400">
               No students match that filter.
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {visible.map((s) => (
-                <StudentCard key={s._id} s={s} isOwner={isOwner}
-                  coachName={s.coachId ? (coachById[s.coachId] ?? s.coachId) : undefined}
-                  coaches={coaches}
-                />
-              ))}
+            <div className="max-h-[720px] overflow-y-auto rounded-xl border border-ink-800 bg-ink-950/30 p-2">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {visible.map((s) => (
+                  <StudentCard key={s._id} s={s} isOwner={isOwner}
+                    coachName={s.coachId ? (coachById[s.coachId] ?? s.coachId) : undefined}
+                    coaches={coaches}
+                  />
+                ))}
+              </div>
+              {visible.length > 10 && (
+                <div className="pt-2 text-center text-[11px] text-ink-500">
+                  Scroll to see all {visible.length} students · filters + search live above
+                </div>
+              )}
             </div>
           )}
         </>
@@ -4698,9 +4767,79 @@ function StudentOverflowMenu({ s, isOwner, coaches }: { s: Student; isOwner: boo
               <AssignCoachDropdown studentId={s._id} currentCoachId={s.coachId} coaches={coaches} />
             </MenuBtnWrap>
           )}
+          {isOwner && (
+            <MenuBtnWrap onClick={() => setOpen(false)}>
+              <RemoveStudentButton studentId={s._id} name={s.name || s.username} />
+            </MenuBtnWrap>
+          )}
         </div>
       )}
     </div>
+  );
+}
+
+/** Owner-only: soft-detach a COACH from the academy. Students the coach
+ *  was assigned to get their `coachId` cleared (owner reassigns via the
+ *  ⋯ menu on each student card). Batches the coach owned get transferred
+ *  to the owner so scheduled classes don't dangle. */
+function RemoveCoachButton({ coachId, name, studentCount }: { coachId: string; name: string; studentCount: number }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    const warn = studentCount > 0
+      ? `Remove ${name} from the academy?\n\n${studentCount} student${studentCount === 1 ? "" : "s"} currently assigned to them will be UNASSIGNED — you'll need to reassign them to another coach. Batches they own transfer to you.`
+      : `Remove ${name} from the academy? They have no students assigned. Batches they own transfer to you.`;
+    if (!confirm(warn)) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/v2api/api/academy/coaches/${encodeURIComponent(coachId)}/remove`, {
+        method: "POST", credentials: "include",
+      });
+      const j = await r.json();
+      if (j?.ok) {
+        qc.invalidateQueries({ queryKey: ["academy-coaches"] });
+        qc.invalidateQueries({ queryKey: ["academy-students"] });
+        qc.invalidateQueries({ queryKey: ["academy-batches"] });
+      } else alert(j?.error || "Couldn't remove coach.");
+    } catch (e: any) { alert(e?.message || "Network error."); }
+    finally { setBusy(false); }
+  };
+  return (
+    <button onClick={submit} disabled={busy}
+      className="rounded-lg border border-rose-500/50 bg-rose-500/10 px-2 py-1 text-xs font-semibold text-rose-200 hover:bg-rose-500/20 disabled:opacity-60"
+      title="Remove this coach from your academy (soft-detach, data preserved)">
+      {busy ? "…" : "🚫 Remove"}
+    </button>
+  );
+}
+
+/** Owner-only: soft-detach a student from the academy. Confirms twice (once
+ *  via the ⋯ open, once explicitly) to avoid a fat-finger removal from a
+ *  scroll. Preserves the user account — they can be re-invited later. */
+function RemoveStudentButton({ studentId, name }: { studentId: string; name: string }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (!confirm(`Remove ${name} from the academy? Their puzzle history + rating is kept; they can be re-invited later. Any unpaid fee invoices remain.`)) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/v2api/api/academy/students/${encodeURIComponent(studentId)}/remove`, {
+        method: "POST", credentials: "include",
+      });
+      const j = await r.json();
+      if (j?.ok) {
+        qc.invalidateQueries({ queryKey: ["academy-students"] });
+        qc.invalidateQueries({ queryKey: ["academy-batches"] });
+      } else alert(j?.error || "Couldn't remove student.");
+    } catch (e: any) { alert(e?.message || "Network error."); }
+    finally { setBusy(false); }
+  };
+  return (
+    <button onClick={submit} disabled={busy}
+      className="rounded-lg border border-rose-500/50 bg-rose-500/10 px-2 py-1 text-rose-200 hover:bg-rose-500/20 disabled:opacity-60"
+      title="Remove this student from your academy (soft-detach, data preserved)">
+      {busy ? "…" : "🚫 Remove"}
+    </button>
   );
 }
 

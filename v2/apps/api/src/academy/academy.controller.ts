@@ -363,6 +363,15 @@ export class AcademyController {
     return this.svc.removeStudent(req.session, id);
   }
 
+  /** Owner-only: detach a coach from this academy. See removeCoach in
+   *  academy.service.ts for exact semantics (students unassigned, batches
+   *  transferred to owner, coach downgraded to plain user under the
+   *  fallback academy). */
+  @Post("coaches/:id/remove")
+  removeCoach(@Req() req: any, @Param("id") id: string) {
+    return this.svc.removeCoach(req.session, id);
+  }
+
   // ── Batches ──────────────────────────────────────────────
   @Get("batches")
   listBatches(@Req() req: any) { return this.svc.listBatches(req.session); }

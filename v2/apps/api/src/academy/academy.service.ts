@@ -208,14 +208,31 @@ export class AcademyService {
       return { ok: false, error: "That student isn't assigned to you." };
     }
     const displayName = String(body?.displayName || "").trim().slice(0, 60);
-    const email = String(body?.email || "").trim().toLowerCase();
-    if (!email || !email.includes("@")) return { ok: false, error: "Parent email is required." };
+    const emailRaw = String(body?.email || "").trim().toLowerCase();
+    // Accept + normalise WhatsApp mobile (2026-09-01). Strip everything except
+    // digits and a leading +. Accept a bare 10-15 digit number OR +CC-prefixed.
+    // Empty string means "no mobile provided".
+    const mobileRaw = String(body?.mobile || "").trim();
+    const mobileClean = mobileRaw
+      ? mobileRaw.replace(/[^\d+]/g, "").replace(/^(?!\+)/, "")   // just digits or +digits
+      : "";
+    const mobileOk = mobileClean === "" || /^(\+?\d{10,15})$/.test(mobileClean);
+    if (!mobileOk) return { ok: false, error: "Mobile must be 10-15 digits (optionally +country)." };
+    const email = emailRaw && emailRaw.includes("@") ? emailRaw : "";
+    // Either email OR mobile is required — pure name isn't enough to
+    // uniquely identify a parent OR let us contact them for fee reminders.
+    if (!email && !mobileClean) return { ok: false, error: "Parent email or WhatsApp mobile is required." };
 
-    let parent: any = await this.users().findOne({ email });
+    // Lookup by email OR mobile — whichever the caller supplied. Mobile
+    // dedupe lets a parent-with-no-email still be identified reliably.
+    let parent: any = null;
+    if (email) parent = await this.users().findOne({ email });
+    if (!parent && mobileClean) parent = await this.users().findOne({ mobile: mobileClean });
     let credentials: { username: string; password: string } | null = null;
     if (parent) {
       if (parent.role === "coach" || parent.role === "academy_owner") {
-        return { ok: false, error: `${email} is a ${parent.role.replace("_", " ")} — cannot also be a parent.` };
+        const label = email || mobileClean;
+        return { ok: false, error: `${label} is a ${parent.role.replace("_", " ")} — cannot also be a parent.` };
       }
       // Existing account (plain user, student, or already-parent) — upgrade
       // to parent role if not already and append the child.
@@ -226,11 +243,15 @@ export class AcademyService {
       // the parent lands in the right portal. Parents don't belong to a
       // coach — only students do.
       if (!parent.academyId) patch.academyId = g.academyId;
+      // Backfill missing contact info if the caller supplied it.
+      if (email && !parent.email) patch.email = email;
+      if (mobileClean && !parent.mobile) patch.mobile = mobileClean;
       await this.users().updateOne({ _id: parent._id }, { $set: patch });
     } else {
       // Create a new parent user.
       const sanitize = (s: string) => s.toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 24);
-      let base = sanitize(displayName) || sanitize(email.split("@")[0] || "") || "parent";
+      const emailLocal = email ? (email.split("@")[0] || "") : "";
+      let base = sanitize(displayName) || sanitize(emailLocal) || (mobileClean ? "parent-" + mobileClean.slice(-4) : "parent");
       if (base.length < 2) base = "parent";
       let uid = base, k = 2;
       while (await this.users().findOne({ $or: [{ _id: uid as any }, { username: { $regex: new RegExp("^" + uid + "$", "i") } }] } as any)) {
@@ -243,10 +264,12 @@ export class AcademyService {
       const hash = await bcrypt.default.hash(password, 10);
       const now = new Date();
       const doc: any = {
-        _id: uid, username: uid, name: displayName || uid, email, bpass: hash,
+        _id: uid, username: uid, name: displayName || uid, bpass: hash,
         role: "parent", academyId: g.academyId,
         childrenIds: [String(student._id)],
         createdAt: now, updatedAt: now,
+        ...(email ? { email } : {}),
+        ...(mobileClean ? { mobile: mobileClean } : {}),
       };
       await this.users().insertOne(doc);
       parent = doc;
@@ -832,6 +855,59 @@ export class AcademyService {
         try { await this.fees.syncBatchEnrollments(g.academyId, String(b._id), g.userId); } catch { /* per-batch best-effort */ }
       }
     } catch { /* fees is best-effort */ }
+    return { ok: true, movedTo: fallback ? FALLBACK_ACADEMY : null };
+  }
+
+  /** Owner-only: detach a COACH from this academy. Mirrors removeStudent's
+   *  soft-detach: coach stays a valid user (rating, session, notes preserved)
+   *  and can be re-invited later, but they're moved to the platform fallback.
+   *  Every student they coached is unassigned (coachId=null) — owner
+   *  reassigns via the AssignCoachDropdown. Every batch they owned is
+   *  transferred to the owner so its scheduled classes don't dangle. */
+  async removeCoach(session: any, coachId: string): Promise<any> {
+    const g = this.ensureOwner(session);
+    const coach: any = await this.users().findOne({ _id: coachId as any, academyId: g.academyId, role: "coach" });
+    if (!coach) return { ok: false, error: "That coach isn't in this academy." };
+    if (String(coach._id) === g.userId) return { ok: false, error: "You can't remove yourself." };
+    const now = new Date();
+    const FALLBACK_ACADEMY = "chess-guru";
+    const fallback = await this.conn.db!.collection("academies").findOne({ _id: FALLBACK_ACADEMY as any });
+
+    // Move the coach user itself.
+    if (fallback) {
+      await this.users().updateOne(
+        { _id: coach._id },
+        { $set: {
+            academyId: FALLBACK_ACADEMY,
+            role: "user",   // downgrade — no longer a coach in the fallback
+            academyDetachedFrom: g.academyId,
+            academyDetachedAt: now,
+            academyDetachedBy: g.userId,
+            updatedAt: now,
+          } },
+      );
+    } else {
+      await this.users().updateOne(
+        { _id: coach._id },
+        { $set: { role: "user", academyDetachedAt: now, academyDetachedBy: g.userId }, $unset: { academyId: "" } },
+      );
+    }
+
+    // Unassign every student this coach was coaching so no student is
+    // stranded pointing at a coach who's no longer in the academy.
+    await this.users().updateMany(
+      { academyId: g.academyId, role: "student", coachId: String(coach._id) },
+      { $set: { coachId: null, updatedAt: now }, $unset: { coachAssignedAt: "", coachAssignedBy: "" } },
+    );
+
+    // Transfer any batches this coach owned to the academy owner so the
+    // batch's scheduled classes + fee links don't orphan. Coach's students
+    // in those batches stay in the batch — only coachUserId changes.
+    await this.batches().updateMany(
+      { academyId: g.academyId, coachUserId: String(coach._id) },
+      { $set: { coachUserId: g.userId, updatedAt: now } },
+    );
+
     return { ok: true, movedTo: fallback ? FALLBACK_ACADEMY : null };
   }
 
