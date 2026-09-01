@@ -17,7 +17,7 @@ import {
 import { Track, DataPacket_Kind } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
-import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, triggerClassSeek, triggerClassPromoteVariation, triggerClassMakeMainline, triggerClassDeleteFrom, triggerClassLoadTree, type SharedTreeNode } from "../components/SharedClassBoard";
+import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, triggerClassSeek, triggerClassPromoteVariation, triggerClassMakeMainline, triggerClassDeleteFrom, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, type SharedTreeNode, type ChallengeAnswerRow } from "../components/SharedClassBoard";
 import { OPENINGS, findOpeningForLine, openingBySlug, type Opening } from "../lib/openings";
 import { fetchExplorer, type ExplorerData, type ExplorerMove } from "../lib/explorer";
 import { listRepertoire, addRepertoire, shareRepertoire, type RepertoireEntry, type RepMoveNode } from "../lib/repertoire-api";
@@ -2125,6 +2125,9 @@ export default function ClassV2Page() {
                   </button>
                 )}
                 {role === "coach" && (
+                  <ChallengeCoachButton />
+                )}
+                {role === "coach" && (
                   <button
                     onClick={() => setSendPositionOpen(true)}
                     title="Send the current board (with move list) to students' Notebook"
@@ -2159,4 +2162,200 @@ export default function ClassV2Page() {
       </div>
     </div>
   );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Challenge mode — "find the good moves"
+// Coach clicks 🧠 Challenge → duration+prompt modal → starts. Students
+// see prompt overlay + solve on their own boards for the duration. At
+// reveal, coach sees every student's SAN sequence in the Answers panel.
+// ═══════════════════════════════════════════════════════════════════════
+
+function ChallengeCoachButton() {
+  const challenge = useClassChallenge();
+  const { startFen, tree, cursorPath } = useClassMoveList();
+  const [open, setOpen] = useState(false);
+  // If a challenge is active, the button becomes "End now"
+  if (challenge?.active) {
+    return <ChallengeCoachActiveChip challenge={challenge} />;
+  }
+  // If a challenge just ended, show the Answers panel and let coach dismiss.
+  if (challenge && !challenge.active && challenge.answers) {
+    return <ChallengeAnswersPanel challenge={challenge} />;
+  }
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        title="Freeze the board and ask students to find good moves on their own boards"
+        className="rounded-full border border-purple-500/50 bg-purple-500/20 px-3 py-1.5 text-sm font-semibold text-purple-100 hover:bg-purple-500/30"
+      >
+        🧠 Challenge
+      </button>
+      {open && (
+        <ChallengeStartModal
+          onClose={() => setOpen(false)}
+          onStart={(opts) => {
+            // The frozen position = the coach's CURRENT board state (fen
+            // at cursorPath from startFen). We just pass the two things
+            // the server needs: positionFen (current board) + startFen
+            // (for notation). ChallengeGameRef in SharedClassBoard uses
+            // positionFen as the starting point for student play.
+            triggerClassChallengeStart({
+              positionFen: computeFenAt(startFen, tree, cursorPath),
+              startFen,
+              prompt: opts.prompt,
+              durationSec: opts.durationSec,
+            });
+            setOpen(false);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function ChallengeCoachActiveChip({ challenge }: { challenge: NonNullable<ReturnType<typeof useClassChallenge>> }) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  void tick;
+  const remaining = Math.max(0, Math.ceil((challenge.endsAt - Date.now()) / 1000));
+  const label = remaining >= 60 ? `${Math.floor(remaining/60)}m ${(remaining%60).toString().padStart(2,"0")}s` : `${remaining}s`;
+  return (
+    <button
+      onClick={() => { if (window.confirm("End the challenge now?")) triggerClassChallengeEnd(); }}
+      title="End the challenge and reveal the coach's board + collect answers"
+      className="rounded-full border border-purple-400/70 bg-purple-500/30 px-3 py-1.5 text-sm font-semibold text-white shadow-glow hover:brightness-110"
+    >
+      🧠 {label} · {challenge.answered}/{challenge.total} answered · ✋ Reveal
+    </button>
+  );
+}
+
+function ChallengeStartModal({ onClose, onStart }: { onClose: () => void; onStart: (opts: { prompt: string; durationSec: number }) => void }) {
+  const [prompt, setPrompt] = useState("Find the best move");
+  const [durationSec, setDurationSec] = useState(120);
+  const presets = [30, 60, 120, 300, 600];
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" role="dialog" aria-modal onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl border border-purple-500/40 bg-ink-950 p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-start justify-between">
+          <div>
+            <h3 className="font-display text-lg text-purple-100">🧠 Challenge students</h3>
+            <p className="mt-1 text-xs text-ink-400">Board freezes. Students play on their own boards. Reveal at end.</p>
+          </div>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg bg-ink-800 text-ink-300 hover:bg-ink-700">✕</button>
+        </div>
+        <label className="mb-3 block">
+          <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-ink-300">Prompt (shown on student boards)</span>
+          <input value={prompt} onChange={(e) => setPrompt(e.target.value)} maxLength={200}
+            className="h-10 w-full rounded-lg border border-ink-700 bg-ink-900 px-3 text-sm text-ink-100 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/30" />
+        </label>
+        <label className="mb-4 block">
+          <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-ink-300">Duration</span>
+          <div className="flex flex-wrap gap-2">
+            {presets.map((s) => (
+              <button key={s} onClick={() => setDurationSec(s)}
+                className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${durationSec === s ? "border-purple-400 bg-purple-500/25 text-purple-100" : "border-ink-700 bg-ink-900 text-ink-300 hover:border-purple-500/60"}`}>
+                {s >= 60 ? `${s/60}m` : `${s}s`}
+              </button>
+            ))}
+          </div>
+        </label>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="h-10 rounded-lg px-4 text-sm font-semibold text-ink-300 hover:bg-ink-800">Cancel</button>
+          <button onClick={() => onStart({ prompt: prompt.trim() || "Find the best move", durationSec })}
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-gradient-to-r from-purple-600 to-purple-500 px-5 text-sm font-semibold text-white shadow-glow hover:brightness-110">
+            🧠 Start challenge
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnType<typeof useClassChallenge>> }) {
+  const [open, setOpen] = useState(true);
+  const answers: ChallengeAnswerRow[] = challenge.answers ?? [];
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="rounded-full border border-purple-400/50 bg-purple-500/20 px-3 py-1.5 text-sm font-semibold text-purple-100 hover:bg-purple-500/30"
+      >
+        📋 Answers ({answers.length})
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" role="dialog" aria-modal onClick={() => setOpen(false)}>
+          <div className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-2xl border border-purple-500/40 bg-ink-950 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between border-b border-ink-800 p-4">
+              <div>
+                <h3 className="font-display text-lg text-purple-100">📋 Challenge answers</h3>
+                {challenge.prompt && <p className="mt-1 text-xs text-ink-400">"{challenge.prompt}"</p>}
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => { triggerClassChallengeDismiss(); setOpen(false); }}
+                  className="rounded-lg bg-ink-800 px-3 py-1 text-xs font-semibold text-ink-300 hover:bg-ink-700"
+                  title="Clear the answers panel and re-enable the 🧠 Challenge button">Dismiss</button>
+                <button onClick={() => setOpen(false)} className="grid h-8 w-8 place-items-center rounded-lg bg-ink-800 text-ink-300 hover:bg-ink-700">✕</button>
+              </div>
+            </div>
+            <div className="max-h-[70vh] overflow-y-auto p-4">
+              {answers.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-ink-700 py-10 text-center text-sm text-ink-400">
+                  No students answered.
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-[11px] uppercase tracking-wider text-ink-400">
+                      <th className="pb-2 pr-3 font-medium">Student</th>
+                      <th className="pb-2 pr-3 font-medium">Moves</th>
+                      <th className="pb-2 font-medium">Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {answers.map((a) => (
+                      <tr key={a.userId} className="border-t border-ink-800 align-top">
+                        <td className="py-2 pr-3 text-white">{a.displayName || a.userId}</td>
+                        <td className="py-2 pr-3 font-mono text-brand-200">{a.movesSan.join(" ") || <span className="text-ink-500">—</span>}</td>
+                        <td className="py-2 text-[11px] tabular-nums text-ink-400">
+                          {a.firstMoveAt && a.lastMoveAt ? `${Math.round((a.lastMoveAt - a.firstMoveAt)/1000)}s` : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// Compute the FEN at (startFen, tree, cursorPath) — used by ChallengeCoachButton
+// so the frozen position matches the coach's CURRENT board view.
+function computeFenAt(startFen: string, tree: SharedTreeNode[], cursorPath: number[]): string {
+  try {
+    // Lazy-load chess.js off the module scope — this file is already large.
+    // Same singleton the notation panel uses.
+    const { Chess } = require("chess.js") as typeof import("chess.js");
+    const c = new Chess(startFen);
+    let cur: SharedTreeNode[] = tree;
+    for (const idx of cursorPath) {
+      const n = cur[idx];
+      if (!n) break;
+      try { c.move({ from: n.move.from, to: n.move.to, promotion: (n.move.promotion as any) || "q" }); }
+      catch { break; }
+      cur = n.children;
+    }
+    return c.fen();
+  } catch {
+    return startFen;
+  }
 }

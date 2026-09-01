@@ -152,6 +152,40 @@ export function useClassOrientation(): Orientation {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Challenge mode (2026-09-01, "find the good moves"):
+// Module-level state so ClassV2 (footer coach controls, floating chip,
+// answers panel) can read/drive it via hooks. Component populates from
+// WS frames + sends via triggers.
+// ─────────────────────────────────────────────────────────────────────
+export interface ChallengeAnswerRow { userId: string; displayName: string; movesSan: string[]; firstMoveAt?: number; lastMoveAt?: number; finalFen?: string; }
+export interface ChallengeState {
+  positionFen: string;
+  startFen: string;
+  prompt: string;
+  endsAt: number;
+  answered: number;
+  total: number;
+  active: boolean;                 // false after end — used to show Answers panel
+  answers: ChallengeAnswerRow[] | null;  // populated for coach after end
+  studentMoves: string[];          // local SAN sequence for THIS student (empty for coach)
+}
+let _challenge: ChallengeState | null = null;
+const _challengeSubs = new Set<() => void>();
+function _publishChallenge(next: ChallengeState | null) { _challenge = next; _challengeSubs.forEach((f) => f()); }
+export function useClassChallenge(): ChallengeState | null {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((n) => n + 1); _challengeSubs.add(f); return () => { _challengeSubs.delete(f); }; }, []);
+  return _challenge;
+}
+// Coach-side triggers — the send fns get wired up by SharedClassBoard on mount.
+let _challengeStartFn: ((opts: { positionFen: string; startFen: string; prompt: string; durationSec: number }) => void) | null = null;
+let _challengeEndFn:   (() => void) | null = null;
+let _challengeDismissFn: (() => void) | null = null;
+export function triggerClassChallengeStart(opts: { positionFen: string; startFen: string; prompt: string; durationSec: number }) { _challengeStartFn?.(opts); }
+export function triggerClassChallengeEnd() { _challengeEndFn?.(); }
+export function triggerClassChallengeDismiss() { _challengeDismissFn?.(); }
+
+// ─────────────────────────────────────────────────────────────────────
 // PositionEditorModal — inline "board editor" for the class Setup flow.
 // Coach picks a piece from the palette, clicks squares to place it, and
 // EVERY change is broadcast live via loadFen so students see the position
@@ -558,6 +592,13 @@ export default function SharedClassBoard(
   const boardWrapRef = useRef<HTMLDivElement | null>(null);
   const lastPointerSentAt = useRef<number>(0);
   const pointerOffTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Challenge mode local state: while a challenge is active, students play
+  // on their OWN chess.js instance (independent of the shared room). Coach's
+  // board stays frozen at the position. Both see the same countdown.
+  const challengeGameRef = useRef<Chess | null>(null);
+  const challengeMovesRef = useRef<string[]>([]);
+  const [challengeFen, setChallengeFen] = useState<string | null>(null);
+  const [challengeDests, setChallengeDests] = useState<Map<string, string[]>>(new Map());
   // Auto-hide remote pointer after 2s of silence — catches coach navigating
   // away without a clean "pointer-off" (page close, network drop).
   useEffect(() => {
@@ -689,6 +730,60 @@ export default function SharedClassBoard(
         else if (msg.type === "orientation") { if (msg.orientation === "white" || msg.orientation === "black") _publishOrientation(msg.orientation); }
         else if (msg.type === "classEnded") { onClassEnded?.(String(msg.reason || "coach_left")); }
         else if (msg.type === "not-invited") { onClassEnded?.("not-invited"); }
+        // ── Challenge mode frames ───────────────────────────────────
+        else if (msg.type === "challenge_start") {
+          // Initialise local challenge game from the position. Students play
+          // on this; coach's local game stays untouched and the frozen board
+          // just renders `msg.positionFen` via the challenge-state.
+          try {
+            challengeGameRef.current = new Chess(msg.positionFen);
+            const dests = destsFromChess(challengeGameRef.current);
+            setChallengeFen(challengeGameRef.current.fen());
+            setChallengeDests(dests);
+            challengeMovesRef.current = [];
+          } catch {
+            challengeGameRef.current = null;
+            setChallengeFen(null);
+            setChallengeDests(new Map());
+          }
+          _publishChallenge({
+            positionFen: String(msg.positionFen),
+            startFen: String(msg.startFen ?? msg.positionFen),
+            prompt: String(msg.prompt ?? ""),
+            endsAt: Number(msg.endsAt) || (Date.now() + 60_000),
+            answered: 0,
+            total: 0,
+            active: true,
+            answers: null,
+            studentMoves: [],
+          });
+        }
+        else if (msg.type === "challenge_progress") {
+          if (!_challenge || !_challenge.active) return;
+          _publishChallenge({
+            ..._challenge,
+            answered: Number(msg.answered) || 0,
+            total: Number(msg.total) || 0,
+          });
+        }
+        else if (msg.type === "challenge_end") {
+          // Server reveals: everyone snaps back to the shared board.
+          // Coach also gets the answers array — students get an undefined
+          // (they see their own attempt via the "Show my answer" toggle).
+          const answers: ChallengeAnswerRow[] | null = Array.isArray(msg.answers) ? msg.answers : null;
+          const myMoves = challengeMovesRef.current;
+          challengeGameRef.current = null;
+          setChallengeFen(null);
+          setChallengeDests(new Map());
+          if (_challenge) {
+            _publishChallenge({
+              ..._challenge,
+              active: false,
+              answers,
+              studentMoves: myMoves,
+            });
+          }
+        }
       };
     };
 
@@ -760,8 +855,49 @@ export default function SharedClassBoard(
   const sendMove = (from: string, to: string) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // Challenge student path: apply to LOCAL chess.js, don't touch shared
+    // board, send `challenge:move` so the server records SAN + tallies
+    // this student in the answered count. Coach in challenge mode = board
+    // is frozen (they don't drag pieces during a challenge).
+    if (_challenge && _challenge.active && role !== "coach" && challengeGameRef.current) {
+      const g = challengeGameRef.current;
+      const fromFen = g.fen();
+      let mv;
+      try { mv = g.move({ from, to, promotion: "q" }); } catch { mv = null; }
+      if (!mv) return;   // illegal — no-op
+      const san = (mv as any).san ?? "";
+      const nextFen = g.fen();
+      challengeMovesRef.current = [...challengeMovesRef.current, san];
+      setChallengeFen(nextFen);
+      setChallengeDests(destsFromChess(g));
+      if (_challenge) {
+        _publishChallenge({ ..._challenge, studentMoves: challengeMovesRef.current });
+      }
+      try { ws.send(JSON.stringify({ type: "challenge:move", fromFen, move: { from, to }, san, nextFen })); } catch { /* */ }
+      return;
+    }
+    // Coach in challenge mode: don't send. Board is frozen at position.
+    if (_challenge && _challenge.active && role === "coach") return;
     try { ws.send(JSON.stringify({ type: "move", move: { from, to } })); } catch { /* */ }
   };
+  // Coach-only triggers for starting/ending a challenge from ClassV2 footer.
+  useEffect(() => {
+    _challengeStartFn = ({ positionFen, startFen, prompt, durationSec }) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      try { ws.send(JSON.stringify({ type: "challenge:start", positionFen, startFen, prompt, durationSec })); } catch { /* */ }
+    };
+    _challengeEndFn = () => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      try { ws.send(JSON.stringify({ type: "challenge:end" })); } catch { /* */ }
+    };
+    _challengeDismissFn = () => {
+      // Client-only: clear the answers panel without server round-trip.
+      if (_challenge && !_challenge.active) _publishChallenge(null);
+    };
+    return () => { _challengeStartFn = null; _challengeEndFn = null; _challengeDismissFn = null; };
+  }, [role]);
   const sendReset = () => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -884,7 +1020,24 @@ export default function SharedClassBoard(
   // the student's board up until an unrelated re-render.
   const locked = useClassLocked();
   const orientation = useClassOrientation();
-  const boardMovable: "both" | "none" = role === "coach" ? "both" : (locked ? "none" : "both");
+  // Challenge state — subscribe so the board re-renders when it starts/ends.
+  const challengeUI = useClassChallenge();
+  const inChallenge = !!challengeUI?.active;
+  const isCoachRole = role === "coach";
+  // Board movability:
+  // - Coach in normal mode: both. In challenge mode: none (board frozen).
+  // - Student in normal mode: locked → none, else both.
+  // - Student in challenge mode: always both (they solve on their own board).
+  const boardMovable: "both" | "none" =
+    inChallenge
+      ? (isCoachRole ? "none" : "both")
+      : (isCoachRole ? "both" : (locked ? "none" : "both"));
+  // What FEN + dests to render:
+  // - Student in challenge: their LOCAL fen + dests.
+  // - Everyone else (incl coach in challenge): the shared board state, which
+  //   the server keeps frozen at challenge.positionFen during a challenge.
+  const displayFen = (inChallenge && !isCoachRole && challengeFen) ? challengeFen : fen;
+  const displayDests = (inChallenge && !isCoachRole && challengeFen) ? challengeDests : dests;
   // Setup modal state now lives in the module (see setClassSetupOpen at top
   // of file) so ClassV2's footer button can open it. Local FEN/error still
   // in state because they're modal-local.
@@ -938,14 +1091,14 @@ export default function SharedClassBoard(
       onPointerLeave={onBoardPointerLeave}
     >
       <Board
-        fen={fen}
+        fen={displayFen}
         orientation={orientation}
         movableColor={boardMovable}
-        dests={boardMovable === "none" ? (new Map() as any) : (dests as any)}
-        lastMove={lastMoveTuple}
+        dests={boardMovable === "none" ? (new Map() as any) : (displayDests as any)}
+        lastMove={inChallenge && !isCoachRole ? null : lastMoveTuple}
         onMove={(f, t) => sendMove(String(f), String(t))}
         coordinates
-        shapes={shapes as any}
+        shapes={inChallenge && !isCoachRole ? [] as any : (shapes as any)}
         onShapesChange={(s) => sendAnnot(s as any)}
       />
       {/* Coach's live cursor — students see a soft-glow amber dot at the
@@ -976,6 +1129,45 @@ export default function SharedClassBoard(
         className={`absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full ${connected ? "bg-emerald-400" : "bg-ink-500"}`}
         title={connected ? "Board synced" : "Board offline"}
       />
+      {/* Challenge-mode overlay ribbon (student + coach see it during active challenge). */}
+      {inChallenge && <ChallengeRibbon isCoach={isCoachRole} />}
+    </div>
+  );
+}
+
+// Small overlay across the top of the board that shows the prompt + a
+// live countdown. Student sees "your board — X remaining"; coach sees
+// "board frozen — X remaining · N/M answered". Renders above chessground
+// via a container-anchored absolute so it doesn't scroll with the page.
+function ChallengeRibbon({ isCoach }: { isCoach: boolean }) {
+  const ch = useClassChallenge();
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!ch?.active) return;
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [ch?.active]);
+  void tick;
+  if (!ch?.active) return null;
+  const remaining = Math.max(0, Math.ceil((ch.endsAt - Date.now()) / 1000));
+  const timeLabel = remaining >= 60 ? `${Math.floor(remaining/60)}m ${(remaining%60).toString().padStart(2,"0")}s` : `${remaining}s`;
+  return (
+    <div className="pointer-events-none absolute left-1/2 top-2 z-30 -translate-x-1/2 rounded-full border border-purple-400/70 bg-purple-500/30 px-3 py-1 text-[11px] font-semibold text-white shadow-lg backdrop-blur">
+      🧠 {ch.prompt || "Find the good move"}
+      <span className="mx-2 opacity-60">·</span>
+      ⏱ {timeLabel}
+      {isCoach && (
+        <>
+          <span className="mx-2 opacity-60">·</span>
+          {ch.answered}/{ch.total} answered
+        </>
+      )}
+      {!isCoach && ch.studentMoves.length > 0 && (
+        <>
+          <span className="mx-2 opacity-60">·</span>
+          <span className="font-mono">{ch.studentMoves.join(" ")}</span>
+        </>
+      )}
     </div>
   );
 }
