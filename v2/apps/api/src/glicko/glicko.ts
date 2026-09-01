@@ -164,24 +164,27 @@ export function isCrazyRatingDelta(pre: Perf, ratingDiff: number): boolean {
 
 export function themeWeight(theme: string | null | undefined, win: boolean, userRating?: number): number {
   if (!theme || theme === "mix") return 1.0;
-  // Owner directive 2026-09-01: at 2000+, ALL themes demand real calculation
-  // (the puzzles served are 1800-2400 rated where "the title said fork" no
-  // longer hands you the answer). Bump each tier up one notch for strong
-  // players — hinting behaves like neutral, obvious behaves like hinting,
-  // neutral stays neutral (already near the ceiling).
   const strong = typeof userRating === "number" && userRating >= 2000;
   if (OBVIOUS_THEMES.has(theme)) {
-    return strong ? (win ? 0.40 : 0.70) : (win ? 0.10 : 0.40);
+    // Obvious pattern-mates. Under-2000 kids learning these tactics get
+    // full reward for spotting them; 2000+ players see harder mateIn1s
+    // but the pattern is still trivial for them → keep low.
+    return strong ? (win ? 0.10 : 0.70) : (win ? 0.40 : 0.40);
   }
   if (NEUTRAL_THEMES.has(theme)) return win ? 0.70 : 0.80;
   // hinting (default: fork, pin, skewer, sacrifice, capturingDefender,
   // discoveredAttack, mateIn2, …).
-  // Owner directive 2026-09-01: double the win weight (0.20 → 0.40) so a
-  // 60%-correct themed session isn't a rating trap. Loss weight stays at
-  // 0.70 — legitimate misses still bite. Example session (harini's
-  // Capturing Defender 3/5): was +8/−32 (net −24), now +16/−32 (net −16).
-  // At 2000+, further bumped to neutral weight (0.70/0.80).
-  return strong ? (win ? 0.70 : 0.80) : (win ? 0.40 : 0.70);
+  //
+  // Owner directive 2026-09-01: under-2000 gets MORE win credit than 2000+.
+  // Reasoning: beginners are LEARNING these tactics — correct solves are
+  // real skill demonstration and deserve reward for motivation. Strong
+  // players (2000+) already have the tactics internalised; their rating
+  // should barely move per themed solve (small perturbations only).
+  // Losses stay heavier at 2000+ (they should know these by now).
+  //
+  // Under 2000:  win 0.70 / loss 0.70
+  // At 2000+:    win 0.40 / loss 0.80
+  return strong ? (win ? 0.40 : 0.80) : (win ? 0.70 : 0.70);
 }
 
 // Weighted linear interp — matches Lichess `Glicko.average`.
