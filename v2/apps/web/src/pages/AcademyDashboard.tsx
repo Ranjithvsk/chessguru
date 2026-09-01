@@ -15,6 +15,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Board from "../components/Board";
 import { api, classRoomPath } from "../lib/api";
 import { LiveStudentsPanel } from "../components/LiveStudentsPanel";
+import BatchesPanel from "../components/BatchesPanel";
 import { LeaderboardPanel } from "../components/LeaderboardPanel";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
@@ -2305,7 +2306,21 @@ export default function AcademyDashboardPage() {
               homework / student notes; coach sees their inbox) ── */}
       {canManage && <DirectivesPanel isOwner={isOwner} coaches={coaches ?? []} students={students} />}
 
-      {/* Batches management moved to /fees/batches (2026-08-30). */}
+      {/* ── Batches (also mounted on /fees/batches — same shared widget). ── */}
+      {canManage && (
+        <div className="relative">
+          <BatchesPanel
+            title="👥 Batches"
+            students={students}
+            coaches={coaches ?? []}
+            isOwner={!!isOwner}
+            classes={[...(schedule?.live ?? []), ...(schedule?.upcoming ?? [])]}
+          />
+          <Link to="/fees/batches" className="absolute right-5 top-5 rounded-full border border-ink-700 bg-ink-950 px-2.5 py-0.5 text-[11px] font-semibold text-ink-400 hover:text-brand-300 hover:border-brand-500/60" title="Open Fees → Batches">
+            /fees/batches ↗
+          </Link>
+        </div>
+      )}
 
       {/* ── Upcoming + live classes ── */}
       <section className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
