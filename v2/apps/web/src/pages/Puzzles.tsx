@@ -641,24 +641,28 @@ export default function PuzzlesPage() {
         )}
 
         {theme === "mix" && displayThemes.length > 0 && (
-          <div className="rounded-xl2 border border-brand-500/25 bg-gradient-to-br from-brand-500/10 via-ink-900 to-ink-900 p-5">
+          // Owner report 2026-09-01: this notice was near-invisible in light
+          // theme — the previous `via-ink-900 to-ink-900` gradient collapsed
+          // to near-white on light bg, and brand-300 text is too pale on
+          // white. Switched to a solid brand tint that reads in both modes.
+          <div className="rounded-xl2 border-2 border-brand-500/60 bg-brand-500/15 p-5 shadow-sm">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-sm text-ink-300">
-                <span className="text-brand-300">🎭 This puzzle's theme</span>
-                <span className="ml-2 text-xs text-ink-500">(you're playing "All themes")</span>
+              <span className="text-sm font-medium text-brand-700 dark:text-brand-200">
+                <span className="font-semibold text-brand-800 dark:text-brand-100">🎭 This puzzle's theme</span>
+                <span className="ml-2 text-xs font-normal text-brand-700/70 dark:text-brand-300">(you're playing "All themes")</span>
               </span>
               {g.fb.kind === "solved" ? (
-                <span className="shrink-0 text-xs text-accent-400">✓ revealed</span>
+                <span className="shrink-0 text-xs font-semibold text-accent-600 dark:text-accent-400">✓ revealed</span>
               ) : showTheme ? (
-                <button onClick={() => setShowTheme(false)} className="shrink-0 text-xs text-ink-400 underline hover:text-ink-200">Hide</button>
+                <button onClick={() => setShowTheme(false)} className="shrink-0 text-xs font-medium text-brand-700 underline hover:text-brand-900 dark:text-brand-300 dark:hover:text-brand-100">Hide</button>
               ) : (
-                <button onClick={() => setShowTheme(true)} className="shrink-0 rounded-lg border border-brand-500/40 bg-brand-500/10 px-3 py-1.5 text-xs font-medium text-brand-200 hover:bg-brand-500/20">Peek</button>
+                <button onClick={() => setShowTheme(true)} className="shrink-0 rounded-lg border border-brand-500/60 bg-brand-500/25 px-3 py-1.5 text-xs font-semibold text-brand-800 hover:bg-brand-500/40 dark:text-brand-100">Peek</button>
               )}
             </div>
             {revealTheme && (
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {displayThemes.map((t) => (
-                  <span key={t} className="rounded-md border border-brand-500/30 bg-brand-500/10 px-2 py-1 text-xs font-medium text-brand-100">{prettify(t)}</span>
+                  <span key={t} className="rounded-md border border-brand-500/50 bg-brand-500/20 px-2 py-1 text-xs font-semibold text-brand-800 dark:text-brand-100">{prettify(t)}</span>
                 ))}
               </div>
             )}
