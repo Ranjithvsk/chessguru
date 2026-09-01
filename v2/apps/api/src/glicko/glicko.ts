@@ -166,7 +166,13 @@ export function themeWeight(theme: string | null | undefined, win: boolean): num
   if (!theme || theme === "mix") return 1.0;
   if (OBVIOUS_THEMES.has(theme)) return win ? 0.10 : 0.40;
   if (NEUTRAL_THEMES.has(theme)) return win ? 0.70 : 0.80;
-  return win ? 0.20 : 0.70;   // hinting (default for everything else)
+  // hinting (default: fork, pin, skewer, sacrifice, capturingDefender,
+  // discoveredAttack, mateIn2, …).
+  // Owner directive 2026-09-01: double the win weight (0.20 → 0.40) so a
+  // 60%-correct themed session isn't a rating trap. Loss weight stays at
+  // 0.70 — legitimate misses still bite. Example session (harini's
+  // Capturing Defender 3/5): was +8/−32 (net −24), now +16/−32 (net −16).
+  return win ? 0.40 : 0.70;
 }
 
 // Weighted linear interp — matches Lichess `Glicko.average`.
