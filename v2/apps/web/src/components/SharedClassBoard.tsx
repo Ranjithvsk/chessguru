@@ -1185,7 +1185,7 @@ function StudentAnswerReviewRibbon({ moves, reviewIdx, onOpen, onPrev, onNext, o
     return (
       <button
         onClick={onOpen}
-        className="absolute left-1/2 top-0 z-30 -translate-x-1/2 -translate-y-[calc(100%+6px)] rounded-full border border-purple-400/70 bg-purple-600 px-3 py-1 text-[11px] font-semibold text-white shadow-lg hover:brightness-110"
+        className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full border-2 border-purple-300 bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-2xl ring-4 ring-purple-500/30 hover:brightness-110"
       >
         📝 Show my answer ({moves.length} {moves.length === 1 ? "move" : "moves"})
       </button>
@@ -1194,7 +1194,7 @@ function StudentAnswerReviewRibbon({ moves, reviewIdx, onOpen, onPrev, onNext, o
   const atStart = reviewIdx <= -1;
   const atEnd = reviewIdx >= moves.length - 1;
   return (
-    <div className="absolute left-1/2 top-0 z-30 flex -translate-x-1/2 -translate-y-[calc(100%+6px)] items-center gap-1 rounded-full border border-purple-400/70 bg-purple-600 px-1 py-1 text-[11px] font-semibold text-white shadow-lg">
+    <div className="fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-full border-2 border-purple-300 bg-purple-600 px-2 py-2 text-sm font-semibold text-white shadow-2xl ring-4 ring-purple-500/30">
       <button onClick={onPrev} disabled={atStart}
         className="grid h-6 w-6 place-items-center rounded-full hover:bg-white/10 disabled:opacity-30" title="Previous move">◀</button>
       <span className="mx-1 font-mono">
@@ -1226,7 +1226,7 @@ function ChallengeRibbon({ isCoach }: { isCoach: boolean }) {
   const remaining = Math.max(0, Math.ceil((ch.endsAt - Date.now()) / 1000));
   const timeLabel = remaining >= 60 ? `${Math.floor(remaining/60)}m ${(remaining%60).toString().padStart(2,"0")}s` : `${remaining}s`;
   return (
-    <div className="pointer-events-none absolute left-1/2 top-0 z-30 -translate-x-1/2 -translate-y-[calc(100%+6px)] rounded-full border border-purple-400/70 bg-purple-600 px-3 py-1 text-[11px] font-semibold text-white shadow-lg">
+    <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full border-2 border-purple-300 bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-2xl ring-4 ring-purple-500/30">
       🧠 {ch.prompt || "Find the good move"}
       <span className="mx-2 opacity-60">·</span>
       ⏱ {timeLabel}
