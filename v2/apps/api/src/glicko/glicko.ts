@@ -112,6 +112,12 @@ const NEUTRAL_THEMES = new Set([
   "rookEndgame", "bishopEndgame", "pawnEndgame", "knightEndgame",
   "queenEndgame", "queenRookEndgame",
   "master", "masterVsMaster", "superGM",
+  // Deep-calculation mates (2026-09-01, owner directive):
+  // knowing "there IS a mate in N" doesn't do much of the work when
+  // N ≥ 3 — you still have to calculate 6-10 half-moves. Only mateIn1
+  // (pattern-match) stays in OBVIOUS; mateIn2 stays default hinting
+  // (short-enough that pattern recognition often catches it).
+  "mateIn3", "mateIn4", "mateIn5",
 ]);
 
 const PROVISIONAL_DEVIATION = 110;
