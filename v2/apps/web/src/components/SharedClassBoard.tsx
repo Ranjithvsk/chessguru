@@ -7,7 +7,7 @@
 // The hello carries the signed-in user's identity so class attendance is
 // logged against the real student (the class-ws server writes classAttendance
 // on join) — same collection the academy roster's "✓ attended" reads.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Chess, validateFen } from "chess.js";
 import type { Key } from "chessground/types";
 import Board from "./Board";
@@ -599,6 +599,10 @@ export default function SharedClassBoard(
   const challengeMovesRef = useRef<string[]>([]);
   const [challengeFen, setChallengeFen] = useState<string | null>(null);
   const [challengeDests, setChallengeDests] = useState<Map<string, string[]>>(new Map());
+  // Post-challenge "Show my answer" review mode (students only). When
+  // reviewIdx is not null, the board renders the fen at moves[0..reviewIdx]
+  // instead of the shared board. Prev/next chip steps through, ✕ returns.
+  const [reviewIdx, setReviewIdx] = useState<number | null>(null);
   // Auto-hide remote pointer after 2s of silence — catches coach navigating
   // away without a clean "pointer-off" (page close, network drop).
   useEffect(() => {
@@ -1024,20 +1028,46 @@ export default function SharedClassBoard(
   const challengeUI = useClassChallenge();
   const inChallenge = !!challengeUI?.active;
   const isCoachRole = role === "coach";
+  // Post-challenge review — student is walking through their own answer.
+  const inReview = !isCoachRole && reviewIdx !== null && !!challengeUI && challengeUI.studentMoves.length > 0;
+  // Compute the review FEN by replaying moves[0..reviewIdx] on a fresh
+  // chess.js from challenge.positionFen. Rebuilt on every reviewIdx change.
+  const reviewFen: string | null = useMemo(() => {
+    if (!inReview || !challengeUI) return null;
+    try {
+      const c = new Chess(challengeUI.positionFen);
+      const upTo = Math.min(reviewIdx! + 1, challengeUI.studentMoves.length);
+      for (let i = 0; i < upTo; i++) {
+        const san = challengeUI.studentMoves[i];
+        try { c.move(san as any); } catch { break; }
+      }
+      return c.fen();
+    } catch { return null; }
+  }, [inReview, reviewIdx, challengeUI?.positionFen, challengeUI?.studentMoves]);
+
   // Board movability:
   // - Coach in normal mode: both. In challenge mode: none (board frozen).
   // - Student in normal mode: locked → none, else both.
   // - Student in challenge mode: always both (they solve on their own board).
+  // - Anyone in review mode: none (read-only walkthrough).
   const boardMovable: "both" | "none" =
+    inReview ? "none" :
     inChallenge
       ? (isCoachRole ? "none" : "both")
       : (isCoachRole ? "both" : (locked ? "none" : "both"));
   // What FEN + dests to render:
+  // - Review mode: reviewFen (student's own move sequence walkthrough)
   // - Student in challenge: their LOCAL fen + dests.
   // - Everyone else (incl coach in challenge): the shared board state, which
   //   the server keeps frozen at challenge.positionFen during a challenge.
-  const displayFen = (inChallenge && !isCoachRole && challengeFen) ? challengeFen : fen;
-  const displayDests = (inChallenge && !isCoachRole && challengeFen) ? challengeDests : dests;
+  const displayFen =
+    inReview && reviewFen ? reviewFen :
+    (inChallenge && !isCoachRole && challengeFen) ? challengeFen :
+    fen;
+  const displayDests =
+    inReview ? new Map<string, string[]>() :
+    (inChallenge && !isCoachRole && challengeFen) ? challengeDests :
+    dests;
   // Setup modal state now lives in the module (see setClassSetupOpen at top
   // of file) so ClassV2's footer button can open it. Local FEN/error still
   // in state because they're modal-local.
@@ -1131,6 +1161,50 @@ export default function SharedClassBoard(
       />
       {/* Challenge-mode overlay ribbon (student + coach see it during active challenge). */}
       {inChallenge && <ChallengeRibbon isCoach={isCoachRole} />}
+      {/* Post-challenge "show my answer" ribbon — student-only, only when
+       *  they submitted at least 1 move. Toggles review mode on/off + steps. */}
+      {!inChallenge && !isCoachRole && challengeUI && !challengeUI.active && challengeUI.studentMoves.length > 0 && (
+        <StudentAnswerReviewRibbon
+          moves={challengeUI.studentMoves}
+          reviewIdx={reviewIdx}
+          onOpen={() => setReviewIdx(challengeUI.studentMoves.length - 1)}
+          onPrev={() => setReviewIdx((i) => (i == null ? null : Math.max(-1, i - 1)))}
+          onNext={() => setReviewIdx((i) => (i == null ? null : Math.min(challengeUI.studentMoves.length - 1, i + 1)))}
+          onClose={() => setReviewIdx(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function StudentAnswerReviewRibbon({ moves, reviewIdx, onOpen, onPrev, onNext, onClose }: {
+  moves: string[]; reviewIdx: number | null; onOpen: () => void; onPrev: () => void; onNext: () => void; onClose: () => void;
+}) {
+  const reviewing = reviewIdx !== null;
+  if (!reviewing) {
+    return (
+      <button
+        onClick={onOpen}
+        className="absolute left-1/2 top-2 z-30 -translate-x-1/2 rounded-full border border-purple-400/70 bg-purple-500/25 px-3 py-1 text-[11px] font-semibold text-purple-100 shadow-lg backdrop-blur hover:bg-purple-500/40"
+      >
+        📝 Show my answer ({moves.length} {moves.length === 1 ? "move" : "moves"})
+      </button>
+    );
+  }
+  const atStart = reviewIdx <= -1;
+  const atEnd = reviewIdx >= moves.length - 1;
+  return (
+    <div className="absolute left-1/2 top-2 z-30 flex -translate-x-1/2 items-center gap-1 rounded-full border border-purple-400/70 bg-purple-500/30 px-1 py-1 text-[11px] font-semibold text-white shadow-lg backdrop-blur">
+      <button onClick={onPrev} disabled={atStart}
+        className="grid h-6 w-6 place-items-center rounded-full hover:bg-white/10 disabled:opacity-30" title="Previous move">◀</button>
+      <span className="mx-1 font-mono">
+        {atStart ? "start" : `${reviewIdx! + 1}/${moves.length} · ${moves[reviewIdx!]}`}
+      </span>
+      <button onClick={onNext} disabled={atEnd}
+        className="grid h-6 w-6 place-items-center rounded-full hover:bg-white/10 disabled:opacity-30" title="Next move">▶</button>
+      <span className="mx-1 opacity-40">|</span>
+      <button onClick={onClose}
+        className="grid h-6 w-6 place-items-center rounded-full hover:bg-white/10" title="Back to coach's board">✕</button>
     </div>
   );
 }
