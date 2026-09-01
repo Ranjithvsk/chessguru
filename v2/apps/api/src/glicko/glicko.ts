@@ -162,9 +162,17 @@ export function isCrazyRatingDelta(pre: Perf, ratingDiff: number): boolean {
   return Math.abs(ratingDiff) >= 150;
 }
 
-export function themeWeight(theme: string | null | undefined, win: boolean): number {
+export function themeWeight(theme: string | null | undefined, win: boolean, userRating?: number): number {
   if (!theme || theme === "mix") return 1.0;
-  if (OBVIOUS_THEMES.has(theme)) return win ? 0.10 : 0.40;
+  // Owner directive 2026-09-01: at 2000+, ALL themes demand real calculation
+  // (the puzzles served are 1800-2400 rated where "the title said fork" no
+  // longer hands you the answer). Bump each tier up one notch for strong
+  // players — hinting behaves like neutral, obvious behaves like hinting,
+  // neutral stays neutral (already near the ceiling).
+  const strong = typeof userRating === "number" && userRating >= 2000;
+  if (OBVIOUS_THEMES.has(theme)) {
+    return strong ? (win ? 0.40 : 0.70) : (win ? 0.10 : 0.40);
+  }
   if (NEUTRAL_THEMES.has(theme)) return win ? 0.70 : 0.80;
   // hinting (default: fork, pin, skewer, sacrifice, capturingDefender,
   // discoveredAttack, mateIn2, …).
@@ -172,7 +180,8 @@ export function themeWeight(theme: string | null | undefined, win: boolean): num
   // 60%-correct themed session isn't a rating trap. Loss weight stays at
   // 0.70 — legitimate misses still bite. Example session (harini's
   // Capturing Defender 3/5): was +8/−32 (net −24), now +16/−32 (net −16).
-  return win ? 0.40 : 0.70;
+  // At 2000+, further bumped to neutral weight (0.70/0.80).
+  return strong ? (win ? 0.70 : 0.80) : (win ? 0.40 : 0.70);
 }
 
 // Weighted linear interp — matches Lichess `Glicko.average`.
@@ -209,7 +218,8 @@ export function updatePuzzleRating(userPerf: Perf, puzzleGlicko: Glicko, win: bo
   rawPuzzle.r = Math.max(puzzleGlicko.r - MAX_RATING_DELTA, Math.min(puzzleGlicko.r + MAX_RATING_DELTA, rawPuzzle.r));
 
   // Weight from theme classifier + provisional-puzzle modifier.
-  const baseWeight = themeWeight(theme, win);
+  // Pass the user's current rating so strong-player themes bump up.
+  const baseWeight = themeWeight(theme, win, userPerf.gl.r);
   const puzzleProvisional = puzzleGlicko.d >= PROVISIONAL_DEVIATION;
   const provisionalMod = puzzleProvisional ? (win ? -0.2 : -0.7) : 0;
   const weight = Math.max(0.1, baseWeight + provisionalMod);
