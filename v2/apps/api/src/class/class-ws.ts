@@ -69,7 +69,16 @@ type ClientFrame =
   | { type: "pointer"; x: number; y: number } // coach only — live cursor over board (normalized 0..1)
   | { type: "pointer-off" }                   // coach only — cursor left the board
   | { type: "orientation"; orientation: Orientation } // coach only — flip board for everyone
-  | { type: "ping" };
+  | { type: "ping" }
+  // ── Challenge mode (2026-09-01, owner directive):
+  // Coach freezes the class board and asks students to find good moves on
+  // their OWN boards. Coach's board stays static. Students explore locally
+  // and each move is recorded server-side. When time expires or the coach
+  // hits Reveal, all boards snap back to the coach's board and the coach
+  // sees every student's move sequence in SAN notation.
+  | { type: "challenge:start"; positionFen: string; startFen?: string; prompt?: string; durationSec: number }  // coach only
+  | { type: "challenge:move";  fromFen: string; move: Move; san: string; nextFen: string }                    // student only — one attempted move
+  | { type: "challenge:end" };                                                                                 // coach only OR auto-fired by server timer
 // Server → client frames. `role` sent once after hello resolves; everything else
 // is broadcast to the room on state changes.
 type ServerFrame =
@@ -83,7 +92,31 @@ type ServerFrame =
   | { type: "pointer-off" }                    // coach's cursor left the board (students hide the dot)
   | { type: "orientation"; orientation: Orientation }
   | { type: "participants"; participants: number }
-  | { type: "pong" };
+  | { type: "pong" }
+  // ── Challenge mode broadcast frames.
+  | { type: "challenge_start"; positionFen: string; startFen: string; prompt: string; durationSec: number; endsAt: number }
+  | { type: "challenge_progress"; answered: number; total: number; remainingSec: number }   // coach-only detail; students see just remaining
+  | { type: "challenge_end"; positionFen: string; answers?: ChallengeAnswer[] };            // answers only sent to coach
+
+interface ChallengeAnswer {
+  userId: string;
+  displayName: string;
+  movesSan: string[];      // full sequence in the order the student tried (branches collapse to newest attempt)
+  firstMoveAt?: number;    // ms — used for "time-to-first-move" analytics
+  lastMoveAt?: number;
+  finalFen?: string;       // fen after their last move
+}
+
+interface Challenge {
+  positionFen: string;     // starting position, frozen for the duration
+  startFen: string;        // preserved for notation numbering
+  prompt: string;
+  startedAt: number;
+  endsAt: number;
+  answers: Map<string, ChallengeAnswer>;   // userId → answer
+  timer: ReturnType<typeof setTimeout> | null;
+  progressTimer: ReturnType<typeof setInterval> | null;
+}
 
 interface Room {
   fen: string;
@@ -120,6 +153,7 @@ interface Room {
   shapes: Shape[];              // last-published annotation set (echoed to new joiners)
   orientation: Orientation;     // board POV — coach can flip; students always mirror
   emptyEvictAt: number | null;  // when to drop this room from memory after last client left
+  challenge: Challenge | null;  // active "find the good moves" session; null when idle
 }
 
 // Grace before an emptied room is evicted. Owner reported (2026-08-12) that
@@ -127,14 +161,28 @@ interface Room {
 // being deleted between drops → fresh reconnects landed in a start-of-game
 // board, wiping every move + shape. Keeping the room alive for a bit means
 // transient network churn (or LiveKit-driven re-renders) doesn't erase state.
-const EMPTY_EVICT_MS = 15 * 60_000;
+// Owner directive 2026-09-01: raised from 15 min → 4 hours so a coach
+// with a long break between periods doesn't get evicted. State is also
+// persisted to `classBoardState` now, so even beyond 4 hours the room
+// re-materialises on next connect — this just avoids the DB round-trip
+// for the common case.
+const EMPTY_EVICT_MS = 4 * 60 * 60_000;
 
 // Sweep rooms whose eviction timestamp has passed. Called on every close so
 // idle rooms don't leak — no separate timer.
 function sweepEvicted(): void {
   const now = Date.now();
   for (const [id, r] of rooms) {
-    if (r.clients.size === 0 && r.emptyEvictAt != null && r.emptyEvictAt <= now) rooms.delete(id);
+    if (r.clients.size === 0 && r.emptyEvictAt != null && r.emptyEvictAt <= now) {
+      // If the room had an active challenge, clear the timers so we don't
+      // leak setTimeout handles + fire on a deleted room.
+      if (r.challenge) {
+        if (r.challenge.timer) clearTimeout(r.challenge.timer);
+        if (r.challenge.progressTimer) clearInterval(r.challenge.progressTimer);
+        r.challenge = null;
+      }
+      rooms.delete(id);
+    }
   }
 }
 
@@ -241,13 +289,90 @@ function getRoom(id: string): Room {
     // piece — owner reported 2026-08-12 that "students were controlling
     // moves". Coach can unlock via the footer 🔒 toggle for interactive drills.
     r = { fen: START_FEN, startFen: START_FEN, tree: [], cursorPath: [], lastMove: null, history: [], cursorIdx: 0, clients: new Set(),
-          coachToken: null, coach: null, locked: true, shapes: [], orientation: "white", emptyEvictAt: null };
+          coachToken: null, coach: null, locked: true, shapes: [], orientation: "white", emptyEvictAt: null,
+          challenge: null };
     rooms.set(id, r);
+    // Async restore from DB — a room evicted or a server restart shouldn't
+    // wipe the coach's setup + moves. When the restore finishes, broadcast
+    // a fresh `state` frame so any already-connected clients pick it up.
+    // Non-fatal on error.
+    void restoreRoomFromDb(id, r);
   }
   // A returning client cancels pending eviction — they see the SAME state they
   // left, not a fresh start.
   r.emptyEvictAt = null;
   return r;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Room persistence (2026-09-01) — survives server restart + eviction.
+//
+// Owner report: "when coach tab inactive and coach position is lost, only
+// new class is created". Root cause: room state (coach token + board tree
+// + setup) was in-memory only. Server restarts (frequent during a day of
+// deploys) wiped every room; 15-min idle eviction also wiped state.
+//
+// Design: on every mutation, debounce (1s) a save to a `classBoardState`
+// collection. On first client into a fresh in-memory room, restore from
+// that collection if present. Small enough that a single upsert is cheap.
+// ═══════════════════════════════════════════════════════════════════════
+const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+function scheduleRoomSave(classId: string): void {
+  if (!dbConn?.db) return;
+  const existing = saveTimers.get(classId);
+  if (existing) clearTimeout(existing);
+  saveTimers.set(classId, setTimeout(() => {
+    saveTimers.delete(classId);
+    const room = rooms.get(classId);
+    if (!room) return;
+    const doc = {
+      coachToken: room.coachToken,
+      fen: room.fen,
+      startFen: room.startFen,
+      tree: room.tree,
+      cursorPath: room.cursorPath,
+      cursorIdx: room.cursorIdx,
+      history: room.history,
+      lastMove: room.lastMove,
+      locked: room.locked,
+      shapes: room.shapes,
+      orientation: room.orientation,
+      updatedAt: new Date(),
+    };
+    void dbConn!.db!.collection("classBoardState")
+      .updateOne({ _id: classId as any }, { $set: doc }, { upsert: true })
+      .catch((e: any) => console.warn("[class-ws] classBoardState save failed:", e?.message));
+  }, 1000));
+}
+async function restoreRoomFromDb(classId: string, room: Room): Promise<void> {
+  if (!dbConn?.db) return;
+  try {
+    const doc: any = await dbConn.db.collection("classBoardState").findOne({ _id: classId as any });
+    if (!doc) return;
+    // Only restore if the in-memory room is still a pristine default —
+    // avoid clobbering fresh writes from an eager coach who moved before
+    // restore returned.
+    if (rooms.get(classId) !== room) return;
+    if (room.fen !== START_FEN || room.tree.length > 0) return;
+    if (typeof doc.coachToken === "string") room.coachToken = doc.coachToken;
+    if (typeof doc.fen === "string") room.fen = doc.fen;
+    if (typeof doc.startFen === "string") room.startFen = doc.startFen;
+    if (Array.isArray(doc.tree)) room.tree = doc.tree;
+    if (Array.isArray(doc.cursorPath)) room.cursorPath = doc.cursorPath;
+    if (Array.isArray(doc.history)) room.history = doc.history;
+    if (typeof doc.cursorIdx === "number") room.cursorIdx = doc.cursorIdx;
+    if (doc.lastMove && typeof doc.lastMove === "object") room.lastMove = doc.lastMove;
+    if (typeof doc.locked === "boolean") room.locked = doc.locked;
+    if (Array.isArray(doc.shapes)) room.shapes = doc.shapes;
+    if (doc.orientation === "white" || doc.orientation === "black") room.orientation = doc.orientation;
+    // Broadcast the restored state to any clients that connected while the
+    // restore was in flight (rare, but possible on a rapid page reload).
+    if (room.clients.size > 0) {
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+    }
+  } catch (e: any) {
+    console.warn("[class-ws] classBoardState restore failed:", e?.message);
+  }
 }
 
 // Re-derive fen + lastMove from history[0..cursorIdx]. Called after any
@@ -300,10 +425,64 @@ function extendMainlineOnce(tree: TreeNode[], path: number[]): number[] | null {
   return [...path, 0];
 }
 
+// State-mutating frame types — after broadcasting these we schedule a
+// persistence save. Ephemeral frames (participants, pointer, pong, role,
+// challenge_*) don't touch board state, no need to save.
+const PERSIST_FRAME_TYPES = new Set(["state", "move", "reset", "lock", "annot", "orientation"]);
 function broadcast(room: Room, frame: ServerFrame): void {
   const payload = JSON.stringify(frame);
   for (const c of room.clients) {
     if (c.readyState === WebSocket.OPEN) { try { c.send(payload); } catch { /* ignore */ } }
+  }
+  if (PERSIST_FRAME_TYPES.has((frame as any).type)) {
+    // Find the classId that owns this room. Cheap linear scan; rooms Map
+    // typically has ≤ dozens of entries in a live class window.
+    for (const [id, r] of rooms) { if (r === room) { scheduleRoomSave(id); break; } }
+  }
+}
+
+function studentCount(room: Room): number {
+  let n = 0;
+  for (const c of room.clients) if (socketRole.get(c) === "student") n++;
+  return n;
+}
+
+/** End the active challenge (auto-fired by timer OR by coach). Broadcasts
+ *  `challenge_end` to everyone, sends the collected answers to the coach
+ *  only, persists to `classChallenges`, and clears room.challenge. Safe to
+ *  call twice — second call is a no-op. */
+function endChallenge(room: Room, classId: string): void {
+  const ch = room.challenge;
+  if (!ch) return;
+  if (ch.timer)         { clearTimeout(ch.timer); }
+  if (ch.progressTimer) { clearInterval(ch.progressTimer); }
+  room.challenge = null;
+  const answers = [...ch.answers.values()];
+  // Everyone: board is un-frozen. Students snap back to coach's live board.
+  broadcast(room, { type: "challenge_end", positionFen: ch.positionFen });
+  // Coach: sees every answer with the SAN sequence.
+  if (room.coach && room.coach.readyState === WebSocket.OPEN) {
+    try { room.coach.send(JSON.stringify({ type: "challenge_end", positionFen: ch.positionFen, answers })); } catch { /* */ }
+  }
+  // Persist so coaches can review after class + students can see their own
+  // attempt in /history later. Fire-and-forget.
+  if (dbConn?.db && answers.length > 0) {
+    void dbConn.db.collection("classChallenges").insertOne({
+      classId,
+      positionFen: ch.positionFen,
+      startFen: ch.startFen,
+      prompt: ch.prompt,
+      startedAt: new Date(ch.startedAt),
+      endedAt: new Date(),
+      answers: answers.map((a) => ({
+        userId: a.userId,
+        displayName: a.displayName,
+        movesSan: a.movesSan,
+        firstMoveAt: a.firstMoveAt ? new Date(a.firstMoveAt) : undefined,
+        lastMoveAt: a.lastMoveAt ? new Date(a.lastMoveAt) : undefined,
+        finalFen: a.finalFen,
+      })),
+    }).catch((e: any) => console.warn("[class-ws] classChallenges insert failed:", e?.message));
   }
 }
 
@@ -324,6 +503,23 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
   // Snapshot current board to the new participant. Role isn't decided here — client
   // sends `hello` (optionally with its saved coachToken) and role is resolved there.
   send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+  // Late joiner mid-challenge — inform them so their board switches to
+  // challenge mode with the correct remaining time. Uses the ORIGINAL
+  // durationSec so the client can display "60s challenge, 42s remaining"
+  // consistently with the coach's countdown.
+  if (room.challenge) {
+    const remaining = Math.max(0, Math.ceil((room.challenge.endsAt - Date.now()) / 1000));
+    const originalDuration = Math.ceil((room.challenge.endsAt - room.challenge.startedAt) / 1000);
+    send({ type: "challenge_start",
+      positionFen: room.challenge.positionFen,
+      startFen: room.challenge.startFen,
+      prompt: room.challenge.prompt,
+      durationSec: originalDuration,
+      endsAt: room.challenge.endsAt,
+    });
+    // (client sees `endsAt` and computes remaining locally — keeps clocks in sync)
+    void remaining;
+  }
   broadcast(room, { type: "participants", participants: room.clients.size });
 
   const isCoach = () => socketRole.get(ws) === "coach";
@@ -362,11 +558,13 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         room.coachToken = mintCoachToken();
         socketRole.set(ws, "coach"); room.coach = ws;
         send({ type: "role", role: "coach", coachToken: room.coachToken });
+        scheduleRoomSave(roomId);   // persist mint so it survives restart
         resolvedSynchronously = true;
       } else if (frame.intendedRole === "coach" && !room.coach) {
         room.coachToken = mintCoachToken();
         socketRole.set(ws, "coach"); room.coach = ws;
         send({ type: "role", role: "coach", coachToken: room.coachToken });
+        scheduleRoomSave(roomId);
         resolvedSynchronously = true;
       } else {
         socketRole.set(ws, "student");
@@ -399,6 +597,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
                 socketRole.set(ws, "coach");
                 room.coach = ws;
                 send({ type: "role", role: "coach", coachToken: room.coachToken });
+                scheduleRoomSave(roomId);
               }
             } catch { /* silent — student role stays */ }
           })();
@@ -730,6 +929,65 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         if (c.readyState !== WebSocket.OPEN) continue;
         try { c.send(payload); } catch { /* ignore */ }
       }
+      return;
+    }
+
+    // ── Challenge mode handlers ──────────────────────────────────────────
+    if (frame.type === "challenge:start") {
+      if (!isCoach()) return;
+      if (room.challenge) endChallenge(room, roomId);   // idempotent: one active challenge at a time
+      const durationSec = Math.max(15, Math.min(15 * 60, Number(frame.durationSec) || 60));
+      const positionFen = typeof frame.positionFen === "string" ? frame.positionFen : room.fen;
+      const startFen = typeof frame.startFen === "string" ? frame.startFen : room.startFen;
+      const prompt = typeof frame.prompt === "string" ? frame.prompt.slice(0, 200) : "";
+      const now = Date.now();
+      const endsAt = now + durationSec * 1000;
+      const ch: Challenge = {
+        positionFen, startFen, prompt, startedAt: now, endsAt,
+        answers: new Map(),
+        timer: setTimeout(() => endChallenge(room, roomId), durationSec * 1000),
+        // Progress ticker (every 5s) — sends coach an updated "answered/total"
+        // count. Cheap enough to run for every active challenge in memory.
+        progressTimer: setInterval(() => {
+          if (!room.challenge) return;
+          const remainingSec = Math.max(0, Math.round((room.challenge.endsAt - Date.now()) / 1000));
+          const total = studentCount(room);
+          const answered = room.challenge.answers.size;
+          if (room.coach && room.coach.readyState === WebSocket.OPEN) {
+            try { room.coach.send(JSON.stringify({ type: "challenge_progress", answered, total, remainingSec })); } catch { /* */ }
+          }
+        }, 5_000),
+      };
+      room.challenge = ch;
+      broadcast(room, { type: "challenge_start", positionFen, startFen, prompt, durationSec, endsAt });
+      return;
+    }
+
+    if (frame.type === "challenge:move") {
+      if (!room.challenge) return;
+      if (isCoach()) return;   // coach doesn't submit answers
+      const who = socketWho.get(ws);
+      if (!who || !who.userId) return;   // guests / unauthed can't be attributed
+      const san = typeof frame.san === "string" ? frame.san.slice(0, 15) : "";
+      if (!san) return;
+      let ans = room.challenge.answers.get(who.userId);
+      const now = Date.now();
+      if (!ans) {
+        ans = { userId: who.userId, displayName: who.name, movesSan: [], firstMoveAt: now };
+        room.challenge.answers.set(who.userId, ans);
+      }
+      ans.movesSan.push(san);
+      ans.lastMoveAt = now;
+      if (typeof frame.nextFen === "string") ans.finalFen = frame.nextFen;
+      // Cap: 40 moves per student per challenge — a reasonable analysis
+      // depth; anything more is spam. Silently drop overflow.
+      if (ans.movesSan.length > 40) ans.movesSan = ans.movesSan.slice(0, 40);
+      return;
+    }
+
+    if (frame.type === "challenge:end") {
+      if (!isCoach()) return;
+      endChallenge(room, roomId);
       return;
     }
 
