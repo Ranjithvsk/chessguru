@@ -2277,6 +2277,8 @@ export default function AcademyDashboardPage() {
           isOwner={!!isOwner}
         />
       )}
+      {/* Undo-remove toast (module-level state; fires from RemoveStudentButton). */}
+      <RemoveUndoToast />
 
       {/* Non-management shell (student view) */}
       {!canManage && (
@@ -4815,7 +4817,10 @@ function RemoveCoachButton({ coachId, name, studentCount }: { coachId: string; n
 
 /** Owner-only: soft-detach a student from the academy. Confirms twice (once
  *  via the ⋯ open, once explicitly) to avoid a fat-finger removal from a
- *  scroll. Preserves the user account — they can be re-invited later. */
+ *  scroll. Preserves the user account — they can be re-invited later.
+ *  Owner ask 2026-09-01: "accidental remove student, undo button" — shows
+ *  an "↩ Undo" toast for 15 seconds after removal that restores academy +
+ *  coach + batch memberships from the pre-detach snapshot. */
 function RemoveStudentButton({ studentId, name }: { studentId: string; name: string }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
@@ -4830,6 +4835,7 @@ function RemoveStudentButton({ studentId, name }: { studentId: string; name: str
       if (j?.ok) {
         qc.invalidateQueries({ queryKey: ["academy-students"] });
         qc.invalidateQueries({ queryKey: ["academy-batches"] });
+        publishUndoToast({ studentId, name });
       } else alert(j?.error || "Couldn't remove student.");
     } catch (e: any) { alert(e?.message || "Network error."); }
     finally { setBusy(false); }
@@ -4840,6 +4846,60 @@ function RemoveStudentButton({ studentId, name }: { studentId: string; name: str
       title="Remove this student from your academy (soft-detach, data preserved)">
       {busy ? "…" : "🚫 Remove"}
     </button>
+  );
+}
+
+// ---- Undo toast (module-level pub/sub) --------------------------------
+// Fires from RemoveStudentButton, rendered once by <RemoveUndoToast/> in
+// the academy dashboard tree. 15 s auto-dismiss; click "↩ Undo" to POST
+// the undo endpoint which restores the pre-detach snapshot (coach + batch
+// memberships) server-side.
+type UndoPayload = { studentId: string; name: string } | null;
+let _undoState: UndoPayload = null;
+const _undoSubs = new Set<() => void>();
+function publishUndoToast(p: UndoPayload) { _undoState = p; _undoSubs.forEach((f) => f()); }
+function useUndoToast(): UndoPayload {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((n) => n + 1); _undoSubs.add(f); return () => { _undoSubs.delete(f); }; }, []);
+  return _undoState;
+}
+function RemoveUndoToast() {
+  const qc = useQueryClient();
+  const t = useUndoToast();
+  const [busy, setBusy] = useState(false);
+  const [remaining, setRemaining] = useState(15);
+  useEffect(() => {
+    if (!t) return;
+    setRemaining(15);
+    const tick = setInterval(() => setRemaining((n) => Math.max(0, n - 1)), 1000);
+    const gone = setTimeout(() => publishUndoToast(null), 15_000);
+    return () => { clearInterval(tick); clearTimeout(gone); };
+  }, [t?.studentId]);
+  if (!t) return null;
+  const undo = async () => {
+    setBusy(true);
+    try {
+      const r = await fetch(`/v2api/api/academy/students/${encodeURIComponent(t.studentId)}/undo-remove`, {
+        method: "POST", credentials: "include",
+      });
+      const j = await r.json();
+      if (j?.ok) {
+        qc.invalidateQueries({ queryKey: ["academy-students"] });
+        qc.invalidateQueries({ queryKey: ["academy-batches"] });
+        publishUndoToast(null);
+      } else alert(j?.error || "Couldn't undo.");
+    } catch (e: any) { alert(e?.message || "Network error."); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="fixed bottom-4 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-3 rounded-full border-2 border-rose-300 bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-2xl ring-4 ring-rose-500/30">
+      🚫 Removed <span className="font-bold">{t.name}</span> from academy
+      <button onClick={undo} disabled={busy}
+        className="rounded-full bg-white/25 px-3 py-1 text-xs font-bold hover:bg-white/40 disabled:opacity-60">
+        {busy ? "…" : `↩ Undo (${remaining}s)`}
+      </button>
+      <button onClick={() => publishUndoToast(null)} className="text-white/70 hover:text-white" title="Dismiss">✕</button>
+    </div>
   );
 }
 

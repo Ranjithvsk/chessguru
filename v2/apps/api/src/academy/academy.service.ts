@@ -812,6 +812,20 @@ export class AcademyService {
     const FALLBACK_ACADEMY = "chess-guru";
     const fallback = await this.conn.db!.collection("academies").findOne({ _id: FALLBACK_ACADEMY as any });
     const now = new Date();
+    // Capture the pre-detach state so undoRemoveStudent (owner ask
+    // 2026-09-01: "accidental remove student, undo button") can restore
+    // coach assignment + batch memberships instead of leaving the owner
+    // to re-wire everything by hand.
+    const priorBatches = await this.batches().find(
+      { academyId: g.academyId, studentIds: student._id },
+      { projection: { _id: 1 } as never },
+    ).toArray();
+    const preDetachSnapshot = {
+      academyId: g.academyId,
+      coachId: student.coachId ?? null,
+      batchIds: priorBatches.map((b: any) => String(b._id)),
+      at: now,
+    };
     if (fallback) {
       await this.users().updateOne(
         { _id: student._id },
@@ -823,6 +837,7 @@ export class AcademyService {
             academyDetachedFrom: g.academyId,
             academyDetachedAt: now,
             academyDetachedBy: g.userId,
+            preDetachSnapshot,
             updatedAt: now,
           },
           $unset: { coachAssignedAt: "", coachAssignedBy: "" },
@@ -832,16 +847,12 @@ export class AcademyService {
       // Fallback academy missing — legacy detach path.
       await this.users().updateOne(
         { _id: student._id },
-        { $set: { role: "user", academyDetachedAt: now, academyDetachedBy: g.userId }, $unset: { academyId: "", coachId: "", coachAssignedAt: "", coachAssignedBy: "" } },
+        { $set: { role: "user", academyDetachedAt: now, academyDetachedBy: g.userId, preDetachSnapshot }, $unset: { academyId: "", coachId: "", coachAssignedAt: "", coachAssignedBy: "" } },
       );
     }
-    // Drop from any batches in the ORIGINAL academy so recurring-class
-    // scheduling doesn't drag them back. Collect affected batch IDs so we
-    // can drive the fees sync per-batch below.
-    const affectedBatches = await this.batches().find(
-      { academyId: g.academyId, studentIds: student._id },
-      { projection: { _id: 1 } as never },
-    ).toArray();
+    // affectedBatches — computed above as priorBatches (used both for the
+    // fees sync fan-out below AND the undo snapshot).
+    const affectedBatches = priorBatches;
     await this.batches().updateMany(
       { academyId: g.academyId, studentIds: student._id },
       { $pull: { studentIds: student._id } as any, $set: { updatedAt: now } },
@@ -856,6 +867,71 @@ export class AcademyService {
       }
     } catch { /* fees is best-effort */ }
     return { ok: true, movedTo: fallback ? FALLBACK_ACADEMY : null };
+  }
+
+  /** Owner-only: undo a recent removeStudent. Restores academy affiliation,
+   *  the coach they had, and the batches they were in. Works within a 24h
+   *  window (soft-cap so a very-old detach can't accidentally be resurrected
+   *  after the student has moved on to another academy).
+   *
+   *  Owner ask 2026-09-01: "accidental remove student, undo button". Uses the
+   *  preDetachSnapshot field stamped by removeStudent as the ground truth. */
+  async undoRemoveStudent(session: any, studentId: string): Promise<any> {
+    const g = this.ensureOwner(session);
+    const user: any = await this.users().findOne({ _id: studentId as any });
+    if (!user) return { ok: false, error: "User not found." };
+    const snap = user.preDetachSnapshot;
+    if (!snap || !snap.academyId || snap.academyId !== g.academyId) {
+      return { ok: false, error: "No recent removal to undo (or the student was removed from a different academy)." };
+    }
+    // 24h window — beyond that, the student should be re-invited fresh so
+    // we don't accidentally overwrite their new affiliation.
+    const at = snap.at ? new Date(snap.at).getTime() : 0;
+    if (!at || Date.now() - at > 24 * 60 * 60_000) {
+      return { ok: false, error: "The removal is more than 24 hours old — re-invite the student instead." };
+    }
+    // Safety: refuse if the user has since been re-assigned to a DIFFERENT
+    // academy (someone else re-added them in the meantime).
+    if (user.academyId && user.academyId !== g.academyId && user.academyId !== "chess-guru") {
+      return { ok: false, error: `The student is now in "${user.academyId}" — undo would clobber that. Skipping.` };
+    }
+    const now = new Date();
+    const restoredCoachId = typeof snap.coachId === "string" ? snap.coachId : null;
+    await this.users().updateOne(
+      { _id: user._id },
+      {
+        $set: {
+          academyId: g.academyId,
+          role: "student",
+          coachId: restoredCoachId,
+          updatedAt: now,
+        },
+        $unset: {
+          academyDetachedFrom: "",
+          academyDetachedAt: "",
+          academyDetachedBy: "",
+          preDetachSnapshot: "",
+        },
+      },
+    );
+    // Add back to their previous batches. If a batch was deleted in the
+    // meantime, silently skip (updateMany won't match).
+    const batchIds: string[] = Array.isArray(snap.batchIds) ? snap.batchIds.filter((x: any) => typeof x === "string") : [];
+    if (batchIds.length > 0) {
+      await this.batches().updateMany(
+        { _id: { $in: batchIds as any[] }, academyId: g.academyId },
+        { $addToSet: { studentIds: String(user._id) } as any, $set: { updatedAt: now } },
+      );
+    }
+    // Re-sync fee enrolments per batch — the removeStudent path ENDed them;
+    // syncBatchEnrollments will re-open ACTIVE enrolments if the linked
+    // program is still active.
+    try {
+      for (const bid of batchIds) {
+        try { await this.fees.syncBatchEnrollments(g.academyId, bid, g.userId); } catch { /* per-batch best-effort */ }
+      }
+    } catch { /* fees is best-effort */ }
+    return { ok: true, restored: { coachId: restoredCoachId, batchCount: batchIds.length } };
   }
 
   /** Owner-only: detach a COACH from this academy. Mirrors removeStudent's

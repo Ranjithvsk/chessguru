@@ -363,6 +363,13 @@ export class AcademyController {
     return this.svc.removeStudent(req.session, id);
   }
 
+  /** Owner-only: undo a removeStudent within 24h. Restores academy, coach,
+   *  and batch memberships from the snapshot stamped at removal time. */
+  @Post("students/:id/undo-remove")
+  undoRemoveStudent(@Req() req: any, @Param("id") id: string) {
+    return this.svc.undoRemoveStudent(req.session, id);
+  }
+
   /** Owner-only: detach a coach from this academy. See removeCoach in
    *  academy.service.ts for exact semantics (students unassigned, batches
    *  transferred to owner, coach downgraded to plain user under the
