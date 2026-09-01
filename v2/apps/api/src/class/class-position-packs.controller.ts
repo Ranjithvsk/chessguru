@@ -12,7 +12,7 @@
 //     cursorIdx, currentFen, recipientUserIds: [uid, ...] }
 
 import {
-  BadRequestException, Body, Controller, ForbiddenException, Get,
+  BadRequestException, Body, Controller, Delete, ForbiddenException, Get,
   NotFoundException, Param, Post, Req, UnauthorizedException,
 } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
@@ -395,6 +395,28 @@ export class NotebookController {
         finishedAt: bestAttempt.finishedAt,
       } : null,
     };
+  }
+
+  /** DELETE /api/notebook/:packId — coach removes a pack they sent from
+   *  every recipient's notebook. Owner ask 2026-09-01: "option for coach
+   *  to delete notebook online class notes". Only the pack's coachId (or
+   *  the academy owner) can delete. Cascades revise attempts too — no
+   *  point keeping scores against a pack that's gone. */
+  @Delete("notebook/:packId")
+  async deletePack(@Param("packId") packId: string, @Req() req: any) {
+    if (!PACK_ID_RE.test(packId)) throw new BadRequestException("bad pack id");
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) throw new UnauthorizedException();
+    const row: any = await this.packs().findOne({ _id: packId as any });
+    if (!row) throw new NotFoundException();
+    const isCoach = row.coachId === userId;
+    const isOwner = req.session.role === "academy_owner" && req.session.academyId === row.academyId;
+    if (!isCoach && !isOwner) throw new ForbiddenException("only the sending coach can delete this pack");
+    await this.packs().deleteOne({ _id: packId as any });
+    // Clean up per-student revise attempts so leaderboards don't reference a
+    // dead pack. Fire-and-forget — cleanup failure is non-fatal.
+    void this.attempts().deleteMany({ packId }).catch(() => { /* ignore */ });
+    return { ok: true, deletedPackId: packId };
   }
 
   /** POST /api/notebook/:packId/revise — student submits the result of a

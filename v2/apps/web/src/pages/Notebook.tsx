@@ -109,6 +109,37 @@ function PackMiniBoard({ fen }: { fen: string }) {
   );
 }
 
+/** Coach-only delete on the pack detail page. Removes the pack from every
+ *  recipient's notebook + wipes revise attempts, then bounces back to
+ *  /notebook. Confirmed inline (no modal — it's a two-step process
+ *  including confirm() so an accidental click doesn't nuke a lesson). */
+function DeletePackButton({ packId, title }: { packId: string; title: string }) {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (!window.confirm(`Delete "${title}" from every student's notebook? This can't be undone.`)) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/v2api/api/notebook/${encodeURIComponent(packId)}`, { method: "DELETE", credentials: "include" });
+      if (!r.ok) throw new Error(`Delete failed (${r.status})`);
+      qc.invalidateQueries({ queryKey: ["notebook"] });
+      qc.invalidateQueries({ queryKey: ["me.notebook"] });
+      navigate("/notebook", { replace: true });
+    } catch (e: any) {
+      alert(e?.message || "Couldn't delete.");
+      setBusy(false);
+    }
+  };
+  return (
+    <button onClick={submit} disabled={busy}
+      className="rounded-lg border border-rose-500/50 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-200 hover:bg-rose-500/20 disabled:opacity-40"
+      title="Delete this pack from every student's notebook">
+      {busy ? "Deleting…" : "🗑 Delete"}
+    </button>
+  );
+}
+
 // Compact PGN preview — first ~8 plies from startFen/history. Numbering
 // respects the starting FEN's move counter + side to move, so a pack from
 // a setup position doesn't restart at "1.".
@@ -132,6 +163,22 @@ function pgnPreview(startFen: string, history: Array<{ from: string; to: string;
 
 function OnlineClassList({ packs }: { packs: PackListItem[] }) {
   const groups = useMemo(() => groupByDay(packs), [packs]);
+  const qc = useQueryClient();
+  const [deleting, setDeleting] = useState<string | null>(null);
+  async function deletePack(packId: string, title: string) {
+    if (!window.confirm(`Delete "${title}" from every student's notebook? This can't be undone.`)) return;
+    setDeleting(packId);
+    try {
+      const r = await fetch(`/v2api/api/notebook/${encodeURIComponent(packId)}`, { method: "DELETE", credentials: "include" });
+      if (!r.ok) throw new Error(`Delete failed (${r.status})`);
+      qc.invalidateQueries({ queryKey: ["notebook"] });
+      qc.invalidateQueries({ queryKey: ["me.notebook"] });
+    } catch (e: any) {
+      alert(e?.message || "Couldn't delete.");
+    } finally {
+      setDeleting(null);
+    }
+  }
   if (packs.length === 0) {
     return (
       <div className="rounded-xl border border-ink-800 bg-ink-900/60 p-8 text-center">
@@ -170,9 +217,19 @@ function OnlineClassList({ packs }: { packs: PackListItem[] }) {
                       </div>
                     </div>
                     {p.sentByMe && (
-                      <span className="shrink-0 rounded-full border border-amber-400/50 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-200">
-                        Sent
-                      </span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="rounded-full border border-amber-400/50 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-200">
+                          Sent
+                        </span>
+                        <button
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); deletePack(p._id, p.title); }}
+                          disabled={deleting === p._id}
+                          title="Delete from every student's notebook"
+                          className="grid h-6 w-6 place-items-center rounded-full text-[11px] text-ink-500 hover:bg-rose-500/20 hover:text-rose-300 disabled:opacity-40"
+                        >
+                          {deleting === p._id ? "…" : "🗑"}
+                        </button>
+                      </div>
                     )}
                   </div>
                   <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-ink-500">
@@ -696,6 +753,7 @@ export function NotebookPackDetailPage() {
             <DifficultyChip rating={data.maiaRating} band={data.maiaBand} />
           </div>
         </div>
+        {data.sentByMe && <DeletePackButton packId={data._id} title={data.title} />}
       </div>
 
       <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_280px]">
