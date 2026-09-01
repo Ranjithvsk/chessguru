@@ -579,77 +579,145 @@ export default function SharedClassBoard(
   useEffect(() => {
     if (!room) return;
     let cancelled = false;
+    // Reconnect state — sticks around across ws instances during this effect run.
+    // Backoff doubles on each failure, capped at 15s. Reset to 500ms on a
+    // successful onopen so a flaky network doesn't stay backed off forever.
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let backoffMs = 500;
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${proto}//${location.host}/v2api/class-ws/${encodeURIComponent(room)}`);
-    wsRef.current = ws;
-    ws.onopen = () => {
+
+    // Owner report 2026-09-01: coach's tab going inactive kills the WS
+    // (browsers/proxies close idle sockets), and moves-navigate stops
+    // working. Root cause: no reconnect, no heartbeat. Fix:
+    //   1. connect() is a function we can call repeatedly to (re)build a WS.
+    //   2. onclose schedules a reconnect with exponential backoff (500ms →
+    //      15s cap). Cancelled cleanly on unmount.
+    //   3. On visibilitychange → visible, if the socket isn't OPEN, force
+    //      an immediate reconnect. This catches the "left tab, came back
+    //      an hour later" case where backoff hasn't fired.
+    //   4. Heartbeat every 20s while open — a tiny `ping` message keeps
+    //      NAT and reverse proxies from timing out an otherwise-idle
+    //      class board. Server is expected to ignore unknown message
+    //      types; if it doesn't, the ping just becomes a no-op on read.
+    const connect = () => {
       if (cancelled) return;
-      setConnected(true);
-      try {
-        // Reuse a saved coachToken so a reload / brief drop resumes coach role
-        // instead of demoting the coach to a student for the rest of the class.
-        let savedCoachToken: string | undefined;
-        try { savedCoachToken = localStorage.getItem(COACH_TOKEN_KEY) || undefined; } catch { /* */ }
-        ws.send(JSON.stringify({
-          type: "hello",
-          userId: userId ?? undefined,
-          displayName: displayName ?? undefined,
-          coachToken: savedCoachToken,
-          intendedRole,
-        }));
-      } catch { /* */ }
-    };
-    ws.onerror = () => { if (!cancelled) setConnected(false); };
-    ws.onclose = () => { if (!cancelled) setConnected(false); };
-    ws.onmessage = (ev) => {
-      if (cancelled) return;
-      let msg: any;
-      try { msg = JSON.parse(ev.data); } catch { return; }
-      if (msg.type === "state") {
-        applyFen(msg.fen, msg.lastMove ?? null);
-        setShapes(Array.isArray(msg.shapes) ? msg.shapes : []);
-        const hist: SharedMove[] = Array.isArray(msg.history) ? msg.history : [];
-        const cursor = Number(msg.cursorIdx ?? hist.length);
-        const tree: SharedTreeNode[] = Array.isArray(msg.tree) ? msg.tree : [];
-        const cursorPath: number[] = Array.isArray(msg.cursorPath) ? msg.cursorPath : [];
-        _publishCursor(cursor, hist.length);
-        _publishMoveList(typeof msg.startFen === "string" ? msg.startFen : new Chess().fen(), hist, cursor, tree, cursorPath);
-        if (typeof msg.locked === "boolean") _publishLocked(msg.locked);
-        if (msg.orientation === "white" || msg.orientation === "black") _publishOrientation(msg.orientation);
-      }
-      else if (msg.type === "move") {
-        applyFen(msg.fen, msg.move);
-        const hist: SharedMove[] = Array.isArray(msg.history) ? msg.history : [];
-        const cursor = Number(msg.cursorIdx ?? hist.length);
-        const tree: SharedTreeNode[] = Array.isArray(msg.tree) ? msg.tree : _moveList.tree;
-        const cursorPath: number[] = Array.isArray(msg.cursorPath) ? msg.cursorPath : _moveList.cursorPath;
-        _publishCursor(cursor, hist.length);
-        _publishMoveList(typeof msg.startFen === "string" ? msg.startFen : _moveList.startFen, hist, cursor, tree, cursorPath);
-        if (typeof msg.locked === "boolean") _publishLocked(msg.locked);
-      }
-      else if (msg.type === "lock") { if (typeof msg.locked === "boolean") _publishLocked(msg.locked); }
-      else if (msg.type === "reset") applyFen(msg.fen, null);
-      else if (msg.type === "annot") setShapes(Array.isArray(msg.shapes) ? msg.shapes : []);
-      else if (msg.type === "role") {
-        setRole(msg.role === "coach" ? "coach" : "student");
-        // Persist the coach token so a reconnect resumes the seat instead of
-        // demoting to student (which would hide the Setup button + cursor
-        // broadcast). Clear on student role in case it's stale.
+      // Nuke any stale socket + timers.
+      if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+      if (wsRef.current) { try { wsRef.current.close(); } catch { /* */ } wsRef.current = null; }
+
+      const ws = new WebSocket(`${proto}//${location.host}/v2api/class-ws/${encodeURIComponent(room)}`);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        if (cancelled) { try { ws.close(); } catch { /* */ } return; }
+        setConnected(true);
+        backoffMs = 500;   // reset backoff on a good open
+        // Heartbeat: 20s < any reasonable NAT/proxy idle timeout.
+        heartbeatTimer = setInterval(() => {
+          if (wsRef.current !== ws || ws.readyState !== WebSocket.OPEN) return;
+          try { ws.send(JSON.stringify({ type: "ping" })); } catch { /* */ }
+        }, 20_000);
         try {
-          if (msg.role === "coach" && msg.coachToken) localStorage.setItem(COACH_TOKEN_KEY, String(msg.coachToken));
-          else if (msg.role === "student") { /* keep any prior token — server will fail-open on mismatch */ }
+          let savedCoachToken: string | undefined;
+          try { savedCoachToken = localStorage.getItem(COACH_TOKEN_KEY) || undefined; } catch { /* */ }
+          ws.send(JSON.stringify({
+            type: "hello",
+            userId: userId ?? undefined,
+            displayName: displayName ?? undefined,
+            coachToken: savedCoachToken,
+            intendedRole,
+          }));
         } catch { /* */ }
-      }
-      else if (msg.type === "pointer") setRemotePointer({ x: Number(msg.x) || 0, y: Number(msg.y) || 0 });
-      else if (msg.type === "pointer-off") setRemotePointer(null);
-      else if (msg.type === "orientation") { if (msg.orientation === "white" || msg.orientation === "black") _publishOrientation(msg.orientation); }
-      else if (msg.type === "classEnded") { onClassEnded?.(String(msg.reason || "coach_left")); }
-      else if (msg.type === "not-invited") { onClassEnded?.("not-invited"); }
+      };
+
+      const scheduleReconnect = () => {
+        if (cancelled) return;
+        if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+        if (reconnectTimer) return;   // one at a time
+        const wait = backoffMs;
+        backoffMs = Math.min(15_000, backoffMs * 2);
+        reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, wait);
+      };
+
+      ws.onerror = () => { if (!cancelled) setConnected(false); };
+      ws.onclose = () => {
+        if (cancelled) return;
+        setConnected(false);
+        scheduleReconnect();
+      };
+      ws.onmessage = (ev) => {
+        if (cancelled) return;
+        let msg: any;
+        try { msg = JSON.parse(ev.data); } catch { return; }
+        if (msg.type === "pong") return;   // heartbeat reply, no-op
+        if (msg.type === "state") {
+          applyFen(msg.fen, msg.lastMove ?? null);
+          setShapes(Array.isArray(msg.shapes) ? msg.shapes : []);
+          const hist: SharedMove[] = Array.isArray(msg.history) ? msg.history : [];
+          const cursor = Number(msg.cursorIdx ?? hist.length);
+          const tree: SharedTreeNode[] = Array.isArray(msg.tree) ? msg.tree : [];
+          const cursorPath: number[] = Array.isArray(msg.cursorPath) ? msg.cursorPath : [];
+          _publishCursor(cursor, hist.length);
+          _publishMoveList(typeof msg.startFen === "string" ? msg.startFen : new Chess().fen(), hist, cursor, tree, cursorPath);
+          if (typeof msg.locked === "boolean") _publishLocked(msg.locked);
+          if (msg.orientation === "white" || msg.orientation === "black") _publishOrientation(msg.orientation);
+        }
+        else if (msg.type === "move") {
+          applyFen(msg.fen, msg.move);
+          const hist: SharedMove[] = Array.isArray(msg.history) ? msg.history : [];
+          const cursor = Number(msg.cursorIdx ?? hist.length);
+          const tree: SharedTreeNode[] = Array.isArray(msg.tree) ? msg.tree : _moveList.tree;
+          const cursorPath: number[] = Array.isArray(msg.cursorPath) ? msg.cursorPath : _moveList.cursorPath;
+          _publishCursor(cursor, hist.length);
+          _publishMoveList(typeof msg.startFen === "string" ? msg.startFen : _moveList.startFen, hist, cursor, tree, cursorPath);
+          if (typeof msg.locked === "boolean") _publishLocked(msg.locked);
+        }
+        else if (msg.type === "lock") { if (typeof msg.locked === "boolean") _publishLocked(msg.locked); }
+        else if (msg.type === "reset") applyFen(msg.fen, null);
+        else if (msg.type === "annot") setShapes(Array.isArray(msg.shapes) ? msg.shapes : []);
+        else if (msg.type === "role") {
+          setRole(msg.role === "coach" ? "coach" : "student");
+          try {
+            if (msg.role === "coach" && msg.coachToken) localStorage.setItem(COACH_TOKEN_KEY, String(msg.coachToken));
+            else if (msg.role === "student") { /* keep any prior token — server will fail-open on mismatch */ }
+          } catch { /* */ }
+        }
+        else if (msg.type === "pointer") setRemotePointer({ x: Number(msg.x) || 0, y: Number(msg.y) || 0 });
+        else if (msg.type === "pointer-off") setRemotePointer(null);
+        else if (msg.type === "orientation") { if (msg.orientation === "white" || msg.orientation === "black") _publishOrientation(msg.orientation); }
+        else if (msg.type === "classEnded") { onClassEnded?.(String(msg.reason || "coach_left")); }
+        else if (msg.type === "not-invited") { onClassEnded?.("not-invited"); }
+      };
     };
+
+    // Tab-visibility handler — the classic "returned to a background tab
+    // after some minutes and the socket is dead" case. If we're visible
+    // and the socket isn't open, force an immediate reconnect (bypass
+    // whatever backoff is scheduled).
+    const onVisibility = () => {
+      if (cancelled) return;
+      if (document.visibilityState !== "visible") return;
+      const ws = wsRef.current;
+      if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        backoffMs = 500;
+        connect();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onVisibility);
+
+    connect();
     return () => {
       cancelled = true;
       setConnected(false);
-      try { ws.close(); } catch { /* */ }
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onVisibility);
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+      try { wsRef.current?.close(); } catch { /* */ }
       wsRef.current = null;
     };
   }, [room, userId, displayName]);
