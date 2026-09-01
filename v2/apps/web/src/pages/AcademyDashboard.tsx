@@ -161,17 +161,33 @@ function fmtDate(d?: string|null) { return d ? new Date(d).toLocaleDateString(un
  *  parent then sees their child on /parent (billing + progress). Owner ask
  *  2026-08-18: "parent portal with billing and progress reports". */
 function LinkParentButton({ studentId, name }: { studentId: string; name: string }) {
-  const [open, setOpen] = useState(false);
+  // Modal state kept at MODULE level (see openParentLinkModal below) so the
+  // overflow menu closing this button — and thus unmounting it — doesn't
+  // wipe the state before the modal can render. Bug reported 2026-09-01:
+  // "when I clicked parent nothing happened".
   return (
-    <>
-      <button onClick={() => setOpen(true)}
-        className="rounded-lg border border-purple-500/50 bg-purple-500/10 px-2 py-1 text-purple-100 hover:bg-purple-500/20"
-        title="Link a parent — they'll see this child's progress + billing on /parent">
-        👪 Parent
-      </button>
-      {open && <LinkParentModal studentId={studentId} childName={name} onClose={() => setOpen(false)} />}
-    </>
+    <button onClick={() => openParentLinkModal({ studentId, name })}
+      className="rounded-lg border border-purple-500/50 bg-purple-500/10 px-2 py-1 text-purple-100 hover:bg-purple-500/20"
+      title="Link a parent — they'll see this child's progress + billing on /parent">
+      👪 Parent
+    </button>
   );
+}
+
+// ---- Parent-link modal host (module-level state) ----------------------
+type ParentLinkTarget = { studentId: string; name: string } | null;
+let _parentLinkTarget: ParentLinkTarget = null;
+const _parentLinkSubs = new Set<() => void>();
+function openParentLinkModal(t: ParentLinkTarget) { _parentLinkTarget = t; _parentLinkSubs.forEach((f) => f()); }
+function useParentLinkTarget(): ParentLinkTarget {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((n) => n + 1); _parentLinkSubs.add(f); return () => { _parentLinkSubs.delete(f); }; }, []);
+  return _parentLinkTarget;
+}
+function ParentLinkHost() {
+  const t = useParentLinkTarget();
+  if (!t) return null;
+  return <LinkParentModal studentId={t.studentId} childName={t.name} onClose={() => openParentLinkModal(null)} />;
 }
 
 /** Structured parent-link form — replaces the old triple-prompt() flow.
@@ -2279,6 +2295,9 @@ export default function AcademyDashboardPage() {
       )}
       {/* Undo-remove toast (module-level state; fires from RemoveStudentButton). */}
       <RemoveUndoToast />
+      {/* Parent-link modal (module-level state so the overflow menu closing
+       *  the button doesn't wipe the modal). */}
+      <ParentLinkHost />
 
       {/* Non-management shell (student view) */}
       {!canManage && (
