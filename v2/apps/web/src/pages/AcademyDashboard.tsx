@@ -216,7 +216,7 @@ function LinkParentModal({ studentId, childName, onClose }: { studentId: string;
       if (j?.ok) {
         qc.invalidateQueries({ queryKey: ["academy-students"] });
         const c = j.credentials;
-        if (c) alert(`Parent linked. Share these credentials with them:\nusername: ${c.username}\npassword: ${c.password}\nlogin: https://harinitharanjith.com/login\n\nOnce signed in they see /parent with your child's progress + billing.`);
+        if (c) alert(`Parent linked. Share these credentials with them:\nusername: ${c.username}\npassword: ${c.password}\nlogin: ${window.location.origin}/login\n\nOnce signed in they see /parent with your child's progress + billing.`);
         else alert(`Linked existing parent ${j.parent?.username || displayName} to ${childName}. They already have an account.`);
         onClose();
       } else {
@@ -832,7 +832,7 @@ function AddStudentModal({ open, onClose, coaches, isOwner }: {
                 <div>username: <b className="select-all">{creds.username}</b></div>
                 <div>password: <b className="select-all">{creds.password}</b></div>
               </div>
-              <button onClick={() => navigator.clipboard?.writeText(`ChessGuru\nusername: ${creds.username}\npassword: ${creds.password}\nlogin: https://harinitharanjith.com/login`)}
+              <button onClick={() => navigator.clipboard?.writeText(`ChessGuru\nusername: ${creds.username}\npassword: ${creds.password}\nlogin: ${window.location.origin}/login`)}
                 className="mt-3 rounded-md border border-emerald-400/40 bg-emerald-500/20 px-3 py-1.5 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/30">
                 📋 Copy credentials
               </button>
