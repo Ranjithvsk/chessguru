@@ -2284,32 +2284,78 @@ function ChallengeStartModal({ onClose, onStart }: { onClose: () => void; onStar
 
 function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnType<typeof useClassChallenge>> }) {
   const [open, setOpen] = useState(true);
-  const answers: ChallengeAnswerRow[] = challenge.answers ?? [];
+  // Local copy so ✓/✗ clicks apply optimistically without waiting for the
+  // server. On revisit / next challenge the coach reopens from the same
+  // state — no per-panel query cache in play.
+  const [rows, setRows] = useState<ChallengeAnswerRow[]>(challenge.answers ?? []);
+  useEffect(() => { setRows(challenge.answers ?? []); }, [challenge.answers]);
+  const { room = "" } = useParams();
+  const correctCount = rows.filter((a) => a.correct === true).length;
+  const wrongCount   = rows.filter((a) => a.correct === false).length;
+  const unmarkedCount = rows.length - correctCount - wrongCount;
+
+  async function mark(userId: string, correct: boolean | null) {
+    // Optimistic — update local state first, then POST.
+    setRows((prev) => prev.map((r) => r.userId === userId ? { ...r, correct } : r));
+    try {
+      await fetch("/v2api/api/class/challenges/mark-answer", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ classId: room, startedAt: challenge.startedAt, userId, correct }),
+      });
+    } catch {
+      // Revert on network fail (rare — leave alone; user can retry).
+    }
+  }
+
   return (
     <>
       <button
         onClick={() => setOpen(true)}
         className="rounded-full border border-purple-400/50 bg-purple-500/20 px-3 py-1.5 text-sm font-semibold text-purple-100 hover:bg-purple-500/30"
       >
-        📋 Answers ({answers.length})
+        📋 Answers ({rows.length})
       </button>
       {open && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" role="dialog" aria-modal onClick={() => setOpen(false)}>
-          <div className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-2xl border border-purple-500/40 bg-ink-950 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-purple-500/40 bg-ink-950 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between border-b border-ink-800 p-4">
-              <div>
+              <div className="min-w-0 flex-1">
                 <h3 className="font-display text-lg text-purple-100">📋 Challenge answers</h3>
-                {challenge.prompt && <p className="mt-1 text-xs text-ink-400">"{challenge.prompt}"</p>}
+                {challenge.prompt && <p className="mt-1 text-xs italic text-ink-400 truncate">"{challenge.prompt}"</p>}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
                 <button onClick={() => { triggerClassChallengeDismiss(); setOpen(false); }}
                   className="rounded-lg bg-ink-800 px-3 py-1 text-xs font-semibold text-ink-300 hover:bg-ink-700"
                   title="Clear the answers panel and re-enable the 🧠 Challenge button">Dismiss</button>
                 <button onClick={() => setOpen(false)} className="grid h-8 w-8 place-items-center rounded-lg bg-ink-800 text-ink-300 hover:bg-ink-700">✕</button>
               </div>
             </div>
-            <div className="max-h-[70vh] overflow-y-auto p-4">
-              {answers.length === 0 ? (
+            {/* Sticky count strip — always visible even after scrolling the table. */}
+            <div className="border-b border-ink-800 bg-ink-900/60 px-4 py-2 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-purple-500/25 px-2.5 py-0.5 font-semibold text-purple-100">
+                  {rows.length} {rows.length === 1 ? "student" : "students"} answered
+                </span>
+                {correctCount > 0 && (
+                  <span className="rounded-full bg-emerald-500/20 px-2.5 py-0.5 font-semibold text-emerald-200">
+                    ✓ {correctCount} correct
+                  </span>
+                )}
+                {wrongCount > 0 && (
+                  <span className="rounded-full bg-rose-500/20 px-2.5 py-0.5 font-semibold text-rose-200">
+                    ✗ {wrongCount} wrong
+                  </span>
+                )}
+                {unmarkedCount > 0 && rows.length > 0 && (
+                  <span className="rounded-full bg-ink-800 px-2.5 py-0.5 font-semibold text-ink-400">
+                    {unmarkedCount} unmarked
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              {rows.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-ink-700 py-10 text-center text-sm text-ink-400">
                   No students answered.
                 </div>
@@ -2319,19 +2365,39 @@ function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnTyp
                     <tr className="text-left text-[11px] uppercase tracking-wider text-ink-400">
                       <th className="pb-2 pr-3 font-medium">Student</th>
                       <th className="pb-2 pr-3 font-medium">Moves</th>
-                      <th className="pb-2 font-medium">Time</th>
+                      <th className="pb-2 pr-3 font-medium">Time</th>
+                      <th className="pb-2 font-medium">Mark</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {answers.map((a) => (
-                      <tr key={a.userId} className="border-t border-ink-800 align-top">
-                        <td className="py-2 pr-3 text-white">{a.displayName || a.userId}</td>
-                        <td className="py-2 pr-3 font-mono text-brand-200">{a.movesSan.join(" ") || <span className="text-ink-500">—</span>}</td>
-                        <td className="py-2 text-[11px] tabular-nums text-ink-400">
-                          {a.firstMoveAt && a.lastMoveAt ? `${Math.round((a.lastMoveAt - a.firstMoveAt)/1000)}s` : "—"}
-                        </td>
-                      </tr>
-                    ))}
+                    {rows.map((a) => {
+                      const rowRing =
+                        a.correct === true  ? "border-l-2 border-emerald-400/70" :
+                        a.correct === false ? "border-l-2 border-rose-400/70" : "";
+                      return (
+                        <tr key={a.userId} className={`border-t border-ink-800 align-top ${rowRing}`}>
+                          <td className="py-2 pr-3 text-white">{a.displayName || a.userId}</td>
+                          <td className="py-2 pr-3 font-mono text-brand-200">{a.movesSan.join(" ") || <span className="text-ink-500">—</span>}</td>
+                          <td className="py-2 pr-3 text-[11px] tabular-nums text-ink-400 whitespace-nowrap">
+                            {a.firstMoveAt && a.lastMoveAt ? `${Math.round((a.lastMoveAt - a.firstMoveAt)/1000)}s` : "—"}
+                          </td>
+                          <td className="py-2">
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => mark(a.userId, a.correct === true ? null : true)}
+                                title={a.correct === true ? "Unmark" : "Mark correct"}
+                                className={`grid h-7 w-7 place-items-center rounded-lg text-xs font-bold transition ${a.correct === true ? "bg-emerald-500/70 text-white ring-2 ring-emerald-300" : "bg-ink-800 text-ink-400 hover:bg-emerald-500/20 hover:text-emerald-200"}`}
+                              >✓</button>
+                              <button
+                                onClick={() => mark(a.userId, a.correct === false ? null : false)}
+                                title={a.correct === false ? "Unmark" : "Mark wrong"}
+                                className={`grid h-7 w-7 place-items-center rounded-lg text-xs font-bold transition ${a.correct === false ? "bg-rose-500/70 text-white ring-2 ring-rose-300" : "bg-ink-800 text-ink-400 hover:bg-rose-500/20 hover:text-rose-200"}`}
+                              >✗</button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}

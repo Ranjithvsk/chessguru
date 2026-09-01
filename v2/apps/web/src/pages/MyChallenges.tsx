@@ -22,6 +22,7 @@ interface StudentChallengeRow {
   myMovesSan: string[];
   myFinalFen?: string;
   myTimeMs?: number;
+  correct?: boolean | null;
   totalAnswers: number;
 }
 
@@ -90,9 +91,17 @@ function ChallengeCard({ r }: { r: StudentChallengeRow }) {
             </div>
             <h3 className="mt-0.5 truncate text-sm font-semibold text-ink-100">{r.classTitle || r.classId}</h3>
           </div>
-          <span className="rounded-full bg-purple-500/15 px-2 py-0.5 text-[10px] font-semibold text-purple-200 ring-1 ring-purple-400/30">
-            🧠 {r.myMovesSan.length} {r.myMovesSan.length === 1 ? "move" : "moves"}
-          </span>
+          <div className="flex flex-col items-end gap-1">
+            <span className="rounded-full bg-purple-500/15 px-2 py-0.5 text-[10px] font-semibold text-purple-200 ring-1 ring-purple-400/30">
+              🧠 {r.myMovesSan.length} {r.myMovesSan.length === 1 ? "move" : "moves"}
+            </span>
+            {r.correct === true && (
+              <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-200 ring-1 ring-emerald-400/40">✓ correct</span>
+            )}
+            {r.correct === false && (
+              <span className="rounded-full bg-rose-500/20 px-2 py-0.5 text-[10px] font-semibold text-rose-200 ring-1 ring-rose-400/40">✗ wrong</span>
+            )}
+          </div>
         </div>
         {r.prompt && <p className="mb-3 text-xs italic text-ink-300 line-clamp-2">"{r.prompt}"</p>}
         <div className="mb-3 aspect-square w-full overflow-hidden rounded-lg border border-ink-700">

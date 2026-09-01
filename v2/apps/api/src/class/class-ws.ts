@@ -94,9 +94,9 @@ type ServerFrame =
   | { type: "participants"; participants: number }
   | { type: "pong" }
   // ── Challenge mode broadcast frames.
-  | { type: "challenge_start"; positionFen: string; startFen: string; prompt: string; durationSec: number; endsAt: number }
+  | { type: "challenge_start"; positionFen: string; startFen: string; prompt: string; durationSec: number; endsAt: number; startedAt: number }
   | { type: "challenge_progress"; answered: number; total: number; remainingSec: number }   // coach-only detail; students see just remaining
-  | { type: "challenge_end"; positionFen: string; answers?: ChallengeAnswer[] };            // answers only sent to coach
+  | { type: "challenge_end"; positionFen: string; startedAt?: number; answers?: (ChallengeAnswer & { correct?: boolean | null })[] };            // answers only sent to coach
 
 interface ChallengeAnswer {
   userId: string;
@@ -459,10 +459,10 @@ function endChallenge(room: Room, classId: string): void {
   room.challenge = null;
   const answers = [...ch.answers.values()];
   // Everyone: board is un-frozen. Students snap back to coach's live board.
-  broadcast(room, { type: "challenge_end", positionFen: ch.positionFen });
+  broadcast(room, { type: "challenge_end", positionFen: ch.positionFen, startedAt: ch.startedAt });
   // Coach: sees every answer with the SAN sequence.
   if (room.coach && room.coach.readyState === WebSocket.OPEN) {
-    try { room.coach.send(JSON.stringify({ type: "challenge_end", positionFen: ch.positionFen, answers })); } catch { /* */ }
+    try { room.coach.send(JSON.stringify({ type: "challenge_end", positionFen: ch.positionFen, startedAt: ch.startedAt, answers })); } catch { /* */ }
   }
   // Persist so coaches can review after class + students can see their own
   // attempt in /history later. Fire-and-forget.
@@ -516,6 +516,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       prompt: room.challenge.prompt,
       durationSec: originalDuration,
       endsAt: room.challenge.endsAt,
+      startedAt: room.challenge.startedAt,
     });
     // (client sees `endsAt` and computes remaining locally — keeps clocks in sync)
     void remaining;
@@ -959,7 +960,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         }, 5_000),
       };
       room.challenge = ch;
-      broadcast(room, { type: "challenge_start", positionFen, startFen, prompt, durationSec, endsAt });
+      broadcast(room, { type: "challenge_start", positionFen, startFen, prompt, durationSec, endsAt, startedAt: now });
       return;
     }
 

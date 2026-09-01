@@ -157,11 +157,12 @@ export function useClassOrientation(): Orientation {
 // answers panel) can read/drive it via hooks. Component populates from
 // WS frames + sends via triggers.
 // ─────────────────────────────────────────────────────────────────────
-export interface ChallengeAnswerRow { userId: string; displayName: string; movesSan: string[]; firstMoveAt?: number; lastMoveAt?: number; finalFen?: string; }
+export interface ChallengeAnswerRow { userId: string; displayName: string; movesSan: string[]; firstMoveAt?: number; lastMoveAt?: number; finalFen?: string; correct?: boolean | null; }
 export interface ChallengeState {
   positionFen: string;
   startFen: string;
   prompt: string;
+  startedAt: number;               // unix ms — used as the mark-answer key
   endsAt: number;
   answered: number;
   total: number;
@@ -754,6 +755,7 @@ export default function SharedClassBoard(
             positionFen: String(msg.positionFen),
             startFen: String(msg.startFen ?? msg.positionFen),
             prompt: String(msg.prompt ?? ""),
+            startedAt: Number(msg.startedAt) || Date.now(),
             endsAt: Number(msg.endsAt) || (Date.now() + 60_000),
             answered: 0,
             total: 0,
