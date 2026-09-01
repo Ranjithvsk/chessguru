@@ -2344,12 +2344,15 @@ function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnTyp
 }
 
 // Compute the FEN at (startFen, tree, cursorPath) — used by ChallengeCoachButton
-// so the frozen position matches the coach's CURRENT board view.
+// so the frozen position matches the coach's CURRENT board view (whatever
+// they've played on the shared board, not just the tree's starting FEN).
+//
+// Uses the Chess import at the top of the file (was using `require` which
+// silently throws in the browser bundle and fell back to startFen — bug
+// filed 2026-09-01: "when challenge is clicked, position reverted to
+// starting position for student").
 function computeFenAt(startFen: string, tree: SharedTreeNode[], cursorPath: number[]): string {
   try {
-    // Lazy-load chess.js off the module scope — this file is already large.
-    // Same singleton the notation panel uses.
-    const { Chess } = require("chess.js") as typeof import("chess.js");
     const c = new Chess(startFen);
     let cur: SharedTreeNode[] = tree;
     for (const idx of cursorPath) {
