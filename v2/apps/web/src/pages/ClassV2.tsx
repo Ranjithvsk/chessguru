@@ -18,6 +18,7 @@ import { Track, DataPacket_Kind } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
 import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, triggerClassSeek, triggerClassPromoteVariation, triggerClassMakeMainline, triggerClassDeleteFrom, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, type SharedTreeNode, type ChallengeAnswerRow } from "../components/SharedClassBoard";
+import { useScreenWakeLock } from "../hooks/useScreenWakeLock";
 import { OPENINGS, findOpeningForLine, openingBySlug, type Opening } from "../lib/openings";
 import { fetchExplorer, type ExplorerData, type ExplorerMove } from "../lib/explorer";
 import { listRepertoire, addRepertoire, shareRepertoire, type RepertoireEntry, type RepMoveNode } from "../lib/repertoire-api";
@@ -1795,6 +1796,10 @@ export default function ClassV2Page() {
   const { data: me, isLoading: authLoading } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
   const navigate = useNavigate();
   const [endedMsg, setEndedMsg] = useState<string | null>(null);
+  // Keep phone/tablet screens on for the duration of the class so students
+  // don't miss the coach when the OS would normally dim + suspend the tab.
+  // Silent no-op on browsers without the Wake Lock API.
+  useScreenWakeLock(true);
   // Per-user hide-video preference — audio-only mode for anyone who wants it
   // (owner ask: coach + students can each hide their own view of video tiles).
   // Persists per browser so bandwidth-constrained users don't have to re-toggle
