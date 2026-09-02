@@ -186,6 +186,20 @@ export function triggerClassChallengeStart(opts: { positionFen: string; startFen
 export function triggerClassChallengeEnd() { _challengeEndFn?.(); }
 export function triggerClassChallengeDismiss() { _challengeDismissFn?.(); }
 
+// Toast for "coach marked your answer" — fires when the server pushes
+// challenge_marked. Module-level so the SharedClassBoard fires it AND a
+// separately-rendered toast host reads it, without prop-drilling.
+export interface ChallengeMarkToast { correct: boolean | null; at: number; }
+let _markToast: ChallengeMarkToast | null = null;
+const _markToastSubs = new Set<() => void>();
+function _publishChallengeMarkToast(t: ChallengeMarkToast | null) { _markToast = t; _markToastSubs.forEach((f) => f()); }
+export function useChallengeMarkToast(): ChallengeMarkToast | null {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((n) => n + 1); _markToastSubs.add(f); return () => { _markToastSubs.delete(f); }; }, []);
+  return _markToast;
+}
+export function dismissChallengeMarkToast() { _publishChallengeMarkToast(null); }
+
 // ─────────────────────────────────────────────────────────────────────
 // PositionEditorModal — inline "board editor" for the class Setup flow.
 // Coach picks a piece from the palette, clicks squares to place it, and
@@ -831,6 +845,25 @@ export default function SharedClassBoard(
               active: false,
               answers,
               studentMoves: myMoves,
+            });
+          }
+        }
+        else if (msg.type === "challenge_marked") {
+          // Coach marked this student's answer. Show a floating toast +
+          // update the challenge state's correct field so any panel
+          // showing it (Show my answer pill) reflects the mark.
+          const c: boolean | null =
+            msg.correct === true ? true :
+            msg.correct === false ? false : null;
+          _publishChallengeMarkToast({ correct: c, at: Date.now() });
+          // If coach's mark arrives while the Answers-panel-derived state
+          // is still around, also patch the student's own row so any
+          // subsequent read shows it.
+          if (_challenge && Array.isArray(_challenge.answers)) {
+            const meId = userId;
+            _publishChallenge({
+              ..._challenge,
+              answers: _challenge.answers.map((a) => a.userId === meId ? { ...a, correct: c } : a),
             });
           }
         }

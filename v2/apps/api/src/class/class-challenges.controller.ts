@@ -7,6 +7,7 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Get, Post, Query, Req, UnauthorizedException } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
+import { pushToClassClient } from "./class-ws";
 
 interface StudentChallengeRow {
   classId: string;
@@ -124,6 +125,19 @@ export class ChallengeMarkController {
     const arrayFilters = [{ "e.userId": studentUserId }];
     const r = await this.conn.db!.collection("classChallenges").updateOne(filter, patch, { arrayFilters });
     if (r.matchedCount === 0) throw new BadRequestException("Challenge not found.");
+
+    // Live push to the student's class socket (if they're still in the
+    // room) so they see an immediate toast instead of only noticing on
+    // their next /challenges visit. Silent no-op if the student left.
+    try {
+      pushToClassClient(classId, studentUserId, {
+        type: "challenge_marked",
+        classId,
+        startedAt: startedAtRaw,
+        correct,
+      });
+    } catch { /* best-effort */ }
+
     return { ok: true };
   }
 }

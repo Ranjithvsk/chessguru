@@ -1090,6 +1090,25 @@ async function loadKicksForRoom(id: string): Promise<Set<string>> {
   return s;
 }
 
+/** Push an arbitrary frame to every OPEN socket in the class room owned
+ *  by `userId`. Used by REST endpoints that need to notify a specific
+ *  student in-class — e.g. "coach marked your challenge answer".
+ *  Returns the count of sockets that received the push (0 if the user
+ *  isn't currently connected). Silent no-op on unknown room. */
+export function pushToClassClient(id: string, userId: string, frame: unknown): { sent: number } {
+  const room = rooms.get(id);
+  if (!room) return { sent: 0 };
+  const payload = JSON.stringify(frame);
+  let sent = 0;
+  for (const c of room.clients) {
+    if (c.readyState !== WebSocket.OPEN) continue;
+    const who = socketWho.get(c);
+    if (who?.userId !== userId) continue;
+    try { c.send(payload); sent++; } catch { /* ignore */ }
+  }
+  return { sent };
+}
+
 /** Called by the HTTP kick endpoint. Add the user id to this room's live
  *  kick set AND drop any of their open sockets so they see the "kicked"
  *  frame immediately instead of waiting for their tab to reconnect. */

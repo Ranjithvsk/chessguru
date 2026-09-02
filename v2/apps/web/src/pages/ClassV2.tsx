@@ -17,7 +17,7 @@ import {
 import { Track, DataPacket_Kind } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
-import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, triggerClassSeek, triggerClassPromoteVariation, triggerClassMakeMainline, triggerClassDeleteFrom, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, type SharedTreeNode, type ChallengeAnswerRow } from "../components/SharedClassBoard";
+import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, triggerClassSeek, triggerClassPromoteVariation, triggerClassMakeMainline, triggerClassDeleteFrom, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, type SharedTreeNode, type ChallengeAnswerRow } from "../components/SharedClassBoard";
 import { useScreenWakeLock } from "../hooks/useScreenWakeLock";
 import { OPENINGS, findOpeningForLine, openingBySlug, type Opening } from "../lib/openings";
 import { fetchExplorer, type ExplorerData, type ExplorerMove } from "../lib/explorer";
@@ -2024,6 +2024,9 @@ export default function ClassV2Page() {
                 style={{ containerType: 'size' } as any}
               >
               <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} onClassEnded={onClassEnded} intendedRole={role} />
+              {/* Student toast when the coach marks their challenge answer.
+               *  Module-level state so this host can live anywhere in the tree. */}
+              <ChallengeMarkToastHost />
               {endedMsg && (
                 <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center bg-ink-950/85 p-6 text-center">
                   <div className="pointer-events-auto space-y-3 rounded-2xl border border-rose-500/50 bg-ink-900 p-6 shadow-2xl">
@@ -2407,6 +2410,38 @@ function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnTyp
       )}
     </>
   );
+}
+
+// Toast shown to a student when the coach marks their answer correct/wrong.
+// Auto-dismisses in 6 s. Uses `fixed bottom-4` so it never fights with the
+// Dream Meet video tiles / footer controls.
+function ChallengeMarkToastHost() {
+  const t = useChallengeMarkToast();
+  useEffect(() => {
+    if (!t) return;
+    const to = setTimeout(dismissChallengeMarkToast, 6000);
+    return () => clearTimeout(to);
+  }, [t?.at]);
+  if (!t) return null;
+  if (t.correct === true) {
+    return (
+      <div className="fixed bottom-4 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-3 rounded-full border-2 border-emerald-300 bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-2xl ring-4 ring-emerald-500/30">
+        ✅ Coach marked your answer <b>correct</b>
+        <button onClick={dismissChallengeMarkToast} className="text-white/70 hover:text-white">✕</button>
+      </div>
+    );
+  }
+  if (t.correct === false) {
+    return (
+      <div className="fixed bottom-4 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-3 rounded-full border-2 border-rose-300 bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-2xl ring-4 ring-rose-500/30">
+        ❌ Coach marked your answer <b>wrong</b>
+        <button onClick={dismissChallengeMarkToast} className="text-white/70 hover:text-white">✕</button>
+      </div>
+    );
+  }
+  // Unmark (null) — silent (no toast) so the coach adjusting their own
+  // marks doesn't spam students.
+  return null;
 }
 
 // Compute the FEN at (startFen, tree, cursorPath) — used by ChallengeCoachButton
