@@ -78,6 +78,12 @@ async function bootstrap() {
   // Phone-captured book photos land at 3-6MB. Cap at 12MB so any modern
   // phone image fits.
   app.use("/api/vision", expressLib.json({ limit: "12mb" }));
+  // Support widget submits base64 screenshots (up to 4 × ~4MB) alongside
+  // the message. The global 1MB cap below rejects any ticket with an
+  // attached screenshot as a 413 → widget shows "Send failed (400)"
+  // (owner report 2026-09-02). Match the server-side per-shot cap (4MB)
+  // × 4 shots + slack for the enriched message + parentSeq metadata.
+  app.use("/api/support/ticket", expressLib.json({ limit: "20mb" }));
   // Global JSON + urlencoded parsers for every other route. Explicit — do NOT
   // rely on Nest's built-in default alone; when the /api/vision json mount
   // above was added, Nest's default silently stopped parsing (Express only
