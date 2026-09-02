@@ -79,7 +79,10 @@ export function useFreePlay(initialFen?: string) {
   // play the 2nd move and can't navigate moves front and back"). Was previously
   // hard-coded to `new Chess()` — which reset the board to the standard start
   // on every replay.
-  const [startFen, setStartFen] = useState<string>(initialFen ?? "");
+  // Hydrate from persisted.startFen too — otherwise the first persist-effect
+  // fires with "" and overwrites the stored setup FEN, losing it on refresh
+  // (owner bug 2026-09-02 "when i refresh, set up position is getting lost").
+  const [startFen, setStartFen] = useState<string>(initialFen ?? persisted?.startFen ?? "");
   const startFenRef = useRef<string>(startFen);
   useEffect(() => { startFenRef.current = startFen; }, [startFen]);
   const freshChess = () => (startFenRef.current ? new Chess(startFenRef.current) : new Chess());
