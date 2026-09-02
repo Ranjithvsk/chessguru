@@ -169,11 +169,16 @@ export default function OpeningExplorer(
     const raw = window.prompt("Save this line + variations to your repertoire. Name:", suggestedName);
     if (raw === null) return;
     const name = raw.trim() || suggestedName;
-    // Strip nag/comment on the way out — the /api/my/repertoire schema
-    // is `{ san, children }` only. Preserved locally via useFreePlay's
-    // localStorage; saved copy just carries the shape.
-    const strip = (nodes: MoveNode[]): RepMoveNode[] => nodes.map((n) => ({ san: n.san, children: strip(n.children) }));
-    const body: any = { name, kind: "line" as const, tree: strip(fp.tree), sans: fp.line };
+    // Round-trip nag + comment via the repertoire API (schema updated
+    // 2026-09-02 to persist both). Structural map so hidden fields don't
+    // sneak into the wire body.
+    const carry = (nodes: MoveNode[]): RepMoveNode[] => nodes.map((n) => {
+      const r: RepMoveNode = { san: n.san, children: carry(n.children) };
+      if (n.nag) r.nag = n.nag;
+      if (n.comment) r.comment = n.comment;
+      return r;
+    });
+    const body: any = { name, kind: "line" as const, tree: carry(fp.tree), sans: fp.line };
     // If the user started from a custom setup, persist the start FEN
     // (so reloading the saved entry lands on that same position).
     if (fp.fen && fp.line.length === 0) body.startFen = fp.fen;

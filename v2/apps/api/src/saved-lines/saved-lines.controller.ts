@@ -38,7 +38,12 @@ const SLUG_RE = /^[a-z0-9-]{1,80}$/;
 const TREE_MAX_NODES = 4000;
 const TREE_MAX_DEPTH = 200;
 
-interface TreeNode { san: string; children: TreeNode[] }
+// Optional NAG glyph (short — e.g. "!", "??", "±") + text comment (up to
+// 500 chars) round-trip through save/load so /openings + Dream Meet keep
+// their annotations across devices.
+interface TreeNode { san: string; nag?: string; comment?: string; children: TreeNode[] }
+const NAG_MAX = 4;
+const COMMENT_MAX = 500;
 
 function newId(): string { return new Types.ObjectId().toHexString(); }
 function requireLogin(req: any): { userId: string; role: string | null; academyId: string | null } {
@@ -83,7 +88,10 @@ function normalizeTree(x: unknown): TreeNode[] | null {
       const san = String(n?.san || "").trim();
       if (!SAN_RE.test(san)) throw new BadRequestException(`bad-san in tree: ${san}`);
       const kids = Array.isArray(n?.children) ? walk(n.children, depth + 1) : [];
-      out.push({ san, children: kids });
+      const node: TreeNode = { san, children: kids };
+      if (typeof n?.nag === "string" && n.nag) node.nag = n.nag.slice(0, NAG_MAX);
+      if (typeof n?.comment === "string" && n.comment) node.comment = n.comment.slice(0, COMMENT_MAX);
+      out.push(node);
     }
     return out;
   };

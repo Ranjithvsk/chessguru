@@ -354,7 +354,10 @@ export default function OpeningsHub() {
                 } else if (entry.tree && entry.tree.length) {
                   // Sideline-preserving load — restores every branch the
                   // student recorded when the entry was saved (2026-08-19).
-                  fp.loadTree(entry.tree);
+                  // Pass startFen too so a saved Setup Position lands back
+                  // on the same custom board, not the standard start
+                  // (2026-09-02).
+                  fp.loadTree(entry.tree, entry.startFen);
                 } else if (entry.sans) {
                   fp.loadSans(entry.sans);
                 }

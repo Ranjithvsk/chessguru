@@ -1431,7 +1431,10 @@ function wsTreeToRepTree(startFen: string, tree: SharedTreeNode[], fromPath: num
         const c = new Chess(fen);
         const applied = c.move({ from: n.move.from, to: n.move.to, promotion: (n.move.promotion as any) || "q" });
         if (!applied) continue;
-        out.push({ san: applied.san, children: n.children?.length ? walk(n.children, c.fen()) : [] });
+        const rep: RepMoveNode = { san: applied.san, children: n.children?.length ? walk(n.children, c.fen()) : [] };
+        if (n.nag) rep.nag = n.nag;
+        if (n.comment) rep.comment = n.comment;
+        out.push(rep);
       } catch { /* skip */ }
     }
     return out;

@@ -299,8 +299,18 @@ export function useFreePlay(initialFen?: string) {
   // saving, now only main lines are saved even when sidelines are there").
   // Cursor lands on the mainline leaf so ArrowUp/Down can switch into
   // sibling variations from any node.
-  const loadTree = (newTree: MoveNode[]): boolean => {
+  const loadTree = (newTree: MoveNode[], newStartFen?: string): boolean => {
     if (!Array.isArray(newTree) || newTree.length === 0) return false;
+    // Apply the entry's saved startFen FIRST so applySans replays SAN
+    // moves from the right base. Loader passes entry.startFen when the
+    // saved line was captured from a Setup Position; standard-start
+    // entries call without it and startFen resets to "".
+    if (typeof newStartFen === "string" && newStartFen) {
+      try { game.current.load(newStartFen); setStartFen(newStartFen); startFenRef.current = newStartFen; }
+      catch { setStartFen(""); startFenRef.current = ""; }
+    } else {
+      setStartFen(""); startFenRef.current = "";
+    }
     // Walk children[0] to the mainline leaf and record the cursor path.
     const newPath: number[] = [];
     let cur: MoveNode | undefined = newTree[0];

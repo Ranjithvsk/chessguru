@@ -30,7 +30,7 @@ interface Props {
    *  survive the round-trip. Optional so old callers keep working. */
   tree?: MoveNode[];
   activeOpening?: { slug: string; name: string; eco: string } | null;
-  onLoad: (entry: { sans?: string[]; tree?: RepMoveNode[]; slug?: string }) => void;
+  onLoad: (entry: { sans?: string[]; tree?: RepMoveNode[]; slug?: string; startFen?: string }) => void;
   /** Fired when a user clicks the 📅 "add to Opening Trainer" button on an
    *  entry. Lets embedders (DailyStudy) refresh their queue view. */
   onActivate?: (slug: string) => void;
@@ -225,7 +225,7 @@ function List({
   entries, onLoad, onDelete, isCoach, onShare, onEdit, onDuplicate, onActivate,
 }: {
   entries: RepertoireEntry[];
-  onLoad: (entry: { sans?: string[]; tree?: RepMoveNode[]; slug?: string }) => void;
+  onLoad: (entry: { sans?: string[]; tree?: RepMoveNode[]; slug?: string; startFen?: string }) => void;
   onDelete: (id: string) => void;
   isCoach: boolean;
   onShare: (entry: RepertoireEntry) => void;
@@ -280,7 +280,7 @@ function List({
               onClick={() => onLoad(
                 e.kind === "corpus"
                   ? { slug: e.slug }
-                  : { sans: e.sans, ...(e.tree ? { tree: e.tree } : {}) },
+                  : { sans: e.sans, ...(e.tree ? { tree: e.tree } : {}), ...(e.startFen ? { startFen: e.startFen } : {}) },
               )}
               className="block w-full px-3 pt-2 text-left"
               title="Load this line onto the board">

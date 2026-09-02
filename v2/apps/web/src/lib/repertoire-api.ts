@@ -14,6 +14,8 @@ const BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
  *  student recorded, not just the mainline SAN sequence. */
 export interface RepMoveNode {
   san: string;
+  nag?: string;       // PGN glyph appended to SAN (!, ?, ±, +=, …)
+  comment?: string;   // free-form coach text under the move
   children: RepMoveNode[];
 }
 
