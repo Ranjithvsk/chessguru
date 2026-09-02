@@ -394,8 +394,28 @@ export class StudiesService {
     try { game = new Chess(startingFen); }
     catch { return { moves: [] }; }
     let headers: Record<string, string> | undefined;
+    // chess.js quirk (v1.4): loadPgn() IGNORES the position set by
+    // new Chess(fen) — it always starts from startpos unless the PGN
+    // itself declares [FEN "..."][SetUp "1"] headers. Without these
+    // headers a setup-position PGN (e.g. K+P endgame from /openings
+    // save) fails on every move as "Invalid move in PGN". Owner report
+    // TKT-123 was chess.js hitting this on Harinitha's K+P save.
+    const STARTPOS = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    // Strip evaluation glyphs that chess.js's PGN grammar doesn't
+    // recognize: +-, -+, +/-, -/+, +/=, =/+, +=, =+, and the unclear
+    // symbol ∞ (U+221E). Real move-quality annotations (!, ?, !!, ??,
+    // !?, ?!) go through untouched — chess.js accepts those. TKT-123
+    // (Harinitha 2026-09-02): client's /openings save emits +- after
+    // decisive-advantage lines, PGN parser threw and blocked the save.
+    const cleanedPgn = pgn
+      .replace(/\+\/-|\-\/\+|\+\/=|=\/\+|\+-|-\+|\+=|=\+|∞/g, "")
+      .replace(/\s{2,}/g, " ");
+    const needsHeader = startingFen !== STARTPOS && !/\[FEN\s+"/i.test(cleanedPgn);
+    const pgnToLoad = needsHeader
+      ? `[FEN "${startingFen}"]\n[SetUp "1"]\n\n${cleanedPgn}`
+      : cleanedPgn;
     try {
-      game.loadPgn(pgn, { strict: false });
+      game.loadPgn(pgnToLoad, { strict: false });
       const hdr = (game as any).header?.() as Record<string, string> | undefined;
       if (hdr) headers = this.cleanHeaders(hdr);
     } catch (e: any) {
