@@ -5,6 +5,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import * as push from "../lib/push";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 interface Contact {
@@ -106,6 +107,8 @@ export default function MessagesPage() {
           <p className="text-xs text-ink-400">Direct messages with your academy — coaches, students, owner.</p>
         </div>
       </header>
+      <PushOptInBanner />
+
       <div className="grid gap-3 md:grid-cols-[280px_minmax(0,1fr)]">
         {/* Sidebar */}
         <aside className="max-h-[70vh] overflow-y-auto rounded-2xl border border-ink-700 bg-ink-900/60">
@@ -306,4 +309,64 @@ function fmtRel(iso: string): string {
   if (md.getTime() === today.getTime()) return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   if (md.getTime() === yst.getTime())   return "yesterday";
   return d.toLocaleDateString(undefined, { day: "2-digit", month: "short" });
+}
+
+// Soft push-opt-in prompt shown at the top of Messages when the browser
+// supports push, the site is allowed to ask, and the user hasn't already
+// subscribed OR dismissed the banner. One tap enables push for chat + the
+// existing Play / streak reminders (same subscription — one endpoint per
+// browser). If the user dismisses, we remember it in localStorage so we
+// don't nag on every visit; a fresh nudge shows up after 14 days in case
+// they change their mind.
+const PUSH_DISMISS_KEY = "cg.msg.pushBannerDismissedAt";
+const PUSH_DISMISS_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+function PushOptInBanner() {
+  const [st, setSt] = useState<push.PushStatus | null>(null);
+  const [dismissed, setDismissed] = useState<boolean>(() => {
+    try {
+      const raw = localStorage.getItem(PUSH_DISMISS_KEY);
+      const ts = raw ? Number(raw) : 0;
+      return ts > 0 && (Date.now() - ts) < PUSH_DISMISS_TTL_MS;
+    } catch { return false; }
+  });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    push.status().then((s) => { if (alive) setSt(s); }).catch(() => { /* silent */ });
+    return () => { alive = false; };
+  }, []);
+  // Nothing to show if: not loaded yet, unsupported, already on, blocked in
+  // browser settings (nothing we can do), or user dismissed.
+  if (!st || !st.supported) return null;
+  if (st.subscribed) return null;
+  if (st.permission === "denied") return null;
+  if (dismissed) return null;
+  const enable = async () => {
+    setBusy(true); setErr(null);
+    try { const next = await push.enable(); setSt(next); }
+    catch (e: any) { setErr(e?.message || "Couldn't enable notifications."); }
+    finally { setBusy(false); }
+  };
+  const dismiss = () => {
+    try { localStorage.setItem(PUSH_DISMISS_KEY, String(Date.now())); } catch { /* */ }
+    setDismissed(true);
+  };
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-brand-500/30 bg-brand-500/10 px-4 py-3 text-sm text-brand-100">
+      <span className="text-lg" aria-hidden>🔔</span>
+      <span className="flex-1 min-w-[10rem]">
+        Get notified when a coach or student messages you — even when this tab is closed.
+        {err && <span className="ml-2 text-rose-300">{err}</span>}
+      </span>
+      <button
+        type="button" onClick={enable} disabled={busy}
+        className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-400 disabled:opacity-50"
+      >{busy ? "Enabling…" : "Enable notifications"}</button>
+      <button
+        type="button" onClick={dismiss} disabled={busy}
+        className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-700"
+      >Not now</button>
+    </div>
+  );
 }

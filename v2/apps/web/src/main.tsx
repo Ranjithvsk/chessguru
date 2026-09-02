@@ -109,4 +109,17 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
       })
       .catch(() => {});
   });
+  // Deep-link from notification click. The push SW posts { type: 'cg:navigate',
+  // url } to already-open tabs when the user taps a notification, so we can
+  // reuse the same window instead of piling up new ones. history.pushState
+  // is enough because BrowserRouter listens to popstate — dispatch one so it
+  // re-renders the matched route.
+  navigator.serviceWorker.addEventListener?.("message", (event) => {
+    const msg = event.data as { type?: string; url?: string } | undefined;
+    if (!msg || msg.type !== "cg:navigate" || !msg.url) return;
+    try {
+      history.pushState({}, "", msg.url);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    } catch { /* ignore */ }
+  });
 }

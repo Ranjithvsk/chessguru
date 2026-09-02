@@ -19,6 +19,7 @@ import { BadRequestException, Body, Controller, ForbiddenException, Get, Param, 
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { ObjectId } from "mongodb";
+import { PushService } from "../push/push.service";
 
 // Compose a stable threadId from two userIds. Sorted so (A,B) and (B,A)
 // map to the SAME thread regardless of who sent first.
@@ -57,7 +58,10 @@ interface MessageRow {
 
 @Controller("messages")
 export class MessagesController {
-  constructor(@InjectConnection() private readonly conn: Connection) {}
+  constructor(
+    @InjectConnection() private readonly conn: Connection,
+    private readonly push: PushService,
+  ) {}
 
   private msgs()    { return this.conn.db!.collection("messages"); }
   private threads() { return this.conn.db!.collection("messageThreads"); }
@@ -207,6 +211,41 @@ export class MessagesController {
       },
       { upsert: true },
     );
+
+    // Push notification to the recipient — fire-and-forget so a slow vendor
+    // never blocks the send() response. sendToUser() is a no-op when the
+    // recipient has no subscriptions (opted out, no device with push enabled,
+    // or VAPID keys not configured in dev). Title is the sender's display
+    // name; body is the preview text (already truncated to 120c). Clicking
+    // the notification deep-links to /messages?open=<threadId> so the
+    // recipient lands directly in the conversation.
+    //
+    // We look up the sender's display name inline — cheap point-read on the
+    // users collection. The recipient sees who messaged them, not just a
+    // generic "ChessGuru — new message" banner.
+    void (async () => {
+      try {
+        const sender: any = await this.users().findOne(
+          { _id: me.userId as any },
+          { projection: { name: 1, fullName: 1, username: 1 } },
+        );
+        const senderName = String(sender?.name || sender?.fullName || sender?.username || "New message");
+        await this.push.sendToUser(toUserId, {
+          title: senderName,
+          body: preview,
+          // /messages/<senderId> — the recipient's route to the conversation
+          // with the person who just messaged them. Matches Messages.tsx's
+          // useParams<{userId?}>() so the thread opens directly.
+          url: `/messages/${encodeURIComponent(me.userId)}`,
+          // Tag by thread so subsequent messages in the same conversation
+          // collapse the previous notification instead of stacking N banners.
+          tag: `msg:${threadId}`,
+        });
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn("[messages] push send failed", { threadId, err: (e as Error)?.message });
+      }
+    })();
 
     return { ok: true, threadId, messageId: String(ins.insertedId) };
   }
