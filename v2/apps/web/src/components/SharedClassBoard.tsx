@@ -427,7 +427,7 @@ function describeIllegalPosition(fen: string): string | null {
   return null;
 }
 
-function PositionEditorModal(props: {
+export function PositionEditorModal(props: {
   initialFen: string;
   onApply: (fen: string) => void;
   onClose: () => void;

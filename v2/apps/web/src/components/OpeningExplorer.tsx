@@ -17,6 +17,8 @@ import { OPENING_HANDOFF_KEY } from "../lib/openingMemory";
 import { findOpeningForLine } from "../lib/openings";
 import { OpeningIdeaPanel } from "./OpeningIdeaPanel";
 import { AnnotationToolbar, applyAnnotationClick, computeAttackShapes, computePinShapes, useAnnotationTool, type AnnotShape } from "./AnnotationToolbar";
+import { PositionEditorModal } from "./SharedClassBoard";
+import { addRepertoire, type RepMoveNode } from "../lib/repertoire-api";
 import { Chess } from "chess.js";
 
 // NAG glyph presets — mirror the class notation panel (ClassV2.tsx). Coach
@@ -142,6 +144,41 @@ export default function OpeningExplorer(
     const name = opening ? `${opening.eco} ${opening.name}` : "Explored line";
     try { sessionStorage.setItem(OPENING_HANDOFF_KEY, JSON.stringify({ name, sans: fp.history })); } catch { /* */ }
     navigate("/study/opening-memory");
+  };
+
+  // Setup Position modal — port from Dream Meet. Loads an arbitrary FEN
+  // via useFreePlay's loadPermissive (accepts board-only strings + full
+  // FENs; falls back to piece-placement parse for board-editor pastes).
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [setupErr, setSetupErr] = useState<string | null>(null);
+  const applySetup = (f: string) => {
+    if (!fp.loadPermissive(f)) { setSetupErr("Could not parse that position"); return; }
+    setSetupErr(null);
+  };
+
+  // 💾 Save to repertoire — light version of Dream Meet's dialog. Prompts
+  // for a name (auto-suggests via findOpeningForLine), builds a plain
+  // RepMoveNode tree (strips nag/comment — the repertoire API doesn't
+  // persist them yet), POSTs to /api/my/repertoire. Includes the full
+  // variation tree, not just the current mainline, so sidelines survive.
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  useEffect(() => { if (!saveMsg) return; const t = setTimeout(() => setSaveMsg(null), 2200); return () => clearTimeout(t); }, [saveMsg]);
+  const saveToRepertoire = () => {
+    if (!fp.tree.length) return;
+    const suggestedName = opening ? `${opening.eco} ${opening.name}` : "Explored line";
+    const raw = window.prompt("Save this line + variations to your repertoire. Name:", suggestedName);
+    if (raw === null) return;
+    const name = raw.trim() || suggestedName;
+    // Strip nag/comment on the way out — the /api/my/repertoire schema
+    // is `{ san, children }` only. Preserved locally via useFreePlay's
+    // localStorage; saved copy just carries the shape.
+    const strip = (nodes: MoveNode[]): RepMoveNode[] => nodes.map((n) => ({ san: n.san, children: strip(n.children) }));
+    const body: any = { name, kind: "line" as const, tree: strip(fp.tree), sans: fp.line };
+    // If the user started from a custom setup, persist the start FEN
+    // (so reloading the saved entry lands on that same position).
+    if (fp.fen && fp.line.length === 0) body.startFen = fp.fen;
+    void addRepertoire(body).then(() => setSaveMsg(`💾 Saved "${name}" to your repertoire`))
+      .catch((e) => setSaveMsg(`Could not save (${e?.message ?? "unknown"})`));
   };
 
   const total = data ? data.white + data.draws + data.black : 0;
@@ -359,6 +396,12 @@ export default function OpeningExplorer(
             title="Jump to end">⏭</button>
           <button onClick={fp.reset} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">Reset</button>
           <button onClick={fp.flip} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">⇅ Flip</button>
+          <button onClick={() => setSetupOpen(true)}
+            className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800"
+            title="Load an arbitrary position — mid-game tactic, endgame, book puzzle">📋 Setup</button>
+          <button onClick={saveToRepertoire} disabled={fp.history.length === 0}
+            className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100 hover:bg-emerald-500/25 disabled:opacity-40"
+            title="Save this line + variations to your repertoire (survives across devices)">💾 Save</button>
           <button onClick={memorize} disabled={!fp.tree.length}
             className="ml-auto rounded-lg bg-accent-600 px-3 py-2 text-sm font-semibold text-white hover:bg-accent-500 disabled:opacity-40"
             title="Send this line to the Memory Training opening trainer">🧠 Memorize</button>
@@ -571,6 +614,19 @@ export default function OpeningExplorer(
           </div>
         );
       })()}
+      {setupOpen && (
+        <PositionEditorModal
+          initialFen={fp.fen}
+          onApply={applySetup}
+          onClose={() => setSetupOpen(false)}
+          error={setupErr}
+        />
+      )}
+      {saveMsg && (
+        <div className="pointer-events-none fixed bottom-4 left-1/2 z-[80] -translate-x-1/2 rounded-lg border border-emerald-500/40 bg-ink-900/95 px-4 py-2 text-sm text-emerald-100 shadow-2xl">
+          {saveMsg}
+        </div>
+      )}
     </div>
   );
 }
