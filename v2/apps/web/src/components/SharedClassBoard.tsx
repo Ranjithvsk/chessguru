@@ -172,6 +172,34 @@ export function cloneChallengeNode(n: ChallengeTreeNode): ChallengeTreeNode {
   return { from: n.from, to: n.to, promotion: n.promotion, san: n.san, children: n.children.map(cloneChallengeNode) };
 }
 
+/** Render a challenge tree as a PGN-style string with variations in parens:
+ *  `1.e4 (1.d4 d5 2.c4) e5 2.Nf3`. sideAtRoot is inferred from startFen. Used
+ *  by the teacher's answers panel to keep student branches visually distinct
+ *  instead of collapsing everything into one flat line. */
+export function challengeTreeToPgn(tree: ChallengeTreeNode[], startFen: string): string {
+  const parts = String(startFen || "").split(" ");
+  const sideAtRoot: "w" | "b" = parts[1] === "b" ? "b" : "w";
+  const render = (nodes: ChallengeTreeNode[], plyBase: number, variation: boolean): string => {
+    if (!Array.isArray(nodes) || nodes.length === 0) return "";
+    const out: string[] = [];
+    const main = nodes[0]!;
+    const isWhite = sideAtRoot === "w" ? plyBase % 2 === 0 : plyBase % 2 === 1;
+    const moveNum = Math.floor(plyBase / 2) + 1;
+    if (isWhite) out.push(`${moveNum}.${main.san}`);
+    else out.push((variation || plyBase === 0) ? `${moveNum}...${main.san}` : main.san);
+    for (let j = 1; j < nodes.length; j++) {
+      const alt = nodes[j]!;
+      const head = isWhite ? `${moveNum}.${alt.san}` : `${moveNum}...${alt.san}`;
+      const rest = render(alt.children ?? [], plyBase + 1, true);
+      out.push(rest ? `(${head} ${rest})` : `(${head})`);
+    }
+    const cont = render(main.children ?? [], plyBase + 1, variation);
+    if (cont) out.push(cont);
+    return out.join(" ");
+  };
+  return render(tree, 0, false);
+}
+
 export function fenAtChallengeCursor(startFen: string, tree: ChallengeTreeNode[], cursorPath: number[]): { fen: string; sanChain: string[]; lastMoveFromTo?: { from: string; to: string } } {
   let c: Chess;
   try { c = new Chess(startFen); } catch { c = new Chess(); }
@@ -194,7 +222,7 @@ export function fenAtChallengeCursor(startFen: string, tree: ChallengeTreeNode[]
 // answers panel) can read/drive it via hooks. Component populates from
 // WS frames + sends via triggers.
 // ─────────────────────────────────────────────────────────────────────
-export interface ChallengeAnswerRow { userId: string; displayName: string; movesSan: string[]; firstMoveAt?: number; lastMoveAt?: number; finalFen?: string; correct?: boolean | null; }
+export interface ChallengeAnswerRow { userId: string; displayName: string; movesSan: string[]; tree?: ChallengeTreeNode[]; firstMoveAt?: number; lastMoveAt?: number; finalFen?: string; correct?: boolean | null; }
 export interface ChallengeState {
   positionFen: string;
   startFen: string;
@@ -1058,7 +1086,7 @@ export default function SharedClassBoard(
 
       // Send a full-snapshot of the current chosen line. Server replaces
       // ans.movesSan so the coach always sees the student's LATEST answer.
-      try { ws.send(JSON.stringify({ type: "challenge:snapshot", movesSan: derived.sanChain, finalFen: derived.fen })); } catch { /* */ }
+      try { ws.send(JSON.stringify({ type: "challenge:snapshot", movesSan: derived.sanChain, finalFen: derived.fen, tree: newTree })); } catch { /* */ }
       // Also send the granular move (server keeps it as a legacy tally for
       // pre-snapshot clients; harmless to keep firing).
       try { ws.send(JSON.stringify({ type: "challenge:move", fromFen, move: { from, to }, san, nextFen })); } catch { /* */ }
@@ -1093,7 +1121,7 @@ export default function SharedClassBoard(
     }
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
-      try { ws.send(JSON.stringify({ type: "challenge:snapshot", movesSan: derived.sanChain, finalFen: derived.fen })); } catch { /* */ }
+      try { ws.send(JSON.stringify({ type: "challenge:snapshot", movesSan: derived.sanChain, finalFen: derived.fen, tree: challengeTreeRef.current })); } catch { /* */ }
     }
   };
   const challengeStepBack    = () => challengeSeek(challengeCursorRef.current.slice(0, -1));
@@ -1111,6 +1139,43 @@ export default function SharedClassBoard(
     let cur = challengeTreeRef.current;
     while (cur.length > 0) { path.push(0); cur = cur[0]!.children; }
     challengeSeek(path);
+  };
+  // Delete the node at the cursor + its whole subtree. Cursor moves to
+  // parent. Broadcasts a fresh snapshot with the pruned tree so the coach
+  // sees the abandoned branch disappear. No-op at root (empty cursor).
+  const challengeDeleteCurrent = () => {
+    if (!_challenge || !_challenge.active) return;
+    const cursor = challengeCursorRef.current;
+    if (cursor.length === 0) return;    // nothing selected
+    const startFen = _challenge.positionFen;
+    // Clone the tree along the cursor path so we can mutate safely.
+    const newTree = challengeTreeRef.current.map(cloneChallengeNode);
+    let parent: ChallengeTreeNode[] = newTree;
+    for (let i = 0; i < cursor.length - 1; i++) {
+      const idx = cursor[i]!;
+      if (!parent[idx]) return;         // bad cursor — bail
+      parent = parent[idx]!.children;
+    }
+    const lastIdx = cursor[cursor.length - 1]!;
+    if (lastIdx < 0 || lastIdx >= parent.length) return;
+    parent.splice(lastIdx, 1);
+    challengeTreeRef.current = newTree;
+    // Cursor moves to the parent of the deleted node (root if we deleted a
+    // top-level move). Recompute FEN + dests + snapshot from there.
+    const parentPath = cursor.slice(0, -1);
+    challengeCursorRef.current = parentPath;
+    const derived = fenAtChallengeCursor(startFen, newTree, parentPath);
+    challengeMovesRef.current = derived.sanChain;
+    setChallengeFen(derived.fen);
+    try { setChallengeDests(destsFromChess(new Chess(derived.fen))); } catch { setChallengeDests(new Map()); }
+    setChallengeTreeTick((n) => n + 1);
+    if (_challenge) {
+      _publishChallenge({ ..._challenge, studentMoves: derived.sanChain });
+    }
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: "challenge:snapshot", movesSan: derived.sanChain, finalFen: derived.fen, tree: newTree })); } catch { /* */ }
+    }
   };
   // Coach-only triggers for starting/ending a challenge from ClassV2 footer.
   useEffect(() => {
@@ -1457,6 +1522,7 @@ export default function SharedClassBoard(
           onStepForward={challengeStepForward}
           onGoStart={challengeGoStart}
           onGoEnd={challengeGoEnd}
+          onDeleteCurrent={challengeDeleteCurrent}
         />
       )}
       {/* Post-challenge "show my answer" ribbon — student-only, only when
@@ -1512,7 +1578,7 @@ function StudentAnswerReviewRibbon({ moves, reviewIdx, onOpen, onPrev, onNext, o
 // 2.Nf3) 2.Nf3 ...`). Prev/next buttons, click any SAN chip to seek.
 // Design goal: encourage exploring different ideas without leaving the
 // board view. Fixed at bottom so it doesn't fight the challenge ribbon.
-function ChallengeScratchpad({ tick, treeRef, cursorRef, onSeek, onStepBack, onStepForward, onGoStart, onGoEnd }: {
+function ChallengeScratchpad({ tick, treeRef, cursorRef, onSeek, onStepBack, onStepForward, onGoStart, onGoEnd, onDeleteCurrent }: {
   tick: number;
   treeRef: React.MutableRefObject<ChallengeTreeNode[]>;
   cursorRef: React.MutableRefObject<number[]>;
@@ -1521,6 +1587,7 @@ function ChallengeScratchpad({ tick, treeRef, cursorRef, onSeek, onStepBack, onS
   onStepForward: () => void;
   onGoStart: () => void;
   onGoEnd: () => void;
+  onDeleteCurrent: () => void;
 }) {
   // Track tick so React re-renders when the tree mutates via refs.
   void tick;
@@ -1550,6 +1617,8 @@ function ChallengeScratchpad({ tick, treeRef, cursorRef, onSeek, onStepBack, onS
           className="grid h-7 w-7 place-items-center rounded-full text-[13px] font-bold text-purple-100 hover:bg-purple-500/25" title="Forward one move">▶</button>
         <button onClick={onGoEnd} disabled={!hasMoves}
           className="grid h-7 w-7 place-items-center rounded-full text-[11px] text-purple-100 hover:bg-purple-500/25 disabled:opacity-30" title="Go to end of mainline">⏭</button>
+        <button onClick={onDeleteCurrent} disabled={cursor.length === 0}
+          className="grid h-7 w-7 place-items-center rounded-full text-[13px] text-rose-200 hover:bg-rose-500/25 disabled:opacity-30" title="Delete this move + everything after it">🗑</button>
         <span className="mx-1 h-4 w-px bg-white/20" />
         {/* Notation strip — horizontally scrollable */}
         <div ref={wrapRef} className="flex flex-1 items-center gap-0.5 overflow-x-auto whitespace-nowrap px-1 py-1 text-[11px]">

@@ -17,7 +17,7 @@ import {
 import { Track, DataPacket_Kind } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
-import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, triggerClassSeek, triggerClassPromoteVariation, triggerClassMakeMainline, triggerClassDeleteFrom, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, type SharedTreeNode, type ChallengeAnswerRow } from "../components/SharedClassBoard";
+import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, triggerClassSeek, triggerClassPromoteVariation, triggerClassMakeMainline, triggerClassDeleteFrom, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow } from "../components/SharedClassBoard";
 import { useScreenWakeLock } from "../hooks/useScreenWakeLock";
 import { OPENINGS, findOpeningForLine, openingBySlug, type Opening } from "../lib/openings";
 import { fetchExplorer, type ExplorerData, type ExplorerMove } from "../lib/explorer";
@@ -2426,7 +2426,11 @@ function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnTyp
                       return (
                         <tr key={a.userId} className={`border-t border-ink-800 align-top ${rowRing}`}>
                           <td className="py-2 pr-3 text-white">{a.displayName || a.userId}</td>
-                          <td className="py-2 pr-3 font-mono text-brand-200">{a.movesSan.join(" ") || <span className="text-ink-500">—</span>}</td>
+                          <td className="py-2 pr-3 font-mono text-brand-200 whitespace-pre-wrap break-words">{
+                            (a.tree && a.tree.length > 0)
+                              ? challengeTreeToPgn(a.tree, challenge.positionFen)
+                              : (a.movesSan.join(" ") || <span className="text-ink-500">—</span>)
+                          }</td>
                           <td className="py-2 pr-3 text-[11px] tabular-nums text-ink-400 whitespace-nowrap">
                             {a.firstMoveAt && a.lastMoveAt ? `${Math.round((a.lastMoveAt - a.firstMoveAt)/1000)}s` : "—"}
                           </td>

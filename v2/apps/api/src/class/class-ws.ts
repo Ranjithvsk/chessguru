@@ -78,7 +78,7 @@ type ClientFrame =
   // sees every student's move sequence in SAN notation.
   | { type: "challenge:start"; positionFen: string; startFen?: string; prompt?: string; durationSec: number }  // coach only
   | { type: "challenge:move";  fromFen: string; move: Move; san: string; nextFen: string }                    // student only — one attempted move
-  | { type: "challenge:snapshot"; movesSan: string[]; finalFen?: string }                                     // student only — full current-line SAN; replaces movesSan
+  | { type: "challenge:snapshot"; movesSan: string[]; finalFen?: string; tree?: ChallengeTreeNode[] }         // student only — full current-line SAN + full variation tree; replaces movesSan+tree
   | { type: "challenge:end" };                                                                                 // coach only OR auto-fired by server timer
 // Server → client frames. `role` sent once after hello resolves; everything else
 // is broadcast to the room on state changes.
@@ -99,13 +99,44 @@ type ServerFrame =
   | { type: "challenge_progress"; answered: number; total: number; remainingSec: number }   // coach-only detail; students see just remaining
   | { type: "challenge_end"; positionFen: string; startedAt?: number; answers?: (ChallengeAnswer & { correct?: boolean | null })[] };            // answers only sent to coach
 
+interface ChallengeTreeNode {
+  from: string;
+  to: string;
+  promotion?: string;
+  san: string;
+  children: ChallengeTreeNode[];
+}
+
 interface ChallengeAnswer {
   userId: string;
   displayName: string;
   movesSan: string[];      // full sequence in the order the student tried (branches collapse to newest attempt)
+  tree?: ChallengeTreeNode[];  // full variation tree from positionFen — used by coach's answers panel to render branches as PGN with (parens) instead of a flat line
   firstMoveAt?: number;    // ms — used for "time-to-first-move" analytics
   lastMoveAt?: number;
   finalFen?: string;       // fen after their last move
+}
+
+/** Sanitize an untrusted tree payload from the student. Enforces per-node
+ *  shape (from/to squares, san ≤ 15 chars, single-char promotion), fanout
+ *  cap (32/level), and a total-node budget so a rogue client can't blow up
+ *  the room or Mongo. */
+function sanitizeChallengeTree(input: any, budget: { count: number }): ChallengeTreeNode[] {
+  if (!Array.isArray(input)) return [];
+  const out: ChallengeTreeNode[] = [];
+  for (const n of input) {
+    if (budget.count <= 0) break;
+    if (out.length >= 32) break;
+    if (!n || typeof n !== "object") continue;
+    const from = typeof n.from === "string" && /^[a-h][1-8]$/.test(n.from) ? n.from : null;
+    const to   = typeof n.to   === "string" && /^[a-h][1-8]$/.test(n.to)   ? n.to   : null;
+    const san  = typeof n.san  === "string" && n.san.length > 0 && n.san.length <= 15 ? n.san : null;
+    if (!from || !to || !san) continue;
+    const promotion = typeof n.promotion === "string" && n.promotion.length === 1 ? n.promotion : undefined;
+    budget.count--;
+    out.push({ from, to, promotion, san, children: sanitizeChallengeTree(n.children, budget) });
+  }
+  return out;
 }
 
 interface Challenge {
@@ -479,6 +510,7 @@ function endChallenge(room: Room, classId: string): void {
         userId: a.userId,
         displayName: a.displayName,
         movesSan: a.movesSan,
+        tree: a.tree,
         firstMoveAt: a.firstMoveAt ? new Date(a.firstMoveAt) : undefined,
         lastMoveAt: a.lastMoveAt ? new Date(a.lastMoveAt) : undefined,
         finalFen: a.finalFen,
@@ -1004,13 +1036,15 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       if (!who || !who.userId) return;
       const raw = Array.isArray(frame.movesSan) ? frame.movesSan : [];
       const cleaned = raw.filter((s: any) => typeof s === "string" && s.length > 0 && s.length <= 15).slice(0, 60);
+      const tree = frame.tree ? sanitizeChallengeTree(frame.tree, { count: 200 }) : undefined;
       let ans = room.challenge.answers.get(who.userId);
       const now = Date.now();
       if (!ans) {
-        ans = { userId: who.userId, displayName: who.name, movesSan: cleaned, firstMoveAt: now };
+        ans = { userId: who.userId, displayName: who.name, movesSan: cleaned, tree, firstMoveAt: now };
         room.challenge.answers.set(who.userId, ans);
       } else {
         ans.movesSan = cleaned;
+        if (tree !== undefined) ans.tree = tree;
       }
       ans.lastMoveAt = now;
       if (typeof frame.finalFen === "string") ans.finalFen = frame.finalFen;
