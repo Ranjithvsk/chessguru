@@ -2183,32 +2183,35 @@ function ChallengeCoachButton() {
   const challenge = useClassChallenge();
   const { startFen, tree, cursorPath } = useClassMoveList();
   const [open, setOpen] = useState(false);
-  // If a challenge is active, the button becomes "End now"
-  if (challenge?.active) {
-    return <ChallengeCoachActiveChip challenge={challenge} />;
-  }
-  // If a challenge just ended, show the Answers panel and let coach dismiss.
-  if (challenge && !challenge.active && challenge.answers) {
-    return <ChallengeAnswersPanel challenge={challenge} />;
-  }
+  // Layout: BOTH the challenge starter AND the past-answers chip render
+  // side-by-side whenever answers exist. Owner report 2026-09-02: "in
+  // coach view, students' answers are gone after continuing the
+  // explanation" — root cause was the answers chip REPLACING the
+  // challenge starter (either-or), and Dismiss wiping the state. Now
+  // the answers chip stays until a new challenge starts (natural
+  // replace) OR the coach explicitly clears it.
   return (
     <>
-      <button
-        onClick={() => setOpen(true)}
-        title="Freeze the board and ask students to find good moves on their own boards"
-        className="rounded-full border border-purple-500/50 bg-purple-500/20 px-3 py-1.5 text-sm font-semibold text-purple-100 hover:bg-purple-500/30"
-      >
-        🧠 Challenge
-      </button>
+      {challenge?.active ? (
+        <ChallengeCoachActiveChip challenge={challenge} />
+      ) : (
+        <button
+          onClick={() => setOpen(true)}
+          title="Freeze the board and ask students to find good moves on their own boards"
+          className="rounded-full border border-purple-500/50 bg-purple-500/20 px-3 py-1.5 text-sm font-semibold text-purple-100 hover:bg-purple-500/30"
+        >
+          🧠 Challenge
+        </button>
+      )}
+      {/* Past-answers chip — stays visible after a challenge ends so the
+       *  coach can reopen the panel any time, even mid-explanation. */}
+      {challenge && !challenge.active && challenge.answers && (
+        <ChallengeAnswersPanel challenge={challenge} />
+      )}
       {open && (
         <ChallengeStartModal
           onClose={() => setOpen(false)}
           onStart={(opts) => {
-            // The frozen position = the coach's CURRENT board state (fen
-            // at cursorPath from startFen). We just pass the two things
-            // the server needs: positionFen (current board) + startFen
-            // (for notation). ChallengeGameRef in SharedClassBoard uses
-            // positionFen as the starting point for student play.
             triggerClassChallengeStart({
               positionFen: computeFenAt(startFen, tree, cursorPath),
               startFen,
@@ -2286,10 +2289,21 @@ function ChallengeStartModal({ onClose, onStart }: { onClose: () => void; onStar
 }
 
 function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnType<typeof useClassChallenge>> }) {
+  // Open once when the challenge first ends (auto-reveal). After that
+  // the coach can close + reopen freely via the chip without the modal
+  // popping unbidden every time the challenge state re-publishes (which
+  // happens when they mark answers, when the mark-toast state changes,
+  // etc.). Keyed on challenge.startedAt so a NEW challenge does auto-open.
   const [open, setOpen] = useState(true);
+  const seenStartedAt = useRef<number | null>(null);
+  useEffect(() => {
+    if (seenStartedAt.current !== challenge.startedAt) {
+      seenStartedAt.current = challenge.startedAt;
+      setOpen(true);   // fresh challenge — auto-reveal
+    }
+  }, [challenge.startedAt]);
   // Local copy so ✓/✗ clicks apply optimistically without waiting for the
-  // server. On revisit / next challenge the coach reopens from the same
-  // state — no per-panel query cache in play.
+  // server. Kept in sync with the incoming challenge.answers on remount.
   const [rows, setRows] = useState<ChallengeAnswerRow[]>(challenge.answers ?? []);
   useEffect(() => { setRows(challenge.answers ?? []); }, [challenge.answers]);
   const { room = "" } = useParams();
@@ -2328,9 +2342,17 @@ function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnTyp
                 {challenge.prompt && <p className="mt-1 text-xs italic text-ink-400 truncate">"{challenge.prompt}"</p>}
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <button onClick={() => { triggerClassChallengeDismiss(); setOpen(false); }}
+                <button
+                  onClick={() => {
+                    if (!window.confirm("Clear these answers? You won't be able to see them again in this class session.")) return;
+                    triggerClassChallengeDismiss();
+                    setOpen(false);
+                  }}
+                  className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-1 text-xs font-semibold text-rose-200 hover:bg-rose-500/20"
+                  title="Permanently clear these answers from the class view">🗑 Clear</button>
+                <button onClick={() => setOpen(false)}
                   className="rounded-lg bg-ink-800 px-3 py-1 text-xs font-semibold text-ink-300 hover:bg-ink-700"
-                  title="Clear the answers panel and re-enable the 🧠 Challenge button">Dismiss</button>
+                  title="Close this panel — answers stay accessible via the 📋 Answers chip">Close</button>
                 <button onClick={() => setOpen(false)} className="grid h-8 w-8 place-items-center rounded-lg bg-ink-800 text-ink-300 hover:bg-ink-700">✕</button>
               </div>
             </div>
