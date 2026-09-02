@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Key } from "chessground/types";
 import Board from "./Board";
 import { useFreePlay, type MoveNode } from "../hooks/useFreePlay";
@@ -162,7 +162,8 @@ export default function OpeningExplorer(
   // persist them yet), POSTs to /api/my/repertoire. Includes the full
   // variation tree, not just the current mainline, so sidelines survive.
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
-  useEffect(() => { if (!saveMsg) return; const t = setTimeout(() => setSaveMsg(null), 2200); return () => clearTimeout(t); }, [saveMsg]);
+  useEffect(() => { if (!saveMsg) return; const t = setTimeout(() => setSaveMsg(null), 5000); return () => clearTimeout(t); }, [saveMsg]);
+  const qc = useQueryClient();
   const saveToRepertoire = () => {
     if (!fp.tree.length) return;
     const suggestedName = opening ? `${opening.eco} ${opening.name}` : "Explored line";
@@ -182,8 +183,12 @@ export default function OpeningExplorer(
     // If the user started from a custom setup, persist the start FEN
     // (so reloading the saved entry lands on that same position).
     if (fp.fen && fp.line.length === 0) body.startFen = fp.fen;
-    void addRepertoire(body).then(() => setSaveMsg(`💾 Saved "${name}" to your repertoire`))
-      .catch((e) => setSaveMsg(`Could not save (${e?.message ?? "unknown"})`));
+    void addRepertoire(body).then(() => {
+      // Invalidate so the My Repertoire panel + /repertoire page pick up
+      // the new entry without a page reload.
+      qc.invalidateQueries({ queryKey: ["my-repertoire"] });
+      setSaveMsg(`💾 Saved "${name}" — open /repertoire to view/edit`);
+    }).catch((e) => setSaveMsg(`Could not save (${e?.message ?? "unknown"})`));
   };
 
   const total = data ? data.white + data.draws + data.black : 0;
