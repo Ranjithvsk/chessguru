@@ -354,20 +354,45 @@ export class StudiesService {
     if (!s || s.toLowerCase() === "startpos") {
       return "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     }
-    // chess.js constructor throws on invalid FEN — catch, re-throw as 400.
-    try {
-      new Chess(s);
-      return s;
-    } catch {
-      throw new BadRequestException("bad FEN");
-    }
+    // Strict path — legal chess position. Wins for anything reachable by
+    // normal play.
+    try { new Chess(s); return s; } catch { /* fall through to permissive */ }
+    // Permissive path — matches the client's useFreePlay.loadPermissive
+    // (used by the /openings Setup Position modal). Owner report 2026-09-02
+    // TKT-123: "Error while saving setup position from opening" — user
+    // built a position with no king / wrong castling / etc. Client accepts
+    // via game.put() + fen(); server was rejecting via strict Chess() ctor.
+    // Setup positions for study/analysis don't have to be legal — that's
+    // the whole point of the position editor. Accept any 8-rank piece-
+    // placement string (with or without the other 5 FEN fields), normalize
+    // to a full 6-field FEN so downstream tools (chess.js in parsePgn,
+    // Chessground display) don't choke on missing bits.
+    const parts = s.split(/\s+/);
+    const board = parts[0] || "";
+    const boardOk = /^[rnbqkpRNBQKP1-8/]+$/.test(board) && board.split("/").length === 8;
+    if (!boardOk) throw new BadRequestException("bad FEN");
+    const turn      = parts[1] === "b" ? "b" : "w";
+    const castling  = parts[2] && /^([KQkq]{1,4}|-)$/.test(parts[2]) ? parts[2] : "-";
+    const enpassant = parts[3] && /^([a-h][36]|-)$/.test(parts[3]) ? parts[3] : "-";
+    const halfmove  = parts[4] && /^\d+$/.test(parts[4]) ? parts[4] : "0";
+    const fullmove  = parts[5] && /^\d+$/.test(parts[5]) ? parts[5] : "1";
+    return `${board} ${turn} ${castling} ${enpassant} ${halfmove} ${fullmove}`;
   }
 
   /** Turn a PGN string into a validated flat move tree. Handles variations
    *  by recursing into RAV blocks. Comments (curly braces) get attached to
    *  the move they follow. */
   parsePgn(pgn: string, startingFen: string): { moves: MoveNode[]; headers?: Record<string, string> } {
-    const game = new Chess(startingFen);
+    // startingFen may be a permissive (setup) FEN that chess.js's strict
+    // constructor rejects (missing king, unreachable castling, etc.). We
+    // still want to save the study — the position is the point. When the
+    // constructor throws, return empty moves + no headers so the study
+    // gets created with just the starting position; the user can add
+    // moves later inside the study editor. Owner report 2026-09-02
+    // TKT-123 follow-up.
+    let game: Chess;
+    try { game = new Chess(startingFen); }
+    catch { return { moves: [] }; }
     let headers: Record<string, string> | undefined;
     try {
       game.loadPgn(pgn, { strict: false });
