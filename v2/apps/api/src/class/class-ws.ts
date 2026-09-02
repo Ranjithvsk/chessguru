@@ -477,6 +477,21 @@ function broadcast(room: Room, frame: ServerFrame): void {
   }
 }
 
+/** Wipe the room's shared arrows/circles + broadcast annot:[] so every
+ *  client's board redraws without stale markup. Called after any handler
+ *  that changes the position or cursor — owner directive 2026-09-02:
+ *  arrows are markup for the CURRENT position, so a move on either side
+ *  (coach or student) or a cursor jump clears them. Coach can immediately
+ *  draw fresh arrows on the new position. No-op if shapes were already
+ *  empty (avoids a needless broadcast on every navigation). loadFen +
+ *  load-tree already zero shapes as part of their state broadcast; this
+ *  helper covers move/seek/step/takeback/tree-mutation. */
+function clearShapesAndBroadcast(room: Room): void {
+  if (room.shapes.length === 0) return;
+  room.shapes = [];
+  broadcast(room, { type: "annot", shapes: [], participants: room.clients.size });
+}
+
 function studentCount(room: Room): number {
   let n = 0;
   for (const c of room.clients) if (socketRole.get(c) === "student") n++;
@@ -688,6 +703,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       broadcast(room, { type: "reset", fen: room.fen, participants: room.clients.size, locked: room.locked });
       // Also emit a full state so tree-aware clients drop their cached tree.
       broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      clearShapesAndBroadcast(room);
       return;
     }
 
@@ -730,6 +746,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       room.cursorPath = nextPath;
       recomputeFromTree(room);
       broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      clearShapesAndBroadcast(room);
       return;
     }
 
@@ -868,6 +885,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       }
       recomputeFromTree(room);
       broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      clearShapesAndBroadcast(room);
       return;
     }
 
@@ -915,6 +933,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       }
       recomputeFromTree(room);
       broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      clearShapesAndBroadcast(room);
       return;
     }
 
@@ -977,6 +996,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       room.cursorPath = path.slice(0, -1);
       recomputeFromTree(room);
       broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      clearShapesAndBroadcast(room);
       return;
     }
 
@@ -1148,6 +1168,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       room.cursorPath = [...room.cursorPath, existingIdx];
       recomputeFromTree(room);
       broadcast(room, { type: "move", move: room.lastMove!, fen: room.fen, startFen: room.startFen, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked });
+      clearShapesAndBroadcast(room);
     }
   });
 
