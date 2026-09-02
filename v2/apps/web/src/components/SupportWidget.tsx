@@ -73,7 +73,23 @@ async function submitTicket(payload: Record<string, unknown>) {
   const text = await r.text();
   let body: any = null;
   try { body = text ? JSON.parse(text) : null; } catch { /* not json */ }
-  if (!r.ok) throw new Error(body?.message || `Send failed (${r.status})`);
+  if (!r.ok) {
+    // Map HTTP status → human message. Server sometimes returns bare 400
+    // (body-parser rejections come back with no JSON message, so
+    // body?.message is undefined — the previous fallback of "Send failed
+    // (400)" told the user nothing about the actual cause). Owner report
+    // 2026-09-02: "why did it show 400 instead of the actual error?".
+    if (body?.message) throw new Error(body.message);
+    if (r.status === 400 || r.status === 413) {
+      throw new Error("Your ticket is too large — remove or shrink attached screenshots and try again.");
+    }
+    if (r.status === 401) throw new Error("Your session has ended — sign in again and retry.");
+    if (r.status === 502 || r.status === 503 || r.status === 504) {
+      throw new Error("Support server is temporarily unreachable — try again in a minute.");
+    }
+    if (r.status >= 500) throw new Error("Support server hit an error — please try again. If it keeps happening, contact us directly.");
+    throw new Error(`Send failed (HTTP ${r.status}). Try again in a minute.`);
+  }
   return body as { ticketNo?: string; id?: string };
 }
 
