@@ -42,7 +42,10 @@ type Move = { from: string; to: string; promotion?: string };
 // pre-move node with no `move`. Coach playing a new move at a rewound
 // cursor now APPENDS a variation instead of truncating the future
 // (matches Lichess-analysis semantics + /openings free-play tree).
-type TreeNode = { move: Move; children: TreeNode[] };
+// nag = short glyph appended to SAN (!, ?, !!, ??, !?, ?!, ±, ∓, +-, -+, =, +=, =+, ∞).
+// comment = coach's free-form text shown under the move. Both optional; empty/absent means none.
+// Preserved across tree mutations (promote, delete, load-tree, etc.).
+type TreeNode = { move: Move; nag?: string; comment?: string; children: TreeNode[] };
 // Chessground DrawShape subset — we serialize only the fields we care about
 // (orig/dest/brush) so the frame stays small even with many annotations.
 type Shape = { orig: string; dest?: string; brush?: string };
@@ -62,6 +65,7 @@ type ClientFrame =
   | { type: "promote-variation"; path: number[] }             // coach only — swap node at path with sibling to its left (one step toward mainline)
   | { type: "make-mainline"; path: number[] }                 // coach only — for every ancestor along path with idx>0, swap into position 0
   | { type: "delete-from"; path: number[] }                   // coach only — remove node at path + subtree; cursor moves to parent
+  | { type: "annotate-move"; path: number[]; nag?: string | null; comment?: string | null }  // coach only — set/clear NAG glyph + text comment on the node at path (null clears)
   | { type: "load-tree"; startFen?: string; tree: TreeNode[]; cursorPath?: number[] }  // coach only — replace tree wholesale (Teach Opening: repertoire / corpus / etc.)
   | { type: "stepBack" }                    // coach only — cursor--, keeps history so students can step forward again
   | { type: "stepForward" }                 // coach only — cursor++
@@ -755,7 +759,12 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
           };
           budget--;
           const kids = Array.isArray(n.children) ? clone(n.children) : [];
-          out.push({ move, children: kids });
+          const node: TreeNode = { move, children: kids };
+          // Preserve annotation fields on incoming trees (repertoire / corpus
+          // packs may already carry glyphs + comments).
+          if (typeof n.nag === "string" && n.nag) node.nag = n.nag.slice(0, 4);
+          if (typeof n.comment === "string" && n.comment) node.comment = n.comment.slice(0, 500);
+          out.push(node);
         }
         return out;
       };
@@ -858,6 +867,36 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         }
       }
       recomputeFromTree(room);
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      return;
+    }
+
+    if (frame.type === "annotate-move") {
+      // Coach-only: set (or clear) the NAG glyph + text comment on the node
+      // at `path`. Non-destructive — no cursor/board change; just tree
+      // metadata. Broadcast the new state so every viewer's notation panel
+      // repaints.
+      if (!isCoach()) return;
+      const p = (frame as any).path;
+      if (!Array.isArray(p) || p.length === 0) return;
+      // Walk to the target node, validating each index.
+      let cur = room.tree;
+      let target: TreeNode | null = null;
+      for (let i = 0; i < p.length; i++) {
+        const idx = Math.trunc(Number(p[i]));
+        if (!Number.isFinite(idx) || idx < 0 || idx >= cur.length) return;
+        if (i === p.length - 1) target = cur[idx]!;
+        else cur = cur[idx]!.children;
+      }
+      if (!target) return;
+      // nag/comment: `null` (or empty string) clears the field; a non-empty
+      // string sets it. Trim + cap to prevent abuse.
+      const rawNag = (frame as any).nag;
+      if (rawNag === null || rawNag === "") { delete target.nag; }
+      else if (typeof rawNag === "string") { target.nag = rawNag.slice(0, 4); }
+      const rawComment = (frame as any).comment;
+      if (rawComment === null || rawComment === "") { delete target.comment; }
+      else if (typeof rawComment === "string") { target.comment = rawComment.slice(0, 500); }
       broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
       return;
     }

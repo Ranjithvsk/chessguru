@@ -67,7 +67,9 @@ export function useClassCursorInfo(): { cursorIdx: number; historyLen: number } 
 // from this. Module-scoped so the panel doesn't have to prop-drill through
 // the LiveKit / class-ws intermediate tree.
 export type SharedMove = { from: string; to: string; promotion?: string };
-export type SharedTreeNode = { move: SharedMove; children: SharedTreeNode[] };
+// nag = glyph appended after the SAN (!, ?, ±, +=, etc.). comment = free-form
+// text under the move. Both optional; server broadcasts them via state frames.
+export type SharedTreeNode = { move: SharedMove; nag?: string; comment?: string; children: SharedTreeNode[] };
 let _moveList: {
   startFen: string;
   history: SharedMove[];       // legacy — linear moves up to cursorPath
@@ -106,6 +108,12 @@ let _deleteFn: PathFn | null = null;
 export function triggerClassPromoteVariation(path: number[]) { _promoteFn?.(path); }
 export function triggerClassMakeMainline(path: number[]) { _mainlineFn?.(path); }
 export function triggerClassDeleteFrom(path: number[]) { _deleteFn?.(path); }
+
+// Coach annotates a move — set/clear NAG glyph + text comment on the node
+// at `path`. Passing `null` for a field clears it; undefined leaves it alone.
+type AnnotateFn = (path: number[], args: { nag?: string | null; comment?: string | null }) => void;
+let _annotateFn: AnnotateFn | null = null;
+export function triggerClassAnnotateMove(path: number[], args: { nag?: string | null; comment?: string | null }) { _annotateFn?.(path, args); }
 
 // Teach Opening — coach loads a whole tree into the class board (from
 // repertoire / corpus / master games). Wholesale replaces room.tree +
@@ -1243,6 +1251,18 @@ export default function SharedClassBoard(
       ws.send(JSON.stringify(body));
     } catch { /* */ }
   };
+  const sendAnnotateMove: AnnotateFn = (path, args) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!Array.isArray(path) || path.length === 0) return;
+    try {
+      const cleanPath = path.map((n) => Math.max(0, Math.floor(Number(n) || 0)));
+      const body: any = { type: "annotate-move", path: cleanPath };
+      if (args.nag !== undefined) body.nag = args.nag;
+      if (args.comment !== undefined) body.comment = args.comment;
+      ws.send(JSON.stringify(body));
+    } catch { /* */ }
+  };
 
   // Register the module-scoped seek + tree-op fns so the notation panel
   // (rendered up in ClassV2, without direct ws access) can drive them.
@@ -1253,12 +1273,14 @@ export default function SharedClassBoard(
     _mainlineFn = sendMainline;
     _deleteFn = sendDelete;
     _loadTreeFn = sendLoadTree;
+    _annotateFn = sendAnnotateMove;
     return () => {
       if (_seekFn === sendSeek) _seekFn = null;
       if (_promoteFn === sendPromote) _promoteFn = null;
       if (_mainlineFn === sendMainline) _mainlineFn = null;
       if (_deleteFn === sendDelete) _deleteFn = null;
       if (_loadTreeFn === sendLoadTree) _loadTreeFn = null;
+      if (_annotateFn === sendAnnotateMove) _annotateFn = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -17,7 +17,7 @@ import {
 import { Track, DataPacket_Kind } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
-import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, triggerClassSeek, triggerClassPromoteVariation, triggerClassMakeMainline, triggerClassDeleteFrom, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow } from "../components/SharedClassBoard";
+import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, triggerClassSeek, triggerClassPromoteVariation, triggerClassMakeMainline, triggerClassDeleteFrom, triggerClassLoadTree, triggerClassAnnotateMove, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow } from "../components/SharedClassBoard";
 import { useScreenWakeLock } from "../hooks/useScreenWakeLock";
 import { OPENINGS, findOpeningForLine, openingBySlug, type Opening } from "../lib/openings";
 import { fetchExplorer, type ExplorerData, type ExplorerMove } from "../lib/explorer";
@@ -777,9 +777,47 @@ type EnrichedNode = {
   ply: number;         // 0-indexed from startFen
   moveNo: number;      // full-move counter
   turn: "w" | "b";     // whose move BEFORE this ply
+  nag?: string;        // annotation glyph (!, ?, ±, +=, …) — appended to SAN when rendered
+  comment?: string;    // coach's text comment shown under the move
   children: EnrichedNode[];
 };
 function pathsEqual(a: number[], b: number[]) { return a.length === b.length && a.every((v, i) => v === b[i]); }
+
+// NAG glyph presets (PGN-standard annotation symbols). The right-click
+// menu's "Annotation" grid uses this list. Colour maps to move quality
+// so the coach's intent reads at a glance in the notation panel.
+const NAG_PRESETS: Array<{ text: string; hint: string }> = [
+  { text: "!",  hint: "Good move" },
+  { text: "?",  hint: "Mistake" },
+  { text: "!!", hint: "Brilliant" },
+  { text: "??", hint: "Blunder" },
+  { text: "!?", hint: "Interesting" },
+  { text: "?!", hint: "Dubious" },
+  { text: "±",  hint: "White clear advantage" },
+  { text: "∓",  hint: "Black clear advantage" },
+  { text: "+-", hint: "White winning" },
+  { text: "-+", hint: "Black winning" },
+  { text: "+=", hint: "White slight edge" },
+  { text: "=+", hint: "Black slight edge" },
+  { text: "=",  hint: "Equal" },
+  { text: "∞",  hint: "Unclear" },
+];
+const NAG_CLASS: Record<string, string> = {
+  "!":  "text-emerald-400",
+  "!!": "text-emerald-400",
+  "?":  "text-rose-400",
+  "??": "text-rose-500",
+  "!?": "text-amber-300",
+  "?!": "text-amber-500",
+  "±":  "text-sky-300",
+  "∓":  "text-sky-300",
+  "+-": "text-sky-400",
+  "-+": "text-sky-400",
+  "+=": "text-sky-200",
+  "=+": "text-sky-200",
+  "=":  "text-ink-400",
+  "∞":  "text-purple-300",
+};
 
 // Compute the ply / moveNo / turn for the CURRENT node given the parent
 // board state — needed for correct row numbering when the pack begins mid-game.
@@ -880,6 +918,7 @@ function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "stu
         const childPath = [...prefix, i];
         out.push({
           san, path: childPath, ply, moveNo, turn,
+          nag: n.nag, comment: n.comment,
           children: walk(n.children, nextFen, childPath, plyBase + 1),
         });
       }
@@ -962,7 +1001,10 @@ function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "stu
           onContextMenu={(e) => onContext(n.path, e)}
           disabled={!clickable}
           className={`rounded px-1 py-0.5 font-mono text-sm ${active ? "bg-brand-500/60 text-white" : "text-ink-100 hover:bg-ink-800"} ${clickable ? "cursor-pointer" : "cursor-default"}`}
-        >{n.san}</button>
+        >{n.san}{n.nag ? <span className={NAG_CLASS[n.nag] ?? "text-amber-300"}>{n.nag}</span> : null}</button>
+        {n.comment && (
+          <span className="ml-1 italic text-[11px] text-ink-400">{n.comment}</span>
+        )}
       </span>
     );
   };
@@ -1124,7 +1166,7 @@ function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "stu
                     onContextMenu={(e) => onContext(row.white!.node.path, e)}
                     disabled={!clickable}
                     className={cellClass(wActive)}
-                  >{row.white.node.san}</button>
+                  >{row.white.node.san}{row.white.node.nag ? <span className={NAG_CLASS[row.white.node.nag] ?? "text-amber-300"}>{row.white.node.nag}</span> : null}</button>
                 ) : <span />}
                 {row.black ? (
                   <button
@@ -1133,9 +1175,17 @@ function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "stu
                     onContextMenu={(e) => onContext(row.black!.node.path, e)}
                     disabled={!clickable}
                     className={cellClass(bActive)}
-                  >{row.black.node.san}</button>
+                  >{row.black.node.san}{row.black.node.nag ? <span className={NAG_CLASS[row.black.node.nag] ?? "text-amber-300"}>{row.black.node.nag}</span> : null}</button>
                 ) : <span />}
               </div>
+              {/* Coach text comment — italic subtext below the move row. Wraps
+               *  full-width so long comments don't push the row wider. */}
+              {(row.white?.node.comment || row.black?.node.comment) && (
+                <div className="ml-9 mb-1 space-y-0.5 text-[11px] italic text-ink-400">
+                  {row.white?.node.comment && <div>{row.moveNo}. {row.white.node.comment}</div>}
+                  {row.black?.node.comment && <div>{row.moveNo}… {row.black.node.comment}</div>}
+                </div>
+              )}
               {/* Variations from white's move (Black-to-move sidelines). */}
               {row.white?.vars.map((v, vi) => (
                 <div key={`wv${vi}`} className="my-1 ml-8 border-l-2 border-ink-700 pl-2 text-[13px] text-ink-300">
@@ -1157,7 +1207,16 @@ function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "stu
         // choice at some branch point). Mainline nodes only get Delete +
         // Copy PGN; variations get Promote / Make main line too.
         const isVariation = ctxMenu.path.some((k) => k > 0);
-        const menuW = 220, menuH = 200;
+        // Locate the enriched node so the annotation submenu can show
+        // current nag/comment (for pre-fill + Clear affordances).
+        const findNode = (nodes: EnrichedNode[], path: number[]): EnrichedNode | null => {
+          let arr: EnrichedNode[] = nodes;
+          let cur: EnrichedNode | null = null;
+          for (const k of path) { cur = arr[k] ?? null; if (!cur) return null; arr = cur.children; }
+          return cur;
+        };
+        const targetNode = findNode(enriched.nodes, ctxMenu.path);
+        const menuW = 280, menuH = 340;
         const x = Math.min(ctxMenu.x, window.innerWidth - menuW - 8);
         const y = Math.min(ctxMenu.y, window.innerHeight - menuH - 8);
         const doAndClose = (fn: () => void) => { fn(); closeCtx(); };
@@ -1165,7 +1224,7 @@ function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "stu
           <div
             data-notation-ctxmenu
             role="menu"
-            className="fixed z-[80] min-w-[210px] rounded-md border border-ink-700 bg-ink-900 py-1 text-sm text-ink-200 shadow-2xl"
+            className="fixed z-[80] min-w-[270px] max-w-[300px] rounded-md border border-ink-700 bg-ink-900 py-1 text-sm text-ink-200 shadow-2xl"
             style={{ left: x, top: y }}
           >
             {isVariation && (
@@ -1192,6 +1251,55 @@ function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "stu
               className="block w-full px-3 py-1.5 text-left text-rose-300 hover:bg-ink-800">
               Delete from here
             </button>
+            <div className="my-1 border-t border-ink-800" />
+            {/* Annotation grid + comment editor — coach-only (menu itself is
+             *  coach-only, `clickable` gate on onContext). Server persists the
+             *  glyph + comment on the tree node so every client's notation
+             *  panel updates in real time. */}
+            <div className="px-2 pt-1 pb-0.5 text-[10px] uppercase tracking-wide text-ink-500">Annotation</div>
+            <div className="grid grid-cols-4 gap-1 px-2 pb-1">
+              {NAG_PRESETS.map((p) => {
+                const active = targetNode?.nag === p.text;
+                return (
+                  <button
+                    key={p.text}
+                    role="menuitem"
+                    onClick={() => doAndClose(() => triggerClassAnnotateMove(ctxMenu.path, { nag: p.text }))}
+                    title={p.hint}
+                    className={`grid h-7 place-items-center rounded font-mono text-[13px] font-bold transition ${active ? "bg-brand-500 text-white" : `${NAG_CLASS[p.text] ?? "text-ink-200"} bg-ink-800 hover:bg-ink-700`}`}
+                  >
+                    {p.text}
+                  </button>
+                );
+              })}
+            </div>
+            {targetNode?.nag && (
+              <button role="menuitem"
+                onClick={() => doAndClose(() => triggerClassAnnotateMove(ctxMenu.path, { nag: null }))}
+                className="block w-full px-3 py-1 text-left text-[11px] text-ink-400 hover:bg-ink-800">
+                × Clear annotation ({targetNode.nag})
+              </button>
+            )}
+            <div className="my-1 border-t border-ink-800" />
+            <button role="menuitem"
+              onClick={() => doAndClose(() => {
+                const existing = targetNode?.comment ?? "";
+                const next = window.prompt("Coach's comment on this move (up to 500 chars). Empty = no change; type '-' to clear.", existing);
+                if (next === null) return;
+                if (next === "-") { triggerClassAnnotateMove(ctxMenu.path, { comment: null }); return; }
+                if (next === "") return;   // no change
+                triggerClassAnnotateMove(ctxMenu.path, { comment: next.slice(0, 500) });
+              })}
+              className="block w-full px-3 py-1.5 text-left hover:bg-ink-800">
+              {targetNode?.comment ? "💬 Edit comment" : "💬 Add comment"}
+            </button>
+            {targetNode?.comment && (
+              <button role="menuitem"
+                onClick={() => doAndClose(() => triggerClassAnnotateMove(ctxMenu.path, { comment: null }))}
+                className="block w-full px-3 py-1 text-left text-[11px] text-ink-400 hover:bg-ink-800">
+                × Clear comment
+              </button>
+            )}
             <div className="my-1 border-t border-ink-800" />
             <button role="menuitem"
               onClick={() => doAndClose(() => {
