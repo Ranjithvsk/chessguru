@@ -16,7 +16,7 @@ import { fetchExplorer } from "../lib/explorer";
 import { OPENING_HANDOFF_KEY } from "../lib/openingMemory";
 import { findOpeningForLine } from "../lib/openings";
 import { OpeningIdeaPanel } from "./OpeningIdeaPanel";
-import { AnnotationToolbar, applyAnnotationClick, computeAttackShapes, useAnnotationTool } from "./AnnotationToolbar";
+import { AnnotationToolbar, applyAnnotationClick, computeAttackShapes, useAnnotationTool, type AnnotShape } from "./AnnotationToolbar";
 import { Chess } from "chess.js";
 
 function WdlBar({ w, d, b, className = "" }: { w: number; d: number; b: number; className?: string }) {
@@ -55,9 +55,9 @@ export default function OpeningExplorer(
   // /openings isn't shared. Shapes are keyed by FEN so each position
   // keeps its own annotations when you step through the tree.
   const annotTool = useAnnotationTool();
-  const [shapesByFen, setShapesByFen] = useState<Record<string, Array<{ orig: string; dest?: string; brush?: string }>>>({});
+  const [shapesByFen, setShapesByFen] = useState<Record<string, AnnotShape[]>>({});
   const shapes = shapesByFen[fp.fen] ?? [];
-  const setShapes = (next: Array<{ orig: string; dest?: string; brush?: string }>) => {
+  const setShapes = (next: AnnotShape[]) => {
     setShapesByFen((prev) => ({ ...prev, [fp.fen]: next }));
   };
   const { data, isError } = useQuery({
@@ -262,6 +262,8 @@ export default function OpeningExplorer(
           hasShapes={shapes.length > 0}
           attackMode={annotTool.attackMode}
           onAttackModeChange={annotTool.setAttackMode}
+          textLabel={annotTool.textLabel}
+          onTextLabelChange={annotTool.setTextLabel}
         />
         {annotTool.tool === "arrow" && annotTool.pendingArrowFrom && (
           <div className="mt-1 text-center text-[11px] font-medium text-brand-300">

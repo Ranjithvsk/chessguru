@@ -15,8 +15,21 @@
 import { useCallback, useEffect, useState } from "react";
 import { Chess } from "chess.js";
 
-export type AnnotationTool = "cursor" | "arrow" | "circle" | "cross";
+export type AnnotationTool = "cursor" | "arrow" | "circle" | "cross" | "text";
 export type AnnotationBrush = "green" | "red" | "blue" | "yellow" | "purple";
+// Preset text labels for the text tool (Phase 4, 2026-09-02). Coach picks
+// one → clicks a square to drop it. Standard PGN annotation glyphs plus
+// a few positional markers.
+export const TEXT_PRESETS: Array<{ text: string; fill: string; hint: string }> = [
+  { text: "!",  fill: "#059669", hint: "Good move" },
+  { text: "?",  fill: "#dc2626", hint: "Mistake" },
+  { text: "!!", fill: "#059669", hint: "Brilliant" },
+  { text: "??", fill: "#7c2d12", hint: "Blunder" },
+  { text: "!?", fill: "#ea580c", hint: "Interesting" },
+  { text: "?!", fill: "#a16207", hint: "Dubious" },
+  { text: "⊕",  fill: "#3b82f6", hint: "Idea / plan" },
+  { text: "⊖",  fill: "#6b7280", hint: "Weakness / concern" },
+];
 
 // Colours match chessground's built-in brush names so shapes render
 // with the library's stock renderer. "purple" isn't a chessground
@@ -34,6 +47,15 @@ const TOOL_META: Record<AnnotationTool, { label: string; icon: string; hint: str
   arrow:  { label: "Arrow",  icon: "→", hint: "Click a square, then a target to draw an arrow" },
   circle: { label: "Circle", icon: "◯", hint: "Click a square to circle it (click again to remove)" },
   cross:  { label: "Cross",  icon: "✕", hint: "Click a square to mark ✕ (bad/avoid)" },
+  text:   { label: "Text",   icon: "🅐", hint: "Pick a label (! ? !! ??) then click a square to drop it" },
+};
+
+const TOOL_HOTKEY: Record<AnnotationTool, string> = {
+  cursor: "",
+  arrow:  "A",
+  circle: "C",
+  cross:  "X",
+  text:   "L",
 };
 
 /** Persisted per user via localStorage — the tool + colour survive reloads
@@ -51,6 +73,19 @@ export function useAnnotationTool() {
   // click to complete the arrow. Reset on tool change / escape.
   const [pendingArrowFrom, setPendingArrowFrom] = useState<string | null>(null);
   useEffect(() => { setPendingArrowFrom(null); }, [tool]);
+  // Text-tool loaded label (Phase 4). The user picks a preset (or types
+  // custom) → clicks a square to drop that label. Persists last pick so
+  // rapid-fire annotation of a game doesn't need a re-pick every time.
+  const [textLabel, _setTextLabel] = useState<{ text: string; fill: string }>(() => {
+    try {
+      const raw = localStorage.getItem("cg_annot_textlabel");
+      if (raw) { const j = JSON.parse(raw); if (typeof j?.text === "string" && typeof j?.fill === "string") return j; }
+    } catch { /* */ }
+    return TEXT_PRESETS[0]!;
+  });
+  const setTextLabel = useCallback((t: { text: string; fill: string }) => {
+    _setTextLabel(t); try { localStorage.setItem("cg_annot_textlabel", JSON.stringify(t)); } catch { /* */ }
+  }, []);
   // Attack-overlay mode (Phase 2). When ON, clicking a piece renders
   // every square that piece attacks. attackShownFrom is the currently-
   // shown source square (or null if nothing selected).
@@ -70,6 +105,7 @@ export function useAnnotationTool() {
       else if (e.key.toLowerCase() === "a") setTool("arrow");
       else if (e.key.toLowerCase() === "c") setTool("circle");
       else if (e.key.toLowerCase() === "x") setTool("cross");
+      else if (e.key.toLowerCase() === "l") setTool("text");
       else if (e.key === "1") setBrush("green");
       else if (e.key === "2") setBrush("red");
       else if (e.key === "3") setBrush("blue");
@@ -87,6 +123,7 @@ export function useAnnotationTool() {
     pendingArrowFrom, setPendingArrowFrom,
     attackMode, setAttackMode,
     attackShownFrom, setAttackShownFrom,
+    textLabel, setTextLabel,
   };
 }
 
@@ -143,12 +180,23 @@ export function computeAttackShapes(fen: string, from: string): Array<{ orig: st
  *
  *  If the arrow tool is mid-select (pendingArrowFrom set) and the user
  *  clicks the SAME square, cancel; otherwise draw arrow from → to. */
+// Extended shape shape — chessground supports `label: {text, fill}`
+// natively; we pass it straight through to Board and it renders as a
+// text badge on the square. Broadcasting these over the class-ws
+// annot frame just works — server relays the raw shape objects.
+export type AnnotShape = {
+  orig: string;
+  dest?: string;
+  brush?: string;
+  label?: { text: string; fill?: string };
+};
+
 export function applyAnnotationClick(
   square: string,
-  currentShapes: Array<{ orig: string; dest?: string; brush?: string }>,
+  currentShapes: AnnotShape[],
   state: ReturnType<typeof useAnnotationTool>,
-): Array<{ orig: string; dest?: string; brush?: string }> | null {
-  const { tool, brush, pendingArrowFrom, setPendingArrowFrom } = state;
+): AnnotShape[] | null {
+  const { tool, brush, pendingArrowFrom, setPendingArrowFrom, textLabel } = state;
   if (tool === "cursor") return null;
 
   if (tool === "circle") {
@@ -164,6 +212,18 @@ export function applyAnnotationClick(
     const existing = currentShapes.findIndex((s) => s.orig === square && !s.dest && s.brush === "brushCross");
     if (existing !== -1) return currentShapes.filter((_, i) => i !== existing);
     return [...currentShapes, { orig: square, brush: "brushCross" }];
+  }
+
+  if (tool === "text") {
+    // Drop the currently-loaded label. Toggle: if the SAME label is
+    // already on this square, remove it. If a DIFFERENT label is there,
+    // replace it (so re-tagging a square doesn't need an eraser step).
+    const existingSame = currentShapes.findIndex((s) => s.orig === square && !s.dest && s.label && s.label.text === textLabel.text);
+    if (existingSame !== -1) return currentShapes.filter((_, i) => i !== existingSame);
+    const existingAny = currentShapes.findIndex((s) => s.orig === square && !s.dest && !!s.label);
+    const next = existingAny !== -1 ? currentShapes.filter((_, i) => i !== existingAny) : currentShapes.slice();
+    next.push({ orig: square, label: { text: textLabel.text, fill: textLabel.fill } });
+    return next;
   }
 
   if (tool === "arrow") {
@@ -191,6 +251,7 @@ export function applyAnnotationClick(
  *  palette + 🎯 Attack toggle + Clear. Keyboard shortcuts shown in tooltips. */
 export function AnnotationToolbar({
   tool, brush, onToolChange, onBrushChange, onClear, hasShapes, attackMode, onAttackModeChange,
+  textLabel, onTextLabelChange,
 }: {
   tool: AnnotationTool;
   brush: AnnotationBrush;
@@ -200,18 +261,21 @@ export function AnnotationToolbar({
   hasShapes: boolean;
   attackMode?: boolean;
   onAttackModeChange?: (v: boolean) => void;
+  textLabel?: { text: string; fill: string };
+  onTextLabelChange?: (t: { text: string; fill: string }) => void;
 }) {
   return (
-    <div className="mt-2 flex flex-wrap items-center justify-center gap-1 rounded-full border border-ink-700 bg-ink-900/70 p-1 shadow-sm">
+    <div className="mt-2 flex flex-col items-center gap-1">
+    <div className="flex flex-wrap items-center justify-center gap-1 rounded-full border border-ink-700 bg-ink-900/70 p-1 shadow-sm">
       {/* Tools */}
-      {(["cursor", "arrow", "circle", "cross"] as AnnotationTool[]).map((t) => {
+      {(["cursor", "arrow", "circle", "cross", "text"] as AnnotationTool[]).map((t) => {
         const meta = TOOL_META[t];
         const active = tool === t;
         return (
           <button
             key={t}
             onClick={() => onToolChange(t)}
-            title={`${meta.label} — ${meta.hint}${t !== "cursor" ? ` (${t[0].toUpperCase()})` : ""}`}
+            title={`${meta.label} — ${meta.hint}${TOOL_HOTKEY[t] ? ` (${TOOL_HOTKEY[t]})` : ""}`}
             className={`grid h-9 min-w-9 place-items-center rounded-full px-2 text-base transition ${active ? "bg-brand-500 text-white shadow-glow" : "text-ink-300 hover:bg-ink-800"}`}
           >
             <span aria-hidden>{meta.icon}</span>
@@ -256,6 +320,41 @@ export function AnnotationToolbar({
       >
         🗑 Clear
       </button>
+    </div>
+    {/* Text-tool preset picker (Phase 4) — appears below the main bar
+     *  when the text tool is active. Coach picks a label → next square
+     *  click drops it. "…" opens a prompt for custom text. */}
+    {tool === "text" && textLabel && onTextLabelChange && (
+      <div className="flex flex-wrap items-center justify-center gap-1 rounded-full border border-ink-700 bg-ink-900/70 p-1 shadow-sm">
+        {TEXT_PRESETS.map((p) => {
+          const active = textLabel.text === p.text;
+          return (
+            <button
+              key={p.text}
+              onClick={() => onTextLabelChange({ text: p.text, fill: p.fill })}
+              title={p.hint}
+              className={`grid h-8 min-w-8 place-items-center rounded-full px-2 font-mono text-sm font-bold transition ${active ? "ring-2 ring-white ring-offset-2 ring-offset-ink-900" : "hover:brightness-125"}`}
+              style={{ backgroundColor: active ? p.fill : `${p.fill}55`, color: "#fff" }}
+            >
+              {p.text}
+            </button>
+          );
+        })}
+        <button
+          onClick={() => {
+            const t = window.prompt("Custom label (max 6 chars):", textLabel.text.length <= 6 ? textLabel.text : "");
+            if (t == null) return;
+            const clean = t.trim().slice(0, 6);
+            if (!clean) return;
+            onTextLabelChange({ text: clean, fill: textLabel.fill });
+          }}
+          title="Type a custom label"
+          className="grid h-8 min-w-8 place-items-center rounded-full bg-ink-800 px-2 text-xs font-semibold text-ink-200 hover:bg-ink-700"
+        >
+          …
+        </button>
+      </div>
+    )}
     </div>
   );
 }

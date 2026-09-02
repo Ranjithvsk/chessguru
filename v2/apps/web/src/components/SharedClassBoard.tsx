@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Chess, validateFen } from "chess.js";
 import type { Key } from "chessground/types";
 import Board from "./Board";
-import { AnnotationToolbar, applyAnnotationClick, computeAttackShapes, useAnnotationTool } from "./AnnotationToolbar";
+import { AnnotationToolbar, applyAnnotationClick, computeAttackShapes, useAnnotationTool, type AnnotShape } from "./AnnotationToolbar";
 
 type BoardMove = { from: string; to: string; promotion?: string };
 
@@ -675,7 +675,7 @@ export default function SharedClassBoard(
   const [lastMove, setLastMove] = useState<BoardMove | null>(null);
   const [dests, setDests] = useState<Map<Key, Key[]>>(() => destsFromChess(new Chess()));
   const [connected, setConnected] = useState(false);
-  const [shapes, setShapes] = useState<Array<{ orig: string; dest?: string; brush?: string }>>([]);
+  const [shapes, setShapes] = useState<AnnotShape[]>([]);
   // Annotation tool state (Phase 1 — owner ask 2026-09-02). Persisted
   // per-user via useAnnotationTool → localStorage. Only used when the
   // board is NOT inside a challenge (challenge students have their own
@@ -1321,7 +1321,7 @@ export default function SharedClassBoard(
     if (!ws || ws.readyState !== WebSocket.OPEN) { setSetupErr("Not connected. Retry in a moment."); return; }
     try { ws.send(JSON.stringify({ type: "loadFen", fen: s })); } catch { /* */ }
   };
-  const sendAnnot = (next: Array<{ orig: string; dest?: string; brush?: string }>) => {
+  const sendAnnot = (next: AnnotShape[]) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     try { ws.send(JSON.stringify({ type: "annot", shapes: next.slice(0, 64) })); } catch { /* */ }
@@ -1434,6 +1434,8 @@ export default function SharedClassBoard(
               hasShapes={shapes.length > 0}
               attackMode={annotTool.attackMode}
               onAttackModeChange={annotTool.setAttackMode}
+              textLabel={annotTool.textLabel}
+              onTextLabelChange={annotTool.setTextLabel}
             />
             {annotTool.tool === "arrow" && annotTool.pendingArrowFrom && (
               <div className="mt-1 text-center text-[11px] font-medium text-brand-300">
