@@ -56,10 +56,31 @@ const MAX_TITLE = 140;
 const MAX_HISTORY = 800;   // 400 full-moves of chess, well past any real class snippet
 
 type Move = { from: string; to: string; promotion?: string };
-// Tree node mirrors the class-ws Room.tree shape — { move, children }. Coach's
-// current variation state is captured in the pack so the Notebook detail can
-// render the full tree (mainline + branches), not just the linear line.
-type PackTreeNode = { move: Move; children: PackTreeNode[] };
+// Tree node mirrors the class-ws Room.tree shape — { move, children, ... }.
+// Coach's current variation state is captured in the pack so the Notebook
+// detail can render the full tree (mainline + branches), not just the linear
+// line. shapes = arrows/circles the coach drew while at THIS position (added
+// 2026-09-02 so send-position preserves teaching arrows per node).
+type PackShape = { orig: string; dest?: string; brush?: string };
+type PackTreeNode = { move: Move; shapes?: PackShape[]; children: PackTreeNode[] };
+
+/** Sanitize an incoming shapes[] the same way class-ws annot handler does:
+ *  a1..h8 squares, brush must be string, cap 64 shapes. Drops junk silently. */
+function cleanShapes(raw: unknown): PackShape[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PackShape[] = [];
+  for (const s of raw) {
+    if (out.length >= 64) break;
+    if (!s || typeof s !== "object") continue;
+    const orig = (s as any).orig;
+    if (typeof orig !== "string" || !/^[a-h][1-8]$/.test(orig)) continue;
+    const dest = (s as any).dest;
+    if (dest != null && (typeof dest !== "string" || !/^[a-h][1-8]$/.test(String(dest)))) continue;
+    const brush = (s as any).brush;
+    out.push({ orig, dest: dest ?? undefined, brush: typeof brush === "string" ? brush : undefined });
+  }
+  return out;
+}
 
 function newPackId(): string {
   return "pp_" + randomBytes(9).toString("base64url").slice(0, 12);
@@ -119,7 +140,10 @@ function cleanTree(raw: unknown): PackTreeNode[] | null {
       };
       budget--;
       const kids = Array.isArray((n as any).children) ? walk((n as any).children) : [];
-      out.push({ move, children: kids });
+      const shapes = cleanShapes((n as any).shapes);
+      const node: PackTreeNode = { move, children: kids };
+      if (shapes.length > 0) node.shapes = shapes;
+      out.push(node);
     }
     return out;
   };
@@ -252,6 +276,10 @@ export class ClassPositionPacksController {
     const packId = newPackId();
     const title = String(body?.title ?? "Position from class").slice(0, MAX_TITLE);
     const now = new Date();
+    // startShapes = coach's arrows/circles drawn at the STARTING position
+    // (before any move). Per-node shapes live inside tree already. Both fields
+    // are optional; older clients simply omit them.
+    const startShapes = cleanShapes(body?.startShapes);
     await this.packs().insertOne({
       _id: packId as any,
       classId: id,
@@ -269,6 +297,7 @@ export class ClassPositionPacksController {
       history,
       cursorIdx: capped,
       currentFen,
+      startShapes,
       recipientUserIds: recipients,
       maiaRating: null as number | null,
       maiaBand: null as string | null,
@@ -387,6 +416,7 @@ export class NotebookController {
         ? row.tree
         : historyToTree(Array.isArray(row.history) ? row.history : []),
       cursorPath: Array.isArray(row.cursorPath) ? row.cursorPath : (Array.isArray(row.history) ? Array.from({ length: row.history.length }, () => 0) : []),
+      startShapes: Array.isArray(row.startShapes) ? row.startShapes : [],
       bestAttempt: bestAttempt ? {
         scorePct: bestAttempt.scorePct,
         correctCount: bestAttempt.correctCount,

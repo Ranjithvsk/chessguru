@@ -91,7 +91,7 @@ type ClientFrame =
 // is broadcast to the room on state changes.
 type ServerFrame =
   | { type: "role"; role: "coach" | "student"; coachToken?: string }
-  | { type: "state"; fen: string; startFen: string; lastMove: Move | null; history: Move[]; cursorIdx: number; tree: TreeNode[]; cursorPath: number[]; participants: number; locked: boolean; shapes: Shape[]; orientation: Orientation }
+  | { type: "state"; fen: string; startFen: string; lastMove: Move | null; history: Move[]; cursorIdx: number; tree: TreeNode[]; cursorPath: number[]; participants: number; locked: boolean; shapes: Shape[]; startShapes: Shape[]; orientation: Orientation }
   | { type: "move"; move: Move; fen: string; startFen: string; history: Move[]; cursorIdx: number; tree: TreeNode[]; cursorPath: number[]; participants: number; locked: boolean }
   | { type: "reset"; fen: string; participants: number; locked: boolean }
   | { type: "lock"; locked: boolean; participants: number }
@@ -415,7 +415,7 @@ async function restoreRoomFromDb(classId: string, room: Room): Promise<void> {
     // Broadcast the restored state to any clients that connected while the
     // restore was in flight (rare, but possible on a rapid page reload).
     if (room.clients.size > 0) {
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
     }
   } catch (e: any) {
     console.warn("[class-ws] classBoardState restore failed:", e?.message);
@@ -608,7 +608,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
   // Snapshot current board to the new participant. Role isn't decided here — client
   // sends `hello` (optionally with its saved coachToken) and role is resolved there.
-  send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+  send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
   // Late joiner mid-challenge — inform them so their board switches to
   // challenge mode with the correct remaining time. Uses the ORIGINAL
   // durationSec so the client can display "60s challenge, 42s remaining"
@@ -756,7 +756,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       room.fen = START_FEN; room.startFen = START_FEN; room.tree = []; room.cursorPath = []; room.lastMove = null; room.history = []; room.cursorIdx = 0; room.startShapes = [];
       broadcast(room, { type: "reset", fen: room.fen, participants: room.clients.size, locked: room.locked });
       // Also emit a full state so tree-aware clients drop their cached tree.
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
       syncShapesToPosition(room);
       return;
     }
@@ -799,7 +799,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       if (nextPath.length === room.cursorPath.length && nextPath.every((v, i) => v === room.cursorPath[i])) return;
       room.cursorPath = nextPath;
       recomputeFromTree(room);
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
       syncShapesToPosition(room);
       return;
     }
@@ -875,7 +875,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       room.cursorPath = cleanCursorPath;
       room.startShapes = [];   // stale start-position arrows meaningless in a fresh tree
       recomputeFromTree(room);
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
       syncShapesToPosition(room);
       return;
     }
@@ -951,7 +951,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         }
       }
       recomputeFromTree(room);
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
       syncShapesToPosition(room);
       return;
     }
@@ -982,7 +982,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       const rawComment = (frame as any).comment;
       if (rawComment === null || rawComment === "") { delete target.comment; }
       else if (typeof rawComment === "string") { target.comment = rawComment.slice(0, 500); }
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
       return;
     }
 
@@ -999,7 +999,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         room.cursorPath = extended;
       }
       recomputeFromTree(room);
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
       syncShapesToPosition(room);
       return;
     }
@@ -1028,7 +1028,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       room.history = [];
       room.cursorIdx = 0;
       room.startShapes = [];    // stale arrows/circles from the previous position are meaningless
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
       syncShapesToPosition(room);
       return;
     }
@@ -1063,7 +1063,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       parentChildren.splice(lastIdx, 1);
       room.cursorPath = path.slice(0, -1);
       recomputeFromTree(room);
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
       syncShapesToPosition(room);
       return;
     }
@@ -1210,7 +1210,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     if (frame.type === "move" && frame.move && typeof frame.move.from === "string" && typeof frame.move.to === "string") {
       // Student-lock check: student moves are dropped when the coach has toggled the
       // lock. The sender still gets a state snapshot to reconcile any optimistic UI.
-      if (room.locked && !isCoach()) { send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation }); return; }
+      if (room.locked && !isCoach()) { send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation }); return; }
       // Server-side chess.js is the tie-breaker: two racing clients can't diverge the
       // canonical FEN. Illegal moves are dropped silently — the sender's local board
       // will reconcile from the next authoritative state frame it receives.
@@ -1220,7 +1220,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         const applied = c.move({ from: frame.move.from, to: frame.move.to, promotion: (frame.move.promotion as any) || "q" });
         ok = !!applied;
       } catch { ok = false; }
-      if (!ok) { send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation }); return; }
+      if (!ok) { send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation }); return; }
       // Tree semantics: append the new move as a child of the node at
       // cursorPath. If a child with the same from/to/promotion already
       // exists, just move the cursor to it (don't duplicate). Playing a

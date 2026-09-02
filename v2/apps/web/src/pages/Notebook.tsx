@@ -55,12 +55,14 @@ function DifficultyChip({ rating, band }: { rating: number | null; band: string 
 type PackListResp = { packs: PackListItem[] };
 type BestAttempt = { scorePct: number; correctCount: number; totalPly: number; tookMs: number; finishedAt: string };
 type PackMove = { from: string; to: string; promotion?: string };
-type PackTreeNode = { move: PackMove; children: PackTreeNode[] };
+type PackShape = { orig: string; dest?: string; brush?: string };
+type PackTreeNode = { move: PackMove; shapes?: PackShape[]; children: PackTreeNode[] };
 type PackDetail = PackListItem & {
   history: PackMove[];
   bestAttempt: BestAttempt | null;
   tree: PackTreeNode[];
   cursorPath: number[];
+  startShapes?: PackShape[];
 };
 type MyAttempt = { packId: string; scorePct: number; correctCount: number; totalPly: number; tookMs: number; finishedAt: string };
 type MyAttemptsResp = { attempts: MyAttempt[] };
@@ -645,6 +647,25 @@ export function NotebookPackDetailPage() {
     } catch { return data.currentFen; }
   }, [data, cursor]);
 
+  // Shapes the coach drew at the CURRENT cursor position — root falls back
+  // to startShapes; deeper reads the tree node's own shapes. Passed to Board
+  // so students see the same teaching arrows/circles the coach saw at that
+  // spot (Sep 2 2026: per-position shapes plumbed through Send-position).
+  const displayShapes = useMemo(() => {
+    if (!data) return [] as PackShape[];
+    const path = cursor ?? data.cursorPath ?? [];
+    if (path.length === 0) return data.startShapes ?? [];
+    let nodes = data.tree;
+    let node: PackTreeNode | null = null;
+    for (const idx of path) {
+      const n = nodes[idx];
+      if (!n) return [];
+      node = n;
+      nodes = n.children;
+    }
+    return node?.shapes ?? [];
+  }, [data, cursor]);
+
   // Keyboard nav: ← → walk mainline; ↑ ↓ switch sibling; Home/End jump.
   // Same shortcuts /openings uses. Ignored when a text input has focus.
   useEffect(() => {
@@ -758,7 +779,7 @@ export function NotebookPackDetailPage() {
 
       <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_280px]">
         <div ref={boardBoxRef} className="rounded-2xl border border-ink-800 bg-ink-950/60 p-3 shadow-lg">
-          <Board fen={displayFen} coordinates viewOnly dests={new Map() as any} />
+          <Board fen={displayFen} coordinates viewOnly dests={new Map() as any} shapes={displayShapes as any} />
           <div className="mt-2 truncate font-mono text-[10px] text-ink-500" title={displayFen}>{displayFen}</div>
           <div className="mt-1 text-[10px] text-ink-500">
             ← → walk · ↑ ↓ variation · Home/End jump · scroll board or click a move

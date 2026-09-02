@@ -68,8 +68,11 @@ export function useClassCursorInfo(): { cursorIdx: number; historyLen: number } 
 // the LiveKit / class-ws intermediate tree.
 export type SharedMove = { from: string; to: string; promotion?: string };
 // nag = glyph appended after the SAN (!, ?, ±, +=, etc.). comment = free-form
-// text under the move. Both optional; server broadcasts them via state frames.
-export type SharedTreeNode = { move: SharedMove; nag?: string; comment?: string; children: SharedTreeNode[] };
+// text under the move. shapes = arrows/circles drawn while THIS position was
+// on the board (saved per-position server-side; see class-ws setShapesAtCursor).
+// All optional; server broadcasts them via state frames.
+export type SharedShape = { orig: string; dest?: string; brush?: string };
+export type SharedTreeNode = { move: SharedMove; nag?: string; comment?: string; shapes?: SharedShape[]; children: SharedTreeNode[] };
 let _moveList: {
   startFen: string;
   history: SharedMove[];       // legacy — linear moves up to cursorPath
@@ -90,6 +93,19 @@ export function useClassMoveList() {
   const [, force] = useState(0);
   useEffect(() => { const f = () => force((n) => n + 1); _moveListSubs.add(f); return () => { _moveListSubs.delete(f); }; }, []);
   return _moveList;
+}
+
+// startShapes = arrows/circles the coach drew AT THE STARTING POSITION
+// (before any move played). Tree-node shapes cover every other position;
+// this module var covers root. Used by the Send-position modal to include
+// root-level arrows in the pack it POSTs. Updated from state-frame handler.
+let _startShapes: SharedShape[] = [];
+const _startShapesSubs = new Set<() => void>();
+function _publishStartShapes(next: SharedShape[]) { _startShapes = next; _startShapesSubs.forEach((f) => f()); }
+export function useClassStartShapes(): SharedShape[] {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((n) => n + 1); _startShapesSubs.add(f); return () => { _startShapesSubs.delete(f); }; }, []);
+  return _startShapes;
 }
 
 // Coach seek — jump cursor to a specific ply (legacy: cursorIdx) OR to a
@@ -849,6 +865,7 @@ export default function SharedClassBoard(
         if (msg.type === "state") {
           applyFen(msg.fen, msg.lastMove ?? null);
           setShapes(Array.isArray(msg.shapes) ? msg.shapes : []);
+          _publishStartShapes(Array.isArray(msg.startShapes) ? msg.startShapes : []);
           const hist: SharedMove[] = Array.isArray(msg.history) ? msg.history : [];
           const cursor = Number(msg.cursorIdx ?? hist.length);
           const tree: SharedTreeNode[] = Array.isArray(msg.tree) ? msg.tree : [];

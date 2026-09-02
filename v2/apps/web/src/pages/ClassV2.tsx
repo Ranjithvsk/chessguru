@@ -17,7 +17,7 @@ import {
 import { Track, DataPacket_Kind } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
-import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, triggerClassSeek, triggerClassPromoteVariation, triggerClassMakeMainline, triggerClassDeleteFrom, triggerClassLoadTree, triggerClassAnnotateMove, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow } from "../components/SharedClassBoard";
+import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, useClassStartShapes, triggerClassSeek, triggerClassPromoteVariation, triggerClassMakeMainline, triggerClassDeleteFrom, triggerClassLoadTree, triggerClassAnnotateMove, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow } from "../components/SharedClassBoard";
 import { useScreenWakeLock } from "../hooks/useScreenWakeLock";
 import { OPENINGS, findOpeningForLine, openingBySlug, type Opening } from "../lib/openings";
 import { fetchExplorer, type ExplorerData, type ExplorerMove } from "../lib/explorer";
@@ -1826,6 +1826,7 @@ function SaveToRepertoireDialog({ room, startFen, tree, fromPath, onClose }: { r
 // Phase 2 will layer a per-student picker here.
 function SendPositionModal({ room, onClose, onSent }: { room: string; onClose: () => void; onSent: (n: number) => void }) {
   const { startFen, history, cursorIdx, tree, cursorPath } = useClassMoveList();
+  const startShapes = useClassStartShapes();
   const [title, setTitle] = useState<string>("Position from class");
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -1837,7 +1838,7 @@ function SendPositionModal({ room, onClose, onSent }: { room: string; onClose: (
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ title, startFen, history, cursorIdx, tree, cursorPath }),
+        body: JSON.stringify({ title, startFen, history, cursorIdx, tree, cursorPath, startShapes }),
       });
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
