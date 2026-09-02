@@ -16,7 +16,7 @@ import { fetchExplorer } from "../lib/explorer";
 import { OPENING_HANDOFF_KEY } from "../lib/openingMemory";
 import { findOpeningForLine } from "../lib/openings";
 import { OpeningIdeaPanel } from "./OpeningIdeaPanel";
-import { AnnotationToolbar, applyAnnotationClick, computeAttackShapes, useAnnotationTool, type AnnotShape } from "./AnnotationToolbar";
+import { AnnotationToolbar, applyAnnotationClick, computeAttackShapes, computePinShapes, useAnnotationTool, type AnnotShape } from "./AnnotationToolbar";
 import { Chess } from "chess.js";
 
 function WdlBar({ w, d, b, className = "" }: { w: number; d: number; b: number; className?: string }) {
@@ -233,7 +233,11 @@ export default function OpeningExplorer(
         <div ref={boardBoxRef} className={preBoardExtra ? "[&>.cg-board-wrap]:mx-0" : ""}>
           <Board fen={fp.fen} orientation={fp.orientation} turnColor={fp.turnColor}
             movableColor="both" dests={fp.dests} onMove={fp.onMove}
-            shapes={[...shapes, ...(annotTool.attackMode && annotTool.attackShownFrom ? computeAttackShapes(fp.fen, annotTool.attackShownFrom) : [])] as any}
+            shapes={[
+              ...shapes,
+              ...(annotTool.attackMode && annotTool.attackShownFrom ? computeAttackShapes(fp.fen, annotTool.attackShownFrom) : []),
+              ...(annotTool.pinsMode ? computePinShapes(fp.fen) : []),
+            ] as any}
             onShapesChange={(s) => setShapes(s as any)}
             onSelect={(key) => {
               const sq = String(key);
@@ -264,6 +268,8 @@ export default function OpeningExplorer(
           onAttackModeChange={annotTool.setAttackMode}
           textLabel={annotTool.textLabel}
           onTextLabelChange={annotTool.setTextLabel}
+          pinsMode={annotTool.pinsMode}
+          onPinsModeChange={annotTool.setPinsMode}
         />
         {annotTool.tool === "arrow" && annotTool.pendingArrowFrom && (
           <div className="mt-1 text-center text-[11px] font-medium text-brand-300">

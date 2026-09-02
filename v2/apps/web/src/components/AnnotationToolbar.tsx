@@ -97,6 +97,15 @@ export function useAnnotationTool() {
   // Switching tools OR turning off attack mode clears the pinned square.
   useEffect(() => { if (!attackMode) setAttackShownFrom(null); }, [attackMode]);
   useEffect(() => { if (tool !== "cursor") setAttackShownFrom(null); }, [tool]);
+  // Pins-overlay mode (Phase 5, 2026-09-02). When ON, every absolute pin
+  // on the board lights up automatically (no click needed) — yellow ring
+  // on the pinned piece + red arrow from the pinner. Both colours so a
+  // student can immediately spot "who is stuck, and who is stopping them".
+  // Local-only like attack mode — each viewer toggles their own view.
+  const [pinsMode, _setPinsMode] = useState<boolean>(() => {
+    try { return localStorage.getItem("cg_annot_pins") === "1"; } catch { return false; }
+  });
+  const setPinsMode = useCallback((v: boolean) => { _setPinsMode(v); try { localStorage.setItem("cg_annot_pins", v ? "1" : "0"); } catch { /* */ } }, []);
   // Escape returns to cursor tool.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -112,10 +121,11 @@ export function useAnnotationTool() {
       else if (e.key === "4") setBrush("yellow");
       else if (e.key === "5") setBrush("purple");
       else if (e.key.toLowerCase() === "t") setAttackMode(!attackMode);
+      else if (e.key.toLowerCase() === "p") setPinsMode(!pinsMode);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [setTool, setBrush, attackMode, setAttackMode]);
+  }, [setTool, setBrush, attackMode, setAttackMode, pinsMode, setPinsMode]);
 
   return {
     tool, setTool,
@@ -124,6 +134,7 @@ export function useAnnotationTool() {
     attackMode, setAttackMode,
     attackShownFrom, setAttackShownFrom,
     textLabel, setTextLabel,
+    pinsMode, setPinsMode,
   };
 }
 
@@ -163,6 +174,77 @@ export function computeAttackShapes(fen: string, from: string): Array<{ orig: st
           shapes.push({ orig: target, brush: "attackDefend" });
         } else {
           shapes.push({ orig: target, brush: "attackAttack" });
+        }
+      }
+    }
+    return shapes;
+  } catch { return []; }
+}
+
+/** Compute pin shapes for both sides on the given FEN (Phase 5).
+ *  An absolute pin: a sliding attacker (rook/queen on rank+file,
+ *  bishop/queen on diagonal) has line-of-sight to the enemy king with
+ *  exactly ONE friendly piece between them — that in-between piece is
+ *  pinned and cannot legally move off the line.
+ *
+ *  We ray-cast from each king in all 8 directions, stopping at the first
+ *  piece. If it's an own-piece and the NEXT piece on the ray is an enemy
+ *  slider that can move along that direction, the own-piece is pinned.
+ *
+ *  Returns:
+ *    * red arrow from pinner → pinned (so the coach can see the line)
+ *    * yellow circle on the pinned piece (so students spot "who's stuck")
+ *
+ *  Empty if no pins on the board. Runs both colours; caller doesn't
+ *  need to know whose turn it is. */
+export function computePinShapes(fen: string): Array<{ orig: string; dest?: string; brush?: string }> {
+  try {
+    const c = new Chess(fen);
+    const shapes: Array<{ orig: string; dest?: string; brush?: string }> = [];
+    // Direction table: [df, dr, sliderTypes-that-can-attack-along-this-line].
+    // Rooks/queens on orthogonal, bishops/queens on diagonal.
+    const dirs: Array<{ df: number; dr: number; sliders: Array<"r" | "b" | "q"> }> = [
+      { df:  1, dr:  0, sliders: ["r", "q"] },
+      { df: -1, dr:  0, sliders: ["r", "q"] },
+      { df:  0, dr:  1, sliders: ["r", "q"] },
+      { df:  0, dr: -1, sliders: ["r", "q"] },
+      { df:  1, dr:  1, sliders: ["b", "q"] },
+      { df: -1, dr:  1, sliders: ["b", "q"] },
+      { df:  1, dr: -1, sliders: ["b", "q"] },
+      { df: -1, dr: -1, sliders: ["b", "q"] },
+    ];
+    for (const kingColor of ["w", "b"] as const) {
+      // Find the king. chess.js has no direct locator so scan the board.
+      let kingSq: string | null = null;
+      for (let r = 0; r < 8 && !kingSq; r++) for (let f = 0; f < 8; f++) {
+        const sq = `${String.fromCharCode(97 + f)}${r + 1}`;
+        const p = c.get(sq as any);
+        if (p && p.type === "k" && p.color === kingColor) { kingSq = sq; break; }
+      }
+      if (!kingSq) continue;
+      const kf = kingSq.charCodeAt(0) - 97;
+      const kr = parseInt(kingSq[1]!, 10) - 1;
+      for (const d of dirs) {
+        let f = kf + d.df, r = kr + d.dr;
+        let candidate: string | null = null;  // first friendly piece on the ray
+        while (f >= 0 && f < 8 && r >= 0 && r < 8) {
+          const sq = `${String.fromCharCode(97 + f)}${r + 1}`;
+          const p = c.get(sq as any);
+          if (p) {
+            if (p.color === kingColor) {
+              if (candidate) break;    // two friendlies on the ray → no pin
+              candidate = sq;
+            } else {
+              // Enemy piece. If it's a slider on this line AND we saw exactly
+              // one friendly in between, that friendly is pinned by this piece.
+              if (candidate && (d.sliders as string[]).includes(p.type)) {
+                shapes.push({ orig: sq, dest: candidate, brush: "red" });
+                shapes.push({ orig: candidate, brush: "yellow" });
+              }
+              break;
+            }
+          }
+          f += d.df; r += d.dr;
         }
       }
     }
@@ -251,7 +333,7 @@ export function applyAnnotationClick(
  *  palette + 🎯 Attack toggle + Clear. Keyboard shortcuts shown in tooltips. */
 export function AnnotationToolbar({
   tool, brush, onToolChange, onBrushChange, onClear, hasShapes, attackMode, onAttackModeChange,
-  textLabel, onTextLabelChange,
+  textLabel, onTextLabelChange, pinsMode, onPinsModeChange,
 }: {
   tool: AnnotationTool;
   brush: AnnotationBrush;
@@ -263,6 +345,8 @@ export function AnnotationToolbar({
   onAttackModeChange?: (v: boolean) => void;
   textLabel?: { text: string; fill: string };
   onTextLabelChange?: (t: { text: string; fill: string }) => void;
+  pinsMode?: boolean;
+  onPinsModeChange?: (v: boolean) => void;
 }) {
   return (
     <div className="mt-2 flex flex-col items-center gap-1">
@@ -310,6 +394,17 @@ export function AnnotationToolbar({
             🎯
           </button>
         </>
+      )}
+      {/* Pins overlay toggle (Phase 5). Auto-highlights every absolute pin
+       *  on the board — no click needed. Optional prop like attack mode. */}
+      {onPinsModeChange && (
+        <button
+          onClick={() => onPinsModeChange(!pinsMode)}
+          title="Pins view (P) — every pinned piece lights up with an arrow from the pinner"
+          className={`grid h-9 min-w-9 place-items-center rounded-full px-2 text-base transition ${pinsMode ? "bg-rose-500 text-white shadow-glow" : "text-ink-300 hover:bg-ink-800"}`}
+        >
+          📌
+        </button>
       )}
       <span className="mx-1 h-5 w-px bg-ink-700" aria-hidden />
       <button
