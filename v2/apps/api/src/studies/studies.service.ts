@@ -119,7 +119,10 @@ export class StudiesService {
    *  can see academy/public studies; owner + explicit shares can see private
    *  and shared. */
   private async loadForRead(studyId: string, userId: string, academyId: string | null): Promise<StudyDoc> {
-    const s = await this.studies().findOne({ _id: studyId });
+    // Soft-deleted studies are invisible to all readers (owner asked 2026-09-02
+    // for delete to be soft-only; a purge job or explicit "Restore" endpoint
+    // can bring them back before physical cleanup).
+    const s = await this.studies().findOne({ _id: studyId, deletedAt: { $exists: false } } as any);
     if (!s) throw new NotFoundException("no such study");
     if (s.ownerId === userId) return s;
     if (s.visibility === "public") return s;
@@ -130,7 +133,10 @@ export class StudiesService {
 
   /** Fetch a study + assert the caller OWNS it. Only owner can mutate in Slice 1. */
   private async loadForWrite(studyId: string, userId: string): Promise<StudyDoc> {
-    const s = await this.studies().findOne({ _id: studyId });
+    // Writes ignore soft-deleted studies too — a deleted study is read-only
+    // until restored. Uses findOne (not filter) so we can tell "gone" from
+    // "no permission" in the error path.
+    const s = await this.studies().findOne({ _id: studyId, deletedAt: { $exists: false } } as any);
     if (!s) throw new NotFoundException("no such study");
     if (s.ownerId !== userId) throw new ForbiddenException("only the owner can edit this study");
     return s;
@@ -147,7 +153,7 @@ export class StudiesService {
     ];
     if (academyId) or.push({ visibility: "academy", academyId });
     const rows = await this.studies()
-      .find({ $or: or }, { projection: { moves: 0 } })
+      .find({ $or: or, deletedAt: { $exists: false } } as any, { projection: { moves: 0 } })
       .sort({ updatedAt: -1 })
       .limit(200)
       .toArray();
@@ -212,7 +218,7 @@ export class StudiesService {
     const { userId, academyId } = this.ensureUser(session);
     const s = await this.loadForRead(studyId, userId, academyId);
     const chapters = await this.chapters()
-      .find({ studyId: s._id }, { projection: { moves: 0 } })
+      .find({ studyId: s._id, deletedAt: { $exists: false } } as any, { projection: { moves: 0 } })
       .sort({ order: 1 })
       .toArray();
     return { study: s, chapters };
@@ -261,8 +267,17 @@ export class StudiesService {
   async remove(session: any, studyId: string) {
     const { userId } = this.ensureUser(session);
     await this.loadForWrite(studyId, userId);
-    await this.chapters().deleteMany({ studyId });
-    await this.studies().deleteOne({ _id: studyId });
+    // Soft delete only — owner directive 2026-09-02 ("in notebook, my
+    // studies, only soft delete"). Chapters follow the study (never
+    // shown when their parent study is soft-deleted; see loadForRead +
+    // listMine). Physical purge happens on a longer cadence via a
+    // scheduled job (out of scope here) so the owner can recover a
+    // mis-clicked delete for as long as they want in phase 1.
+    const now = new Date();
+    await this.studies().updateOne(
+      { _id: studyId },
+      { $set: { deletedAt: now, updatedAt: now } },
+    );
     return { ok: true };
   }
 
@@ -271,7 +286,7 @@ export class StudiesService {
   async getChapter(session: any, studyId: string, chapterId: string) {
     const { userId, academyId } = this.ensureUser(session);
     await this.loadForRead(studyId, userId, academyId);
-    const c = await this.chapters().findOne({ _id: chapterId, studyId });
+    const c = await this.chapters().findOne({ _id: chapterId, studyId, deletedAt: { $exists: false } } as any);
     if (!c) throw new NotFoundException("no such chapter");
     return c;
   }
@@ -339,9 +354,16 @@ export class StudiesService {
   async deleteChapter(session: any, studyId: string, chapterId: string) {
     const { userId } = this.ensureUser(session);
     await this.loadForWrite(studyId, userId);
-    const r = await this.chapters().deleteOne({ _id: chapterId, studyId });
-    if (!r.deletedCount) throw new NotFoundException("no such chapter");
-    await this.studies().updateOne({ _id: studyId }, { $inc: { chapterCount: -1 }, $set: { updatedAt: new Date() } });
+    // Soft delete — matches study.remove(). Chapter stays in the
+    // collection with deletedAt set; excluded from getChapter / list /
+    // revision-sync via the deletedAt filter. Owner ask 2026-09-02.
+    const now = new Date();
+    const r = await this.chapters().updateOne(
+      { _id: chapterId, studyId, deletedAt: { $exists: false } },
+      { $set: { deletedAt: now, updatedAt: now } },
+    );
+    if (!r.matchedCount) throw new NotFoundException("no such chapter");
+    await this.studies().updateOne({ _id: studyId }, { $inc: { chapterCount: -1 }, $set: { updatedAt: now } });
     return { ok: true };
   }
 
@@ -421,28 +443,90 @@ export class StudiesService {
     } catch (e: any) {
       throw new BadRequestException(`bad PGN: ${String(e?.message || e).slice(0, 200)}`);
     }
-    const history = game.history({ verbose: true }) as any[];
-    if (history.length > MAX_MOVES) throw new BadRequestException("PGN too long");
-    // chess.js main-line only — reset + replay to capture fenAfter per ply.
-    const replay = new Chess(startingFen);
+    // Walk the PGN body ourselves so `(variation)` blocks survive as
+    // sibling branches in the MoveNode tree. chess.js's game.history()
+    // returns MAINLINE ONLY — using it here silently drops every branch
+    // the user saved (owner report 2026-09-02: "i save a tree, but in
+    // notebook my studies, only one line is there why"). Tokenize the
+    // cleaned PGN body (headers already consumed by loadPgn above), then
+    // recurse: `(` pushes the current position + parent onto a stack and
+    // opens a sibling variation off the LAST move, `)` pops back.
+    const body = pgnToLoad
+      .replace(/\[[^\]]*\]/g, " ")         // strip headers — already loaded
+      .replace(/\{[^}]*\}/g, " ")          // strip { comments }
+      .replace(/;[^\n]*/g, " ")            // strip ;-line comments
+      .replace(/\$\d+/g, " ")              // strip $NAG glyphs (kept for future use)
+      .replace(/[!?]+/g, " ")              // strip !, ?, !!, ??, !?, ?! move-quality
+      .replace(/\d+\.(\.\.)?/g, " ")       // strip move numbers "12." and "12..."
+      .replace(/\*|1-0|0-1|1\/2-1\/2/g, " ")  // strip game-termination markers
+      .replace(/\s+/g, " ")
+      .trim();
+    // Tokenize: parens are their own tokens; SAN moves split on whitespace.
+    // A buffer accumulating between paren boundaries must be split by ws too
+    // (a single variation body like "Kf5 Kg7 h8=Q+" has to become 3 tokens,
+    // not one string). Bug caught 2026-09-02 while implementing tree parse.
+    const tokens: string[] = [];
+    let buf = "";
+    const flush = () => {
+      if (!buf.trim()) { buf = ""; return; }
+      for (const t of buf.trim().split(/\s+/)) tokens.push(t);
+      buf = "";
+    };
+    for (const ch of body) {
+      if (ch === "(" || ch === ")") { flush(); tokens.push(ch); }
+      else buf += ch;
+    }
+    flush();
+
     const moves: MoveNode[] = [];
-    let parentId: string | null = null;
-    let ply = 0;
-    for (const h of history) {
-      ply += 1;
-      const m = replay.move({ from: h.from, to: h.to, promotion: h.promotion });
-      if (!m) throw new BadRequestException("PGN replay failed at " + h.san);
+    // Walk each variation with a fresh Chess instance seeded from the
+    // parent's fenAfter (or startingFen for root). Stack entries are the
+    // frames we return to on `)`. lastMoveId = the ply we hang a `(`-
+    // variation off of.
+    type Frame = { fen: string; parentId: string | null; lastMoveId: string | null; isMainLine: boolean };
+    const stack: Frame[] = [];
+    let cur: Frame = { fen: startingFen, parentId: null, lastMoveId: null, isMainLine: true };
+    for (const tok of tokens) {
+      if (tok === "(") {
+        // Open a sibling variation off the LAST played move. Reset the
+        // walker to that ply's parent position; new moves will be
+        // siblings of that ply (same parentId).
+        if (!cur.lastMoveId) continue;   // stray "(" before any move — ignore
+        const anchor = moves.find((m) => m.id === cur.lastMoveId);
+        if (!anchor) continue;
+        stack.push({ ...cur });
+        // The variation starts at the SAME position the anchor's parent
+        // saw — i.e. before the anchor was played. Rebuild that FEN by
+        // rewinding one move via replaying from startingFen up to
+        // anchor.parentId.
+        const preAnchorFen = anchor.parentId
+          ? (moves.find((m) => m.id === anchor.parentId)?.fenAfter ?? startingFen)
+          : startingFen;
+        cur = { fen: preAnchorFen, parentId: anchor.parentId, lastMoveId: null, isMainLine: false };
+        continue;
+      }
+      if (tok === ")") {
+        const back = stack.pop();
+        if (back) cur = back;
+        continue;
+      }
+      // A SAN move token. Play it on the current position.
+      const board = new Chess(cur.fen);
+      const played = board.move(tok);
+      if (!played) throw new BadRequestException("PGN replay failed at " + tok);
+      if (moves.length >= MAX_MOVES) throw new BadRequestException("PGN too long");
       const id = shortId(6);
-      moves.push({
+      const node: MoveNode = {
         id,
-        parentId,
-        ply,
-        san: m.san,
-        uci: m.from + m.to + (m.promotion || ""),
-        fenAfter: replay.fen(),
-        isMainLine: true,
-      });
-      parentId = id;
+        parentId: cur.parentId,
+        ply: (cur.parentId ? (moves.find((m) => m.id === cur.parentId)?.ply ?? 0) : 0) + 1,
+        san: played.san,
+        uci: played.from + played.to + (played.promotion || ""),
+        fenAfter: board.fen(),
+        isMainLine: cur.isMainLine,
+      };
+      moves.push(node);
+      cur = { fen: board.fen(), parentId: id, lastMoveId: id, isMainLine: cur.isMainLine };
     }
     return { moves, headers };
   }
