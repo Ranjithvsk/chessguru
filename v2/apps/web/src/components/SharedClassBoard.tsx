@@ -361,13 +361,26 @@ function PositionEditorModal(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fenText]);
 
+  // Click semantics (owner ask 2026-09-02):
+  //   * Eraser picked → click always clears the square.
+  //   * Piece picked → click on EMPTY square places the piece.
+  //   * Piece picked → click on square holding a DIFFERENT piece replaces it.
+  //   * Piece picked → click on square holding the SAME piece removes it (toggle).
+  // Matches the Lichess board-editor / SCID pattern — makes fixing typos
+  // fast without switching to the eraser.
   const onSquareClick = (sq: Key) => {
     const rc = squareToRowCol(String(sq));
     if (!rc) return;
     const [r, c] = rc;
     setGrid((g) => {
       const ng = g.map((row) => row.slice());
-      ng[r][c] = selected === "_" ? "" : selected;
+      if (selected === "_") {
+        ng[r][c] = "";
+      } else if (ng[r][c] === selected) {
+        ng[r][c] = "";       // same piece → remove
+      } else {
+        ng[r][c] = selected; // empty or different → place/replace
+      }
       return ng;
     });
   };
