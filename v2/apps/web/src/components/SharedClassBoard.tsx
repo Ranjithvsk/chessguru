@@ -1544,31 +1544,11 @@ export default function SharedClassBoard(
        *  the class-ws annot frame — the toolbar is only for producing
        *  them. Also gated to non-challenge state so the challenge
        *  scratchpad owns the bottom-center slot during a challenge. */}
-      {!inChallenge && isCoachRole && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-2 z-30 flex justify-center px-2">
-          <div className="pointer-events-auto">
-            <AnnotationToolbar
-              tool={annotTool.tool}
-              brush={annotTool.brush}
-              onToolChange={annotTool.setTool}
-              onBrushChange={annotTool.setBrush}
-              onClear={() => { userClearRef.current = true; sendAnnot([]); }}
-              hasShapes={shapes.length > 0}
-              attackMode={annotTool.attackMode}
-              onAttackModeChange={annotTool.setAttackMode}
-              textLabel={annotTool.textLabel}
-              onTextLabelChange={annotTool.setTextLabel}
-              pinsMode={annotTool.pinsMode}
-              onPinsModeChange={annotTool.setPinsMode}
-            />
-            {annotTool.tool === "arrow" && annotTool.pendingArrowFrom && (
-              <div className="mt-1 text-center text-[11px] font-medium text-brand-300">
-                → Click the arrow's target square (or click <b>{annotTool.pendingArrowFrom}</b> again to cancel)
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {/* Annotation toolbar removed from Dream Meet per owner 2026-09-02:
+       *  coach draws arrows/circles via chessground's native right-click
+       *  drag + shift-click. Toolbar just cluttered bottom-center and
+       *  overlapped the challenge ribbon. Toolbar still available on
+       *  /openings and other Board consumers. */}
       {/* Student scratchpad tree — prev/next controls + click-to-seek
        *  variations shown below the board during an active challenge. */}
       {inChallenge && !isCoachRole && (
