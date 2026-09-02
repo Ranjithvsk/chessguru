@@ -232,7 +232,7 @@ export default function OpeningExplorer(
             2026-08-20: "so much gap between board and left/right panel". */}
         <div ref={boardBoxRef} className={preBoardExtra ? "[&>.cg-board-wrap]:mx-0" : ""}>
           <Board fen={fp.fen} orientation={fp.orientation} turnColor={fp.turnColor}
-            movableColor="both" dests={fp.dests} onMove={fp.onMove}
+            movableColor={annotTool.tool !== "cursor" ? "none" : "both"} dests={fp.dests} onMove={fp.onMove}
             shapes={[
               ...shapes,
               ...(annotTool.attackMode && annotTool.attackShownFrom ? computeAttackShapes(fp.fen, annotTool.attackShownFrom) : []),

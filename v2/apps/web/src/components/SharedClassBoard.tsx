@@ -1343,7 +1343,13 @@ export default function SharedClassBoard(
   // - Student in normal mode: locked → none, else both.
   // - Student in challenge mode: always both (they solve on their own board).
   // - Anyone in review mode: none (read-only walkthrough).
+  // While a draw tool is active, disable moves — otherwise clicking the
+  // source square makes the piece move, and by the second click the
+  // source is empty so the coach's arrow lands on random squares (owner
+  // report 2026-09-02 "random arrows in random direction and square").
+  const isDrawing = annotTool.tool !== "cursor";
   const boardMovable: "both" | "none" =
+    isDrawing ? "none" :
     inReview ? "none" :
     inChallenge
       ? (isCoachRole ? "none" : "both")
@@ -1452,6 +1458,10 @@ export default function SharedClassBoard(
           // Annotation tools route through this: when a tool is active,
           // build the next shape list + push it through sendAnnot so it
           // broadcasts + persists like a chessground-drawn shape.
+          // Coach-only: students don't draw (owner 2026-09-02); guards
+          // against a stale localStorage tool value causing accidental
+          // student draws now that the toolbar is hidden for them.
+          if (!isCoachRole) return;
           if (annotTool.tool === "cursor") return;
           const next = applyAnnotationClick(sq, shapes as any, annotTool);
           if (next) sendAnnot(next as any);
@@ -1487,11 +1497,13 @@ export default function SharedClassBoard(
       />
       {/* Challenge-mode overlay ribbon (student + coach see it during active challenge). */}
       {inChallenge && <ChallengeRibbon isCoach={isCoachRole} />}
-      {/* Annotation toolbar — only outside challenges (challenge scratchpad
-       *  takes the bottom-center slot during a challenge). Fixed at the
-       *  bottom of the viewport so it stays visible on any screen size,
-       *  and doesn't fight the container-queried board sizing. */}
-      {!inChallenge && (
+      {/* Annotation toolbar — coach-only. Students don't need the draw/
+       *  pattern tools (owner 2026-09-02: "students dont need arrow
+       *  panel"); they still SEE the coach's arrows/circles/labels via
+       *  the class-ws annot frame — the toolbar is only for producing
+       *  them. Also gated to non-challenge state so the challenge
+       *  scratchpad owns the bottom-center slot during a challenge. */}
+      {!inChallenge && isCoachRole && (
         <div className="pointer-events-none fixed inset-x-0 bottom-2 z-30 flex justify-center px-2">
           <div className="pointer-events-auto">
             <AnnotationToolbar
