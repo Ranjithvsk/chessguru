@@ -143,6 +143,14 @@ export default function Board({
       // there's no echo loop with remote annotations.
       drawable: {
         enabled: true, visible: true,
+        // Chessground default is eraseOnClick:true — a left-click on the
+        // board (moving a piece, selecting a square) wipes every shape.
+        // That was silently killing the Dream Meet coach's arrows: draw
+        // arrow → click board → arrow gone, before the 1-s debounced
+        // persistence save could fire. Owner report Sep 2 2026. Shapes
+        // now stick until removed (right-click a shape to erase it) or
+        // until a position change (see class-ws clearShapesAndBroadcast).
+        eraseOnClick: false,
         onChange: (s) => onShapesChangeRef.current?.(s),
         // Custom brushes for the annotation toolbar's cross tool +
         // Phase 2 attack overlay (2026-09-02). Chessground merges
