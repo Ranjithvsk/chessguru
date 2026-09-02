@@ -1798,8 +1798,13 @@ export default function ClassV2Page() {
   const [endedMsg, setEndedMsg] = useState<string | null>(null);
   // Keep phone/tablet screens on for the duration of the class so students
   // don't miss the coach when the OS would normally dim + suspend the tab.
-  // Silent no-op on browsers without the Wake Lock API.
-  useScreenWakeLock(true);
+  // Silent no-op on browsers without the Wake Lock API. `needsUserGesture`
+  // flips true when iOS Safari has silently denied our autoplay + wake-lock
+  // requests (mainly on pull-to-refresh — the reload has zero transient
+  // activation, so both silently fail). The overlay below prompts the
+  // student to tap once, which fires the hook's internal onFirstGesture
+  // path and re-arms the screen-on machinery.
+  const { needsUserGesture } = useScreenWakeLock(true);
   // Per-user hide-video preference — audio-only mode for anyone who wants it
   // (owner ask: coach + students can each hide their own view of video tiles).
   // Persists per browser so bandwidth-constrained users don't have to re-toggle
@@ -1937,6 +1942,25 @@ export default function ClassV2Page() {
 
   return (
     <div className="mx-auto w-full">
+      {/* iOS wake-lock rescue overlay — shown when the screen-on machinery
+       *  didn't arm (mainly on pull-to-refresh: the reload grants zero
+       *  transient activation, so muted-video autoplay + wake-lock request
+       *  BOTH silently fail on iOS Safari). The student sees this small,
+       *  non-blocking pill and taps once; the hook's onFirstGesture path
+       *  starts the silent video + re-requests the wake lock, and the
+       *  screen stays on for the rest of the class. Positioned above the
+       *  LiveKit ControlBar so it doesn't overlap the mute/camera buttons.
+       *  Auto-hides as soon as `needsUserGesture` flips back to false. */}
+      {needsUserGesture && (
+        <button
+          type="button"
+          onClick={() => { /* the click itself is the gesture the hook needs */ }}
+          className="fixed left-1/2 top-16 z-[80] -translate-x-1/2 rounded-full bg-amber-500/95 px-4 py-2 text-xs font-bold text-black shadow-lg ring-2 ring-amber-300 backdrop-blur hover:bg-amber-400 md:top-20"
+          aria-label="Tap to keep the screen on during class"
+        >
+          📱 Tap to keep screen on
+        </button>
+      )}
       {/* Full-viewport class shell (owner 2026-08-28: "board still not big
        *  like openings/puzzles"). Was capped at max-w-6xl + h-[90vh] which
        *  shrank the flex-1 board slot on desktop. Now the class uses the

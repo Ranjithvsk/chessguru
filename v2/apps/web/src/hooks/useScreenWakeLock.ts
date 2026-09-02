@@ -20,7 +20,7 @@
 // backup that costs ~1 KB decode CPU per second — a rounding error next
 // to Dream Meet's video decode.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type WakeLock = { release: () => Promise<void> | void; released?: boolean };
 
@@ -91,8 +91,38 @@ function resumeSilentVideoOnVisible() {
   }
 }
 
-export function useScreenWakeLock(enabled: boolean = true): void {
+// Was the current page loaded via a reload (pull-to-refresh, browser reload
+// button, cmd-R)? If YES, iOS Safari treats it as a fresh navigation with NO
+// user activation — muted-video autoplay AND wake-lock request BOTH silently
+// fail. The class page catches this and prompts the student to tap once to
+// re-arm the screen-on machinery.
+function isReloadNavigation(): boolean {
+  try {
+    const entries = performance.getEntriesByType?.("navigation");
+    const nav = entries && entries[0] as PerformanceNavigationTiming | undefined;
+    return !!nav && nav.type === "reload";
+  } catch { return false; }
+}
+
+// Is the singleton silent-video element actually playing right now? Used to
+// decide whether the screen-on machinery armed successfully, which drives
+// the "tap to keep screen on" prompt in ClassV2.
+function isSilentVideoPlaying(): boolean {
+  return !!(videoEl && !videoEl.paused && videoEl.readyState > 2);
+}
+
+export interface ScreenWakeLockState {
+  // True when we've detected the screen-on machinery didn't arm and iOS is
+  // likely to time out the screen. Consumers (ClassV2) show a small "tap
+  // anywhere" overlay when this is true — the tap fires the existing
+  // onFirstGesture path which plays the silent video + re-acquires the
+  // wake lock, and flips this back to false.
+  needsUserGesture: boolean;
+}
+
+export function useScreenWakeLock(enabled: boolean = true): ScreenWakeLockState {
   const lockRef = useRef<WakeLock | null>(null);
+  const [needsUserGesture, setNeedsUserGesture] = useState(false);
   useEffect(() => {
     if (!enabled) return;
     if (typeof navigator === "undefined") return;
@@ -107,11 +137,16 @@ export function useScreenWakeLock(enabled: boolean = true): void {
     const nav = navigator as unknown as { wakeLock?: { request: (t: string) => Promise<WakeLock> } };
     const hasWakeLock = !!(nav.wakeLock && typeof nav.wakeLock.request === "function");
 
+    let lockGranted = false;
     const requestLock = async () => {
       if (disposed || !hasWakeLock) return;
       if (lockRef.current && !lockRef.current.released) return;
       try {
         lockRef.current = await nav.wakeLock!.request("screen");
+        lockGranted = true;
+        // A successful lock alone is enough to keep the screen on — hide
+        // any lingering "tap to enable" prompt.
+        setNeedsUserGesture(false);
       } catch {
         // "NotAllowedError" (some iOS versions require a user gesture)
         // or "SecurityError" (iframe / non-https). Silent — the video
@@ -130,9 +165,44 @@ export function useScreenWakeLock(enabled: boolean = true): void {
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("focus", onVisibility);
 
+    // Arm the "needs gesture" prompt.
+    //   - Reload: set immediately — pull-to-refresh has zero transient
+    //     activation, autoplay + wakelock BOTH fail silently on iOS.
+    //   - Fresh load: wait 1.2 s and check. If the video isn't playing AND
+    //     the wake lock wasn't granted, we're about to sleep — prompt.
+    // Either way, the FIRST document touch (via the existing onFirstGesture
+    // listener in attachSilentVideo) starts the video → we then re-check
+    // + clear the prompt.
+    const armPromptIfNeeded = () => {
+      if (disposed) return;
+      if (isSilentVideoPlaying() || lockGranted) { setNeedsUserGesture(false); return; }
+      setNeedsUserGesture(true);
+    };
+    const isReload = isReloadNavigation();
+    const armTimer = window.setTimeout(armPromptIfNeeded, isReload ? 0 : 1200);
+
+    // Clear the prompt after any user touch: the onFirstGesture path inside
+    // attachSilentVideo will .play() the video; wait for the microtask to
+    // settle then re-check. We use a separate (non-once) listener so we can
+    // clear the prompt even on subsequent gestures (e.g. after visibility
+    // change → still-not-playing → user taps again).
+    const onAnyTouch = () => {
+      // Give play() a moment to resolve, then re-check both signals.
+      window.setTimeout(() => {
+        if (disposed) return;
+        void requestLock();
+        if (isSilentVideoPlaying() || lockGranted) setNeedsUserGesture(false);
+      }, 150);
+    };
+    document.addEventListener("touchstart", onAnyTouch, { passive: true });
+    document.addEventListener("pointerdown", onAnyTouch);
+
     return () => {
       disposed = true;
+      window.clearTimeout(armTimer);
       document.removeEventListener("visibilitychange", onVisibility);
+      document.removeEventListener("touchstart", onAnyTouch);
+      document.removeEventListener("pointerdown", onAnyTouch);
       window.removeEventListener("focus", onVisibility);
       const l = lockRef.current;
       lockRef.current = null;
@@ -140,4 +210,5 @@ export function useScreenWakeLock(enabled: boolean = true): void {
       detachSilentVideo();
     };
   }, [enabled]);
+  return { needsUserGesture };
 }
