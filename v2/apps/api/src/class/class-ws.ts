@@ -44,8 +44,11 @@ type Move = { from: string; to: string; promotion?: string };
 // (matches Lichess-analysis semantics + /openings free-play tree).
 // nag = short glyph appended to SAN (!, ?, !!, ??, !?, ?!, ±, ∓, +-, -+, =, +=, =+, ∞).
 // comment = coach's free-form text shown under the move. Both optional; empty/absent means none.
+// shapes = arrows/circles the coach drew while THIS position was on the board.
+// Per-node (not global) so navigating back to a taught position brings its
+// markup back. Owner request 2026-09-02: "save that in the move until removed".
 // Preserved across tree mutations (promote, delete, load-tree, etc.).
-type TreeNode = { move: Move; nag?: string; comment?: string; children: TreeNode[] };
+type TreeNode = { move: Move; nag?: string; comment?: string; shapes?: Shape[]; children: TreeNode[] };
 // Chessground DrawShape subset — we serialize only the fields we care about
 // (orig/dest/brush) so the frame stays small even with many annotations.
 type Shape = { orig: string; dest?: string; brush?: string };
@@ -186,7 +189,8 @@ interface Room {
   coachToken: string | null;    // random shared secret — coach's browser keeps it
   coach: WebSocket | null;      // currently-connected coach socket (may go null between reconnects)
   locked: boolean;              // student-move lock
-  shapes: Shape[];              // last-published annotation set (echoed to new joiners)
+  shapes: Shape[];              // shapes for the CURRENT cursor position (mirror of tree-node's own shapes; broadcast in state/annot)
+  startShapes: Shape[];         // arrows/circles drawn at the starting position (cursorPath = []); tree nodes carry their own .shapes
   orientation: Orientation;     // board POV — coach can flip; students always mirror
   emptyEvictAt: number | null;  // when to drop this room from memory after last client left
   challenge: Challenge | null;  // active "find the good moves" session; null when idle
@@ -325,7 +329,7 @@ function getRoom(id: string): Room {
     // piece — owner reported 2026-08-12 that "students were controlling
     // moves". Coach can unlock via the footer 🔒 toggle for interactive drills.
     r = { fen: START_FEN, startFen: START_FEN, tree: [], cursorPath: [], lastMove: null, history: [], cursorIdx: 0, clients: new Set(),
-          coachToken: null, coach: null, locked: true, shapes: [], orientation: "white", emptyEvictAt: null,
+          coachToken: null, coach: null, locked: true, shapes: [], startShapes: [], orientation: "white", emptyEvictAt: null,
           challenge: null };
     rooms.set(id, r);
     // Async restore from DB — a room evicted or a server restart shouldn't
@@ -372,6 +376,7 @@ function scheduleRoomSave(classId: string): void {
       lastMove: room.lastMove,
       locked: room.locked,
       shapes: room.shapes,
+      startShapes: room.startShapes,     // per-position shapes are also stored inside tree nodes; startShapes covers the pre-first-move root position
       orientation: room.orientation,
       updatedAt: new Date(),
     };
@@ -400,7 +405,13 @@ async function restoreRoomFromDb(classId: string, room: Room): Promise<void> {
     if (doc.lastMove && typeof doc.lastMove === "object") room.lastMove = doc.lastMove;
     if (typeof doc.locked === "boolean") room.locked = doc.locked;
     if (Array.isArray(doc.shapes)) room.shapes = doc.shapes;
+    if (Array.isArray(doc.startShapes)) room.startShapes = doc.startShapes;
     if (doc.orientation === "white" || doc.orientation === "black") room.orientation = doc.orientation;
+    // Make sure room.shapes reflects the RESTORED cursor position (tree
+    // may have per-node shapes at a non-root cursor; without this the
+    // initial state broadcast to newly-connected clients could carry stale
+    // shapes from before the eviction).
+    room.shapes = shapesAtCursor(room);
     // Broadcast the restored state to any clients that connected while the
     // restore was in flight (rare, but possible on a rapid page reload).
     if (room.clients.size > 0) {
@@ -477,19 +488,62 @@ function broadcast(room: Room, frame: ServerFrame): void {
   }
 }
 
-/** Wipe the room's shared arrows/circles + broadcast annot:[] so every
- *  client's board redraws without stale markup. Called after any handler
- *  that changes the position or cursor — owner directive 2026-09-02:
- *  arrows are markup for the CURRENT position, so a move on either side
- *  (coach or student) or a cursor jump clears them. Coach can immediately
- *  draw fresh arrows on the new position. No-op if shapes were already
- *  empty (avoids a needless broadcast on every navigation). loadFen +
- *  load-tree already zero shapes as part of their state broadcast; this
- *  helper covers move/seek/step/takeback/tree-mutation. */
-function clearShapesAndBroadcast(room: Room): void {
-  if (room.shapes.length === 0) return;
-  room.shapes = [];
-  broadcast(room, { type: "annot", shapes: [], participants: room.clients.size });
+/** Get shapes for the position currently at cursorPath. Returns startShapes
+ *  when cursor is at root; otherwise the tree-node's own shapes (empty when
+ *  that node was never annotated). Owner directive 2026-09-02: shapes are
+ *  saved PER POSITION so navigating back to a taught position brings its
+ *  arrows/circles back. */
+function shapesAtCursor(room: Room): Shape[] {
+  if (room.cursorPath.length === 0) return room.startShapes;
+  let cur = room.tree;
+  let target: TreeNode | null = null;
+  for (const idx of room.cursorPath) {
+    const n = cur[idx];
+    if (!n) return [];
+    target = n;
+    cur = n.children;
+  }
+  return target?.shapes ?? [];
+}
+
+/** Write shapes to the position currently at cursorPath. Root writes
+ *  startShapes; deeper writes the tree-node's own shapes. Empty arrays are
+ *  stored as absent (delete field) to keep persisted docs small. */
+function setShapesAtCursor(room: Room, shapes: Shape[]): void {
+  if (room.cursorPath.length === 0) {
+    room.startShapes = shapes;
+    return;
+  }
+  let cur = room.tree;
+  let target: TreeNode | null = null;
+  for (const idx of room.cursorPath) {
+    const n = cur[idx];
+    if (!n) return;
+    target = n;
+    cur = n.children;
+  }
+  if (!target) return;
+  if (shapes.length === 0) delete target.shapes;
+  else target.shapes = shapes;
+}
+
+/** Re-sync room.shapes to the current cursor position + broadcast annot so
+ *  every client's board shows THAT position's arrows/circles. Called after
+ *  any position/cursor change. If the new position was never annotated,
+ *  clients see an empty markup layer (equivalent to the old
+ *  clearShapesAndBroadcast behaviour). */
+function syncShapesToPosition(room: Room): void {
+  const next = shapesAtCursor(room);
+  // Only broadcast if the visible shape set actually changes — avoids
+  // needless annot frames on every no-op navigation.
+  const prev = room.shapes;
+  const same = prev.length === next.length && prev.every((s, i) => {
+    const q = next[i]!;
+    return s.orig === q.orig && s.dest === q.dest && s.brush === q.brush;
+  });
+  room.shapes = next;
+  if (same) return;
+  broadcast(room, { type: "annot", shapes: room.shapes, participants: room.clients.size });
 }
 
 function studentCount(room: Room): number {
@@ -699,11 +753,11 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
     if (frame.type === "reset") {
       if (!isCoach()) return;                            // coach-gated to prevent accidental reset by a student
-      room.fen = START_FEN; room.startFen = START_FEN; room.tree = []; room.cursorPath = []; room.lastMove = null; room.history = []; room.cursorIdx = 0;
+      room.fen = START_FEN; room.startFen = START_FEN; room.tree = []; room.cursorPath = []; room.lastMove = null; room.history = []; room.cursorIdx = 0; room.startShapes = [];
       broadcast(room, { type: "reset", fen: room.fen, participants: room.clients.size, locked: room.locked });
       // Also emit a full state so tree-aware clients drop their cached tree.
       broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
-      clearShapesAndBroadcast(room);
+      syncShapesToPosition(room);
       return;
     }
 
@@ -746,7 +800,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       room.cursorPath = nextPath;
       recomputeFromTree(room);
       broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
-      clearShapesAndBroadcast(room);
+      syncShapesToPosition(room);
       return;
     }
 
@@ -781,6 +835,18 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
           // packs may already carry glyphs + comments).
           if (typeof n.nag === "string" && n.nag) node.nag = n.nag.slice(0, 4);
           if (typeof n.comment === "string" && n.comment) node.comment = n.comment.slice(0, 500);
+          // Preserve per-position shapes from repertoire packs (validated same
+          // as annot-frame shapes: orig/dest square strings, brush string).
+          if (Array.isArray(n.shapes)) {
+            const cleaned: Shape[] = [];
+            for (const s of n.shapes) {
+              if (cleaned.length >= 64) break;
+              if (!s || typeof s.orig !== "string" || !/^[a-h][1-8]$/.test(s.orig)) continue;
+              if (s.dest != null && !/^[a-h][1-8]$/.test(String(s.dest))) continue;
+              cleaned.push({ orig: s.orig, dest: s.dest, brush: typeof s.brush === "string" ? s.brush : undefined });
+            }
+            if (cleaned.length > 0) node.shapes = cleaned;
+          }
           out.push(node);
         }
         return out;
@@ -807,9 +873,10 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       room.startFen = cleanStartFen;
       room.tree = cleanTree;
       room.cursorPath = cleanCursorPath;
-      room.shapes = [];   // stale arrows meaningless in a fresh position
+      room.startShapes = [];   // stale start-position arrows meaningless in a fresh tree
       recomputeFromTree(room);
       broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      syncShapesToPosition(room);
       return;
     }
 
@@ -885,7 +952,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       }
       recomputeFromTree(room);
       broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
-      clearShapesAndBroadcast(room);
+      syncShapesToPosition(room);
       return;
     }
 
@@ -933,7 +1000,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       }
       recomputeFromTree(room);
       broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
-      clearShapesAndBroadcast(room);
+      syncShapesToPosition(room);
       return;
     }
 
@@ -960,8 +1027,9 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       room.lastMove = null;
       room.history = [];
       room.cursorIdx = 0;
-      room.shapes = [];    // stale arrows/circles from the previous position are meaningless
+      room.startShapes = [];    // stale arrows/circles from the previous position are meaningless
       broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
+      syncShapesToPosition(room);
       return;
     }
 
@@ -996,7 +1064,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       room.cursorPath = path.slice(0, -1);
       recomputeFromTree(room);
       broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, orientation: room.orientation });
-      clearShapesAndBroadcast(room);
+      syncShapesToPosition(room);
       return;
     }
 
@@ -1129,6 +1197,11 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         if (s.dest != null && !/^[a-h][1-8]$/.test(String(s.dest))) continue;
         cleaned.push({ orig: s.orig, dest: s.dest, brush: typeof s.brush === "string" ? s.brush : undefined });
       }
+      // Persist to the CURRENT cursor position (startShapes if at root, or
+      // the tree node otherwise). Room-level room.shapes mirrors it for
+      // state broadcasts + save. Owner directive 2026-09-02: shapes are
+      // tied to the position — navigating back brings them back.
+      setShapesAtCursor(room, cleaned);
       room.shapes = cleaned;
       broadcast(room, { type: "annot", shapes: room.shapes, participants: room.clients.size });
       return;
@@ -1168,7 +1241,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       room.cursorPath = [...room.cursorPath, existingIdx];
       recomputeFromTree(room);
       broadcast(room, { type: "move", move: room.lastMove!, fen: room.fen, startFen: room.startFen, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked });
-      clearShapesAndBroadcast(room);
+      syncShapesToPosition(room);
     }
   });
 

@@ -1414,7 +1414,26 @@ export default function SharedClassBoard(
     if (!ws || ws.readyState !== WebSocket.OPEN) { setSetupErr("Not connected. Retry in a moment."); return; }
     try { ws.send(JSON.stringify({ type: "loadFen", fen: s })); } catch { /* */ }
   };
+  // Ref tracking whether an incoming empty-shapes callback came from the
+  // AnnotationToolbar's Clear button (user intent) vs chessground's own
+  // auto-clear on a left-click. Even with drawable.eraseOnClick:false,
+  // chessground still clears every shape when the coach clicks an empty
+  // square or an opponent piece (see chessground/dist/drag.js: drawClear
+  // fires when !piece || piece.color !== turnColor). Owner report Sep 2
+  // 2026: arrows vanish the moment coach clicks anywhere. Guard: swallow
+  // the phantom empty-annot unless we know the coach hit Clear.
+  const userClearRef = useRef(false);
+  const shapesRef = useRef<AnnotShape[]>([]);
+  useEffect(() => { shapesRef.current = shapes; }, [shapes]);
   const sendAnnot = (next: AnnotShape[]) => {
+    if (next.length === 0 && shapesRef.current.length > 0 && !userClearRef.current) {
+      // Reassert our authoritative shapes on chessground on next render by
+      // bumping the state to a new array reference — Board's shapes-sync
+      // useEffect will re-set them.
+      setShapes([...shapesRef.current]);
+      return;
+    }
+    userClearRef.current = false;
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     try { ws.send(JSON.stringify({ type: "annot", shapes: next.slice(0, 64) })); } catch { /* */ }
@@ -1533,7 +1552,7 @@ export default function SharedClassBoard(
               brush={annotTool.brush}
               onToolChange={annotTool.setTool}
               onBrushChange={annotTool.setBrush}
-              onClear={() => sendAnnot([])}
+              onClear={() => { userClearRef.current = true; sendAnnot([]); }}
               hasShapes={shapes.length > 0}
               attackMode={annotTool.attackMode}
               onAttackModeChange={annotTool.setAttackMode}
