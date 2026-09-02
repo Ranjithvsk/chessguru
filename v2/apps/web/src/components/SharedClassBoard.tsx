@@ -431,15 +431,46 @@ function PositionEditorModal(props: {
         )}
 
         <div className="grid gap-4 p-4 md:grid-cols-[1fr_360px]">
-          {/* Editor board (fills left column, capped) */}
+          {/* Editor board (fills left column, capped).
+              An overlay div captures clicks and resolves the square from
+              the raw bounding-rect + click coordinates. Bypasses
+              chessground's onSelect which had edge-misalignment issues
+              at some zoom levels / high-DPI displays (owner report
+              2026-09-02: "I have to click at the corner of the square,
+              sometimes places to nearby square"). Chessground's own
+              square resolution uses clientX/Y vs bounds, and our
+              cqi-sized board has fractional pixel widths per square —
+              boundary clicks round to the wrong square. The overlay's
+              simple Math.floor((relX / rect.width) * 8) is exact. */}
           <div className="mx-auto w-full max-w-[360px]">
-            <Board
-              fen={currentFen}
-              movableColor="none"
-              dests={new Map() as any}
-              coordinates
-              onSelect={onSquareClick}
-            />
+            <div className="relative">
+              <Board
+                fen={currentFen}
+                movableColor="none"
+                dests={new Map() as any}
+                coordinates
+              />
+              <div
+                className="absolute inset-0 z-10"
+                aria-label="setup click overlay"
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const relX = e.clientX - rect.left;
+                  const relY = e.clientY - rect.top;
+                  if (rect.width <= 0 || rect.height <= 0) return;
+                  // Clamp to [0,7]. Math.floor over an 8-way split gives the
+                  // exact square regardless of fractional pixel widths.
+                  const col = Math.max(0, Math.min(7, Math.floor((relX / rect.width) * 8)));
+                  const row = Math.max(0, Math.min(7, Math.floor((relY / rect.height) * 8)));
+                  // Setup board is always white-orientation, so col=0 → a-file,
+                  // row=0 → rank 8. If we ever add black orientation to the
+                  // setup UI, flip both here.
+                  const file = String.fromCharCode(97 + col);
+                  const rank = 8 - row;
+                  onSquareClick(`${file}${rank}` as Key);
+                }}
+              />
+            </div>
             <div className="mt-2 flex items-center justify-center gap-4 text-xs text-ink-300">
               <label className="flex items-center gap-1.5 cursor-pointer">
                 <input type="radio" checked={turn === "w"} onChange={() => setTurn("w")} className="accent-brand-500" />
