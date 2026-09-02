@@ -19,6 +19,41 @@ import { OpeningIdeaPanel } from "./OpeningIdeaPanel";
 import { AnnotationToolbar, applyAnnotationClick, computeAttackShapes, computePinShapes, useAnnotationTool, type AnnotShape } from "./AnnotationToolbar";
 import { Chess } from "chess.js";
 
+// NAG glyph presets — mirror the class notation panel (ClassV2.tsx). Coach
+// picks one from the right-click menu → glyph renders inline next to the SAN.
+const NAG_PRESETS: Array<{ text: string; hint: string }> = [
+  { text: "!",  hint: "Good move" },
+  { text: "?",  hint: "Mistake" },
+  { text: "!!", hint: "Brilliant" },
+  { text: "??", hint: "Blunder" },
+  { text: "!?", hint: "Interesting" },
+  { text: "?!", hint: "Dubious" },
+  { text: "±",  hint: "White clear advantage" },
+  { text: "∓",  hint: "Black clear advantage" },
+  { text: "+-", hint: "White winning" },
+  { text: "-+", hint: "Black winning" },
+  { text: "+=", hint: "White slight edge" },
+  { text: "=+", hint: "Black slight edge" },
+  { text: "=",  hint: "Equal" },
+  { text: "∞",  hint: "Unclear" },
+];
+const NAG_CLASS: Record<string, string> = {
+  "!":  "text-emerald-400",
+  "!!": "text-emerald-400",
+  "?":  "text-rose-400",
+  "??": "text-rose-500",
+  "!?": "text-amber-300",
+  "?!": "text-amber-500",
+  "±":  "text-sky-300",
+  "∓":  "text-sky-300",
+  "+-": "text-sky-400",
+  "-+": "text-sky-400",
+  "+=": "text-sky-200",
+  "=+": "text-sky-200",
+  "=":  "text-ink-400",
+  "∞":  "text-purple-300",
+};
+
 function WdlBar({ w, d, b, className = "" }: { w: number; d: number; b: number; className?: string }) {
   const t = w + d + b || 1;
   const pct = (n: number) => `${(n / t) * 100}%`;
@@ -55,10 +90,32 @@ export default function OpeningExplorer(
   // /openings isn't shared. Shapes are keyed by FEN so each position
   // keeps its own annotations when you step through the tree.
   const annotTool = useAnnotationTool();
-  const [shapesByFen, setShapesByFen] = useState<Record<string, AnnotShape[]>>({});
+  // Persist annotation shapes per position (owner ask 2026-09-02 "arrow save
+  // option"). Keyed by FEN so each position keeps its own annotations across
+  // reloads + variation navigation. localStorage cap: skip writing when the
+  // map grows past ~2 MB stringified to stay well under the 5 MB quota.
+  const SHAPES_KEY = "cg_openings_shapes_v1";
+  const [shapesByFen, setShapesByFen] = useState<Record<string, AnnotShape[]>>(() => {
+    try {
+      const raw = localStorage.getItem(SHAPES_KEY);
+      if (!raw) return {};
+      const j = JSON.parse(raw);
+      return j && typeof j === "object" ? j : {};
+    } catch { return {}; }
+  });
   const shapes = shapesByFen[fp.fen] ?? [];
   const setShapes = (next: AnnotShape[]) => {
-    setShapesByFen((prev) => ({ ...prev, [fp.fen]: next }));
+    setShapesByFen((prev) => {
+      // Drop the key entirely when empty so unused positions don't bloat storage.
+      const merged = { ...prev };
+      if (next.length === 0) delete merged[fp.fen];
+      else merged[fp.fen] = next;
+      try {
+        const s = JSON.stringify(merged);
+        if (s.length < 2_000_000) localStorage.setItem(SHAPES_KEY, s);
+      } catch { /* quota — silent */ }
+      return merged;
+    });
   };
   const { data, isError } = useQuery({
     queryKey: ["explorer", fp.fen],
@@ -232,7 +289,7 @@ export default function OpeningExplorer(
             2026-08-20: "so much gap between board and left/right panel". */}
         <div ref={boardBoxRef} className={preBoardExtra ? "[&>.cg-board-wrap]:mx-0" : ""}>
           <Board fen={fp.fen} orientation={fp.orientation} turnColor={fp.turnColor}
-            movableColor={annotTool.tool !== "cursor" ? "none" : "both"} dests={fp.dests} onMove={fp.onMove}
+            movableColor={annotTool.tool !== "cursor" ? undefined : "both"} dests={fp.dests} onMove={fp.onMove}
             shapes={[
               ...shapes,
               ...(annotTool.attackMode && annotTool.attackShownFrom ? computeAttackShapes(fp.fen, annotTool.attackShownFrom) : []),
@@ -412,8 +469,19 @@ export default function OpeningExplorer(
       {moveMenu && (() => {
         const isVariation = moveMenu.path.some((k) => k > 0);
         const doAndClose = (fn: () => void) => { fn(); closeMoveMenu(); };
-        // Clamp inside the viewport with a rough menu size guess.
-        const menuW = 220, menuH = 180;
+        // Walk fp.tree along moveMenu.path to find the current node (used
+        // by the NAG grid + comment button to show existing values).
+        let targetNode: MoveNode | null = null;
+        {
+          let arr: MoveNode[] = fp.tree;
+          for (const k of moveMenu.path) {
+            const n = arr[k];
+            if (!n) { targetNode = null; break; }
+            targetNode = n;
+            arr = n.children;
+          }
+        }
+        const menuW = 280, menuH = 320;
         const x = Math.min(moveMenu.x, window.innerWidth - menuW - 8);
         const y = Math.min(moveMenu.y, window.innerHeight - menuH - 8);
         return (
@@ -421,7 +489,7 @@ export default function OpeningExplorer(
             role="menu"
             onMouseDown={(e) => e.stopPropagation()}
             onContextMenu={(e) => e.preventDefault()}
-            className="fixed z-50 min-w-[210px] rounded-md border border-ink-700 bg-ink-900 py-1 text-sm text-ink-200 shadow-xl"
+            className="fixed z-50 min-w-[270px] max-w-[300px] rounded-md border border-ink-700 bg-ink-900 py-1 text-sm text-ink-200 shadow-xl"
             style={{ left: x, top: y }}>
             {isVariation && (
               <button role="menuitem"
@@ -452,6 +520,54 @@ export default function OpeningExplorer(
               className="block w-full px-3 py-1.5 text-left hover:bg-ink-800">
               Copy PGN to here
             </button>
+            <div className="my-1 border-t border-ink-800" />
+            {/* Annotation grid + comment editor — mirrors the class notation
+             *  panel. Persists to the free-play tree (localStorage) so glyphs
+             *  and comments survive reload + variation navigation. */}
+            <div className="px-2 pt-1 pb-0.5 text-[10px] uppercase tracking-wide text-ink-500">Annotation</div>
+            <div className="grid grid-cols-4 gap-1 px-2 pb-1">
+              {NAG_PRESETS.map((p) => {
+                const active = targetNode?.nag === p.text;
+                return (
+                  <button
+                    key={p.text}
+                    role="menuitem"
+                    onClick={() => doAndClose(() => fp.setNodeAnnotation(moveMenu.path, { nag: p.text }))}
+                    title={p.hint}
+                    className={`grid h-7 place-items-center rounded font-mono text-[13px] font-bold transition ${active ? "bg-brand-500 text-white" : `${NAG_CLASS[p.text] ?? "text-ink-200"} bg-ink-800 hover:bg-ink-700`}`}
+                  >
+                    {p.text}
+                  </button>
+                );
+              })}
+            </div>
+            {targetNode?.nag && (
+              <button role="menuitem"
+                onClick={() => doAndClose(() => fp.setNodeAnnotation(moveMenu.path, { nag: null }))}
+                className="block w-full px-3 py-1 text-left text-[11px] text-ink-400 hover:bg-ink-800">
+                × Clear annotation ({targetNode.nag})
+              </button>
+            )}
+            <div className="my-1 border-t border-ink-800" />
+            <button role="menuitem"
+              onClick={() => doAndClose(() => {
+                const existing = targetNode?.comment ?? "";
+                const next = window.prompt("Comment on this move (up to 500 chars). Empty = no change; type '-' to clear.", existing);
+                if (next === null) return;
+                if (next === "-") { fp.setNodeAnnotation(moveMenu.path, { comment: null }); return; }
+                if (next === "") return;
+                fp.setNodeAnnotation(moveMenu.path, { comment: next.slice(0, 500) });
+              })}
+              className="block w-full px-3 py-1.5 text-left hover:bg-ink-800">
+              {targetNode?.comment ? "💬 Edit comment" : "💬 Add comment"}
+            </button>
+            {targetNode?.comment && (
+              <button role="menuitem"
+                onClick={() => doAndClose(() => fp.setNodeAnnotation(moveMenu.path, { comment: null }))}
+                className="block w-full px-3 py-1 text-left text-[11px] text-ink-400 hover:bg-ink-800">
+                × Clear comment
+              </button>
+            )}
           </div>
         );
       })()}
@@ -536,7 +652,7 @@ function MainMoveTable({
                   onClick={() => onPick(row.white!.path)}
                   onContextMenu={(e) => { e.preventDefault(); onContext(row.white!.path, e.clientX, e.clientY); }}
                   className={cellClass(wActive, "w")}>
-                  {row.white.node.san}
+                  {row.white.node.san}{row.white.node.nag ? <span className={NAG_CLASS[row.white.node.nag] ?? "text-amber-300"}>{row.white.node.nag}</span> : null}
                 </button>
               ) : <span />}
               {row.black ? (
@@ -544,10 +660,17 @@ function MainMoveTable({
                   onClick={() => onPick(row.black!.path)}
                   onContextMenu={(e) => { e.preventDefault(); onContext(row.black!.path, e.clientX, e.clientY); }}
                   className={cellClass(bActive, "b")}>
-                  {row.black.node.san}
+                  {row.black.node.san}{row.black.node.nag ? <span className={NAG_CLASS[row.black.node.nag] ?? "text-amber-300"}>{row.black.node.nag}</span> : null}
                 </button>
               ) : <span />}
             </div>
+            {/* Text comment(s) — italic subtext below the move row. */}
+            {(row.white?.node.comment || row.black?.node.comment) && (
+              <div className="ml-9 mb-1 space-y-0.5 text-[11px] italic text-ink-400">
+                {row.white?.node.comment && <div>{row.moveNo}. {row.white.node.comment}</div>}
+                {row.black?.node.comment && <div>{row.moveNo}… {row.black.node.comment}</div>}
+              </div>
+            )}
             {/* Variations spawning from white's move (Black-to-move sidelines):
                 render on the row underneath, spanning both move columns. */}
             {row.white?.vars.map((v, vi) => (
@@ -623,8 +746,11 @@ function MoveTreeLine({
           className={`rounded px-1.5 py-0.5 transition ${active
             ? "bg-brand-500/60 text-white"
             : depth === 0 ? "text-ink-100 hover:bg-ink-800" : "text-ink-300 hover:bg-ink-800"}`}>
-          {node.san}
+          {node.san}{node.nag ? <span className={NAG_CLASS[node.nag] ?? "text-amber-300"}>{node.nag}</span> : null}
         </button>
+        {node.comment && (
+          <span className="ml-1 italic text-[11px] text-ink-400">{node.comment}</span>
+        )}
       </span>
     );
     openedWithVariationBlock = false;

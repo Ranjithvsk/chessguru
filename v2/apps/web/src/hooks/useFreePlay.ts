@@ -4,9 +4,14 @@ import type { Key } from "chessground/types";
 import { destsFromChess } from "../components/Board";
 
 /** One SAN move in the recorded tree. `children[0]` is the mainline
- *  continuation from THIS node; additional children are branch variations. */
+ *  continuation from THIS node; additional children are branch variations.
+ *  nag = short PGN glyph appended to the SAN (!, ?, ±, +=, …).
+ *  comment = free-form text under the move.
+ *  Both optional; preserved through promote/mainline/delete/loadTree. */
 export interface MoveNode {
   san: string;
+  nag?: string;
+  comment?: string;
   children: MoveNode[];
 }
 
@@ -148,7 +153,7 @@ export function useFreePlay(initialFen?: string) {
       const idx = path[depth]!;
       const next = [...nodes];
       const child = next[idx]!;
-      next[idx] = { san: child.san, children: cloneAppend(child.children, depth + 1) };
+      next[idx] = { san: child.san, nag: child.nag, comment: child.comment, children: cloneAppend(child.children, depth + 1) };
       return next;
     };
     const nextTree = cloneAppend(tree, 0);
@@ -293,7 +298,9 @@ export function useFreePlay(initialFen?: string) {
     for (let i = 0; i < p.length - 1; i++) {
       const idx = p[i]!;
       const child = parentArr[idx]!;
-      const newChild: MoveNode = { san: child.san, children: [...child.children] };
+      // Preserve nag/comment on cloned ancestors so promote/mainline/delete
+      // don't strip annotations from any node on the walk path.
+      const newChild: MoveNode = { san: child.san, nag: child.nag, comment: child.comment, children: [...child.children] };
       parentArr[idx] = newChild;
       parentArr = newChild.children;
     }
@@ -337,7 +344,7 @@ export function useFreePlay(initialFen?: string) {
       // Descend into the (now-mainline) node's children with a structural copy.
       const child = arr[0]!;
       if (i < p.length - 1) {
-        const newChild: MoveNode = { san: child.san, children: [...child.children] };
+        const newChild: MoveNode = { san: child.san, nag: child.nag, comment: child.comment, children: [...child.children] };
         arr[0] = newChild;
         arr = newChild.children;
       }
@@ -348,6 +355,35 @@ export function useFreePlay(initialFen?: string) {
     // suffix indices are relative to the moved node's own children which
     // aren't shuffled).
     setPath([...nextPath, ...path.slice(p.length)]);
+  };
+
+  // Set / clear the NAG glyph or the text comment on the node at `p`.
+  // Passing `null` clears the field; a string sets it. Both are optional,
+  // preserved through all other tree mutations. Owner ask 2026-09-02:
+  // port from Dream Meet's class notation panel.
+  const setNodeAnnotation = (p: number[], patch: { nag?: string | null; comment?: string | null }) => {
+    if (p.length === 0) return;
+    // Structural clone along p, mutating the leaf.
+    const cloneAndPatch = (nodes: MoveNode[], depth: number): MoveNode[] => {
+      const idx = p[depth]!;
+      const next = [...nodes];
+      const child = next[idx]!;
+      if (depth === p.length - 1) {
+        const patched: MoveNode = { san: child.san, children: child.children };
+        // Preserve existing fields; then apply patch.
+        if (child.nag !== undefined) patched.nag = child.nag;
+        if (child.comment !== undefined) patched.comment = child.comment;
+        if (patch.nag === null || patch.nag === "") delete patched.nag;
+        else if (typeof patch.nag === "string") patched.nag = patch.nag.slice(0, 4);
+        if (patch.comment === null || patch.comment === "") delete patched.comment;
+        else if (typeof patch.comment === "string") patched.comment = patch.comment.slice(0, 500);
+        next[idx] = patched;
+      } else {
+        next[idx] = { san: child.san, nag: child.nag, comment: child.comment, children: cloneAndPatch(child.children, depth + 1) };
+      }
+      return next;
+    };
+    setTree(cloneAndPatch(tree, 0));
   };
 
   // Remove the node at `p` and everything below it. Cursor jumps to the
@@ -371,6 +407,6 @@ export function useFreePlay(initialFen?: string) {
     game, fen, orientation, turnColor,
     tree, path, history, line, ply, hasNext,
     dests, onMove, undo, goPrev, goNext, goTo, goSibling, reset, load, loadPermissive, loadSans, loadTree, flip,
-    promoteVariation, makeMainLine, deleteFrom,
+    promoteVariation, makeMainLine, deleteFrom, setNodeAnnotation,
   };
 }
