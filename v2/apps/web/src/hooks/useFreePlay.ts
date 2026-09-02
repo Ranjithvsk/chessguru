@@ -20,19 +20,21 @@ export interface MoveNode {
 // state — omit the arg for the shared default. Empty tree = don't persist
 // (avoids a stale empty write clobbering a real session on quick remounts).
 const STORAGE_KEY = "cg_freeplay_v1";
-function loadPersisted(): { tree: MoveNode[]; path: number[] } | null {
+function loadPersisted(): { tree: MoveNode[]; path: number[]; startFen?: string } | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const j = JSON.parse(raw);
     if (!Array.isArray(j?.tree) || !Array.isArray(j?.path)) return null;
-    return { tree: j.tree, path: j.path };
+    return { tree: j.tree, path: j.path, startFen: typeof j.startFen === "string" ? j.startFen : undefined };
   } catch { return null; }
 }
-function savePersisted(tree: MoveNode[], path: number[]) {
+function savePersisted(tree: MoveNode[], path: number[], startFen: string) {
   try {
-    if (tree.length === 0 && path.length === 0) { localStorage.removeItem(STORAGE_KEY); return; }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ tree, path }));
+    if (tree.length === 0 && path.length === 0 && !startFen) { localStorage.removeItem(STORAGE_KEY); return; }
+    const body: any = { tree, path };
+    if (startFen) body.startFen = startFen;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(body));
   } catch { /* quota / disabled — silent */ }
 }
 
@@ -45,12 +47,16 @@ function savePersisted(tree: MoveNode[], path: number[]) {
  *    (opening-name matcher, Memorize handoff, BoardEditor) don't need changes.
  *  Shared by Opening Explorer & Board Editor. */
 export function useFreePlay(initialFen?: string) {
-  const game = useRef(initialFen ? new Chess(initialFen) : new Chess());
   // Rehydrate persisted tree/path on first mount — only when there's no
   // caller-supplied initialFen (that's how the BoardEditor seeds a specific
   // position and it must WIN over stale saved play). Owner report 2026-08-19:
   // "when i refresh, all the moves vanishes". Now they don't.
   const persisted = useMemo(() => (initialFen ? null : loadPersisted()), [initialFen]);
+  // Seed chess.js from initialFen > persisted.startFen > standard. So a
+  // reload after Setup Position lands on the same custom board, not the
+  // standard start (paired with startFen state below).
+  const seededStart = initialFen ?? persisted?.startFen ?? "";
+  const game = useRef(seededStart ? new Chess(seededStart) : new Chess());
   const [fen, setFen] = useState(() => {
     if (!persisted) return game.current.fen();
     // Replay the persisted path so fen matches the saved cursor position.
@@ -67,8 +73,18 @@ export function useFreePlay(initialFen?: string) {
   const [orientation, setOrientation] = useState<"white" | "black">("white");
   const [tree, setTree] = useState<MoveNode[]>(persisted?.tree ?? []);
   const [path, setPath] = useState<number[]>(persisted?.path ?? []);
-  // Persist on every tree/path change (fire-and-forget, quota-safe).
-  useEffect(() => { savePersisted(tree, path); }, [tree, path]);
+  // Custom starting FEN (Setup Position). Empty = standard start. onMove +
+  // applySans use this as their base so a mid-game position stays intact
+  // across navigation (owner bug 2026-09-02 "after position setup, i can't
+  // play the 2nd move and can't navigate moves front and back"). Was previously
+  // hard-coded to `new Chess()` — which reset the board to the standard start
+  // on every replay.
+  const [startFen, setStartFen] = useState<string>(initialFen ?? "");
+  const startFenRef = useRef<string>(startFen);
+  useEffect(() => { startFenRef.current = startFen; }, [startFen]);
+  const freshChess = () => (startFenRef.current ? new Chess(startFenRef.current) : new Chess());
+  // Persist on every tree/path/startFen change (fire-and-forget, quota-safe).
+  useEffect(() => { savePersisted(tree, path, startFen); }, [tree, path, startFen]);
 
   // Walk the tree along `path`, collecting the SAN moves currently applied
   // to the board. Also returns the node objects for downstream rendering.
@@ -101,9 +117,12 @@ export function useFreePlay(initialFen?: string) {
   const dests = useMemo(() => destsFromChess(game.current as any), [fen]);
   const turnColor: "white" | "black" = game.current.turn() === "w" ? "white" : "black";
 
-  // Replay a SAN move list from scratch and sync the fen + chess ref.
+  // Replay a SAN move list from the current startFen and sync fen + chess ref.
+  // Uses startFenRef (not startFen state) so callers inside setTree/setPath
+  // updates see the latest value without stale-closure surprises.
   const applySans = (sans: string[]) => {
-    game.current.reset();
+    if (startFenRef.current) { try { game.current.load(startFenRef.current); } catch { game.current.reset(); } }
+    else game.current.reset();
     for (const s of sans) { try { if (!game.current.move(s)) break; } catch { break; } }
     setFen(game.current.fen());
   };
@@ -124,7 +143,10 @@ export function useFreePlay(initialFen?: string) {
 
   const onMove = (from: Key, to: Key) => {
     // Play the move on a fresh clone at the cursor position to compute SAN.
-    const rewind = new Chess();
+    // freshChess honours a custom startFen (Setup Position) so replaying to
+    // the cursor stays on the SAME position — previously hard-coded to
+    // standard start, which stripped the setup after the first move.
+    const rewind = freshChess();
     for (const s of history) rewind.move(s);
     let san: string;
     try {
@@ -202,6 +224,8 @@ export function useFreePlay(initialFen?: string) {
     setFen(game.current.fen());
     setTree([]);
     setPath([]);
+    setStartFen("");
+    startFenRef.current = "";
   };
   const load = (f: string): boolean => {
     try {
@@ -209,6 +233,9 @@ export function useFreePlay(initialFen?: string) {
       setFen(game.current.fen());
       setTree([]);
       setPath([]);
+      const loaded = game.current.fen();
+      setStartFen(loaded);
+      startFenRef.current = loaded;
       return true;
     } catch { return false; }
   };
@@ -234,6 +261,9 @@ export function useFreePlay(initialFen?: string) {
       setFen(game.current.fen());
       setTree([]);
       setPath([]);
+      const loaded = game.current.fen();
+      setStartFen(loaded);
+      startFenRef.current = loaded;
       return true;
     } catch { return false; }
   };
