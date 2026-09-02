@@ -3,11 +3,17 @@
 // Chessground already supports these via hidden right-click gestures; this
 // exposes them for tablet users + coaches who don't know the gestures.
 //
+// Phase 2 (2026-09-02): 🎯 attack overlay — toggle on, click a piece,
+// every square it attacks lights up as a subtle marker. Uses chess.js's
+// `attackers()` per square so the result matches chess reality (includes
+// defenders of own pieces + captures, not just legal moves).
+//
 // Used by both Dream Meet (SharedClassBoard) and /openings. Presentation
 // is identical; interaction logic (parent handles onClick square routing
 // via useAnnotationTool()) lets each host wire into its own shape state.
 
 import { useCallback, useEffect, useState } from "react";
+import { Chess } from "chess.js";
 
 export type AnnotationTool = "cursor" | "arrow" | "circle" | "cross";
 export type AnnotationBrush = "green" | "red" | "blue" | "yellow" | "purple";
@@ -45,6 +51,17 @@ export function useAnnotationTool() {
   // click to complete the arrow. Reset on tool change / escape.
   const [pendingArrowFrom, setPendingArrowFrom] = useState<string | null>(null);
   useEffect(() => { setPendingArrowFrom(null); }, [tool]);
+  // Attack-overlay mode (Phase 2). When ON, clicking a piece renders
+  // every square that piece attacks. attackShownFrom is the currently-
+  // shown source square (or null if nothing selected).
+  const [attackMode, _setAttackMode] = useState<boolean>(() => {
+    try { return localStorage.getItem("cg_annot_attack") === "1"; } catch { return false; }
+  });
+  const setAttackMode = useCallback((v: boolean) => { _setAttackMode(v); try { localStorage.setItem("cg_annot_attack", v ? "1" : "0"); } catch { /* */ } }, []);
+  const [attackShownFrom, setAttackShownFrom] = useState<string | null>(null);
+  // Switching tools OR turning off attack mode clears the pinned square.
+  useEffect(() => { if (!attackMode) setAttackShownFrom(null); }, [attackMode]);
+  useEffect(() => { if (tool !== "cursor") setAttackShownFrom(null); }, [tool]);
   // Escape returns to cursor tool.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -58,16 +75,62 @@ export function useAnnotationTool() {
       else if (e.key === "3") setBrush("blue");
       else if (e.key === "4") setBrush("yellow");
       else if (e.key === "5") setBrush("purple");
+      else if (e.key.toLowerCase() === "t") setAttackMode(!attackMode);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [setTool, setBrush]);
+  }, [setTool, setBrush, attackMode, setAttackMode]);
 
   return {
     tool, setTool,
     brush, setBrush,
     pendingArrowFrom, setPendingArrowFrom,
+    attackMode, setAttackMode,
+    attackShownFrom, setAttackShownFrom,
   };
+}
+
+/** Compute attack shapes for the given source-square on the given FEN.
+ *  Returns chessground-shaped `{orig, brush?}` circles marking every
+ *  square the source piece attacks (empty AND own-defended AND captures).
+ *  Three brush flavours:
+ *    * "attackAttack" — attacks an enemy piece (red-ish circle)
+ *    * "attackDefend" — defends an own piece   (blue-ish circle)
+ *    * "attackControl" — empty square controlled (yellow-ish dot)
+ *  Consumers extend chessground's brush config with these colours.
+ *
+ *  Uses chess.js's attackers(sq, color) — walks all 64 squares, checks
+ *  if `from` appears in the attackers of the target for the piece's
+ *  own color. That covers piece-native movement WITHOUT depending on
+ *  legality (a piece can "attack" a square even if it's pinned). */
+export function computeAttackShapes(fen: string, from: string): Array<{ orig: string; brush?: string }> {
+  try {
+    const c = new Chess(fen);
+    const piece = c.get(from as any);
+    if (!piece) return [];
+    const shapes: Array<{ orig: string; brush?: string }> = [{ orig: from, brush: "attackSource" }];
+    const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
+    for (const f of files) {
+      for (let r = 1; r <= 8; r++) {
+        const target = `${f}${r}`;
+        if (target === from) continue;
+        // attackers(target, ownColor) = pieces of `ownColor` that attack `target`.
+        let attackers: string[] = [];
+        try { attackers = c.attackers(target as any, piece.color) as unknown as string[]; }
+        catch { continue; }
+        if (!attackers.includes(from as any)) continue;
+        const occupant = c.get(target as any);
+        if (!occupant) {
+          shapes.push({ orig: target, brush: "attackControl" });
+        } else if (occupant.color === piece.color) {
+          shapes.push({ orig: target, brush: "attackDefend" });
+        } else {
+          shapes.push({ orig: target, brush: "attackAttack" });
+        }
+      }
+    }
+    return shapes;
+  } catch { return []; }
 }
 
 /** Apply a click to the current shape list per the active tool. Returns
@@ -125,9 +188,9 @@ export function applyAnnotationClick(
 
 /** The visible bar. Renders below the board — 44 px tall touch targets so
  *  it works on tablets. Cursor / Arrow / Circle / Cross buttons + colour
- *  palette + Clear. Keyboard shortcuts shown in tooltips. */
+ *  palette + 🎯 Attack toggle + Clear. Keyboard shortcuts shown in tooltips. */
 export function AnnotationToolbar({
-  tool, brush, onToolChange, onBrushChange, onClear, hasShapes,
+  tool, brush, onToolChange, onBrushChange, onClear, hasShapes, attackMode, onAttackModeChange,
 }: {
   tool: AnnotationTool;
   brush: AnnotationBrush;
@@ -135,6 +198,8 @@ export function AnnotationToolbar({
   onBrushChange: (b: AnnotationBrush) => void;
   onClear: () => void;
   hasShapes: boolean;
+  attackMode?: boolean;
+  onAttackModeChange?: (v: boolean) => void;
 }) {
   return (
     <div className="mt-2 flex flex-wrap items-center justify-center gap-1 rounded-full border border-ink-700 bg-ink-900/70 p-1 shadow-sm">
@@ -168,6 +233,20 @@ export function AnnotationToolbar({
           />
         );
       })}
+      {/* Attack overlay toggle (Phase 2). Optional prop — consumers that
+       *  don't want it just don't pass onAttackModeChange. */}
+      {onAttackModeChange && (
+        <>
+          <span className="mx-1 h-5 w-px bg-ink-700" aria-hidden />
+          <button
+            onClick={() => onAttackModeChange(!attackMode)}
+            title="Attack view (T) — click a piece to see every square it attacks/defends"
+            className={`grid h-9 min-w-9 place-items-center rounded-full px-2 text-base transition ${attackMode ? "bg-amber-500 text-white shadow-glow" : "text-ink-300 hover:bg-ink-800"}`}
+          >
+            🎯
+          </button>
+        </>
+      )}
       <span className="mx-1 h-5 w-px bg-ink-700" aria-hidden />
       <button
         onClick={onClear}

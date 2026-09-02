@@ -141,8 +141,23 @@ export default function Board({
       // drawable.onChange fires when the USER draws/erases shapes via right-click.
       // Programmatic setShapes() from the sync effect below does NOT trigger it, so
       // there's no echo loop with remote annotations.
-      drawable: { enabled: true, visible: true,
-        onChange: (s) => onShapesChangeRef.current?.(s) },
+      drawable: {
+        enabled: true, visible: true,
+        onChange: (s) => onShapesChangeRef.current?.(s),
+        // Custom brushes for the annotation toolbar's cross tool +
+        // Phase 2 attack overlay (2026-09-02). Chessground merges
+        // these with its defaults (green/red/blue/yellow). Names
+        // must match the shape.brush strings used by AnnotationToolbar
+        // + computeAttackShapes.
+        brushes: {
+          purple:        { key: "annot-purple",   color: "#6b21a8", opacity: 1,    lineWidth: 10 },
+          brushCross:    { key: "annot-cross",    color: "#dc2626", opacity: 0.9,  lineWidth: 10 },
+          attackSource:  { key: "attack-source",  color: "#f59e0b", opacity: 0.7,  lineWidth: 10 },
+          attackAttack:  { key: "attack-attack",  color: "#dc2626", opacity: 0.55, lineWidth: 8 },
+          attackDefend:  { key: "attack-defend",  color: "#3b82f6", opacity: 0.5,  lineWidth: 8 },
+          attackControl: { key: "attack-control", color: "#f59e0b", opacity: 0.35, lineWidth: 6 },
+        } as any,
+      },
     };
     api.current = Chessground(el.current, config);
     if (shapes) api.current.setShapes(shapes);

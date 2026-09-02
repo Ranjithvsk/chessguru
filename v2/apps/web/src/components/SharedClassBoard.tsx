@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Chess, validateFen } from "chess.js";
 import type { Key } from "chessground/types";
 import Board from "./Board";
-import { AnnotationToolbar, applyAnnotationClick, useAnnotationTool } from "./AnnotationToolbar";
+import { AnnotationToolbar, applyAnnotationClick, computeAttackShapes, useAnnotationTool } from "./AnnotationToolbar";
 
 type BoardMove = { from: string; to: string; promotion?: string };
 
@@ -1356,14 +1356,35 @@ export default function SharedClassBoard(
         lastMove={inChallenge && !isCoachRole ? null : lastMoveTuple}
         onMove={(f, t) => sendMove(String(f), String(t))}
         coordinates
-        shapes={inChallenge && !isCoachRole ? [] as any : (shapes as any)}
+        shapes={inChallenge && !isCoachRole
+          ? [] as any
+          // Combine user annotations with the attack overlay (Phase 2).
+          // Attack shapes are LOCAL — not broadcast (each user toggles
+          // their own view). Rendered last so they draw on top.
+          : ([...(shapes as any[]), ...(annotTool.attackMode && annotTool.attackShownFrom ? computeAttackShapes(displayFen, annotTool.attackShownFrom) : [])] as any)}
         onShapesChange={(s) => sendAnnot(s as any)}
         onSelect={(key) => {
+          const sq = String(key);
+          // Attack overlay: cursor mode + attack on + click a piece →
+          // show its attacks. Clicking the same source clears; clicking
+          // a different piece switches; clicking an empty square clears.
+          if (annotTool.tool === "cursor" && annotTool.attackMode) {
+            try {
+              const c = new Chess(displayFen);
+              const piece = c.get(sq as any);
+              if (!piece) {
+                annotTool.setAttackShownFrom(null);
+                return;
+              }
+              annotTool.setAttackShownFrom(annotTool.attackShownFrom === sq ? null : sq);
+            } catch { /* */ }
+            return;
+          }
           // Annotation tools route through this: when a tool is active,
           // build the next shape list + push it through sendAnnot so it
           // broadcasts + persists like a chessground-drawn shape.
           if (annotTool.tool === "cursor") return;
-          const next = applyAnnotationClick(String(key), shapes as any, annotTool);
+          const next = applyAnnotationClick(sq, shapes as any, annotTool);
           if (next) sendAnnot(next as any);
         }}
       />
@@ -1411,6 +1432,8 @@ export default function SharedClassBoard(
               onBrushChange={annotTool.setBrush}
               onClear={() => sendAnnot([])}
               hasShapes={shapes.length > 0}
+              attackMode={annotTool.attackMode}
+              onAttackModeChange={annotTool.setAttackMode}
             />
             {annotTool.tool === "arrow" && annotTool.pendingArrowFrom && (
               <div className="mt-1 text-center text-[11px] font-medium text-brand-300">

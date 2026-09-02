@@ -16,7 +16,8 @@ import { fetchExplorer } from "../lib/explorer";
 import { OPENING_HANDOFF_KEY } from "../lib/openingMemory";
 import { findOpeningForLine } from "../lib/openings";
 import { OpeningIdeaPanel } from "./OpeningIdeaPanel";
-import { AnnotationToolbar, applyAnnotationClick, useAnnotationTool } from "./AnnotationToolbar";
+import { AnnotationToolbar, applyAnnotationClick, computeAttackShapes, useAnnotationTool } from "./AnnotationToolbar";
+import { Chess } from "chess.js";
 
 function WdlBar({ w, d, b, className = "" }: { w: number; d: number; b: number; className?: string }) {
   const t = w + d + b || 1;
@@ -232,11 +233,20 @@ export default function OpeningExplorer(
         <div ref={boardBoxRef} className={preBoardExtra ? "[&>.cg-board-wrap]:mx-0" : ""}>
           <Board fen={fp.fen} orientation={fp.orientation} turnColor={fp.turnColor}
             movableColor="both" dests={fp.dests} onMove={fp.onMove}
-            shapes={shapes as any}
+            shapes={[...shapes, ...(annotTool.attackMode && annotTool.attackShownFrom ? computeAttackShapes(fp.fen, annotTool.attackShownFrom) : [])] as any}
             onShapesChange={(s) => setShapes(s as any)}
             onSelect={(key) => {
+              const sq = String(key);
+              if (annotTool.tool === "cursor" && annotTool.attackMode) {
+                try {
+                  const c = new Chess(fp.fen);
+                  const piece = c.get(sq as any);
+                  annotTool.setAttackShownFrom(!piece ? null : (annotTool.attackShownFrom === sq ? null : sq));
+                } catch { /* */ }
+                return;
+              }
               if (annotTool.tool === "cursor") return;
-              const next = applyAnnotationClick(String(key), shapes, annotTool);
+              const next = applyAnnotationClick(sq, shapes, annotTool);
               if (next) setShapes(next);
             }}
           />
@@ -250,6 +260,8 @@ export default function OpeningExplorer(
           onBrushChange={annotTool.setBrush}
           onClear={() => setShapes([])}
           hasShapes={shapes.length > 0}
+          attackMode={annotTool.attackMode}
+          onAttackModeChange={annotTool.setAttackMode}
         />
         {annotTool.tool === "arrow" && annotTool.pendingArrowFrom && (
           <div className="mt-1 text-center text-[11px] font-medium text-brand-300">
