@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Chess, validateFen } from "chess.js";
 import type { Key } from "chessground/types";
 import Board from "./Board";
-import { AnnotationToolbar, applyAnnotationClick, computeAttackShapes, useAnnotationTool, type AnnotShape } from "./AnnotationToolbar";
+import { AnnotationToolbar, applyAnnotationClick, computeAttackShapes, computePinShapes, useAnnotationTool, type AnnotShape } from "./AnnotationToolbar";
 
 type BoardMove = { from: string; to: string; promotion?: string };
 
@@ -1426,7 +1426,11 @@ export default function SharedClassBoard(
           // Combine user annotations with the attack overlay (Phase 2).
           // Attack shapes are LOCAL — not broadcast (each user toggles
           // their own view). Rendered last so they draw on top.
-          : ([...(shapes as any[]), ...(annotTool.attackMode && annotTool.attackShownFrom ? computeAttackShapes(displayFen, annotTool.attackShownFrom) : [])] as any)}
+          : ([
+              ...(shapes as any[]),
+              ...(annotTool.attackMode && annotTool.attackShownFrom ? computeAttackShapes(displayFen, annotTool.attackShownFrom) : []),
+              ...(annotTool.pinsMode ? computePinShapes(displayFen) : []),
+            ] as any)}
         onShapesChange={(s) => sendAnnot(s as any)}
         onSelect={(key) => {
           const sq = String(key);
@@ -1501,6 +1505,8 @@ export default function SharedClassBoard(
               onAttackModeChange={annotTool.setAttackMode}
               textLabel={annotTool.textLabel}
               onTextLabelChange={annotTool.setTextLabel}
+              pinsMode={annotTool.pinsMode}
+              onPinsModeChange={annotTool.setPinsMode}
             />
             {annotTool.tool === "arrow" && annotTool.pendingArrowFrom && (
               <div className="mt-1 text-center text-[11px] font-medium text-brand-300">
