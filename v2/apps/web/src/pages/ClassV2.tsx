@@ -817,18 +817,8 @@ function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "stu
   // tactics) go through 📤 Send position → Notebook instead.
   const isOpeningStart = startFen === STANDARD_START_FEN;
 
-  // Keyboard nav (coach only):
-  //   ←     back 1 ply (one half-move)
-  //   →     forward 1 ply
-  //   ↑     back 2 plies (one FULL row in the notation panel)
-  //   ↓     forward 2 plies
-  //   Alt+↑ switch to previous variation at current branch
-  //   Alt+↓ switch to next variation at current branch
-  // Owner ask 2026-09-02: "up and down arrow don't navigate in notation
-  // panel up and down". The notation panel is a two-column White/Black
-  // table — one row = one full move pair = 2 plies. Bare ↑/↓ now jumps
-  // by a row. Alt-modified keeps the sibling-variation switch behaviour
-  // for coaches who need it.
+  // Keyboard nav (coach only): ← → walk mainline; ↑ ↓ switch variation
+  // at current branch. Mirrors /openings keyboard shortcuts.
   useEffect(() => {
     if (role !== "coach") return;
     const handler = (e: KeyboardEvent) => {
@@ -836,26 +826,16 @@ function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "stu
       if (e.key === "ArrowLeft") { e.preventDefault(); triggerClassBoardAction("stepBack"); }
       else if (e.key === "ArrowRight") { e.preventDefault(); triggerClassBoardAction("stepForward"); }
       else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-        const back = e.key === "ArrowUp";
-        // Alt = sibling-variation switch (old behaviour, kept for power users).
-        if (e.altKey) {
-          if (cursorPath.length === 0) return;
-          let parentArr = tree;
-          for (let i = 0; i < cursorPath.length - 1; i++) parentArr = parentArr[cursorPath[i]!]!.children;
-          const k = cursorPath[cursorPath.length - 1]!;
-          const dir = back ? -1 : 1;
-          const nk = k + dir;
-          if (nk < 0 || nk >= parentArr.length) return;
-          e.preventDefault();
-          triggerClassSeek([...cursorPath.slice(0, -1), nk]);
-          return;
-        }
-        // Plain ↑/↓ = jump one notation-row (2 plies). Two stepBack/stepForward
-        // triggers → one per ply. Each is a small WS frame; server dedupes fine.
+        // Sibling switch: replace last cursor index with prev / next sibling.
+        if (cursorPath.length === 0) return;
+        let parentArr = tree;
+        for (let i = 0; i < cursorPath.length - 1; i++) parentArr = parentArr[cursorPath[i]!]!.children;
+        const k = cursorPath[cursorPath.length - 1]!;
+        const dir = e.key === "ArrowUp" ? -1 : 1;
+        const nk = k + dir;
+        if (nk < 0 || nk >= parentArr.length) return;
         e.preventDefault();
-        const act = back ? "stepBack" : "stepForward";
-        triggerClassBoardAction(act);
-        triggerClassBoardAction(act);
+        triggerClassSeek([...cursorPath.slice(0, -1), nk]);
       }
     };
     window.addEventListener("keydown", handler);
