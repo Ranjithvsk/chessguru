@@ -20,7 +20,7 @@
 // Right-click drag on board → arrow; right-click a square → circle.
 // Shapes attach to the "current move" (the last node in currentPath).
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Chess } from "chess.js";
@@ -39,6 +39,24 @@ function nid(): string {
   for (let i = 0; i < 6; i++) s += alphabet[Math.floor(Math.random() * alphabet.length)];
   return s;
 }
+
+// NAG (Numeric Annotation Glyph) presets — mirror the /openings + Dream Meet
+// class-board notation. Values are the standard PGN NAG codes 1-6 which the
+// server's cleanHeaders passes through unchanged.
+const NAG_PRESETS: { text: string; label: string; nag: number }[] = [
+  { text: "!",  label: "Good move",       nag: 1 },
+  { text: "?",  label: "Mistake",         nag: 2 },
+  { text: "!!", label: "Brilliant",       nag: 3 },
+  { text: "??", label: "Blunder",         nag: 4 },
+  { text: "!?", label: "Interesting",     nag: 5 },
+  { text: "?!", label: "Dubious",         nag: 6 },
+];
+const NAG_TEXT: Record<number, string> = { 1: "!", 2: "?", 3: "!!", 4: "??", 5: "!?", 6: "?!" };
+const NAG_COLOR: Record<number, string> = {
+  1: "text-emerald-400", 2: "text-amber-300", 3: "text-emerald-300",
+  4: "text-rose-400", 5: "text-blue-300", 6: "text-orange-300",
+};
+const nagToText = (n?: number): string => (n && NAG_TEXT[n]) || "";
 
 /** Build a chess.js game by replaying from startingFen through a path of nodes. */
 function replayTo(startingFen: string, path: MoveNode[]): Chess {
@@ -253,6 +271,164 @@ export default function StudyChapterEditPage() {
     setDirty(true);
   };
 
+  // ── Right-click menu mutations (parity with /openings notation panel) ──
+  // Owner ask 2026-09-02: "all" — full parity plus keep ⭐/💬 icons.
+
+  // Set nag / comment on a specific node (not the current node — the right-
+  // clicked one). Overwrite semantics: nag=null clears, comment=null clears.
+  const setNodeAnnotation = (nodeId: string, patch: { nag?: number | null; comment?: string | null }) => {
+    setMoves((prev) => prev.map((m) => {
+      if (m.id !== nodeId) return m;
+      const next = { ...m };
+      if ("nag" in patch) { if (patch.nag == null) delete next.nag; else next.nag = patch.nag; }
+      if ("comment" in patch) { if (!patch.comment) delete next.comment; else next.comment = patch.comment.slice(0, 500); }
+      return next;
+    }));
+    setDirty(true);
+  };
+
+  // Promote a variation up one level: swap isMainLine between the target and
+  // whichever of its siblings currently owns isMainLine (at the same parent).
+  const promoteVariation = (nodeId: string) => {
+    const node = moves.find((m) => m.id === nodeId);
+    if (!node) return;
+    const siblings = childrenOf(moves, node.parentId);
+    if (siblings.length < 2) return;                   // no sibling to swap with
+    const currentMain = siblings.find((s) => s.isMainLine);
+    if (!currentMain || currentMain.id === nodeId) return;
+    setMoves((prev) => prev.map((m) => {
+      if (m.id === nodeId) return { ...m, isMainLine: true };
+      if (m.id === currentMain.id) return { ...m, isMainLine: false };
+      return m;
+    }));
+    setDirty(true);
+  };
+
+  // Make this node the main line all the way to the root — walk up demoting
+  // each ancestor's mainline sibling in favour of the path from root to here.
+  const makeMainLine = (nodeId: string) => {
+    let cur: MoveNode | undefined = moves.find((m) => m.id === nodeId);
+    if (!cur) return;
+    const wantMain = new Set<string>();
+    while (cur) {
+      wantMain.add(cur.id);
+      cur = cur.parentId ? moves.find((m) => m.id === cur!.parentId) : undefined;
+    }
+    // Any sibling of a want-main node that's currently main must be demoted.
+    setMoves((prev) => prev.map((m) => {
+      if (wantMain.has(m.id) && !m.isMainLine) return { ...m, isMainLine: true };
+      if (!wantMain.has(m.id) && m.isMainLine) {
+        // Only demote if a sibling in wantMain took over — otherwise leave.
+        const sibs = prev.filter((s) => s.parentId === m.parentId && s.id !== m.id);
+        if (sibs.some((s) => wantMain.has(s.id))) return { ...m, isMainLine: false };
+      }
+      return m;
+    }));
+    setDirty(true);
+  };
+
+  // Delete node + subtree (used by right-click menu — same collect logic as
+  // the current deleteFromHere but for an arbitrary node, not just currentId).
+  const deleteSubtree = (nodeId: string) => {
+    const doomed = new Set<string>();
+    const collect = (id: string) => {
+      doomed.add(id);
+      for (const k of childrenOf(moves, id)) collect(k.id);
+    };
+    collect(nodeId);
+    // If the current cursor is inside the doomed subtree, hop it up to the parent.
+    const node = moves.find((m) => m.id === nodeId);
+    const parent = node?.parentId ?? null;
+    if (currentId && doomed.has(currentId)) setCurrentId(parent);
+    setMoves((prev) => prev.filter((m) => !doomed.has(m.id)));
+    setDirty(true);
+  };
+
+  // Build a PGN string from the FULL move tree (all mainlines + variations).
+  // Follows the same format the /openings save uses so a copied PGN pastes
+  // cleanly into any other analysis tool.
+  const buildPgn = useCallback((rootMoves: MoveNode[]): string => {
+    // startTurn/startNum derived from startingFen so mid-game positions get
+    // the right ply numbers.
+    let startTurn: "w" | "b" = "w", startNum = 1;
+    if (startingFen) {
+      const parts = startingFen.split(" ");
+      startTurn = parts[1] === "b" ? "b" : "w";
+      startNum = parseInt(parts[5] || "1", 10) || 1;
+    }
+    const walk = (parentId: string | null, plyBase: number, isVariation: boolean): string => {
+      const kids = childrenOf(rootMoves, parentId);
+      if (!kids.length) return "";
+      const main = kids.find((k) => k.isMainLine) ?? kids[0];
+      const siblings = kids.filter((k) => k.id !== main.id);
+      const isWhite = startTurn === "w" ? plyBase % 2 === 0 : plyBase % 2 === 1;
+      const moveNum = Math.floor(plyBase / 2) + startNum;
+      const parts: string[] = [];
+      if (isWhite) parts.push(`${moveNum}.${main.san}${main.nag ? " " + nagToText(main.nag) : ""}`);
+      else parts.push((isVariation || plyBase === 0) ? `${moveNum}...${main.san}${main.nag ? " " + nagToText(main.nag) : ""}` : `${main.san}${main.nag ? " " + nagToText(main.nag) : ""}`);
+      if (main.comment) parts.push(`{${main.comment.replace(/[{}]/g, "")}}`);
+      for (const s of siblings) {
+        const sHead = isWhite ? `${moveNum}.${s.san}${s.nag ? " " + nagToText(s.nag) : ""}` : `${moveNum}...${s.san}${s.nag ? " " + nagToText(s.nag) : ""}`;
+        const sTail = walk(s.id, plyBase + 1, true);
+        const sCmt = s.comment ? ` {${s.comment.replace(/[{}]/g, "")}}` : "";
+        parts.push(`(${sHead}${sCmt}${sTail ? " " + sTail : ""})`);
+      }
+      const rest = walk(main.id, plyBase + 1, false);
+      if (rest) parts.push(rest);
+      return parts.join(" ");
+    };
+    return walk(null, 0, false);
+  }, [startingFen]);
+
+  const copyPgnAt = async (nodeId: string) => {
+    // Whole-tree PGN — same format as /openings save. Node-specific slicing
+    // is a Phase 2 nice-to-have.
+    void nodeId;
+    const pgn = buildPgn(moves);
+    try { await navigator.clipboard.writeText(pgn); }
+    catch { /* fallback: open a prompt so the user can copy manually */
+      window.prompt("Copy PGN:", pgn);
+    }
+  };
+
+  // Right-click menu state (fixed-position at viewport coords).
+  const [moveMenu, setMoveMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const openMoveMenu = (id: string, x: number, y: number) => setMoveMenu({ id, x, y });
+  const closeMoveMenu = () => setMoveMenu(null);
+  useEffect(() => {
+    if (!moveMenu) return;
+    const onDown = () => closeMoveMenu();
+    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") closeMoveMenu(); };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onEsc);
+    window.addEventListener("scroll", onDown, true);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onEsc);
+      window.removeEventListener("scroll", onDown, true);
+    };
+  }, [moveMenu]);
+
+  // Mouse-wheel over the board scrubs the move list — matches /openings +
+  // Lichess analysis convention. Throttled at 120 ms so a trackpad flick
+  // doesn't jump five moves.
+  const boardBoxRef = useRef<HTMLDivElement>(null);
+  const lastWheelTs = useRef(0);
+  useEffect(() => {
+    const el = boardBoxRef.current?.querySelector(".cg-board-wrap") as HTMLElement | null;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) < 4) return;
+      const now = Date.now();
+      if (now - lastWheelTs.current < 120) { e.preventDefault(); return; }
+      lastWheelTs.current = now;
+      e.preventDefault();
+      if (e.deltaY > 0) goForward(); else goBack();
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [moves, currentId]);
+
   const save = useMutation({
     mutationFn: () => studiesApi.saveChapter(sid, cid, { title, startingFen, moves }),
     onSuccess: () => { setDirty(false); qc.invalidateQueries({ queryKey: ["chapter", sid, cid] }); },
@@ -297,8 +473,9 @@ export default function StudyChapterEditPage() {
       {save.error && <div className="mb-3 rounded border border-rose-500/40 bg-rose-500/10 p-2 text-xs text-rose-200">{String((save.error as any)?.message || save.error)}</div>}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,540px)_1fr]">
-        {/* Board column */}
-        <div>
+        {/* Board column — wrapped in boardBoxRef so the wheel-scrub listener
+         *  can attach to .cg-board-wrap specifically (matches /openings). */}
+        <div ref={boardBoxRef}>
           <Board fen={fen}
             orientation={orientation}
             turnColor={turnColor}
@@ -341,7 +518,7 @@ export default function StudyChapterEditPage() {
         {/* Move list + comment */}
         <div className="rounded-xl border border-ink-700 bg-ink-900/60 p-3">
           <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-400">Moves</div>
-          <MoveTree moves={moves} currentId={currentId} onJump={setCurrentId} />
+          <MoveTree moves={moves} currentId={currentId} onJump={setCurrentId} onContext={openMoveMenu} />
 
           {/* Comment on current position */}
           <div className="mt-4">
@@ -363,79 +540,217 @@ export default function StudyChapterEditPage() {
           </div>
         </div>
       </div>
+
+      {/* Right-click menu on any move in the notation panel — Lichess-analysis
+       *  parity with /openings + Dream Meet class board. Promote/Make main
+       *  line only show for variation nodes (those whose parent has more
+       *  than one child, and this isn't the current mainline sibling). NAG
+       *  picker + comment always available. Positioned in fixed viewport
+       *  coords so it doesn't scroll away. */}
+      {moveMenu && (() => {
+        const node = moves.find((m) => m.id === moveMenu.id);
+        if (!node) return null;
+        const siblings = childrenOf(moves, node.parentId);
+        const isVariation = siblings.length > 1 && !node.isMainLine;
+        const doAndClose = (fn: () => void) => { fn(); closeMoveMenu(); };
+        const menuW = 280, menuH = 340;
+        const x = Math.min(moveMenu.x, window.innerWidth - menuW - 8);
+        const y = Math.min(moveMenu.y, window.innerHeight - menuH - 8);
+        return (
+          <div role="menu"
+            onMouseDown={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+            className="fixed z-50 min-w-[260px] max-w-[300px] rounded-md border border-ink-700 bg-ink-900 py-1 text-sm text-ink-200 shadow-xl"
+            style={{ left: x, top: y }}>
+            <div className="px-3 pt-1 pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-500">
+              {node.san} (ply {node.ply})
+            </div>
+            {isVariation && (
+              <>
+                <button role="menuitem"
+                  onClick={() => doAndClose(() => promoteVariation(moveMenu.id))}
+                  className="block w-full px-3 py-1.5 text-left hover:bg-ink-800">
+                  ⬆ Promote variation
+                </button>
+                <button role="menuitem"
+                  onClick={() => doAndClose(() => makeMainLine(moveMenu.id))}
+                  className="block w-full px-3 py-1.5 text-left hover:bg-ink-800">
+                  ⭐ Make main line
+                </button>
+                <div className="my-1 border-t border-ink-800" />
+              </>
+            )}
+            {/* NAG (move-quality glyph) picker — grid layout so all 6 fit in one row. */}
+            <div className="px-3 py-1">
+              <div className="mb-1 text-[10px] uppercase tracking-wide text-ink-500">Annotation glyph</div>
+              <div className="grid grid-cols-6 gap-1">
+                {NAG_PRESETS.map((p) => (
+                  <button key={p.nag} role="menuitem" title={p.label}
+                    onClick={() => doAndClose(() => setNodeAnnotation(moveMenu.id, { nag: p.nag }))}
+                    className={`rounded border border-ink-700 py-1 font-mono text-xs hover:bg-ink-800 ${node.nag === p.nag ? "bg-ink-800 " + (NAG_COLOR[p.nag] ?? "text-amber-300") : ""}`}>
+                    {p.text}
+                  </button>
+                ))}
+              </div>
+              {node.nag && (
+                <button role="menuitem"
+                  onClick={() => doAndClose(() => setNodeAnnotation(moveMenu.id, { nag: null }))}
+                  className="mt-1 block w-full rounded py-1 text-left text-[11px] text-ink-400 hover:bg-ink-800">
+                  Clear glyph
+                </button>
+              )}
+            </div>
+            <div className="my-1 border-t border-ink-800" />
+            <button role="menuitem"
+              onClick={() => doAndClose(() => {
+                const existing = node.comment ?? "";
+                const next = window.prompt("Comment on this move (up to 500 chars). Empty = no change; type '-' to clear.", existing);
+                if (next === null) return;                     // cancel
+                if (next === "") return;                       // no change
+                if (next === "-") { setNodeAnnotation(moveMenu.id, { comment: null }); return; }
+                setNodeAnnotation(moveMenu.id, { comment: next });
+              })}
+              className="block w-full px-3 py-1.5 text-left hover:bg-ink-800">
+              💬 {node.comment ? "Edit comment" : "Add comment"}
+            </button>
+            {node.comment && (
+              <button role="menuitem"
+                onClick={() => doAndClose(() => setNodeAnnotation(moveMenu.id, { comment: null }))}
+                className="block w-full px-3 py-1.5 text-left text-ink-400 hover:bg-ink-800">
+                Clear comment
+              </button>
+            )}
+            <div className="my-1 border-t border-ink-800" />
+            <button role="menuitem"
+              onClick={() => doAndClose(() => copyPgnAt(moveMenu.id))}
+              className="block w-full px-3 py-1.5 text-left hover:bg-ink-800">
+              📋 Copy PGN
+            </button>
+            <button role="menuitem"
+              onClick={() => doAndClose(() => {
+                if (confirm(`Delete "${node.san}" and every move after it in this line?`)) deleteSubtree(moveMenu.id);
+              })}
+              className="block w-full px-3 py-1.5 text-left text-rose-300 hover:bg-rose-500/10">
+              🗑 Delete from here
+            </button>
+          </div>
+        );
+      })()}
     </div>
   );
 }
 
-/** Move-list rendering: main line inline, variations indented under their parent. */
-function MoveTree({ moves, currentId, onJump }: { moves: MoveNode[]; currentId: string | null; onJump: (id: string) => void }) {
+// Lichess-analysis-style notation panel (2026-09-02 rewrite — owner ask
+// "all" for parity with the /openings + Dream Meet board panel). Mainline
+// flows as inline text with move numbers, variations render as INDENTED
+// BLOCKS with a left border and progressively deeper indent. Every move is
+// right-clickable → context menu (promote / make main / NAG / comment /
+// copy PGN / delete). ⭐ (revise point) + 💬 (comment) icons preserved so
+// the study-specific affordances survive.
+function MoveTree({
+  moves, currentId, onJump, onContext,
+}: {
+  moves: MoveNode[];
+  currentId: string | null;
+  onJump: (id: string) => void;
+  onContext: (id: string, x: number, y: number) => void;
+}) {
   if (moves.length === 0) return <div className="text-xs text-ink-500">No moves yet — play one on the board or type SAN.</div>;
+  // Root call — pick the mainline root child, all others render as sibling
+  // variations under it. Everything below uses the "emit this node then
+  // descend into its mainline child" pattern.
+  const rootKids = childrenOf(moves, null);
+  const rootMain = rootKids.find((k) => k.isMainLine) ?? rootKids[0];
+  return (
+    <div className="font-mono text-sm leading-relaxed break-words">
+      <MoveTreeLine moves={moves} firstNodeId={rootMain?.id ?? null}
+        siblingsOfFirst={rootKids.filter((k) => k.id !== rootMain?.id)}
+        currentId={currentId} onJump={onJump} onContext={onContext}
+        depth={0} openedWithVariationBlock={false} />
+    </div>
+  );
+}
 
-  // Render the main line as pairs: "1. e4 e5 2. Nf3 Nc6 …" and inline variations after their parent.
-  const nodes: React.ReactNode[] = [];
-  const renderLine = (fromId: string | null, depth: number) => {
-    const kids = childrenOf(moves, fromId);
-    if (!kids.length) return;
-    const main = kids.find((k) => k.isMainLine) ?? kids[0];
-    if (!main) return;
-    const branches = kids.filter((k) => k.id !== main.id);
-
-    // Move number: only white plays print "1." — black continues on same line.
-    const num = Math.ceil(main.ply / 2);
-    const isWhite = main.ply % 2 === 1;
-
-    nodes.push(
-      <span key={main.id + "-w"} className={`inline-block ${depth > 0 ? "text-xs" : ""}`}>
-        {isWhite && <span className="mr-1 text-ink-500">{num}.</span>}
-        <button onClick={() => onJump(main.id)}
-          className={`rounded px-1 font-mono ${currentId === main.id ? "bg-brand-600 text-white" : "text-ink-100 hover:bg-ink-800"}`}>
-          {main.san}
-          {main.isRevisePoint && <span className="ml-0.5 text-amber-300">⭐</span>}
-          {main.comment && <span className="ml-0.5 text-blue-300" title={main.comment}>💬</span>}
+/** Emits `firstNodeId` as the first move, then walks its mainline chain of
+ *  descendants. At each ply, sibling variations render as indented blocks
+ *  that recurse. `siblingsOfFirst` covers sibling variations of the first
+ *  node itself (used for root-level branches — Kh5 mainline with Kf5 as a
+ *  sibling variation both hang off parentId=null). */
+function MoveTreeLine({
+  moves, firstNodeId, siblingsOfFirst, currentId, onJump, onContext, depth, openedWithVariationBlock,
+}: {
+  moves: MoveNode[];
+  firstNodeId: string | null;
+  siblingsOfFirst?: MoveNode[];
+  currentId: string | null;
+  onJump: (id: string) => void;
+  onContext: (id: string, x: number, y: number) => void;
+  depth: number;
+  openedWithVariationBlock: boolean;
+}) {
+  if (!firstNodeId) return null;
+  const parts: React.ReactNode[] = [];
+  let curId: string | null = firstNodeId;
+  let extraSiblings: MoveNode[] | undefined = siblingsOfFirst;   // only fires on first iteration
+  let forceBlackPrefix = openedWithVariationBlock;
+  const emitMove = (m: MoveNode) => {
+    const isWhite = m.ply % 2 === 1;
+    const moveNum = Math.ceil(m.ply / 2);
+    const needsNo = isWhite || forceBlackPrefix;
+    const active = currentId === m.id;
+    parts.push(
+      <span key={`m${m.id}`} className="inline-flex items-baseline">
+        {needsNo && <span className="mr-0.5 text-ink-500">{moveNum}{isWhite ? "." : "…"}</span>}
+        <button
+          onClick={() => onJump(m.id)}
+          onContextMenu={(e) => { e.preventDefault(); onContext(m.id, e.clientX, e.clientY); }}
+          className={`rounded px-1.5 py-0.5 transition ${active
+            ? "bg-brand-500/60 text-white"
+            : depth === 0 ? "text-ink-100 hover:bg-ink-800" : "text-ink-300 hover:bg-ink-800"}`}>
+          {m.san}
+          {m.nag ? <span className={"ml-0.5 " + (NAG_COLOR[m.nag] ?? "text-amber-300")}>{NAG_TEXT[m.nag]}</span> : null}
+          {m.isRevisePoint && <span className="ml-0.5 text-amber-300">⭐</span>}
+          {m.comment && <span className="ml-0.5 text-blue-300" title={m.comment}>💬</span>}
         </button>{" "}
       </span>
     );
-
-    // Render branches (variations) as parenthetical inline lists on new lines.
-    for (const b of branches) {
-      nodes.push(
-        <div key={b.id + "-var-wrap"} className={`ml-${Math.min(depth + 1, 4) * 4} my-1 border-l border-ink-700 pl-2 text-xs text-ink-400`}>
-          <span className="text-ink-500">({Math.ceil(b.ply / 2)}{b.ply % 2 === 1 ? "." : "..."}</span>{" "}
-          <button onClick={() => onJump(b.id)}
-            className={`rounded px-1 font-mono ${currentId === b.id ? "bg-brand-600 text-white" : "hover:bg-ink-800"}`}>
-            {b.san}
-          </button>{" "}
-          <VariationTail moves={moves} fromId={b.id} currentId={currentId} onJump={onJump} depth={depth + 1} />
-          <span className="text-ink-500">)</span>
+    forceBlackPrefix = false;
+  };
+  const emitSiblings = (siblings: MoveNode[]) => {
+    for (const s of siblings) {
+      const sSiblings = childrenOf(moves, s.parentId).filter((k) => k.id !== s.id && k.id !== firstNodeId);
+      // (sSiblings will be empty for a normal sibling — kept for symmetry)
+      void sSiblings;
+      parts.push(
+        <div key={`v${s.id}`}
+          className="my-1 border-l-2 border-ink-700 pl-2 text-[13px]"
+          style={{ marginLeft: `${Math.min(depth + 1, 3) * 8}px` }}>
+          <MoveTreeLine moves={moves} firstNodeId={s.id}
+            currentId={currentId} onJump={onJump} onContext={onContext}
+            depth={depth + 1} openedWithVariationBlock={false} />
         </div>
       );
+      forceBlackPrefix = true;
     }
-
-    // Continue the main line.
-    renderLine(main.id, depth);
   };
-  renderLine(null, 0);
-  return <div className="text-sm leading-7 break-words">{nodes}</div>;
-}
-
-/** Inline tail of a variation — just the moves, no comment column. */
-function VariationTail({ moves, fromId, currentId, onJump, depth }: {
-  moves: MoveNode[]; fromId: string; currentId: string | null; onJump: (id: string) => void; depth: number;
-}) {
-  const kids = childrenOf(moves, fromId);
-  if (!kids.length) return null;
-  const main = kids.find((k) => k.isMainLine) ?? kids[0];
-  if (!main) return null;
-  const num = Math.ceil(main.ply / 2);
-  const isWhite = main.ply % 2 === 1;
+  while (curId) {
+    const node = moves.find((m) => m.id === curId);
+    if (!node) break;
+    emitMove(node);
+    // On the FIRST iteration, siblings-of-first from the caller take
+    // precedence (they're the root branches when curId is a root move).
+    if (extraSiblings && extraSiblings.length) { emitSiblings(extraSiblings); extraSiblings = undefined; }
+    // Then descend: mainline continuation is the isMainLine child; other
+    // children of this node become sibling variations at this depth.
+    const kids = childrenOf(moves, node.id);
+    const nextMain = kids.find((k) => k.isMainLine) ?? kids[0];
+    const nextSiblings = kids.filter((k) => k.id !== nextMain?.id);
+    if (nextSiblings.length) emitSiblings(nextSiblings);
+    curId = nextMain?.id ?? null;
+  }
   return (
-    <>
-      {isWhite && <span className="text-ink-500">{num}.</span>}{" "}
-      <button onClick={() => onJump(main.id)}
-        className={`rounded px-1 font-mono ${currentId === main.id ? "bg-brand-600 text-white" : "hover:bg-ink-800"}`}>
-        {main.san}
-      </button>{" "}
-      <VariationTail moves={moves} fromId={main.id} currentId={currentId} onJump={onJump} depth={depth} />
-    </>
+    <span className={depth === 0 ? undefined : "font-mono leading-relaxed"}>
+      {parts}
+    </span>
   );
 }
