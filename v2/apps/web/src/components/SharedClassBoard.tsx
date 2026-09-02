@@ -152,6 +152,42 @@ export function useClassOrientation(): Orientation {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Student challenge scratchpad tree — full variation tree so students can
+// try different ideas + branches while solving (2026-09-02).
+// ─────────────────────────────────────────────────────────────────────
+export interface ChallengeTreeNode {
+  from: string;
+  to: string;
+  promotion?: string;
+  san: string;
+  children: ChallengeTreeNode[];
+}
+/** Walk (tree, cursorPath) and return the FEN + last move at the cursor,
+ *  plus the SAN chain from root to cursor (used for snapshot send). */
+/** Shallow-clone a tree (children arrays are new so mutating in place is
+ *  safe for the caller). Used before edits so the ref points to a new
+ *  object graph and React can re-render dependent panels. */
+export function cloneChallengeNode(n: ChallengeTreeNode): ChallengeTreeNode {
+  return { from: n.from, to: n.to, promotion: n.promotion, san: n.san, children: n.children.map(cloneChallengeNode) };
+}
+
+export function fenAtChallengeCursor(startFen: string, tree: ChallengeTreeNode[], cursorPath: number[]): { fen: string; sanChain: string[]; lastMoveFromTo?: { from: string; to: string } } {
+  let c: Chess;
+  try { c = new Chess(startFen); } catch { c = new Chess(); }
+  const chain: string[] = [];
+  let cur = tree;
+  let last: { from: string; to: string } | undefined;
+  for (const idx of cursorPath) {
+    const n = cur[idx];
+    if (!n) break;
+    try { c.move({ from: n.from, to: n.to, promotion: (n.promotion as any) || "q" }); chain.push(n.san); last = { from: n.from, to: n.to }; }
+    catch { break; }
+    cur = n.children;
+  }
+  return { fen: c.fen(), sanChain: chain, lastMoveFromTo: last };
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Challenge mode (2026-09-01, "find the good moves"):
 // Module-level state so ClassV2 (footer coach controls, floating chip,
 // answers panel) can read/drive it via hooks. Component populates from
@@ -654,10 +690,22 @@ export default function SharedClassBoard(
   // Challenge mode local state: while a challenge is active, students play
   // on their OWN chess.js instance (independent of the shared room). Coach's
   // board stays frozen at the position. Both see the same countdown.
+  //
+  // Now a TREE (2026-09-02, owner ask "different branches / different ideas"):
+  //   * challengeTreeRef  — top-level array of child nodes from positionFen
+  //   * challengeCursorRef — path of child indices from root; empty = start
+  //   * playing a move at a non-tip cursor creates a variation
+  //   * moves already in the tree from this cursor advance to that child
+  //   * challengeMovesRef is kept as a derived flat SAN chain for the
+  //     server snapshot + review UI
   const challengeGameRef = useRef<Chess | null>(null);
   const challengeMovesRef = useRef<string[]>([]);
+  const challengeTreeRef = useRef<ChallengeTreeNode[]>([]);
+  const challengeCursorRef = useRef<number[]>([]);
   const [challengeFen, setChallengeFen] = useState<string | null>(null);
   const [challengeDests, setChallengeDests] = useState<Map<string, string[]>>(new Map());
+  // Bump on any tree/cursor change so the render subtree recomputes.
+  const [challengeTreeTick, setChallengeTreeTick] = useState(0);
   // Post-challenge "Show my answer" review mode (students only). When
   // reviewIdx is not null, the board renders the fen at moves[0..reviewIdx]
   // instead of the shared board. Prev/next chip steps through, ✕ returns.
@@ -804,10 +852,15 @@ export default function SharedClassBoard(
             setChallengeFen(challengeGameRef.current.fen());
             setChallengeDests(dests);
             challengeMovesRef.current = [];
+            challengeTreeRef.current = [];
+            challengeCursorRef.current = [];
+            setChallengeTreeTick((n) => n + 1);
           } catch {
             challengeGameRef.current = null;
             setChallengeFen(null);
             setChallengeDests(new Map());
+            challengeTreeRef.current = [];
+            challengeCursorRef.current = [];
           }
           _publishChallenge({
             positionFen: String(msg.positionFen),
@@ -938,30 +991,120 @@ export default function SharedClassBoard(
   const sendMove = (from: string, to: string) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    // Challenge student path: apply to LOCAL chess.js, don't touch shared
-    // board, send `challenge:move` so the server records SAN + tallies
-    // this student in the answered count. Coach in challenge mode = board
-    // is frozen (they don't drag pieces during a challenge).
-    if (_challenge && _challenge.active && role !== "coach" && challengeGameRef.current) {
-      const g = challengeGameRef.current;
+    // Challenge student path: apply to LOCAL TREE at cursor. If the move
+    // matches an existing child at the cursor position, we advance to it
+    // (re-entering a line the student explored earlier). If it's a new
+    // move, create a variation. Then compute the SAN chain from root →
+    // cursor and send it as a full-snapshot to the server (server replaces
+    // the answer's movesSan — "latest chosen line" semantics).
+    if (_challenge && _challenge.active && role !== "coach") {
+      const startFen = _challenge.positionFen;
+      // Reconstruct chess.js from tree + cursor so we know whose turn +
+      // whether the move is legal. Cheaper than replaying every solve.
+      let g: Chess;
+      try { g = new Chess(startFen); } catch { return; }
+      const cursor = challengeCursorRef.current;
+      let cur = challengeTreeRef.current;
+      for (const idx of cursor) {
+        const n = cur[idx]; if (!n) break;
+        try { g.move({ from: n.from, to: n.to, promotion: (n.promotion as any) || "q" }); } catch { break; }
+        cur = n.children;
+      }
       const fromFen = g.fen();
       let mv;
       try { mv = g.move({ from, to, promotion: "q" }); } catch { mv = null; }
-      if (!mv) return;   // illegal — no-op
+      if (!mv) return;
       const san = (mv as any).san ?? "";
       const nextFen = g.fen();
-      challengeMovesRef.current = [...challengeMovesRef.current, san];
-      setChallengeFen(nextFen);
-      setChallengeDests(destsFromChess(g));
+
+      // Insert into the tree at cursor. Match on (from,to,promotion) so
+      // "same move as before" advances to that existing child instead of
+      // creating a duplicate.
+      const promotion = (mv as any).promotion ?? undefined;
+      // `cur` above pointed to children at the current cursor when we
+      // finished walking. Re-walk to get a mutable slot for insertion so
+      // the update is reflected on the root ref.
+      const newTree = challengeTreeRef.current.map(cloneChallengeNode);
+      let insertParent = newTree;
+      for (let i = 0; i < cursor.length; i++) {
+        const idx = cursor[i]!;
+        if (!insertParent[idx]) break;
+        insertParent = insertParent[idx].children;
+      }
+      let childIdx = insertParent.findIndex((c) => c.from === from && c.to === to && (c.promotion ?? undefined) === (promotion ?? undefined));
+      if (childIdx === -1) {
+        insertParent.push({ from, to, promotion, san, children: [] });
+        childIdx = insertParent.length - 1;
+      }
+      challengeTreeRef.current = newTree;
+      challengeCursorRef.current = [...cursor, childIdx];
+      // Derived flat SAN chain — used by the snapshot send + Show-my-answer
+      // review UI.
+      const derived = fenAtChallengeCursor(startFen, newTree, challengeCursorRef.current);
+      challengeMovesRef.current = derived.sanChain;
+      setChallengeFen(derived.fen);
+      const gAfter = new Chess(derived.fen);
+      setChallengeDests(destsFromChess(gAfter));
+      setChallengeTreeTick((n) => n + 1);
       if (_challenge) {
         _publishChallenge({ ..._challenge, studentMoves: challengeMovesRef.current });
       }
+
+      // Send a full-snapshot of the current chosen line. Server replaces
+      // ans.movesSan so the coach always sees the student's LATEST answer.
+      try { ws.send(JSON.stringify({ type: "challenge:snapshot", movesSan: derived.sanChain, finalFen: derived.fen })); } catch { /* */ }
+      // Also send the granular move (server keeps it as a legacy tally for
+      // pre-snapshot clients; harmless to keep firing).
       try { ws.send(JSON.stringify({ type: "challenge:move", fromFen, move: { from, to }, san, nextFen })); } catch { /* */ }
       return;
     }
     // Coach in challenge mode: don't send. Board is frozen at position.
     if (_challenge && _challenge.active && role === "coach") return;
     try { ws.send(JSON.stringify({ type: "move", move: { from, to } })); } catch { /* */ }
+  };
+
+  // Step-back / step-forward / seek — helpers used by the challenge notation
+  // panel. Recompute FEN + dests + snapshot on every navigation.
+  const challengeSeek = (path: number[]) => {
+    if (!_challenge || !_challenge.active) return;
+    const startFen = _challenge.positionFen;
+    // Clamp path against the tree (missing indices = stop early).
+    const clean: number[] = [];
+    let cur = challengeTreeRef.current;
+    for (const idx of path) {
+      if (idx < 0 || idx >= cur.length) break;
+      clean.push(idx);
+      cur = cur[idx]!.children;
+    }
+    challengeCursorRef.current = clean;
+    const derived = fenAtChallengeCursor(startFen, challengeTreeRef.current, clean);
+    challengeMovesRef.current = derived.sanChain;
+    setChallengeFen(derived.fen);
+    try { setChallengeDests(destsFromChess(new Chess(derived.fen))); } catch { setChallengeDests(new Map()); }
+    setChallengeTreeTick((n) => n + 1);
+    if (_challenge) {
+      _publishChallenge({ ..._challenge, studentMoves: derived.sanChain });
+    }
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: "challenge:snapshot", movesSan: derived.sanChain, finalFen: derived.fen })); } catch { /* */ }
+    }
+  };
+  const challengeStepBack    = () => challengeSeek(challengeCursorRef.current.slice(0, -1));
+  const challengeStepForward = () => {
+    const cursor = challengeCursorRef.current;
+    let cur = challengeTreeRef.current;
+    for (const idx of cursor) { cur = cur[idx]?.children ?? []; }
+    if (cur.length === 0) return;
+    challengeSeek([...cursor, 0]);
+  };
+  const challengeGoStart = () => challengeSeek([]);
+  const challengeGoEnd = () => {
+    // Walk mainline (first child) all the way to a tip.
+    const path: number[] = [];
+    let cur = challengeTreeRef.current;
+    while (cur.length > 0) { path.push(0); cur = cur[0]!.children; }
+    challengeSeek(path);
   };
   // Coach-only triggers for starting/ending a challenge from ClassV2 footer.
   useEffect(() => {
@@ -1240,6 +1383,20 @@ export default function SharedClassBoard(
       />
       {/* Challenge-mode overlay ribbon (student + coach see it during active challenge). */}
       {inChallenge && <ChallengeRibbon isCoach={isCoachRole} />}
+      {/* Student scratchpad tree — prev/next controls + click-to-seek
+       *  variations shown below the board during an active challenge. */}
+      {inChallenge && !isCoachRole && (
+        <ChallengeScratchpad
+          tick={challengeTreeTick}
+          treeRef={challengeTreeRef}
+          cursorRef={challengeCursorRef}
+          onSeek={challengeSeek}
+          onStepBack={challengeStepBack}
+          onStepForward={challengeStepForward}
+          onGoStart={challengeGoStart}
+          onGoEnd={challengeGoEnd}
+        />
+      )}
       {/* Post-challenge "show my answer" ribbon — student-only, only when
        *  they submitted at least 1 move. Toggles review mode on/off + steps. */}
       {!inChallenge && !isCoachRole && challengeUI && !challengeUI.active && challengeUI.studentMoves.length > 0 && (
@@ -1286,6 +1443,136 @@ function StudentAnswerReviewRibbon({ moves, reviewIdx, onOpen, onPrev, onNext, o
         className="grid h-6 w-6 place-items-center rounded-full hover:bg-white/10" title="Back to coach's board">✕</button>
     </div>
   );
+}
+
+// Student scratchpad — floats below the board during a challenge.
+// Compact notation panel with variations shown inline (`1.e4 e5 (1...c5
+// 2.Nf3) 2.Nf3 ...`). Prev/next buttons, click any SAN chip to seek.
+// Design goal: encourage exploring different ideas without leaving the
+// board view. Fixed at bottom so it doesn't fight the challenge ribbon.
+function ChallengeScratchpad({ tick, treeRef, cursorRef, onSeek, onStepBack, onStepForward, onGoStart, onGoEnd }: {
+  tick: number;
+  treeRef: React.MutableRefObject<ChallengeTreeNode[]>;
+  cursorRef: React.MutableRefObject<number[]>;
+  onSeek: (path: number[]) => void;
+  onStepBack: () => void;
+  onStepForward: () => void;
+  onGoStart: () => void;
+  onGoEnd: () => void;
+}) {
+  // Track tick so React re-renders when the tree mutates via refs.
+  void tick;
+  const tree = treeRef.current;
+  const cursor = cursorRef.current;
+  const cursorKey = cursor.join(",");
+  // Walk the tree and emit a flat list of tokens: mainline plies + inline
+  // `(variation)` groups. Each token knows its path so a click seeks there.
+  const tokens = useMemo(() => flatten(tree, [], 0, "w"), [tree, tick]);
+  // Auto-scroll the current move into view.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = wrapRef.current?.querySelector<HTMLElement>('[data-current="1"]');
+    if (el && wrapRef.current) el.scrollIntoView({ block: "nearest", inline: "center" });
+  }, [cursorKey]);
+
+  const hasMoves = tree.length > 0;
+  return (
+    <div className="pointer-events-none absolute inset-x-2 bottom-2 z-30 flex flex-col items-center gap-1">
+      <div className="pointer-events-auto flex w-full max-w-[520px] items-center gap-1 rounded-full border border-purple-400/60 bg-ink-950/95 px-1 py-1 shadow-lg backdrop-blur">
+        {/* Control buttons */}
+        <button onClick={onGoStart} disabled={!hasMoves || cursor.length === 0}
+          className="grid h-7 w-7 place-items-center rounded-full text-[11px] text-purple-100 hover:bg-purple-500/25 disabled:opacity-30" title="Go to start">⏮</button>
+        <button onClick={onStepBack} disabled={cursor.length === 0}
+          className="grid h-7 w-7 place-items-center rounded-full text-[13px] font-bold text-purple-100 hover:bg-purple-500/25 disabled:opacity-30" title="Back one move">◀</button>
+        <button onClick={onStepForward}
+          className="grid h-7 w-7 place-items-center rounded-full text-[13px] font-bold text-purple-100 hover:bg-purple-500/25" title="Forward one move">▶</button>
+        <button onClick={onGoEnd} disabled={!hasMoves}
+          className="grid h-7 w-7 place-items-center rounded-full text-[11px] text-purple-100 hover:bg-purple-500/25 disabled:opacity-30" title="Go to end of mainline">⏭</button>
+        <span className="mx-1 h-4 w-px bg-white/20" />
+        {/* Notation strip — horizontally scrollable */}
+        <div ref={wrapRef} className="flex flex-1 items-center gap-0.5 overflow-x-auto whitespace-nowrap px-1 py-1 text-[11px]">
+          {tokens.length === 0 ? (
+            <span className="italic text-white/60">Start playing — variations show here</span>
+          ) : tokens.map((t, i) => {
+            if (t.kind === "num")   return <span key={i} className="mr-0.5 text-purple-300/70">{t.text}</span>;
+            if (t.kind === "openv") return <span key={i} className="text-purple-300/60">(</span>;
+            if (t.kind === "closv") return <span key={i} className="text-purple-300/60">)</span>;
+            const isCurrent = t.path && arraysEq(t.path, cursor);
+            return (
+              <button
+                key={i}
+                onClick={() => t.path && onSeek(t.path)}
+                data-current={isCurrent ? 1 : 0}
+                className={`rounded px-1.5 py-0.5 font-mono transition ${isCurrent ? "bg-purple-500 text-white ring-1 ring-purple-200" : t.variation ? "text-purple-200/80 hover:bg-purple-500/25" : "text-white hover:bg-purple-500/25"}`}
+              >
+                {t.text}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+type ScratchToken =
+  | { kind: "san"; text: string; path: number[]; variation: boolean }
+  | { kind: "num"; text: string; path?: undefined }
+  | { kind: "openv"; text: string; path?: undefined }
+  | { kind: "closv"; text: string; path?: undefined };
+function flatten(nodes: ChallengeTreeNode[], parentPath: number[], plyBase: number, sideAtRoot: "w" | "b", variation = false): ScratchToken[] {
+  const out: ScratchToken[] = [];
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i]!;
+    const path = [...parentPath, i];
+    const plyIdx = plyBase + parentPath.length;
+    const isWhite = sideAtRoot === "w" ? plyIdx % 2 === 0 : plyIdx % 2 === 1;
+    const moveNum = Math.floor(plyIdx / 2) + 1;
+    if (i === 0) {
+      // Mainline path
+      if (isWhite) out.push({ kind: "num", text: `${moveNum}.` });
+      else if (parentPath.length === 0 || variation) out.push({ kind: "num", text: `${moveNum}...` });
+      out.push({ kind: "san", text: n.san, path, variation });
+      if (n.children.length > 0) {
+        // Continue mainline into first child in a nested loop-like fashion.
+        // Also emit siblings BEFORE recursing to keep the "(variation) mainline"
+        // ordering typical of chess notation.
+        // Emit sibling variations at this ply first.
+        // Actually — Lichess-style is: MAINLINE first, then variations
+        // AFTER the ply that spawned them. To keep it compact, we render
+        // the mainline chain here and inline `(altSan …)` for each
+        // sibling of the current position.
+      }
+      // Siblings of this move (other choices at parentPath, indices > 0)
+      // rendered as `(altSan …)` variations INLINE right after the
+      // mainline move. This matches PGN convention.
+      if (i === 0 && nodes.length > 1) {
+        for (let j = 1; j < nodes.length; j++) {
+          const alt = nodes[j]!;
+          const altPath = [...parentPath, j];
+          out.push({ kind: "openv", text: "(" });
+          // A variation at the SAME ply — use same isWhite/moveNum, but
+          // always emit the number since we're starting a new sub-line.
+          out.push({ kind: "num", text: isWhite ? `${moveNum}.` : `${moveNum}...` });
+          out.push({ kind: "san", text: alt.san, path: altPath, variation: true });
+          if (alt.children.length > 0) {
+            out.push(...flatten(alt.children, altPath, plyBase, sideAtRoot, true));
+          }
+          out.push({ kind: "closv", text: ")" });
+        }
+      }
+      // Recurse into mainline children
+      if (n.children.length > 0) {
+        out.push(...flatten(n.children, path, plyBase, sideAtRoot, variation));
+      }
+      break;   // handled all siblings at this depth in the loop above
+    }
+  }
+  return out;
+}
+function arraysEq(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 // Small overlay across the top of the board that shows the prompt + a

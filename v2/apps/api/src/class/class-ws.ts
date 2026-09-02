@@ -78,6 +78,7 @@ type ClientFrame =
   // sees every student's move sequence in SAN notation.
   | { type: "challenge:start"; positionFen: string; startFen?: string; prompt?: string; durationSec: number }  // coach only
   | { type: "challenge:move";  fromFen: string; move: Move; san: string; nextFen: string }                    // student only — one attempted move
+  | { type: "challenge:snapshot"; movesSan: string[]; finalFen?: string }                                     // student only — full current-line SAN; replaces movesSan
   | { type: "challenge:end" };                                                                                 // coach only OR auto-fired by server timer
 // Server → client frames. `role` sent once after hello resolves; everything else
 // is broadcast to the room on state changes.
@@ -977,12 +978,42 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         ans = { userId: who.userId, displayName: who.name, movesSan: [], firstMoveAt: now };
         room.challenge.answers.set(who.userId, ans);
       }
-      ans.movesSan.push(san);
       ans.lastMoveAt = now;
       if (typeof frame.nextFen === "string") ans.finalFen = frame.nextFen;
-      // Cap: 40 moves per student per challenge — a reasonable analysis
-      // depth; anything more is spam. Silently drop overflow.
-      if (ans.movesSan.length > 40) ans.movesSan = ans.movesSan.slice(0, 40);
+      // Note: don't push to movesSan here anymore — clients that also
+      // emit `challenge:snapshot` are the ones building the tree, and
+      // snapshot is authoritative for the final answer. Legacy clients
+      // without snapshot support fall through to the old push path.
+      // Detected by: if this is the very first move (no snapshot yet
+      // came in), append. If movesSan is already populated by a
+      // snapshot, leave it alone.
+      if (ans.movesSan.length === 0) {
+        ans.movesSan.push(san);
+      }
+      return;
+    }
+
+    // Full-line snapshot from the student's scratchpad tree. Replaces
+    // movesSan entirely so the coach always sees the LATEST chosen line
+    // (even after undo, branching, re-seeking). Owner directive
+    // 2026-09-02.
+    if (frame.type === "challenge:snapshot") {
+      if (!room.challenge) return;
+      if (isCoach()) return;
+      const who = socketWho.get(ws);
+      if (!who || !who.userId) return;
+      const raw = Array.isArray(frame.movesSan) ? frame.movesSan : [];
+      const cleaned = raw.filter((s: any) => typeof s === "string" && s.length > 0 && s.length <= 15).slice(0, 60);
+      let ans = room.challenge.answers.get(who.userId);
+      const now = Date.now();
+      if (!ans) {
+        ans = { userId: who.userId, displayName: who.name, movesSan: cleaned, firstMoveAt: now };
+        room.challenge.answers.set(who.userId, ans);
+      } else {
+        ans.movesSan = cleaned;
+      }
+      ans.lastMoveAt = now;
+      if (typeof frame.finalFen === "string") ans.finalFen = frame.finalFen;
       return;
     }
 
