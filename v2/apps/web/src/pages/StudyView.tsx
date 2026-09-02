@@ -35,7 +35,15 @@ export default function StudyViewPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["study", sid] }),
   });
   const addChapterM = useMutation({
-    mutationFn: () => studiesApi.addChapter(sid, { title: "" }),
+    // Explicit startingFen so a new chapter always lands on the standard
+    // opening board in the editor (owner ask 2026-09-02: "when i click
+    // new chapter, i need opening board"). Server normalizeFen defaults
+    // an empty startingFen to startpos too, but sending it explicitly
+    // avoids any future divergence between client + server defaults.
+    mutationFn: () => studiesApi.addChapter(sid, {
+      title: "",
+      startingFen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    }),
     onSuccess: (r) => nav(`/studies/${encodeURIComponent(sid)}/edit/${encodeURIComponent(r.chapterId)}`),
   });
   const deleteStudy = useMutation({
