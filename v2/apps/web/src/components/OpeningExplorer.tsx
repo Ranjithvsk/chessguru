@@ -18,7 +18,7 @@ import { findOpeningForLine } from "../lib/openings";
 import { OpeningIdeaPanel } from "./OpeningIdeaPanel";
 import { AnnotationToolbar, applyAnnotationClick, computeAttackShapes, computePinShapes, useAnnotationTool, type AnnotShape } from "./AnnotationToolbar";
 import { PositionEditorModal } from "./SharedClassBoard";
-import { addRepertoire, type RepMoveNode } from "../lib/repertoire-api";
+import { studiesApi } from "../lib/studies-api";
 import { Chess } from "chess.js";
 
 // NAG glyph presets — mirror the class notation panel (ClassV2.tsx). Coach
@@ -164,30 +164,67 @@ export default function OpeningExplorer(
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   useEffect(() => { if (!saveMsg) return; const t = setTimeout(() => setSaveMsg(null), 5000); return () => clearTimeout(t); }, [saveMsg]);
   const qc = useQueryClient();
-  const saveToRepertoire = () => {
-    if (!fp.tree.length) return;
-    const suggestedName = opening ? `${opening.eco} ${opening.name}` : "Explored line";
-    const raw = window.prompt("Save this line + variations to your repertoire. Name:", suggestedName);
+  // Emit standard PGN from the free-play tree — mainline + variations in
+  // parens + literal nag glyph after the SAN + {comment} braces. The
+  // studies backend feeds this straight into chess.js's PGN parser, which
+  // preserves everything we care about round-trip. Symbol NAGs like ± /
+  // ∓ go in as literal unicode (chess.js is tolerant); ! / ? / !! / etc.
+  // are standard ASCII PGN annotations.
+  const buildPgn = (nodes: MoveNode[], startTurn: "w" | "b", startNum: number): string => {
+    const walk = (ns: MoveNode[], plyBase: number, isVariation: boolean): string => {
+      if (!ns.length) return "";
+      const parts: string[] = [];
+      const main = ns[0]!;
+      const isWhite = startTurn === "w" ? plyBase % 2 === 0 : plyBase % 2 === 1;
+      const moveNum = Math.floor(plyBase / 2) + startNum;
+      if (isWhite) parts.push(`${moveNum}.${main.san}${main.nag ?? ""}`);
+      else parts.push((isVariation || plyBase === 0) ? `${moveNum}...${main.san}${main.nag ?? ""}` : `${main.san}${main.nag ?? ""}`);
+      if (main.comment) parts.push(`{${main.comment.replace(/[{}]/g, "")}}`);
+      for (let j = 1; j < ns.length; j++) {
+        const alt = ns[j]!;
+        const altHead = isWhite ? `${moveNum}.${alt.san}${alt.nag ?? ""}` : `${moveNum}...${alt.san}${alt.nag ?? ""}`;
+        const altCmt = alt.comment ? ` {${alt.comment.replace(/[{}]/g, "")}}` : "";
+        const rest = walk(alt.children, plyBase + 1, true);
+        parts.push(`(${altHead}${altCmt}${rest ? " " + rest : ""})`);
+      }
+      const cont = walk(main.children, plyBase + 1, false);
+      if (cont) parts.push(cont);
+      return parts.join(" ");
+    };
+    return walk(nodes, 0, false);
+  };
+
+  // Save to My Studies (owner ask 2026-09-02: "if i save setup position,
+  // from openings, save it to notebook, my studies"). Studies are the
+  // Lichess-style analysis + PGN container — right home for Setup +
+  // variations + coach annotations. Previously targeted Repertoire; that
+  // still exists but for "opening lines to memorise" — different use case.
+  const saveToStudy = () => {
+    if (fp.history.length === 0 && !fp.startFen) return;
+    const suggestedName = opening ? `${opening.eco} ${opening.name}` : (fp.startFen ? "Saved position" : "Explored line");
+    const raw = window.prompt("Save to My Studies. Name:", suggestedName);
     if (raw === null) return;
     const name = raw.trim() || suggestedName;
-    // Round-trip nag + comment via the repertoire API (schema updated
-    // 2026-09-02 to persist both). Structural map so hidden fields don't
-    // sneak into the wire body.
-    const carry = (nodes: MoveNode[]): RepMoveNode[] => nodes.map((n) => {
-      const r: RepMoveNode = { san: n.san, children: carry(n.children) };
-      if (n.nag) r.nag = n.nag;
-      if (n.comment) r.comment = n.comment;
-      return r;
-    });
-    const body: any = { name, kind: "line" as const, tree: carry(fp.tree), sans: fp.line };
-    // If the user started from a custom setup, persist the start FEN
-    // (so reloading the saved entry lands on that same position).
-    if (fp.fen && fp.line.length === 0) body.startFen = fp.fen;
-    void addRepertoire(body).then(() => {
-      // Invalidate so the My Repertoire panel + /repertoire page pick up
-      // the new entry without a page reload.
-      qc.invalidateQueries({ queryKey: ["my-repertoire"] });
-      setSaveMsg(`💾 Saved "${name}" — open /repertoire to view/edit`);
+    // Derive PGN turn + move number from startFen so the emitted PGN has
+    // the right ply base (e.g., "15... Kb8" not "1. Kb8" for a mid-game
+    // setup). Falls back to standard start (white to move, move 1).
+    let startTurn: "w" | "b" = "w", startNum = 1;
+    if (fp.startFen) {
+      const parts = fp.startFen.split(" ");
+      startTurn = parts[1] === "b" ? "b" : "w";
+      startNum = parseInt(parts[5] || "1", 10) || 1;
+    }
+    const pgn = buildPgn(fp.tree, startTurn, startNum);
+    const body: { title: string; intent: "opening"; startingFen?: string; pgn?: string; chapterTitle?: string } = {
+      title: name, intent: "opening",
+    };
+    if (fp.startFen) body.startingFen = fp.startFen;
+    if (pgn) body.pgn = pgn;
+    void studiesApi.create(body).then((r) => {
+      // Invalidate the studies list so it appears without a reload if the
+      // My Studies page is open in a tab.
+      qc.invalidateQueries({ queryKey: ["studies", "list"] });
+      setSaveMsg(`📓 Saved "${name}" to My Studies — open /studies to view/edit`);
     }).catch((e) => setSaveMsg(`Could not save (${e?.message ?? "unknown"})`));
   };
 
@@ -409,9 +446,9 @@ export default function OpeningExplorer(
           <button onClick={() => setSetupOpen(true)}
             className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800"
             title="Load an arbitrary position — mid-game tactic, endgame, book puzzle">📋 Setup</button>
-          <button onClick={saveToRepertoire} disabled={fp.history.length === 0}
+          <button onClick={saveToStudy} disabled={fp.history.length === 0 && !fp.startFen}
             className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100 hover:bg-emerald-500/25 disabled:opacity-40"
-            title="Save this line + variations to your repertoire (survives across devices)">💾 Save</button>
+            title="Save this line + position to My Studies (visible under /studies)">📓 Save to Studies</button>
           <button onClick={memorize} disabled={!fp.tree.length}
             className="ml-auto rounded-lg bg-accent-600 px-3 py-2 text-sm font-semibold text-white hover:bg-accent-500 disabled:opacity-40"
             title="Send this line to the Memory Training opening trainer">🧠 Memorize</button>

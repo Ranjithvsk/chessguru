@@ -118,21 +118,25 @@ function buildEntry(body: any): { kind: "corpus" | "line"; slug?: string; sans?:
     if (!SLUG_RE.test(slug)) throw new BadRequestException("bad-slug");
     return { kind, slug, name };
   }
-  const sans = normalizeSans(body?.sans);
+  // Optional tree + optional sans — at least ONE of (sans, tree, startFen)
+  // must be present so a "line" entry has meaningful content. Bare Setup
+  // Position saves (startFen only, no moves) are allowed so a coach can
+  // bookmark a puzzle diagram or endgame study without playing a move first.
+  const rawSans = body?.sans;
+  const hasSans = Array.isArray(rawSans) && rawSans.length > 0;
+  const sans = hasSans ? normalizeSans(rawSans) : undefined;
   const notes = body?.notes ? String(body.notes).slice(0, NOTES_MAX) : null;
-  // Optional tree — when the client sent one AND it carries at least one
-  // sibling variation, persist it alongside sans. `sans` stays as the
-  // canonical mainline so old clients (and list-render tooltips) keep working.
   const tree = normalizeTree(body?.tree);
   const hasVariations = tree ? tree.some(function containsBranch(n: TreeNode): boolean {
     return n.children.length > 1 || n.children.some(containsBranch);
   }) : false;
-  // Optional startFen — set when the coach saved a line from a SETUP position
-  // (mid-game, endgame study, etc.). Loading the entry back replays sans/tree
-  // from THIS fen instead of the standard opening.
   const startFen = normalizeStartFen(body?.startFen);
+  if (!sans && !tree && !startFen) throw new BadRequestException("nothing-to-save (need sans, tree, or startFen)");
   const base: { kind: "corpus" | "line"; slug?: string; sans?: string[]; tree?: TreeNode[]; notes?: string | null; name: string; startFen?: string } =
-    hasVariations ? { kind, sans, tree: tree!, notes, name } : { kind, sans, notes, name };
+    { kind, notes, name };
+  if (sans) base.sans = sans;
+  if (hasVariations && tree) base.tree = tree;
+  else if (tree && !sans) base.tree = tree;   // tree-only save (no separate mainline) — persist the tree
   if (startFen) base.startFen = startFen;
   return base;
 }

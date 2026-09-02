@@ -450,6 +450,6 @@ export function useFreePlay(initialFen?: string) {
     game, fen, orientation, turnColor,
     tree, path, history, line, ply, hasNext,
     dests, onMove, undo, goPrev, goNext, goTo, goSibling, reset, load, loadPermissive, loadSans, loadTree, flip,
-    promoteVariation, makeMainLine, deleteFrom, setNodeAnnotation,
+    promoteVariation, makeMainLine, deleteFrom, setNodeAnnotation, startFen,
   };
 }
