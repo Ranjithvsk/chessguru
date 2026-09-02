@@ -1555,7 +1555,7 @@ function StudentAnswerReviewRibbon({ moves, reviewIdx, onOpen, onPrev, onNext, o
     return (
       <button
         onClick={onOpen}
-        className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full border-2 border-purple-300 bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-2xl ring-4 ring-purple-500/30 hover:brightness-110"
+        className="fixed top-16 left-1/2 z-50 -translate-x-1/2 rounded-full border-2 border-purple-300 bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-2xl ring-4 ring-purple-500/30 hover:brightness-110"
       >
         📝 Show my answer ({moves.length} {moves.length === 1 ? "move" : "moves"})
       </button>
@@ -1612,8 +1612,15 @@ function ChallengeScratchpad({ tick, treeRef, cursorRef, onSeek, onStepBack, onS
 
   const hasMoves = tree.length > 0;
   return (
-    <div className="pointer-events-none absolute inset-x-2 bottom-2 z-30 flex flex-col items-center gap-1">
-      <div className="pointer-events-auto flex w-full max-w-[520px] items-center gap-1 rounded-full border border-purple-400/60 bg-ink-950/95 px-1 py-1 shadow-lg backdrop-blur">
+    // Pinned to the BOTTOM of the viewport (below the board, above the
+    // class chrome controls) so the notation pill NEVER covers the board.
+    // Was `absolute inset-x-2 bottom-2` INSIDE the board wrapper which sat on
+    // rank 1 and hid the pieces there (owner report 2026-09-02).
+    // Solid `bg-ink-950` (no /95 opacity, no backdrop-blur) because iOS
+    // Safari can render backdrop-blur as fully transparent, which left the
+    // white notation text unreadable against the light board squares behind.
+    <div className="pointer-events-none fixed inset-x-0 bottom-2 z-40 flex justify-center px-2">
+      <div className="pointer-events-auto flex w-full max-w-[520px] items-center gap-1 rounded-full border-2 border-purple-400 bg-ink-950 px-1 py-1 shadow-2xl">
         {/* Control buttons */}
         <button onClick={onGoStart} disabled={!hasMoves || cursor.length === 0}
           className="grid h-7 w-7 place-items-center rounded-full text-[11px] text-purple-100 hover:bg-purple-500/25 disabled:opacity-30" title="Go to start">⏮</button>
@@ -1729,7 +1736,11 @@ function ChallengeRibbon({ isCoach }: { isCoach: boolean }) {
   const remaining = Math.max(0, Math.ceil((ch.endsAt - Date.now()) / 1000));
   const timeLabel = remaining >= 60 ? `${Math.floor(remaining/60)}m ${(remaining%60).toString().padStart(2,"0")}s` : `${remaining}s`;
   return (
-    <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full border-2 border-purple-300 bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-2xl ring-4 ring-purple-500/30">
+    // Pinned to the TOP of the viewport (below the class shell's header row)
+    // instead of the bottom — previously overlapped the board's last rank on
+    // phones. top-16 leaves clearance for the class chrome; z-50 keeps it
+    // above the scratchpad + video tiles.
+    <div className="pointer-events-none fixed top-16 left-1/2 z-50 -translate-x-1/2 max-w-[95vw] truncate rounded-full border-2 border-purple-300 bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-2xl ring-4 ring-purple-500/30">
       🧠 {ch.prompt || "Find the good move"}
       <span className="mx-2 opacity-60">·</span>
       ⏱ {timeLabel}
