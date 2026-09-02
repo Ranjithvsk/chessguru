@@ -160,6 +160,18 @@ function fmtDate(d?: string|null) { return d ? new Date(d).toLocaleDateString(un
  *  parent account with a name+email prompt if one doesn't exist yet). The
  *  parent then sees their child on /parent (billing + progress). Owner ask
  *  2026-08-18: "parent portal with billing and progress reports". */
+/** 💬 Message — deep-link into /messages/<studentId> so coach lands directly
+ *  in that student's chat thread. No modal — just navigate. */
+function MessageStudentButton({ studentId, name }: { studentId: string; name: string }) {
+  return (
+    <Link to={`/messages/${encodeURIComponent(studentId)}`}
+      className="inline-block rounded-lg border border-brand-500/50 bg-brand-500/10 px-2 py-1 text-brand-100 hover:bg-brand-500/20"
+      title={`Send a direct message to ${name}`}>
+      💬 Message
+    </Link>
+  );
+}
+
 function LinkParentButton({ studentId, name }: { studentId: string; name: string }) {
   // Modal state kept at MODULE level (see openParentLinkModal below) so the
   // overflow menu closing this button — and thus unmounting it — doesn't
@@ -4776,6 +4788,9 @@ function StudentOverflowMenu({ s, isOwner, coaches }: { s: Student; isOwner: boo
           </MenuBtnWrap>
           <MenuBtnWrap onClick={() => setOpen(false)}>
             <MarkAttendedButton studentId={s._id} name={s.name || s.username} />
+          </MenuBtnWrap>
+          <MenuBtnWrap onClick={() => setOpen(false)}>
+            <MessageStudentButton studentId={s._id} name={s.name || s.username} />
           </MenuBtnWrap>
           <MenuBtnWrap onClick={() => setOpen(false)}>
             <LinkParentButton studentId={s._id} name={s.name || s.username} />

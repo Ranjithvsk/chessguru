@@ -403,6 +403,7 @@ export default function Navbar({ rating, ratingProvisional, username, admin, onL
           )}
           {username ? (
             <div className="hidden items-center gap-2 sm:flex">
+              <MessagesBadge />
               <span className="text-sm font-medium text-white">{username}</span>
               <button onClick={onLogout} className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white">Sign out</button>
             </div>
@@ -454,5 +455,38 @@ export default function Navbar({ rating, ratingProvisional, username, admin, onL
         </>
       )}
     </header>
+  );
+}
+
+// ── Messages badge (2026-09-02) — polls /api/messages/unread-count every
+// 20s and shows a purple pill with the total unread count next to the
+// username in the top nav. Click → /messages page.
+function MessagesBadge() {
+  const [count, setCount] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const fetchCount = async () => {
+      try {
+        const r = await fetch("/v2api/api/messages/unread-count", { credentials: "include" });
+        if (!r.ok || cancelled) return;
+        const j = await r.json();
+        setCount(Number(j?.count ?? 0));
+      } catch { /* silent */ }
+    };
+    void fetchCount();
+    const iv = setInterval(fetchCount, 20_000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, []);
+  return (
+    <NavLink to="/messages"
+      className="relative rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white"
+      title="Messages">
+      💬
+      {count != null && count > 0 && (
+        <span className="absolute -right-1 -top-1 grid h-4 min-w-[16px] place-items-center rounded-full bg-brand-500 px-1 text-[10px] font-bold leading-none text-white">
+          {count > 99 ? "99+" : count}
+        </span>
+      )}
+    </NavLink>
   );
 }
