@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Chess, validateFen } from "chess.js";
 import type { Key } from "chessground/types";
 import Board from "./Board";
+import { AnnotationToolbar, applyAnnotationClick, useAnnotationTool } from "./AnnotationToolbar";
 
 type BoardMove = { from: string; to: string; promotion?: string };
 
@@ -675,6 +676,11 @@ export default function SharedClassBoard(
   const [dests, setDests] = useState<Map<Key, Key[]>>(() => destsFromChess(new Chess()));
   const [connected, setConnected] = useState(false);
   const [shapes, setShapes] = useState<Array<{ orig: string; dest?: string; brush?: string }>>([]);
+  // Annotation tool state (Phase 1 — owner ask 2026-09-02). Persisted
+  // per-user via useAnnotationTool → localStorage. Only used when the
+  // board is NOT inside a challenge (challenge students have their own
+  // scratchpad tools).
+  const annotTool = useAnnotationTool();
   // Live remote cursor — coach's cursor as seen by students. Normalized 0..1
   // relative to the board square. Server never echoes to sender, so this is
   // only meaningful on the student side.
@@ -1352,6 +1358,14 @@ export default function SharedClassBoard(
         coordinates
         shapes={inChallenge && !isCoachRole ? [] as any : (shapes as any)}
         onShapesChange={(s) => sendAnnot(s as any)}
+        onSelect={(key) => {
+          // Annotation tools route through this: when a tool is active,
+          // build the next shape list + push it through sendAnnot so it
+          // broadcasts + persists like a chessground-drawn shape.
+          if (annotTool.tool === "cursor") return;
+          const next = applyAnnotationClick(String(key), shapes as any, annotTool);
+          if (next) sendAnnot(next as any);
+        }}
       />
       {/* Coach's live cursor — students see a soft-glow amber dot at the
        *  normalized position. Coach never sees their own (server doesn't
@@ -1383,6 +1397,29 @@ export default function SharedClassBoard(
       />
       {/* Challenge-mode overlay ribbon (student + coach see it during active challenge). */}
       {inChallenge && <ChallengeRibbon isCoach={isCoachRole} />}
+      {/* Annotation toolbar — only outside challenges (challenge scratchpad
+       *  takes the bottom-center slot during a challenge). Fixed at the
+       *  bottom of the viewport so it stays visible on any screen size,
+       *  and doesn't fight the container-queried board sizing. */}
+      {!inChallenge && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-2 z-30 flex justify-center px-2">
+          <div className="pointer-events-auto">
+            <AnnotationToolbar
+              tool={annotTool.tool}
+              brush={annotTool.brush}
+              onToolChange={annotTool.setTool}
+              onBrushChange={annotTool.setBrush}
+              onClear={() => sendAnnot([])}
+              hasShapes={shapes.length > 0}
+            />
+            {annotTool.tool === "arrow" && annotTool.pendingArrowFrom && (
+              <div className="mt-1 text-center text-[11px] font-medium text-brand-300">
+                → Click the arrow's target square (or click <b>{annotTool.pendingArrowFrom}</b> again to cancel)
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {/* Student scratchpad tree — prev/next controls + click-to-seek
        *  variations shown below the board during an active challenge. */}
       {inChallenge && !isCoachRole && (

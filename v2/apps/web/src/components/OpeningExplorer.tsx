@@ -16,6 +16,7 @@ import { fetchExplorer } from "../lib/explorer";
 import { OPENING_HANDOFF_KEY } from "../lib/openingMemory";
 import { findOpeningForLine } from "../lib/openings";
 import { OpeningIdeaPanel } from "./OpeningIdeaPanel";
+import { AnnotationToolbar, applyAnnotationClick, useAnnotationTool } from "./AnnotationToolbar";
 
 function WdlBar({ w, d, b, className = "" }: { w: number; d: number; b: number; className?: string }) {
   const t = w + d + b || 1;
@@ -49,6 +50,15 @@ export default function OpeningExplorer(
   const ownFp = useFreePlay();
   const fp = externalFp ?? ownFp;
   const navigate = useNavigate();
+  // Annotation tool state (Phase 1 — owner ask 2026-09-02). Local only —
+  // /openings isn't shared. Shapes are keyed by FEN so each position
+  // keeps its own annotations when you step through the tree.
+  const annotTool = useAnnotationTool();
+  const [shapesByFen, setShapesByFen] = useState<Record<string, Array<{ orig: string; dest?: string; brush?: string }>>>({});
+  const shapes = shapesByFen[fp.fen] ?? [];
+  const setShapes = (next: Array<{ orig: string; dest?: string; brush?: string }>) => {
+    setShapesByFen((prev) => ({ ...prev, [fp.fen]: next }));
+  };
   const { data, isError } = useQuery({
     queryKey: ["explorer", fp.fen],
     queryFn: () => fetchExplorer(fp.fen, "masters"),
@@ -221,8 +231,31 @@ export default function OpeningExplorer(
             2026-08-20: "so much gap between board and left/right panel". */}
         <div ref={boardBoxRef} className={preBoardExtra ? "[&>.cg-board-wrap]:mx-0" : ""}>
           <Board fen={fp.fen} orientation={fp.orientation} turnColor={fp.turnColor}
-            movableColor="both" dests={fp.dests} onMove={fp.onMove} />
+            movableColor="both" dests={fp.dests} onMove={fp.onMove}
+            shapes={shapes as any}
+            onShapesChange={(s) => setShapes(s as any)}
+            onSelect={(key) => {
+              if (annotTool.tool === "cursor") return;
+              const next = applyAnnotationClick(String(key), shapes, annotTool);
+              if (next) setShapes(next);
+            }}
+          />
         </div>
+        {/* Annotation toolbar (Phase 1, 2026-09-02) — sits directly below
+         *  the board so it doesn't crowd the analysis panel on the right. */}
+        <AnnotationToolbar
+          tool={annotTool.tool}
+          brush={annotTool.brush}
+          onToolChange={annotTool.setTool}
+          onBrushChange={annotTool.setBrush}
+          onClear={() => setShapes([])}
+          hasShapes={shapes.length > 0}
+        />
+        {annotTool.tool === "arrow" && annotTool.pendingArrowFrom && (
+          <div className="mt-1 text-center text-[11px] font-medium text-brand-300">
+            → Click the arrow's target square (or click <b>{annotTool.pendingArrowFrom}</b> again to cancel)
+          </div>
+        )}
         {/* Nav row: ⏮ start · ◀ prev · ▶ next · ⏭ end · Reset · Flip · Memorize.
             Prev/Next are enabled only when there's somewhere to go on the
             recorded line (Lichess analysis semantics — rewinding doesn't
