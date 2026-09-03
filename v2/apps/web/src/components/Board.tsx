@@ -210,19 +210,18 @@ export default function Board({
   // WS state arriving, api.set({fen: stale-e1}) reverse-animated chess-
   // ground back before the fresh fen catch up bounced it forward.
   //
-  // Effect 1: sync the FEN. Fires only when the fen prop actually changes.
-  // A ref tracks the last piece-placement we sent so back-to-back same-
-  // position updates don't re-apply (avoids chessground's own diff dance).
-  const lastAppliedBoardRef = useRef<string>("");
+  // Effect 1: sync the FEN + lastMove. Fires only when fen or lastMove
+  // actually change (they're the only deps), so a stale prop can't sneak
+  // in — no ref-guard needed. Removing the previous ref-guard (2026-09-03
+  // Harinita puzzle report: "computer's move is not made") — the guard
+  // was silently swallowing legit updates when propBoard matched, which
+  // broke the wrong-move rollback path in puzzle trainer (chess.js
+  // rejects the move → we call setFen(oldFen) which is the SAME string
+  // as before → guard returned early → chessground kept the wrong-moved
+  // piece on the destination). Chessground handles same-fen no-op
+  // internally via anim() diffing, so re-applying is cheap.
   useEffect(() => {
     if (!api.current) return;
-    const propBoard = fen.split(" ")[0];
-    if (propBoard === lastAppliedBoardRef.current) return;
-    lastAppliedBoardRef.current = propBoard;
-    // Only include the fen field — chessground's set() picks anim vs
-    // render based on whether config.fen is present, so passing it here
-    // keeps the animation on genuine position updates (server-driven or
-    // remote-user moves).
     api.current.set({ fen, lastMove });
   }, [fen, lastMove]);
 
