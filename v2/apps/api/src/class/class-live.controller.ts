@@ -148,7 +148,10 @@ export class ClassLiveController {
       audienceKind: klass?.audienceKind ?? null,
       audienceBatchId: klass?.audienceBatchId ?? null,
       batchStudentIds: Array.isArray(klass?.batchStudentIds) ? klass.batchStudentIds : null,
-      batches: batches.map((b: any) => ({ _id: String(b._id), name: b.name, memberCount: (b.studentIds ?? []).length })),
+      // studentIds sent alongside memberCount so the picker can render the
+      // roster of a selected batch (resolved to names via `students` below).
+      // Owner ask 2026-09-03: "need option to see students in a batch".
+      batches: batches.map((b: any) => ({ _id: String(b._id), name: b.name, memberCount: (b.studentIds ?? []).length, studentIds: Array.isArray(b.studentIds) ? b.studentIds.map(String) : [] })),
       students: students.map((u: any) => ({ _id: String(u._id), name: u.name || u.username || String(u._id) })),
     };
   }

@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { get, patch } from "../lib/api";
 
-type Batch    = { _id: string; name: string; memberCount: number };
+type Batch    = { _id: string; name: string; memberCount: number; studentIds: string[] };
 type Student  = { _id: string; name: string };
 type Audience = {
   audienceKind: "batch" | "coach_students" | "individuals" | "academy" | null;
@@ -160,16 +160,44 @@ export default function AudiencePickerModal(props: {
                     You don&apos;t have any batches yet. Create one from the Academy → Batches page, or pick people below.
                   </div>
                 ) : (
-                  <select
-                    value={batchId}
-                    onChange={(e) => setBatchId(e.target.value)}
-                    className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none"
-                  >
-                    <option value="">— pick a batch —</option>
-                    {data.batches.map((b) => (
-                      <option key={b._id} value={b._id}>{b.name} ({b.memberCount})</option>
-                    ))}
-                  </select>
+                  <>
+                    <select
+                      value={batchId}
+                      onChange={(e) => setBatchId(e.target.value)}
+                      className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none"
+                    >
+                      <option value="">— pick a batch —</option>
+                      {data.batches.map((b) => (
+                        <option key={b._id} value={b._id}>{b.name} ({b.memberCount})</option>
+                      ))}
+                    </select>
+                    {batchId && (() => {
+                      // Preview the selected batch's roster so the coach can
+                      // eyeball who's about to be invited (owner 2026-09-03).
+                      // Resolve names via data.students; IDs not in the coach's
+                      // student list still render as "Unnamed (id)".
+                      const b = data.batches.find((x) => x._id === batchId);
+                      if (!b) return null;
+                      const byId = new Map(data.students.map((s) => [s._id, s.name] as const));
+                      const roster = b.studentIds.map((id) => ({ _id: id, name: byId.get(id) ?? `Unknown (${id.slice(0, 6)}…)` }));
+                      return (
+                        <div className="rounded-lg border border-ink-800 bg-ink-950">
+                          <div className="border-b border-ink-800 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-400">
+                            {roster.length} student{roster.length === 1 ? "" : "s"} in “{b.name}”
+                          </div>
+                          {roster.length === 0 ? (
+                            <div className="p-3 text-xs text-ink-500">Batch is empty.</div>
+                          ) : (
+                            <div className="max-h-40 overflow-y-auto">
+                              {roster.map((s) => (
+                                <div key={s._id} className="border-b border-ink-800 px-3 py-1.5 text-xs text-ink-200 last:border-b-0">{s.name}</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </>
                 )}
               </div>
             )}
