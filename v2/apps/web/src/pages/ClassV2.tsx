@@ -12,7 +12,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   LiveKitRoom, RoomAudioRenderer, ControlBar,
   GridLayout, ParticipantTile, useTracks, useParticipants,
-  useDataChannel, useLocalParticipant, useRoomContext,
+  useDataChannel, useLocalParticipant, useRoomContext, useIsSpeaking,
 } from "@livekit/components-react";
 import { Track, DataPacket_Kind } from "livekit-client";
 import "@livekit/components-styles";
@@ -575,6 +575,40 @@ function MessageCoachButton({ room }: { room: string }) {
         </div>
       )}
     </>
+  );
+}
+
+// Persistent mic status for the COACH — feedback loop for "are students
+// hearing me right now?". Green dot pulses when the coach's mic is
+// actually publishing audio (via LiveKit's speaking-detection). Rose pill
+// when muted or the mic track is missing entirely. N listeners = number
+// of remote participants in the room (proxy for hearing; a student with
+// audio output muted / autoplay blocked still counts, but a 0 here means
+// definitely nobody). Owner 2026-09-03: "coach doesn't know whether
+// students hear". Renders in the header for coaches only.
+function CoachMicStatus() {
+  const { localParticipant, isMicrophoneEnabled } = useLocalParticipant();
+  const isSpeaking = useIsSpeaking(localParticipant);
+  const participants = useParticipants();
+  const listeners = Math.max(0, participants.length - 1);   // exclude coach themselves
+  if (!isMicrophoneEnabled) {
+    return (
+      <div
+        className="inline-flex items-center gap-1.5 rounded-full border border-rose-500/60 bg-rose-500/20 px-2.5 py-1 text-xs font-semibold text-rose-100"
+        title="Your mic is OFF — students hear nothing. Click the 🎤 button in the footer to unmute."
+      >
+        🔇 Mic off · {listeners} in room
+      </div>
+    );
+  }
+  return (
+    <div
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold transition ${isSpeaking ? "border-emerald-400/70 bg-emerald-500/25 text-emerald-100" : "border-ink-700 bg-ink-800 text-ink-200"}`}
+      title={isSpeaking ? "Mic is publishing — students hear you now" : "Mic is on, waiting for you to speak"}
+    >
+      <span className={`inline-block h-2 w-2 rounded-full ${isSpeaking ? "bg-emerald-400 animate-pulse" : "bg-ink-600"}`} />
+      🎤 On air · {listeners} listener{listeners === 1 ? "" : "s"}
+    </div>
   );
 }
 
@@ -2298,6 +2332,7 @@ export default function ClassV2Page() {
               <span className="hidden truncate text-xs text-ink-500 sm:inline">· you're {role}</span>
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              {role === "coach" && <CoachMicStatus />}
               <LiveHeaderBits room={room} role={role} />
               {role === "coach" ? (
                 <button
