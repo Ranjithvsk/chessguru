@@ -2432,7 +2432,7 @@ export default function AcademyDashboardPage() {
           <div className="mb-3">
             <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-300">🟢 Live now</div>
             {schedule!.live.map((c) => (
-              <ClassRowUI key={c._id} c={c} live />
+              <ClassRowUI key={c._id} c={c} live canManage={canManage} />
             ))}
           </div>
         )}
@@ -2440,7 +2440,7 @@ export default function AcademyDashboardPage() {
           <div>
             <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-400">Upcoming</div>
             {schedule!.upcoming.slice(0, 10).map((c) => (
-              <ClassRowUI key={c._id} c={c} />
+              <ClassRowUI key={c._id} c={c} canManage={canManage} />
             ))}
           </div>
         )}
@@ -4169,10 +4169,30 @@ function RecentSnapsSection({ snaps }: { snaps: SnapItem[] }) {
 
 // Single-row renderer for a scheduled class. Live rows get a green ring and
 // a Join button; upcoming rows just show the start time and a Copy-link.
-function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
+function ClassRowUI({ c, live, canManage }: { c: ClassRow; live?: boolean; canManage?: boolean }) {
   const qc = useQueryClient();
   const [sending, setSending] = useState(false);
   const [sendMsg, setSendMsg] = useState<string | null>(null);
+  // Coach-only 'End class' — force-close an orphaned Dream Meet room the
+  // coach abandoned (owner report 2026-09-03: 'when coach abandoned the
+  // Dream Meet class and re-login, coach is shown Join class but cant
+  // join, at least have End option'). Same endpoint the in-class Leave
+  // button calls — wipes the live-now announcement, closes the class-ws
+  // room, kicks every student socket. After success, invalidate the
+  // schedule so the row moves out of 'Live now' immediately.
+  const [ending, setEnding] = useState(false);
+  const endClass = async () => {
+    if (!confirm(`End "${c.title}" now? Any students still in the room will be disconnected.`)) return;
+    setEnding(true);
+    try {
+      await fetch(`${BASE}/api/class/${encodeURIComponent(c._id)}/end`, {
+        method: "POST", credentials: "include",
+      });
+    } catch { /* swallow — button hides after refresh either way */ }
+    setEnding(false);
+    qc.invalidateQueries({ queryKey: ["schedule"] });
+    qc.invalidateQueries({ queryKey: ["classAttendanceToday"] });
+  };
   // Copy-link: 1500ms "Copied!" flash then reverts. Falls back to a manual
   // prompt on the (rare) old browsers where navigator.clipboard is missing.
   const [copied, setCopied] = useState(false);
@@ -4456,6 +4476,15 @@ function ClassRowUI({ c, live }: { c: ClassRow; live?: boolean }) {
         className={`rounded-lg px-3 py-1 text-xs font-semibold ${live ? "bg-emerald-600 text-white hover:bg-emerald-500" : "bg-brand-600 text-white hover:bg-brand-500"}`}>
         {live ? "Join now" : "Open class"}
       </Link>
+      {live && canManage && (
+        <button
+          onClick={endClass}
+          disabled={ending}
+          title="Force-end this class — closes the room + disconnects any remaining students. Use if you left the tab and can't rejoin."
+          className="rounded-lg border border-rose-500/50 bg-rose-500/10 px-2 py-1 text-[11px] font-semibold text-rose-200 hover:bg-rose-500/20 disabled:opacity-50">
+          {ending ? "Ending…" : "🛑 End"}
+        </button>
+      )}
     </div>
   );
 }
