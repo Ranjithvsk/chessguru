@@ -2188,11 +2188,15 @@ export default function ClassV2Page() {
           serverUrl={tokenData.url}
           token={tokenData.token}
           connect
-          /* video + audio are opt-in — devices without a camera/mic (like a
-           * headless coach machine or many desktop PCs) hit getUserMedia
+          /* video stays opt-in — devices without a camera hit getUserMedia
            * errors that LiveKit surfaces as ConnectionError(InternalError,
-           * reason=2, code=1). Users publish video/audio via the ControlBar
-           * button after joining. This is what LiveKit's own examples do. */
+           * reason=2, code=1). Users toggle video via the ControlBar after
+           * joining.
+           * audio: coach starts with mic ON (owner 2026-09-03: "default mic
+           * for coach should be on"). If the mic isn't available, LiveKit
+           * lands in the same soft-fail path and coach can toggle later.
+           * Students stay muted by default — they unmute via the ControlBar. */
+          audio={role === "coach"}
           options={{ logLevel: 'debug' }}
           onError={(e) => {
             // Verbose error trail so we can catch the ACTUAL cause below
