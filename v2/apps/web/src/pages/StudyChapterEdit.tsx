@@ -136,7 +136,7 @@ export default function StudyChapterEditPage() {
     setMoves(q.data.moves || []);
     // Land on the last main-line move so re-opening a chapter feels resumable.
     const tail = followMainLine(q.data.moves || [], null);
-    setCurrentId(tail.length ? tail[tail.length - 1].id : null);
+    setCurrentId(tail.length ? tail[tail.length - 1]!.id : null);
     seededRef.current = true;
   }, [q.data]);
 
@@ -147,12 +147,12 @@ export default function StudyChapterEditPage() {
   const turnColor: "white" | "black" = board.turn() === "w" ? "white" : "black";
   const isCheck = board.inCheck();
   const lastMove: [Key, Key] | undefined = currentPath.length
-    ? [currentPath[currentPath.length - 1].uci.slice(0, 2) as Key, currentPath[currentPath.length - 1].uci.slice(2, 4) as Key]
+    ? [currentPath[currentPath.length - 1]!.uci.slice(0, 2) as Key, currentPath[currentPath.length - 1]!.uci.slice(2, 4) as Key]
     : undefined;
 
   const shapes: DrawShape[] = useMemo(() => {
     if (!currentPath.length) return [];
-    const s = currentPath[currentPath.length - 1].shapes || [];
+    const s = currentPath[currentPath.length - 1]!.shapes || [];
     return s.map((sh) => ({ brush: sh.brush, orig: sh.orig as Key, dest: sh.dest as Key | undefined }));
   }, [currentPath]);
 
@@ -219,26 +219,26 @@ export default function StudyChapterEditPage() {
       orig: sh.orig,
       dest: sh.dest,
     }));
-    const last = currentPath[currentPath.length - 1];
+    const last = currentPath[currentPath.length - 1]!;
     setMoves((prev) => prev.map((m) => m.id === last.id ? { ...m, shapes: s } : m));
     setDirty(true);
   };
 
   const goBack = () => {
     if (!currentPath.length) return;
-    const parent = currentPath.length >= 2 ? currentPath[currentPath.length - 2].id : null;
+    const parent = currentPath.length >= 2 ? currentPath[currentPath.length - 2]!.id : null;
     setCurrentId(parent);
   };
   const goForward = () => {
     const kids = childrenOf(moves, currentId);
     if (!kids.length) return;
-    const main = kids.find((k) => k.isMainLine) ?? kids[0];
+    const main = (kids.find((k) => k.isMainLine) ?? kids[0])!;
     setCurrentId(main.id);
   };
   const goStart = () => setCurrentId(null);
   const goEnd = () => {
     const tail = followMainLine(moves, currentId);
-    if (tail.length) setCurrentId(tail[tail.length - 1].id);
+    if (tail.length) setCurrentId(tail[tail.length - 1]!.id);
   };
 
   // Delete the current subtree (this move + everything descending from it).
@@ -251,7 +251,7 @@ export default function StudyChapterEditPage() {
       for (const k of childrenOf(moves, id)) collect(k.id);
     };
     collect(currentId);
-    const parent = currentPath.length >= 2 ? currentPath[currentPath.length - 2].id : null;
+    const parent = currentPath.length >= 2 ? currentPath[currentPath.length - 2]!.id : null;
     setMoves((prev) => prev.filter((m) => !doomed.has(m.id)));
     setCurrentId(parent);
     setDirty(true);
@@ -359,7 +359,7 @@ export default function StudyChapterEditPage() {
     const walk = (parentId: string | null, plyBase: number, isVariation: boolean): string => {
       const kids = childrenOf(rootMoves, parentId);
       if (!kids.length) return "";
-      const main = kids.find((k) => k.isMainLine) ?? kids[0];
+      const main = (kids.find((k) => k.isMainLine) ?? kids[0])!;
       const siblings = kids.filter((k) => k.id !== main.id);
       const isWhite = startTurn === "w" ? plyBase % 2 === 0 : plyBase % 2 === 1;
       const moveNum = Math.floor(plyBase / 2) + startNum;

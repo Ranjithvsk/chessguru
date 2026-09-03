@@ -2246,7 +2246,10 @@ export default function AcademyPublicPage() {
     queryKey: ["academy-public-showcase", slug],
     queryFn: () => get<Resp>(`/api/academy-page/${encodeURIComponent(slug || "")}`),
     enabled: !!slug,
-    retry: false,
+    // Retry transient failures (502/503/504 during API restart, network blips)
+    // — a real 404 (missing academy) short-circuits so we don't waste retries.
+    retry: (failureCount, err: any) => err?.status !== 404 && failureCount < 3,
+    retryDelay: (attempt) => Math.min(2000, 300 * 2 ** attempt),
   });
 
   const displayName = useMemo(
@@ -2317,13 +2320,30 @@ export default function AcademyPublicPage() {
       </div>
     );
   }
-  if ((acadQ.error as any)?.status === 404 || !acadQ.data) {
+  // Only render "Not found" for a genuine 404 from the API. Transient 5xx
+  // (API restart, LB blip) previously landed users on this screen because the
+  // guard also matched `!acadQ.data` — see gunachess.com "academy not found"
+  // ticket 2026-09-03. Now transient errors keep the loading splash while
+  // useQuery retries; real 404 still hits this branch.
+  const errStatus = (acadQ.error as any)?.status;
+  if (errStatus === 404) {
     return (
       <div className="min-h-screen bg-[#faf6ef] text-stone-900 grid place-items-center px-6 text-center">
         <div>
           <div className="text-7xl mb-4">&#9822;</div>
           <h1 className="font-display text-4xl mb-3">Not found</h1>
           <Link to="/" className="px-6 py-3 rounded-full bg-stone-100 hover:bg-stone-200 text-sm">Home</Link>
+        </div>
+      </div>
+    );
+  }
+  if (!acadQ.data) {
+    // Still loading / retrying — reuse the splash markup above by rendering nothing
+    // here would show a blank; return the same cyan splash for continuity.
+    return (
+      <div className="min-h-screen grid place-items-center" style={{ background: '#c7edf5' }}>
+        <div className="cg-splash-piece" style={{ width: 120, height: 120 }}>
+          <img src="/academy/guna-logo.webp" alt="Loading" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
         </div>
       </div>
     );
