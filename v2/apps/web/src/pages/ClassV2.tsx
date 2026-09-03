@@ -2496,7 +2496,7 @@ function ChallengeCoachActiveChip({ challenge }: { challenge: NonNullable<Return
 function ChallengeStartModal({ onClose, onStart }: { onClose: () => void; onStart: (opts: { prompt: string; durationSec: number }) => void }) {
   const [prompt, setPrompt] = useState("Find the best move");
   const [durationSec, setDurationSec] = useState(120);
-  const presets = [30, 60, 120, 300, 600];
+  const presets = [30, 60, 120, 300, 600, 900, 1800];
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" role="dialog" aria-modal onClick={onClose}>
       <div className="w-full max-w-md rounded-2xl border border-purple-500/40 bg-ink-950 p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>

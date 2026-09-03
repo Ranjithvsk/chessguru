@@ -1129,7 +1129,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     if (frame.type === "challenge:start") {
       if (!isCoach()) return;
       if (room.challenge) endChallenge(room, roomId);   // idempotent: one active challenge at a time
-      const durationSec = Math.max(15, Math.min(15 * 60, Number(frame.durationSec) || 60));
+      const durationSec = Math.max(15, Math.min(30 * 60, Number(frame.durationSec) || 60));
       const positionFen = typeof frame.positionFen === "string" ? frame.positionFen : room.fen;
       const startFen = typeof frame.startFen === "string" ? frame.startFen : room.startFen;
       const prompt = typeof frame.prompt === "string" ? frame.prompt.slice(0, 200) : "";
