@@ -280,7 +280,10 @@ export default function Board({
   // 2026-09-03 kept seeing hints even after every JS-side fix.
   const wrapClass = `cg-board-wrap ${blindfold ? "blindfold" : ""} ${hideMoveHints ? "cg-no-dests" : ""} ${className}`;
   return (
-    <div className={wrapClass} style={{ position: "relative" }}>
+    <div
+      className={wrapClass}
+      data-hide-hints={hideMoveHints ? "1" : undefined}
+      style={{ position: "relative" }}>
       <div ref={el} style={{ width: "100%", height: "100%" }} />
       {pending && pickerPos && (
         <div

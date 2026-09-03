@@ -487,6 +487,97 @@ function ReactionsBar() {
   );
 }
 
+// Student-only: quick PRIVATE message to the class's coach without leaving
+// Dream Meet. Owner ask 2026-09-03: "need option for students to private
+// message coach during dream meet". Uses the existing 1:1 messaging
+// backend from feature-1 (push notifications on new DM). Coach gets the
+// standard chat push and can reply from /messages — this is a one-shot
+// send, not a live chat pane (that's the deferred feature 6).
+function MessageCoachButton({ room }: { room: string }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [sending, setSending] = useState(false);
+  const [coach, setCoach] = useState<{ userId: string | null; name: string | null } | null>(null);
+  useEffect(() => {
+    if (!open || coach) return;
+    void fetch(`/v2api/api/class/${encodeURIComponent(room)}/coach`, { credentials: "include" })
+      .then((r) => r.ok ? r.json() : null)
+      .then((j) => { if (j) setCoach(j); })
+      .catch(() => { /* silent */ });
+  }, [open, coach, room]);
+
+  const send = async () => {
+    const body = text.trim();
+    if (!body || !coach?.userId) return;
+    setSending(true); setStatus(null);
+    try {
+      const r = await fetch("/v2api/api/messages/send", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ toUserId: coach.userId, text: body }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((j as any)?.message || `HTTP ${r.status}`);
+      setStatus({ ok: true, msg: "Sent — coach was notified." });
+      setText("");
+      // Close after 1.2s so the confirmation is visible then dismisses.
+      setTimeout(() => { setOpen(false); setStatus(null); }, 1200);
+    } catch (e) {
+      setStatus({ ok: false, msg: (e as Error)?.message || "Send failed" });
+    } finally { setSending(false); }
+  };
+
+  return (
+    <>
+      <button onClick={() => setOpen(true)}
+        title="Send a private message to your coach"
+        className="rounded-full border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm text-ink-100 hover:bg-ink-800">
+        📩 Message coach
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-[70] grid place-items-center bg-black/60 p-4" onClick={() => !sending && setOpen(false)}>
+          <div className="w-full max-w-sm rounded-2xl border border-brand-500/40 bg-slate-950 p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="font-display text-base text-white">📩 Message coach{coach?.name ? ` — ${coach.name}` : ""}</h3>
+              <button onClick={() => setOpen(false)} className="text-ink-400 hover:text-white">✕</button>
+            </div>
+            {!coach ? (
+              <div className="py-6 text-center text-sm text-ink-400">Loading…</div>
+            ) : !coach.userId ? (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200">
+                Couldn't find the coach for this class — please DM them from the Messages page instead.
+              </div>
+            ) : (
+              <>
+                <textarea rows={4} value={text} disabled={sending}
+                  onChange={(e) => setText(e.target.value)}
+                  onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); void send(); } }}
+                  placeholder="Type your message — only the coach sees it."
+                  className="w-full rounded-lg border border-ink-700 bg-slate-900 px-3 py-2 text-sm text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none disabled:opacity-50" />
+                {status && (
+                  <div className={`mt-2 text-xs ${status.ok ? "text-emerald-300" : "text-rose-300"}`}>{status.msg}</div>
+                )}
+                <div className="mt-3 flex items-center justify-end gap-2">
+                  <button onClick={() => setOpen(false)} disabled={sending}
+                    className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-1.5 text-xs text-ink-200 hover:bg-ink-700">Cancel</button>
+                  <button onClick={send} disabled={sending || !text.trim()}
+                    className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-400 disabled:opacity-50">
+                    {sending ? "Sending…" : "Send ↩"}
+                  </button>
+                </div>
+                <div className="mt-2 text-[10px] text-ink-500">
+                  Tip: Ctrl/⌘+Enter to send. Only your coach sees this message.
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // Live participant count + one-tap "copy student invite" — lives inside the
 // LiveKitRoom so useParticipants has room context. Clicking the count opens a
 // dropdown showing WHO'S in the room right now — coach's most-requested view
@@ -2248,6 +2339,12 @@ export default function ClassV2Page() {
                 <ChatToggleButton />
                 <ReactionsBar />
                 <CoachBoardNav readOnly={role !== "coach"} />
+                {/* 📩 Private DM to the coach — student-only. Opens a small
+                 *  dialog to send one message; coach receives the standard
+                 *  chat push notification + can reply from /messages. Owner
+                 *  ask 2026-09-03: 'need option for students to private
+                 *  message coach during dream meet'. */}
+                {role === "student" && <MessageCoachButton room={room} />}
                 {role === "coach" && <CoachFlipToggle />}
                 {role === "coach" && <CoachLockToggle />}
                 {role === "coach" && (
@@ -2543,7 +2640,7 @@ function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnTyp
                       // some Safari/iOS builds render the modal's opacity as
                       // fully transparent, leaving text on a white overlay.
                       return (
-                        <tr key={a.userId} className={`border-t border-ink-800 bg-ink-950 align-top ${rowRing}`}>
+                        <tr key={a.userId} className={`border-t border-ink-800 bg-slate-950 align-top ${rowRing}`}>
                           <td className="py-2 pr-3 text-white">{a.displayName || a.userId}</td>
                           <td className="py-2 pr-3 font-mono text-white whitespace-pre-wrap break-words">{
                             (a.tree && a.tree.length > 0)

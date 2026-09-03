@@ -203,12 +203,18 @@ export function cloneChallengeNode(n: ChallengeTreeNode): ChallengeTreeNode {
 export function challengeTreeToPgn(tree: ChallengeTreeNode[], startFen: string): string {
   const parts = String(startFen || "").split(" ");
   const sideAtRoot: "w" | "b" = parts[1] === "b" ? "b" : "w";
+  // Move numbers must continue from the fullmove counter in startFen (field
+  // 6), not restart at 1. Owner report 2026-09-03: 'when students answer
+  // challenge, the move number should be what it was in position, now it
+  // shows 1,2 why?'. A challenge that starts at move 15 now renders as
+  // '15.Kh5 15...Kg7 16.h8=Q+' instead of '1.Kh5 1...Kg7 2.h8=Q+'.
+  const startNum = Number.isFinite(Number(parts[5])) ? Math.max(1, Number(parts[5])) : 1;
   const render = (nodes: ChallengeTreeNode[], plyBase: number, variation: boolean): string => {
     if (!Array.isArray(nodes) || nodes.length === 0) return "";
     const out: string[] = [];
     const main = nodes[0]!;
     const isWhite = sideAtRoot === "w" ? plyBase % 2 === 0 : plyBase % 2 === 1;
-    const moveNum = Math.floor(plyBase / 2) + 1;
+    const moveNum = Math.floor(plyBase / 2) + startNum;
     if (isWhite) out.push(`${moveNum}.${main.san}`);
     else out.push((variation || plyBase === 0) ? `${moveNum}...${main.san}` : main.san);
     for (let j = 1; j < nodes.length; j++) {
@@ -1681,7 +1687,12 @@ function ChallengeScratchpad({ tick, treeRef, cursorRef, onSeek, onStepBack, onS
     // Safari can render backdrop-blur as fully transparent, which left the
     // white notation text unreadable against the light board squares behind.
     <div className="pointer-events-none fixed inset-x-0 bottom-2 z-40 flex justify-center px-2">
-      <div className="pointer-events-auto flex w-full max-w-[520px] items-center gap-1 rounded-full border-2 border-purple-400 bg-ink-950 px-1 py-1 shadow-2xl">
+      {/* Theme-independent dark background — was bg-ink-950 which resolves
+       *  to WHITE in light mode (owner report 2026-09-03: "the panel which
+       *  has navigation is white background and the text is also white").
+       *  Slate-950 is a fixed Tailwind color that stays dark regardless of
+       *  html.light / html.dark. Applied to every dark-pill overlay below. */}
+      <div className="pointer-events-auto flex w-full max-w-[520px] items-center gap-1 rounded-full border-2 border-purple-400 bg-slate-950 px-1 py-1 shadow-2xl">
         {/* Control buttons */}
         <button onClick={onGoStart} disabled={!hasMoves || cursor.length === 0}
           className="grid h-7 w-7 place-items-center rounded-full text-[11px] text-purple-100 hover:bg-purple-500/25 disabled:opacity-30" title="Go to start">⏮</button>

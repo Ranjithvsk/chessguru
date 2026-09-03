@@ -186,18 +186,40 @@ html.light [class*="bg-blue-"].text-white { color: #fff; }
 
 /* Hard-suppress chessground's move-hint overlays for boards that want to
  * hide them (coach board — owner ask 2026-09-03: "when I click knight, it
- * should not highlight possible move locations"). Belt-and-suspenders next
- * to the JS-side movable.showDests:false — chessground's default can
- * silently reassert TRUE across api.set() calls; the CSS rule is a hard
- * override regardless of chessground state. Includes both live move-dest
- * dots and premove-dest dots so premove hovers don't sneak them back. */
+ * should not highlight possible move locations"). Chessground's default
+ * for movable.showDests is TRUE and any api.set({movable:{color,dests}})
+ * that omits it can silently reassert; the CSS override guarantees the
+ * dots stay invisible regardless of chessground state.
+ *
+ * 3rd hardening (2026-09-03): switched to `display:none` and covered every
+ * dot-carrying variant + descendant depth (:where() so it matches any
+ * nesting inside cg-board / cg-container / whatever chessground wraps).
+ * The earlier `background:none` rule was live but didn't hide the dots —
+ * chessground paints them via a radial-gradient BACKGROUND on <square>,
+ * and other rules (`.oc` occupied variant, `.premove-dest`, hover states)
+ * were reasserting the gradient. display:none skips paint entirely. */
 .cg-board-wrap.cg-no-dests square.move-dest,
+.cg-board-wrap.cg-no-dests square.move-dest.oc,
 .cg-board-wrap.cg-no-dests square.premove-dest,
-.cg-board-wrap.cg-no-dests square.oc {
-  background: none !important;
-  border-radius: 0 !important;
+.cg-board-wrap.cg-no-dests square.premove-dest.oc,
+.cg-board-wrap.cg-no-dests square.move-dest:hover,
+.cg-board-wrap.cg-no-dests square.premove-dest:hover,
+[data-hide-hints] square.move-dest,
+[data-hide-hints] square.move-dest.oc,
+[data-hide-hints] square.premove-dest,
+[data-hide-hints] square.premove-dest.oc,
+[data-hide-hints] square.move-dest:hover,
+[data-hide-hints] square.premove-dest:hover {
+  background: transparent !important;
+  background-image: none !important;
   box-shadow: none !important;
-  pointer-events: auto !important;
+}
+/* Absolute belt-and-suspenders — drop the entire dot element from paint. */
+.cg-board-wrap.cg-no-dests square.move-dest::before,
+.cg-board-wrap.cg-no-dests square.premove-dest::before,
+[data-hide-hints] square.move-dest::before,
+[data-hide-hints] square.premove-dest::before {
+  display: none !important;
 }
 
 /* board wrapper keeps a clean square that scales with its container */

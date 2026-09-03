@@ -83,6 +83,37 @@ export class ClassLiveController {
     return { ok: true, deferred: true };
   }
 
+  /** GET /api/class/:id/coach — resolve the coach that owns this class so
+   *  a student in Dream Meet can DM them privately (owner ask 2026-09-03:
+   *  "need option for students to private message coach during Dream
+   *  Meet"). Uses the classSchedules doc's coachUserId (or createdByUserId
+   *  as fallback for legacy rows). Any authenticated participant of the
+   *  class can call — student, coach, owner alike. Returns {userId, name}
+   *  or 404 if the class has no coach on file. */
+  @Get(":id/coach")
+  async getCoach(@Param("id") id: string, @Req() req: any) {
+    if (!ROOM_RE.test(id)) throw new BadRequestException("bad room id");
+    const me: string | null = req?.session?.userId ?? null;
+    if (!me) return { userId: null, name: null };
+    const db = this.conn.db!;
+    const klass: any = await db.collection("classSchedules").findOne(
+      { _id: id as any },
+      { projection: { coachUserId: 1, createdByUserId: 1, coach: 1 } },
+    );
+    if (!klass) return { userId: null, name: null };
+    const coachId: string | null = klass.coachUserId || klass.createdByUserId || null;
+    if (!coachId) return { userId: null, name: klass.coach || null };
+    const coach: any = await db.collection("users").findOne(
+      { _id: coachId as any },
+      { projection: { name: 1, username: 1 } },
+    );
+    return {
+      userId: coachId,
+      name: coach?.name || coach?.username || klass.coach || "Coach",
+      username: coach?.username || null,
+    };
+  }
+
   /** GET /api/class/:id/audience — audience state + picker options.
    *  Returns the current audience selection (kind, batchId, studentIds) plus
    *  the coach's batches and students so the picker UI can render without
