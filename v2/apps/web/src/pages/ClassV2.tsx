@@ -2582,11 +2582,11 @@ function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnTyp
       </button>
       {open && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" role="dialog" aria-modal onClick={() => setOpen(false)}>
-          <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-purple-500/40 bg-ink-950 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between border-b border-ink-800 p-4">
+          <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-purple-500/40 bg-slate-900 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between border-b border-slate-700 p-4">
               <div className="min-w-0 flex-1">
-                <h3 className="font-display text-lg text-purple-100">📋 Challenge answers</h3>
-                {challenge.prompt && <p className="mt-1 text-xs italic text-ink-400 truncate">"{challenge.prompt}"</p>}
+                <h3 className="font-display text-lg text-purple-200">📋 Challenge answers</h3>
+                {challenge.prompt && <p className="mt-1 text-xs italic text-slate-400 truncate">"{challenge.prompt}"</p>}
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <button
@@ -2598,13 +2598,13 @@ function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnTyp
                   className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-1 text-xs font-semibold text-rose-200 hover:bg-rose-500/20"
                   title="Permanently clear these answers from the class view">🗑 Clear</button>
                 <button onClick={() => setOpen(false)}
-                  className="rounded-lg bg-ink-800 px-3 py-1 text-xs font-semibold text-ink-300 hover:bg-ink-700"
+                  className="rounded-lg bg-slate-800 px-3 py-1 text-xs font-semibold text-slate-300 hover:bg-slate-700"
                   title="Close this panel — answers stay accessible via the 📋 Answers chip">Close</button>
-                <button onClick={() => setOpen(false)} className="grid h-8 w-8 place-items-center rounded-lg bg-ink-800 text-ink-300 hover:bg-ink-700">✕</button>
+                <button onClick={() => setOpen(false)} className="grid h-8 w-8 place-items-center rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700">✕</button>
               </div>
             </div>
             {/* Sticky count strip — always visible even after scrolling the table. */}
-            <div className="border-b border-ink-800 bg-ink-900/60 px-4 py-2 text-xs">
+            <div className="border-b border-slate-700 bg-slate-800/80 px-4 py-2 text-xs">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full bg-purple-500/25 px-2.5 py-0.5 font-semibold text-purple-100">
                   {rows.length} {rows.length === 1 ? "student" : "students"} answered
@@ -2620,7 +2620,7 @@ function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnTyp
                   </span>
                 )}
                 {unmarkedCount > 0 && rows.length > 0 && (
-                  <span className="rounded-full bg-ink-800 px-2.5 py-0.5 font-semibold text-ink-400">
+                  <span className="rounded-full bg-slate-800 px-2.5 py-0.5 font-semibold text-slate-400">
                     {unmarkedCount} unmarked
                   </span>
                 )}
@@ -2628,13 +2628,13 @@ function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnTyp
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
               {rows.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-ink-700 py-10 text-center text-sm text-ink-400">
+                <div className="rounded-xl border border-dashed border-slate-700 py-10 text-center text-sm text-slate-400">
                   No students answered.
                 </div>
               ) : (
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="text-left text-[11px] uppercase tracking-wider text-ink-400">
+                    <tr className="text-left text-[11px] uppercase tracking-wider text-slate-400">
                       <th className="pb-2 pr-3 font-medium">Student</th>
                       <th className="pb-2 pr-3 font-medium">Moves</th>
                       <th className="pb-2 pr-3 font-medium">Time</th>
@@ -2654,14 +2654,14 @@ function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnTyp
                       // some Safari/iOS builds render the modal's opacity as
                       // fully transparent, leaving text on a white overlay.
                       return (
-                        <tr key={a.userId} className={`border-t border-ink-800 bg-slate-950 align-top ${rowRing}`}>
+                        <tr key={a.userId} className={`border-t border-slate-700 align-top ${rowRing}`}>
                           <td className="py-2 pr-3 text-white">{a.displayName || a.userId}</td>
-                          <td className="py-2 pr-3 font-mono text-white whitespace-pre-wrap break-words">{
+                          <td className="py-2 pr-3 font-mono text-cyan-200 whitespace-pre-wrap break-words">{
                             (a.tree && a.tree.length > 0)
                               ? challengeTreeToPgn(a.tree, challenge.positionFen)
-                              : (a.movesSan.join(" ") || <span className="text-ink-500">—</span>)
+                              : (a.movesSan.join(" ") || <span className="text-slate-500">—</span>)
                           }</td>
-                          <td className="py-2 pr-3 text-[11px] tabular-nums text-ink-400 whitespace-nowrap">
+                          <td className="py-2 pr-3 text-[11px] tabular-nums text-slate-400 whitespace-nowrap">
                             {a.firstMoveAt && a.lastMoveAt ? `${Math.round((a.lastMoveAt - a.firstMoveAt)/1000)}s` : "—"}
                           </td>
                           <td className="py-2">
@@ -2669,12 +2669,12 @@ function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnTyp
                               <button
                                 onClick={() => mark(a.userId, a.correct === true ? null : true)}
                                 title={a.correct === true ? "Unmark" : "Mark correct"}
-                                className={`grid h-7 w-7 place-items-center rounded-lg text-xs font-bold transition ${a.correct === true ? "bg-emerald-500/70 text-white ring-2 ring-emerald-300" : "bg-ink-800 text-ink-400 hover:bg-emerald-500/20 hover:text-emerald-200"}`}
+                                className={`grid h-7 w-7 place-items-center rounded-lg text-xs font-bold transition ${a.correct === true ? "bg-emerald-500/70 text-white ring-2 ring-emerald-300" : "bg-slate-800 text-slate-400 hover:bg-emerald-500/20 hover:text-emerald-200"}`}
                               >✓</button>
                               <button
                                 onClick={() => mark(a.userId, a.correct === false ? null : false)}
                                 title={a.correct === false ? "Unmark" : "Mark wrong"}
-                                className={`grid h-7 w-7 place-items-center rounded-lg text-xs font-bold transition ${a.correct === false ? "bg-rose-500/70 text-white ring-2 ring-rose-300" : "bg-ink-800 text-ink-400 hover:bg-rose-500/20 hover:text-rose-200"}`}
+                                className={`grid h-7 w-7 place-items-center rounded-lg text-xs font-bold transition ${a.correct === false ? "bg-rose-500/70 text-white ring-2 ring-rose-300" : "bg-slate-800 text-slate-400 hover:bg-rose-500/20 hover:text-rose-200"}`}
                               >✗</button>
                             </div>
                           </td>
