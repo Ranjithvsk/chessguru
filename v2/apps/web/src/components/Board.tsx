@@ -198,10 +198,16 @@ export default function Board({
       viewOnly,
       lastMove,
       check: check ? turnColor : undefined,
-      movable: { color: movableColor, dests },
+      // showDests MUST be re-set here — chessground's default is TRUE, so
+      // any api.set() that touches `movable` without passing showDests can
+      // silently revert to showing the dest hints (owner report 2026-09-03:
+      // "when I click knight, it should not highlight possible move
+      // locations, still in shows"). Include it explicitly so the coach's
+      // click-highlight stays off after every re-render.
+      movable: { color: movableColor, dests, showDests: hideMoveHints ? false : showDests },
     });
     api.current?.cancelPremove();
-  }, [fen, orientation, turnColor, coordinates, viewOnly, lastMove, check, movableColor, dests, syncNonce]);
+  }, [fen, orientation, turnColor, coordinates, viewOnly, lastMove, check, movableColor, dests, syncNonce, hideMoveHints, showDests]);
 
   // shapes (hints / engine arrows)
   useEffect(() => {
