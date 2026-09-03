@@ -588,7 +588,41 @@ function LiveHeaderBits({ room, role }: { room: string; role: "coach" | "student
   const { localParticipant } = useLocalParticipant();
   const me = localParticipant?.identity ?? "";
   const [copied, setCopied] = useState(false);
-  const [rosterOpen, setRosterOpen] = useState(false);
+  // rosterOpen closes on click-away in dropdown mode; in pinned mode the panel
+  // stays open across page reloads (owner 2026-09-03: "if pinned it becomes
+  // floatable, and keeps open and floatable, so coach move it to not
+  // disturbing place"). Both states persist to localStorage per-user.
+  const [rosterPinned, setRosterPinned] = useState<boolean>(() => {
+    try { return localStorage.getItem("cg-roster-pin") === "1"; } catch { return false; }
+  });
+  const [rosterPos, setRosterPos] = useState<{ x: number; y: number }>(() => {
+    try {
+      const raw = localStorage.getItem("cg-roster-pos");
+      if (raw) { const p = JSON.parse(raw); if (Number.isFinite(p?.x) && Number.isFinite(p?.y)) return p; }
+    } catch { /* */ }
+    return { x: Math.max(16, window.innerWidth - 260), y: 120 };
+  });
+  const [rosterOpen, setRosterOpen] = useState<boolean>(rosterPinned);
+  useEffect(() => { try { localStorage.setItem("cg-roster-pin", rosterPinned ? "1" : "0"); } catch { /* */ } }, [rosterPinned]);
+  useEffect(() => { try { localStorage.setItem("cg-roster-pos", JSON.stringify(rosterPos)); } catch { /* */ } }, [rosterPos]);
+  // Drag handle — pointerdown on the header captures + moves. Clamped to
+  // viewport so the panel can't be dragged fully offscreen.
+  const dragRef = useRef<{ dx: number; dy: number; pid: number } | null>(null);
+  const onDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!rosterPinned) return;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    dragRef.current = { dx: e.clientX - rosterPos.x, dy: e.clientY - rosterPos.y, pid: e.pointerId };
+  };
+  const onDragMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current; if (!d || d.pid !== e.pointerId) return;
+    const w = 240, h = 200;   // approx panel size for clamping
+    const x = Math.max(4, Math.min(window.innerWidth - w - 4, e.clientX - d.dx));
+    const y = Math.max(4, Math.min(window.innerHeight - h - 4, e.clientY - d.dy));
+    setRosterPos({ x, y });
+  };
+  const onDragEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pid === e.pointerId) dragRef.current = null;
+  };
   // Track who has been kicked from THIS session so the roster shows a
   // "kicked" pill instead of vanishing (LiveKit removes their tile from
   // useParticipants once the token is denied; the roster snapshot is
@@ -652,11 +686,38 @@ function LiveHeaderBits({ room, role }: { room: string; role: "coach" | "student
         </button>
         {rosterOpen && (
           <>
-            {/* click-away closer */}
-            <div className="fixed inset-0 z-40" onClick={() => setRosterOpen(false)} />
-            <div className="absolute right-0 top-full z-50 mt-1 w-[240px] overflow-hidden rounded-xl border border-ink-700 bg-ink-900/95 shadow-2xl backdrop-blur">
-              <div className="border-b border-ink-800 bg-ink-800/60 px-3 py-2 text-xs font-semibold text-white">
-                In the room · {participants.length}
+            {/* click-away closer only when NOT pinned — pinned panels stay
+             *  open until the coach clicks × or un-pins. */}
+            {!rosterPinned && <div className="fixed inset-0 z-40" onClick={() => setRosterOpen(false)} />}
+            <div
+              className={
+                rosterPinned
+                  ? "fixed z-50 w-[240px] overflow-hidden rounded-xl border border-ink-700 bg-ink-900/95 shadow-2xl backdrop-blur"
+                  : "absolute right-0 top-full z-50 mt-1 w-[240px] overflow-hidden rounded-xl border border-ink-700 bg-ink-900/95 shadow-2xl backdrop-blur"
+              }
+              style={rosterPinned ? { left: rosterPos.x, top: rosterPos.y } : undefined}
+            >
+              <div
+                onPointerDown={onDragStart}
+                onPointerMove={onDragMove}
+                onPointerUp={onDragEnd}
+                onPointerCancel={onDragEnd}
+                className={`flex items-center justify-between border-b border-ink-800 bg-ink-800/60 px-3 py-2 text-xs font-semibold text-white ${rosterPinned ? "cursor-move select-none" : ""}`}
+                title={rosterPinned ? "Drag to move" : undefined}
+              >
+                <span>In the room · {participants.length}</span>
+                <span className="flex items-center gap-1">
+                  <button
+                    onClick={() => setRosterPinned((v) => !v)}
+                    title={rosterPinned ? "Unpin — go back to dropdown" : "Pin — float above the board so it stays open"}
+                    className={`grid h-6 w-6 place-items-center rounded ${rosterPinned ? "bg-brand-500/30 text-brand-100" : "text-ink-300 hover:bg-ink-700"}`}
+                  >📌</button>
+                  <button
+                    onClick={() => setRosterOpen(false)}
+                    title="Close"
+                    className="grid h-6 w-6 place-items-center rounded text-ink-300 hover:bg-ink-700"
+                  >×</button>
+                </span>
               </div>
               <ul className="max-h-72 overflow-y-auto py-1">
                 {rows.length === 0 && <li className="px-3 py-2 text-xs text-ink-500">No one yet.</li>}
