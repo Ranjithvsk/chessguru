@@ -202,30 +202,49 @@ export default function Board({
   // Guard: skip the fen field when chessground's internal FEN already
   // matches (which is exactly the "stale prop" case). Movable + shapes
   // still get updated; only the position is left alone.
+  // Split into TWO effects so a stale fen prop can never accidentally reset
+  // chessground's live position mid-move (owner report 2026-09-03: piece
+  // moves to e3, back to e1, forward to e3 again). The old single effect
+  // fired on EVERY dep change (dests is a new Map every parent render); if
+  // it happened to run between chessground's local `after` event and the
+  // WS state arriving, api.set({fen: stale-e1}) reverse-animated chess-
+  // ground back before the fresh fen catch up bounced it forward.
+  //
+  // Effect 1: sync the FEN. Fires only when the fen prop actually changes.
+  // A ref tracks the last piece-placement we sent so back-to-back same-
+  // position updates don't re-apply (avoids chessground's own diff dance).
+  const lastAppliedBoardRef = useRef<string>("");
   useEffect(() => {
     if (!api.current) return;
-    const cgFen = api.current.getFen?.();
-    const same = typeof cgFen === "string" && cgFen.split(" ")[0] === fen.split(" ")[0];
+    const propBoard = fen.split(" ")[0];
+    if (propBoard === lastAppliedBoardRef.current) return;
+    lastAppliedBoardRef.current = propBoard;
+    // Only include the fen field — chessground's set() picks anim vs
+    // render based on whether config.fen is present, so passing it here
+    // keeps the animation on genuine position updates (server-driven or
+    // remote-user moves).
+    api.current.set({ fen, lastMove });
+  }, [fen, lastMove]);
+
+  // Effect 2: sync everything BUT the fen. Fires on any of the non-position
+  // deps. Never touches fen so the position can't be dragged back by a
+  // stale prop.
+  useEffect(() => {
+    if (!api.current) return;
     api.current.set({
-      // Skip fen when the board is already showing this position — avoids
-      // the reverse-animation bounce described above.
-      ...(same ? {} : { fen }),
       orientation,
       turnColor,
       coordinates,
       viewOnly,
-      lastMove,
       check: check ? turnColor : undefined,
-      // showDests MUST be re-set here — chessground's default is TRUE, so
-      // any api.set() that touches `movable` without passing showDests can
-      // silently revert to showing the dest hints (owner report 2026-09-03:
-      // "when I click knight, it should not highlight possible move
-      // locations, still in shows"). Include it explicitly so the coach's
-      // click-highlight stays off after every re-render.
+      // showDests re-passed explicitly — chessground's default is TRUE,
+      // and any api.set({movable:{...}}) that omits it can silently
+      // revert (owner report 2026-09-03: coach's dest hints kept showing
+      // even after hideMoveHints:true).
       movable: { color: movableColor, dests, showDests: hideMoveHints ? false : showDests },
     });
     api.current.cancelPremove();
-  }, [fen, orientation, turnColor, coordinates, viewOnly, lastMove, check, movableColor, dests, syncNonce, hideMoveHints, showDests]);
+  }, [orientation, turnColor, coordinates, viewOnly, check, movableColor, dests, syncNonce, hideMoveHints, showDests]);
 
   // shapes (hints / engine arrows)
   useEffect(() => {
@@ -252,8 +271,16 @@ export default function Board({
     ? (pending?.color === "white" ? ["q", "n", "r", "b"] : ["q", "n", "r", "b"])
     : (pending?.color === "white" ? ["b", "r", "n", "q"] : ["b", "r", "n", "q"]);
 
+  // Belt-and-suspenders for hideMoveHints — even though we set
+  // movable.showDests:false via chessground config, some code paths
+  // (a config replay, a race, chessground defaults reasserting) can let
+  // the .move-dest / .premove-dest overlays sneak back. A pure-CSS
+  // suppression on the wrapper class is a hard guarantee: those dots
+  // never render, regardless of chessground state. Owner report
+  // 2026-09-03 kept seeing hints even after every JS-side fix.
+  const wrapClass = `cg-board-wrap ${blindfold ? "blindfold" : ""} ${hideMoveHints ? "cg-no-dests" : ""} ${className}`;
   return (
-    <div className={`cg-board-wrap ${blindfold ? "blindfold" : ""} ${className}`} style={{ position: "relative" }}>
+    <div className={wrapClass} style={{ position: "relative" }}>
       <div ref={el} style={{ width: "100%", height: "100%" }} />
       {pending && pickerPos && (
         <div

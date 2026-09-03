@@ -184,6 +184,22 @@ html.light [class*="bg-green-"].text-white,
 html.light [class*="bg-blue-"] .text-white,
 html.light [class*="bg-blue-"].text-white { color: #fff; }
 
+/* Hard-suppress chessground's move-hint overlays for boards that want to
+ * hide them (coach board — owner ask 2026-09-03: "when I click knight, it
+ * should not highlight possible move locations"). Belt-and-suspenders next
+ * to the JS-side movable.showDests:false — chessground's default can
+ * silently reassert TRUE across api.set() calls; the CSS rule is a hard
+ * override regardless of chessground state. Includes both live move-dest
+ * dots and premove-dest dots so premove hovers don't sneak them back. */
+.cg-board-wrap.cg-no-dests square.move-dest,
+.cg-board-wrap.cg-no-dests square.premove-dest,
+.cg-board-wrap.cg-no-dests square.oc {
+  background: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  pointer-events: auto !important;
+}
+
 /* board wrapper keeps a clean square that scales with its container */
 .cg-board-wrap {
   position: relative;
