@@ -188,10 +188,28 @@ export default function Board({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // sync on prop changes
+  // sync on prop changes.
+  // TRICKY: this useEffect fires on ANY dep change (dests is a new Map
+  // every render, so it fires almost every render). If chessground has
+  // just processed a local move via `after` and our React state hasn't
+  // updated yet, the fen prop is STALE — calling api.set({fen: stale})
+  // makes chessground reverse-animate the piece back to its old square.
+  // A moment later the WS state arrives, fen updates, and chessground
+  // animates it forward again. User sees the piece move e1→e3→e1→e3
+  // (owner report 2026-09-03: "when i click rook on e1 and click e3,
+  // rook moves to e3 then e1 and e3 again fast why?").
+  //
+  // Guard: skip the fen field when chessground's internal FEN already
+  // matches (which is exactly the "stale prop" case). Movable + shapes
+  // still get updated; only the position is left alone.
   useEffect(() => {
-    api.current?.set({
-      fen,
+    if (!api.current) return;
+    const cgFen = api.current.getFen?.();
+    const same = typeof cgFen === "string" && cgFen.split(" ")[0] === fen.split(" ")[0];
+    api.current.set({
+      // Skip fen when the board is already showing this position — avoids
+      // the reverse-animation bounce described above.
+      ...(same ? {} : { fen }),
       orientation,
       turnColor,
       coordinates,
@@ -206,7 +224,7 @@ export default function Board({
       // click-highlight stays off after every re-render.
       movable: { color: movableColor, dests, showDests: hideMoveHints ? false : showDests },
     });
-    api.current?.cancelPremove();
+    api.current.cancelPremove();
   }, [fen, orientation, turnColor, coordinates, viewOnly, lastMove, check, movableColor, dests, syncNonce, hideMoveHints, showDests]);
 
   // shapes (hints / engine arrows)
