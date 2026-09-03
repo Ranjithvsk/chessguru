@@ -656,6 +656,17 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       // synchronous "intendedRole===coach && !room.coach" path failed when
       // the old ws's close event hadn't fired yet, so room.coach still
       // pointed at the dead socket and coach fell through to student.
+      // Stale-socket detection: if room.coach still points at a socket whose
+      // readyState isn't OPEN, treat it as gone. Owner report 2026-09-03:
+      // 'when coach abandoned the Dream Meet class and re-login, coach is
+      // shown Join class but cant join'. Half-open TCP connections (network
+      // drop, no FIN) can keep room.coach pointing at a dead socket for
+      // MINUTES before the OS-level timeout fires, during which time the
+      // coach's re-login hits the `else` branch and gets student role.
+      if (room.coach && room.coach.readyState !== WebSocket.OPEN) {
+        try { room.coach.close(1000, "stale_coach_socket"); } catch { /* */ }
+        room.coach = null;
+      }
       let resolvedSynchronously = false;
       if (frame.coachToken && room.coachToken && frame.coachToken === room.coachToken) {
         socketRole.set(ws, "coach"); room.coach = ws;
@@ -677,6 +688,18 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         socketRole.set(ws, "student");
         send({ type: "role", role: "student" });
       }
+      // Diagnostic log so future 'coach cant rejoin' reports have a trace.
+      try {
+        console.log("[class-ws.hello]", roomId, {
+          intendedRole: frame.intendedRole,
+          hasFrameToken: !!frame.coachToken,
+          hasRoomToken: !!room.coachToken,
+          tokenMatch: frame.coachToken && room.coachToken && frame.coachToken === room.coachToken,
+          roomCoach: !!room.coach,
+          resolvedRole: socketRole.get(ws),
+          userId: typeof frame.userId === "string" ? frame.userId.slice(0, 40) : null,
+        });
+      } catch { /* silent */ }
       // Session-based coach re-auth. If the caller's session identifies them
       // as the class's creator (or academy_owner), promote to coach even if
       // the token didn't match — covers "coach refresh, room.coach stale
@@ -688,15 +711,23 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         if (uidForCoach && dbConn?.db) {
           void (async () => {
             try {
-              const [klass, announce] = await Promise.all([
+              const [klass, announce, user] = await Promise.all([
                 dbConn!.db!.collection("classSchedules").findOne({ _id: roomId as any }, { projection: { createdByUserId: 1, academyId: 1 } }),
                 dbConn!.db!.collection("classLiveAnnouncements").findOne({ _id: roomId as any }, { projection: { coachUserId: 1, academyId: 1 } }),
+                dbConn!.db!.collection("users").findOne({ _id: uidForCoach as any }, { projection: { role: 1, academyId: 1 } }),
               ]);
               const creator: string | null = (klass as any)?.createdByUserId ?? (announce as any)?.coachUserId ?? null;
-              if (creator && creator === uidForCoach) {
-                // Boot the stale coach socket (if the pointer is a dead one
-                // it's a no-op close; if it's a live one, this is a coach
-                // takeover — same behaviour as re-claim after End Class).
+              const classAcademy: string | null = (klass as any)?.academyId ?? (announce as any)?.academyId ?? null;
+              const uRole: string = String((user as any)?.role || "");
+              const uAcademy: string | null = (user as any)?.academyId ?? null;
+              // Promote if: creator match OR academy_owner of the class's
+              // academy OR a coach of the class's academy. Owner report
+              // 2026-09-03: 'coach cant rejoin' — the original check was
+              // creator-exact only, so an academy_owner picking up an
+              // abandoned session for a coach who left couldn't reclaim.
+              const isOriginalCoach = creator && creator === uidForCoach;
+              const isAcademyElder = uAcademy && classAcademy && uAcademy === classAcademy && (uRole === "academy_owner" || uRole === "coach");
+              if (isOriginalCoach || isAcademyElder) {
                 if (room.coach && room.coach !== ws) {
                   try { room.coach.close(1000, "coach_takeover"); } catch { /* */ }
                 }
@@ -705,6 +736,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
                 room.coach = ws;
                 send({ type: "role", role: "coach", coachToken: room.coachToken });
                 scheduleRoomSave(roomId);
+                try { console.log("[class-ws.hello] async coach promote", roomId, { uidForCoach: uidForCoach.slice(0, 40), reason: isOriginalCoach ? "creator" : "academy_elder" }); } catch { /* */ }
               }
             } catch { /* silent — student role stays */ }
           })();
