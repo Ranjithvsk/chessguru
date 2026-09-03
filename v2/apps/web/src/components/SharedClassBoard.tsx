@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Chess, validateFen } from "chess.js";
 import type { Key } from "chessground/types";
 import Board from "./Board";
-import { AnnotationToolbar, applyAnnotationClick, computeAttackShapes, computePinShapes, useAnnotationTool, type AnnotShape } from "./AnnotationToolbar";
+import { AnnotationToolbar, applyAnnotationClick, useAnnotationTool, type AnnotShape } from "./AnnotationToolbar";
 
 type BoardMove = { from: string; to: string; promotion?: string };
 
@@ -1512,37 +1512,22 @@ export default function SharedClassBoard(
         lastMove={inChallenge && !isCoachRole ? null : lastMoveTuple}
         onMove={(f, t) => sendMove(String(f), String(t))}
         coordinates
-        shapes={inChallenge && !isCoachRole
-          ? [] as any
-          // Combine user annotations with the attack overlay (Phase 2).
-          // Attack shapes are LOCAL — not broadcast (each user toggles
-          // their own view). Rendered last so they draw on top.
-          : ([
-              ...(shapes as any[]),
-              ...(annotTool.attackMode && annotTool.attackShownFrom ? computeAttackShapes(displayFen, annotTool.attackShownFrom) : []),
-              ...(annotTool.pinsMode ? computePinShapes(displayFen) : []),
-            ] as any)}
+        // Attack + pins overlays REMOVED from Dream Meet (owner ask
+        // 2026-09-03: 'disable attack + pins overlay for coach by default,
+        // no need this option itself'). Coaches were seeing circles on
+        // possible-move squares every time they clicked a piece — those
+        // overlays were leaking in from the /openings toolbar's localStorage
+        // (useAnnotationTool reads its initial attackMode/pinsMode from LS).
+        // Class board renders ONLY user-drawn shapes (right-click arrows +
+        // circles from the annotation toolbar) — no auto-overlays.
+        shapes={inChallenge && !isCoachRole ? ([] as any) : (shapes as any)}
         onShapesChange={(s) => sendAnnot(s as any)}
         onSelect={(key) => {
           const sq = String(key);
-          // Attack overlay: cursor mode + attack on + click a piece →
-          // show its attacks. Clicking the same source clears; clicking
-          // a different piece switches; clicking an empty square clears.
-          if (annotTool.tool === "cursor" && annotTool.attackMode) {
-            try {
-              const c = new Chess(displayFen);
-              const piece = c.get(sq as any);
-              if (!piece) {
-                annotTool.setAttackShownFrom(null);
-                return;
-              }
-              annotTool.setAttackShownFrom(annotTool.attackShownFrom === sq ? null : sq);
-            } catch { /* */ }
-            return;
-          }
-          // Annotation tools route through this: when a tool is active,
-          // build the next shape list + push it through sendAnnot so it
-          // broadcasts + persists like a chessground-drawn shape.
+          // Attack-overlay branch REMOVED with the shapes overlay above
+          // (owner ask 2026-09-03). Class board's onSelect now only
+          // routes cursor-mode clicks through the drawing tools.
+          //
           // Coach-only: students don't draw (owner 2026-09-02); guards
           // against a stale localStorage tool value causing accidental
           // student draws now that the toolbar is hidden for them.
