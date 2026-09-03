@@ -1443,10 +1443,15 @@ export default function SharedClassBoard(
   const shapesRef = useRef<AnnotShape[]>([]);
   useEffect(() => { shapesRef.current = shapes; }, [shapes]);
   const sendAnnot = (next: AnnotShape[]) => {
-    if (next.length === 0 && shapesRef.current.length > 0 && !userClearRef.current) {
-      // Reassert our authoritative shapes on chessground on next render by
-      // bumping the state to a new array reference — Board's shapes-sync
-      // useEffect will re-set them.
+    // Phantom-empty guard: chessground occasionally fires onChange([]) after
+    // a left-click that has nothing to do with drawing (owner report 2026:
+    // "arrows vanish the moment coach clicks anywhere"). We only want to
+    // reassert when going from MANY shapes to zero in a single event — a
+    // real right-click erase only removes ONE shape at a time, so a 1→0
+    // transition is a legitimate user action and must pass through.
+    // Owner report 2026-09-03: single-highlight right-click wasn't
+    // vanishing because the old ">0" threshold caught the last shape too.
+    if (next.length === 0 && shapesRef.current.length >= 2 && !userClearRef.current) {
       setShapes([...shapesRef.current]);
       return;
     }
@@ -1482,6 +1487,12 @@ export default function SharedClassBoard(
         orientation={orientation}
         movableColor={boardMovable}
         dests={boardMovable === "none" ? (new Map() as any) : (displayDests as any)}
+        // Coach board hides click-to-select (source highlight + dest dots).
+        // Owner ask 2026-09-03: 'when coach click piece, it highlight the
+        // possible move for that piece, remove that'. Coach still moves
+        // via drag. Students keep click-to-select so touch users can tap
+        // to move.
+        hideMoveHints={isCoachRole && !inChallenge}
         lastMove={inChallenge && !isCoachRole ? null : lastMoveTuple}
         onMove={(f, t) => sendMove(String(f), String(t))}
         coordinates

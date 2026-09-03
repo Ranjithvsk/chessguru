@@ -31,6 +31,13 @@ export interface BoardProps {
   premovable?: boolean;
   /** Show chessground's legal-move dots when a piece is selected. Default false. */
   showDests?: boolean;
+  /** When true, clicking a piece does NOT select it — no selected-square
+   *  highlight, no destination hints. Piece can still be moved by dragging.
+   *  Used by the Dream Meet coach board (owner ask 2026-09-03: "when coach
+   *  click piece, it highlight the possible move for that piece, remove
+   *  that"). Default false — most surfaces want the normal click-to-select
+   *  UX (touch devices, students, puzzles). */
+  hideMoveHints?: boolean;
   onSelect?: (key: Key) => void;
   className?: string;
   /** Force chessground to re-apply the current fen when this value changes,
@@ -58,6 +65,7 @@ export default function Board({
   premovable = false,
   onSelect,
   showDests = false,
+  hideMoveHints = false,
   className = "",
   syncNonce,
 }: BoardProps) {
@@ -128,7 +136,10 @@ export default function Board({
         free: false,
         color: movableColor,
         dests,
-        showDests, // caller opts in (practice pages set true)
+        // hideMoveHints wins: coach board wants zero visual feedback on
+        // click. Otherwise honour the caller's opt-in (practice pages set
+        // true so students see destination dots).
+        showDests: hideMoveHints ? false : showDests,
         events: { after: (from, to) => handleAfter(from, to) },
       },
       premovable: {
@@ -136,6 +147,10 @@ export default function Board({
         showDests: true,
         events: { set: (orig, dest) => onPremoveRef.current?.(orig, dest) },
       },
+      // selectable stays ON regardless — disabling it kills tap-to-move
+      // on touch (owner report 2026-09-03: "now coach also cant move"
+      // after I tried selectable:false to hide the click hints). Dest
+      // hints alone are enough to hide via movable.showDests above.
       selectable: { enabled: true },
       events: { select: (key) => onSelectRef.current?.(key) },
       // drawable.onChange fires when the USER draws/erases shapes via right-click.

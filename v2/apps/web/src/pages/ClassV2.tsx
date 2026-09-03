@@ -2253,10 +2253,10 @@ export default function ClassV2Page() {
                 {role === "coach" && (
                   <button
                     onClick={() => setAudiencePickerOpen(true)}
-                    title="Change who can join this class + who gets notified"
+                    title="Change which students can join this class + who gets notified"
                     className="rounded-full border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm font-semibold text-ink-100 hover:bg-ink-800"
                   >
-                    🎯 Audience
+                    🎯 Students
                   </button>
                 )}
                 {role === "coach" && (
@@ -2535,10 +2535,17 @@ function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnTyp
                       const rowRing =
                         a.correct === true  ? "border-l-2 border-emerald-400/70" :
                         a.correct === false ? "border-l-2 border-rose-400/70" : "";
+                      // Explicit solid dark row bg + white/high-contrast text
+                      // so the moves stay legible on every device (owner report
+                      // 2026-09-03: "student answer panel has white text and
+                      // background is also white, how it'll be visible"). Was
+                      // relying on the modal's bg-ink-950 to bleed through —
+                      // some Safari/iOS builds render the modal's opacity as
+                      // fully transparent, leaving text on a white overlay.
                       return (
-                        <tr key={a.userId} className={`border-t border-ink-800 align-top ${rowRing}`}>
+                        <tr key={a.userId} className={`border-t border-ink-800 bg-ink-950 align-top ${rowRing}`}>
                           <td className="py-2 pr-3 text-white">{a.displayName || a.userId}</td>
-                          <td className="py-2 pr-3 font-mono text-brand-200 whitespace-pre-wrap break-words">{
+                          <td className="py-2 pr-3 font-mono text-white whitespace-pre-wrap break-words">{
                             (a.tree && a.tree.length > 0)
                               ? challengeTreeToPgn(a.tree, challenge.positionFen)
                               : (a.movesSan.join(" ") || <span className="text-ink-500">—</span>)
