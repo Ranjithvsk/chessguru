@@ -870,6 +870,16 @@ export default function SharedClassBoard(
         if (msg.type === "pong") return;   // heartbeat reply, no-op
         if (msg.type === "state") {
           applyFen(msg.fen, msg.lastMove ?? null);
+          // Coach set up a new position (loadFen / reset): server broadcasts
+          // state with empty tree + fresh startFen. Clear any lingering
+          // challenge residue so a student who just finished the previous
+          // challenge doesn't keep seeing '📝 Show my answer' on the new
+          // position. Owner report 2026-09-03: 'even after coach setup new
+          // position, why students has option to see, show my answer'.
+          const isBoardReset = Array.isArray(msg.tree) && msg.tree.length === 0;
+          if (isBoardReset && _challenge && !_challenge.active) {
+            _publishChallenge(null);
+          }
           setShapes(Array.isArray(msg.shapes) ? msg.shapes : []);
           _publishStartShapes(Array.isArray(msg.startShapes) ? msg.startShapes : []);
           const hist: SharedMove[] = Array.isArray(msg.history) ? msg.history : [];

@@ -1124,14 +1124,24 @@ function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "stu
   };
 
   // Build a Lichess-style two-column table for the MAINLINE (child[0] chain).
+  //
+  // vars for a cell must be alternatives AT THAT PLY — i.e., the SIBLINGS of
+  // the mainline node in the current level of the tree. Owner report
+  // 2026-09-03: 'after 4th move of black, branch opens, its showing after
+  // 4th move, it should show after 5th move'. Old code used
+  // node.children.slice(1) which are alternatives for the NEXT ply (e.g.,
+  // alternatives for white 5 attached to black 4's row instead of white 5's).
+  // Now we walk with a `siblings` pointer at each depth so the vars land in
+  // the correct row.
   const mainRows = useMemo(() => {
     type Cell = { node: EnrichedNode; vars: EnrichedNode[] } | null;
     type Row = { moveNo: number; white: Cell; black: Cell };
     const rows: Row[] = [];
-    let node: EnrichedNode | undefined = enriched.nodes[0];
+    let siblingArr: EnrichedNode[] = enriched.nodes;
+    let node: EnrichedNode | undefined = siblingArr[0];
     let curRow: Row | null = null;
     while (node) {
-      const vars = node.children.slice(1);
+      const vars = siblingArr.slice(1);
       if (node.turn === "w") {
         curRow = { moveNo: node.moveNo, white: { node, vars }, black: null };
         rows.push(curRow);
@@ -1143,7 +1153,11 @@ function ClassNotationPanel({ room, role }: { room: string; role: "coach" | "stu
           curRow.black = { node, vars };
         }
       }
-      node = node.children[0];
+      // Descend into the mainline continuation — siblings at the next depth
+      // are node.children[1..] (kids of the current mainline that aren't the
+      // mainline continuation itself).
+      siblingArr = node.children;
+      node = siblingArr[0];
     }
     return rows;
   }, [enriched.nodes]);
