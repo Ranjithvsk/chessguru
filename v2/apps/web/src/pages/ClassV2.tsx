@@ -2281,7 +2281,9 @@ export default function ClassV2Page() {
               {!hideVideo && <CameraPIPMaybe />}
               <CoachWaitingOverlay room={room} role={role} />
               <HandsRoster />
-              <ReactionOverlay />
+              {/* ReactionOverlay + ReactionsBar removed 2026-09-03 (owner:
+               *  "remove emoji panel, for coach and students"). Components
+               *  left in the file dead for now — sweep in a later cleanup. */}
               <ChatPanelHost />
               {/* Always-mounted chat receiver — feeds the module store so the
                *  toggle badge + toast pop even when the panel is closed. */}
@@ -2351,7 +2353,6 @@ export default function ClassV2Page() {
                 </button>
                 <HandRaiseButton />
                 <ChatToggleButton />
-                <ReactionsBar />
                 <CoachBoardNav readOnly={role !== "coach"} />
                 {/* 📩 Private DM to the coach — student-only. Opens a small
                  *  dialog to send one message; coach receives the standard
