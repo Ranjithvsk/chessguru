@@ -20,6 +20,12 @@ export class StudiesController {
   @Get()
   list(@Req() req: any) { return this.svc.listMine(req?.session); }
 
+  // Trash — owner-only list of soft-deleted studies (owner ask 2026-09-03).
+  // Kept BEFORE the :sid routes so "/studies/trash" isn't caught by the
+  // dynamic :sid handler.
+  @Get("trash")
+  listTrash(@Req() req: any) { return this.svc.listTrash(req?.session); }
+
   @Post()
   create(@Body() body: any, @Req() req: any) { return this.svc.create(req?.session, body); }
 
@@ -33,6 +39,10 @@ export class StudiesController {
 
   @Delete(":sid")
   remove(@Param("sid") sid: string, @Req() req: any) { return this.svc.remove(req?.session, sid); }
+
+  // Restore a soft-deleted study (owner-only). Pairs with @Delete above.
+  @Post(":sid/restore")
+  restore(@Param("sid") sid: string, @Req() req: any) { return this.svc.restore(req?.session, sid); }
 
   @Post(":sid/chapters")
   addChapter(@Param("sid") sid: string, @Body() body: any, @Req() req: any) {

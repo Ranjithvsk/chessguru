@@ -44,6 +44,8 @@ export interface StudySummary {
   sourceBook?: SourceBook;
   createdAt: string;
   updatedAt: string;
+  // Only present in the trash listing (server strips it from the live list).
+  deletedAt?: string;
 }
 
 export interface ChapterSummary {
@@ -78,6 +80,14 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 
 export const studiesApi = {
   list: () => req<{ items: StudySummary[] }>("GET", "/api/studies"),
+
+  // Trash — soft-deleted studies the caller can restore (owner-only).
+  // Server sorts by deletedAt desc so newest deletions show first.
+  listTrash: () => req<{ items: StudySummary[] }>("GET", "/api/studies/trash"),
+
+  // Restore a soft-deleted study — clears its deletedAt flag.
+  restore: (sid: string) =>
+    req<{ ok: boolean; alreadyLive?: boolean }>("POST", `/api/studies/${encodeURIComponent(sid)}/restore`),
 
   create: (body: {
     title?: string; intent?: Intent; visibility?: Visibility;

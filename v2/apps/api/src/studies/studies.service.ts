@@ -264,6 +264,38 @@ export class StudiesService {
     return { bookId, chapterNumber, topicTags };
   }
 
+  // Owner-only view of soft-deleted studies for the restore UI (2026-09-03).
+  // Only returns studies the caller OWNS — shared/academy visibility doesn't
+  // extend to the trash, since it's a personal recovery affordance.
+  async listTrash(session: any) {
+    const { userId } = this.ensureUser(session);
+    const rows = await this.studies()
+      .find({ ownerId: userId, deletedAt: { $exists: true } } as any, { projection: { moves: 0 } })
+      .sort({ deletedAt: -1 } as any)
+      .limit(200)
+      .toArray();
+    return { items: rows };
+  }
+
+  // Clear deletedAt on a soft-deleted study. Chapters retain their own
+  // deletedAt flags (chapter-level delete uses a separate mechanism) — a
+  // future per-chapter restore can add that; for now restore covers the
+  // study-level accidental-delete case the owner asked for.
+  async restore(session: any, studyId: string) {
+    const { userId } = this.ensureUser(session);
+    // loadForWrite filters out deleted rows, so we bypass it here and check
+    // ownership + deletedAt directly.
+    const s = await this.studies().findOne({ _id: studyId } as any);
+    if (!s) throw new NotFoundException("no such study");
+    if ((s as any).ownerId !== userId) throw new ForbiddenException("only the owner can restore this study");
+    if (!(s as any).deletedAt) return { ok: true, alreadyLive: true };
+    await this.studies().updateOne(
+      { _id: studyId } as any,
+      { $unset: { deletedAt: "" }, $set: { updatedAt: new Date() } } as any,
+    );
+    return { ok: true };
+  }
+
   async remove(session: any, studyId: string) {
     const { userId } = this.ensureUser(session);
     await this.loadForWrite(studyId, userId);

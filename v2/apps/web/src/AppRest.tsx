@@ -84,6 +84,7 @@ import AdminDomainsPage from "./pages/AdminDomains";
 import AcademyBrandingPage from "./pages/AcademyBranding";
 import TenantHomePage from "./pages/TenantHome";
 import StudiesListPage from "./pages/StudiesList";
+import StudiesTrashPage from "./pages/StudiesTrash";
 import StudyCreatePage from "./pages/StudyCreate";
 import StudyViewPage from "./pages/StudyView";
 import StudyChapterEditPage from "./pages/StudyChapterEdit";
@@ -196,6 +197,7 @@ export default function AppRest() {
         <Route path="a/:slug" element={<TenantHomePage />} />
         <Route path="daily" element={<DailyPage />} />
         <Route path="studies" element={<StudiesListPage />} />
+        <Route path="studies/trash" element={<StudiesTrashPage />} />
         <Route path="studies/new" element={<StudyCreatePage />} />
         <Route path="studies/:sid" element={<StudyViewPage />} />
         <Route path="studies/:sid/edit/:cid" element={<StudyChapterEditPage />} />

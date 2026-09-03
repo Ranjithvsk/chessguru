@@ -47,10 +47,17 @@ export default function StudiesListPage() {
           <h1 className="font-display text-2xl text-white">My Studies</h1>
           <p className="text-sm text-ink-400">Analyze games, teach concepts, build opening notes.</p>
         </div>
-        <Link to="/studies/new"
-          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-500 shadow-glow">
-          + New study
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link to="/studies/trash"
+            className="rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800"
+            title="Recover recently-deleted studies">
+            🗑 Trash
+          </Link>
+          <Link to="/studies/new"
+            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-500 shadow-glow">
+            + New study
+          </Link>
+        </div>
       </div>
 
       {list.isLoading && <div className="text-sm text-ink-400">Loading…</div>}
