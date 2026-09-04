@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { NavLink, useLocation } from "react-router-dom";
 import InstallButton from "./InstallButton";
 import { useTheme } from "../hooks/useTheme";
@@ -414,8 +415,14 @@ export default function Navbar({ rating, ratingProvisional, username, admin, onL
       </nav>
 
       {/* Left slide-in drawer + dim backdrop. Renders when open so pathname-close
-          in the effect above still cleans up between routes. */}
-      {menuOpen && (
+          in the effect above still cleans up between routes.
+
+          Portalled to <body> on purpose: this <header> has `backdrop-blur`, and
+          a backdrop-filter makes an element the containing block for its `fixed`
+          descendants. Nested here, the backdrop's top-14/bottom-0 resolved
+          against the 56px-tall header and collapsed to zero height — invisible,
+          and impossible to click, so tapping outside never closed the drawer. */}
+      {menuOpen && createPortal(
         <>
           <div className="fixed inset-0 top-14 z-40 bg-black/50 backdrop-blur-sm"
             onClick={() => setMenuOpen(false)} aria-hidden="true" />
@@ -452,7 +459,8 @@ export default function Navbar({ rating, ratingProvisional, username, admin, onL
               )}
             </div>
           </aside>
-        </>
+        </>,
+        document.body,
       )}
     </header>
   );
