@@ -44,3 +44,57 @@ itself (including the ✕ toggle) stays clickable.
 ## Note for future work
 Any other `position: fixed` child of a `backdrop-blur` container has this bug.
 Portal such overlays to `document.body`.
+
+## Codebase-wide audit for the same bug
+
+Owner: "check the same issue in other places also".
+
+**Result: Navbar was the only real instance.**
+
+A source audit flagged nine more overlays in Dream Meet — `AudiencePickerModal`,
+`SendPositionModal`, `TeachOpeningModal`, `PositionEditorModal`, `ChatToastStack`,
+`ChallengeMarkToastHost`, `ChallengeRibbon`, `StudentAnswerReviewRibbon`,
+`ChallengeScratchpad` — all nested inside `ClassV2.tsx:2389`:
+
+    <div className="relative flex min-h-0 flex-1 ..." style={{ containerType: 'size' }}>
+
+The reasoning was that `container-type: size` applies `contain: size layout style`,
+and layout containment creates a containing block for `fixed` descendants.
+
+**That is wrong in practice.** Measured directly in Chrome 153 — a 300x200 host
+with a `position:fixed; inset:0` child:
+
+| host style | fixed child size | traps? |
+|---|---|---|
+| (none) | 420x860 (viewport) | no |
+| `container-type: size` | 420x860 | **no** |
+| `container-type: inline-size` | 420x860 | **no** |
+| `backdrop-filter: blur(8px)` | 300x200 | yes |
+| `transform: translateX(0)` | 300x200 | yes |
+| `filter: blur(1px)` | 300x200 | yes |
+| `contain: layout` | 300x200 | yes |
+| `contain: paint` | 300x200 | yes |
+| `will-change: transform` | 300x200 | yes |
+
+`container-type` does NOT create a containing block for fixed descendants, even
+though explicit `contain: layout` does. Note `getComputedStyle(el).contain` stays
+`"none"` under `container-type`, so a `contain`-based check correctly skips it.
+
+No changes made to ClassV2/SharedClassBoard — the Dream Meet modals are fine.
+
+### The predicate to use
+Only these ancestor properties trap `fixed` descendants: `transform`, `filter`,
+`backdrop-filter`, `perspective`, `contain: layout|paint|strict|content`,
+`will-change: transform|filter|perspective`.
+
+### Runtime sweep
+Ran that predicate over the live DOM of `/` and `/signup-academy` after the
+Navbar fix: zero trapped elements. A static pass over the remaining ~29
+`fixed inset-0` modals found them under plain flex/grid/card ancestors. All four
+`createPortal` call sites (`Navbar`, `History`, `ClassV2` x2) target
+`document.body` correctly.
+
+### Untested
+Only Chrome 153 was measured. If Safari/Firefox ever do treat `container-type` as
+a containing block, the nine Dream Meet overlays above are where it would show —
+worth one look at an open Dream Meet modal on an iPhone.
