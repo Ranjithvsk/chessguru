@@ -8,6 +8,7 @@ import { PeriodPerformanceTable } from "../components/PeriodPerformanceTable";
 import { MyMistakesPanel } from "../components/MyMistakesPanel";
 import { TrainerStatsStrip } from "../components/TrainerStatsStrip";
 import { getMyTrainerRollup, type TrainerRollup } from "../lib/opening-trainer-api";
+import { EndClassButton } from "../components/LiveClassBanner";
 
 // Phase 8a: Puzzle of the Day card. Sits at the very top of the dashboard so
 // it's the first thing you see when you log in — the daily anchor for a habit.
@@ -91,6 +92,13 @@ function StudentLiveClassCard() {
               <div className="shrink-0 rounded-xl bg-ink-900 px-4 py-2.5 text-sm font-bold text-rose-600 shadow-lg">
                 Join →
               </div>
+              {c.mine && (
+                // The whole card is a <Link>; without preventDefault the confirm()
+                // would be followed by a navigation into the room being ended.
+                <div className="shrink-0" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+                  <EndClassButton classId={c._id} />
+                </div>
+              )}
             </div>
           </Link>
         );

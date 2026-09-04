@@ -60,3 +60,25 @@ rooms) did not, so it now returns `mine: coachUserId === session.userId` to matc
 - Not yet exercised against a real coach account on a mic-less machine.
 - `CoachPublic.tsx:752` still links `role=student` — correct there (public page,
   visitors are students), but worth revisiting if coaches ever use that surface.
+
+## Follow-up — End class from the dashboard
+
+Owner: "yes add the end class button in dashboard also, for coach".
+
+`LiveClassBanner` returns `null` on `/dashboard`, so the End-class button it
+renders (`{live.mine && <EndClassButton/>}`) was unreachable there — the
+dashboard shows `StudentLiveClassCard` instead, which had no way to end a class.
+
+- `EndClassButton` is now exported from `LiveClassBanner.tsx` and reused rather
+  than duplicated; it also invalidates `student-live-now` so the dashboard card
+  disappears immediately after ending.
+- `StudentLiveClassCard` renders it behind the same `c.mine` gate. The card is a
+  `<Link>`, so the button sits in a wrapper that `preventDefault()`s — otherwise
+  confirming the dialog would navigate into the room being ended.
+
+Permission is unchanged and still server-side: `POST /api/class/:id/end` requires
+session role coach/academy_owner AND `doc.coachUserId === session.userId`. `mine`
+only controls visibility.
+
+Verification: web `tsc --noEmit` at its 101-error baseline, 7/7 vitest tests pass,
+deployed bundle `AppRest-0xE0Q99L.js` contains `a.mine&&...EndClassButton`.

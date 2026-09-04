@@ -24,7 +24,7 @@ const DISMISS_KEY = "cg_live_class_dismissed";
  *  POST /api/class/:id/end so a coach can close an abandoned class WITHOUT
  *  re-entering the room. Owner ask 2026-08-18: "for coach, we need option
  *  to close floating class". */
-function EndClassButton({ classId }: { classId: string }) {
+export function EndClassButton({ classId }: { classId: string }) {
   const qc = useQueryClient();
   const m = useMutation({
     mutationFn: async () => {
@@ -37,6 +37,7 @@ function EndClassButton({ classId }: { classId: string }) {
       if (j?.ok) {
         qc.invalidateQueries({ queryKey: ["schedule-live"] });
         qc.invalidateQueries({ queryKey: ["class-live-now"] });
+        qc.invalidateQueries({ queryKey: ["student-live-now"] });
         qc.invalidateQueries({ queryKey: ["academy-schedule"] });
       } else {
         alert(j?.reason === "not-your-class" ? "Only the coach who started this class can end it." : "Couldn't end class.");
