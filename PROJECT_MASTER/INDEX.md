@@ -52,6 +52,7 @@ _Created 2026-05-29 · expanded the same day with a full codebase read. Live: ht
 - [research/lichess-source-reads.md](research/lichess-source-reads.md) — which Lichess `lila` / `lichess-puzzler` sources were ported
 
 ## Sessions
+- [2026-09-04-puzzle-picker-slow-and-repeating.md](sessions/2026-09-04-puzzle-picker-slow-and-repeating.md) — 50-id `paths` pools ran dry for active students → 26s `$sample` fallback + endless repeats; neighbour-band failover, never-seen-first, indexed seek instead of `$sample`, pools 50→1000
 - [2026-05-30-own-opening-explorer.md](sessions/2026-05-30-own-opening-explorer.md) — building our OWN opening explorer (Lichess 401s our datacenter IP); ingestion foundation done (ECO names + position tree)
 - [2026-05-30-v2-remove-themes-section.md](sessions/2026-05-30-v2-remove-themes-section.md) — dropped the redundant Themes page (same solver as Puzzles, which already has a theme dropdown); /theme now redirects to /
 - [2026-05-29-v2-feedback-ui-test-harness.md](sessions/2026-05-29-v2-feedback-ui-test-harness.md) — Lichess-exact feedback block built as a shared component + isolated test page (`/test/feedback-ui`); typechecks; production merge gated on review (ADR-0005)

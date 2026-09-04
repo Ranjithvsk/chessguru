@@ -13,7 +13,12 @@ const Path = mongoose.model('Path', PathSchema, 'paths_new');
 const THEMES=['mix','advancedPawn','advantage','anastasiaMate','arabianMate','attackingF2F7','attraction','backRankMate','balestraMate','bishopEndgame','blindSwineMate','bodenMate','capturingDefender','castling','clearance','collinearMove','cornerMate','crushing','defensiveMove','deflection','discoveredAttack','discoveredCheck','doubleBishopMate','doubleCheck','dovetailMate','endgame','enPassant','epauletteMate','equality','exposedKing','fork','hangingPiece','hookMate','interference','intermezzo','kingsideAttack','knightEndgame','long','mate','mateIn1','mateIn2','mateIn3','mateIn4','mateIn5','middlegame','oneMove','opening','operaMate','pawnEndgame','pin','promotion','queenEndgame','queenRookEndgame','queensideAttack','quietMove','rookEndgame','sacrifice','short','skewer','smotheredMate','killBoxMate','vukovicMate','pillsburysMate','morphysMate','swallowstailMate','superGM','master','masterVsMaster','triangleMate','trappedPiece','underPromotion','veryLong','xRayAttack','zugzwang'];
 const TIERS=[{name:'top',minVote:70},{name:'good',minVote:40},{name:'all',minVote:-100}];
 const BANDS=[[0,900],[900,1000],[1000,1100],[1100,1200],[1200,1270],[1270,1340],[1340,1410],[1410,1480],[1480,1550],[1550,1620],[1620,1690],[1690,1760],[1760,1830],[1830,1900],[1900,2000],[2000,2100],[2100,2200],[2200,2350],[2350,2500],[2500,2650],[2650,2800],[2800,9999]];
-const TARGET=50, SUBS=10, PER=6;
+// 50 ids per pool was too few: an active student clears a whole band's pool and
+// then every draw is either a 26s $sample fallback or a repeat of a puzzle they
+// already failed (harinitharanjith, 1359 rounds, had cleared all 15 pools across
+// her flex window — 2026-09-04). 1000 leaves ~20x headroom against the busiest
+// account. Costs ~57MB of collection and ~45min to build.
+const TARGET=1000, SUBS=10, PER=100;
 function pid(a,t,r){return a+'|'+t+'|'+String(r).padStart(4,'0');}
 async function run(){
   await mongoose.connection.dropCollection('paths_new').catch(()=>{});

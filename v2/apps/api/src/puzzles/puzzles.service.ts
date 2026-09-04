@@ -28,7 +28,7 @@ export class PuzzlesService {
    *     eligible again so the user gets another crack at the ones they missed.
    * rounds._id is "userId:puzzleId"; range scan on the indexed _id, most-recent-first.
    */
-  private async playedIds(userId: string): Promise<string[]> {
+  private async playedIds(userId: string): Promise<{ exclude: string[]; attempted: Set<string> }> {
     // ";" (0x3B) sorts immediately after ":" (0x3A), so [userId:, userId;) brackets exactly this user's rounds.
     const lo = `${userId}:`;
     const hi = `${userId};`;
@@ -41,13 +41,15 @@ export class PuzzlesService {
       .limit(MAX_PLAYED)
       .toArray();
     const out: string[] = [];
+    const attempted = new Set<string>();
     for (const r of rows as any[]) {
       const id = String(r._id).slice(lo.length);
+      attempted.add(id);
       if (r.w) out.push(id);                                          // solved -> never repeat
       else if (r.d && new Date(r.d) >= cutoff) out.push(id);          // failed recently -> hold off
       // failed long ago -> eligible to retry
     }
-    return out;
+    return { exclude: out, attempted };
   }
 
   async random(theme: string, difficulty: string, rating: number, maxPc?: number, userId?: string | null, section?: string, player?: string, mode?: string, exactRating?: number) {
@@ -94,7 +96,7 @@ export class PuzzlesService {
     // so a thin exact-band pool can never bleed into the 900-rated bucket.
     const easyFloor = Math.max(400, baseRating - 250);
     const target = Math.max(rawTarget, easyFloor);
-    const played = userId ? await this.playedIds(userId) : [];
+    const { exclude: played, attempted } = userId ? await this.playedIds(userId) : { exclude: [] as string[], attempted: new Set<string>() };
     const playedSet = new Set(played);
 
     // ── MASTER GAMES section: GM/super-GM blunder puzzles (source:"broadcast").
@@ -125,29 +127,59 @@ export class PuzzlesService {
     // ── FAST PATH: precomputed pools (`paths`) — sample an id, fetch by indexed _id. ──
     // paths: { _id:"theme|tier|RRRR", min, max, ids:[puzzleId] }; exactly one band path per rating.
     // Avoids the $sample-over-5.9M-docs scan (4–6s). pieceCount-filtered requests fall through.
+    const flex = Math.round(100 + Math.abs(1500 - target) / 4);
     if (!maxPc || maxPc >= 32) {
-      const band = String(Math.max(0, Math.round(target))).padStart(4, "0");
+      const key4 = (n: number) => String(clamp(Math.round(n), 0, 9999)).padStart(4, "0");
+      // Widen to the same flex window the fallback uses, but never below the
+      // easy-floor, so an exhausted band borrows from its neighbours instead of
+      // bleeding into the 900-rated bucket.
+      const loKey = key4(Math.max(easyFloor, target - flex));
+      const hiKey = key4(target + flex);
       const esc = theme.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const paths = this.conn.db!.collection("paths");
-      for (const tier of ["top", "good", "all"]) {
-        const key = `${theme}|${tier}|${band}`;
-        const path = await paths.findOne({
-          _id: { $regex: `^${esc}\\|${tier}\\|` } as any,
-          min: { $lte: key },
-          max: { $gte: key },
-        });
-        const ids: string[] = (path?.ids as string[]) || [];
-        if (!ids.length) continue;
-        const avail = ids.filter((id) => !playedSet.has(id));
-        if (!avail.length) continue; // user cleared this pool -> next tier, then fresh $sample fallback
-        const pick = avail[Math.floor(Math.random() * avail.length)]!;
-        const d = await this.col().findOne({ _id: pick as any });
-        if (d) return applyLastMove(fmtPuzzle(d));
+      const dist = (p: any) => {
+        const lo = Number(String(p.min).slice(-4));
+        const hi = Number(String(p.max).slice(-4));
+        return target < lo ? lo - target : target > hi ? target - hi : 0;
+      };
+      // Every pool overlapping the flex window, nearest band first. Until
+      // 2026-09-04 this took ONLY the pool containing `target`; an active student
+      // who had cleared it fell through to the $sample fallback and waited 26s.
+      const poolCache = new Map<string, any[]>();
+      const poolsFor = async (tier: string) => {
+        let p = poolCache.get(tier);
+        if (!p) {
+          p = await paths.find({
+            _id: { $regex: `^${esc}\\|${tier}\\|` } as any,
+            min: { $lte: `${theme}|${tier}|${hiKey}` },
+            max: { $gte: `${theme}|${tier}|${loKey}` },
+          }).toArray();
+          p.sort((a, b) => dist(a) - dist(b));
+          poolCache.set(tier, p);
+        }
+        return p;
+      };
+      // freshOnly is the OUTER loop: a never-seen puzzle from a lower quality
+      // tier beats re-serving one the student already met. A puzzle failed >7d
+      // ago is deliberately back in the draw (spaced repetition), but it must
+      // not outrank a puzzle she has never seen — with 50-id pools her whole
+      // "available" set was old failures, so every draw was a repeat
+      // (harinitharanjith: 10/10 already-attempted, 328 re-eligible failures).
+      for (const freshOnly of [true, false]) {
+        for (const tier of ["top", "good", "all"]) {
+          for (const path of await poolsFor(tier)) {
+            const ids: string[] = (path?.ids as string[]) || [];
+            const avail = ids.filter((id) => !playedSet.has(id) && !(freshOnly && attempted.has(id)));
+            if (!avail.length) continue;
+            const pick = avail[Math.floor(Math.random() * avail.length)]!;
+            const d = await this.col().findOne({ _id: pick as any });
+            if (d) return applyLastMove(fmtPuzzle(d));
+          }
+        }
       }
     }
 
-    // ── FALLBACK: $match + $sample (rare: piece-count filter, exotic theme, or missing pool). ──
-    const flex = Math.round(100 + Math.abs(1500 - target) / 4);
+    // ── FALLBACK: indexed random seek (rare: piece-count filter, exotic theme, or missing pool). ──
     const themeQ = theme && theme !== "mix" ? { themes: theme } : {};
     const pcQ = maxPc && maxPc < 32 ? { pieceCount: { $lte: maxPc } } : {};
     const dedupQ = played.length ? { _id: { $nin: played } } : {};
@@ -155,9 +187,29 @@ export class PuzzlesService {
     // Enforce the easy-floor on every fallback query so a thin exact-band pool
     // never bleeds into serving 300+-below puzzles.
     const withFloor = (band: any) => ({ ...band, $gte: Math.max(band.$gte, easyFloor) });
+    // $sample over a rating band is a scan of the whole band — measured at 25s
+    // against the ~1M puzzles between 1021 and 1335 (2026-09-04), and the $nin
+    // dedup was NOT the cost (24.1s with it, 24.7s without). Instead: seek the
+    // {glicko.r:1} / {themes:1,glicko.r:1} index at a random rating inside the
+    // band and take a small page from there — ~6ms.
+    //
+    // Both directions are tried because ascending alone only sees puzzles above
+    // the seek point; the pair covers the whole band, so an empty result really
+    // does mean "nothing unplayed matches" rather than "seeded too high".
+    // Biases the draw toward rating-dense parts of the band, which a solver
+    // cannot perceive.
     const sample = async (m: any) => {
-      const d = await this.col().aggregate([{ $match: m }, { $sample: { size: 1 } }]).toArray();
-      return d.length ? applyLastMove(fmtPuzzle(d[0])) : null;
+      const band = (m["glicko.r"] ?? {}) as { $gte?: number; $lte?: number };
+      const lo = typeof band.$gte === "number" ? band.$gte : 400;
+      const hi = typeof band.$lte === "number" ? band.$lte : 3000;
+      const seed = lo + Math.random() * Math.max(1, hi - lo);
+      const first = Math.random() < 0.5;
+      for (const asc of [first, !first]) {
+        const q = { ...m, "glicko.r": asc ? { ...band, $gte: seed } : { ...band, $lte: seed } };
+        const rows = await this.col().find(q).sort({ "glicko.r": asc ? 1 : -1 }).limit(20).toArray();
+        if (rows.length) return applyLastMove(fmtPuzzle(rows[Math.floor(Math.random() * rows.length)]!));
+      }
+      return null;
     };
     const tiers: any[] = [
       { vote: { $gte: 0.75 }, plays: { $gte: 100 } },
