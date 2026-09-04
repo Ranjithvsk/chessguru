@@ -94,7 +94,7 @@ all returned 404/403).
 
 Smoke rows and the forged test session were deleted afterwards; `errorEvents` is back to 0.
 
-## ⚠️ Found while testing: all ChessGuru email has been dead since ~30 Aug
+## ⚠️ Found while testing: all ChessGuru email had been dead since ~30 Aug — FIXED
 
 The very first alert failed to send with `ECONNREFUSED 127.0.0.1:4025`.
 
@@ -115,10 +115,42 @@ for **all three** of `ubuntu@`, `dreamworld@`, `root@` on Mumbai — so Mumbai's
 password resets, OTP sign-in, weekly digests, streak reminders, class/fee reminders.
 `sendMail` logs and returns `{ok:false}`; nothing surfaces to the user.
 
-**Not fixed here** — it needs a shell on Mumbai, which this box no longer has, and
-re-adding a key to a production box's `authorized_keys` is an owner decision. Fix is to
-append this box's `~/.ssh/id_ed25519.pub` to `~ubuntu/.ssh/authorized_keys` on
-148.113.43.16, then `systemctl restart dwotp-tunnel`.
+### Fix — 2026-09-04 07:31 UTC
+
+The initial read ("the key is rejected for all three users") was wrong, and wrong in an
+instructive way. Re-testing after the failed-auth flood had quietened showed:
+
+```
+ubuntu@148.113.43.16     → Permission denied (publickey)
+dreamworld@148.113.43.16 → Server accepts key ✓  uid=1001(dreamworld)
+```
+
+The key was never revoked. Only `~ubuntu/.ssh/authorized_keys` was rotated; `dreamworld`'s
+was untouched. The earlier all-three-rejected result came from probing while France's own
+tunnel was hammering sshd every 12s — that's 35,472 failed auths, enough to trip
+`MaxStartups` and make healthy users look dead. **Lesson: never conclude "the key is
+revoked" from probes taken during a restart storm.** Stop the flapping unit first, then probe.
+
+So no change to Mumbai was needed. The fix is one line on France — point the unit at the
+user whose `authorized_keys` still holds our key:
+
+```
+-L 4025:127.0.0.1:4025 ubuntu@148.113.43.16
+-L 4025:127.0.0.1:4025 dreamworld@148.113.43.16
+```
+
+Also added explicit `-i /home/dreamworld/.ssh/id_ed25519` and `-o BatchMode=yes` so the unit
+names the key it depends on instead of inheriting whatever the default happens to be —
+matching `pg-tunnel-mumbai.service`, which uses `dreamworld@` and was therefore never at risk.
+
+| check | result |
+|---|---|
+| `systemctl is-active dwotp-tunnel` | active, `NRestarts=0` |
+| `curl 127.0.0.1:4025/health` on France | `{"ok":true}` |
+| `POST /send` through the tunnel to a Gmail address | `{"ok":true,"mx":"gmail-smtp-in.l.google.com"}` |
+| audit of every France unit targeting 148.113.43.16 | only these two; `pg-tunnel-mumbai` already on `dreamworld@` |
+
+Previous unit saved as `/etc/systemd/system/dwotp-tunnel.service.bak-20260904`.
 
 ## Files
 
@@ -133,7 +165,11 @@ append this box's `~/.ssh/id_ed25519.pub` to `~ubuntu/.ssh/authorized_keys` on
 
 ## Open items
 
-- **dw-otp tunnel key** (above) — until it's fixed, alerts land in `/admin/errors` only.
+- **Nothing watches the tunnel.** It was down 5 days and the only reason we know is that a
+  brand-new alerting feature happened to try to mail on the same afternoon. `sendMail` still
+  fails open — it logs and returns `{ok:false}` and no caller surfaces that. A liveness check
+  on `127.0.0.1:4025/health`, or an alert when `mailLog`'s newest `sentAt` goes stale, would
+  turn this from "found by accident" into a signal. Not built here.
 - `ERROR_ALERT_TO` env overrides the recipient; defaults to `ranjith.vsk@gmail.com`.
 - The slow-request skip list is a static prefix list. If a new legitimately-slow endpoint
   ships and starts emailing, add its prefix to `SKIP` rather than raising the threshold.
