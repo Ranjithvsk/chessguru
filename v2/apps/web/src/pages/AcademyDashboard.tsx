@@ -1317,15 +1317,19 @@ function UpcomingClassesPanel({ classes, live }: { classes: ClassRow[]; live: Cl
   // Stable ad-hoc room id for "Start now" — generated once per mount so every
   // click this session lands in the SAME room. Above the early return (rules of hooks).
   const [adhocRoom] = useState(() => `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`);
+  // Full-width card, not a pill in the header: starting an unscheduled class is
+  // the most-used action on this page and an 11px chip was being missed.
   const startNow = (
-    <div className="flex items-center gap-1.5">
-      <span className="text-[10px] uppercase tracking-wide text-ink-500">Start now</span>
-      <Link to={`/class-v2/${adhocRoom}?role=coach`}
-        className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-500"
-        title="Start an instant class — video + shared board, scales to any class size">
-        🎥 Dream Meet
-      </Link>
-    </div>
+    <Link to={`/class-v2/${adhocRoom}?role=coach`}
+      className="flex items-center gap-4 rounded-2xl border-2 border-emerald-500/50 bg-gradient-to-r from-emerald-600/25 via-emerald-500/10 to-transparent p-4 text-left shadow-lg transition hover:scale-[1.01] hover:brightness-110"
+      title="Start an instant class — video + shared board, scales to any class size">
+      <div className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-emerald-500 text-2xl shadow-lg">🎥</div>
+      <div className="min-w-0 flex-1">
+        <div className="font-display text-lg font-bold text-white">Start a class now</div>
+        <div className="text-xs text-emerald-200">Dream Meet · video + shared board, nothing to schedule</div>
+      </div>
+      <div className="shrink-0 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-white shadow-lg">Start →</div>
+    </Link>
   );
   const nextFew = classes.slice(0, 6);
   if (nextFew.length === 0 && live.length === 0) {
@@ -1334,16 +1338,14 @@ function UpcomingClassesPanel({ classes, live }: { classes: ClassRow[]; live: Cl
         <div className="text-3xl">🎥</div>
         <div className="mt-1 font-display text-lg text-white">No classes scheduled</div>
         <div className="text-xs text-ink-400">Add topics + a start time below to schedule your first one.</div>
-        <div className="mt-4 flex justify-center">{startNow}</div>
+        <div className="mt-4">{startNow}</div>
       </section>
     );
   }
   return (
     <section className="rounded-2xl border border-rose-500/25 bg-gradient-to-br from-ink-900 to-rose-950/20 p-5 shadow">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-display text-lg text-white">🎥 Coming up</h2>
-        {startNow}
-      </div>
+      <h2 className="mb-3 font-display text-lg text-white">🎥 Coming up</h2>
+      <div className="mb-4">{startNow}</div>
       {live.length > 0 && (
         <div className="mb-3 space-y-3">
           {live.map((c) => (
