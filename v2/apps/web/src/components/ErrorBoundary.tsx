@@ -9,6 +9,7 @@
 //     <AcademyPerformancePage />
 //   </ErrorBoundary>
 import { Component, type ReactNode } from "react";
+import { reportClientError } from "../lib/report-error";
 
 type Props = { label?: string; children: ReactNode };
 type State = { err: Error | null };
@@ -20,6 +21,10 @@ export class ErrorBoundary extends Component<Props, State> {
     // Surface to devtools even though we render a fallback.
     // eslint-disable-next-line no-console
     console.error(`[ErrorBoundary${this.props.label ? ` · ${this.props.label}` : ""}]`, err, info);
+    reportClientError(
+      `${this.props.label ? `${this.props.label}: ` : ""}${err?.message || String(err)}`,
+      `${err?.stack || ""}\n--- component stack ---${(info as any)?.componentStack || ""}`,
+    );
   }
   render(): ReactNode {
     if (!this.state.err) return this.props.children;

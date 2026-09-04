@@ -6,6 +6,7 @@ import App from "./App";
 import LoginPage from "./pages/Login";
 import TenantLoginPage from "./pages/TenantLogin";
 import "./index.css";
+import { installGlobalErrorReporting } from "./lib/report-error";
 
 // Fast-path bundle (2026-08-30): only what's needed to render the first
 // paint on `/login`, `/`, and tenant-login. Everything else — the ~60
@@ -63,6 +64,11 @@ function PrefetchRest() {
   }, []);
   return null;
 }
+
+// Catch crashes that escape React (async callbacks, rejected promises) and
+// ship them to /api/client-error. Installed before render so a throw during
+// the very first mount is still reported.
+installGlobalErrorReporting();
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false, retry: 1 } },

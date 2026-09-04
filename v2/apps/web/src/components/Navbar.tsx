@@ -438,6 +438,7 @@ export default function Navbar({ rating, ratingProvisional, username, admin, onL
                       <div className="flex flex-col gap-0.5">
                         {adminLink("/admin/users", "Admin — Users")}
                         {adminLink("/admin/mail-log", "Admin — Mail log")}
+                        {adminLink("/admin/errors", "Admin — Errors")}
                         {adminLink("/admin/domains", "Admin — Domains")}
                         {adminLink("/admin", "Admin — Factory")}
                       </div>

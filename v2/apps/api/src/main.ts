@@ -5,7 +5,7 @@ import "reflect-metadata";
 // doesn't exist; pm2 env still wins for anything set both places.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 try { require("dotenv").config(); } catch { /* dotenv optional in dev */ }
-import { NestFactory } from "@nestjs/core";
+import { HttpAdapterHost, NestFactory } from "@nestjs/core";
 import { RequestMethod } from "@nestjs/common";
 import session from "express-session";
 import MongoStore from "connect-mongo";
@@ -18,6 +18,9 @@ import type { Connection } from "mongoose";
 import { AppModule } from "./app.module";
 import { attachClassWs } from "./class/class-ws";
 import { attachVideoSignalWs } from "./video/video-signal";
+import { ErrorAlertsService } from "./errors/error-alerts.service";
+import { AllExceptionsFilter } from "./errors/all-exceptions.filter";
+import { slowRequestWatcher } from "./errors/slow-request";
 
 const MONGO_URI = process.env.MONGO_URI ?? "mongodb://localhost:27017/chessguru";
 
@@ -31,6 +34,11 @@ async function bootstrap() {
     res.setHeader("Cache-Control", "no-store");
     next();
   });
+  // Mounted this early so the measured window covers body-parsing and session
+  // load too — the finish handler reads req.session, which is populated by the
+  // time it actually runs.
+  const errorAlerts = app.get(ErrorAlertsService);
+  app.use(slowRequestWatcher(errorAlerts));
   // Path-scoped raw body parsers must be mounted BEFORE the global json parser so
   // they win the multi-content-type route match; the global json parser catches
   // everything else. (Prior to explicit mount, /auth/signin was seeing empty
@@ -147,6 +155,9 @@ async function bootstrap() {
     ],
   });
   app.enableCors({ origin: true, credentials: true });
+  // Observation only — delegates to BaseExceptionFilter so response bodies are
+  // unchanged; it just reports 5xx before they're rendered.
+  app.useGlobalFilters(new AllExceptionsFilter(app.get(HttpAdapterHost).httpAdapter, errorAlerts));
   const port = process.env.PORT ?? 4000;
   await app.listen(port);
   // Attach the class-ws message bus to the same http.Server Nest is listening on.
