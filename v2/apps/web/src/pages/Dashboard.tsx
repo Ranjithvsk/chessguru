@@ -51,7 +51,7 @@ async function uploadBinary(path: string, blob: Blob): Promise<void> {
 // CURRENT live class from their coach. Backend deletes stale announcements
 // on going-live, so this card can't get stuck on an old room. Auto-hides
 // entirely when no coach in the student's academy is live.
-type LiveNow = { live: Array<{ _id: string; title: string; coach: string; roomKind?: "call"|"meet"; startAt: string }> };
+type LiveNow = { live: Array<{ _id: string; title: string; coach: string; roomKind?: "call"|"meet"; startAt: string; mine?: boolean }> };
 function StudentLiveClassCard() {
   const { data } = useQuery({
     queryKey: ["student-live-now"],
@@ -68,7 +68,10 @@ function StudentLiveClassCard() {
         // runs on Dream Meet. roomKind is retained on old rows but ignored
         // here; /call/:room is a redirect shim (main.tsx) for old push URLs
         // so no one is stranded.
-        const join = `/class-v2/${encodeURIComponent(c._id)}?role=student`;
+        // `mine` = the caller's OWN live room. Hardcoding role=student here is what
+        // stranded a coach who closed his tab: class-ws only promotes to coach when
+        // the hello frame asks for it (owner report 2026-09-04).
+        const join = `/class-v2/${encodeURIComponent(c._id)}?role=${c.mine ? "coach" : "student"}`;
         const startedMin = Math.max(0, Math.round((Date.now() - new Date(c.startAt).getTime()) / 60_000));
         return (
           <Link key={c._id} to={join}

@@ -102,7 +102,7 @@ export default function LiveClassBanner() {
           body: `${c.title} — tap to join.`,
           tag: `cg-classlive-${c._id}`,
         });
-        n.onclick = () => { window.focus(); location.href = classRoomPath(c.roomKind, c._id, "student"); };
+        n.onclick = () => { window.focus(); location.href = classRoomPath(c.roomKind, c._id, c.mine ? "coach" : "student"); };
       }
     } catch { /* Safari / Chromium quirks — never break the banner */ }
     // Soft ding — WebAudio short sine so no asset to ship. Best-effort;
@@ -171,7 +171,7 @@ export default function LiveClassBanner() {
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <Link
-          to={classRoomPath(live.roomKind, live._id, "student")}
+          to={classRoomPath(live.roomKind, live._id, live.mine ? "coach" : "student")}
           className="rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 px-3 py-1.5 text-xs font-semibold text-white hover:brightness-110"
         >
           Join now →

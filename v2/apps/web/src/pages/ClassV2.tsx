@@ -2152,6 +2152,9 @@ export default function ClassV2Page() {
   };
 
   const [errMsg, setErrMsg] = useState<string | null>(null);
+  // Non-fatal media trouble (no webcam, no mic, permission denied, device busy).
+  // Kept OUT of errMsg on purpose — see the onError handler below.
+  const [mediaWarn, setMediaWarn] = useState<string | null>(null);
   const [tokenData, setTokenData] = useState<LKTokenResp | null>(null);
   // Audience picker — shows on coach entry if no audience has been picked
   // for this class yet (ad-hoc "Start now" rooms + scheduled classes without
@@ -2263,6 +2266,12 @@ export default function ClassV2Page() {
        *  screen stays on for the rest of the class. Positioned above the
        *  LiveKit ControlBar so it doesn't overlap the mute/camera buttons.
        *  Auto-hides as soon as `needsUserGesture` flips back to false. */}
+      {mediaWarn && (
+        <div className="fixed left-1/2 top-16 z-[81] flex -translate-x-1/2 items-center gap-2 rounded-full bg-amber-500/95 px-4 py-2 text-xs font-bold text-black shadow-lg ring-2 ring-amber-300 md:top-20">
+          <span>🎤 {mediaWarn}</span>
+          <button type="button" onClick={() => setMediaWarn(null)} aria-label="Dismiss" className="rounded-full px-1.5 hover:bg-black/10">×</button>
+        </div>
+      )}
       {needsUserGesture && (
         <button
           type="button"
@@ -2308,6 +2317,21 @@ export default function ClassV2Page() {
             if (anyE?.cause?.message) parts.push(`cause=${anyE.cause.message}`);
             // eslint-disable-next-line no-console
             console.error("[ClassV2] LiveKit error", e, "extras=", { ...anyE });
+            // A missing/blocked camera or mic must NOT throw the whole class away.
+            // Rendering the errMsg screen unmounts LiveKitRoom, so a coach on a
+            // deskop with no mic was locked out of his own class entirely
+            // ("NotFoundError · Requested device not found · code=8", owner
+            // report 2026-09-04). Those are getUserMedia DOMExceptions: warn,
+            // stay connected, let the ControlBar retry the device later.
+            const MEDIA_ERRORS = ["NotFoundError", "NotAllowedError", "NotReadableError", "OverconstrainedError", "AbortError"];
+            if (e?.name && MEDIA_ERRORS.includes(e.name)) {
+              setMediaWarn(
+                e.name === "NotAllowedError"
+                  ? "Camera/mic blocked. Allow access in your browser to be heard."
+                  : "No camera or microphone found. You can still see and hear the class.",
+              );
+              return;
+            }
             setErrMsg(parts.join(" · ") || "Unknown error");
           }}
           onDisconnected={(reason) => {

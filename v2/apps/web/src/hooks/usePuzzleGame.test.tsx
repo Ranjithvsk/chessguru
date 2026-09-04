@@ -15,7 +15,7 @@ const PUZZLE = {
   themes: ["mateIn1"],
 };
 
-const complete = vi.fn(async () => ({ ratingDiff: 0 }));
+const complete = vi.fn(async (_id: string, _body: Record<string, unknown>) => ({ ratingDiff: 0 }));
 vi.mock("../lib/api", () => ({
   api: {
     randomPuzzle: async () => PUZZLE,
@@ -65,8 +65,8 @@ function Harness() {
 /** chessground defers movable.events.after through setTimeout — flush before asserting. */
 async function tapMove(from: Key, to: Key) {
   await act(async () => {
-    instances[0].selectSquare(from);
-    instances[0].selectSquare(to);
+    instances[0]!.selectSquare(from);
+    instances[0]!.selectSquare(to);
     await new Promise((r) => setTimeout(r, 5));
   });
 }
@@ -81,7 +81,7 @@ async function mount() {
   await screen.findByText(PUZZLE.id);
   // The fetch resolving and chessground actually holding the puzzle position are two
   // separate commits — wait for the board itself, not just the rendered id.
-  await waitFor(() => expect(instances[0].state.pieces.get("a1")?.role).toBe("rook"));
+  await waitFor(() => expect(instances[0]!.state.pieces.get("a1")?.role).toBe("rook"));
 }
 
 beforeEach(() => {
@@ -104,8 +104,8 @@ describe("usePuzzleGame — wrong move must not freeze the board", () => {
     await tapMove("a1", "a7");
 
     expect(screen.getByTestId("fb").textContent).toBe("Not the best");
-    expect(instances[0].state.movable.dests?.size).toBeGreaterThan(0);
-    expect(instances[0].state.turnColor).toBe("white");
+    expect(instances[0]!.state.movable.dests?.size).toBeGreaterThan(0);
+    expect(instances[0]!.state.turnColor).toBe("white");
   });
 
   it("still solves when the correct move is played after a wrong one", async () => {
@@ -139,6 +139,6 @@ describe("usePuzzleGame — wrong move must not freeze the board", () => {
     await tapMove("a1", "a6");
 
     expect(complete).toHaveBeenCalledTimes(1);
-    expect(complete.mock.calls[0][1]).toMatchObject({ win: false, wrong: "a1a7" });
+    expect(complete.mock.calls[0]![1]).toMatchObject({ win: false, wrong: "a1a7" });
   });
 });

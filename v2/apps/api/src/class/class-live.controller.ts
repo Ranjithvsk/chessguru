@@ -538,6 +538,12 @@ export class ClassLiveController {
         roomKind: "meet" as const,   // every live class is Dream Meet now (in-app mesh CallRoom retired 2026-08-12)
         startAt: r.at,
         durationMin: 60,
+        // Drives the join link's ?role= on the live banners. Without it a coach
+        // rejoining his OWN room through the banner asked the class-ws for
+        // intendedRole=student, which skips every coach-promotion path — he
+        // permanently lost the board once he closed the tab (owner report
+        // 2026-09-04). `mine` already exists on GET /schedule; this matches it.
+        mine: !!(meUid && r.coachUserId === meUid),
       })),
     };
   }

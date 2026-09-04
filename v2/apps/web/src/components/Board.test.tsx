@@ -72,7 +72,7 @@ describe("Board dests sync", () => {
     const { rerender } = render(
       <Board fen={FEN} turnColor="white" movableColor="white" dests={mkDests()} lastMove={mkLastMove()} onMove={onMove} />
     );
-    const api = instances[0];
+    const api = instances[0]!;
 
     await tapMove(api, "a1", "a7");
     expect(onMove).toHaveBeenCalledTimes(1);
@@ -93,7 +93,7 @@ describe("Board dests sync", () => {
     const { rerender } = render(
       <Board fen={FEN} turnColor="white" movableColor="white" dests={dests} lastMove={mkLastMove()} onMove={onMove} />
     );
-    const api = instances[0];
+    const api = instances[0]!;
 
     await tapMove(api, "a1", "a7");
     rerender(<Board fen={FEN} turnColor="white" movableColor="white" dests={dests} lastMove={mkLastMove()} onMove={onMove} />);
