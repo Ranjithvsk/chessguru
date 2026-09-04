@@ -774,6 +774,10 @@ export class PuzzlesService {
       const perf = doc[key] || { gl: { r: (key === "blindfold" ? 800 : 1200), d: 500, v: DEFAULT_VOLATILITY }, nb: 0, re: [], la: null };
       if (hint) return { win, ratingDiff: 0, rating: Math.round(perf.gl.r), glicko: perf.gl };
 
+      // Has this user already played this exact puzzle? Drives SAFEGUARD 5 below.
+      const alreadyPlayed = !!(await this.conn.db!.collection("rounds")
+        .findOne({ _id: `${userId}:${id}` as any }, { projection: { _id: 1 } as any }));
+
       // ── SAFEGUARD 1: DAILY_RATED_LIMIT (Lichess canUpdatePuzzleRating) ──
       // Cap RATING UPDATES at 300/day/user. The solve still counts as a
       // played round, they see the correct move — they just don't move
@@ -862,6 +866,18 @@ export class PuzzlesService {
         upd.ratingDiff = dampenedDelta;
       }
 
+      // ── SAFEGUARD 5: one RATED attempt per puzzle (Lichess rule) ──
+      // A repeat attempt at a puzzle this user has already played is unrated.
+      // The picker excludes played ids, so a repeat only reaches here via
+      // review / daily / a page reload mid-puzzle — and a reload after a wrong
+      // move was charging the SAME miss twice (Harinita report 2026-09-04).
+      // The round row + homework credit below still run; only the rating and
+      // the solve counter are frozen.
+      if (alreadyPlayed) {
+        upd.userPerf = perf;
+        upd.ratingDiff = 0;
+      }
+
       // ── SAFEGUARD 4: nb-inflation on same-theme grinds (2026-08-30) ──
       // Owner report: mageswaran grinded 200/200 smotheredMate solves in a
       // single session — pattern-matches a 1-move mate in ~1.7s and his
@@ -927,7 +943,7 @@ export class PuzzlesService {
           sets[`${themeNs}.${t}`] = tOut;
         }
       }
-      await perfsCol.updateOne({ _id: userId as any }, { $set: sets }, { upsert: true });
+      if (!alreadyPlayed) await perfsCol.updateOne({ _id: userId as any }, { $set: sets }, { upsert: true });
       // Solve time (ms): client-timed from puzzle-load to first submit. Sanity-clamp
       // to [0, 30min] to reject clock skew / tabbed-away sessions from polluting
       // theme-median stats later.

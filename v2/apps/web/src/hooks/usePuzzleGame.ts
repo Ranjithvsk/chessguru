@@ -99,7 +99,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   // Cleared on the next puzzle load — the celebration overlay lives on the parent.
   const [milestone, setMilestone] = useState<{ type: "rating" | "count"; milestone: number; firstTime: boolean } | null>(null);
   const [displayRating, setDisplayRating] = useState(initialRating);
-  const [, force] = useState(0);
+  const [syncTick, force] = useState(0);
   const [replayPly, setReplayPly] = useState<number | null>(null); // post-solve move replay (null = live)
   const exploreGame = useRef(new Chess());
   const [exploreFen, setExploreFen] = useState<string | null>(null); // post-solve free-play sandbox (null = off)
@@ -109,7 +109,12 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
 
   const playerColor = (): "white" | "black" => (game.current.turn() === "w" ? "white" : "black");
 
-  const dests = useMemo(() => (solved.current ? new Map() : destsFromChess(game.current as any)), [fen]);
+  // syncTick is in the deps on purpose: chessground CLEARS movable.dests (and flips
+  // turnColor) internally after every user move, so it must be re-pushed even when the
+  // position is unchanged. After a wrong move we roll back to the same fen, so a
+  // fen-only memo handed Board the identical Map, its sync effect never fired, and the
+  // board stayed dead — no further moves possible (Harinita report 2026-09-04).
+  const dests = useMemo(() => (solved.current ? new Map() : destsFromChess(game.current as any)), [fen, syncTick]);
 
   useEffect(() => {
     if (!puzzle) return;
@@ -383,7 +388,6 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
     solveMsRef.current = null;
     setSolveMs(null);
     startedAtRef.current = Date.now();
-    setElapsedMs(0);
     setLastMove(puzzle.lastMove ? [puzzle.lastMove.slice(0, 2) as Key, puzzle.lastMove.slice(2, 4) as Key] : undefined);
     setFen(puzzle.fen);
     setReplayPly(null);
