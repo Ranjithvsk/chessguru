@@ -11,6 +11,7 @@ import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { isAdmin } from "../admin/admins";
 import { ErrorAlertsService } from "./error-alerts.service";
+import { MailHealthService } from "./mail-health.service";
 
 const PER_IP_PER_MIN = 10;
 const hits = new Map<string, { n: number; resetAt: number }>();
@@ -19,6 +20,7 @@ const hits = new Map<string, { n: number; resetAt: number }>();
 export class ErrorsController {
   constructor(
     private readonly alerts: ErrorAlertsService,
+    private readonly mailHealth: MailHealthService,
     @InjectConnection() private readonly conn: Connection,
   ) {}
 
@@ -45,12 +47,21 @@ export class ErrorsController {
     return { ok: true };
   }
 
+  // Deliberately tiny and separate from admin/errors: the Navbar polls this on
+  // every page for admins so a mail outage is visible without anyone thinking
+  // to visit the errors page. Returning 200 rows for a badge would be silly.
+  @Get("admin/mail-health")
+  mailHealthStatus(@Req() req: any) {
+    if (!isAdmin(req.session?.userId)) throw new ForbiddenException("admin only");
+    return this.mailHealth.current();
+  }
+
   @Get("admin/errors")
   async list(@Req() req: any, @Query("kind") kind?: string, @Query("limit") limitRaw?: string) {
     if (!isAdmin(req.session?.userId)) throw new ForbiddenException("admin only");
     const limit = Math.min(500, Math.max(1, parseInt(String(limitRaw ?? "200"), 10) || 200));
     const q: any = {};
-    if (kind === "server" || kind === "client" || kind === "slow") q.kind = kind;
+    if (kind === "server" || kind === "client" || kind === "slow" || kind === "mail") q.kind = kind;
 
     const col = this.conn.db!.collection("errorEvents");
     const rows = await col.find(q).sort({ at: -1 }).limit(limit).toArray();
@@ -70,6 +81,6 @@ export class ErrorsController {
       { $group: { _id: "$kind", n: { $sum: 1 } } },
     ]).toArray();
 
-    return { rows, top, counts };
+    return { rows, top, counts, mail: this.mailHealth.current() };
   }
 }

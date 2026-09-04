@@ -10,6 +10,15 @@
 
 interface MailInput { to: string; subject: string; html: string; text?: string; }
 
+/** Set by MailHealthService. Every real send reports its outcome here, which is
+ *  how a broken mail path gets noticed even though no caller checks the return
+ *  value — sendMail fails open by design, and that is exactly what hid a 5-day
+ *  outage in Aug 2026. The /health probe can't see send-level rejections (DKIM,
+ *  MX refusal, a 403 from a relay), so this is the second, independent signal. */
+let observer: ((ok: boolean, error?: string) => void) | null = null;
+export function setMailObserver(fn: (ok: boolean, error?: string) => void): void { observer = fn; }
+const observe = (ok: boolean, error?: string) => { try { observer?.(ok, error); } catch { /* must never break a send */ } };
+
 export async function sendMail({ to, subject, html, text }: MailInput): Promise<{ ok: boolean; id?: string; error?: string }> {
   const url   = process.env.DWOTP_URL || "http://127.0.0.1:4025";
   const token = process.env.DWOTP_INTERNAL_TOKEN;
@@ -28,13 +37,19 @@ export async function sendMail({ to, subject, html, text }: MailInput): Promise<
     if (!r.ok) {
       const err = await r.text().catch(() => "");
       console.warn(`[mail] dw-otp HTTP ${r.status}: ${err.slice(0, 200)}`);
+      observe(false, `dw-otp HTTP ${r.status}: ${err.slice(0, 200)}`);
       return { ok: false, error: `dwotp_${r.status}` };
     }
     const j = (await r.json()) as { ok?: boolean; mx?: string; error?: string };
-    if (!j.ok) return { ok: false, error: j.error || "dwotp_reject" };
+    if (!j.ok) {
+      observe(false, `dw-otp rejected: ${j.error || "no reason given"}`);
+      return { ok: false, error: j.error || "dwotp_reject" };
+    }
+    observe(true);
     return { ok: true, id: j.mx };
   } catch (e) {
     console.warn(`[mail] dw-otp send failed:`, e);
+    observe(false, String((e as any)?.message || e));
     return { ok: false, error: String(e) };
   }
 }

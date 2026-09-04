@@ -15,7 +15,7 @@ import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { sendMail } from "../lib/mail";
 
-export type ErrorKind = "server" | "client" | "slow";
+export type ErrorKind = "server" | "client" | "slow" | "mail";
 
 export interface ErrorReport {
   kind: ErrorKind;
@@ -118,7 +118,11 @@ export class ErrorAlertsService implements OnModuleInit {
 
   private async mail(d: any) {
     const to = process.env.ERROR_ALERT_TO || "ranjith.vsk@gmail.com";
-    const label = d.kind === "client" ? "Browser crash" : d.kind === "slow" ? "Slow request" : `Server ${d.status || 500}`;
+    const label =
+      d.kind === "client" ? "Browser crash"
+      : d.kind === "slow" ? "Slow request"
+      : d.kind === "mail" ? "Mail health"
+      : `Server ${d.status || 500}`;
     const where = d.route || d.url || "unknown";
     const rows: [string, unknown][] = [
       ["When", d.at.toISOString()],

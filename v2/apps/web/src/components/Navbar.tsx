@@ -413,6 +413,8 @@ export default function Navbar({ rating, ratingProvisional, username, admin, onL
         </div>
       </nav>
 
+      {admin && <MailDownBanner />}
+
       {/* Left slide-in drawer + dim backdrop. Renders when open so pathname-close
           in the effect above still cleans up between routes.
 
@@ -463,6 +465,41 @@ export default function Navbar({ rating, ratingProvisional, username, admin, onL
         document.body,
       )}
     </header>
+  );
+}
+
+// ── Mail-down banner (2026-09-04) — admins only.
+//
+// Outbound mail died on 30 Aug 2026 and went unnoticed for five days because
+// the only place a failure showed up was a log line nobody reads. A page that
+// reports the outage doesn't help if nobody thinks to open it, so this rides
+// in the header on every page instead: if mail is broken, the person who can
+// fix it sees it the next time they use the site at all.
+function MailDownBanner() {
+  const [down, setDown] = useState<{ since: string; lastError: string | null } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const r = await fetch("/v2api/api/admin/mail-health", { credentials: "include" });
+        if (!r.ok || cancelled) return;
+        const j = await r.json();
+        setDown(j?.ok === false ? { since: j.since, lastError: j.lastError ?? null } : null);
+      } catch { /* silent — a monitoring widget must never break the header */ }
+    };
+    void check();
+    const iv = setInterval(check, 60_000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, []);
+  if (!down) return null;
+  const since = new Date(down.since);
+  const hours = Math.max(0, Math.round((Date.now() - since.getTime()) / 3_600_000));
+  return (
+    <NavLink to="/admin/errors"
+      className="block bg-rose-600 px-4 py-1.5 text-center text-xs font-semibold text-white hover:bg-rose-500">
+      ⚠️ Outbound email is DOWN{hours >= 1 ? ` (${hours}h)` : ""} — password resets, OTP sign-in and all reminders are failing silently
+      {down.lastError ? ` · ${down.lastError}` : ""}
+    </NavLink>
   );
 }
 

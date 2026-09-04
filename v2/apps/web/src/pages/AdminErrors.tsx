@@ -9,19 +9,27 @@ import { useQuery } from "@tanstack/react-query";
 import { get } from "../lib/api";
 
 type Row = {
-  _id: string; at: string; kind: "server" | "client" | "slow"; message: string;
+  _id: string; at: string; kind: "server" | "client" | "slow" | "mail"; message: string;
   stack?: string; route?: string; method?: string; status?: number; ms?: number;
   userId?: string; academyId?: string; url?: string; userAgent?: string;
 };
 type Top = { _id: string; n: number; kind: string; message: string; route?: string; last: string };
-type Payload = { rows: Row[]; top: Top[]; counts: { _id: string; n: number }[] };
+type MailHealth = { ok: boolean; since: string; lastOkAt: string | null; lastError: string | null; checkedAt: string };
+type Payload = { rows: Row[]; top: Top[]; counts: { _id: string; n: number }[]; mail?: MailHealth };
 
-type KindFilter = "" | "server" | "client" | "slow";
+type KindFilter = "" | "server" | "client" | "slow" | "mail";
 
 const KIND_STYLE: Record<string, string> = {
   server: "bg-rose-500/20 text-rose-300",
   client: "bg-amber-500/20 text-amber-300",
   slow: "bg-sky-500/20 text-sky-300",
+  mail: "bg-fuchsia-500/20 text-fuchsia-300",
+};
+
+const ago = (iso: string) => {
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000));
+  if (m < 60) return `${m}m`;
+  return m < 2880 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${Math.floor(m / 1440)}d`;
 };
 
 export default function AdminErrors() {
@@ -51,9 +59,31 @@ export default function AdminErrors() {
             <option value="server">server 5xx</option>
             <option value="client">browser crash</option>
             <option value="slow">slow request</option>
+            <option value="mail">mail health</option>
           </select>
         </div>
       </div>
+
+      {data?.mail && (
+        <div className={`rounded-xl2 border p-4 ${data.mail.ok ? "border-emerald-500/40 bg-emerald-500/5" : "border-rose-500/60 bg-rose-500/10"}`}>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className={`text-sm font-semibold ${data.mail.ok ? "text-emerald-700 dark:text-emerald-300" : "text-rose-700 dark:text-rose-200"}`}>
+              {data.mail.ok ? "✅ Outbound email is working" : "🚨 Outbound email is DOWN"}
+            </span>
+            <span className="text-xs text-ink-400">
+              {data.mail.ok ? `up for ${ago(data.mail.since)}` : `down for ${ago(data.mail.since)}`}
+              {" · checked "}{ago(data.mail.checkedAt)} ago
+            </span>
+          </div>
+          {!data.mail.ok && (
+            <p className="mt-2 text-xs text-rose-700 dark:text-rose-200/90">
+              Password resets, OTP sign-in, weekly digests and every class/fee reminder are failing silently right now.
+              First check: <code className="text-rose-100">sudo journalctl -u dwotp-tunnel -n 20</code> on the France box.
+            </p>
+          )}
+          {data.mail.lastError && <div className="mt-1 text-xs text-ink-500">last error: {data.mail.lastError}</div>}
+        </div>
+      )}
 
       <div className="grid grid-cols-3 gap-3">
         {([["server", "Server 5xx"], ["client", "Browser crashes"], ["slow", "Slow requests"]] as const).map(([k, label]) => {
@@ -130,6 +160,8 @@ export default function AdminErrors() {
       <p className="text-xs text-ink-500">
         Kept for 30 days, then expired automatically. Email goes to the owner on the first occurrence of each distinct
         fault per hour (max 20/hour) — slow requests are recorded from 5s but only emailed from 15s. Click a row for the stack trace.
+        Mail health is probed every 2 minutes; while mail is down it can only be reported here and in the header, so the
+        outage summary is emailed the moment sending works again.
       </p>
     </div>
   );

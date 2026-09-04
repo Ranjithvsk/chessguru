@@ -165,11 +165,8 @@ Previous unit saved as `/etc/systemd/system/dwotp-tunnel.service.bak-20260904`.
 
 ## Open items
 
-- **Nothing watches the tunnel.** It was down 5 days and the only reason we know is that a
-  brand-new alerting feature happened to try to mail on the same afternoon. `sendMail` still
-  fails open — it logs and returns `{ok:false}` and no caller surfaces that. A liveness check
-  on `127.0.0.1:4025/health`, or an alert when `mailLog`'s newest `sentAt` goes stale, would
-  turn this from "found by accident" into a signal. Not built here.
+- ~~**Nothing watches the tunnel.**~~ Built the same day — see
+  [2026-09-04-mail-health-monitoring.md](2026-09-04-mail-health-monitoring.md).
 - `ERROR_ALERT_TO` env overrides the recipient; defaults to `ranjith.vsk@gmail.com`.
 - The slow-request skip list is a static prefix list. If a new legitimately-slow endpoint
   ships and starts emailing, add its prefix to `SKIP` rather than raising the threshold.
