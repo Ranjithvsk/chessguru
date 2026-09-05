@@ -71,15 +71,12 @@ export class SupportController {
     // pos-api Body zod schema uses `pageUrl`, `screenshots`, `screenshot`,
     // `app`, `kind`, `message`, `contact`, `parentSeq`. Forward the shape
     // exactly so the upstream doesn't reject on unknown fields.
-    // Upstream caps `app` at 30 chars and 502s past it — slicing only the
-    // academyId let the "chessguru-" prefix push the total over, so any academy
-    // with a slug longer than 20 chars had every ticket rejected and silently
-    // parked in the local fallback collection. Slice the whole tag instead.
-    // (2026-09-05: test-academy-only-email came to 33; shriguruchessacademy
-    // sits at exactly 30.) The academy id is still spelled out in `who` below,
-    // so truncating here never loses the filer's identity.
+    // NOT truncated: upstream now caps `app` at 120. A 30-char slice left only
+    // 20 chars for the slug, so two academies sharing their first 20 characters
+    // collapsed to the same tag — and myTickets() looks tickets up BY this tag,
+    // which would have shown each academy the other's support threads.
     // Must stay byte-identical to the tag built in myTickets().
-    const app = academyId ? `chessguru-${academyId}`.slice(0, 30) : "chessguru";
+    const app = academyId ? `chessguru-${academyId}` : "chessguru";
     // Prepend a small who/where block so super-admin sees the user without
     // clicking into pos systems (which won't know a ChessGuru userId).
     const who = userId
@@ -151,9 +148,9 @@ export class SupportController {
 
     // Determine which app tag(s) this user's tickets landed under. Match how
     // ticket() stamps `app` above:  chessguru-<academyId>  or  chessguru.
-    // Same 30-char slice as ticket() — if these two ever diverge, a user's own
+    // Untruncated, same as ticket() — if these two ever diverge, a user's own
     // tickets stop matching and the "Your tickets" tab silently goes empty.
-    const app = academyId ? `chessguru-${academyId}`.slice(0, 30) : "chessguru";
+    const app = academyId ? `chessguru-${academyId}` : "chessguru";
     const qs = new URLSearchParams();
     if (userId) qs.set("userId", userId);
     // userName is our fallback path for LEGACY tickets that predate the
