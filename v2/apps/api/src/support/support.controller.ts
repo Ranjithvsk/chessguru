@@ -71,7 +71,15 @@ export class SupportController {
     // pos-api Body zod schema uses `pageUrl`, `screenshots`, `screenshot`,
     // `app`, `kind`, `message`, `contact`, `parentSeq`. Forward the shape
     // exactly so the upstream doesn't reject on unknown fields.
-    const app = academyId ? `chessguru-${academyId.slice(0, 30)}` : "chessguru";
+    // Upstream caps `app` at 30 chars and 502s past it — slicing only the
+    // academyId let the "chessguru-" prefix push the total over, so any academy
+    // with a slug longer than 20 chars had every ticket rejected and silently
+    // parked in the local fallback collection. Slice the whole tag instead.
+    // (2026-09-05: test-academy-only-email came to 33; shriguruchessacademy
+    // sits at exactly 30.) The academy id is still spelled out in `who` below,
+    // so truncating here never loses the filer's identity.
+    // Must stay byte-identical to the tag built in myTickets().
+    const app = academyId ? `chessguru-${academyId}`.slice(0, 30) : "chessguru";
     // Prepend a small who/where block so super-admin sees the user without
     // clicking into pos systems (which won't know a ChessGuru userId).
     const who = userId
@@ -79,10 +87,18 @@ export class SupportController {
       : "👤 anonymous";
     const enrichedMessage = `${who}\n\n${messageRaw}`.slice(0, MAX_MESSAGE);
 
+    // Fall back to the signed-in user's email as the contact. Dreamcy only
+    // emails ticket replies to platform.tenant_operator rows (keyed on
+    // tenant_id) or to `contact` when it parses as an email — and ChessGuru
+    // academies have no platform.tenant row at all, so a ticket with no
+    // contact is permanently email-silent. Every ChessGuru reply sent before
+    // 2026-09-05 reached the filer only inside the in-app widget thread.
+    const sessionEmail = userId ? await this.emailFor(userId) : null;
+
     const upstreamPayload: any = {
       kind,
       message: enrichedMessage,
-      contact: contact || undefined,
+      contact: contact || sessionEmail || undefined,
       screenshots: shots.length ? shots : undefined,
       pageUrl: pageUrl || undefined,
       app,
@@ -135,7 +151,9 @@ export class SupportController {
 
     // Determine which app tag(s) this user's tickets landed under. Match how
     // ticket() stamps `app` above:  chessguru-<academyId>  or  chessguru.
-    const app = academyId ? `chessguru-${academyId.slice(0, 30)}` : "chessguru";
+    // Same 30-char slice as ticket() — if these two ever diverge, a user's own
+    // tickets stop matching and the "Your tickets" tab silently goes empty.
+    const app = academyId ? `chessguru-${academyId}`.slice(0, 30) : "chessguru";
     const qs = new URLSearchParams();
     if (userId) qs.set("userId", userId);
     // userName is our fallback path for LEGACY tickets that predate the
@@ -156,6 +174,19 @@ export class SupportController {
     } catch (e) {
       if (e instanceof HttpException) throw e;
       throw new HttpException("Support system is temporarily unreachable — try again in a minute.", HttpStatus.BAD_GATEWAY);
+    }
+  }
+
+  /** users._id is the username (a plain string, never an ObjectId). */
+  private async emailFor(userId: string): Promise<string | null> {
+    try {
+      const u = await this.conn.db!
+        .collection("users")
+        .findOne({ _id: userId as any }, { projection: { email: 1 } });
+      const e = typeof u?.email === "string" ? u.email.trim() : "";
+      return e.includes("@") ? e.slice(0, MAX_CONTACT) : null;
+    } catch {
+      return null;
     }
   }
 
