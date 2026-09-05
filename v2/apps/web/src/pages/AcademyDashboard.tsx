@@ -260,7 +260,10 @@ function LinkParentModal({ studentId, childName, parents = [], onClose }: { stud
             <ul className="flex flex-col gap-2">
               {parents.map((p) => (
                 <li key={p._id} className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="text-sm font-semibold text-white">{parentLabel(p)}</span>
+                  {/* not text-white: index.css forces .text-white inside any
+                      bg-purple-* element to #fff, which vanishes on the light
+                      theme's pale tint. text-purple-100 has a light mapping. */}
+                  <span className="text-sm font-semibold text-purple-100">{parentLabel(p)}</span>
                   {p.mobile && (
                     <a href={`https://wa.me/${p.mobile.replace(/\D/g, "")}`} target="_blank" rel="noreferrer"
                       className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] text-emerald-200 ring-1 ring-emerald-400/30 hover:bg-emerald-500/25">
@@ -1082,7 +1085,7 @@ function AddCoachModal({ open, onClose }: { open: boolean; onClose: () => void }
 
 /** Owner-only reassign-coach dropdown per student row. Sits inline (small
  *  select) so the owner can shift students between coaches without a modal. */
-function AssignCoachDropdown({ studentId, currentCoachId, coaches }: { studentId: string; currentCoachId?: string | null; coaches: any[] }) {
+function AssignCoachDropdown({ studentId, currentCoachId, coaches, onDone }: { studentId: string; currentCoachId?: string | null; coaches: any[]; onDone?: () => void }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
   const change = async (coachId: string) => {
@@ -1095,7 +1098,7 @@ function AssignCoachDropdown({ studentId, currentCoachId, coaches }: { studentId
         body: JSON.stringify({ coachId }),
       });
       const j = await r.json();
-      if (j?.ok) qc.invalidateQueries({ queryKey: ["academy-students"] });
+      if (j?.ok) { qc.invalidateQueries({ queryKey: ["academy-students"] }); onDone?.(); }
       else alert(j?.error || "Couldn't reassign coach.");
     } catch (e: any) { alert(e?.message || "Network error."); }
     finally { setBusy(false); }
@@ -4896,22 +4899,41 @@ function StudentCard({ s, isOwner, coachName, coaches }: {
 // ---- Overflow ⋯ menu (secondary + destructive actions) ------------------
 function StudentOverflowMenu({ s, isOwner, coaches }: { s: Student; isOwner: boolean; coaches: Coach[] }) {
   const [open, setOpen] = useState(false);
+  // The menu used to always open upward. For cards in the FIRST row of the
+  // grid there is no room above, so the topmost item (🔑 Password) was pushed
+  // off the top of the screen — owner report 2026-09-05. Pick the side with
+  // more room at open time and cap the height so it scrolls instead of
+  // overflowing either way.
+  const [drop, setDrop] = useState<{ dir: "up" | "down"; max: number }>({ dir: "up", max: 320 });
   const ref = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
+  const toggle = () => {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      const above = r.top - 12;
+      const below = window.innerHeight - r.bottom - 12;
+      const dir = above >= below ? "up" : "down";
+      setDrop({ dir, max: Math.max(180, Math.min(360, dir === "up" ? above : below)) });
+    }
+    setOpen((v) => !v);
+  };
   return (
     <div ref={ref} className="relative">
-      <button onClick={() => setOpen((v) => !v)}
+      <button ref={btnRef} onClick={toggle}
         title="More actions"
         className={`grid h-8 w-8 place-items-center rounded-lg border border-ink-600 bg-ink-800 text-lg text-ink-200 hover:bg-ink-700 ${open ? "ring-2 ring-brand-400/40" : ""}`}>
         ⋯
       </button>
       {open && (
-        <div className="absolute bottom-full right-0 z-20 mb-2 flex w-56 flex-col gap-1 rounded-xl border border-ink-700 bg-ink-950 p-2 shadow-2xl">
+        <div
+          style={{ maxHeight: drop.max }}
+          className={`absolute right-0 z-20 flex w-56 flex-col gap-1 overflow-y-auto overscroll-contain rounded-xl border border-ink-700 bg-ink-950 p-2 shadow-2xl ${drop.dir === "up" ? "bottom-full mb-2" : "top-full mt-2"}`}>
           <MenuBtnWrap onClick={() => setOpen(false)}>
             <ResetPasswordButton studentId={s._id} name={s.name || s.username} />
           </MenuBtnWrap>
@@ -4928,8 +4950,8 @@ function StudentOverflowMenu({ s, isOwner, coaches }: { s: Student; isOwner: boo
             <MergeStudentButton studentId={s._id} name={s.name || s.username} />
           </MenuBtnWrap>
           {isOwner && (
-            <MenuBtnWrap onClick={() => setOpen(false)}>
-              <AssignCoachDropdown studentId={s._id} currentCoachId={s.coachId} coaches={coaches} />
+            <MenuBtnWrap keepOpen onClick={() => setOpen(false)}>
+              <AssignCoachDropdown studentId={s._id} currentCoachId={s.coachId} coaches={coaches} onDone={() => setOpen(false)} />
             </MenuBtnWrap>
           )}
           {isOwner && (
@@ -5070,9 +5092,13 @@ function RemoveUndoToast() {
 // overflow menu without editing every action component. The pass-through
 // onClick closes the menu when the child fires; the child's own logic
 // (prompts, mutations) still runs.
-function MenuBtnWrap({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+/** keepOpen: for items that need the menu to survive the click — a native
+ *  <select> unmounts (and so appears to "close immediately") if the wrapper
+ *  closes the menu the moment you tap it. Owner report 2026-09-05 on
+ *  reassign-coach. Those items close the menu themselves once they're done. */
+function MenuBtnWrap({ children, onClick, keepOpen }: { children: React.ReactNode; onClick: () => void; keepOpen?: boolean }) {
   return (
-    <div onClick={onClick} className="rounded-lg [&>*]:!w-full [&>*]:!justify-start">
+    <div onClick={keepOpen ? undefined : onClick} className="rounded-lg [&>*]:!w-full [&>*]:!justify-start">
       {children}
     </div>
   );
