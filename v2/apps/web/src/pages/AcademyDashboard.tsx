@@ -53,7 +53,10 @@ interface Student {
   dailyStreakCurrent?: number; dailyStreakLongest?: number;
   // 2026-08-30 — surfaced for the "no parent" filter on the roster card grid.
   parentIds?: string[];
+  parents?: LinkedParent[];
 }
+type LinkedParent = { _id: string; username?: string; name?: string; mobile?: string; email?: string };
+const parentLabel = (p: LinkedParent) => p.name || p.username || p._id;
 // Mini 30-day attendance strip — 30 tiny cells, green when present.
 /** Absent-of-week alert banner. Appears at the top of /academy when there are
  *  students needing attention this week — flagged by the same rules as the
@@ -172,22 +175,23 @@ function MessageStudentButton({ studentId, name }: { studentId: string; name: st
   );
 }
 
-function LinkParentButton({ studentId, name }: { studentId: string; name: string }) {
+function LinkParentButton({ studentId, name, parents }: { studentId: string; name: string; parents?: LinkedParent[] }) {
   // Modal state kept at MODULE level (see openParentLinkModal below) so the
   // overflow menu closing this button — and thus unmounting it — doesn't
   // wipe the state before the modal can render. Bug reported 2026-09-01:
   // "when I clicked parent nothing happened".
+  const n = parents?.length || 0;
   return (
-    <button onClick={() => openParentLinkModal({ studentId, name })}
+    <button onClick={() => openParentLinkModal({ studentId, name, parents })}
       className="rounded-lg border border-purple-500/50 bg-purple-500/10 px-2 py-1 text-purple-100 hover:bg-purple-500/20"
-      title="Link a parent — they'll see this child's progress + billing on /parent">
-      👪 Parent
+      title={n ? `Parents: ${parents!.map(parentLabel).join(", ")}` : "Link a parent — they'll see this child's progress + billing on /parent"}>
+      👪 Parent{n > 0 ? ` (${n})` : ""}
     </button>
   );
 }
 
 // ---- Parent-link modal host (module-level state) ----------------------
-type ParentLinkTarget = { studentId: string; name: string } | null;
+type ParentLinkTarget = { studentId: string; name: string; parents?: LinkedParent[] } | null;
 let _parentLinkTarget: ParentLinkTarget = null;
 const _parentLinkSubs = new Set<() => void>();
 function openParentLinkModal(t: ParentLinkTarget) { _parentLinkTarget = t; _parentLinkSubs.forEach((f) => f()); }
@@ -199,14 +203,14 @@ function useParentLinkTarget(): ParentLinkTarget {
 function ParentLinkHost() {
   const t = useParentLinkTarget();
   if (!t) return null;
-  return <LinkParentModal studentId={t.studentId} childName={t.name} onClose={() => openParentLinkModal(null)} />;
+  return <LinkParentModal studentId={t.studentId} childName={t.name} parents={t.parents} onClose={() => openParentLinkModal(null)} />;
 }
 
 /** Structured parent-link form — replaces the old triple-prompt() flow.
  *  Owner ask 2026-09-01: "option to add parent name and WhatsApp mobile
  *  number of the parent". Backend accepts email OR mobile (or both).
  *  Requires at least one contact so we can reach the parent for reminders. */
-function LinkParentModal({ studentId, childName, onClose }: { studentId: string; childName: string; onClose: () => void }) {
+function LinkParentModal({ studentId, childName, parents = [], onClose }: { studentId: string; childName: string; parents?: LinkedParent[]; onClose: () => void }) {
   const qc = useQueryClient();
   const [displayName, setDisplayName] = useState("");
   const [mobile, setMobile] = useState("");
@@ -242,11 +246,40 @@ function LinkParentModal({ studentId, childName, onClose }: { studentId: string;
       <div className="w-full max-w-md rounded-2xl border border-purple-500/40 bg-ink-950 p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-start justify-between">
           <div>
-            <h3 className="font-display text-lg text-purple-100">👪 Link parent to {childName}</h3>
+            <h3 className="font-display text-lg text-purple-100">👪 {parents.length ? `Parents of ${childName}` : `Link parent to ${childName}`}</h3>
             <p className="mt-1 text-xs text-ink-400">They'll see fees + progress on <span className="font-mono">/parent</span>. WhatsApp reminders will use the mobile below.</p>
           </div>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg bg-ink-800 text-ink-300 hover:bg-ink-700">✕</button>
         </div>
+
+        {parents.length > 0 && (
+          <div className="mb-4 rounded-xl border border-purple-500/30 bg-purple-500/5 p-3">
+            <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-purple-200">
+              Already linked ({parents.length})
+            </div>
+            <ul className="flex flex-col gap-2">
+              {parents.map((p) => (
+                <li key={p._id} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="text-sm font-semibold text-white">{parentLabel(p)}</span>
+                  {p.mobile && (
+                    <a href={`https://wa.me/${p.mobile.replace(/\D/g, "")}`} target="_blank" rel="noreferrer"
+                      className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] text-emerald-200 ring-1 ring-emerald-400/30 hover:bg-emerald-500/25">
+                      📱 {p.mobile}
+                    </a>
+                  )}
+                  {p.email && <span className="text-[11px] text-ink-400">✉️ {p.email}</span>}
+                  {!p.mobile && !p.email && (
+                    <span className="text-[11px] text-amber-300">no contact on file — reminders can't reach them</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {parents.length > 0 && (
+          <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-400">Add another parent</div>
+        )}
         <label className="mb-3 block">
           <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-ink-300">Parent name</span>
           <input autoFocus value={displayName} onChange={(e) => setDisplayName(e.target.value)} maxLength={60} placeholder="e.g. Ravi Kumar"
@@ -323,48 +356,105 @@ function MergeStudentButton({ studentId, name }: { studentId: string; name: stri
 }
 
 function ResetPasswordButton({ studentId, name }: { studentId: string; name: string }) {
+  // Same module-level-host pattern as the parent modal: the overflow menu's
+  // MenuBtnWrap closes (and unmounts) this button on click, so any result held
+  // in local state vanished before it could be read. Owner report 2026-09-05:
+  // "still can't see change password for students" — the password WAS being
+  // set server-side, the credentials just never rendered.
+  return (
+    <button onClick={() => openPasswordModal({ studentId, name })}
+      className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-2 py-1 text-amber-100 hover:bg-amber-500/20"
+      title="Set or reset this student's password">
+      🔑 Password
+    </button>
+  );
+}
+
+// ---- Set-password modal host (module-level state) ---------------------
+type PasswordTarget = { studentId: string; name: string } | null;
+let _pwTarget: PasswordTarget = null;
+const _pwSubs = new Set<() => void>();
+function openPasswordModal(t: PasswordTarget) { _pwTarget = t; _pwSubs.forEach((f) => f()); }
+function usePasswordTarget(): PasswordTarget {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((n) => n + 1); _pwSubs.add(f); return () => { _pwSubs.delete(f); }; }, []);
+  return _pwTarget;
+}
+function PasswordResetHost() {
+  const t = usePasswordTarget();
+  if (!t) return null;
+  return <SetPasswordModal studentId={t.studentId} name={t.name} onClose={() => openPasswordModal(null)} />;
+}
+
+function SetPasswordModal({ studentId, name, onClose }: { studentId: string; name: string; onClose: () => void }) {
+  const [pw, setPw] = useState("");
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
   const [creds, setCreds] = useState<{ username: string; password: string } | null>(null);
+  const [copied, setCopied] = useState(false);
   const submit = async () => {
-    const raw = prompt(`Set a password for ${name}.\n\nLeave blank to auto-generate (${name.split(/\s+/)[0]?.toLowerCase().replace(/[^a-z0-9]/g, "") || "student"}@123):`, "");
-    if (raw === null) return; // cancelled
-    setBusy(true);
+    setErr(null); setBusy(true);
     try {
       const r = await fetch(`/v2api/api/academy/students/${encodeURIComponent(studentId)}/set-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ newPassword: raw.trim() }),
+        body: JSON.stringify({ newPassword: pw.trim() }),
       });
       const j = await r.json();
       if (j?.ok) setCreds(j.credentials);
-      else alert(j?.error || "Couldn't reset password.");
-    } catch (e: any) {
-      alert(e?.message || "Network error.");
-    } finally {
-      setBusy(false);
-    }
+      else setErr(j?.error || j?.message || "Couldn't reset password.");
+    } catch (e: any) { setErr(e?.message || "Network error."); }
+    finally { setBusy(false); }
   };
-  if (creds) {
-    return (
-      <button
-        onClick={() => { navigator.clipboard?.writeText(`${creds.username} / ${creds.password}`).catch(() => {}); setCreds(null); }}
-        title="Click to copy + hide"
-        className="rounded-lg border border-emerald-500/50 bg-emerald-500/15 px-2 py-1 font-mono text-emerald-100 hover:bg-emerald-500/25"
-      >
-        {creds.username} / {creds.password}
-      </button>
-    );
-  }
   return (
-    <button
-      onClick={submit}
-      disabled={busy}
-      className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-2 py-1 text-amber-100 hover:bg-amber-500/20 disabled:opacity-60"
-      title="Set or reset this student's password"
-    >
-      🔑 {busy ? "…" : "Password"}
-    </button>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" role="dialog" aria-modal onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl border border-amber-500/40 bg-ink-950 p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-start justify-between">
+          <h3 className="font-display text-lg text-amber-100">🔑 Password for {name}</h3>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg bg-ink-800 text-ink-300 hover:bg-ink-700">✕</button>
+        </div>
+
+        {creds ? (
+          <>
+            <p className="mb-3 text-sm text-emerald-200">Password updated. Share these with {name}:</p>
+            <div className="mb-4 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 font-mono text-sm text-emerald-100">
+              <div>username: <span className="font-bold">{creds.username}</span></div>
+              <div>password: <span className="font-bold">{creds.password}</span></div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  navigator.clipboard?.writeText(`username: ${creds.username}\npassword: ${creds.password}\nlogin: ${window.location.origin}/login`)
+                    .then(() => setCopied(true)).catch(() => setCopied(true));
+                }}
+                className="h-10 rounded-lg border border-emerald-500/50 bg-emerald-500/15 px-4 text-sm font-semibold text-emerald-100 hover:bg-emerald-500/25">
+                {copied ? "✓ Copied" : "Copy"}
+              </button>
+              <button onClick={onClose} className="h-10 rounded-lg bg-gradient-to-r from-amber-600 to-amber-500 px-5 text-sm font-semibold text-white">Done</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <label className="mb-4 block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-ink-300">New password</span>
+              <input autoFocus value={pw} onChange={(e) => setPw(e.target.value)} placeholder="leave blank to auto-generate"
+                onKeyDown={(e) => { if (e.key === "Enter" && !busy) submit(); }}
+                className="h-10 w-full rounded-lg border border-ink-700 bg-ink-900 px-3 text-sm text-ink-100 focus:border-amber-500 focus:outline-none" />
+              <span className="mt-1 block text-[11px] text-ink-500">Blank generates something like <span className="font-mono">{(name.split(/\s+/)[0] || "student").toLowerCase().replace(/[^a-z0-9]/g, "")}@123</span>. You'll see the exact credentials next.</span>
+            </label>
+            {err && <div className="mb-3 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">{err}</div>}
+            <div className="flex justify-end gap-2">
+              <button onClick={onClose} className="h-10 rounded-lg px-4 text-sm font-semibold text-ink-300 hover:bg-ink-800">Cancel</button>
+              <button onClick={submit} disabled={busy}
+                className="h-10 rounded-lg bg-gradient-to-r from-amber-600 to-amber-500 px-5 text-sm font-semibold text-white disabled:opacity-50">
+                {busy ? "Setting…" : "Set password"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -2312,6 +2402,7 @@ export default function AcademyDashboardPage() {
       {/* Parent-link modal (module-level state so the overflow menu closing
        *  the button doesn't wipe the modal). */}
       <ParentLinkHost />
+      <PasswordResetHost />
 
       {/* Non-management shell (student view) */}
       {!canManage && (
@@ -4712,7 +4803,9 @@ function StudentCard({ s, isOwner, coachName, coaches }: {
   const feeOverdue = feesPaise > 0 && !!s.oldestPendingPeriod;
 
   return (
-    <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-ink-700 bg-gradient-to-br from-ink-900 to-ink-950 p-4 transition hover:border-brand-500/50">
+    // No overflow-hidden: the ⋯ menu opens upward (absolute bottom-full) from
+    // inside this card and was being clipped by it.
+    <div className="group relative flex flex-col rounded-2xl border border-ink-700 bg-gradient-to-br from-ink-900 to-ink-950 p-4 transition hover:border-brand-500/50">
       {/* Corner status ribbons */}
       {feeOverdue && (
         <span className="pointer-events-none absolute right-2 top-2 rounded-full bg-rose-500/20 px-2 py-0.5 text-[10px] font-semibold text-rose-200 ring-1 ring-rose-400/40" title={`Oldest pending period: ${s.oldestPendingPeriod}`}>
@@ -4734,9 +4827,14 @@ function StudentCard({ s, isOwner, coachName, coaches }: {
                 👨‍🏫 {coachName}
               </span>
             )}
-            {!hasParent && (
+            {!hasParent ? (
               <span className="rounded-full bg-purple-500/15 px-1.5 py-0.5 text-[10px] text-purple-200 ring-1 ring-purple-400/30" title="No parent linked — fee reminders + parent portal won't work">
                 👪 no parent
+              </span>
+            ) : (
+              <span className="max-w-full truncate rounded-full bg-purple-500/15 px-1.5 py-0.5 text-[10px] text-purple-200 ring-1 ring-purple-400/30"
+                title={(s.parents || []).map((p) => `${parentLabel(p)}${p.mobile ? ` · ${p.mobile}` : ""}`).join("\n") || "Parent linked"}>
+                👪 {(s.parents || []).map(parentLabel).join(", ") || "parent linked"}
               </span>
             )}
           </div>
@@ -4824,7 +4922,7 @@ function StudentOverflowMenu({ s, isOwner, coaches }: { s: Student; isOwner: boo
             <MessageStudentButton studentId={s._id} name={s.name || s.username} />
           </MenuBtnWrap>
           <MenuBtnWrap onClick={() => setOpen(false)}>
-            <LinkParentButton studentId={s._id} name={s.name || s.username} />
+            <LinkParentButton studentId={s._id} name={s.name || s.username} parents={s.parents} />
           </MenuBtnWrap>
           <MenuBtnWrap onClick={() => setOpen(false)}>
             <MergeStudentButton studentId={s._id} name={s.name || s.username} />

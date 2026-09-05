@@ -2727,6 +2727,18 @@ Thank you!`;
     const fmap: Record<string, { pendingFeesPaise: number; oldestPendingPeriod: string }> = {};
     for (const f of feeRows) fmap[String(f._id)] = { pendingFeesPaise: f.pendingFeesPaise ?? 0, oldestPendingPeriod: f.oldestPendingPeriod ?? "" };
 
+    // Resolve parentIds → contact rows. The roster only had bare ids, so the
+    // card could say "has a parent" but never show WHO — owner report
+    // 2026-09-05: parent added for harinitharanjith, clicking 👪 Parent
+    // showed a blank add-form.
+    const allParentIds = [...new Set(rows.flatMap((r: any) => (r.parentIds || []).map(String)))];
+    const parentDocs: any[] = allParentIds.length
+      ? await this.users()
+          .find({ _id: { $in: allParentIds as any } }, { projection: { _id: 1, username: 1, name: 1, mobile: 1, email: 1 } })
+          .toArray()
+      : [];
+    const parentById = new Map(parentDocs.map((p: any) => [String(p._id), p]));
+
     // Compute "alive" daily streak the same way the puzzles service does —
     // current is 0 when lastDate is older than yesterday, so the coach sees a
     // truthful "how consistent is this student RIGHT NOW" number.
@@ -2755,6 +2767,9 @@ Thank you!`;
         lastPuzzleAt:   pmap[String(s._id)]?.lastPuzzleAt ?? null,
         dailyStreakCurrent: streak.current,
         dailyStreakLongest: streak.longest,
+        parents: ((s.parentIds || []) as string[])
+          .map((pid) => parentById.get(String(pid)))
+          .filter(Boolean),
       };
     });
   }
