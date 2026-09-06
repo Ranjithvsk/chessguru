@@ -127,7 +127,13 @@ export default function Board({
       orientation,
       turnColor,
       coordinates,
-      viewOnly,
+      // NOT the real viewOnly — see the set() right after Chessground(). Chessground
+      // binds its input listeners once, inside Chessground(), and bindBoard +
+      // bindDocument both early-return when viewOnly is true. Nothing ever binds them
+      // later, so a board built while viewOnly and flipped interactive afterwards is
+      // dead forever: every prop reads correct and the piece still won't pick up.
+      // Play mounts exactly like that (viewOnly={!playing}, true until a game starts).
+      viewOnly: false,
       lastMove,
       check: check ? turnColor : undefined,
       animation: { enabled: true, duration: 200 },
@@ -183,8 +189,27 @@ export default function Board({
       },
     };
     api.current = Chessground(el.current, config);
+    // Listeners exist now; the handlers re-read s.viewOnly per event, so a spectator
+    // board is still inert. `manipulable` (cursor: pointer) is only applied by
+    // chessground at construction, so it has to be corrected by hand too.
+    api.current.set({ viewOnly });
+    el.current.classList.toggle("manipulable", !viewOnly);
     if (shapes) api.current.setShapes(shapes);
-    return () => api.current?.destroy();
+
+    // Chessground memoises the board's bounding rect and only invalidates it on
+    // scroll, window resize, and its own ResizeObserver. None of those fire when the
+    // board is *moved* without being *resized* — which is exactly what Play does when
+    // the seek panel collapses into the in-game layout. The rect then reads ~74px too
+    // high, every pointer position maps a rank off, and the move is silently rejected
+    // as illegal. Re-measure at the start of each interaction; it's one rect read.
+    const freshenBounds = () => api.current?.state.dom.bounds.clear();
+    document.addEventListener("mousedown", freshenBounds, true);
+    document.addEventListener("touchstart", freshenBounds, true);
+    return () => {
+      document.removeEventListener("mousedown", freshenBounds, true);
+      document.removeEventListener("touchstart", freshenBounds, true);
+      api.current?.destroy();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -230,6 +255,14 @@ export default function Board({
   // stale prop.
   useEffect(() => {
     if (!api.current) return;
+    // An orientation change makes api.set() call redrawAll(), which blows away the board
+    // element (innerHTML = "") and re-runs bindBoard — and bindBoard skips binding while
+    // state.viewOnly is true, which it still is at that point because configure() applies
+    // the new viewOnly later in the same set(). Play hits this every time a black game
+    // starts: the board flips, the fresh DOM gets no listeners, and the whole game is
+    // unplayable. Clear it first so the rebind always lands; the real value is applied
+    // below and the handlers re-read it per event, so spectator boards stay inert.
+    api.current.state.viewOnly = false;
     api.current.set({
       orientation,
       turnColor,
@@ -242,6 +275,7 @@ export default function Board({
       // even after hideMoveHints:true).
       movable: { color: movableColor, dests, showDests: hideMoveHints ? false : showDests },
     });
+    el.current?.classList.toggle("manipulable", !viewOnly);
     api.current.cancelPremove();
   }, [orientation, turnColor, coordinates, viewOnly, check, movableColor, dests, syncNonce, hideMoveHints, showDests]);
 

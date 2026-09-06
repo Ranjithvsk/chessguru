@@ -15,7 +15,10 @@ function guestToken(): string {
 }
 
 function fmtClock(ms: number): string {
-  const s = Math.max(0, Math.ceil(ms / 1000));
+  const t = Math.max(0, ms);
+  // Under 10s the hundredths are what tells you whether you can still make the move.
+  if (t < 10000) return `${Math.floor(t / 1000)}.${String(Math.floor((t % 1000) / 10)).padStart(2, "0")}`;
+  const s = Math.ceil(t / 1000);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 

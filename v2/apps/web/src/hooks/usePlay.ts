@@ -70,6 +70,12 @@ export function usePlay(token: string): PlayState {
   const [moves, setMoves] = useState<string[]>([]);
   const [lastMove, setLastMove] = useState<[Key, Key] | undefined>();
   const [clock, setClock] = useState({ white: 0, black: 0 });
+  // The server only broadcasts the clock every 2s, so the raw value visibly jumps.
+  // Keep the authoritative snapshot plus when it arrived and run the seconds down
+  // locally between broadcasts; each broadcast re-anchors, so drift can't accumulate.
+  const clockAt = useRef(0);
+  const clockRunning = useRef(false);
+  const [clockTick, setClockTick] = useState(0);
   const [opponent, setOpponent] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const [reason, setReason] = useState<string | null>(null);
@@ -81,6 +87,11 @@ export function usePlay(token: string): PlayState {
   const clearPending = () => {
     pendingRef.current = null;
     setPendingPromotion(null);
+  };
+  const applyClock = (c: { white: number; black: number }, running?: boolean) => {
+    clockAt.current = Date.now();
+    if (running !== undefined) clockRunning.current = running;
+    setClock(c);
   };
   const loadFen = (f: string) => {
     try {
@@ -128,7 +139,7 @@ export function usePlay(token: string): PlayState {
         setTurn(m.d.turn);
         plyRef.current = m.d.ply;
         setPly(m.d.ply);
-        setClock(m.d.clock);
+        applyClock(m.d.clock);
         setMoves(m.d.moves);
         setIncomingDraw(false);
         clearPending();
@@ -142,14 +153,14 @@ export function usePlay(token: string): PlayState {
         setTurn(m.d.turn);
         plyRef.current = m.d.ply + 1;
         setPly(m.d.ply + 1);
-        setClock(m.d.clock);
+        applyClock(m.d.clock);
         setLastMove([m.d.uci.slice(0, 2) as Key, m.d.uci.slice(2, 4) as Key]);
         setMoves((mv) => [...mv, m.d.san]);
         setIncomingDraw(false);
         clearPending();
         break;
       case "clock":
-        setClock(m.d.clock);
+        applyClock(m.d.clock, m.d.running);
         setTurn(m.d.turn);
         break;
       case "challenge-created":
@@ -162,7 +173,7 @@ export function usePlay(token: string): PlayState {
       case "game-end":
         setResult(m.d.result);
         setReason(m.d.reason);
-        setClock(m.d.clock);
+        applyClock(m.d.clock, false);
         setIncomingDraw(false);
         clearPending();
         setStatus("ended");
@@ -277,8 +288,24 @@ export function usePlay(token: string): PlayState {
   const myTurn = status === "playing" && turn === color;
   const dests = useMemo(() => destsFromChess(game.current as never), [fen]);
 
+  // 50ms so the sub-second digits in the last 10s actually read as counting down
+  // rather than stepping.
+  useEffect(() => {
+    if (status !== "playing") return;
+    const id = setInterval(() => setClockTick((t) => t + 1), 50);
+    return () => clearInterval(id);
+  }, [status]);
+
+  const liveClock = useMemo(() => {
+    if (status !== "playing" || !clockRunning.current || !clockAt.current) return clock;
+    const elapsed = Date.now() - clockAt.current;
+    return { ...clock, [turn]: Math.max(0, clock[turn] - elapsed) };
+    // clockTick drives the recompute; Date.now() is read fresh each time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clock, turn, status, clockTick]);
+
   return {
-    status, color, fen, turn, ply, moves, lastMove, clock, opponent, result, reason, incomingDraw, challengeId,
+    status, color, fen, turn, ply, moves, lastMove, clock: liveClock, opponent, result, reason, incomingDraw, challengeId,
     pendingPromotion, boardEpoch, dests, myTurn,
     seek, createChallenge, sendMove, premove, choosePromotion, cancelPromotion, resign, offerDraw, acceptDraw, declineDraw, rematch, newGame,
   };
