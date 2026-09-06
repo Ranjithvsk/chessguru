@@ -193,6 +193,17 @@ export default function SupportWidget() {
   const [replyDrafts, setReplyDrafts] = useState<Record<number, string>>({});
   const [replyBusy, setReplyBusy] = useState<Record<number, boolean>>({});
   const [hasUnread, setHasUnread] = useState(false);
+  // Screenshots are stored as data: URIs, and browsers refuse top-level
+  // navigation to those — the old <a href={src} target="_blank"> opened a
+  // blank tab. Show the full image in an overlay instead.
+  const [zoom, setZoom] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!zoom) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setZoom(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoom]);
 
   const loadTickets = useCallback(async (): Promise<MyTicket[]> => {
     setTicketsLoading(true); setTicketsErr("");
@@ -540,9 +551,14 @@ export default function SupportWidget() {
                           {t.screenshots.length > 0 && (
                             <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
                               {t.screenshots.slice(0, 4).map((src, i) => (
-                                <a key={i} href={src} target="_blank" rel="noreferrer">
-                                  <img src={src} alt="" style={{ maxHeight: 60, maxWidth: 90, borderRadius: 6, border: "1px solid #e2e8f0" }} />
-                                </a>
+                                <img
+                                  key={i}
+                                  src={src}
+                                  alt=""
+                                  title="Click to view full size"
+                                  onClick={() => setZoom(src)}
+                                  style={{ maxHeight: 60, maxWidth: 90, borderRadius: 6, border: "1px solid #e2e8f0", cursor: "zoom-in" }}
+                                />
                               ))}
                             </div>
                           )}
@@ -555,9 +571,14 @@ export default function SupportWidget() {
                               {r.screenshots.length > 0 && (
                                 <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
                                   {r.screenshots.slice(0, 4).map((src, i) => (
-                                    <a key={i} href={src} target="_blank" rel="noreferrer">
-                                      <img src={src} alt="" style={{ maxHeight: 50, maxWidth: 80, borderRadius: 6, border: "1px solid #e2e8f0" }} />
-                                    </a>
+                                    <img
+                                      key={i}
+                                      src={src}
+                                      alt=""
+                                      title="Click to view full size"
+                                      onClick={() => setZoom(src)}
+                                      style={{ maxHeight: 50, maxWidth: 80, borderRadius: 6, border: "1px solid #e2e8f0", cursor: "zoom-in" }}
+                                    />
                                   ))}
                                 </div>
                               )}
@@ -594,6 +615,15 @@ export default function SupportWidget() {
           </div>
         </div>
       )}
+      {zoom && (
+        <div
+          data-support-widget="1"
+          style={s.zoomBack}
+          onClick={(e) => { e.stopPropagation(); setZoom(null); }}
+        >
+          <img src={zoom} alt="Screenshot, full size" style={s.zoomImg} />
+        </div>
+      )}
     </>
   );
 }
@@ -604,6 +634,8 @@ const s: Record<string, React.CSSProperties> = {
   fab: { position: "fixed", right: 16, bottom: 16, width: 46, height: 46, borderRadius: "50%", border: "none", cursor: "pointer", zIndex: 9998, background: "rgba(35,0,81,0.55)", color: "#fff", fontSize: 22, fontWeight: 800, backdropFilter: "blur(4px)", boxShadow: "0 8px 24px rgba(2,6,23,0.35)", opacity: 0.55, transition: "opacity .15s, transform .15s" },
   dot: { position: "absolute", top: 6, right: 6, width: 10, height: 10, borderRadius: "50%", background: "#ef4444", border: "2px solid #fff", boxShadow: "0 0 0 1px rgba(2,6,23,0.15)" },
   backdrop: { position: "fixed", inset: 0, background: "rgba(2,6,23,0.5)", display: "grid", placeItems: "end", zIndex: 9999, padding: 16 },
+  zoomBack: { position: "fixed", inset: 0, background: "rgba(2,6,23,0.88)", display: "grid", placeItems: "center", zIndex: 10000, padding: 12, cursor: "zoom-out" },
+  zoomImg: { maxWidth: "100%", maxHeight: "100%", objectFit: "contain", borderRadius: 8, boxShadow: "0 24px 60px rgba(2,6,23,0.6)" },
   panel: { width: "100%", maxWidth: 380, marginLeft: "auto", background: "#fff", borderRadius: 18, padding: 16, boxShadow: "0 24px 60px rgba(2,6,23,0.4)", fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" },
   head: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
   x: { border: "none", background: "#f1f5f9", borderRadius: 8, width: 30, height: 30, cursor: "pointer", color: "#475569", fontWeight: 700 },
