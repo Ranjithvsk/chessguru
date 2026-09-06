@@ -67,3 +67,8 @@ the two real options are both already referenced in the repo:
   while or it ran elsewhere — worth confirming before trusting `enginegames`.
 - Nothing here is wired into `apps/bot-player` yet; this was a survey only.
 - Disk is at 87% (26G free); Stockfish alone is 99MB.
+- **`play-bot` runs as `ubuntu` but execs a `dreamworld`-owned interpreter**
+  (`/home/dreamworld/opt/maia3/.venv/bin/maia3-uci`). It works today only because
+  `/home/dreamworld` is world-readable (`drwxr-xr-x`). Tightening those perms, moving or
+  rebuilding that venv kills the live bot with no other copy to fall back on. The model
+  weights are *not* shared — each user has its own 105MB HF cache copy of Maia3-5M.
