@@ -5,7 +5,11 @@ import type { Color, ServerMsg, TimeControl } from "@chessguru/protocol";
 import { LiveClient } from "../lib/live";
 import { destsFromChess } from "../components/Board";
 
-const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined) ?? "ws://localhost:18080/ws";
+// Same-origin by default: the SPA is served from several hostnames, so a baked-in
+// absolute URL would break every host but one. nginx proxies /ws to the gateway.
+const WS_URL =
+  (import.meta.env.VITE_WS_URL as string | undefined) ??
+  `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 
 export type PlayStatus = "connecting" | "idle" | "seeking" | "playing" | "ended";
 export type Promo = "q" | "r" | "b" | "n";
