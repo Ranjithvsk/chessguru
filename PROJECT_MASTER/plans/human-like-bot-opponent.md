@@ -45,6 +45,26 @@ reaches 57.1% human move-match. `maia3-5m` is the "CPU, chess GUIs" preset.
 **There is no 1100 floor.** Sub-1100 is genuinely covered. This was the main open risk
 and it is closed.
 
+### Local install (France, `vps-2c160fde`) — done 2026-09-06
+
+```bash
+git clone --depth 1 https://github.com/CSSLab/maia3.git /home/dreamworld/opt/maia3
+python3 -m venv /home/dreamworld/opt/maia3/.venv
+# CPU wheel EXPLICITLY — plain `pip install torch` pulls multi-GB CUDA wheels
+/home/dreamworld/opt/maia3/.venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+cd /home/dreamworld/opt/maia3 && .venv/bin/pip install .
+.venv/bin/maia3-cache --model maia3-5m
+.venv/bin/maia3-uci --model maia3-5m --device cpu --no-use-amp
+```
+
+Installed **outside** the ChessGuru repo, deliberately — see the licensing rule below;
+keeping it out of the tree makes accidental vendoring impossible. Got
+`torch 2.14.0+cpu` (cuda build `None`), `maia3 0.1.0`; checkpoint cached under
+`~/.cache/huggingface/`. Disk was 87% full, hence the CPU index.
+
+UCI options confirmed live: `Elo/SelfElo/OppoElo` **spin, default 1500, min 0 max 5000**;
+`MultiPV` default 5, min 1 max 20; `Temperature` 1.0; `TopP` 1.0.
+
 ## Licensing constraint (shapes the architecture)
 
 - **Code: AGPL-3.0**, verified in the LICENSE body.
@@ -131,8 +151,38 @@ genuinely hard for that band → tank.
 This is free, already rating-conditioned, and means we never hand-tune "what looks hard"
 per level. It falls out of the model. This is why we run `MultiPV=5`.
 
-*Open:* confirm whether Maia-3's UCI layer exposes policy probability per line or only a
-score. If only scores, derive the spread from the score gap between lines instead.
+**Resolved 2026-09-06 — recover it by resampling, not by reading it.**
+
+`uci.py:333` computes `policy` per candidate but **never prints it**. The info line emits
+only `score cp` + `wdl`, and those come from the *value* head via a second forward pass
+over candidate positions (`uci.py:336-354`). Observed at startpos: cp by MultiPV rank was
+`104, 105, 31, 29, 75` — **not monotone**, because rank is policy order while cp is value.
+So cp gaps are the wrong quantity and must not be used as the complexity proxy.
+
+We cannot patch `uci.py` to emit policy (AGPL rule above), and importing `maia3` as a
+library into our own process would be linking, a far stronger copyleft trigger than
+stdio. Both routes are closed.
+
+Instead: **`bestmove` is *sampled*, not argmax** — `uci.py:322` calls
+`sample_from_logits` → `torch.multinomial`, with defaults `Temperature=1.0`, `TopP=1.0`
+(verified live). Repeated `go` on one position therefore yields i.i.d. draws from the
+policy, and the agreement rate between draws estimates the collision probability
+`Σpᵢ²` — a legitimate concentration measure (order-2 Rényi entropy).
+
+Measured, maia3-5m @ SelfElo=1200, 24 samples, MultiPV=1:
+
+| position | distinct | top-1 | collision |
+|---|---|---|---|
+| Bxf7+, Kxf7 near-forced | 1 | 100% | **1.00** |
+| startpos | 3 | 83% | **0.71** |
+| quiet Italian middlegame | 7 | 38% | **0.24** |
+
+Monotone across the full range and rating-conditioned for free. **K≈6–8 samples suffices**
+in production (~70–100 ms each on CPU) — negligible against multi-second think times, and
+**one of those samples is the move we play**, so move selection costs nothing extra.
+
+Note ~70–100 ms/sample was measured even at MultiPV=1, above the 27 ms bare forward pass,
+because the candidate value pass at `uci.py:335-354` runs regardless of MultiPV.
 
 ### 2. Forced moves are near-instant
 
@@ -162,7 +212,8 @@ corruption layer on top of a human-move model is how we end up with neither.
 ## Open items
 
 1. **Strength calibration harness** — blocks rated go-live. See gate above.
-2. **Policy exposure via UCI** — does MultiPV give probabilities or only scores?
+2. ~~**Policy exposure via UCI**~~ — ✅ RESOLVED 2026-09-06, see think-time §1: policy is
+   never emitted, but resampling `bestmove` recovers concentration through plain UCI.
 3. **Resign / draw behaviour** — Maia has none. A bot grinding K+Q vs K to mate in a dead
    lost position is a tell. Needs a rating-plausible resign threshold.
 4. **Abort / disconnect behaviour** — humans sometimes vanish. Never doing so is itself a
