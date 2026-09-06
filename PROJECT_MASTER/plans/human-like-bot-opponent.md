@@ -142,6 +142,11 @@ bias), 12% draws, avg 73 ply.
 **Ladder span: nominal 1200 → achieved 556 (0.46x).** Every pairing is compressed; the
 ratio ranges 0.29–0.64 with no pair above 0.64.
 
+Raw games: [`research/maia-calibration-raw-games.jsonl`](../research/maia-calibration-raw-games.jsonl)
+(300 games, 120 per level; recovered from `/tmp` 2026-09-06 before it was lost). Recomputed
+independently with a mean-anchored logistic fit: span 609, slope 0.480 — same conclusion by
+a different method.
+
 > **Read this correctly.** The robust result is the **compression ratio**, not the implied
 > column. Absolute numbers are anchored by construction — the ladder mean is pinned to the
 > nominal mean — so "1400 is accurate" is an artefact of anchoring, not a finding. This is
