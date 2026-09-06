@@ -125,6 +125,38 @@ bot games from analytics.
 > bot game silently inflates or deflates real student ratings.
 > Measure empirically across our actual rating span before this touches a rated game.
 
+### Calibration round 1 — measured 2026-09-06
+
+`scripts/maia_calibration.py`, maia3-5m, ladder 800/1100/1400/1700/2000, full round robin,
+30 games per pair, 300 games. Clean sample: **0 hit the 300-ply cap** (so no adjudication
+bias), 12% draws, avg 73 ply.
+
+| SelfElo | implied | delta |
+|---|---|---|
+| 800 | 1133 | **+333** |
+| 1100 | 1286 | +186 |
+| 1400 | 1393 | −7 |
+| 1700 | 1499 | −201 |
+| 2000 | 1688 | **−312** |
+
+**Ladder span: nominal 1200 → achieved 556 (0.46x).** Every pairing is compressed; the
+ratio ranges 0.29–0.64 with no pair above 0.64.
+
+> **Read this correctly.** The robust result is the **compression ratio**, not the implied
+> column. Absolute numbers are anchored by construction — the ladder mean is pinned to the
+> nominal mean — so "1400 is accurate" is an artefact of anchoring, not a finding. This is
+> also Maia-vs-Maia only; self-play can compress a model against itself in ways that do not
+> transfer. **A human anchor is still required.**
+
+**Consequence for the design:** do **not** set `SelfElo` = the seeker's rating. A 900-rated
+student would face something performing near 1150 and lose rating steadily; a 1900 student
+would face ~1550 and farm it. The mapping has to be inverted through the measured curve,
+which needs the human anchor first to place it on our actual Glicko scale.
+
+**Still open before rated:** bot vs known-rated students, ≥200 games spread across the
+academy's real band, comparing realised score to Glicko expectation. Until then the bot
+ships **unrated** or not at all.
+
 ## Disguise: full, no badge
 
 Owner decision, 2026-09-06 ("no not badge").
@@ -211,7 +243,9 @@ corruption layer on top of a human-move model is how we end up with neither.
 
 ## Open items
 
-1. **Strength calibration harness** — blocks rated go-live. See gate above.
+1. **Strength calibration** — ⚠️ STILL BLOCKS RATED. Round 1 (Maia-vs-Maia) done
+   2026-09-06: **0.46x compression**, so `SelfElo` cannot map 1:1 to student rating. Round 2
+   (human anchor, ≥200 games vs known-rated students) not started. See gate above.
 2. ~~**Policy exposure via UCI**~~ — ✅ RESOLVED 2026-09-06, see think-time §1: policy is
    never emitted, but resampling `bestmove` recovers concentration through plain UCI.
 3. **Resign / draw behaviour** — Maia has none. A bot grinding K+Q vs K to mate in a dead
