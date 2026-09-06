@@ -24,6 +24,10 @@ import chess
 
 BIN = "/home/dreamworld/opt/maia3/.venv/bin/maia3-uci"
 MODEL = "maia3-5m"
+# Must stay identical to what apps/bot-player actually launches, or the measured mapping
+# describes an engine we don't ship. --use-uci-history is the faithful mode: Maia-3
+# conditions on prior positions, and without it the current one is just repeated.
+ENGINE_ARGS = ["--device", "cpu", "--no-use-amp", "--use-uci-history"]
 LADDER = [800, 1100, 1400, 1700, 2000]
 GAMES_PER_PAIR = 30
 PLY_CAP = 300  # Maia never resigns; lost positions get played out forever
@@ -33,7 +37,7 @@ class Engine:
     def __init__(self):
         env = dict(os.environ, OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
         self.p = subprocess.Popen(
-            [BIN, "--model", MODEL, "--device", "cpu", "--no-use-amp"],
+            [BIN, "--model", MODEL, *ENGINE_ARGS],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             text=True, bufsize=1, env=env,
         )

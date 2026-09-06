@@ -32,6 +32,7 @@ const mongo = new MongoClient(MONGO);
 
 const BASE_RANGE = 200; // ± rating for an immediate match
 const WIDEN_PER_SEC = 40; // window growth per second waited (the sweep)
+const SEEK_MAX_MS = 10 * 60 * 1000; // drop seeks this old — their gateway is gone
 
 // Atomically pop the first compatible seek in a rating window (≠ excludeMember).
 const MATCH_LUA = `
@@ -96,6 +97,12 @@ async function pair(white: SeekMeta, black: SeekMeta): Promise<void> {
   console.log(`[lobby] paired ${white.by}(W) vs ${black.by}(B) -> ${gid}`);
 }
 
+/** Coin-flip the colours. Seats used to follow arrival order, which handed white to
+ *  whoever waited longer — and would make the bot black in every game it joins. */
+async function pairSeek(a: SeekMeta, b: SeekMeta): Promise<void> {
+  return Math.random() < 0.5 ? pair(a, b) : pair(b, a);
+}
+
 async function onSeek(e: LobbySeek): Promise<void> {
   const speed = speedOf(e.clock);
   const pool = tcKey(e.clock);
@@ -116,7 +123,7 @@ async function onSeek(e: LobbySeek): Promise<void> {
       await cmd.hdel(keys.seekMeta, matchId);
       await cmd.hdel(keys.seekByUser, partner.by);
       const me: SeekMeta = { seekId: randomUUID(), by: e.by, gw: e.gw, conn: e.conn, clock: e.clock, rated: e.rated, rating, ts: Date.now(), pool };
-      await pair(partner, me); // the waiting seeker gets white
+      await pairSeek(partner, me);
       return;
     }
   }
@@ -131,10 +138,12 @@ async function onSeek(e: LobbySeek): Promise<void> {
 
 async function onUnseek(e: LobbyUnseek): Promise<void> {
   const prev = await cmd.hget(keys.seekByUser, e.by);
-  if (prev) {
-    const pm = await getMeta(prev);
-    if (pm) await removeSeek(pm);
-  }
+  if (!prev) return;
+  const pm = await getMeta(prev);
+  // Only the connection that owns the live seek may cancel it. Seeks are keyed by
+  // user, so a second tab supersedes the first — closing the first tab must not
+  // cancel the seek the second one is waiting on.
+  if (pm && pm.conn === e.conn) await removeSeek(pm);
 }
 
 async function onChallenge(e: LobbyChallenge): Promise<void> {
@@ -168,6 +177,11 @@ async function sweep(): Promise<void> {
         continue;
       }
       const waited = (Date.now() - m.ts) / 1000;
+      if (waited * 1000 > SEEK_MAX_MS) {
+        // Backstop for a gateway that died without sending unseek.
+        await removeSeek(m);
+        continue;
+      }
       const range = BASE_RANGE + Math.floor(waited) * WIDEN_PER_SEC;
       const matchId = (await cmd.eval(MATCH_LUA, 1, key, String(m.rating - range), String(m.rating + range), id)) as string | null;
       if (matchId) {
@@ -177,7 +191,7 @@ async function sweep(): Promise<void> {
         await cmd.hdel(keys.seekByUser, m.by);
         if (partner) {
           await cmd.hdel(keys.seekByUser, partner.by);
-          await pair(m, partner); // the seek we started from gets white
+          await pairSeek(m, partner);
         }
       }
     }

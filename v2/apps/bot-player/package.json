@@ -1,0 +1,24 @@
+{
+  "name": "@chessguru/bot-player",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo \"(bot-player) no lint yet\""
+  },
+  "dependencies": {
+    "@chessguru/protocol": "workspace:*",
+    "chess.js": "^1.0.0-beta.8",
+    "ioredis": "^5.10.1",
+    "mongodb": "^6.20.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "@types/ws": "^8.5.12",
+    "tsx": "^4.21.0",
+    "typescript": "^5.6.3"
+  }
+}

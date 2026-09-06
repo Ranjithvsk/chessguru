@@ -53,6 +53,7 @@ _Created 2026-05-29 · expanded the same day with a full codebase read. Live: ht
 - [research/lichess-source-reads.md](research/lichess-source-reads.md) — which Lichess `lila` / `lichess-puzzler` sources were ported
 
 ## Sessions
+- ⚠️ [2026-09-06-maia-bot-opponent-live.md](sessions/2026-09-06-maia-bot-opponent-live.md) — quick pairing is now answered by a Maia-3 bot under a human Indian name (`apps/bot-player`, **unrated only** — the strength mapping has no human anchor yet); also fixed ghost seeks surviving a closed tab, and colour following arrival order
 - ⚠️ [2026-09-06-online-play-never-deployed.md](sessions/2026-09-06-online-play-never-deployed.md) — Play sat on "Waiting for a match" because online play **had no backend in production**: the bundle dialled `ws://localhost:18080` and ws/lobby/game-engine were never in pm2 → `ecosystem.play.config.cjs`, nginx `location = /ws`, same-origin WS URL
 - [2026-09-04-mail-health-monitoring.md](sessions/2026-09-04-mail-health-monitoring.md) — mail can't alert about its own outage: 2-min `/health` probe + `sendMail` observer → header banner for admins, `errorEvents` row, and an emailed postmortem the moment it recovers
 - ⚠️ [2026-09-04-error-alerting.md](sessions/2026-09-04-error-alerting.md) — auto-alerting on server 5xx / browser crashes / slow requests → `errorEvents` + throttled email + `/admin/errors`; **found all ChessGuru email dead since ~30 Aug (dwotp tunnel publickey denied)**

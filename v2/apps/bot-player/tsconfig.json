@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "target": "ES2022",
+    "outDir": "dist",
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@chessguru/protocol": ["../../packages/protocol/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

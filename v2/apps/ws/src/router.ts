@@ -213,7 +213,12 @@ export class Router {
 
   private onClose(s: Socket): void {
     const conn = this.conns.get(s.id);
-    if (conn) for (const g of conn.subs) this.gameSubs.get(g)?.delete(s.id);
+    if (conn) {
+      for (const g of conn.subs) this.gameSubs.get(g)?.delete(s.id);
+      // Without this a closed tab leaves its seek in the pool forever, and the next
+      // seeker "matches" a socket that no longer exists.
+      void this.cmd.publish(ch.lobbyIn, encode({ kind: "unseek", gw: this.gwId, conn: s.id, by: conn.userId }));
+    }
     this.conns.delete(s.id);
   }
 }

@@ -49,5 +49,30 @@ module.exports = {
       restart_delay: 2000,
       time: true,
     },
+    {
+      name: "play-bot",
+      cwd: CWD,
+      script: "apps/bot-player/src/main.ts",
+      interpreter: `${CWD}/apps/bot-player/node_modules/.bin/tsx`,
+      // Talks to the gateway on loopback as an ordinary client, so it goes through
+      // exactly the same seek/match/move path a browser does.
+      env: {
+        REDIS_URL,
+        MONGO_URI,
+        BOT_WS_URL: "ws://127.0.0.1:18080/ws",
+        MAIA_BIN: "/home/dreamworld/opt/maia3/.venv/bin/maia3-uci",
+        MAIA_MODEL: "maia3-5m",
+        // Weights were fetched under dreamworld; ubuntu gets its own copy and must never
+        // try to reach Hugging Face at move time.
+        HF_HOME: "/home/ubuntu/.cache/huggingface",
+        HF_HUB_OFFLINE: "1",
+        OMP_NUM_THREADS: "2",
+        MKL_NUM_THREADS: "2",
+      },
+      autorestart: true,
+      max_restarts: 20,
+      restart_delay: 5000,
+      time: true,
+    },
   ],
 };

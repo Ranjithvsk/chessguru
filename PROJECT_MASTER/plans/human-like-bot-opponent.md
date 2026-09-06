@@ -157,6 +157,34 @@ which needs the human anchor first to place it on our actual Glicko scale.
 academy's real band, comparing realised score to Glicko expectation. Until then the bot
 ships **unrated** or not at all.
 
+### Calibration round 2 — measured 2026-09-06, shipped config
+
+Round 1 ran before `--use-uci-history` was added, so it described an engine we do not
+ship. Re-run with the exact argv `apps/bot-player/src/engine.ts` spawns
+(`--device cpu --no-use-amp --use-uci-history`), same ladder, 300 games, 8% draws, avg 71
+ply, again 0 ply-cap hits.
+
+| SelfElo | implied | delta |
+|---|---|---|
+| 800 | 1185 | **+385** |
+| 1100 | 1202 | +102 |
+| 1400 | 1349 | −51 |
+| 1700 | 1572 | −128 |
+| 2000 | 1693 | **−307** |
+
+**Ladder span: nominal 1200 → achieved 508.** OLS over the five points gives slope
+**0.462** (R²=0.94) and 1123 at SelfElo 800 — against 0.4625 and 1133 in round 1.
+
+**The compression ratio did not move.** History conditioning changes which moves come
+back, not how much SelfElo separation survives as playing strength. That is the useful
+result: the `think.ts` mapping is robust to this config change, and the 10-point intercept
+shift sits inside the noise of a 300-game sample — and is anchored by construction anyway,
+so it was never the load-bearing number.
+
+`think.ts` carries round 2's constants only so the shipped numbers come from the run whose
+argv matches the shipped engine. Net effect on `selfEloFor()` is +22 SelfElo across the
+usable band, roughly 10 points of real strength.
+
 ## Disguise: full, no badge
 
 Owner decision, 2026-09-06 ("no not badge").
