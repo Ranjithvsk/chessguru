@@ -47,3 +47,20 @@ the owner's own ad-hoc test class `cmtrhp5zr5h5m`.) Temporary sessions removed a
 
 Not related: `meet.harinitharanjith.com` (the retired Jitsi install) still shows a "not available
 on mobile" deep-link page on phones; nothing in the app links there any more.
+
+## 3. Follow-up 23:55 IST — "in PC also I can't click and move"
+
+Not the phone bugs above: the owner had the same class open on the **PC and the phone at once**.
+`class-ws` treated the second connection of the same coach as a takeover — it closed the first
+socket (`coach_takeover`), that client reconnected, was promoted again and closed the *other*
+one, and the two devices kicked each other every ~2 s (hellos at 18:38:57, :59, :59, 19:01,
+19:05 with "async coach promote … creator" each time). Whichever device connected last could move;
+the other only showed local selection highlights and right-click arrows. Meanwhile 7 moves were
+played from the phone, so "mobile works, PC doesn't" was exactly the takeover order.
+
+**Fix** (`class-ws.ts`, API rebuilt + restarted 18:50 UTC): a second socket of the SAME user
+joins as an extra coach — no close, no token re-mint, `room.coach` unchanged. A different user
+(academy owner / another coach reclaiming an abandoned room) still takes over as before.
+Verified with two coach sessions of `gunachess` (desktop + mobile contexts) in a throwaway room:
+both kept the coach role for 9 s, PC played 1. e4, phone answered e5, PC played 2. Nf3, all
+synced both ways; the log shows one "async coach join (same user, extra device)" and no takeover.

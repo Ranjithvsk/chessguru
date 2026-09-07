@@ -728,8 +728,25 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
               const isOriginalCoach = creator && creator === uidForCoach;
               const isAcademyElder = uAcademy && classAcademy && uAcademy === classAcademy && (uRole === "academy_owner" || uRole === "coach");
               if (isOriginalCoach || isAcademyElder) {
-                if (room.coach && room.coach !== ws) {
-                  try { room.coach.close(1000, "coach_takeover"); } catch { /* */ }
+                // Same coach on a second device (owner, 2026-09-07: class open on
+                // the PC and the phone at once): this used to be a takeover —
+                // the older socket was closed, its client reconnected, took the
+                // room back and closed THIS one, and the two devices kicked each
+                // other every couple of seconds. Whichever had connected last
+                // could move; the other only showed local highlights. Now a
+                // socket of the SAME user simply joins as an extra coach: no
+                // close, no re-mint (so the other device's stored token stays
+                // valid on its next reconnect), room.coach stays where it is.
+                const existing = room.coach && room.coach !== ws && room.coach.readyState === WebSocket.OPEN ? room.coach : null;
+                const sameUser = !!existing && (socketWho.get(existing)?.userId ?? null) === uidForCoach;
+                if (sameUser) {
+                  socketRole.set(ws, "coach");
+                  send({ type: "role", role: "coach", coachToken: room.coachToken ?? undefined });
+                  try { console.log("[class-ws.hello] async coach join (same user, extra device)", roomId, { uidForCoach: uidForCoach.slice(0, 40) }); } catch { /* */ }
+                  return;
+                }
+                if (existing) {
+                  try { existing.close(1000, "coach_takeover"); } catch { /* */ }
                 }
                 room.coachToken = mintCoachToken();
                 socketRole.set(ws, "coach");
