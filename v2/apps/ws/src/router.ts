@@ -14,6 +14,7 @@ import {
   type ServerMsg,
 } from "@chessguru/protocol";
 import type { Socket, SocketServer } from "./socket-server";
+import { botKey, guestId, sessionUser, trustTokens } from "./identity";
 
 interface Conn {
   socket: Socket;
@@ -35,6 +36,7 @@ export class Router {
   private ownerCache = new Map<string, { node: string; exp: number }>();
   private messagesTotal = 0;
   private rateLimitedTotal = 0;
+  private botKey = "";
 
   constructor(
     private server: SocketServer,
@@ -43,7 +45,9 @@ export class Router {
   ) {}
 
   async start(port: number): Promise<void> {
-    this.server.onConnection((s) => this.conns.set(s.id, { socket: s, userId: "anon", subs: new Set(), tokens: RL_CAPACITY, last: Date.now() }));
+    this.botKey = await botKey(this.cmd);
+    if (trustTokens) console.warn(`[ws ${this.gwId}] PLAY_TRUST_TOKENS=1 — hello.token is trusted (dev harness only)`);
+    this.server.onConnection((s) => this.conns.set(s.id, { socket: s, userId: `anon:${s.id.slice(0, 8)}`, subs: new Set(), tokens: RL_CAPACITY, last: Date.now() }));
     this.server.onMessage((s, data) => void this.onMessage(s, data));
     this.server.onClose((s) => this.onClose(s));
 
@@ -122,10 +126,17 @@ export class Router {
     const base = { gw: this.gwId, conn: s.id, by: conn.userId, hop: 0 };
 
     switch (msg.t) {
-      case "hello":
-        conn.userId = msg.d?.token ? `u:${msg.d.token}` : `anon:${s.id.slice(0, 8)}`;
-        this.send(s.id, { v: 1, t: "hello-ok", d: { node: this.gwId, conn: s.id } });
+      case "hello": {
+        const bot = msg.d?.bot;
+        if (bot && this.botKey && bot.key === this.botKey && /^[a-z0-9_]{3,40}$/.test(bot.name)) conn.userId = `u:${bot.name}`;
+        else if (trustTokens && msg.d?.token) conn.userId = `u:${msg.d.token}`;
+        else conn.userId = (await sessionUser(s.cookie)) ?? guestId(msg.d?.guest, s.id.slice(0, 8));
+        // Seat changed → any seek left under the old id is stale (a re-hello after
+        // reconnect keeps the same id, so this is a no-op in the common case).
+        if (base.by !== conn.userId && !base.by.startsWith("anon:")) this.publishLeaves(conn, base.by);
+        this.send(s.id, { v: 1, t: "hello-ok", d: { node: this.gwId, conn: s.id, userId: conn.userId } });
         return;
+      }
 
       case "ping":
         this.send(s.id, { v: 1, t: "pong", d: { ts: msg.d.ts } });
@@ -139,6 +150,15 @@ export class Router {
       case "unsub":
         this.gameSubs.get(msg.g)?.delete(s.id);
         conn.subs.delete(msg.g);
+        if (!this.stillSubscribed(conn.userId, msg.g)) await this.route({ ...base, kind: "leave", g: msg.g });
+        return;
+
+      case "abort":
+        await this.route({ ...base, kind: "abort", g: msg.g });
+        return;
+
+      case "claim":
+        await this.route({ ...base, kind: "claim", g: msg.g });
         return;
 
       case "create":
@@ -211,14 +231,31 @@ export class Router {
     );
   }
 
+  /** Does this user still hold another socket on `g` (a second tab)? */
+  private stillSubscribed(userId: string, g: string): boolean {
+    for (const c of this.conns.values()) if (c.userId === userId && c.subs.has(g)) return true;
+    return false;
+  }
+
+  /** Tell each game's engine the user's last socket on it is gone, so the opponent
+   *  can eventually claim. Presence is per user, not per socket: a second tab keeps
+   *  the player "present". */
+  private publishLeaves(conn: Conn, userId: string): void {
+    for (const g of conn.subs) {
+      if (this.stillSubscribed(userId, g)) continue;
+      void this.route({ gw: this.gwId, conn: conn.socket.id, by: userId, hop: 0, kind: "leave", g });
+    }
+  }
+
   private onClose(s: Socket): void {
     const conn = this.conns.get(s.id);
+    this.conns.delete(s.id);
     if (conn) {
       for (const g of conn.subs) this.gameSubs.get(g)?.delete(s.id);
+      this.publishLeaves(conn, conn.userId);
       // Without this a closed tab leaves its seek in the pool forever, and the next
       // seeker "matches" a socket that no longer exists.
       void this.cmd.publish(ch.lobbyIn, encode({ kind: "unseek", gw: this.gwId, conn: s.id, by: conn.userId }));
     }
-    this.conns.delete(s.id);
   }
 }

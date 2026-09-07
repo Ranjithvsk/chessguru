@@ -4,6 +4,7 @@ import {
   decode,
   encode,
   HEARTBEAT_MS,
+  type Color,
   type EngineInbound,
   type GameStatus,
   type OutBroadcast,
@@ -63,8 +64,15 @@ function gameStateMsg(g: string, grain: RoundGrain, now: number): ServerMsg {
       clock: grain.liveClock(now),
       timeControl: st.timeControl,
       rated: st.rated,
+      gone: st.gone ?? { white: null, black: null },
+      graceMs: grain.graceMs(),
     },
   };
+}
+
+function presenceMsg(g: string, grain: RoundGrain, color: Color): ServerMsg {
+  const online = grain.gone[color] === null;
+  return { v: 1, t: "presence", g, d: { color, online, claimableAt: online ? null : grain.claimableAt(color) } };
 }
 
 function clearFlagTimer(g: string): void {
@@ -91,6 +99,13 @@ async function endGame(g: string, grain: RoundGrain, end: { result: string; reas
   let ratingDiff: RatingDiff | undefined;
   let rating: RatingChange | null = null;
   const { white, black } = grain.players;
+  // An aborted game never happened: no rating, no archive row. Drop the hot state
+  // early too so a stale tab cannot resync into it and keep "playing".
+  if (end.reason === "aborted") {
+    broadcast(g, { v: 1, t: "game-end", g, d: { result: "*", reason: "aborted", fen: grain.fen(), clock: grain.liveClock(now) } });
+    clearFlagTimer(g);
+    return;
+  }
   if (grain.rated && white && black && white.startsWith("u:") && black.startsWith("u:")) {
     const speed = speedOf(grain.timeControl);
     const wPerf = await getPerf(white, speed);
@@ -209,9 +224,47 @@ async function handle(evt: EngineInbound): Promise<void> {
 
   switch (evt.kind) {
     case "sub":
-    case "resync":
+    case "resync": {
+      // A seated player (re)attaching is present again; tell the table.
+      const back = grain.setPresent(evt.by, true, now);
+      if (back) {
+        if (!(await dir.owns(g))) return void reg.evict(g);
+        await writeState(cmd, g, grain.state());
+      }
       reply(evt.gw, evt.conn, gameStateMsg(g, grain, now));
+      if (back) broadcast(g, presenceMsg(g, grain, back));
       return;
+    }
+
+    case "leave": {
+      if (grain.status !== "playing") return;
+      const went = grain.setPresent(evt.by, false, now);
+      if (!went) return;
+      if (!(await dir.owns(g))) return void reg.evict(g);
+      await writeState(cmd, g, grain.state());
+      broadcast(g, presenceMsg(g, grain, went));
+      return;
+    }
+
+    case "abort": {
+      const r = grain.abort(evt.by, now);
+      if (!r.ok) return reply(evt.gw, evt.conn, { v: 1, t: "error", g, d: { code: r.code ?? "rejected", msg: "abort rejected" } });
+      if (!(await dir.owns(g))) return void reg.evict(g);
+      await writeState(cmd, g, grain.state());
+      broadcast(g, gameStateMsg(g, grain, now));
+      await endGame(g, grain, r.end!, now);
+      return;
+    }
+
+    case "claim": {
+      const r = grain.claim(evt.by, now);
+      if (!r.ok) return reply(evt.gw, evt.conn, { v: 1, t: "error", g, d: { code: r.code ?? "rejected", msg: "claim rejected" } });
+      if (!(await dir.owns(g))) return void reg.evict(g);
+      await writeState(cmd, g, grain.state());
+      broadcast(g, gameStateMsg(g, grain, now));
+      await endGame(g, grain, r.end!, now);
+      return;
+    }
 
     case "create": {
       if (!grain.configure(evt.clock, evt.initialFen, evt.rated)) {

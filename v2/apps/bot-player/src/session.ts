@@ -41,9 +41,11 @@ export class BotSession {
   private busy = false;
   private losingStreak = 0;
   private done = false;
+  private claimTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly name: string,
+    private readonly botKey: string,
     private readonly clockTc: TimeControl,
     private readonly opponentRating: number,
     private readonly engine: BotEngine,
@@ -71,7 +73,7 @@ export class BotSession {
     const hardTimer = setTimeout(() => this.finish(null, startedAt), GAME_TIMEOUT_MS);
 
     ws.on("open", () => {
-      this.send({ v: 1, t: "hello", d: { token: this.name } });
+      this.send({ v: 1, t: "hello", d: { bot: { name: this.name, key: this.botKey } } });
       this.send({ v: 1, t: "seek", d: { clock: this.clockTc, rated: false, ratingRange: 4000 } });
     });
 
@@ -90,6 +92,7 @@ export class BotSession {
     ws.on("close", () => {
       clearTimeout(matchTimer);
       clearTimeout(hardTimer);
+      if (this.claimTimer) clearTimeout(this.claimTimer);
       this.finish(null, startedAt);
     });
   }
@@ -150,7 +153,13 @@ export class BotSession {
         return;
 
       case "game-end":
-        this.finish(this.log(msg.d.result, msg.d.reason, startedAt), startedAt);
+        if (this.claimTimer) clearTimeout(this.claimTimer);
+        // An aborted game never happened — nothing worth a bot_games row.
+        this.finish(msg.d.reason === "aborted" ? null : this.log(msg.d.result, msg.d.reason, startedAt), startedAt);
+        return;
+
+      case "presence":
+        this.onPresence(msg.d.color, msg.d.online, msg.d.claimableAt);
         return;
 
       case "error":
@@ -158,6 +167,25 @@ export class BotSession {
         this.busy = false;
         return;
     }
+  }
+
+  /** The opponent's socket came or went. A human who is left alone at the board
+   *  aborts if nothing has been played yet, otherwise takes the win once the
+   *  server allows it — a little after, never on the exact second. */
+  private onPresence(color: Color, online: boolean, claimableAt: number | null): void {
+    if (color === this.color) return;
+    if (this.claimTimer) {
+      clearTimeout(this.claimTimer);
+      this.claimTimer = null;
+    }
+    if (online || this.done || !this.game) return;
+    const g = this.game;
+    if (this.ply < 2) {
+      this.claimTimer = setTimeout(() => this.send({ v: 1, t: "abort", g }), 8000 + Math.random() * 10000);
+      return;
+    }
+    const wait = Math.max(0, (claimableAt ?? Date.now()) - Date.now()) + 2000 + Math.random() * 6000;
+    this.claimTimer = setTimeout(() => this.send({ v: 1, t: "claim", g }), wait);
   }
 
   /** Our move list drifted from the server's; fall back to the authoritative FEN. */

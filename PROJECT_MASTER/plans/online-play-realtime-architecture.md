@@ -343,6 +343,7 @@ authority fair across regions; add regional authority only if cross-region RTT m
   deploy-time wiring.)*
 - **Then** → parent-plan Phase 4 (analysis/fishnet → Arena/Swiss → variants → studies/broadcasts →
   anti-cheat ML → social → mobile).
+- **M6 — Identity, abort, abandonment, resume.** ✅ BUILT + LIVE 2026-09-07 (24/24, `bash v2/scripts/run-play-test.sh` — a PRIVATE redis on :6390 + own Mongo db, because pub/sub channels are global per Redis instance and the production lobby would otherwise hear the test seeks). Gateway identity is the API session cookie looked up in `sessions` (`apps/ws/src/identity.ts`); guests live in `g:`, the bot proves itself with `play:bot:key`; `hello.token` only under `PLAY_TRUST_TOKENS=1` (the M1–M5 harness). Grain: `abort` (either side, < 2 moves, no archive row), per-colour `gone` timestamps fed by gateway `leave` events (per user, not per socket — a second tab keeps you present), `claim` after `abandonGraceMs(tc)` = clamp(initial/10, 15s, 60s). Web: `LiveClient` reconnects with backoff and re-hellos + resyncs; the game id sits in `sessionStorage` so a refresh resumes the live game; cancel-seek, abort, claim-victory UI. Bot: aborts/claims when the human leaves.
 
 A lower-stakes warm-up that exercises M0–M2 without rated pressure: **play-vs-Stockfish** and
 **challenge-a-friend casual** — same transport + grain, one side is an engine or there's no rating.

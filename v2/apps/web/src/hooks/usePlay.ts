@@ -14,6 +14,10 @@ const WS_URL =
 export type PlayStatus = "connecting" | "idle" | "seeking" | "playing" | "ended";
 export type Promo = "q" | "r" | "b" | "n";
 
+// The game we are in survives a refresh: the server keeps playing the clock, so
+// coming back to an empty lobby while your game ticks away is the worst outcome.
+const RESUME_KEY = "cg_play_game";
+
 export interface PlayState {
   status: PlayStatus;
   color: Color;
@@ -32,7 +36,17 @@ export interface PlayState {
   boardEpoch: number;
   dests: ReturnType<typeof destsFromChess>;
   myTurn: boolean;
+  /** Our own id as the gateway sees it (`u:…` signed in, `g:…` guest). */
+  selfId: string | null;
+  /** False while the socket is down and reconnecting. */
+  connected: boolean;
+  /** Set while the opponent has no socket on the game. */
+  oppGone: { since: number; claimableAt: number } | null;
+  canAbort: boolean;
   seek: (clock: TimeControl, rated?: boolean) => void;
+  cancelSeek: () => void;
+  abort: () => void;
+  claim: () => void;
   createChallenge: (clock: TimeControl, rated?: boolean) => void;
   sendMove: (from: Key, to: Key) => void;
   premove: (from: Key, to: Key) => void;
@@ -51,16 +65,19 @@ const isPromotion = (game: Chess, from: Key, to: Key): boolean => {
   return piece?.type === "p" && (to[1] === "8" || to[1] === "1");
 };
 
-/** All realtime game state for the Play page, driven by one LiveClient. */
-export function usePlay(token: string): PlayState {
+/** All realtime game state for the Play page, driven by one LiveClient.
+ *  `guest` names a signed-out visitor; signed-in identity is the session cookie. */
+export function usePlay(guest: string | null): PlayState {
   const client = useRef<LiveClient | null>(null);
   const game = useRef(new Chess());
   const gameIdRef = useRef<string | null>(null);
   const plyRef = useRef(0);
   const colorRef = useRef<Color>("white");
-  const tokenRef = useRef(token);
+  const selfIdRef = useRef<string | null>(null);
+  const guestRef = useRef(guest);
   const pendingRef = useRef<{ from: Key; to: Key } | null>(null);
-  tokenRef.current = token;
+  const resumingRef = useRef(false);
+  guestRef.current = guest;
 
   const [status, setStatus] = useState<PlayStatus>("connecting");
   const [color, setColor] = useState<Color>("white");
@@ -83,6 +100,9 @@ export function usePlay(token: string): PlayState {
   const [challengeId, setChallengeId] = useState<string | null>(null);
   const [pendingPromotion, setPendingPromotion] = useState<{ from: Key; to: Key } | null>(null);
   const [boardEpoch, setBoardEpoch] = useState(0);
+  const [selfId, setSelfId] = useState<string | null>(null);
+  const [connected, setConnected] = useState(false);
+  const [oppGone, setOppGone] = useState<{ since: number; claimableAt: number } | null>(null);
 
   const clearPending = () => {
     pendingRef.current = null;
@@ -102,6 +122,15 @@ export function usePlay(token: string): PlayState {
     setFen(f);
   };
 
+  const remember = (g: string | null) => {
+    try {
+      if (g) sessionStorage.setItem(RESUME_KEY, g);
+      else sessionStorage.removeItem(RESUME_KEY);
+    } catch {
+      /* storage unavailable */
+    }
+  };
+
   const startGame = (g: string, myColor: Color, opp: string | null) => {
     gameIdRef.current = g;
     colorRef.current = myColor;
@@ -119,34 +148,74 @@ export function usePlay(token: string): PlayState {
     setReason(null);
     setIncomingDraw(false);
     setChallengeId(null);
+    setOppGone(null);
+    remember(g);
     client.current?.sub(g);
     setStatus("playing");
   };
 
+  const oppColor = (): Color => (colorRef.current === "white" ? "black" : "white");
+
   const onMsg = (m: ServerMsg) => {
     switch (m.t) {
+      case "hello-ok":
+        selfIdRef.current = m.d.userId;
+        setSelfId(m.d.userId);
+        break;
       case "matched":
         startGame(m.d.game, m.d.color, m.d.opponent);
         break;
       case "rematch-ready": {
-        const me = `u:${tokenRef.current}`;
+        const me = selfIdRef.current;
         const myColor: Color = m.d.white === me ? "white" : "black";
         startGame(m.d.game, myColor, myColor === "white" ? m.d.black : m.d.white);
         break;
       }
-      case "game-state":
+      case "game-state": {
+        if (m.g !== gameIdRef.current) break; // a stale tab's game, not ours
+        if (resumingRef.current) {
+          // Came back after a refresh/drop: the server's seats tell us who we are.
+          resumingRef.current = false;
+          const me = selfIdRef.current;
+          const mine: Color | null = m.d.players.white === me ? "white" : m.d.players.black === me ? "black" : null;
+          if (!mine || m.d.status !== "playing") {
+            gameIdRef.current = null;
+            remember(null);
+            setStatus("idle");
+            break;
+          }
+          colorRef.current = mine;
+          setColor(mine);
+          setOpponent(mine === "white" ? m.d.players.black : m.d.players.white);
+          setResult(null);
+          setReason(null);
+          setChallengeId(null);
+          setStatus("playing");
+        }
         loadFen(m.d.fen);
         setTurn(m.d.turn);
         plyRef.current = m.d.ply;
         setPly(m.d.ply);
-        applyClock(m.d.clock);
+        applyClock(m.d.clock, m.d.status === "playing");
         setMoves(m.d.moves);
+        if (m.d.moves.length) {
+          const last = m.d.moves[m.d.moves.length - 1]!;
+          setLastMove([last.slice(0, 2) as Key, last.slice(2, 4) as Key]);
+        }
         setIncomingDraw(false);
         clearPending();
+        const goneSince = m.d.gone?.[oppColor()] ?? null;
+        setOppGone(goneSince !== null && m.d.status === "playing" ? { since: goneSince, claimableAt: goneSince + (m.d.graceMs ?? 30000) } : null);
         if (m.d.status !== "playing") {
           setStatus("ended");
           setResult(m.d.result);
+          remember(null);
         }
+        break;
+      }
+      case "presence":
+        if (m.g !== gameIdRef.current || m.d.color === colorRef.current) break;
+        setOppGone(m.d.online || m.d.claimableAt === null ? null : { since: Date.now(), claimableAt: m.d.claimableAt });
         break;
       case "moved":
         loadFen(m.d.fen);
@@ -175,7 +244,9 @@ export function usePlay(token: string): PlayState {
         setReason(m.d.reason);
         applyClock(m.d.clock, false);
         setIncomingDraw(false);
+        setOppGone(null);
         clearPending();
+        remember(null);
         setStatus("ended");
         break;
     }
@@ -184,13 +255,29 @@ export function usePlay(token: string): PlayState {
   useEffect(() => {
     const c = new LiveClient();
     client.current = c;
-    let off = () => {};
     const g = () => gameIdRef.current;
+    const off = c.on(onMsg);
+    const offStatus = c.onStatus(setConnected);
+    // Every (re)open: say who we are, then re-attach to the game we were in.
+    const offOpen = c.onOpen(() => {
+      c.hello(guestRef.current ?? undefined);
+      const cur = gameIdRef.current;
+      if (cur) c.resync(cur, plyRef.current);
+    });
     c.connect(WS_URL)
       .then(() => {
-        c.hello(tokenRef.current);
         setStatus("idle");
-        off = c.on(onMsg);
+        let saved: string | null = null;
+        try {
+          saved = sessionStorage.getItem(RESUME_KEY);
+        } catch {
+          /* storage unavailable */
+        }
+        if (saved && !gameIdRef.current) {
+          resumingRef.current = true;
+          gameIdRef.current = saved;
+          c.sub(saved);
+        }
         const cid = new URLSearchParams(window.location.search).get("challenge");
         if (cid) {
           c.challengeAccept(cid);
@@ -205,13 +292,17 @@ export function usePlay(token: string): PlayState {
             offerDraw: () => g() && c.drawOffer(g()!),
             acceptDraw: () => g() && c.drawAccept(g()!),
             rematch: () => g() && c.rematch(g()!),
-            state: () => ({ game: g(), ply: plyRef.current, color: colorRef.current }),
+            abort: () => g() && c.abort(g()!),
+            claim: () => g() && c.claim(g()!),
+            state: () => ({ game: g(), ply: plyRef.current, color: colorRef.current, self: selfIdRef.current }),
           };
         }
       })
       .catch(() => setStatus("idle"));
     return () => {
       off();
+      offStatus();
+      offOpen();
       c.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -220,6 +311,19 @@ export function usePlay(token: string): PlayState {
   const seek = useCallback((clock: TimeControl, rated = false) => {
     client.current?.seek(clock, rated);
     setStatus("seeking");
+  }, []);
+
+  const cancelSeek = useCallback(() => {
+    client.current?.unseek();
+    setChallengeId(null);
+    setStatus("idle");
+  }, []);
+
+  const abort = useCallback(() => {
+    if (gameIdRef.current) client.current?.abort(gameIdRef.current);
+  }, []);
+  const claim = useCallback(() => {
+    if (gameIdRef.current) client.current?.claim(gameIdRef.current);
   }, []);
 
   const createChallenge = useCallback((clock: TimeControl, rated = false) => {
@@ -276,6 +380,8 @@ export function usePlay(token: string): PlayState {
   }, []);
   const newGame = useCallback(() => {
     gameIdRef.current = null;
+    remember(null);
+    setOppGone(null);
     setStatus("idle");
     setResult(null);
     setReason(null);
@@ -304,9 +410,11 @@ export function usePlay(token: string): PlayState {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clock, turn, status, clockTick]);
 
+  const canAbort = status === "playing" && moves.length < 2;
+
   return {
     status, color, fen, turn, ply, moves, lastMove, clock: liveClock, opponent, result, reason, incomingDraw, challengeId,
-    pendingPromotion, boardEpoch, dests, myTurn,
-    seek, createChallenge, sendMove, premove, choosePromotion, cancelPromotion, resign, offerDraw, acceptDraw, declineDraw, rematch, newGame,
+    pendingPromotion, boardEpoch, dests, myTurn, selfId, connected, oppGone, canAbort,
+    seek, cancelSeek, abort, claim, createChallenge, sendMove, premove, choosePromotion, cancelPromotion, resign, offerDraw, acceptDraw, declineDraw, rematch, newGame,
   };
 }

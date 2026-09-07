@@ -11,6 +11,7 @@
   "dependencies": {
     "@chessguru/protocol": "workspace:*",
     "ioredis": "^5.10.1",
+    "mongodb": "^6.20.0",
     "uWebSockets.js": "uNetworking/uWebSockets.js#v20.49.0"
   },
   "devDependencies": {

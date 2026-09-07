@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import Redis from "ioredis";
 import { MongoClient } from "mongodb";
 import { keys, type TimeControl } from "@chessguru/protocol";
@@ -18,6 +19,9 @@ const cmd = new Redis(REDIS_URL, { maxRetriesPerRequest: null });
 cmd.on("error", (e) => console.error("[bot] redis:", e.message));
 const mongo = new MongoClient(MONGO);
 const engines = new EnginePool(() => new Maia3Engine());
+// pm2 restarts us with SIGINT; never leave an engine behind (see EnginePool.killAll).
+process.on("exit", () => engines.killAll());
+for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => process.exit(0));
 
 interface SeekMeta {
   seekId: string;
@@ -25,11 +29,16 @@ interface SeekMeta {
   clock: TimeControl;
   rated: boolean;
   rating: number;
+  /** Lobby's strength estimate (live rating, else puzzle rating). Older metas lack it. */
+  skill?: number;
   ts: number;
   pool: string;
 }
 
+const skillOf = (m: SeekMeta): number => m.skill ?? m.rating;
+
 let namePool: string[] = [];
+let botKey = "";
 const inUse = new Set<string>();
 let seeking = false; // at most one bot seek at a time, so bots can never match each other
 let live = 0;
@@ -84,12 +93,13 @@ async function tick(): Promise<void> {
   seeking = true;
   inUse.add(name);
   live++;
-  const engine = engines.acquire(pickEngine(target.rating));
+  const skill = skillOf(target);
+  const engine = engines.acquire(pickEngine(skill));
   console.log(
-    `[bot] ${name} entering ${target.pool} for ${target.by} (waited ${Math.round((now - target.ts) / 1000)}s, rating ${target.rating}, engine ${engine.id})`,
+    `[bot] ${name} entering ${target.pool} for ${target.by} (waited ${Math.round((now - target.ts) / 1000)}s, rating ${target.rating}, skill ${skill}, engine ${engine.id})`,
   );
 
-  const session = new BotSession(name, target.clock, target.rating, engine, (log) => {
+  const session = new BotSession(name, botKey, target.clock, skill, engine, (log) => {
     seeking = false;
     inUse.delete(name);
     live--;
@@ -111,8 +121,18 @@ async function recordGame(log: GameLog): Promise<void> {
   console.log(`[bot] ${log.bot} finished ${log.game}: ${log.result ?? "?"} (${log.reason ?? "?"}) in ${log.plies} plies`);
 }
 
+/** The gateway only seats a `u:<name>` identity for a hello that carries the key it
+ *  minted into Redis (or that we mint first — SET NX, whoever boots first wins). */
+async function loadBotKey(): Promise<string> {
+  await cmd.set(keys.botKey, randomBytes(24).toString("base64url"), "NX");
+  const k = await cmd.get(keys.botKey);
+  if (!k) throw new Error("bot key unavailable");
+  return k;
+}
+
 async function main(): Promise<void> {
   await mongo.connect();
+  botKey = await loadBotKey();
   namePool = await buildNamePool(mongo.db());
   // Load the weights now: the first think otherwise costs seconds, which would show up as
   // an implausibly long stare at move one of the first game after a restart.

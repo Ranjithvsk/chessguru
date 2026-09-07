@@ -1,6 +1,6 @@
 # Human-like bot opponent for Play (Maia-3)
 
-**Status:** LIVE (unrated) — Maia-3 bot shipped 2026-09-06; replaced as primary by the lc0 + Maia-1 1100–1900 ladder on 2026-09-07 (commit `e94b90e`, see [sessions/2026-09-07-play-bot-ladder-shipped.md](../sessions/2026-09-07-play-bot-ladder-shipped.md)). Maia-3 now serves only as a 25% variety draw inside its measured 1130–1690 band. Rated remains OFF pending the owner's call and the gateway token fix.
+**Status:** LIVE (unrated) — Maia-3 bot shipped 2026-09-06; replaced as primary by the lc0 + Maia-1 1100–1900 ladder on 2026-09-07 (commit `e94b90e`, see [sessions/2026-09-07-play-bot-ladder-shipped.md](../sessions/2026-09-07-play-bot-ladder-shipped.md)). Maia-3 now serves only as a 25% variety draw inside its measured 1130–1690 band. The gateway token hole is closed (2026-09-07, identity = session cookie; the bot seats itself with a Redis-minted key). Rated remains OFF pending the owner's call only.
 
 ## Goal
 
@@ -283,8 +283,12 @@ corruption layer on top of a human-move model is how we end up with neither.
    never emitted, but resampling `bestmove` recovers concentration through plain UCI.
 3. **Resign / draw behaviour** — Maia has none. A bot grinding K+Q vs K to mate in a dead
    lost position is a tell. Needs a rating-plausible resign threshold.
-4. **Abort / disconnect behaviour** — humans sometimes vanish. Never doing so is itself a
-   pattern.
+4. **Abort / disconnect behaviour** — ✅ the *reacting* half shipped 2026-09-07 (see
+   [sessions/2026-09-07-play-identity-abort-claim.md](../sessions/2026-09-07-play-identity-abort-claim.md)):
+   when the human's last socket drops, the bot aborts (before two moves, 8–18s later) or
+   claims the win a few seconds after the server's grace period, exactly as a human would.
+   The bot deliberately never vanishes itself — a student left staring at a dead board is a
+   worse outcome than a bot that is always polite.
 5. **Name pool** — curated, regionally plausible, no collisions with real usernames.
 6. **Weights license** — track CSSLab/maia3 #8/#11/#12; re-check before any distribution
    beyond serving play.

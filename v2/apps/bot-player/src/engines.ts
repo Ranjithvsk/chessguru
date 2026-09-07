@@ -4,6 +4,11 @@ const LC0 = process.env.LC0_BIN ?? "/home/dreamworld/opt/engines/src/lc0/build/l
 const MAIA1_DIR = process.env.MAIA1_WEIGHTS ?? "/home/dreamworld/opt/engines/weights/maia1";
 const ENGINE_SRC = process.env.ENGINE_SRC ?? "/home/dreamworld/opt/engines/src";
 const MAIA1_LEVELS = [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900] as const;
+/** Hard address-space ceiling for the survey engines (`prlimit --as`). None of them has a hash
+ *  option and Minace in particular allocates without bound on a long search: on 2026-09-07 it
+ *  reached 10-20 GB four times and each OOM-kill took every terminal on the box down with it.
+ *  At the cap malloc fails, the engine dies, and UciProc respawns it on the next move. */
+const PLAIN_ENGINE_AS_BYTES = Number(process.env.PLAIN_ENGINE_AS_MB ?? 2048) * 1024 * 1024;
 
 export interface Think {
   uci: string;
@@ -143,10 +148,11 @@ export class PlainUciEngine implements BotEngine {
   constructor(private readonly spec: PlainSpec) {
     this.id = spec.id;
     this.movetimeMs = spec.movetimeMs ?? 600;
-    this.proc = new UciProc(spec.bin, spec.args ?? [], {
+    this.proc = new UciProc("prlimit", [`--as=${PLAIN_ENGINE_AS_BYTES}`, spec.bin, ...(spec.args ?? [])], {
       cwd: spec.cwd,
       timeoutMs: 20000,
       setoptions: spec.setoptions,
+      label: spec.bin,
     });
   }
 
@@ -262,6 +268,16 @@ export class EnginePool {
     const cutoff = Date.now() - IDLE_MS;
     for (const [id, engine] of this.live) {
       if (engine.lastUsed >= cutoff) continue;
+      engine.kill();
+      this.live.delete(id);
+    }
+  }
+
+  /** Tear every engine down. Must run on our own exit: a child engine only sees stdin EOF
+   *  when we die, and Minace (at least) never exits on EOF — it spins and allocates until
+   *  something kills it, which on 2026-09-07 was the kernel, four times. */
+  killAll(): void {
+    for (const [id, engine] of this.live) {
       engine.kill();
       this.live.delete(id);
     }

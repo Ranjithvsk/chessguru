@@ -6,6 +6,8 @@ import { randomUUID } from "node:crypto";
 // `ws` (or anything else) is a new implementation, not a rewrite.
 export interface Socket {
   readonly id: string;
+  /** Cookie header from the upgrade request — carries the API session (cgsid). */
+  readonly cookie?: string;
   send(data: string): void;
   close(): void;
 }
@@ -21,7 +23,7 @@ export interface SocketServer {
 /** uWebSockets.js implementation of SocketServer. */
 export class UwsSocketServer implements SocketServer {
   private app = uWS.App();
-  private sockets = new Map<string, uWS.WebSocket<{ id: string }>>();
+  private sockets = new Map<string, uWS.WebSocket<{ id: string; cookie?: string }>>();
   private onConn?: (s: Socket) => void;
   private onMsg?: (s: Socket, data: string) => void;
   private onCls?: (s: Socket) => void;
@@ -29,12 +31,23 @@ export class UwsSocketServer implements SocketServer {
 
   constructor() {
     const self = this;
-    this.app.ws<{ id: string }>("/ws", {
+    this.app.ws<{ id: string; cookie?: string }>("/ws", {
       maxPayloadLength: 64 * 1024,
       idleTimeout: 120,
+      // The upgrade request is the only place the browser's cookies are visible,
+      // and uWS frees `req` as soon as this returns — copy what identity needs now.
+      upgrade(res, req, context) {
+        const cookie = req.getHeader("cookie");
+        res.upgrade(
+          { id: randomUUID(), cookie: cookie || undefined },
+          req.getHeader("sec-websocket-key"),
+          req.getHeader("sec-websocket-protocol"),
+          req.getHeader("sec-websocket-extensions"),
+          context,
+        );
+      },
       open(ws) {
-        const id = randomUUID();
-        ws.getUserData().id = id;
+        const { id } = ws.getUserData();
         self.sockets.set(id, ws);
         self.onConn?.(self.wrap(id));
       },
@@ -61,8 +74,15 @@ export class UwsSocketServer implements SocketServer {
 
   private wrap(id: string): Socket {
     const sockets = this.sockets;
+    let cookie: string | undefined;
+    try {
+      cookie = sockets.get(id)?.getUserData().cookie;
+    } catch {
+      /* socket already gone */
+    }
     return {
       id,
+      cookie,
       send(data: string) {
         const ws = sockets.get(id);
         if (ws) {

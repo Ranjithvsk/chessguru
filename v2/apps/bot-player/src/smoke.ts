@@ -70,6 +70,7 @@ async function main(): Promise<void> {
     console.log(`  ${String(rating).padEnd(5)} ${parts.join("  ")}`);
   }
 
+  pool.killAll();
   process.exit(0);
 }
 

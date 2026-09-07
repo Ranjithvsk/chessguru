@@ -22,7 +22,7 @@ echo "[run-m4] starting engine e1, e2 + lobby + gateway gw1"
 NODE_ID=e1 ENGINE_PORT=9101 tsx "$ROOT/apps/game-engine/src/main.ts" >"$LOG/e1.log" 2>&1 & PIDS+=($!)
 NODE_ID=e2 ENGINE_PORT=9102 tsx "$ROOT/apps/game-engine/src/main.ts" >"$LOG/e2.log" 2>&1 & PIDS+=($!)
 tsx "$ROOT/apps/lobby/src/main.ts"                                    >"$LOG/lobby.log" 2>&1 & PIDS+=($!)
-WS_PORT=18080 GW_ID=gw1      tsx "$ROOT/apps/ws/src/main.ts"          >"$LOG/gw1.log" 2>&1 & PIDS+=($!)
+PLAY_TRUST_TOKENS=1 WS_PORT=18080 GW_ID=gw1      tsx "$ROOT/apps/ws/src/main.ts"          >"$LOG/gw1.log" 2>&1 & PIDS+=($!)
 
 for i in $(seq 1 40); do
   curl -fsS http://127.0.0.1:18080/healthz >/dev/null 2>&1 && break

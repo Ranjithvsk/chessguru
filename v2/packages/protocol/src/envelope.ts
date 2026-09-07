@@ -14,7 +14,11 @@ export type GameStatus =
   | "draw"
   | "agreement"
   | "resign"
-  | "flag";
+  | "flag"
+  // Neither side had made a move when a player pulled out. No result, never rated.
+  | "aborted"
+  // A player vanished mid-game and the opponent claimed the win after the grace period.
+  | "abandoned";
 
 export interface Players {
   white: string | null;
@@ -32,9 +36,20 @@ export interface RatingDiff {
   white: number;
   black: number;
 }
+export interface Gone {
+  white: number | null;
+  black: number | null;
+}
 
 // ── client → server ─────────────────────────────────────────────────────────
-export interface HelloMsg       { v: 1; t: "hello";  d?: { token?: string } }
+// Identity is the session cookie on the upgrade request, never anything in this
+// message. `guest` is a client-chosen id honoured ONLY when no session resolves
+// (it lands in the `g:` namespace, so it can never collide with a real account).
+// `bot` carries the shared key the gateway minted into Redis (keys.botKey); a
+// caller that knows it is seated as `u:<name>` so the bot stays indistinguishable
+// from a human on the wire. `token` is honoured only by a gateway started with
+// PLAY_TRUST_TOKENS=1 (the M-series verify harness), never in production.
+export interface HelloMsg       { v: 1; t: "hello";  d?: { token?: string; guest?: string; bot?: { name: string; key: string } } }
 export interface SubMsg         { v: 1; t: "sub";    g: string }
 export interface UnsubMsg       { v: 1; t: "unsub";  g: string }
 export interface CreateMsg      { v: 1; t: "create"; g: string; d: { clock: TimeControl; initialFen?: string; rated?: boolean } }
@@ -46,6 +61,10 @@ export interface DrawOfferMsg   { v: 1; t: "draw-offer";   g: string }
 export interface DrawAcceptMsg  { v: 1; t: "draw-accept";  g: string }
 export interface DrawDeclineMsg { v: 1; t: "draw-decline"; g: string }
 export interface RematchMsg     { v: 1; t: "rematch"; g: string }
+/** Either player, before both have moved. */
+export interface AbortMsg       { v: 1; t: "abort";   g: string }
+/** Claim the win once the opponent has been gone for the game's grace period. */
+export interface ClaimMsg       { v: 1; t: "claim";   g: string }
 export interface ResyncMsg      { v: 1; t: "resync"; g: string; d: { havePly: number } }
 export interface PingMsg        { v: 1; t: "ping";   d: { ts: number } }
 // lobby
@@ -55,11 +74,11 @@ export interface ChallengeMsg       { v: 1; t: "challenge"; d: { clock: TimeCont
 export interface ChallengeAcceptMsg { v: 1; t: "challenge-accept"; d: { id: string } }
 export type ClientMsg =
   | HelloMsg | SubMsg | UnsubMsg | CreateMsg | JoinMsg | MoveMsg | ResignMsg | PremoveMsg
-  | DrawOfferMsg | DrawAcceptMsg | DrawDeclineMsg | RematchMsg | ResyncMsg | PingMsg
+  | DrawOfferMsg | DrawAcceptMsg | DrawDeclineMsg | RematchMsg | AbortMsg | ClaimMsg | ResyncMsg | PingMsg
   | SeekMsg | UnseekMsg | ChallengeMsg | ChallengeAcceptMsg;
 
 // ── server → client ─────────────────────────────────────────────────────────
-export interface HelloOkMsg  { v: 1; t: "hello-ok"; d: { node: string; conn: string } }
+export interface HelloOkMsg  { v: 1; t: "hello-ok"; d: { node: string; conn: string; userId: string } }
 export interface JoinedMsg   { v: 1; t: "joined";   g: string; d: { seat: Seat; userId: string } }
 export interface GameStateMsg {
   v: 1;
@@ -76,12 +95,18 @@ export interface GameStateMsg {
     clock: Clock;
     timeControl: TimeControl;
     rated: boolean;
+    /** Per colour: when that player's last socket went away (ms epoch), or null if present. */
+    gone?: Gone;
+    /** Grace period after which the remaining player may `claim`. */
+    graceMs?: number;
   };
 }
 export interface MovedMsg        { v: 1; t: "moved";    g: string; d: { uci: string; san: string; ply: number; fen: string; turn: Color; by: string; clock: Clock } }
 export interface ClockMsg        { v: 1; t: "clock";    g: string; d: { clock: Clock; turn: Color; running: boolean } }
 export interface OfferMsg        { v: 1; t: "offer";    g: string; d: { kind: "draw"; by: Color } }
 export interface GameEndMsg      { v: 1; t: "game-end"; g: string; d: { result: string; reason: GameStatus; fen: string; clock: Clock; ratingDiff?: RatingDiff } }
+/** A seated player's socket came or went. `claimableAt` is set while they are gone. */
+export interface PresenceMsg     { v: 1; t: "presence"; g: string; d: { color: Color; online: boolean; claimableAt: number | null } }
 export interface RematchReadyMsg { v: 1; t: "rematch-ready"; g: string; d: { game: string; white: string | null; black: string | null } }
 export interface ErrorMsg        { v: 1; t: "error";    g?: string; d: { code: string; msg: string } }
 export interface PongMsg         { v: 1; t: "pong";     d: { ts: number } }
@@ -91,7 +116,7 @@ export interface MatchedMsg          { v: 1; t: "matched";           d: { game: 
 export interface ChallengeCreatedMsg { v: 1; t: "challenge-created"; d: { id: string } }
 export type ServerMsg =
   | HelloOkMsg | JoinedMsg | GameStateMsg | MovedMsg | ClockMsg | OfferMsg
-  | GameEndMsg | RematchReadyMsg | ErrorMsg | PongMsg
+  | GameEndMsg | PresenceMsg | RematchReadyMsg | ErrorMsg | PongMsg
   | SeekAckMsg | MatchedMsg | ChallengeCreatedMsg;
 
 // ── internal: gateway/lobby → owning engine node (over game:in:{node}) ───────
@@ -108,9 +133,13 @@ export interface InDrawOffer   extends RoutedAddr { kind: "draw-offer" }
 export interface InDrawAccept  extends RoutedAddr { kind: "draw-accept" }
 export interface InDrawDecline extends RoutedAddr { kind: "draw-decline" }
 export interface InRematch     extends RoutedAddr { kind: "rematch" }
+export interface InAbort       extends RoutedAddr { kind: "abort" }
+export interface InClaim       extends RoutedAddr { kind: "claim" }
+/** The gateway lost the last socket `by` had on this game. */
+export interface InLeave       extends RoutedAddr { kind: "leave" }
 export type EngineInbound =
   | InSub | InResync | InCreate | InSetup | InJoin | InMove | InResign | InPremove
-  | InDrawOffer | InDrawAccept | InDrawDecline | InRematch;
+  | InDrawOffer | InDrawAccept | InDrawDecline | InRematch | InAbort | InClaim | InLeave;
 
 // ── internal: gateway → lobby (over lobby:in) ────────────────────────────────
 export interface LobbyAddr { gw: string; conn: string; by: string }

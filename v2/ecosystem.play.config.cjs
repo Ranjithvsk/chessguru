@@ -43,7 +43,9 @@ module.exports = {
       cwd: CWD,
       script: "apps/ws/src/main.ts",
       interpreter: `${CWD}/apps/ws/node_modules/.bin/tsx`,
-      env: { WS_PORT: "18080", GW_ID: "gw1", REDIS_URL },
+      // MONGO_URI: identity is the API session cookie looked up in `sessions`
+      // (apps/ws/src/identity.ts). Never set PLAY_TRUST_TOKENS here.
+      env: { WS_PORT: "18080", GW_ID: "gw1", REDIS_URL, MONGO_URI },
       autorestart: true,
       max_restarts: 20,
       restart_delay: 2000,

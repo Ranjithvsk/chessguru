@@ -21,6 +21,8 @@ export class UciProc {
       /** Sent between `uciok` and `isready`. */
       setoptions?: string[];
       onExit?: () => void;
+      /** Name for log lines when `bin` is a wrapper (e.g. prlimit) rather than the engine. */
+      label?: string;
     },
   ) {}
 
@@ -41,7 +43,7 @@ export class UciProc {
       if (this.proc !== p) return;
       this.proc = null;
       this.opts.onExit?.();
-      console.error(`[bot] ${this.bin} exited (${code}) — will respawn on next use`);
+      console.error(`[bot] ${this.opts.label ?? this.bin} exited (${code}) — will respawn on next use`);
     });
     // lc0 quits the moment stdin reaches EOF, so the pipe stays open for the process's life.
     this.proc = p;

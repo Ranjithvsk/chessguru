@@ -1,5 +1,5 @@
 import { Chess } from "chess.js";
-import type { Clock, Color, GameStatus, Players, Seat, TimeControl } from "@chessguru/protocol";
+import { abandonGraceMs, type Clock, type Color, type GameStatus, type Gone, type Players, type Seat, type TimeControl } from "@chessguru/protocol";
 import type { GameState } from "./snapshot";
 
 export interface MoveResult {
@@ -49,6 +49,7 @@ export class RoundGrain {
   rematchReq: { white: boolean; black: boolean } = { white: false, black: false };
   premoves: { white: string | null; black: string | null } = { white: null, black: null };
   moveTimes: number[] = [];
+  gone: Gone = { white: null, black: null };
 
   get ply(): number {
     return this.moves.length;
@@ -62,8 +63,11 @@ export class RoundGrain {
   bothSeated(): boolean {
     return this.players.white !== null && this.players.black !== null;
   }
-  private colorOf(userId: string): Color | null {
+  colorOf(userId: string): Color | null {
     return this.players.white === userId ? "white" : this.players.black === userId ? "black" : null;
+  }
+  graceMs(): number {
+    return abandonGraceMs(this.timeControl);
   }
 
   hydrate(st: GameState | null): void {
@@ -83,6 +87,7 @@ export class RoundGrain {
     this.rematchReq = { ...st.rematchReq };
     this.premoves = { ...st.premoves };
     this.moveTimes = st.moveTimes.slice();
+    this.gone = { white: st.gone?.white ?? null, black: st.gone?.black ?? null };
     this.chess = new Chess(st.initialFen);
     for (const uci of st.moves) this.applyUci(uci);
     this.moves = st.moves.slice();
@@ -106,7 +111,54 @@ export class RoundGrain {
       rematchReq: { ...this.rematchReq },
       premoves: { ...this.premoves },
       moveTimes: this.moveTimes.slice(),
+      gone: { ...this.gone },
     };
+  }
+
+  // ── presence ────────────────────────────────────────────────────────────
+  /** Returns the colour whose presence changed, or null if `userId` is not seated
+   *  or the state was already what was asked for. */
+  setPresent(userId: string, present: boolean, now: number): Color | null {
+    const color = this.colorOf(userId);
+    if (!color) return null;
+    const wasPresent = this.gone[color] === null;
+    if (wasPresent === present) return null;
+    this.gone[color] = present ? null : now;
+    return color;
+  }
+  claimableAt(color: Color): number | null {
+    const since = this.gone[color];
+    return since === null ? null : since + this.graceMs();
+  }
+
+  /** Either player may abort while fewer than two moves have been made — nobody has
+   *  committed to the game yet, so there is no result and nothing to rate. */
+  abort(by: string, now: number): MoveResult {
+    if (this.status !== "playing") return { ok: false, code: "game-over" };
+    if (!this.colorOf(by)) return { ok: false, code: "not-a-player" };
+    if (this.moves.length >= 2) return { ok: false, code: "too-late" };
+    this.status = "aborted";
+    this.result = null;
+    this.finishedAt = now;
+    this.turnStartedAt = null;
+    return { ok: true, clock: { ...this.clockRemaining }, end: { result: "*", reason: "aborted" } };
+  }
+
+  /** The remaining player takes the win once the opponent has been gone past the
+   *  grace period. Before two moves the right call is `abort`, so this refuses. */
+  claim(by: string, now: number): MoveResult {
+    if (this.status !== "playing") return { ok: false, code: "game-over" };
+    const color = this.colorOf(by);
+    if (!color) return { ok: false, code: "not-a-player" };
+    if (this.moves.length < 2) return { ok: false, code: "abort-instead" };
+    const opp: Color = color === "white" ? "black" : "white";
+    const at = this.claimableAt(opp);
+    if (at === null || now < at) return { ok: false, code: "not-claimable" };
+    this.status = "abandoned";
+    this.result = color === "white" ? "1-0" : "0-1";
+    this.finishedAt = now;
+    this.turnStartedAt = null;
+    return { ok: true, clock: { ...this.clockRemaining }, end: { result: this.result, reason: "abandoned" } };
   }
 
   configure(tc: TimeControl, initialFen?: string, rated = true): boolean {

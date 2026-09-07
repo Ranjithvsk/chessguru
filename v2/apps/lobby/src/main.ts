@@ -52,7 +52,12 @@ interface SeekMeta {
   conn: string;
   clock: TimeControl;
   rated: boolean;
+  /** Pairing rating (the pool score). Live-play rating, 1500 until one exists. */
   rating: number;
+  /** Best guess at playing strength for opponents that adapt to it (the bot). Falls back
+   *  to the puzzle rating so a beginner does not get a 1500 opponent just because every
+   *  game so far was unrated and never moved `live_perfs`. */
+  skill: number;
   ts: number;
   pool: string;
 }
@@ -62,10 +67,19 @@ function reply(gw: string, conn: string, msg: ServerMsg): void {
   void cmd.publish(ch.wsReply(gw), encode(payload));
 }
 
-async function ratingOf(userId: string, speed: string): Promise<number> {
-  if (!userId.startsWith("u:")) return 1500;
+async function ratingOf(userId: string, speed: string): Promise<{ rating: number; skill: number }> {
+  if (!userId.startsWith("u:")) return { rating: 1500, skill: 1500 };
   const doc = (await mongo.db().collection("live_perfs").findOne({ _id: userId as never })) as Record<string, { gl?: { r?: number } }> | null;
-  return doc?.[speed]?.gl?.r ?? 1500;
+  const live = doc?.[speed]?.gl?.r;
+  if (live !== undefined) return { rating: live, skill: live };
+  // No live rating yet: pair at the default (so two humans still find each other at once)
+  // but let the bot play at the level the trainer already measured.
+  const perf = (await mongo.db().collection("userperfs").findOne({ _id: userId.slice(2) as never }, { projection: { puzzle: 1 } })) as
+    | { puzzle?: { gl?: { r?: number }; nb?: number } }
+    | null;
+  const puzzle = perf?.puzzle;
+  const skill = puzzle?.gl?.r !== undefined && (puzzle.nb ?? 0) > 0 ? Math.round(puzzle.gl.r) : 1500;
+  return { rating: 1500, skill };
 }
 
 async function liveNodes(): Promise<string[]> {
@@ -106,7 +120,7 @@ async function pairSeek(a: SeekMeta, b: SeekMeta): Promise<void> {
 async function onSeek(e: LobbySeek): Promise<void> {
   const speed = speedOf(e.clock);
   const pool = tcKey(e.clock);
-  const rating = await ratingOf(e.by, speed);
+  const { rating, skill } = await ratingOf(e.by, speed);
 
   // one live seek per user
   const prev = await cmd.hget(keys.seekByUser, e.by);
@@ -122,14 +136,14 @@ async function onSeek(e: LobbySeek): Promise<void> {
     if (partner) {
       await cmd.hdel(keys.seekMeta, matchId);
       await cmd.hdel(keys.seekByUser, partner.by);
-      const me: SeekMeta = { seekId: randomUUID(), by: e.by, gw: e.gw, conn: e.conn, clock: e.clock, rated: e.rated, rating, ts: Date.now(), pool };
+      const me: SeekMeta = { seekId: randomUUID(), by: e.by, gw: e.gw, conn: e.conn, clock: e.clock, rated: e.rated, rating, skill, ts: Date.now(), pool };
       await pairSeek(partner, me);
       return;
     }
   }
 
   const seekId = randomUUID();
-  const meta: SeekMeta = { seekId, by: e.by, gw: e.gw, conn: e.conn, clock: e.clock, rated: e.rated, rating, ts: Date.now(), pool };
+  const meta: SeekMeta = { seekId, by: e.by, gw: e.gw, conn: e.conn, clock: e.clock, rated: e.rated, rating, skill, ts: Date.now(), pool };
   await cmd.zadd(keys.seekPool(pool, e.rated), String(rating), seekId);
   await cmd.hset(keys.seekMeta, seekId, JSON.stringify(meta));
   await cmd.hset(keys.seekByUser, e.by, seekId);
@@ -160,7 +174,7 @@ async function onAccept(e: LobbyAccept): Promise<void> {
   }
   await cmd.del(keys.challenge(e.id));
   const c = JSON.parse(raw) as { from: { by: string; gw: string; conn: string }; clock: TimeControl; rated: boolean };
-  const mk = (by: string, gw: string, conn: string): SeekMeta => ({ seekId: "", by, gw, conn, clock: c.clock, rated: c.rated, rating: 0, ts: 0, pool: "" });
+  const mk = (by: string, gw: string, conn: string): SeekMeta => ({ seekId: "", by, gw, conn, clock: c.clock, rated: c.rated, rating: 0, skill: 0, ts: 0, pool: "" });
   await pair(mk(c.from.by, c.from.gw, c.from.conn), mk(e.by, e.gw, e.conn)); // challenger = white
 }
 

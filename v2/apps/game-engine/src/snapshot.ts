@@ -1,6 +1,6 @@
 import type Redis from "ioredis";
 import { keys, LEASE_MS } from "@chessguru/protocol";
-import type { Clock, Color, GameStatus, Players, TimeControl } from "@chessguru/protocol";
+import type { Clock, Color, GameStatus, Gone, Players, TimeControl } from "@chessguru/protocol";
 
 /** Hot recovery state: rebuild the position by replay + restore clock + flow. */
 export interface GameState {
@@ -20,6 +20,9 @@ export interface GameState {
   rematchReq: { white: boolean; black: boolean };
   premoves: { white: string | null; black: string | null };
   moveTimes: number[];
+  /** When each seated player's last socket went away; null while present. Optional so
+   *  a snapshot written before this field existed still hydrates. */
+  gone?: Gone;
 }
 
 export async function readState(cmd: Redis, g: string): Promise<GameState | null> {
