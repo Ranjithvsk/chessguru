@@ -59,15 +59,24 @@ const TOOL_HOTKEY: Record<AnnotationTool, string> = {
 };
 
 /** Persisted per user via localStorage — the tool + colour survive reloads
- *  so a coach's preferred setup ("cursor + red brush by default") sticks. */
-export function useAnnotationTool() {
+ *  so a coach's preferred setup ("cursor + red brush by default") sticks.
+ *
+ *  `persistTool: false` — start in cursor mode and never write the tool back.
+ *  For surfaces with no toolbar of their own (the Dream Meet class board): a
+ *  coach who picked the arrow tool on /openings on their phone came into class
+ *  with taps drawing arrows and every move disabled, and nothing on screen to
+ *  switch it off (owner report 2026-09-07, "click and move creates arrow on
+ *  mobile / tab"). The brush colour is still shared — that one is harmless. */
+export function useAnnotationTool(opts: { persistTool?: boolean } = {}) {
+  const persistTool = opts.persistTool !== false;
   const [tool, _setTool] = useState<AnnotationTool>(() => {
+    if (!persistTool) return "cursor";
     try { return (localStorage.getItem("cg_annot_tool") as AnnotationTool) || "cursor"; } catch { return "cursor"; }
   });
   const [brush, _setBrush] = useState<AnnotationBrush>(() => {
     try { return (localStorage.getItem("cg_annot_brush") as AnnotationBrush) || "green"; } catch { return "green"; }
   });
-  const setTool  = useCallback((t: AnnotationTool)  => { _setTool(t);  try { localStorage.setItem("cg_annot_tool", t); }  catch { /* */ } }, []);
+  const setTool  = useCallback((t: AnnotationTool)  => { _setTool(t);  if (persistTool) { try { localStorage.setItem("cg_annot_tool", t); }  catch { /* */ } } }, [persistTool]);
   const setBrush = useCallback((b: AnnotationBrush) => { _setBrush(b); try { localStorage.setItem("cg_annot_brush", b); } catch { /* */ } }, []);
   // Pending source-square for the arrow tool: we're waiting for a second
   // click to complete the arrow. Reset on tool change / escape.

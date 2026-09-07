@@ -738,7 +738,10 @@ export default function SharedClassBoard(
   // per-user via useAnnotationTool → localStorage. Only used when the
   // board is NOT inside a challenge (challenge students have their own
   // scratchpad tools).
-  const annotTool = useAnnotationTool();
+  // Class board has no annotation toolbar: right-click (desktop) draws through
+  // chessground itself, taps and left-clicks always move. Never inherit the
+  // tool the coach last picked on /openings (see useAnnotationTool).
+  const annotTool = useAnnotationTool({ persistTool: false });
   // Live remote cursor — coach's cursor as seen by students. Normalized 0..1
   // relative to the board square. Server never echoes to sender, so this is
   // only meaningful on the student side.

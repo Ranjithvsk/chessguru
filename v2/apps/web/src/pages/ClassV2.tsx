@@ -832,7 +832,10 @@ function LiveHeaderBits({ room, role }: { room: string; role: "coach" | "student
 // copy, and mini QR so a student sitting next to the coach can join
 // without a laptop. Auto-hides the moment anyone else joins so it never
 // covers the board mid-class.
-function CoachWaitingOverlay({ room, role }: { room: string; role: "coach" | "student" }) {
+// Two mount points: the floating card over the board on lg+ screens, and a
+// one-line strip under the top bar on phones/tablets, where a 280px card over
+// a 360px board swallowed every tap on the top ranks (owner report 2026-09-07).
+function CoachWaitingOverlay({ room, role, variant = "overlay" }: { room: string; role: "coach" | "student"; variant?: "overlay" | "strip" }) {
   const participants = useParticipants();
   const [copied, setCopied] = useState(false);
   // Session-dismiss per room — user can hide it and keep teaching alone.
@@ -848,13 +851,24 @@ function CoachWaitingOverlay({ room, role }: { room: string; role: "coach" | "st
     try { await navigator.clipboard.writeText(inviteUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }
     catch { window.prompt("Copy the student invite link:", inviteUrl); }
   };
+  const dismiss = () => { try { sessionStorage.setItem("cg-waiting-dismiss-" + room, "1"); } catch { /* */ } setDismissed(true); };
+  if (variant === "strip") {
+    return (
+      <div className="flex items-center gap-2 border-b border-amber-400/30 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-100 lg:hidden" data-testid="waiting-strip">
+        <span className="shrink-0 font-semibold uppercase tracking-wide text-amber-300">⏳ Waiting for students</span>
+        <span className="min-w-0 flex-1 truncate text-ink-300">share the invite link so moves sync</span>
+        <button onClick={copy} className="shrink-0 rounded-md bg-amber-500 px-2 py-0.5 font-bold text-ink-900 hover:bg-amber-400">{copied ? "✓" : "Copy link"}</button>
+        <button onClick={dismiss} className="shrink-0 px-1 text-sm text-ink-400 hover:text-white" title="Hide">×</button>
+      </div>
+    );
+  }
   return (
-    <div className="absolute right-3 top-3 z-20 w-[280px] rounded-xl border border-amber-400/40 bg-ink-900/95 p-3 shadow-2xl backdrop-blur">
+    <div className="absolute right-3 top-3 z-20 hidden w-[280px] rounded-xl border border-amber-400/40 bg-ink-900/95 p-3 shadow-2xl backdrop-blur lg:block" data-testid="waiting-card">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-300">
           ⏳ Waiting for students
         </div>
-        <button onClick={() => { try { sessionStorage.setItem("cg-waiting-dismiss-" + room, "1"); } catch { /* */ } setDismissed(true); }}
+        <button onClick={dismiss}
           className="text-sm text-ink-400 hover:text-white" title="Hide this panel">×</button>
       </div>
       <div className="mb-2 text-[11px] text-ink-300">
@@ -2371,6 +2385,10 @@ export default function ClassV2Page() {
               )}
             </div>
           </div>
+
+          {/* Phone/tablet: the waiting-for-students notice lives here, in flow,
+           *  never over the board. */}
+          <CoachWaitingOverlay room={room} role={role} variant="strip" />
 
           {/* Body: /openings-style layout — big board on the left, notation
            *  as a right sidebar on lg+ screens. Stacks (board on top, notation

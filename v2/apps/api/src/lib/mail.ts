@@ -8,7 +8,20 @@
 // token is missing we fail-open (log to stdout + return ok) so dev/staging
 // still work without the tunnel.
 
-interface MailInput { to: string; subject: string; html: string; text?: string; }
+interface MailInput {
+  to: string;
+  subject: string;
+  html: string;
+  text?: string;
+  /** Override the sending identity (default MAIL_FROM). The mail-health monitor uses
+   *  dw-otp's own domain for its DOWN alert, because "the transport is fine but it cannot
+   *  sign for our domain" is a real failure mode (2026-09-07) and the only way to say so
+   *  is from a domain it can still sign. */
+  from?: string;
+  /** Skip the health observer for this send (monitor-internal traffic must not be
+   *  mistaken for the customer mail path recovering). */
+  observe?: boolean;
+}
 
 /** Set by MailHealthService. Every real send reports its outcome here, which is
  *  how a broken mail path gets noticed even though no caller checks the return
@@ -17,12 +30,13 @@ interface MailInput { to: string; subject: string; html: string; text?: string; 
  *  MX refusal, a 403 from a relay), so this is the second, independent signal. */
 let observer: ((ok: boolean, error?: string) => void) | null = null;
 export function setMailObserver(fn: (ok: boolean, error?: string) => void): void { observer = fn; }
-const observe = (ok: boolean, error?: string) => { try { observer?.(ok, error); } catch { /* must never break a send */ } };
+const observeAll = (ok: boolean, error?: string) => { try { observer?.(ok, error); } catch { /* must never break a send */ } };
 
-export async function sendMail({ to, subject, html, text }: MailInput): Promise<{ ok: boolean; id?: string; error?: string }> {
+export async function sendMail({ to, subject, html, text, from: fromOverride, observe: shouldObserve = true }: MailInput): Promise<{ ok: boolean; id?: string; error?: string }> {
   const url   = process.env.DWOTP_URL || "http://127.0.0.1:4025";
   const token = process.env.DWOTP_INTERNAL_TOKEN;
-  const from  = process.env.MAIL_FROM || "ChessGuru <noreply@otp.dreamworldplants.com>";
+  const from  = fromOverride || process.env.MAIL_FROM || "ChessGuru <noreply@otp.dreamworldplants.com>";
+  const observe = (ok: boolean, error?: string) => { if (shouldObserve) observeAll(ok, error); };
   if (!token) {
     console.log(`[mail:noop] to=${to} subject=${JSON.stringify(subject)} — set DWOTP_INTERNAL_TOKEN to actually send`);
     console.log(`[mail:noop] body:\n${text || html.replace(/<[^>]+>/g, "")}`);

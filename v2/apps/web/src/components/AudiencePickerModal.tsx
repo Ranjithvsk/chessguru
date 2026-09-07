@@ -102,13 +102,19 @@ export default function AudiencePickerModal(props: {
   };
 
   return (
+    // Phone layout (owner report 2026-09-07, coach on Android: "when I click it
+    // shows students, I can't make moves"): the whole dialog used to scroll as
+    // one box, so with 90+ students the Skip / Start buttons sat below the fold
+    // and every tap landed in the roster. Now the dialog is a column — header
+    // and action row always on screen, only the middle scrolls — and on small
+    // screens it is a bottom sheet.
     <div
-      className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-black/70 backdrop-blur-sm p-4 sm:items-center"
+      className="fixed inset-0 z-[70] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4"
       onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
       tabIndex={-1}
     >
-      <div className="my-auto w-full max-w-lg max-h-[92vh] overflow-y-auto rounded-2xl border border-ink-700 bg-ink-900 shadow-2xl">
-        <div className="flex items-center justify-between border-b border-ink-800 bg-ink-800/60 px-4 py-2.5">
+      <div className="flex max-h-[92vh] w-full max-w-lg flex-col rounded-t-2xl border border-ink-700 bg-ink-900 shadow-2xl sm:rounded-2xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-ink-800 bg-ink-800/60 px-4 py-2.5">
           <div className="font-display text-base font-bold text-white">🎯 Who can join this class?</div>
           <button
             onClick={onClose}
@@ -122,7 +128,7 @@ export default function AudiencePickerModal(props: {
         ) : !data ? (
           <div className="p-6 text-center text-sm text-rose-400">{err || "Could not load"}</div>
         ) : (
-          <div className="space-y-3 p-4">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
             <p className="text-xs text-ink-400">
               Only these people can enter the room, and only they get the
               &quot;class is live&quot; notification. You can change this later.
@@ -210,7 +216,7 @@ export default function AudiencePickerModal(props: {
                   placeholder="Search students…"
                   className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none"
                 />
-                <div className="max-h-64 overflow-y-auto rounded-lg border border-ink-800 bg-ink-950">
+                <div className="max-h-[38vh] overflow-y-auto rounded-lg border border-ink-800 bg-ink-950 sm:max-h-64">
                   {filteredStudents.length === 0 ? (
                     <div className="p-3 text-xs text-ink-500">No students match.</div>
                   ) : filteredStudents.map((s) => (
@@ -237,24 +243,26 @@ export default function AudiencePickerModal(props: {
             )}
 
             {err && <div className="text-xs text-rose-400">{err}</div>}
+          </div>
+        )}
 
-            <div className="flex items-center justify-between border-t border-ink-800 pt-3">
-              <div className="text-xs text-ink-400">
-                Will invite <span className="font-bold text-brand-200">{previewCount}</span> {previewCount === 1 ? "person" : "people"}
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={onClose}
-                  className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-200 hover:bg-ink-700"
-                >Skip</button>
-                <button
-                  onClick={submit}
-                  disabled={!canSubmit}
-                  className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-bold text-white hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {saving ? "Sending…" : "Start & notify"}
-                </button>
-              </div>
+        {data && !loading && (
+          <div className="flex shrink-0 items-center justify-between border-t border-ink-800 bg-ink-900 px-4 py-3" data-testid="audience-actions">
+            <div className="text-xs text-ink-400">
+              Will invite <span className="font-bold text-brand-200">{previewCount}</span> {previewCount === 1 ? "person" : "people"}
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={onClose}
+                className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-200 hover:bg-ink-700"
+              >Skip</button>
+              <button
+                onClick={submit}
+                disabled={!canSubmit}
+                className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-bold text-white hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {saving ? "Sending…" : "Start & notify"}
+              </button>
             </div>
           </div>
         )}

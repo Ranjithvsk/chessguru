@@ -30,6 +30,16 @@ const PROBE_TIMEOUT_MS = 8_000;
 /** Two consecutive misses before declaring an outage. The tunnel unit restarts
  *  on a 10s timer, so a single miss is routinely just a reconnect in progress. */
 const FAILURES_TO_TRIP = 2;
+// Real sends fail for reasons a /health probe cannot see (2026-09-07: dw-otp was up but
+// had lost the DKIM key entry for our domain, so every send got a 502 while /health
+// said ok). Send failures therefore keep their own counter, and once they trip the
+// state only a real successful send may clear it — a healthy probe in between must
+// not "recover" a path that still rejects every message.
+const SEND_FAILURES_TO_TRIP = 2;
+// dw-otp can always sign for its own domain, so a DOWN alert sent from it still lands
+// when the failure is "cannot sign for harinitharanjith.com". Sent with observe:false
+// so the monitor does not mistake its own alert for the customer path recovering.
+const FALLBACK_FROM = process.env.MAIL_FALLBACK_FROM || "ChessGuru alerts <noreply@otp.dreamworldplants.com>";
 const STATE_ID = "dwotp";
 
 export interface MailHealth {
@@ -49,6 +59,8 @@ export class MailHealthService implements OnModuleInit {
   private lastError: string | null = null;
   private checkedAt = new Date();
   private consecutiveFailures = 0;
+  private sendFailures = 0;
+  private downBy: "probe" | "send" | null = null;
 
   constructor(
     @InjectConnection() private readonly conn: Connection,
@@ -71,8 +83,13 @@ export class MailHealthService implements OnModuleInit {
 
     setMailObserver((ok, error) => {
       // A real send is stronger evidence than any probe, in both directions.
-      if (ok) void this.transition(true, null).catch(() => {});
-      else void this.markDown(error || "send failed").catch(() => {});
+      if (ok) {
+        this.sendFailures = 0;
+        this.downBy = null;
+        void this.transition(true, null).catch(() => {});
+      } else {
+        void this.markDown(error || "send failed", "send").catch(() => {});
+      }
     });
 
     setInterval(() => { this.probe().catch(() => {}); }, PROBE_MS);
@@ -97,16 +114,21 @@ export class MailHealthService implements OnModuleInit {
     } catch (e) {
       error = String((e as any)?.message || e);
     }
-    if (error) await this.markDown(error);
-    else await this.transition(true, null);
+    if (error) await this.markDown(error, "probe");
+    // A reachable service proves nothing about signing/delivery: while sends are the
+    // thing failing, only a send may recover the state.
+    else if (this.downBy !== "send") await this.transition(true, null);
   }
 
   /** Only trips after FAILURES_TO_TRIP consecutive misses, so a reconnect blip
    *  doesn't page. Once already down, every further failure is a no-op. */
-  private async markDown(error: string) {
+  private async markDown(error: string, source: "probe" | "send") {
     this.lastError = error;
     if (!this.ok) return;
-    if (++this.consecutiveFailures < FAILURES_TO_TRIP) return;
+    if (source === "send") {
+      if (++this.sendFailures < SEND_FAILURES_TO_TRIP) return;
+    } else if (++this.consecutiveFailures < FAILURES_TO_TRIP) return;
+    this.downBy = source;
     await this.transition(false, error);
   }
 
@@ -132,9 +154,10 @@ export class MailHealthService implements OnModuleInit {
         kind: "mail",
         message: `Outbound email is down — ${error || "dw-otp unreachable"}`,
         route: process.env.DWOTP_URL || "http://127.0.0.1:4025",
-        notify: true, // will almost certainly fail to send; the errorEvents row is the real record
+        notify: false, // that mail would use the broken identity; the fallback alert below is the notification
       });
       console.error(`[mail-health] DOWN: ${error}`);
+      await this.alertViaFallback(error || "dw-otp unreachable");
       return;
     }
 
@@ -146,6 +169,43 @@ export class MailHealthService implements OnModuleInit {
       notify: false, // the postmortem below is the notification
     });
     await this.mailPostmortem(downSince, downMs);
+  }
+
+  /** Try to say "mail is down" from dw-otp's own domain. Lands whenever the service
+   *  is reachable but cannot sign or deliver for ours; silently pointless when the
+   *  transport itself is gone (the errorEvents row + admin UI remain the record). */
+  private async alertViaFallback(error: string) {
+    const to = process.env.ERROR_ALERT_TO || "ranjith.vsk@gmail.com";
+    const from = process.env.MAIL_FROM || "(MAIL_FROM unset)";
+    const signing = /DKIM selector/i.test(error);
+    try {
+      const r = await sendMail({
+        to,
+        from: FALLBACK_FROM,
+        observe: false,
+        subject: `[ChessGuru] Outbound email is DOWN — ${error.slice(0, 80)}`,
+        html:
+          `<h2 style="margin:0 0 12px">ChessGuru cannot send email</h2>` +
+          `<p style="font:14px/1.5 system-ui">Every message sent as <b>${from}</b> is failing:</p>` +
+          `<pre style="font:12px/1.4 ui-monospace;background:#f6f6f6;padding:12px;overflow:auto">${error}</pre>` +
+          (signing
+            ? `<p style="font:14px/1.5 system-ui">The mail service is reachable — it has lost the DKIM key entry for our domain. ` +
+              `On Mumbai, <code>apps/otp-service/mailer.js</code> → <code>DKIM_BY_DOMAIN</code> must list <code>harinitharanjith.com</code>; ` +
+              `run <code>git diff HEAD -- mailer.js</code> there and <code>pm2 restart dw-otp</code>. This exact thing happened on 2026-09-07.</p>`
+            : `<p style="font:14px/1.5 system-ui">Password resets, OTP sign-in, digests and reminders are all failing silently until this is fixed.</p>`) +
+          `<p style="font:13px system-ui;color:#666">This alert was sent from ${FALLBACK_FROM} because the normal identity cannot send. ` +
+          `Details: https://chessguru.cc/admin/errors</p>`,
+        text: `ChessGuru cannot send email as ${from}: ${error}
+` +
+          (signing ? `dw-otp is up but has no DKIM entry for our domain — check DKIM_BY_DOMAIN in apps/otp-service/mailer.js on Mumbai and pm2 restart dw-otp.
+` : `Resets, OTP sign-in, digests and reminders are failing silently.
+`) +
+          `https://chessguru.cc/admin/errors`,
+      });
+      console.error(`[mail-health] fallback alert ${r.ok ? "delivered" : `failed: ${r.error}`}`);
+    } catch (e) {
+      console.error(`[mail-health] fallback alert threw:`, e);
+    }
   }
 
   /** The only message that can be delivered about a mail outage, because it is
