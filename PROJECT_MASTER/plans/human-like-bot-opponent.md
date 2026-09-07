@@ -1,6 +1,6 @@
 # Human-like bot opponent for Play (Maia-3)
 
-**Status:** PROPOSED — decisions settled with owner 2026-09-06, not yet built.
+**Status:** LIVE (unrated) — Maia-3 bot shipped 2026-09-06; replaced as primary by the lc0 + Maia-1 1100–1900 ladder on 2026-09-07 (commit `e94b90e`, see [sessions/2026-09-07-play-bot-ladder-shipped.md](../sessions/2026-09-07-play-bot-ladder-shipped.md)). Maia-3 now serves only as a 25% variety draw inside its measured 1130–1690 band. Rated remains OFF pending the owner's call and the gateway token fix.
 
 ## Goal
 

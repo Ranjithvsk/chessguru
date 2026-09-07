@@ -58,8 +58,8 @@ rating by construction rather than by a dial that needs calibrating.
 
 ## Open items
 
-- **Not wired into `apps/bot-player` yet** — it still spawns `maia3-uci`. Switching to the
-  Maia-1 ladder is a separate change and would remove the calibration gate on rated play.
+- ~~Not wired into `apps/bot-player` yet~~ — **done 2026-09-07**, see
+  [2026-09-07-play-bot-ladder-shipped.md](2026-09-07-play-bot-ladder-shipped.md).
 - Nine separate processes vs one: Maia-3 is a single process whose `SelfElo` is set per
   game; Maia-1 needs a distinct process per level, so the bot pool needs a process cache
   keyed by level.
