@@ -1,7 +1,8 @@
 import Redis from "ioredis";
 import { MongoClient } from "mongodb";
 import { keys, type TimeControl } from "@chessguru/protocol";
-import { MaiaEngine } from "./engine";
+import { Maia3Engine } from "./engine";
+import { EnginePool, pickEngine } from "./engines";
 import { buildNamePool } from "./names";
 import { BotSession, type GameLog } from "./session";
 
@@ -11,11 +12,12 @@ const POLL_MS = 2000;
 const WAIT_MIN_MS = Number(process.env.BOT_WAIT_MIN_MS ?? 11000);
 const WAIT_MAX_MS = Number(process.env.BOT_WAIT_MAX_MS ?? 18000);
 const MAX_CONCURRENT = Number(process.env.BOT_MAX_GAMES ?? 6);
+const SWEEP_MS = 60000;
 
 const cmd = new Redis(REDIS_URL, { maxRetriesPerRequest: null });
 cmd.on("error", (e) => console.error("[bot] redis:", e.message));
 const mongo = new MongoClient(MONGO);
-const engine = new MaiaEngine();
+const engines = new EnginePool(() => new Maia3Engine());
 
 interface SeekMeta {
   seekId: string;
@@ -82,7 +84,10 @@ async function tick(): Promise<void> {
   seeking = true;
   inUse.add(name);
   live++;
-  console.log(`[bot] ${name} entering ${target.pool} for ${target.by} (waited ${Math.round((now - target.ts) / 1000)}s, rating ${target.rating})`);
+  const engine = engines.acquire(pickEngine(target.rating));
+  console.log(
+    `[bot] ${name} entering ${target.pool} for ${target.by} (waited ${Math.round((now - target.ts) / 1000)}s, rating ${target.rating}, engine ${engine.id})`,
+  );
 
   const session = new BotSession(name, target.clock, target.rating, engine, (log) => {
     seeking = false;
@@ -109,11 +114,15 @@ async function recordGame(log: GameLog): Promise<void> {
 async function main(): Promise<void> {
   await mongo.connect();
   namePool = await buildNamePool(mongo.db());
-  // Load the weights now: the first think otherwise costs ~6s, which would show up as an
-  // implausibly long stare at move one of the first game after a restart.
-  await engine.think([], 1500, 1500, 1).catch((e) => console.error("[bot] warmup:", e.message));
+  // Load the weights now: the first think otherwise costs seconds, which would show up as
+  // an implausibly long stare at move one of the first game after a restart.
+  await engines
+    .acquire({ kind: "maia1", id: "maia1-1500", level: 1500 })
+    .think({ moves: [], opponentRating: 1500 })
+    .catch((e) => console.error("[bot] warmup:", e.message));
   console.log(`[bot] up — ${namePool.length} names, waits ${WAIT_MIN_MS}-${WAIT_MAX_MS}ms, max ${MAX_CONCURRENT} games`);
   setInterval(() => void tick().catch((e) => console.error("[bot] tick:", e.message)), POLL_MS);
+  setInterval(() => engines.sweep(), SWEEP_MS);
 }
 
 void main().catch((e) => {

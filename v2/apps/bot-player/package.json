@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "tsx src/main.ts",
+    "smoke": "tsx src/smoke.ts",
     "typecheck": "tsc --noEmit",
     "lint": "echo \"(bot-player) no lint yet\""
   },

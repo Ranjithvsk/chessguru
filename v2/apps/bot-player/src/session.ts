@@ -1,8 +1,8 @@
 import { Chess } from "chess.js";
 import WebSocket from "ws";
 import type { Color, ServerMsg, TimeControl } from "@chessguru/protocol";
-import type { MaiaEngine } from "./engine";
-import { selfEloFor, thinkMs } from "./think";
+import type { BotEngine } from "./engines";
+import { thinkMs } from "./think";
 
 const WS_URL = process.env.BOT_WS_URL ?? "ws://127.0.0.1:18080/ws";
 const MATCH_TIMEOUT_MS = 6000;
@@ -18,7 +18,8 @@ export interface GameLog {
   opponent: string;
   botColor: Color;
   opponentRating: number;
-  selfElo: number;
+  /** Which engine and strength setting answered this game, e.g. `maia1-1500`. */
+  engine: string;
   clock: TimeControl;
   plies: number;
   result: string | null;
@@ -45,13 +46,9 @@ export class BotSession {
     private readonly name: string,
     private readonly clockTc: TimeControl,
     private readonly opponentRating: number,
-    private readonly engine: MaiaEngine,
+    private readonly engine: BotEngine,
     private readonly onFinish: (log: GameLog | null) => void,
   ) {}
-
-  private get selfElo(): number {
-    return selfEloFor(this.opponentRating);
-  }
 
   private send(msg: unknown): void {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
@@ -116,7 +113,7 @@ export class BotSession {
         this.opponent = msg.d.opponent;
         this.board.reset();
         this.uciMoves = [];
-        console.log(`[bot ${this.name}] matched ${msg.d.game} as ${msg.d.color} vs ${msg.d.opponent} (SelfElo ${this.selfElo})`);
+        console.log(`[bot ${this.name}] matched ${msg.d.game} as ${msg.d.color} vs ${msg.d.opponent} (${this.engine.id})`);
         this.send({ v: 1, t: "sub", g: msg.d.game });
         return;
 
@@ -178,14 +175,14 @@ export class BotSession {
     this.busy = true;
     const atPly = this.ply;
     try {
-      // Only `position startpos moves ...` gives Maia-3 real position history, which is
-      // what it conditions on. If we lost the move list, skip the think and play a legal
+      // Only `position startpos moves ...` gives the Maia nets real position history, which
+      // is what they condition on. If we lost the move list, skip the think and play a legal
       // move rather than feeding it a history it never saw.
       if (this.uciMoves.length !== atPly) {
         this.playFallback(atPly);
         return;
       }
-      const think = await this.engine.think(this.uciMoves, this.selfElo, this.opponentRating);
+      const think = await this.engine.think({ moves: this.uciMoves, opponentRating: this.opponentRating });
       if (this.done || this.ply !== atPly) return; // the position moved on under us
 
       if (this.shouldResign()) {
@@ -244,7 +241,7 @@ export class BotSession {
       opponent: this.opponent,
       botColor: this.color,
       opponentRating: this.opponentRating,
-      selfElo: this.selfElo,
+      engine: this.engine.id,
       clock: this.clockTc,
       plies: this.ply,
       result,
