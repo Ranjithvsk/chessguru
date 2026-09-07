@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import Redis from "ioredis";
 import { MongoClient } from "mongodb";
-import { keys, type TimeControl } from "@chessguru/protocol";
+import { keys, speedOf, type TimeControl } from "@chessguru/protocol";
 import { Maia3Engine } from "./engine";
 import { EnginePool, pickEngine } from "./engines";
 import { buildNamePool } from "./names";
@@ -76,9 +76,10 @@ async function tick(): Promise<void> {
   const threshold = WAIT_MIN_MS + Math.random() * (WAIT_MAX_MS - WAIT_MIN_MS);
   const now = Date.now();
 
-  // Rated seeks are left to humans: the strength mapping is not calibrated against real
-  // players yet, so a bot must not touch anyone's rating.
-  const open = (await waitingSeeks()).filter((m) => !m.rated && !isBot(m.by));
+  // Rated seeks too (owner call 2026-09-07): the bot's own live rating is stamped to the
+  // level it is about to play at, so a student's rating moves as it would against a
+  // human of that strength. Never another bot.
+  const open = (await waitingSeeks()).filter((m) => !isBot(m.by));
   const pool = open.find((m) => now - m.ts >= threshold)?.pool;
   if (!pool) return;
 
@@ -99,7 +100,12 @@ async function tick(): Promise<void> {
     `[bot] ${name} entering ${target.pool} for ${target.by} (waited ${Math.round((now - target.ts) / 1000)}s, rating ${target.rating}, skill ${skill}, engine ${engine.id})`,
   );
 
-  const session = new BotSession(name, botKey, target.clock, skill, engine, (log) => {
+  // Glicko sees the bot as an established player at exactly the strength it plays.
+  // Between games the engine's own rating update drifts this; re-stamp every time so
+  // the human's update is computed against the level actually at the board.
+  if (target.rated) await stampRating(name, speedOf(target.clock), skill);
+
+  const session = new BotSession(name, botKey, target.clock, target.rated, skill, engine, (log) => {
     seeking = false;
     inUse.delete(name);
     live--;
@@ -110,6 +116,17 @@ async function tick(): Promise<void> {
     seeking = false;
   }, 7000);
   session.run();
+}
+
+async function stampRating(name: string, speed: string, rating: number): Promise<void> {
+  try {
+    await mongo
+      .db()
+      .collection("live_perfs")
+      .updateOne({ _id: `u:${name}` as never }, { $set: { [speed]: { gl: { r: rating, d: 80, v: 0.06 }, nb: 25, la: new Date() } } }, { upsert: true });
+  } catch (e) {
+    console.error("[bot] could not stamp rating:", (e as Error).message);
+  }
 }
 
 async function recordGame(log: GameLog): Promise<void> {

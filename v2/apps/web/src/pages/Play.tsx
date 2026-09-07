@@ -58,6 +58,11 @@ export default function PlayPage() {
   const guest = useMemo(() => (ctx?.userId ? null : guestToken()), [ctx?.userId]);
   const p = usePlay(guest);
   const [mode, setMode] = useState<"online" | "local">("online");
+  // Rated by default (owner call 2026-09-07). Guests are always casual server-side;
+  // the switch is hidden for them so it cannot promise a rating they do not have.
+  const [wantRated, setWantRated] = useState(true);
+  const signedIn = !!ctx?.userId;
+  const rated = signedIn && wantRated;
   // Ticks once a second while the opponent is away so the claim countdown moves.
   const [nowTick, setNowTick] = useState(Date.now());
   useEffect(() => {
@@ -91,6 +96,7 @@ export default function PlayPage() {
     const why = p.reason === "abandoned" ? (won ? "opponent left" : "you left") : p.reason ?? "";
     return `${won ? "You won" : "You lost"} — ${p.result} (${why})`;
   })();
+  const diffText = p.ratingDiff === null ? "" : `${p.ratingDiff > 0 ? "+" : ""}${p.ratingDiff}`;
   const claimIn = p.oppGone ? Math.max(0, Math.ceil((p.oppGone.claimableAt - nowTick) / 1000)) : 0;
 
   const topClock = p.color === "white" ? p.clock.black : p.clock.white;
@@ -174,7 +180,15 @@ export default function PlayPage() {
           </div>
           <div className="mt-1 text-sm text-ink-400" data-testid="movecount">
             {p.moves.length} move{p.moves.length === 1 ? "" : "s"} played
+            {(playing || p.status === "ended") && (
+              <span className="ml-2 rounded bg-ink-800 px-1.5 py-0.5 text-xs text-ink-300" data-testid="rated-label">{p.rated ? "Rated" : "Casual"}</span>
+            )}
           </div>
+          {p.status === "ended" && diffText && (
+            <div className={`mt-1 text-sm font-semibold ${p.ratingDiff! >= 0 ? "text-emerald-300" : "text-rose-300"}`} data-testid="rating-diff">
+              Rating {diffText}
+            </div>
+          )}
           {!p.connected && p.status !== "connecting" && (
             <div className="mt-2 inline-block rounded bg-amber-500/20 px-2 py-0.5 text-xs text-amber-200" data-testid="reconnecting">
               Reconnecting…
@@ -234,13 +248,23 @@ export default function PlayPage() {
                 </button>
               </div>
             )}
-            <div className="mb-2 text-xs uppercase tracking-wide text-ink-400">Quick pairing</div>
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-xs uppercase tracking-wide text-ink-400">Quick pairing</div>
+              {signedIn ? (
+                <div className="inline-flex rounded-lg border border-ink-700 p-0.5 text-xs" data-testid="rated-toggle">
+                  <button onClick={() => setWantRated(true)} className={`rounded-md px-2 py-0.5 ${wantRated ? "bg-brand-600 text-white" : "text-ink-300 hover:text-white"}`}>Rated</button>
+                  <button onClick={() => setWantRated(false)} className={`rounded-md px-2 py-0.5 ${!wantRated ? "bg-brand-600 text-white" : "text-ink-300 hover:text-white"}`}>Casual</button>
+                </div>
+              ) : (
+                <span className="text-xs text-ink-500">Sign in for rated games</span>
+              )}
+            </div>
             <div className="grid grid-cols-2 gap-2">
               {TIME_CONTROLS.map((tc) => (
                 <button
                   key={tc.label}
                   data-testid={`seek-${tc.initial}`}
-                  onClick={() => p.seek({ initial: tc.initial, increment: tc.increment }, false)}
+                  onClick={() => p.seek({ initial: tc.initial, increment: tc.increment }, rated)}
                   className="rounded-lg bg-ink-800 px-3 py-2 text-sm font-medium text-white hover:bg-ink-700"
                 >
                   {tc.label}
@@ -249,7 +273,7 @@ export default function PlayPage() {
             </div>
             <button
               data-testid="challenge-friend"
-              onClick={() => p.createChallenge({ initial: 300000, increment: 3000 }, false)}
+              onClick={() => p.createChallenge({ initial: 300000, increment: 3000 }, rated)}
               className="mt-2 w-full rounded-lg border border-ink-700 px-3 py-2 text-sm text-ink-200 hover:bg-ink-800"
             >
               Challenge a friend (5+3)

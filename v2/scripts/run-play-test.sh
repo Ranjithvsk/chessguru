@@ -18,8 +18,19 @@ cleanup() {
   echo "[play-test] cleanup"
   for p in "${PIDS[@]:-}"; do kill -9 "$p" 2>/dev/null || true; done
   fuser -k 18090/tcp 9191/tcp 2>/dev/null || true
+  # tsx forks a node child that outlives its parent. An orphaned lobby has no port
+  # to kill by, reconnects to the NEXT run's redis and processes every seek a second
+  # time — which pairs a seeker with itself. Only this user's processes: production
+  # runs the same scripts as `ubuntu`.
+  pkill -9 -u "$(id -un)" -f 'apps/(lobby|ws|game-engine)/src/main.ts' 2>/dev/null || true
   redis-cli -p "$REDIS_PORT" shutdown nosave >/dev/null 2>&1 || true
 }
+# Refuse to start on top of leftovers from an earlier run for the same reason.
+if pgrep -u "$(id -un)" -f 'apps/(lobby|ws|game-engine)/src/main.ts' >/dev/null; then
+  echo "[play-test] killing leftover play processes from an earlier run"
+  pkill -9 -u "$(id -un)" -f 'apps/(lobby|ws|game-engine)/src/main.ts' || true
+  sleep 0.5
+fi
 trap cleanup EXIT
 
 redis-server --port "$REDIS_PORT" --save "" --appendonly no --daemonize no >"$LOG/redis-test.log" 2>&1 & PIDS+=($!)
@@ -42,6 +53,10 @@ echo "[play-test] running verifier"
 node "$ROOT/scripts/play-verify.mjs"; rc=$?
 
 if [ "$rc" != "0" ]; then
-  for f in t1 lobby-test gw-test; do echo "----- $f.log -----"; tail -n 30 "$LOG/$f.log"; done
+  echo "----- redis seek state -----"
+  redis-cli -p "$REDIS_PORT" --scan --pattern 'seek:*' | while read -r k; do echo "$k => $(redis-cli -p "$REDIS_PORT" type "$k")"; done
+  redis-cli -p "$REDIS_PORT" hgetall seek:meta | paste - - | cut -c1-300
+  redis-cli -p "$REDIS_PORT" hgetall seek:byuser | paste - -
+  for f in t1 lobby-test gw-test; do echo "----- $f.log -----"; grep -a -v '^\s*$' "$LOG/$f.log" | grep -av ECONNREFUSED | tail -n 30; done
 fi
 exit $rc

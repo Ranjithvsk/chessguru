@@ -1,6 +1,6 @@
 # Human-like bot opponent for Play (Maia-3)
 
-**Status:** LIVE (unrated) — Maia-3 bot shipped 2026-09-06; replaced as primary by the lc0 + Maia-1 1100–1900 ladder on 2026-09-07 (commit `e94b90e`, see [sessions/2026-09-07-play-bot-ladder-shipped.md](../sessions/2026-09-07-play-bot-ladder-shipped.md)). Maia-3 now serves only as a 25% variety draw inside its measured 1130–1690 band. The gateway token hole is closed (2026-09-07, identity = session cookie; the bot seats itself with a Redis-minted key). Rated remains OFF pending the owner's call only.
+**Status:** LIVE (unrated) — Maia-3 bot shipped 2026-09-06; replaced as primary by the lc0 + Maia-1 1100–1900 ladder on 2026-09-07 (commit `e94b90e`, see [sessions/2026-09-07-play-bot-ladder-shipped.md](../sessions/2026-09-07-play-bot-ladder-shipped.md)). Maia-3 now serves only as a 25% variety draw inside its measured 1130–1690 band. The gateway token hole is closed (2026-09-07, identity = session cookie; the bot seats itself with a Redis-minted key). **Rated is ON since 2026-09-07 (owner: "rated for bot also")** — the bot stamps its own `live_perfs` to the level it plays before each rated game; see [sessions/2026-09-07-play-rated-on-tenant-ws.md](../sessions/2026-09-07-play-rated-on-tenant-ws.md).
 
 ## Goal
 
@@ -276,9 +276,10 @@ corruption layer on top of a human-move model is how we end up with neither.
 
 ## Open items
 
-1. **Strength calibration** — ⚠️ STILL BLOCKS RATED. Round 1 (Maia-vs-Maia) done
-   2026-09-06: **0.46x compression**, so `SelfElo` cannot map 1:1 to student rating. Round 2
-   (human anchor, ≥200 games vs known-rated students) not started. See gate above.
+1. **Strength calibration** — no longer a gate: the Maia-1 ladder's level *is* the rating by
+   construction, and the owner turned rated on 2026-09-07. Still worth doing: compare realised
+   scores in `bot_games` (now carrying `rated`) against the stamped level once a few hundred
+   rated games exist, and shift the ladder pick if the bot over/under-performs.
 2. ~~**Policy exposure via UCI**~~ — ✅ RESOLVED 2026-09-06, see think-time §1: policy is
    never emitted, but resampling `bestmove` recovers concentration through plain UCI.
 3. **Resign / draw behaviour** — Maia has none. A bot grinding K+Q vs K to mate in a dead

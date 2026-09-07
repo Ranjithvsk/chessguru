@@ -117,7 +117,11 @@ async function pairSeek(a: SeekMeta, b: SeekMeta): Promise<void> {
   return Math.random() < 0.5 ? pair(a, b) : pair(b, a);
 }
 
-async function onSeek(e: LobbySeek): Promise<void> {
+/** Only signed-in accounts hold a rating, so a guest's "rated" seek is casual. */
+const canRate = (by: string): boolean => by.startsWith("u:");
+
+async function onSeek(raw: LobbySeek): Promise<void> {
+  const e: LobbySeek = { ...raw, rated: raw.rated && canRate(raw.by) };
   const speed = speedOf(e.clock);
   const pool = tcKey(e.clock);
   const { rating, skill } = await ratingOf(e.by, speed);
@@ -131,6 +135,7 @@ async function onSeek(e: LobbySeek): Promise<void> {
 
   const range = e.ratingRange ?? BASE_RANGE;
   const matchId = (await cmd.eval(MATCH_LUA, 1, keys.seekPool(pool, e.rated), String(rating - range), String(rating + range), "")) as string | null;
+  console.log(`[lobby] seek ${e.by} conn ${e.conn.slice(0, 8)} ${pool} rated=${e.rated} rating=${rating} skill=${skill} prev=${prev ? "y" : "n"} match=${matchId ?? "-"}`);
   if (matchId) {
     const partner = await getMeta(matchId);
     if (partner) {
@@ -162,7 +167,7 @@ async function onUnseek(e: LobbyUnseek): Promise<void> {
 
 async function onChallenge(e: LobbyChallenge): Promise<void> {
   const id = randomUUID().slice(0, 10);
-  await cmd.set(keys.challenge(id), JSON.stringify({ id, from: { by: e.by, gw: e.gw, conn: e.conn }, clock: e.clock, rated: e.rated }), "EX", 300);
+  await cmd.set(keys.challenge(id), JSON.stringify({ id, from: { by: e.by, gw: e.gw, conn: e.conn }, clock: e.clock, rated: e.rated && canRate(e.by) }), "EX", 300);
   reply(e.gw, e.conn, { v: 1, t: "challenge-created", d: { id } });
 }
 
@@ -174,7 +179,8 @@ async function onAccept(e: LobbyAccept): Promise<void> {
   }
   await cmd.del(keys.challenge(e.id));
   const c = JSON.parse(raw) as { from: { by: string; gw: string; conn: string }; clock: TimeControl; rated: boolean };
-  const mk = (by: string, gw: string, conn: string): SeekMeta => ({ seekId: "", by, gw, conn, clock: c.clock, rated: c.rated, rating: 0, skill: 0, ts: 0, pool: "" });
+  const rated = c.rated && canRate(e.by);
+  const mk = (by: string, gw: string, conn: string): SeekMeta => ({ seekId: "", by, gw, conn, clock: c.clock, rated, rating: 0, skill: 0, ts: 0, pool: "" });
   await pair(mk(c.from.by, c.from.gw, c.from.conn), mk(e.by, e.gw, e.conn)); // challenger = white
 }
 
@@ -200,6 +206,7 @@ async function sweep(): Promise<void> {
       const matchId = (await cmd.eval(MATCH_LUA, 1, key, String(m.rating - range), String(m.rating + range), id)) as string | null;
       if (matchId) {
         const partner = await getMeta(matchId);
+        console.log(`[lobby] sweep ${m.by} (${id.slice(0, 8)}) waited ${Math.round(waited)}s → ${partner?.by ?? "?"} (${matchId.slice(0, 8)})`);
         await cmd.zrem(key, id);
         await cmd.hdel(keys.seekMeta, id, matchId);
         await cmd.hdel(keys.seekByUser, m.by);

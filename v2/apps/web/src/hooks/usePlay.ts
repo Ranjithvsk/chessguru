@@ -43,6 +43,10 @@ export interface PlayState {
   /** Set while the opponent has no socket on the game. */
   oppGone: { since: number; claimableAt: number } | null;
   canAbort: boolean;
+  /** Whether the current game counts for rating. */
+  rated: boolean;
+  /** Our rating change once a rated game ends. */
+  ratingDiff: number | null;
   seek: (clock: TimeControl, rated?: boolean) => void;
   cancelSeek: () => void;
   abort: () => void;
@@ -103,6 +107,8 @@ export function usePlay(guest: string | null): PlayState {
   const [selfId, setSelfId] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [oppGone, setOppGone] = useState<{ since: number; claimableAt: number } | null>(null);
+  const [rated, setRated] = useState(false);
+  const [ratingDiff, setRatingDiff] = useState<number | null>(null);
 
   const clearPending = () => {
     pendingRef.current = null;
@@ -149,6 +155,7 @@ export function usePlay(guest: string | null): PlayState {
     setIncomingDraw(false);
     setChallengeId(null);
     setOppGone(null);
+    setRatingDiff(null);
     remember(g);
     client.current?.sub(g);
     setStatus("playing");
@@ -164,6 +171,7 @@ export function usePlay(guest: string | null): PlayState {
         break;
       case "matched":
         startGame(m.d.game, m.d.color, m.d.opponent);
+        setRated(m.d.rated);
         break;
       case "rematch-ready": {
         const me = selfIdRef.current;
@@ -192,6 +200,7 @@ export function usePlay(guest: string | null): PlayState {
           setChallengeId(null);
           setStatus("playing");
         }
+        setRated(m.d.rated);
         loadFen(m.d.fen);
         setTurn(m.d.turn);
         plyRef.current = m.d.ply;
@@ -242,6 +251,7 @@ export function usePlay(guest: string | null): PlayState {
       case "game-end":
         setResult(m.d.result);
         setReason(m.d.reason);
+        setRatingDiff(m.d.ratingDiff ? Math.round(m.d.ratingDiff[colorRef.current]) : null);
         applyClock(m.d.clock, false);
         setIncomingDraw(false);
         setOppGone(null);
@@ -414,7 +424,7 @@ export function usePlay(guest: string | null): PlayState {
 
   return {
     status, color, fen, turn, ply, moves, lastMove, clock: liveClock, opponent, result, reason, incomingDraw, challengeId,
-    pendingPromotion, boardEpoch, dests, myTurn, selfId, connected, oppGone, canAbort,
+    pendingPromotion, boardEpoch, dests, myTurn, selfId, connected, oppGone, canAbort, rated, ratingDiff,
     seek, cancelSeek, abort, claim, createChallenge, sendMove, premove, choosePromotion, cancelPromotion, resign, offerDraw, acceptDraw, declineDraw, rematch, newGame,
   };
 }

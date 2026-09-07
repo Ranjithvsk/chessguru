@@ -531,6 +531,19 @@ server {
     access_log off;
   }
 
+  # Online-play WebSocket gateway (apps/ws, uWS on 127.0.0.1:18080, path /ws).
+  # Exact match so it cannot shadow /ws-engine. Without this a tenant domain
+  # could not open online Play at all (owner ask 2026-09-07).
+  location = /ws {
+    proxy_pass http://127.0.0.1:18080;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "Upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_read_timeout 3600;
+  }
+
   location /v2api/ {
     proxy_pass http://localhost:4000/;
     proxy_http_version 1.1;

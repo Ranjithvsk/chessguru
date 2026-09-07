@@ -134,6 +134,7 @@ export class Router {
         // Seat changed → any seek left under the old id is stale (a re-hello after
         // reconnect keeps the same id, so this is a no-op in the common case).
         if (base.by !== conn.userId && !base.by.startsWith("anon:")) this.publishLeaves(conn, base.by);
+        console.log(`[ws ${this.gwId}] hello ${s.id.slice(0, 8)} → ${conn.userId}`);
         this.send(s.id, { v: 1, t: "hello-ok", d: { node: this.gwId, conn: s.id, userId: conn.userId } });
         return;
       }

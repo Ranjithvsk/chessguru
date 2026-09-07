@@ -264,6 +264,59 @@ async function main() {
     a.close();
   }
 
+  // ── T7 rated game between two accounts moves live_perfs; a guest is always casual ──
+  console.log("T7 rated play");
+  {
+    const mkSession = async (userId) => {
+      const sid = `r${rid()}${rid()}${rid()}${rid()}`;
+      await db.collection("sessions").insertOne({ _id: sid, expires: new Date(Date.now() + 3600_000), session: JSON.stringify({ cookie: {}, userId }) });
+      return `cgsid=s%3A${sid}.x`;
+    };
+    const a = new Client("ra", { cookie: await mkSession("rated_a") });
+    const b = new Client("rb", { cookie: await mkSession("rated_b") });
+    await a.hello({});
+    await b.hello({});
+    a.send({ v: 1, t: "seek", d: { clock: TC, rated: true } });
+    await a.next((m) => m.t === "seek-ack");
+    b.send({ v: 1, t: "seek", d: { clock: TC, rated: true } });
+    const ma = await a.next((m) => m.t === "matched");
+    await b.next((m) => m.t === "matched");
+    const g = ma.d.game;
+    check("two accounts seeking rated get a rated game", ma.d.rated === true);
+    a.send({ v: 1, t: "sub", g });
+    b.send({ v: 1, t: "sub", g });
+    await a.next((m) => m.t === "game-state" && m.g === g);
+    await b.next((m) => m.t === "game-state" && m.g === g);
+    const white = ma.d.color === "white" ? a : b;
+    const black = white === a ? b : a;
+    await playTwo(g, white, black);
+    black.send({ v: 1, t: "resign", g });
+    const end = await white.next((m) => m.t === "game-end" && m.g === g);
+    check("game-end carries a rating diff", !!end.d.ratingDiff && end.d.ratingDiff.white > 0 && end.d.ratingDiff.black < 0, JSON.stringify(end.d.ratingDiff));
+    await sleep(300);
+    const pw = await db.collection("live_perfs").findOne({ _id: white.id });
+    const pb = await db.collection("live_perfs").findOne({ _id: black.id });
+    check("live_perfs bullet rows written for both, winner above 1500", pw?.bullet?.gl?.r > 1500 && pb?.bullet?.gl?.r < 1500, `${pw?.bullet?.gl?.r} / ${pb?.bullet?.gl?.r}`);
+    a.close();
+    b.close();
+
+    const gA = new Client("gA");
+    const gB = new Client("gB");
+    await gA.hello({ guest: `gr_${rid()}` });
+    await gB.hello({ guest: `gr_${rid()}` });
+    gA.send({ v: 1, t: "seek", d: { clock: TC, rated: true } });
+    await gA.next((m) => m.t === "seek-ack");
+    gB.send({ v: 1, t: "seek", d: { clock: TC, rated: true } });
+    const mg = await gA.next((m) => m.t === "matched");
+    check("guests asking for rated are paired casual", mg.d.rated === false);
+    gA.send({ v: 1, t: "sub", g: mg.d.game }); // broadcasts only reach subscribers
+    await gA.next((m) => m.t === "game-state" && m.g === mg.d.game);
+    gA.send({ v: 1, t: "abort", g: mg.d.game });
+    await gA.next((m) => m.t === "game-end" && m.g === mg.d.game);
+    gA.close();
+    gB.close();
+  }
+
   await db.dropDatabase();
   await mc.close();
   redis.disconnect();

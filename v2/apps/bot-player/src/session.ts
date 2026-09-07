@@ -17,6 +17,7 @@ export interface GameLog {
   bot: string;
   opponent: string;
   botColor: Color;
+  rated: boolean;
   opponentRating: number;
   /** Which engine and strength setting answered this game, e.g. `maia1-1500`. */
   engine: string;
@@ -47,6 +48,7 @@ export class BotSession {
     private readonly name: string,
     private readonly botKey: string,
     private readonly clockTc: TimeControl,
+    private readonly rated: boolean,
     private readonly opponentRating: number,
     private readonly engine: BotEngine,
     private readonly onFinish: (log: GameLog | null) => void,
@@ -74,7 +76,8 @@ export class BotSession {
 
     ws.on("open", () => {
       this.send({ v: 1, t: "hello", d: { bot: { name: this.name, key: this.botKey } } });
-      this.send({ v: 1, t: "seek", d: { clock: this.clockTc, rated: false, ratingRange: 4000 } });
+      // Pools are keyed by the rated flag, so this must mirror the seek we are answering.
+      this.send({ v: 1, t: "seek", d: { clock: this.clockTc, rated: this.rated, ratingRange: 4000 } });
     });
 
     ws.on("message", (raw) => {
@@ -268,6 +271,7 @@ export class BotSession {
       bot: this.name,
       opponent: this.opponent,
       botColor: this.color,
+      rated: this.rated,
       opponentRating: this.opponentRating,
       engine: this.engine.id,
       clock: this.clockTc,
