@@ -295,6 +295,22 @@ export function useChallengeMarkToast(): ChallengeMarkToast | null {
 }
 export function dismissChallengeMarkToast() { _publishChallengeMarkToast(null); }
 
+// Coach notices — small stacked toasts for "X answered" and "challenge over".
+// Names only, never moves: the coach's screen is often shared with the class.
+export interface CoachNotice { id: number; text: string; tone: "info" | "success"; at: number }
+let _notices: CoachNotice[] = [];
+const _noticeSubs = new Set<() => void>();
+function _publishNotices(next: CoachNotice[]) { _notices = next; _noticeSubs.forEach((f) => f()); }
+export function pushCoachNotice(text: string, tone: CoachNotice["tone"] = "info") {
+  _publishNotices([..._notices, { id: Date.now() + Math.random(), text, tone, at: Date.now() }].slice(-4));
+}
+export function dismissCoachNotice(id: number) { _publishNotices(_notices.filter((n) => n.id !== id)); }
+export function useCoachNotices(): CoachNotice[] {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((n) => n + 1); _noticeSubs.add(f); return () => { _noticeSubs.delete(f); }; }, []);
+  return _notices;
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // PositionEditorModal — inline "board editor" for the class Setup flow.
 // Coach picks a piece from the palette, clicks squares to place it, and
@@ -961,11 +977,23 @@ export default function SharedClassBoard(
             total: Number(msg.total) || 0,
           });
         }
+        else if (msg.type === "challenge_answered") {
+          // Coach only. Count + a name toast; the moves stay on the server
+          // until the challenge ends and the coach explicitly reveals them.
+          if (_challenge && _challenge.active) {
+            _publishChallenge({ ..._challenge, answered: Number(msg.answered) || 0, total: Number(msg.total) || 0 });
+          }
+          const nm = String(msg.displayName || msg.userId || "A student");
+          pushCoachNotice(`✅ ${nm} answered (${Number(msg.answered) || 0}/${Number(msg.total) || 0})`, "success");
+        }
         else if (msg.type === "challenge_end") {
           // Server reveals: everyone snaps back to the shared board.
           // Coach also gets the answers array — students get an undefined
           // (they see their own attempt via the "Show my answer" toggle).
           const answers: ChallengeAnswerRow[] | null = Array.isArray(msg.answers) ? msg.answers : null;
+          if (answers) {
+            pushCoachNotice(`🧠 Challenge over — ${answers.length} answered. Open 📋 Answers when students can't see your screen.`);
+          }
           const myMoves = challengeMovesRef.current;
           challengeGameRef.current = null;
           setChallengeFen(null);

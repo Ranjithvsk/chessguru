@@ -74,3 +74,18 @@ password? Ask your coach — they can set a new one from the Students page", whi
 `POST /api/academy/students/:id/set-password` flow. Verified on gunachess.com with a throwaway
 student through the real login form: wrong current → "Current password is wrong."; correct →
 changed; old password refused, new one signs in; drawer link present on a phone width.
+
+## Challenge answers no longer auto-reveal on the coach's screen (owner ask, 2026-09-08)
+
+The coach's screen is shared with the class, so the answers panel popping open the moment a
+challenge ended handed the solution to everyone still thinking.
+- **Server** (`class-ws.ts`): on a student's FIRST answer (move or snapshot) the coach gets
+  `challenge_answered { userId, displayName, answered, total }` — name and count, never moves.
+- **Coach UI**: stacked bottom-left notices ("✅ Harinitharanjith answered (1/1)", "🧠 Challenge
+  over — N answered. Open 📋 Answers when students can't see your screen."). `ChallengeAnswersPanel`
+  never opens by itself any more; inside it every Moves cell reads "✓ answered · ••••••" and the
+  ✓/✗ mark buttons are disabled until the coach presses **👁 Reveal moves** (amber bar explains
+  why); **🙈 Hide moves** puts it back. Reveal state resets per challenge.
+- Verified live with a coach + a student in a throwaway room: student dragged e2–e4 → coach notice
+  and "1/1 answered" chip, no moves anywhere on the coach's screen; end → "Challenge over" notice,
+  no dialog opened; open panel → hidden cell + disabled marks; Reveal → "1.e4" + marks enabled.

@@ -17,7 +17,7 @@ import {
 import { Track, DataPacket_Kind } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
-import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, useClassStartShapes, triggerClassSeek, triggerClassPromoteVariation, triggerClassMakeMainline, triggerClassDeleteFrom, triggerClassLoadTree, triggerClassAnnotateMove, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow } from "../components/SharedClassBoard";
+import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, useClassStartShapes, triggerClassSeek, triggerClassPromoteVariation, triggerClassMakeMainline, triggerClassDeleteFrom, triggerClassLoadTree, triggerClassAnnotateMove, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow , useCoachNotices, dismissCoachNotice } from "../components/SharedClassBoard";
 import { useScreenWakeLock } from "../hooks/useScreenWakeLock";
 import { OPENINGS, findOpeningForLine, openingBySlug, type Opening } from "../lib/openings";
 import { fetchExplorer, type ExplorerData, type ExplorerMove } from "../lib/explorer";
@@ -2410,6 +2410,7 @@ export default function ClassV2Page() {
               {/* Student toast when the coach marks their challenge answer.
                *  Module-level state so this host can live anywhere in the tree. */}
               <ChallengeMarkToastHost />
+              <CoachNoticeHost />
               {endedMsg && (
                 <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center bg-ink-950/85 p-6 text-center">
                   <div className="pointer-events-auto space-y-3 rounded-2xl border border-rose-500/50 bg-ink-900 p-6 shadow-2xl">
@@ -2646,7 +2647,7 @@ function ChallengeStartModal({ onClose, onStart }: { onClose: () => void; onStar
         <div className="mb-3 flex items-start justify-between">
           <div>
             <h3 className="font-display text-lg text-purple-100">🧠 Challenge students</h3>
-            <p className="mt-1 text-xs text-ink-400">Board freezes. Students play on their own boards. Reveal at end.</p>
+            <p className="mt-1 text-xs text-ink-400">Board freezes. Students play on their own boards. You are told as each one answers; the answers stay hidden until you open them.</p>
           </div>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg bg-ink-800 text-ink-300 hover:bg-ink-700">✕</button>
         </div>
@@ -2679,19 +2680,13 @@ function ChallengeStartModal({ onClose, onStart }: { onClose: () => void; onStar
 }
 
 function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnType<typeof useClassChallenge>> }) {
-  // Open once when the challenge first ends (auto-reveal). After that
-  // the coach can close + reopen freely via the chip without the modal
-  // popping unbidden every time the challenge state re-publishes (which
-  // happens when they mark answers, when the mark-toast state changes,
-  // etc.). Keyed on challenge.startedAt so a NEW challenge does auto-open.
-  const [open, setOpen] = useState(true);
-  const seenStartedAt = useRef<number | null>(null);
-  useEffect(() => {
-    if (seenStartedAt.current !== challenge.startedAt) {
-      seenStartedAt.current = challenge.startedAt;
-      setOpen(true);   // fresh challenge — auto-reveal
-    }
-  }, [challenge.startedAt]);
+  // Never opens on its own (owner 2026-09-08: the coach's screen is shared
+  // with the class, so an auto-revealed answer list gave the solution away).
+  // The coach gets a notice when the challenge ends and opens this when the
+  // screen is safe. Inside, the moves are hidden behind "Reveal" as well.
+  const [open, setOpen] = useState(false);
+  const [revealed, setRevealed] = useState(false);
+  useEffect(() => { setRevealed(false); setOpen(false); }, [challenge.startedAt]);
   // Local copy so ✓/✗ clicks apply optimistically without waiting for the
   // server. Kept in sync with the incoming challenge.answers on remount.
   const [rows, setRows] = useState<ChallengeAnswerRow[]>(challenge.answers ?? []);
@@ -2719,6 +2714,8 @@ function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnTyp
     <>
       <button
         onClick={() => setOpen(true)}
+        data-testid="answers-chip"
+        title="Who answered — the moves stay hidden until you press Reveal inside"
         className="rounded-full border border-purple-400/50 bg-purple-500/20 px-3 py-1.5 text-sm font-semibold text-purple-100 hover:bg-purple-500/30"
       >
         📋 Answers ({rows.length})
@@ -2748,6 +2745,18 @@ function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnTyp
             </div>
             {/* Sticky count strip — always visible even after scrolling the table. */}
             <div className="border-b border-ink-800 bg-ink-900/60 px-4 py-2 text-xs">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2" data-testid="reveal-bar">
+                <span className="text-amber-100">
+                  {revealed ? "Moves are showing — anyone who can see your screen sees them." : "Moves are hidden. Names show who answered; press Reveal only when students can't see your screen."}
+                </span>
+                <button
+                  onClick={() => setRevealed((r) => !r)}
+                  data-testid="reveal-toggle"
+                  className={`shrink-0 rounded-lg px-3 py-1 text-xs font-semibold ${revealed ? "border border-ink-600 bg-ink-800 text-ink-200 hover:bg-ink-700" : "bg-amber-500 text-ink-950 hover:bg-amber-400"}`}
+                >
+                  {revealed ? "🙈 Hide moves" : "👁 Reveal moves"}
+                </button>
+              </div>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full bg-purple-500/25 px-2.5 py-0.5 font-semibold text-purple-100">
                   {rows.length} {rows.length === 1 ? "student" : "students"} answered
@@ -2792,10 +2801,12 @@ function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnTyp
                       return (
                         <tr key={a.userId} className={`border-t border-ink-800 align-top ${rowRing}`}>
                           <td className="py-2 pr-3 text-white">{a.displayName || a.userId}</td>
-                          <td className="py-2 pr-3 font-mono text-brand-200 whitespace-pre-wrap break-words">{
-                            (a.tree && a.tree.length > 0)
-                              ? challengeTreeToPgn(a.tree, challenge.positionFen)
-                              : (a.movesSan.join(" ") || <span className="text-ink-500">—</span>)
+                          <td className="py-2 pr-3 font-mono text-brand-200 whitespace-pre-wrap break-words" data-testid="answer-moves">{
+                            !revealed
+                              ? <span className="select-none tracking-widest text-ink-500" aria-label="hidden">✓ answered · ••••••</span>
+                              : (a.tree && a.tree.length > 0)
+                                ? challengeTreeToPgn(a.tree, challenge.positionFen)
+                                : (a.movesSan.join(" ") || <span className="text-ink-500">—</span>)
                           }</td>
                           <td className="py-2 pr-3 text-[11px] tabular-nums text-ink-400 whitespace-nowrap">
                             {a.firstMoveAt && a.lastMoveAt ? `${Math.round((a.lastMoveAt - a.firstMoveAt)/1000)}s` : "—"}
@@ -2804,12 +2815,14 @@ function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnTyp
                             <div className="flex items-center gap-1">
                               <button
                                 onClick={() => mark(a.userId, a.correct === true ? null : true)}
-                                title={a.correct === true ? "Unmark" : "Mark correct"}
+                                disabled={!revealed}
+                                title={!revealed ? "Reveal the moves first" : a.correct === true ? "Unmark" : "Mark correct"}
                                 className={`grid h-7 w-7 place-items-center rounded-lg text-xs font-bold transition ${a.correct === true ? "bg-emerald-500/70 text-white ring-2 ring-emerald-300" : "bg-ink-800 text-ink-400 hover:bg-emerald-500/20 hover:text-emerald-200"}`}
                               >✓</button>
                               <button
                                 onClick={() => mark(a.userId, a.correct === false ? null : false)}
-                                title={a.correct === false ? "Unmark" : "Mark wrong"}
+                                disabled={!revealed}
+                                title={!revealed ? "Reveal the moves first" : a.correct === false ? "Unmark" : "Mark wrong"}
                                 className={`grid h-7 w-7 place-items-center rounded-lg text-xs font-bold transition ${a.correct === false ? "bg-rose-500/70 text-white ring-2 ring-rose-300" : "bg-ink-800 text-ink-400 hover:bg-rose-500/20 hover:text-rose-200"}`}
                               >✗</button>
                             </div>
@@ -2825,6 +2838,31 @@ function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnTyp
         </div>
       )}
     </>
+  );
+}
+
+// Coach-side notices: "X answered", "challenge over". Bottom-left so they
+// never sit on the board or the footer controls; auto-dismiss after 5 s.
+function CoachNoticeHost() {
+  const notices = useCoachNotices();
+  useEffect(() => {
+    if (!notices.length) return;
+    const oldest = notices[0]!;
+    const t = setTimeout(() => dismissCoachNotice(oldest.id), Math.max(0, 5000 - (Date.now() - oldest.at)));
+    return () => clearTimeout(t);
+  }, [notices]);
+  if (!notices.length) return null;
+  return (
+    <div className="pointer-events-none fixed bottom-24 left-3 z-[60] flex w-[min(92vw,22rem)] flex-col gap-2" data-testid="coach-notices">
+      {notices.map((n) => (
+        <div key={n.id} className={`pointer-events-auto rounded-xl border px-3 py-2 text-sm shadow-2xl backdrop-blur ${n.tone === "success" ? "border-emerald-400/50 bg-emerald-500/20 text-emerald-100" : "border-purple-400/50 bg-purple-500/20 text-purple-100"}`}>
+          <div className="flex items-start justify-between gap-2">
+            <span>{n.text}</span>
+            <button onClick={() => dismissCoachNotice(n.id)} className="text-xs text-ink-300 hover:text-white">✕</button>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

@@ -104,6 +104,7 @@ type ServerFrame =
   // ── Challenge mode broadcast frames.
   | { type: "challenge_start"; positionFen: string; startFen: string; prompt: string; durationSec: number; endsAt: number; startedAt: number }
   | { type: "challenge_progress"; answered: number; total: number; remainingSec: number }   // coach-only detail; students see just remaining
+  | { type: "challenge_answered"; userId: string; displayName: string; answered: number; total: number } // coach-only: WHO answered, never what
   | { type: "challenge_end"; positionFen: string; startedAt?: number; answers?: (ChallengeAnswer & { correct?: boolean | null })[] };            // answers only sent to coach
 
 interface ChallengeTreeNode {
@@ -550,6 +551,16 @@ function studentCount(room: Room): number {
   let n = 0;
   for (const c of room.clients) if (socketRole.get(c) === "student") n++;
   return n;
+}
+
+/** Tell the coach a student has (first) answered — name only. The coach's
+ *  screen is often shared with the class, so the moves themselves must never
+ *  appear unbidden (owner 2026-09-08); they wait behind "Reveal" in the panel. */
+function notifyCoachAnswered(room: Room, who: { userId: string | null; name: string }): void {
+  if (!room.challenge || !room.coach || room.coach.readyState !== WebSocket.OPEN) return;
+  try {
+    room.coach.send(JSON.stringify({ type: "challenge_answered", userId: who.userId, displayName: who.name, answered: room.challenge.answers.size, total: studentCount(room) }));
+  } catch { /* */ }
 }
 
 /** End the active challenge (auto-fired by timer OR by coach). Broadcasts
@@ -1185,6 +1196,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       if (!ans) {
         ans = { userId: who.userId, displayName: who.name, movesSan: [], firstMoveAt: now };
         room.challenge.answers.set(who.userId, ans);
+        notifyCoachAnswered(room, who);
       }
       ans.lastMoveAt = now;
       if (typeof frame.nextFen === "string") ans.finalFen = frame.nextFen;
@@ -1218,6 +1230,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       if (!ans) {
         ans = { userId: who.userId, displayName: who.name, movesSan: cleaned, tree, firstMoveAt: now };
         room.challenge.answers.set(who.userId, ans);
+        notifyCoachAnswered(room, who);
       } else {
         ans.movesSan = cleaned;
         if (tree !== undefined) ans.tree = tree;
