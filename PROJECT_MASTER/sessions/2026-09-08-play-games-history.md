@@ -89,3 +89,11 @@ challenge ended handed the solution to everyone still thinking.
 - Verified live with a coach + a student in a throwaway room: student dragged e2–e4 → coach notice
   and "1/1 answered" chip, no moves anywhere on the coach's screen; end → "Challenge over" notice,
   no dialog opened; open panel → hidden cell + disabled marks; Reveal → "1.e4" + marks enabled.
+
+**Student side checked (owner: "in student screen also hide other students answers").** Already
+the case — no change needed. Proof with a coach + two throwaway students in one challenge (stu1
+played e4, stu2 played d4 e5): during and after the challenge neither student's page contained
+the other's name or moves; `challenge_end` to students carries no answers; `GET /api/me/challenges`
+returned only `myMovesSan` + `totalAnswers` (keys: classId, positionFen, startFen, prompt,
+startedAt, endedAt, myMovesSan, myFinalFen, myTimeMs, correct, totalAnswers) with no other
+student's name or moves anywhere in the JSON. Throwaway users and room data removed.
