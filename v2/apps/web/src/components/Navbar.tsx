@@ -404,10 +404,7 @@ export default function Navbar({ rating, ratingProvisional, username, admin, onL
           {username ? (
             <div className="hidden items-center gap-2 sm:flex">
               <MessagesBadge />
-              <NavLink to="/settings/password" title="Change password" data-testid="account-link" className="group flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-white hover:bg-ink-800">
-                <span>{username}</span>
-                <span className="text-xs text-ink-400 group-hover:text-brand-300">🔑</span>
-              </NavLink>
+              <span className="text-sm font-medium text-white">{username}</span>
               <button onClick={onLogout} className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white">Sign out</button>
             </div>
           ) : (
