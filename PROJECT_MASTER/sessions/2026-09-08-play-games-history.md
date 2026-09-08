@@ -97,3 +97,29 @@ the other's name or moves; `challenge_end` to students carries no answers; `GET 
 returned only `myMovesSan` + `totalAnswers` (keys: classId, positionFen, startFen, prompt,
 startedAt, endedAt, myMovesSan, myFinalFen, myTimeMs, correct, totalAnswers) with no other
 student's name or moves anywhere in the JSON. Throwaway users and room data removed.
+
+## Master Games section served 600-rated puzzles to 2000+ players (owner: "for some high rated player above 2000, puzzles 1300, 1100 suggested?"; akshay complained too)
+
+**Finding.** Not the normal trainer — since the 24 Aug floor fix it never serves below
+`rating − 250` and returns 404 when a theme has nothing at that level (probe as mageswaran
+3013 / smotheredMate: 404). The leak was the **Master Games section** (`section=masters`):
+mageswaran's 555 smothered-mate requests in the log were all `section=masters`, and the
+picker's masters branch, once a theme's difficulty band was empty, fell back to *any* puzzle
+with no rating constraint. Its premise ("every puzzle's rating = the loser's Elo, uniformly
+hard") only holds for our own broadcast GM blunders — of which there are **0** in the DB. The
+section is really the 830k Lichess `themes:"master"` puzzles, which carry ordinary ratings (a
+one-move smothered mate from a GM game is rated 650). Live probe before the fix: 644, 666, 1346
+for a 3013 player. Since 24 Aug: 949 solves by players ≥1800 were ≥250 below their rating, 14
+users, mageswaran 609 of them, akshayprathab ~100 (attackingF2F7, skewer, smotheredMate,
+backRankMate, mateIn1 — his 51 masters requests). Blindfold's low numbers are its own separate
+rating and are fine.
+
+**Fix** (`puzzles.service.ts`, API restarted 08:5x IST): the masters branch now serves the
+Lichess master-game set in the same window as normal play (`target ± flex`, then ±400, then
+replays), every step wrapped in `withFloor`, a themed request uses `themes: {$all: ["master",
+theme]}` (the theme key used to overwrite the "master" constraint), and an exhausted theme
+returns "no puzzle" instead of anything below the floor. The broadcast (`source`, unindexed)
+queries only run when a specific player is requested — scanning for them was the 5–6 s latency.
+Probes after: akshay 2122 → 1946/2075 mix, 2145 attackingF2F7, 1880 smotheredMate; mageswaran
+3013 → 3109 mix, 404 smotheredMate; kashika → 1607; deepakcharanv hardest → 2554; all master
+puzzles, 36–153 ms.

@@ -99,36 +99,11 @@ export class PuzzlesService {
     const { exclude: played, attempted } = userId ? await this.playedIds(userId) : { exclude: [] as string[], attempted: new Set<string>() };
     const playedSet = new Set(played);
 
-    // ── MASTER GAMES section: GM/super-GM blunder puzzles (source:"broadcast").
-    // Every puzzle's glicko.r = the loser's Elo, so they are uniformly hard; difficulty
-    // just picks a sub-band of that Elo range (not tied to the child's low rating).
-    if (section === "masters") {
-      const BANDS: Record<string, [number, number]> = {
-        easiest: [2200, 2450], easier: [2350, 2550], normal: [2400, 2650], harder: [2550, 2750], hardest: [2650, 3200],
-      };
-      const [lo, hi] = BANDS[difficulty] ?? [2200, 3200];
-      const themeM = theme && theme !== "mix" ? { themes: theme } : {};
-      const dedupM = played.length ? { _id: { $nin: played } } : {};
-      // A specific big-player pick -> only their NAMED broadcast puzzles (so winner shows).
-      // Otherwise blend our own broadcast GM puzzles with Lichess master-game tactics so the
-      // section is full immediately (broadcast ones additionally carry player names + winner).
-      const base: any = player
-        ? { source: "broadcast", winnerName: player }
-        : { $or: [{ source: "broadcast" }, { themes: "master" }] };
-      const pick = async (m: any) => {
-        const d = await this.col().aggregate([{ $match: m }, { $sample: { size: 1 } }]).toArray();
-        return d.length ? applyLastMove(fmtPuzzle(d[0])) : null;
-      };
-      return (await pick({ ...base, "glicko.r": { $gte: lo, $lte: hi }, ...themeM, ...dedupM }))
-          ?? (await pick({ ...base, ...themeM, ...dedupM }))
-          ?? (await pick({ ...base, ...themeM }));
-    }
-
     // ── FAST PATH: precomputed pools (`paths`) — sample an id, fetch by indexed _id. ──
     // paths: { _id:"theme|tier|RRRR", min, max, ids:[puzzleId] }; exactly one band path per rating.
     // Avoids the $sample-over-5.9M-docs scan (4–6s). pieceCount-filtered requests fall through.
     const flex = Math.round(100 + Math.abs(1500 - target) / 4);
-    if (!maxPc || maxPc >= 32) {
+    if (section !== "masters" && (!maxPc || maxPc >= 32)) {
       const key4 = (n: number) => String(clamp(Math.round(n), 0, 9999)).padStart(4, "0");
       // Widen to the same flex window the fallback uses, but never below the
       // easy-floor, so an exhausted band borrows from its neighbours instead of
@@ -211,6 +186,47 @@ export class PuzzlesService {
       }
       return null;
     };
+    // ── MASTER GAMES section ─────────────────────────────────────────────
+    // Lichess puzzles taken from master games (themes:"master", 830k of them)
+    // plus, if any ever exist, our own broadcast GM blunders (source:"broadcast",
+    // glicko.r = the loser's Elo). The master-game puzzles carry ORDINARY
+    // ratings — a one-move smothered mate from a GM game is still rated 650 —
+    // so they are served in the same window as normal play, every step keeps
+    // the easy-floor, and an exhausted theme returns "no puzzle" like the
+    // normal trainer. Until 2026-09-08 the fallback dropped the rating band
+    // altogether once a theme's band was empty and a 3013-rated student got
+    // 644- and 666-rated mates-in-one (owner report; akshayprathab the same).
+    // The broadcast set is queried only when a specific player is asked for:
+    // `source` has no index, and there were 0 broadcast puzzles at the time.
+    if (section === "masters") {
+      const themeAll = theme && theme !== "mix" ? { themes: { $all: ["master", theme] } } : { themes: "master" };
+      const dedupM = played.length ? { _id: { $nin: played } } : {};
+      const band = (lo: number, hi: number) => withFloor({ $gte: lo, $lte: hi });
+      const tries: any[] = [];
+      if (player) {
+        const BANDS: Record<string, [number, number]> = {
+          easiest: [2200, 2450], easier: [2350, 2550], normal: [2400, 2650], harder: [2550, 2750], hardest: [2650, 3200],
+        };
+        const [blo, bhi] = BANDS[difficulty] ?? [2200, 3200];
+        const themeM = theme && theme !== "mix" ? { themes: theme } : {};
+        tries.push({ source: "broadcast", winnerName: player, "glicko.r": band(blo, bhi), ...themeM, ...dedupM });
+        tries.push({ source: "broadcast", winnerName: player, "glicko.r": band(blo - 200, bhi + 200), ...themeM });
+      } else {
+        tries.push(
+          { ...themeAll, "glicko.r": band(target - flex, target + flex), ...dedupM },   // the player's own window
+          { ...themeAll, "glicko.r": band(target - 400, target + 400), ...dedupM },     // wider, floor kept
+          { ...themeAll, "glicko.r": band(target - 400, target + 400) },                // replays allowed, floor kept
+        );
+      }
+      for (const q of tries) {
+        const lo = q["glicko.r"].$gte, hi = q["glicko.r"].$lte;
+        if (lo > hi) continue; // floor above the band: nothing honest to serve from it
+        const pz = await sample(q);
+        if (pz) return pz;
+      }
+      return null;
+    }
+
     const tiers: any[] = [
       { vote: { $gte: 0.75 }, plays: { $gte: 100 } },
       { vote: { $gte: 0.5 }, plays: { $gte: 20 } },
