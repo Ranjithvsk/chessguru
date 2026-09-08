@@ -69,8 +69,8 @@ export class ExamsController {
   }
 
   @Post(":id/attempts/:aid/finish")
-  finish(@Param("id") id: string, @Param("aid") aid: string, @Req() req: any) {
-    return this.svc.finishAttempt(req?.session, id, aid);
+  finish(@Param("id") id: string, @Param("aid") aid: string, @Body() body: any, @Req() req: any) {
+    return this.svc.finishAttempt(req?.session, id, aid, body);
   }
 
   @Get(":id/results")

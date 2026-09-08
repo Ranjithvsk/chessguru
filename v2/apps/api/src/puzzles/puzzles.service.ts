@@ -783,9 +783,10 @@ export class PuzzlesService {
    *  Clamped at target; only bumps if current < target so we never overshoot.
    *  Silent on any error — homework credit is a nice-to-have; a Mongo hiccup
    *  must never break the puzzle-complete flow. Owner ask 2026-08-25. */
-  private async autoCreditHomework(userId: string, puzzleThemes: string[]): Promise<void> {
+  private async autoCreditHomework(userId: string, puzzleThemes: string[]): Promise<string[]> {
+    const credited: string[] = [];
     const themeSet = new Set(puzzleThemes.filter((t) => typeof t === "string"));
-    if (themeSet.size === 0) return;
+    if (themeSet.size === 0) return credited;
     const hwCol = this.conn.db!.collection("homework");
     // Only pending ("assigned" or "in_progress") — completed homework is not
     // touched. Sorted by assignedAt so the oldest coach's assignment gets
@@ -795,7 +796,7 @@ export class PuzzlesService {
       { studentId: userId, status: { $in: ["assigned", "in_progress"] } },
       { projection: { tasks: 1, progress: 1, status: 1 } },
     ).sort({ assignedAt: 1 }).limit(20).toArray();
-    if (!active.length) return;
+    if (!active.length) return credited;
     for (const hw of active) {
       const tasks = Array.isArray(hw.tasks) ? hw.tasks : [];
       const oldProgress: Record<string, number> = { ...(hw.progress || {}) };
@@ -820,7 +821,9 @@ export class PuzzlesService {
       if (allDone) { set.status = "completed"; set.completedAt = new Date(); }
       else if (hw.status === "assigned") set.status = "in_progress";
       await hwCol.updateOne({ _id: hw._id }, { $set: set });
+      credited.push(String(hw._id));
     }
+    return credited;
   }
 
   async complete(id: string, body: { win: boolean; userId?: string | null; hint?: boolean; mode?: string; rating?: number; deviation?: number; theme?: string; difficulty?: string; ms?: number; moves_ms?: number[]; wrong?: string; daily?: boolean }) {
@@ -1117,7 +1120,11 @@ export class PuzzlesService {
       // or completed. Losses do NOT count — same anti-farming rule as the
       // rating fatigue system.
       if (win && key === "puzzle" && Array.isArray(pz.themes) && pz.themes.length > 0) {
-        void this.autoCreditHomework(userId, pz.themes as string[]).catch(() => { /* silent */ });
+        void this.autoCreditHomework(userId, pz.themes as string[]).then((creditedHw) => {
+          // Homework proctoring (Fair Play Phase 2): remember which homework this
+          // solve credited so the coach can see focus losses per homework.
+          if (creditedHw.length) return this.conn.db!.collection("rounds").updateOne({ _id: `${userId}:${id}` as any }, { $set: { hw: creditedHw } }).then(() => undefined);
+        }).catch(() => { /* silent */ });
       }
       // Phase 7n + 7o: milestone crossings on both rating AND solve-count.
       // Only for regular puzzle mode — blindfold's rating distribution is

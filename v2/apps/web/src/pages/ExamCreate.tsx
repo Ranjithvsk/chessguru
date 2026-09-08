@@ -24,6 +24,7 @@ export default function ExamCreatePage() {
   const [timePerPosSec, setTime] = useState<number | null>(60);
   const [passMarkPct, setPass] = useState(60);
   const [retryable, setRetry] = useState(true);
+  const [proctored, setProctored] = useState(true);
   const [err, setErr] = useState("");
 
   const mut = useMutation({
@@ -37,7 +38,7 @@ export default function ExamCreatePage() {
   const submit = () => {
     setErr("");
     if (!title.trim()) { setErr("Title required"); return; }
-    mut.mutate({ title: title.trim(), description: description.trim() || undefined, timePerPosSec, passMarkPct, retryable });
+    mut.mutate({ title: title.trim(), description: description.trim() || undefined, timePerPosSec, passMarkPct, retryable, proctored });
   };
 
   return (
@@ -84,6 +85,12 @@ export default function ExamCreatePage() {
           <input type="checkbox" checked={retryable} onChange={(e) => setRetry(e.target.checked)}
             className="accent-brand-500" />
           <span>Students can retake if they fail</span>
+        </label>
+
+        <label className="flex items-start gap-2 text-sm text-white">
+          <input type="checkbox" checked={proctored} onChange={(e) => setProctored(e.target.checked)}
+            className="mt-0.5 accent-brand-500" />
+          <span>🛡 Proctored <span className="block text-xs font-normal text-ink-400">Opens in full screen. Leaving the tab, switching windows or leaving full screen is recorded and shown on the results page. Students see the rule before they start.</span></span>
         </label>
 
         {err && <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200">{err}</div>}

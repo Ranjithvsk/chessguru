@@ -84,6 +84,7 @@ export default function ExamResultsPage() {
                       <th className="px-3 py-2 text-left">Attempt</th>
                       <th className="px-3 py-2 text-left">Score</th>
                       <th className="px-3 py-2 text-left">Passed</th>
+                      <th className="px-3 py-2 text-left" title="Proctored exams record tab, window and full-screen changes">Proctor</th>
                       <th className="px-3 py-2 text-left">Submitted</th>
                     </tr>
                   </thead>
@@ -98,6 +99,7 @@ export default function ExamResultsPage() {
                           </span>
                         </td>
                         <td className="px-3 py-2">{a.passed ? "✓" : "✗"}</td>
+                        <td className="px-3 py-2 text-xs"><ProctorCell exam={exam} a={a} /></td>
                         <td className="px-3 py-2 text-xs text-ink-400">{fmt(a.submittedAt)}</td>
                       </tr>
                     ))}
@@ -152,6 +154,18 @@ function StatBox({ label, value }: { label: string; value: string | number }) {
       <div className="mt-1 text-xs text-ink-400">{label}</div>
     </div>
   );
+}
+
+/** Coach column: what the proctor saw during this attempt. */
+function ProctorCell({ exam, a }: { exam: any; a: any }) {
+  if (exam.proctored === false) return <span className="text-ink-600">not proctored</span>;
+  const p = a.proctor;
+  if (!p) return <span className="text-ink-500" title="Taken before proctoring, or the page closed before finishing">no data</span>;
+  const clean = p.hiddenCount === 0 && p.fsExits === 0;
+  const perPos = (a.answers || []).filter((x: any) => x.focus && (x.focus.hiddenCount > 0 || x.focus.fsExits > 0)).length;
+  const detail = `${p.hiddenCount} time(s) away for ${Math.round(p.hiddenMs / 1000)} s · full screen exited ${p.fsExits}× · ${perPos} position(s) affected${p.fsSupported ? (p.fsUsed ? " · full screen used" : " · full screen refused") : " · full screen unavailable on this device"}`;
+  if (clean) return <span className="text-emerald-300" title={detail}>🛡 clean{!p.fsUsed ? <span className="text-ink-500"> · no full screen</span> : null}</span>;
+  return <span className={p.hiddenCount >= 3 || p.hiddenMs >= 30_000 ? "text-rose-300" : "text-amber-200"} title={detail}>left {p.hiddenCount}× · {Math.round(p.hiddenMs / 1000)} s{p.fsExits ? ` · fs exit ${p.fsExits}×` : ""}</span>;
 }
 
 function StudentResults({ exam, attempts, inProg, onRetake, retaking }: {

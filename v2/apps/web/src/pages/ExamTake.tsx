@@ -46,6 +46,14 @@ export default function ExamTakePage() {
   const startedAtRef = useRef<number>(Date.now());
   const [remaining, setRemaining] = useState<number | null>(null);
   const [correctCount, setCorrectCount] = useState(0);
+  // Proctoring (Fair Play Phase 2): a proctored exam starts from a gate the
+  // student clicks (that click is the user gesture full screen needs), and
+  // while it runs every tab/window/full-screen change is recorded — per
+  // position (sent with the answer) and for the attempt (sent with finish).
+  const [gateOpen, setGateOpen] = useState(false);
+  const [fsLost, setFsLost] = useState(false);
+  const proctorRef = useRef({ startedAt: Date.now(), hiddenSince: null as number | null, hiddenMs: 0, hiddenCount: 0, fsExits: 0, fsSupported: false, fsUsed: false, events: [] as { t: number; k: string }[] });
+  const posFocusRef = useRef({ hiddenMs: 0, hiddenCount: 0, fsExits: 0 });
 
   const start = useMutation({
     mutationFn: () => examsApi.startAttempt(id),
@@ -55,20 +63,78 @@ export default function ExamTakePage() {
     mutationFn: (body: any) => examsApi.answer(id, attemptId!, body),
   });
   const finish = useMutation({
-    mutationFn: () => examsApi.finish(id, attemptId!),
-    onSuccess: () => nav(`/exams/${encodeURIComponent(id)}/results`),
+    mutationFn: () => {
+      const pr = proctorRef.current;
+      if (pr.hiddenSince != null) { pr.hiddenMs += Date.now() - pr.hiddenSince; pr.hiddenSince = null; }
+      const proctored = examQ.data?.exam?.proctored !== false;
+      return examsApi.finish(id, attemptId!, proctored ? { proctor: { hiddenMs: pr.hiddenMs, hiddenCount: pr.hiddenCount, fsExits: pr.fsExits, fsSupported: pr.fsSupported, fsUsed: pr.fsUsed, events: pr.events.slice(0, 200) } } : undefined);
+    },
+    onSuccess: () => { try { if (document.fullscreenElement) void document.exitFullscreen(); } catch { /* */ } nav(`/exams/${encodeURIComponent(id)}/results`); },
   });
 
-  // Auto-start attempt on page load (only once).
+  const exam = examQ.data?.exam;
+  const proctored = !!exam && exam.proctored !== false;
+
+  // Auto-start attempt on page load (only once) — a proctored exam waits for
+  // the gate click instead.
   const startedOnce = useRef(false);
   useEffect(() => {
-    if (examQ.data && !attemptId && !startedOnce.current) {
+    if (examQ.data && !attemptId && !startedOnce.current && !proctored) {
       startedOnce.current = true;
       start.mutate();
     }
-  }, [examQ.data]);
+  }, [examQ.data, proctored]);
 
-  const exam = examQ.data?.exam;
+  const beginProctored = () => {
+    if (startedOnce.current) return;
+    startedOnce.current = true;
+    setGateOpen(true);
+    const pr = proctorRef.current;
+    pr.startedAt = Date.now();
+    const el: any = document.documentElement;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    pr.fsSupported = typeof req === "function";
+    if (pr.fsSupported) {
+      try { Promise.resolve(req.call(el)).then(() => { pr.fsUsed = true; }).catch(() => { /* denied: still recorded as not used */ }); } catch { /* */ }
+    }
+    start.mutate();
+  };
+
+  // Record focus and full-screen changes while a proctored attempt is open.
+  useEffect(() => {
+    if (!proctored || !attemptId) return;
+    const pr = proctorRef.current;
+    const ev = (k: string) => { if (pr.events.length < 200) pr.events.push({ t: Date.now() - pr.startedAt, k }); };
+    const away = (k: string) => { if (pr.hiddenSince != null) return; pr.hiddenSince = Date.now(); pr.hiddenCount++; posFocusRef.current.hiddenCount++; ev(k); };
+    const back = (k: string) => { if (pr.hiddenSince == null) return; const d = Date.now() - pr.hiddenSince; pr.hiddenMs += d; posFocusRef.current.hiddenMs += d; pr.hiddenSince = null; ev(k); };
+    const onVis = () => { if (document.visibilityState === "hidden") away("hidden"); else back("visible"); };
+    const onBlur = () => away("blur");
+    const onFocus = () => back("focus");
+    const onFs = () => {
+      const inFs = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
+      if (inFs) { pr.fsUsed = true; setFsLost(false); ev("fs_enter"); }
+      else { pr.fsExits++; posFocusRef.current.fsExits++; setFsLost(true); ev("fs_exit"); }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("fullscreenchange", onFs);
+    document.addEventListener("webkitfullscreenchange", onFs as any);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("fullscreenchange", onFs);
+      document.removeEventListener("webkitfullscreenchange", onFs as any);
+    };
+  }, [proctored, attemptId]);
+
+  const returnToFullscreen = () => {
+    const el: any = document.documentElement;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (typeof req === "function") { try { Promise.resolve(req.call(el)).catch(() => { /* */ }); } catch { /* */ } }
+  };
+
   const positions = exam?.positions ?? [];
   const pos = positions[i];
 
@@ -100,6 +166,7 @@ export default function ExamTakePage() {
       setFeedback(null);
       setSanInput("");
       setSanError("");
+      posFocusRef.current = { hiddenMs: 0, hiddenCount: 0, fsExits: 0 };
     }
   }, [pos?.id]);
 
@@ -109,8 +176,10 @@ export default function ExamTakePage() {
   const submitAttempt = (uci: string | null, san: string | null) => {
     if (!attemptId || !pos) return;
     const timeSpentMs = Date.now() - startedAtRef.current;
+    const pr = proctorRef.current;
+    if (proctored && pr.hiddenSince != null) { const d = Date.now() - pr.hiddenSince; pr.hiddenMs += d; posFocusRef.current.hiddenMs += d; pr.hiddenSince = Date.now(); }
     answer.mutate(
-      { positionId: pos.id, playedUci: uci, playedSan: san, timeSpentMs },
+      { positionId: pos.id, playedUci: uci, playedSan: san, timeSpentMs, ...(proctored ? { focus: { ...posFocusRef.current } } : {}) },
       {
         onSuccess: (r) => {
           setPhase("revealed");
@@ -156,6 +225,23 @@ export default function ExamTakePage() {
     <div className="rounded border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200">{String((examQ.error as any)?.message || (start.error as any)?.message)}</div>
     <Link to="/exams" className="mt-3 inline-block text-sm text-brand-300 hover:underline">← Exams</Link>
   </div>;
+  if (exam && proctored && !attemptId && !gateOpen) {
+    return (
+      <div className="mx-auto max-w-lg px-3 py-10" data-testid="proctor-gate">
+        <div className="rounded-2xl border border-ink-700 bg-ink-900 p-6">
+          <div className="text-xs font-semibold uppercase tracking-wide text-ink-400">{exam.title}</div>
+          <h1 className="mt-1 font-display text-2xl text-white">🛡 This exam is proctored</h1>
+          <ul className="mt-3 space-y-1.5 text-sm text-ink-300">
+            <li>It opens in full screen and stays there until you finish.</li>
+            <li>Leaving the tab, switching windows or leaving full screen is recorded and shown to your coach.</li>
+            <li>{exam.timePerPosSec ? `You have ${exam.timePerPosSec} seconds per position.` : "There is no time limit per position."} {exam.positions.length} positions.</li>
+          </ul>
+          <button type="button" onClick={beginProctored} className="mt-5 w-full rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-500" data-testid="proctor-start">Start exam</button>
+          <Link to="/exams" className="mt-3 block text-center text-xs text-ink-400 hover:text-white">Not now</Link>
+        </div>
+      </div>
+    );
+  }
   if (!exam || !pos) return null;
 
   const turnColor = pos.turnColor;
@@ -165,8 +251,14 @@ export default function ExamTakePage() {
     <div className="mx-auto max-w-5xl px-3 py-6">
       <div className="mb-3 flex items-center justify-between text-xs text-ink-400">
         <div>Position {i + 1} of {positions.length} · {correctCount} correct so far</div>
-        <div>{exam.title}</div>
+        <div>{proctored && <span className="mr-2 rounded bg-ink-800 px-1.5 py-0.5 text-[10px] font-semibold text-ink-200" title="Tab, window and full-screen changes are recorded">🛡 Proctored</span>}{exam.title}</div>
       </div>
+      {proctored && fsLost && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100" data-testid="fs-lost">
+          <span>You left full screen — this has been recorded.</span>
+          <button type="button" onClick={returnToFullscreen} className="rounded bg-amber-500/20 px-2 py-1 font-semibold hover:bg-amber-500/30">Return to full screen</button>
+        </div>
+      )}
 
       {/* Timer bar */}
       {exam.timePerPosSec && (

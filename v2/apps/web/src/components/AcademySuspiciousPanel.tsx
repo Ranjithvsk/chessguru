@@ -10,19 +10,22 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, post } from "../lib/api";
 
 interface Fastest { puzzleId: string; pr: number; ms: number; mvMs: number[] | null; at: string }
-interface Components { flags: number; fastHard: number; accuracy: number; crowd: number; climb: number }
+interface Components { flags: number; fastHard: number; accuracy: number; crowd: number; climb: number; themeFlat: number; playGap: number }
+interface Decision { kind: "clear" | "hold" | "reset"; by: string; note: string; at: string }
+interface Recent { userId: string; name: string; kind: "clear" | "hold" | "reset" | "review"; by: string | null; byName: string | null; note: string; score: number | null; at: string }
 interface Row {
   userId: string; name: string; ratingNow: number | null; ratingStart: number | null; ratingEnd: number | null; climb: number;
   solves: number; dubious: number; reasons: Record<string, number>;
   hard: { n: number; wins: number; winPct: number | null; medianMs: number | null; fast: number };
   fastest: Fastest[]; score: number; band: "clear" | "watch" | "review"; hold: boolean; components: Components; crowdRatio: number | null;
   reviewSince: string | null; windowStart: string; lastReset: { at: string } | null;
+  decision: Decision | null;
 }
 interface Solve { pid: string; at: string; pr: number; r: number; w: boolean; ms: number | null; mvMs: number[] | null; dub: boolean; dubr: string[] | null; held: boolean; crowdMedMs: number | null }
 interface Detail {
   ok: boolean; error?: string; userId: string; name: string; score: number; band: Row["band"]; hold: boolean; components: Components;
-  evidence: { solves: number; flagged: number; reasons: Record<string, number>; hard: Row["hard"]; atLevel: { n: number; winPct: number | null }; above: { n: number; winPct: number | null }; crowdRatio: number | null; ratingStart: number | null; ratingEnd: number | null; climb: number; fastest: { pid: string; pr: number; ms: number; mvMs: number[] | null; at: string }[]; sessions: { day: string; solves: number; wins: number }[]; peakHour: { hour: string; solves: number } | null };
-  windowStart: string; lastReset: string | null; solves: Solve[];
+  evidence: { solves: number; flagged: number; reasons: Record<string, number>; hard: Row["hard"]; atLevel: { n: number; winPct: number | null }; above: { n: number; winPct: number | null }; crowdRatio: number | null; ratingStart: number | null; ratingEnd: number | null; climb: number; fastest: { pid: string; pr: number; ms: number; mvMs: number[] | null; at: string }[]; sessions: { day: string; solves: number; wins: number }[]; peakHour: { hour: string; solves: number } | null; themes: { n: number; sd: number; min: number; max: number } | null; play: { speed: string; r: number; nb: number; gap: number } | null };
+  windowStart: string; lastReset: string | null; solves: Solve[]; decision: Decision | null;
 }
 const REASON_LABEL: Record<string, string> = {
   fast_hard: "2400+ puzzle under 4 s",
@@ -33,6 +36,25 @@ const REASON_LABEL: Record<string, string> = {
   focus_loss: "left the tab, moved on return",
 };
 const secs = (ms: number) => (ms / 1000).toFixed(1) + "s";
+const KIND_LABEL: Record<Recent["kind"], string> = { clear: "Cleared", hold: "Held", reset: "Reset", review: "Entered review" };
+type Actor = { userId: string; name: string; hold: boolean };
+
+function DecisionChip({ d }: { d: Decision | null }) {
+  if (!d) return null;
+  const label = d.kind === "clear" ? "cleared" : d.kind === "hold" ? "held" : "reset";
+  return <span className={`rounded-md px-1.5 py-0.5 text-xs ${d.kind === "hold" ? "bg-amber-500/15 text-amber-200" : "bg-ink-800 text-ink-300"}`} title={d.note || undefined}>{label} by {d.by} · {day(d.at)}{d.note ? ` · “${d.note.length > 60 ? d.note.slice(0, 60) + "…" : d.note}”` : ""}</span>;
+}
+
+/** Clear (with note) and Hold, for coach and owner. The server refuses a
+ *  coach's Clear on a held student — the owner lifts holds. */
+function DecisionButtons({ a, busy, onDecide }: { a: Actor; busy: string | null; onDecide: (a: Actor, kind: "clear" | "hold") => void }) {
+  return (
+    <>
+      <button onClick={() => onDecide(a, "clear")} disabled={busy === a.userId} className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/20 disabled:opacity-50" data-testid="decide-clear">Clear…</button>
+      {!a.hold && <button onClick={() => onDecide(a, "hold")} disabled={busy === a.userId} className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-100 hover:bg-amber-500/20 disabled:opacity-50" data-testid="decide-hold">Hold…</button>}
+    </>
+  );
+}
 const pctStr = (p: number | null) => (p === null ? "n/a" : `${p}%`);
 const day = (s: string) => new Date(s).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 
@@ -136,7 +158,7 @@ function Timeline({ sessions, peakHour }: { sessions: Detail["evidence"]["sessio
   );
 }
 
-function Drawer({ userId, isOwner, onClose, onReset }: { userId: string; isOwner: boolean; onClose: () => void; onReset: (r: { userId: string; name: string }) => void }) {
+function Drawer({ userId, isOwner, busy, onClose, onReset, onDecide }: { userId: string; isOwner: boolean; busy: string | null; onClose: () => void; onReset: (r: { userId: string; name: string }) => void; onDecide: (a: Actor, kind: "clear" | "hold") => void }) {
   const q = useQuery({ queryKey: ["academy-suspicious-detail", userId], queryFn: () => get<Detail>(`/api/academy/suspicious-solves/${encodeURIComponent(userId)}`), staleTime: 60_000 });
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
   const d = q.data;
@@ -148,6 +170,8 @@ function Drawer({ userId, isOwner, onClose, onReset }: { userId: string; isOwner
     { label: "Accuracy curve", pts: c.accuracy, note: `${pctStr(e.above.winPct)} on puzzles 200+ above (${e.above.n}) vs ${pctStr(e.atLevel.winPct)} at level (${e.atLevel.n})${e.hard.winPct !== null ? ` · ${e.hard.winPct}% on 2400+` : ""}` },
     { label: "Crowd baseline", pts: c.crowd, note: e.crowdRatio === null ? "not enough overlap with the crowd yet" : `typical win takes ${Math.round(e.crowdRatio * 100)}% of the crowd's time on the same puzzles` },
     { label: "Climb", pts: c.climb, note: e.ratingStart !== null ? `${e.ratingStart} → ${e.ratingEnd} (${e.climb > 0 ? "+" : ""}${e.climb})` : "—" },
+    { label: "Theme spread", pts: c.themeFlat ?? 0, note: e.themes ? `${e.themes.n} themes with 20+ solves, rated ${e.themes.min}–${e.themes.max} (spread ±${e.themes.sd})${e.themes.n < 8 ? " · needs 8 themes to count" : ""}` : "no theme with 20+ solves yet" },
+    { label: "Play cross-check", pts: c.playGap ?? 0, note: e.play ? `${e.play.speed} ${e.play.r} over ${e.play.nb} games · puzzle rating ${e.play.gap > 0 ? "+" : ""}${e.play.gap} against it` : "no rated live games yet" },
   ] : [];
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/60" onClick={onClose} data-testid="suspicious-detail">
@@ -161,9 +185,11 @@ function Drawer({ userId, isOwner, onClose, onReset }: { userId: string; isOwner
                   <BandPill band={d.band} hold={d.hold} />
                 </div>
                 <p className="mt-1 text-xs text-ink-400">Fair-play score <b className="text-white">{d.score}</b>/100 · window since {day(d.windowStart)}{d.lastReset ? ` (last reset ${day(d.lastReset)})` : ""} · {e!.solves} solves</p>
-                {d.hold && <p className="mt-1 text-xs text-amber-200">Rated gains are held until you reset this student's rating. The student has not been told.</p>}
+                {d.hold && <p className="mt-1 text-xs text-amber-200">Rated gains are held until {isOwner ? "you reset or clear" : "the owner resets or clears"} this student. The student has not been told.</p>}
+                {d.decision && <div className="mt-1.5"><DecisionChip d={d.decision} /></div>}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <DecisionButtons a={{ userId: d.userId, name: d.name, hold: d.hold }} busy={busy} onDecide={onDecide} />
                 {isOwner && <button onClick={() => onReset({ userId: d.userId, name: d.name })} className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-2.5 py-1 text-xs font-semibold text-rose-100 hover:bg-rose-500/20" data-testid="reset-rating">Reset rating…</button>}
                 <button onClick={onClose} className="rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-ink-300 hover:text-white" aria-label="Close">✕</button>
               </div>
@@ -207,13 +233,30 @@ export default function AcademySuspiciousPanel({ isOwner, compact = false }: { i
   const [toast, setToast] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const qc = useQueryClient();
+  const [showRecent, setShowRecent] = useState(false);
   const q = useQuery({
     queryKey: ["academy-suspicious"],
-    queryFn: () => get<{ days: number; students: Row[] }>(`/api/academy/suspicious-solves`),
+    queryFn: () => get<{ days: number; students: Row[]; recent: Recent[] }>(`/api/academy/suspicious-solves`),
     staleTime: 60_000,
   });
   const rows = q.data?.students ?? [];
+  const recent = q.data?.recent ?? [];
   if (compact && (!q.data || rows.length === 0)) return null;
+
+  const decide = async (a: Actor, kind: "clear" | "hold") => {
+    const note = window.prompt(kind === "clear"
+      ? `Clear ${a.name}? Add a note for the record (why you're satisfied this was honest). Their window restarts and they drop off the list.`
+      : `Hold ${a.name}'s rated gains? Add a note for the record. Gains stop until the owner resets or clears. The student is not told.`,
+      kind === "clear" ? "Watched them solve in class — genuine" : "Pattern matches assisted solving — see drawer");
+    if (note === null) return;
+    setBusy(a.userId);
+    try {
+      const res = await post<{ ok: boolean; error?: string }>(`/api/academy/suspicious-solves/${encodeURIComponent(a.userId)}/${kind}`, { note });
+      if (res.ok) { setToast(kind === "clear" ? `${a.name} cleared.` : `${a.name}: rated gains on hold.`); setOpen(null); void qc.invalidateQueries({ queryKey: ["academy-suspicious"] }); void qc.invalidateQueries({ queryKey: ["academy-suspicious-detail"] }); }
+      else setToast(res.error || "Could not save that.");
+    } catch (e: any) { setToast(e?.message || "Could not save that."); }
+    finally { setBusy(null); setTimeout(() => setToast(null), 5000); }
+  };
 
   const reset = async (r: { userId: string; name: string }) => {
     const ratingStr = window.prompt(`Reset ${r.name}'s puzzle rating to:`, "1700");
@@ -237,7 +280,7 @@ export default function AcademySuspiciousPanel({ isOwner, compact = false }: { i
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="font-display text-lg text-white">🚩 Suspicious solving</h2>
-          <p className="text-xs text-ink-400">Fair-play score over the last 30 days (or since a reset): flagged solves, wins on 2400+ puzzles under 5 s, an inverted accuracy curve, speed against the crowd, steep climbs. <b className="text-amber-200">Watch</b> from 25, <b className="text-rose-200">Review</b> from 60 — Review holds rated gains until {isOwner ? "you reset" : "the owner resets"}. Students are not told.</p>
+          <p className="text-xs text-ink-400">Fair-play score over the last 30 days (or since a reset): flagged solves, wins on 2400+ puzzles under 5 s, an inverted accuracy curve, speed against the crowd, steep climbs. <b className="text-amber-200">Watch</b> from 25, <b className="text-rose-200">Review</b> from 60 — Review holds rated gains until {isOwner ? "you reset or clear" : "the owner resets or clears"}. <b className="text-emerald-200">Clear</b> a student with a note when you're satisfied, or <b className="text-amber-200">Hold</b> their gains yourself. Students are not told.</p>
         </div>
         {rows.length > 0 && <span className="text-[11px] text-ink-400">{reviewN} in review · {rows.length - reviewN} on watch</span>}
       </div>
@@ -258,11 +301,13 @@ export default function AcademySuspiciousPanel({ isOwner, compact = false }: { i
                     <span className={`rounded-md px-1.5 py-0.5 text-xs ${r.climb >= 500 ? "bg-rose-500/20 text-rose-200" : "bg-ink-800 text-ink-300"}`}>{r.ratingStart} → {r.ratingEnd} ({r.climb > 0 ? "+" : ""}{r.climb})</span>
                   )}
                   {r.dubious > 0 && <span className="rounded-md bg-rose-500/25 px-1.5 py-0.5 text-xs font-semibold text-rose-100">{r.dubious} flagged</span>}
-                  {r.lastReset && <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-xs text-amber-200">reset {day(r.lastReset.at)}</span>}
+                  {r.lastReset && !r.decision && <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-xs text-amber-200">reset {day(r.lastReset.at)}</span>}
+                  <DecisionChip d={r.decision} />
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2">
                   <ScoreBar score={r.score} />
                   <button onClick={() => setOpen(r.userId)} className="rounded-lg border border-ink-700 bg-ink-800/60 px-2.5 py-1 text-xs font-semibold text-ink-100 hover:bg-ink-700" data-testid="open-detail">Details</button>
+                  <DecisionButtons a={{ userId: r.userId, name: r.name, hold: r.hold }} busy={busy} onDecide={decide} />
                   {isOwner && (
                     <button onClick={() => reset(r)} disabled={busy === r.userId} className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-2.5 py-1 text-xs font-semibold text-rose-100 hover:bg-rose-500/20 disabled:opacity-50" data-testid="reset-rating">
                       {busy === r.userId ? "…" : "Reset rating…"}
@@ -292,8 +337,27 @@ export default function AcademySuspiciousPanel({ isOwner, compact = false }: { i
           ))}
         </div>
       )}
+      {recent.length > 0 && (
+        <div className="mt-3 border-t border-ink-800 pt-2" data-testid="recent-decisions">
+          <button onClick={() => setShowRecent((v) => !v)} className="text-xs text-ink-400 hover:underline">{showRecent ? "▾" : "▸"} Recent decisions ({recent.length})</button>
+          {showRecent && (
+            <ul className="mt-2 space-y-1">
+              {recent.map((e, i) => (
+                <li key={i} className="flex flex-wrap items-baseline gap-x-2 text-xs text-ink-300">
+                  <span className="text-ink-500">{day(e.at)}</span>
+                  <span className={e.kind === "clear" ? "text-emerald-200" : e.kind === "review" ? "text-rose-200" : "text-amber-200"}>{KIND_LABEL[e.kind]}</span>
+                  <Link to={`/insights/students/${encodeURIComponent(e.userId)}`} className="font-semibold text-white hover:underline">{e.name}</Link>
+                  {e.byName && <span className="text-ink-500">by {e.byName}</span>}
+                  {e.score !== null && <span className="font-mono text-ink-500">score {e.score}</span>}
+                  {e.note && <span className="text-ink-400">“{e.note}”</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {toast && <div className="mt-3 rounded-lg bg-ink-800 px-3 py-2 text-sm text-white">{toast}</div>}
-      {open && <Drawer userId={open} isOwner={isOwner} onClose={() => setOpen(null)} onReset={reset} />}
+      {open && <Drawer userId={open} isOwner={isOwner} busy={busy} onClose={() => setOpen(null)} onReset={reset} onDecide={decide} />}
     </section>
   );
 }

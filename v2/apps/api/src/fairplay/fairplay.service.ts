@@ -9,7 +9,9 @@ import { Injectable, OnModuleInit } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { sendMail } from "../lib/mail";
-import { scoreStudent, type RoundLite, type ScoreResult, type Band } from "./score";
+import { scoreStudent, type RoundLite, type ScoreResult, type ScoreExtras } from "./score";
+
+export interface Decision { kind: "clear" | "hold" | "reset"; by: string; note: string; at: Date }
 
 const WINDOW_DAYS = 30;
 const TICK_MS = 10 * 60 * 1000;
@@ -105,12 +107,15 @@ export class FairplayService implements OnModuleInit {
     return r?.at ? new Date(r.at) : null;
   }
 
-  /** The window starts at the later of 30 days ago and the last reset — a
-   *  reset is the owner's review, so nothing before it counts again. */
+  /** The window starts at the latest of 30 days ago, the last reset and the
+   *  last Clear — a reset or a Clear is the review, so nothing before it
+   *  counts again. */
   async roundsFor(userId: string, now = new Date()): Promise<{ rounds: RoundLite[]; windowStart: Date; lastReset: Date | null }> {
     const lastReset = await this.lastResetAt(userId);
     let windowStart = new Date(now.getTime() - WINDOW_DAYS * 86400000);
     if (lastReset && lastReset > windowStart) windowStart = lastReset;
+    const fp: any = await this.conn.db!.collection("fairplay").findOne({ _id: userId as any }, { projection: { clearedAt: 1 } as any });
+    if (fp?.clearedAt && new Date(fp.clearedAt) > windowStart) windowStart = new Date(fp.clearedAt);
     const rows = await this.conn.db!.collection("rounds")
       .find({ _id: { $regex: `^${esc(userId)}:` } as any, k: "puzzle", d: { $gte: windowStart, $lte: now } }, { projection: { d: 1, pr: 1, r: 1, w: 1, ms: 1, mv_ms: 1, dub: 1, dubr: 1, nc: 1, held: 1, th: 1, sel: 1 } as any })
       .sort({ d: 1 }).toArray();
@@ -120,13 +125,38 @@ export class FairplayService implements OnModuleInit {
     return { rounds, windowStart, lastReset };
   }
 
+  /** Phase 2 signals from outside the solve list: per-theme rating spread
+   *  and the best live-game rating. */
+  async extrasFor(userId: string): Promise<ScoreExtras> {
+    const up: any = await this.conn.db!.collection("userperfs").findOne({ _id: userId as any }, { projection: { "puzzle.gl.r": 1, themes: 1 } as any });
+    const puzzleR = typeof up?.puzzle?.gl?.r === "number" ? Math.round(up.puzzle.gl.r) : null;
+    let themes: ScoreExtras["themes"] = null;
+    const rs: number[] = Object.values(up?.themes ?? {}).filter((v: any) => (v?.nb ?? 0) >= 20 && typeof v?.gl?.r === "number").map((v: any) => v.gl.r);
+    if (rs.length) {
+      const mean = rs.reduce((a, b) => a + b, 0) / rs.length;
+      const sd = Math.sqrt(rs.reduce((a, b) => a + (b - mean) ** 2, 0) / rs.length);
+      themes = { n: rs.length, sd: Math.round(sd), min: Math.round(Math.min(...rs)), max: Math.round(Math.max(...rs)) };
+    }
+    let play: ScoreExtras["play"] = null;
+    const lp: any = await this.conn.db!.collection("live_perfs").findOne({ _id: `u:${userId}` as any });
+    if (lp && puzzleR !== null) {
+      for (const [speed, v] of Object.entries(lp)) {
+        const perf: any = v;
+        if (speed === "_id" || !perf || typeof perf.gl?.r !== "number" || (perf.nb ?? 0) < 10) continue;
+        if (!play || perf.gl.r > play.r) play = { speed, r: Math.round(perf.gl.r), nb: perf.nb, gap: puzzleR - Math.round(perf.gl.r) };
+      }
+    }
+    return { themes, play, puzzleR };
+  }
+
   /** Score one student, persist, and handle the transition into review. */
-  async scoreUser(userId: string, academyId: string | null, opts: { notify?: boolean } = {}): Promise<ScoreResult & { hold: boolean; windowStart: Date; lastReset: Date | null; reviewSince: Date | null }> {
+  async scoreUser(userId: string, academyId: string | null, opts: { notify?: boolean } = {}): Promise<ScoreResult & { hold: boolean; windowStart: Date; lastReset: Date | null; reviewSince: Date | null; decision: Decision | null }> {
     await this.loadCrowdStats();
     const now = new Date();
     const { rounds, windowStart, lastReset } = await this.roundsFor(userId, now);
     const loo = await this.bandsExcluding(userId);
-    const res = scoreStudent(rounds, (pid, pr) => this.crowdMedianMs(pid, pr, loo));
+    const extras = await this.extrasFor(userId);
+    const res = scoreStudent(rounds, (pid, pr) => this.crowdMedianMs(pid, pr, loo), extras);
     const fp = this.conn.db!.collection("fairplay");
     const prev: any = await fp.findOne({ _id: userId as any });
     const wasReview = prev?.band === "review";
@@ -142,15 +172,53 @@ export class FairplayService implements OnModuleInit {
       await this.conn.db!.collection("fairplayEvents").insertOne({ userId, academyId, kind: "review", score: res.score, components: res.components, at: now });
       if (opts.notify !== false) await this.notifyOwnerReview(userId, academyId, res).catch((e) => console.warn("[fairplay] notify", e?.message || e));
     }
-    return { ...res, hold, windowStart, lastReset, reviewSince };
+    return { ...res, hold, windowStart, lastReset, reviewSince, decision: prev?.decision ?? null };
   }
 
   /** Called after an owner reset: the window restarts, the hold lifts. */
-  async clearAfterReset(userId: string, academyId: string | null, by: string): Promise<void> {
+  async clearAfterReset(userId: string, academyId: string | null, by: string, note = ""): Promise<void> {
     const now = new Date();
-    await this.conn.db!.collection("fairplay").updateOne({ _id: userId as any }, { $set: { academyId, score: 0, band: "clear", components: null, evidence: null, windowStart: now, computedAt: now, hold: false, reviewSince: null, lastReset: now } }, { upsert: true });
+    const prev: any = await this.conn.db!.collection("fairplay").findOne({ _id: userId as any });
+    const decision: Decision = { kind: "reset", by, note: note.slice(0, 500), at: now };
+    await this.conn.db!.collection("fairplay").updateOne({ _id: userId as any }, { $set: { academyId, score: 0, band: "clear", components: null, evidence: null, windowStart: now, computedAt: now, hold: false, reviewSince: null, lastReset: now, decision } }, { upsert: true });
     this.holdCache.set(userId, { held: false, at: Date.now() });
-    await this.conn.db!.collection("fairplayEvents").insertOne({ userId, academyId, kind: "reset", by, at: now });
+    // Labelled example for Phase 3: a reset says "this was assisted".
+    await this.conn.db!.collection("fairplayEvents").insertOne({ userId, academyId, kind: "reset", by, note: decision.note, at: now, label: "assisted", score: prev?.score ?? null, components: prev?.components ?? null });
+  }
+
+  /** Coach/owner decision on a listed student. `clear` restarts the window
+   *  with a note (the student drops off the list); only the owner's Clear
+   *  lifts a hold. `hold` stops rated gains until the owner resets or clears.
+   *  Both are audited as labelled examples. */
+  async decide(userId: string, academyId: string | null, by: { userId: string; role: string }, kind: "clear" | "hold", noteRaw: unknown): Promise<{ ok: boolean; error?: string }> {
+    const note = typeof noteRaw === "string" ? noteRaw.trim().slice(0, 500) : "";
+    const now = new Date();
+    const fp = this.conn.db!.collection("fairplay");
+    const prev: any = await fp.findOne({ _id: userId as any });
+    const decision: Decision = { kind, by: by.userId, note, at: now };
+    if (kind === "clear") {
+      if (prev?.hold && by.role !== "academy_owner") return { ok: false, error: "This student's gains are on hold — only the owner can clear or reset a hold." };
+      await fp.updateOne({ _id: userId as any }, { $set: { academyId, score: 0, band: "clear", components: null, evidence: null, windowStart: now, computedAt: now, hold: false, reviewSince: null, clearedAt: now, decision } }, { upsert: true });
+      this.holdCache.set(userId, { held: false, at: Date.now() });
+      await this.conn.db!.collection("fairplayEvents").insertOne({ userId, academyId, kind: "clear", by: by.userId, note, at: now, label: "honest", score: prev?.score ?? null, components: prev?.components ?? null });
+      return { ok: true };
+    }
+    await fp.updateOne({ _id: userId as any }, { $set: { academyId, hold: true, heldBy: by.userId, heldAt: now, decision }, $setOnInsert: { score: 0, band: "clear", windowStart: now, computedAt: now } }, { upsert: true });
+    this.holdCache.set(userId, { held: true, at: Date.now() });
+    await this.conn.db!.collection("fairplayEvents").insertOne({ userId, academyId, kind: "hold", by: by.userId, note, at: now, label: "assisted", score: prev?.score ?? null, components: prev?.components ?? null });
+    return { ok: true };
+  }
+
+  /** Last decisions in an academy (optionally limited to a roster) for the
+   *  panel's "Recent decisions" strip. */
+  async recentDecisions(academyId: string | null, userIds: string[] | null, limit = 12): Promise<any[]> {
+    const q: any = { academyId, kind: { $in: ["clear", "hold", "reset", "review"] } };
+    if (userIds) q.userId = { $in: userIds };
+    const ev = await this.conn.db!.collection("fairplayEvents").find(q).sort({ at: -1 }).limit(limit).toArray();
+    const ids = Array.from(new Set(ev.flatMap((e: any) => [String(e.userId), e.by ? String(e.by) : null]).filter(Boolean) as string[]));
+    const users = ids.length ? await this.conn.db!.collection("users").find({ _id: { $in: ids as any } }, { projection: { username: 1, name: 1 } as any }).toArray() : [];
+    const nm = new Map(users.map((u: any) => [String(u._id), u.name || u.username || String(u._id)]));
+    return ev.map((e: any) => ({ userId: String(e.userId), name: nm.get(String(e.userId)) || String(e.userId), kind: e.kind, by: e.by ? String(e.by) : null, byName: e.by ? (nm.get(String(e.by)) || String(e.by)) : null, note: e.note || "", score: e.score ?? null, at: e.at }));
   }
 
   /** Are this student's rated gains on hold? Cached a minute — read on every solve. */

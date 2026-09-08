@@ -27,6 +27,7 @@ export interface ExamSummary {
   timePerPosSec: number | null;
   passMarkPct: number;
   retryable: boolean;
+  proctored?: boolean;
   assignedTo: string[];
   status: "draft" | "published" | "closed";
   dueAt: string | null;
@@ -47,6 +48,11 @@ export interface AttemptAnswer {
   playedSan: string | null;
   correct: boolean;
   timeSpentMs: number;
+  focus?: { hiddenMs: number; hiddenCount: number; fsExits: number } | null;
+}
+export interface ProctorSummary {
+  hiddenMs: number; hiddenCount: number; fsExits: number; fsSupported: boolean; fsUsed: boolean;
+  events: { t: number; k: string }[];
 }
 
 export interface Attempt {
@@ -61,6 +67,7 @@ export interface Attempt {
   totalPositions: number;
   scorePct: number;
   passed: boolean;
+  proctor?: ProctorSummary | null;
   user?: { _id: string; username: string; name?: string };
 }
 
@@ -89,7 +96,7 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 export const examsApi = {
   list: () => req<{ owned: ExamListEntry[]; assigned: ExamListEntry[] }>("GET", "/api/exams"),
   pickableStudents: () => req<{ items: { _id: string; username: string; name?: string; role: string }[] }>("GET", "/api/exams/pickable-students"),
-  create: (body: { title?: string; description?: string; timePerPosSec?: number | null; passMarkPct?: number; retryable?: boolean }) =>
+  create: (body: { title?: string; description?: string; timePerPosSec?: number | null; passMarkPct?: number; retryable?: boolean; proctored?: boolean }) =>
     req<{ examId: string }>("POST", "/api/exams", body),
   get: (id: string) => req<{ exam: ExamSummary; role: "owner" | "student" }>("GET", `/api/exams/${encodeURIComponent(id)}`),
   updateMeta: (id: string, body: Partial<ExamSummary>) => req<{ ok: boolean }>("PATCH", `/api/exams/${encodeURIComponent(id)}`, body),
@@ -99,8 +106,8 @@ export const examsApi = {
   close: (id: string) => req<{ ok: boolean }>("POST", `/api/exams/${encodeURIComponent(id)}/close`, {}),
   remove: (id: string) => req<{ ok: boolean }>("DELETE", `/api/exams/${encodeURIComponent(id)}`),
   startAttempt: (id: string) => req<{ attemptId: string; attemptNumber: number; resumed: boolean }>("POST", `/api/exams/${encodeURIComponent(id)}/attempts/start`, {}),
-  answer: (id: string, aid: string, body: { positionId: string; playedUci: string | null; playedSan: string | null; timeSpentMs: number }) =>
+  answer: (id: string, aid: string, body: { positionId: string; playedUci: string | null; playedSan: string | null; timeSpentMs: number; focus?: { hiddenMs: number; hiddenCount: number; fsExits: number } }) =>
     req<{ ok: boolean; correct?: boolean; expectedSan?: string; expectedUci?: string; alreadyAnswered?: boolean }>("POST", `/api/exams/${encodeURIComponent(id)}/attempts/${encodeURIComponent(aid)}/answer`, body),
-  finish: (id: string, aid: string) => req<{ ok: boolean; score?: number; total?: number; scorePct?: number; passed?: boolean; alreadySubmitted?: boolean }>("POST", `/api/exams/${encodeURIComponent(id)}/attempts/${encodeURIComponent(aid)}/finish`, {}),
+  finish: (id: string, aid: string, body?: { proctor?: ProctorSummary }) => req<{ ok: boolean; score?: number; total?: number; scorePct?: number; passed?: boolean; alreadySubmitted?: boolean }>("POST", `/api/exams/${encodeURIComponent(id)}/attempts/${encodeURIComponent(aid)}/finish`, body ?? {}),
   results: (id: string) => req<Results>("GET", `/api/exams/${encodeURIComponent(id)}/results`),
 };

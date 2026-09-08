@@ -190,3 +190,32 @@ hold → win gives `ratingDiff 0`, round `held:true`, rating unchanged · owner 
 - Crowd baseline is thin (4 heavy solvers on 2400+): the crowd component reaches 8 for the real case, never 15. It will firm up as more academies solve.
 - `focus_loss` is only sent when the tab/window actually left — a second device or a phone beside the screen is invisible to it (by design; see plan Phase 2).
 - Owner email for Review goes to the academy owner's `users.email`; academies whose owner has no email get the event only (panel + digest skip).
+
+---
+
+## Fair Play Trainer — Phase 2 BUILT & LIVE (2026-09-08, night)
+
+Scope from the plan: coach actions, two more signals, proctored exams/homework. The plan's **"Message the student"** action was dropped — it contradicts the owner's "students are never told".
+
+### Decisions (Clear / Hold), audited as labelled examples
+- `POST /api/academy/suspicious-solves/:id/clear {note}` — coach or owner. Restarts the window (`fairplay.clearedAt`), drops the student off the list, stores `decision{kind,by,note,at}`; **a coach's Clear on a held student is refused** ("only the owner can clear or reset a hold"). `fairplayEvents{kind:"clear", label:"honest", score, components}`.
+- `POST …/hold {note}` — coach or owner: `hold:true` (rated gains stop, silently) until the owner resets or clears. `fairplayEvents{kind:"hold", label:"assisted", …}`. Reset now records the reason as a decision too (`label:"assisted"`).
+- Panel: **Clear…** / **Hold…** on every row and in the drawer (note prompt → confirm); the last decision shows as a chip on the row when the student is listed again; a **Recent decisions** strip (last 12 for the roster: cleared / held / reset / entered review, by whom, note, score at the time). Phase 3 trains on these labels.
+
+### Two new signals (`ScoreExtras` in `score.ts`, loaded in `FairplayService.extrasFor`)
+- **Theme spread** — per-theme puzzle ratings with 20+ solves: 8+ themes and player 2000+, sd < 40 → +10, < 60 → +5. Honest students measured at sd 92–121 (deepak 121 over 23 themes, akshay 109/31, haritha 92/8, ashwanth 116/13); gunachess 61 over 7 themes (below the 8-theme minimum anyway).
+- **Play cross-check** — best `live_perfs` speed with 10+ rated games (`_id` is `u:<userId>`): puzzle rating 800+ above → +10, 600+ → +5. Almost nobody has 10 rated games yet; it will matter as Play grows.
+- Both show in the drawer's breakdown. Replay unchanged: mageswaran 100 / everyone else Clear; reseed of 98 real students: nobody moved.
+- Rejected: theme *win-rate* flatness — calibrated on 8 students, honest solvers around 50% are as "flat" (sd 8) as the assisted one (sd 6); ceiling effect.
+
+### Proctored exams (`exams.proctored`, default **on** for new exams; toggle on Create and Edit)
+- Student: a gate card before the attempt ("opens in full screen… leaving is recorded") — the Start click is the user gesture full screen needs. During the attempt every tab/window/full-screen change is recorded: per position (`answers[].focus{hiddenMs,hiddenCount,fsExits}`, sent with the answer) and for the attempt (`attempt.proctor{hiddenMs,hiddenCount,fsExits,fsSupported,fsUsed,events[≤200]}`, sent with finish). Leaving full screen shows an amber "Return to full screen" bar. Devices without the full-screen API (iOS) still record focus.
+- Coach results table: **Proctor** column — `🛡 clean`, `left 2× · 14 s · fs exit 1×` (amber; rose from 3 leaves or 30 s), `no data` (older attempts), `not proctored`; tooltip has the detail. Older attempts are untouched.
+- Homework: the trainer already records focus per solve (Phase 1). Now a solve that credits homework is stamped `rounds.hw:[homeworkIds]` (from `autoCreditHomework`), and the coach's homework list carries `proctor{solves,focusLoss,hiddenMs,flagged}` → chip on the dashboard's Recent homework card ("🛡 1/2 lost focus", "focus kept"). No full screen for homework — it is solved in the general trainer.
+
+### Verified live (throwaway student + coach in Guna Chess, forged sessions; all deleted after)
+Five focus-loss solves → Watch 32 · coach Hold with note → `hold`, event `hold/assisted/32`, win while held gives 0 · coach Clear on held → refused · owner Clear → hold off, `clearedAt`, off the list, both decisions in *recent*, next win +26 · five more flagged solves → re-listed with "cleared by gunachess" on the row · coach Clear (not held) → ok · coach outside the roster → refused · exam: answer with focus + finish with proctor stored and returned to the owner (`hiddenCount 1, 6 s, fs exit 1`, 4 events, per-answer focus) · homework: two fork solves stamped `hw:[id]`, coach list `proctor{solves:2, focusLoss:1, hiddenMs:5000}` · browser as student: gate → Start engaged real full screen (`document.fullscreenElement` set) → badge → simulated blur/focus → answers → finish → results; as owner: results table "left 1× · 2 s" (browser attempt) and "left 1× · 6 s · fs exit 1×" (API attempt); panel row with Clear/Hold/Reset, decision chip, recent strip, drawer with Theme spread + Play cross-check lines.
+
+### Open
+- Coach Clear lifts nothing on a held student by design; the owner's Clear does. A Clear restarts the window, so the same evidence never re-lists them — new evidence does.
+- Play cross-check uses the best speed with 10+ games; a student who only plays bots rated is still "rated play" (bots are rated by owner decision).

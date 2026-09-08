@@ -2659,7 +2659,7 @@ Thank you!`;
     const out: any[] = [];
     for (const st of students as any[]) {
       const r = await this.fairplay.scoreUser(String(st._id), g.academyId);
-      if (r.band === "clear" && !r.hold) continue;   // a held student stays listed until the owner resets
+      if (r.band === "clear" && !r.hold) continue;   // a held student stays listed until the owner resets or clears
       const perf: any = await perfs.findOne({ _id: st._id as any }, { projection: { "puzzle.gl": 1 } });
       const e = r.evidence;
       out.push({
@@ -2672,10 +2672,22 @@ Thank you!`;
         score: r.score, band: r.band, hold: r.hold, components: r.components, crowdRatio: e.crowdRatio,
         reviewSince: r.reviewSince, windowStart: r.windowStart,
         lastReset: r.lastReset ? { at: r.lastReset } : null,
+        decision: r.decision,
       });
     }
     out.sort((a, b) => b.score - a.score);
-    return { days: 30, students: out, bands: { watch: 25, review: 60 } };
+    const recent = await this.fairplay.recentDecisions(g.academyId, g.role === "coach" ? students.map((s: any) => String(s._id)) : null);
+    return { days: 30, students: out, bands: { watch: 25, review: 60 }, recent };
+  }
+
+  /** Coach/owner: Clear (with note) or Hold a listed student. Audited. */
+  async suspiciousDecide(session: any, studentId: string, kind: "clear" | "hold", body: any) {
+    const g = this.ensureCoachOrOwner(session);
+    const filter: any = { _id: studentId as any, academyId: g.academyId, role: "student" };
+    if (g.role === "coach") filter.coachId = g.userId;
+    const st: any = await this.users().findOne(filter, { projection: { _id: 1 } });
+    if (!st) return { ok: false, error: "That student isn't in your roster." };
+    return this.fairplay.decide(studentId, g.academyId, { userId: g.userId, role: g.role }, kind, body?.note);
   }
 
   /** Everything behind one student's score: each solve in the window (for the
@@ -2715,7 +2727,7 @@ Thank you!`;
     await this.conn.db!.collection("ratingAdjustments").insertOne({ userId: studentId, kind: "puzzle", before, after: { r: target, d: sets["puzzle.gl.d"] }, themesClamped: clamped, reason, by: g.userId, academyId: g.academyId, at: new Date() });
     await this.users().updateOne({ _id: studentId as any }, { $set: { puzzleRatingResetAt: new Date() } });
     // The reset IS the review: the fair-play window restarts and the hold lifts.
-    await this.fairplay.clearAfterReset(studentId, g.academyId, g.userId);
+    await this.fairplay.clearAfterReset(studentId, g.academyId, g.userId, typeof body?.reason === "string" ? body.reason : "");
     return { ok: true, before, after: { r: target }, themesClamped: clamped };
   }
 

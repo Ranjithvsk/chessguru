@@ -48,6 +48,7 @@ export interface ExamDoc {
   timePerPosSec: number | null;   // null = untimed
   passMarkPct: number;            // 0..100
   retryable: boolean;
+  proctored?: boolean;            // full screen + focus loss recorded while taking (Fair Play Phase 2)
   assignedTo: string[];           // userIds; empty = "everyone in my academy"
   status: "draft" | "published" | "closed";
   dueAt: Date | null;
@@ -61,6 +62,7 @@ export interface Answer {
   playedSan: string | null;
   correct: boolean;
   timeSpentMs: number;
+  focus?: { hiddenMs: number; hiddenCount: number; fsExits: number } | null;   // proctored: tab/window left while this position was up
 }
 
 export interface AttemptDoc {
@@ -75,6 +77,11 @@ export interface AttemptDoc {
   totalPositions: number;
   scorePct: number;
   passed: boolean;
+  proctor?: ProctorSummary | null;
+}
+export interface ProctorSummary {
+  hiddenMs: number; hiddenCount: number; fsExits: number; fsSupported: boolean; fsUsed: boolean;
+  events: { t: number; k: string }[];   // ms since attempt start, kind: hidden/visible/blur/focus/fs_enter/fs_exit (cap 200)
 }
 
 @Injectable()
@@ -155,6 +162,7 @@ export class ExamsService {
     const timePerPosSec = this.normTime(b.timePerPosSec);
     const passMarkPct = Math.max(0, Math.min(100, Number(b.passMarkPct) || 60));
     const retryable = !!b.retryable;
+    const proctored = b.proctored === undefined ? true : !!b.proctored;
 
     const id = shortId(10);
     const now = new Date();
@@ -168,6 +176,7 @@ export class ExamsService {
       timePerPosSec,
       passMarkPct,
       retryable,
+      proctored,
       assignedTo: [],
       status: "draft",
       dueAt: null,
@@ -217,6 +226,7 @@ export class ExamsService {
     if ("timePerPosSec" in b) set.timePerPosSec = this.normTime(b.timePerPosSec);
     if ("passMarkPct" in b) set.passMarkPct = Math.max(0, Math.min(100, Number(b.passMarkPct) || 60));
     if ("retryable" in b) set.retryable = !!b.retryable;
+    if ("proctored" in b) set.proctored = !!b.proctored;
     if (Array.isArray(b.assignedTo)) {
       set.assignedTo = b.assignedTo.filter((x: any) => typeof x === "string").slice(0, 500);
     }
@@ -384,18 +394,22 @@ export class ExamsService {
     // Grading: exact UCI match for now. (Slice 3 adds top-2 engine match.)
     const correct = !!(playedUci && playedUci === pos.expectedUci);
 
+    const f: any = body?.focus;
+    const focus = f && typeof f === "object"
+      ? { hiddenMs: Math.max(0, Math.min(86_400_000, Number(f.hiddenMs) || 0)), hiddenCount: Math.max(0, Math.min(1000, Number(f.hiddenCount) || 0)), fsExits: Math.max(0, Math.min(1000, Number(f.fsExits) || 0)) }
+      : null;
     await this.attempts().updateOne(
       { _id: attemptId },
       {
         $push: {
-          answers: { positionId, playedUci, playedSan, correct, timeSpentMs } as any,
+          answers: { positionId, playedUci, playedSan, correct, timeSpentMs, ...(focus ? { focus } : {}) } as any,
         },
       },
     );
     return { ok: true, correct, expectedSan: pos.expectedSan, expectedUci: pos.expectedUci };
   }
 
-  async finishAttempt(session: any, examId: string, attemptId: string) {
+  async finishAttempt(session: any, examId: string, attemptId: string, body?: any) {
     const { userId } = this.ensureUser(session);
     const attempt = await this.attempts().findOne({ _id: attemptId, examId, userId });
     if (!attempt) throw new NotFoundException("no such attempt");
@@ -410,9 +424,18 @@ export class ExamsService {
     const passed = scorePct >= exam.passMarkPct;
 
     const now = new Date();
+    const p: any = body?.proctor;
+    const proctor: ProctorSummary | null = p && typeof p === "object" ? {
+      hiddenMs: Math.max(0, Math.min(86_400_000, Number(p.hiddenMs) || 0)),
+      hiddenCount: Math.max(0, Math.min(1000, Number(p.hiddenCount) || 0)),
+      fsExits: Math.max(0, Math.min(1000, Number(p.fsExits) || 0)),
+      fsSupported: !!p.fsSupported,
+      fsUsed: !!p.fsUsed,
+      events: Array.isArray(p.events) ? p.events.slice(0, 200).filter((e: any) => e && typeof e.t === "number" && typeof e.k === "string").map((e: any) => ({ t: Math.round(e.t), k: String(e.k).slice(0, 12) })) : [],
+    } : null;
     await this.attempts().updateOne(
       { _id: attemptId },
-      { $set: { submittedAt: now, score, totalPositions: total, scorePct, passed } },
+      { $set: { submittedAt: now, score, totalPositions: total, scorePct, passed, ...(proctor ? { proctor } : {}) } },
     );
     return { ok: true, score, total, scorePct, passed };
   }

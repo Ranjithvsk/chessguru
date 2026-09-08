@@ -255,6 +255,16 @@ export class HomeworkService {
     const su = allIds.length ? await this.users().find({ _id: { $in: allIds } as any }, { projection: { _id: 1, username: 1, name: 1, role: 1 } }).toArray() : [];
     const uMap: Record<string, { username: string; name: string | null; role: string }> = {};
     for (const u of su as any[]) uMap[String(u._id)] = { username: u.username || String(u._id), name: u.name || null, role: u.role || "" };
+    // Proctor summary per homework from the solves that credited it (Fair
+    // Play Phase 2): how many solves, how many lost focus, time away, flagged.
+    const hwIds = rows.map((r: any) => String(r._id));
+    const agg = hwIds.length ? await this.conn.db!.collection("rounds").aggregate([
+      { $match: { hw: { $in: hwIds } } },
+      { $unwind: "$hw" },
+      { $match: { hw: { $in: hwIds } } },
+      { $group: { _id: "$hw", solves: { $sum: 1 }, focusLoss: { $sum: { $cond: [{ $gt: ["$fx.hiddenCount", 0] }, 1, 0] } }, hiddenMs: { $sum: { $ifNull: ["$fx.hiddenMs", 0] } }, flagged: { $sum: { $cond: ["$dub", 1, 0] } } } },
+    ]).toArray() : [];
+    const proctorBy = new Map(agg.map((a: any) => [String(a._id), { solves: a.solves, focusLoss: a.focusLoss, hiddenMs: a.hiddenMs, flagged: a.flagged }]));
     return rows.map((r: any) => {
       const c = r.coachId ? uMap[String(r.coachId)] : null;
       return {
@@ -267,6 +277,7 @@ export class HomeworkService {
         assignedByRole: c?.role || null,
         catchupForDate: r.catchupForDate ?? null,
         catchupSource: r.catchupSource ?? null,
+        proctor: proctorBy.get(String(r._id)) ?? null,
       };
     });
   }

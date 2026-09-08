@@ -1984,7 +1984,12 @@ function HomeworkPanel({ homework }: { homework: any[] }) {
                 <div className={`h-full ${h.status === "completed" ? "bg-emerald-500" : "bg-gradient-to-r from-purple-500 to-fuchsia-500"}`} style={{ width: `${pct}%` }} />
               </div>
               <div className="mt-1 flex items-center justify-between text-[10px] text-ink-500">
-                <span>{totalDone}/{totalTargets} tasks · {h.tasks.length} sections</span>
+                <span>{totalDone}/{totalTargets} tasks · {h.tasks.length} sections{h.proctor && h.proctor.solves > 0 && (
+                  <span className={`ml-2 rounded px-1.5 py-0.5 ${h.proctor.focusLoss > 0 || h.proctor.flagged > 0 ? "bg-amber-500/15 text-amber-200" : "bg-emerald-500/10 text-emerald-200"}`}
+                    title={`${h.proctor.solves} credited solves · ${h.proctor.focusLoss} left the tab (${Math.round(h.proctor.hiddenMs / 1000)} s away) · ${h.proctor.flagged} flagged`}>
+                    🛡 {h.proctor.focusLoss > 0 ? `${h.proctor.focusLoss}/${h.proctor.solves} lost focus` : `${h.proctor.solves} solves, focus kept`}{h.proctor.flagged > 0 ? ` · ${h.proctor.flagged} flagged` : ""}
+                  </span>
+                )}</span>
                 <button onClick={() => confirm(`Delete "${h.title}"?`) && delMut.mutate(h._id)}
                   className="text-rose-400 hover:underline">delete</button>
               </div>

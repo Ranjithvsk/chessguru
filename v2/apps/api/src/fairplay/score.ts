@@ -11,6 +11,10 @@
 //   crowd        15 if the typical win takes < 25% of the crowd's time on the
 //                same puzzles, 8 if < 40% (n ≥ 10)          (crowd baseline)
 //   climb        10 for a 500+ climb, only alongside 3+ flags or 15+ fastHard
+//   themeFlat    10 if per-theme ratings (8+ themes with 20+ solves, player
+//                2000+) sit within sd < 40, 5 if < 60 — honest sd is ~100
+//   playGap      10 if the puzzle rating is 800+ above the best live-game
+//                rating (10+ games), 5 if 600+
 // Bands: clear < 25, watch 25–59, review ≥ 60 (owner decision 2026-09-08).
 import { assessSuspicion, isDrill } from "../glicko/glicko";
 
@@ -20,10 +24,19 @@ export interface RoundLite {
   th?: string[]; sel?: string;
 }
 export type Band = "clear" | "watch" | "review";
+/** Signals that live outside the solve list (Phase 2). */
+export interface ScoreExtras {
+  /** Per-theme puzzle ratings with 20+ solves: everyone has weak themes, an
+   *  engine is equally strong at everything. */
+  themes?: { n: number; sd: number; min: number; max: number } | null;
+  /** Best live-game rating with 10+ rated games, against the puzzle rating. */
+  play?: { speed: string; r: number; nb: number; gap: number } | null;
+  puzzleR?: number | null;
+}
 export interface ScoreResult {
   score: number;
   band: Band;
-  components: { flags: number; fastHard: number; accuracy: number; crowd: number; climb: number };
+  components: { flags: number; fastHard: number; accuracy: number; crowd: number; climb: number; themeFlat: number; playGap: number };
   evidence: {
     solves: number; flagged: number; reasons: Record<string, number>;
     hard: { n: number; wins: number; winPct: number | null; medianMs: number | null; fast: number };
@@ -34,6 +47,8 @@ export interface ScoreResult {
     fastest: { pid: string; pr: number; ms: number; mvMs: number[] | null; at: Date }[];
     sessions: { day: string; solves: number; wins: number }[];
     peakHour: { hour: string; solves: number } | null;
+    themes: ScoreExtras["themes"];
+    play: ScoreExtras["play"];
   };
 }
 
@@ -64,7 +79,7 @@ export const bandOf = (score: number): Band => (score >= BAND_REVIEW ? "review" 
 const median = (a: number[]): number | null => { if (!a.length) return null; const s = a.slice().sort((x, y) => x - y); return s[Math.floor(s.length / 2)]!; };
 const pct = (wins: number, n: number): number | null => (n ? Math.round((wins / n) * 100) : null);
 
-export function scoreStudent(rounds: RoundLite[], crowdMedianMs: (pid: string, pr: number) => number | null): ScoreResult {
+export function scoreStudent(rounds: RoundLite[], crowdMedianMs: (pid: string, pr: number) => number | null, extras: ScoreExtras = {}): ScoreResult {
   const rs = withRetroFlags(rounds.slice().sort((a, b) => a.d.getTime() - b.d.getTime()));
   const flagged = rs.filter((x) => x.dub);
   const reasons: Record<string, number> = {};
@@ -100,12 +115,18 @@ export function scoreStudent(rounds: RoundLite[], crowdMedianMs: (pid: string, p
     accuracy: 0,
     crowd: 0,
     climb: 0,
+    themeFlat: 0,
+    playGap: 0,
   };
+  const th = extras.themes;
+  if (th && th.n >= 8 && (extras.puzzleR ?? 0) >= 2000) c.themeFlat = th.sd < 40 ? 10 : th.sd < 60 ? 5 : 0;
+  const pl = extras.play;
+  if (pl && pl.nb >= 10) c.playGap = pl.gap >= 800 ? 10 : pl.gap >= 600 ? 5 : 0;
   const hardPct = pct(hardWins.length, hard.length);
   if ((above.length >= 10 && atLevel.length >= 10 && abovePct !== null && atLevelPct !== null && abovePct >= atLevelPct) || (hard.length >= 10 && hardPct !== null && hardPct >= 85)) c.accuracy = 15;
   if (crowdRatio !== null) c.crowd = crowdRatio < 0.25 ? 15 : crowdRatio < 0.4 ? 8 : 0;
   if (climb >= 500 && (flagged.length >= 3 || c.fastHard >= 15)) c.climb = 10;
-  const score = Math.min(100, c.flags + c.fastHard + c.accuracy + c.crowd + c.climb);
+  const score = Math.min(100, c.flags + c.fastHard + c.accuracy + c.crowd + c.climb + c.themeFlat + c.playGap);
 
   const byDay = new Map<string, { solves: number; wins: number }>();
   const byHour = new Map<string, number>();
@@ -134,6 +155,8 @@ export function scoreStudent(rounds: RoundLite[], crowdMedianMs: (pid: string, p
       fastest: hardWins.slice().sort((a, b) => a.ms! - b.ms!).slice(0, 5).map((x) => ({ pid: x.pid, pr: x.pr, ms: x.ms!, mvMs: Array.isArray(x.mv_ms) ? x.mv_ms : null, at: x.d })),
       sessions: Array.from(byDay, ([day, v]) => ({ day, ...v })),
       peakHour,
+      themes: th ?? null,
+      play: pl ?? null,
     },
   };
 }

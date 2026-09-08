@@ -77,6 +77,10 @@ export default function ExamEditPage() {
         <input value={exam.title} onChange={(e) => patchMeta.mutate({ title: e.target.value })} disabled={!isDraft}
           maxLength={200}
           className="flex-1 min-w-[240px] rounded-lg border border-ink-700 bg-ink-900 px-3 py-1.5 font-display text-lg text-white outline-none focus:border-brand-500 disabled:opacity-70" />
+        <label className="mt-2 flex items-start gap-2 text-sm text-white">
+          <input type="checkbox" checked={exam.proctored !== false} disabled={!isDraft} onChange={(e) => patchMeta.mutate({ proctored: e.target.checked })} className="mt-0.5 accent-brand-500" />
+          <span>🛡 Proctored <span className="block text-xs font-normal text-ink-400">Full screen while taking; leaving the tab or full screen is recorded for you.</span></span>
+        </label>
         <span className={`rounded-full px-3 py-1 text-xs font-semibold ${exam.status === "draft" ? "bg-ink-800 text-ink-300" : exam.status === "published" ? "bg-emerald-500/20 text-emerald-200" : "bg-ink-800 text-ink-500"}`}>{exam.status}</span>
       </div>
 

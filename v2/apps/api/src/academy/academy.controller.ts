@@ -114,6 +114,18 @@ export class AcademyController {
     return this.svc.suspiciousDetail(req.session, id);
   }
 
+  /** Coach/owner: Clear a listed student with a note (window restarts). Body: { note } */
+  @Post("suspicious-solves/:id/clear")
+  suspiciousClear(@Req() req: any, @Param("id") id: string, @Body() body: any) {
+    return this.svc.suspiciousDecide(req.session, id, "clear", body);
+  }
+
+  /** Coach/owner: put a student's rated gains on hold. Body: { note } */
+  @Post("suspicious-solves/:id/hold")
+  suspiciousHold(@Req() req: any, @Param("id") id: string, @Body() body: any) {
+    return this.svc.suspiciousDecide(req.session, id, "hold", body);
+  }
+
   /** Owner-only: set a student's puzzle rating. Body: { rating, reason } */
   @Post("students/:id/reset-puzzle-rating")
   resetPuzzleRating(@Req() req: any, @Param("id") id: string, @Body() body: any) {
