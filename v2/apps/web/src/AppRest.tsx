@@ -112,6 +112,7 @@ import ParentReportViewPage from "./pages/ParentReportView";
 import DailyPage from "./pages/Daily";
 import PlayPage from "./pages/Play";
 import PlayHistoryPage from "./pages/PlayHistory";
+import ChangePasswordPage from "./pages/ChangePassword";
 import PlayGameReplayPage from "./pages/PlayGameReplay";
 import FeedbackUITestPage from "./pages/FeedbackUITest";
 import BookPage from "./pages/Book";
@@ -262,6 +263,7 @@ export default function AppRest() {
         <Route path="accept-invite" element={<AcceptInvitePage />} />
         <Route path="call/:room" element={<CallRoomRedirect />} />
         <Route path="settings/accounts" element={<AccountLinksPage />} />
+        <Route path="settings/password" element={<ChangePasswordPage />} />
         <Route path="history/external/:id" element={<ExternalGamePage />} />
         <Route path="test/feedback-ui" element={<FeedbackUITestPage />} />
         <Route path="book" element={<BookPage />} />

@@ -163,6 +163,7 @@ export const api = {
   signupAcademy: (body: { academyName: string; ownerName: string; ownerEmail: string; password: string }) =>
     post<AuthResult & { academyId?: string; academyName?: string }>("/auth/signup-academy", body),
   logout: () => post<{ ok: boolean }>("/auth/logout", {}),
+  changePassword: (currentPassword: string, newPassword: string) => post<{ ok: boolean; error?: string }>("/auth/change-password", { currentPassword, newPassword }),
   requestReset:  (email: string) => post<{ ok: boolean; error?: string }>("/auth/request-reset", { email }),
   resetPassword: (token: string, newPassword: string) => post<AuthResult & { username?: string }>("/auth/reset-password", { token, newPassword }),
   requestOtp:    (email: string) => post<{ ok: boolean; error?: string }>("/auth/request-otp", { email }),

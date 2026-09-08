@@ -404,7 +404,10 @@ export default function Navbar({ rating, ratingProvisional, username, admin, onL
           {username ? (
             <div className="hidden items-center gap-2 sm:flex">
               <MessagesBadge />
-              <span className="text-sm font-medium text-white">{username}</span>
+              <NavLink to="/settings/password" title="Change password" data-testid="account-link" className="group flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-white hover:bg-ink-800">
+                <span>{username}</span>
+                <span className="text-xs text-ink-400 group-hover:text-brand-300">🔑</span>
+              </NavLink>
               <button onClick={onLogout} className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white">Sign out</button>
             </div>
           ) : (
@@ -450,9 +453,12 @@ export default function Navbar({ rating, ratingProvisional, username, admin, onL
                     <div className="mt-2 px-1 text-xs text-ink-400">Rating <b className="text-white">{ratingProvisional && <span className="text-gold-400">≈</span>}{rating}{ratingProvisional && <span className="text-gold-400">?</span>}</b></div>
                   )}
                   {username ? (
-                    <div className="mt-2 flex items-center justify-between px-1">
-                      <span className="text-sm font-medium text-white">{username}</span>
-                      <button onClick={onLogout} className="rounded-lg border border-ink-700 px-3 py-1 text-xs text-ink-300 hover:text-white">Sign out</button>
+                    <div className="mt-2 space-y-2 px-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-white">{username}</span>
+                        <button onClick={onLogout} className="rounded-lg border border-ink-700 px-3 py-1 text-xs text-ink-300 hover:text-white">Sign out</button>
+                      </div>
+                      <NavLink to="/settings/password" data-testid="account-link-drawer" className="block rounded-lg border border-ink-700 px-3 py-2 text-sm text-ink-200 hover:bg-ink-800">🔑 Change password</NavLink>
                     </div>
                   ) : (
                     <NavLink to="/login" className="mt-2 block rounded-lg border border-ink-700 px-3 py-2 text-center text-sm text-ink-300 hover:text-white">Sign in</NavLink>

@@ -168,6 +168,7 @@ export default function TenantLoginPage() {
               <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} />
               Keep me signed in
             </label>
+            <p className="mt-1 text-[11px] leading-snug text-ink-500" data-testid="forgot-hint">Forgot your password? Ask your coach — they can set a new one for you from the Students page.</p>
           </div>
         )}
         {mode === "otp" && (

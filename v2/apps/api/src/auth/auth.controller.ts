@@ -31,6 +31,9 @@ export class AuthController {
     return this.auth.me(req.session);
   }
 
+  @Post("change-password")
+  changePassword(@Body() body: any, @Req() req: any) { return this.auth.changePassword(req.session, body); }
+
   @Post("logout")
   logout(@Req() req: any) { return this.auth.logout(req.session); }
 

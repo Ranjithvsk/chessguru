@@ -86,9 +86,10 @@ export default function LoginPage() {
                 <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} className="accent-brand-500" />
                 Keep me logged in
               </label>
-              <div className="text-right">
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-[11px] leading-snug text-ink-500">Academy student? Your coach can set a new password from the Students page.</span>
                 <button type="button" onClick={() => { setMode("forgot"); clearMsg(); }}
-                  className="text-xs font-semibold text-brand-300 hover:text-brand-200 hover:underline">
+                  className="shrink-0 text-xs font-semibold text-brand-300 hover:text-brand-200 hover:underline">
                   Forgot password?
                 </button>
               </div>

@@ -145,6 +145,7 @@ async function bootstrap() {
       { path: "auth/signin", method: RequestMethod.POST },
       { path: "auth/me", method: RequestMethod.GET },
       { path: "auth/logout", method: RequestMethod.POST },
+      { path: "auth/change-password", method: RequestMethod.POST },
       { path: "auth/request-reset", method: RequestMethod.POST },
       { path: "auth/reset-password", method: RequestMethod.POST },
       { path: "auth/request-otp", method: RequestMethod.POST },

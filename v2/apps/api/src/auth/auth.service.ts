@@ -317,6 +317,33 @@ export class AuthService {
     return { ok: true };
   }
 
+  /** Signed-in user changes their own password. Students in an academy mostly
+   *  have no email, so the emailed reset link never reaches them — this is the
+   *  self-service path; the coach's "Set / reset password" on the Students page
+   *  stays the fallback when they forget it (owner ask 2026-09-08). */
+  async changePassword(session: any, body: any) {
+    const userId = session?.userId;
+    if (!userId) return { ok: false, error: "You are not signed in." };
+    const currentPassword = String(body?.currentPassword ?? "");
+    const newPassword = String(body?.newPassword ?? "");
+    if (newPassword.length < 6) return { ok: false, error: "New password too short (min 6 chars)." };
+    if (newPassword === currentPassword) return { ok: false, error: "Choose a password different from the current one." };
+    const user: any = await this.users().findOne({ _id: userId as any }, { projection: { bpass: 1 } });
+    if (!user) return { ok: false, error: "Account not found." };
+    // An account that only ever signed in by email code has no password yet —
+    // let it set one without a "current" to check against.
+    if (user.bpass) {
+      const ok = await bcrypt.compare(currentPassword, String(user.bpass));
+      if (!ok) return { ok: false, error: "Current password is wrong." };
+    }
+    const hash = await bcrypt.hash(newPassword, 10);
+    await this.users().updateOne(
+      { _id: userId as any },
+      { $set: { bpass: hash, passwordChangedAt: new Date() }, $unset: { resetTokenHash: "", resetExpiresAt: "" } },
+    );
+    return { ok: true };
+  }
+
   async resetPassword(body: any) {
     const token = String(body?.token || "");
     const newPassword = String(body?.newPassword || "");

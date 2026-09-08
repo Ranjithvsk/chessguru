@@ -56,3 +56,21 @@ features from Dream Meet"*, and *"[the Play menu's Live class entry] — no need
   changed here.
 - Leaving a rated game counts as a loss ("You left the game" = the opponent claimed after the
   grace period). That is the abandonment rule from 2026-09-07 doing its job.
+
+## Also this session
+
+**Starting rating deviation 350 (was 500).** `packages/glicko` `DEFAULT_DEVIATION`; play-engine
+restarted 07:1x IST. First-game loss to an established 1187: −393 instead of −599; first win +69
+instead of +104. Cluster test 28/28 (winner 1662 / loser 1338 on the first rated game). Puzzle
+ratings keep their own copy (`apps/api/src/glicko`, d=500) — untouched.
+
+**Students change their own password.** `POST /auth/change-password` (session; current +
+new, new ≥ 6, accounts that only ever used the email code may set one without a current) +
+`/settings/password` page (strength meter, repeat check, show toggle, success card). Reached
+from the 🔑 beside the username in the header and a "🔑 Change password" row in the drawer
+footer — the hamburger's Puzzles group was the wrong home for it (owner: "profile menu where?").
+Tenant login (`TenantLogin.tsx`, NOT `Login.tsx` — the main-domain page) now says "Forgot your
+password? Ask your coach — they can set a new one from the Students page", which is the existing
+`POST /api/academy/students/:id/set-password` flow. Verified on gunachess.com with a throwaway
+student through the real login form: wrong current → "Current password is wrong."; correct →
+changed; old password refused, new one signs in; drawer link present on a phone width.
