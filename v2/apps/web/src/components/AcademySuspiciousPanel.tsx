@@ -418,6 +418,7 @@ export default function AcademySuspiciousPanel({ isOwner, compact = false }: { i
       )}
       <div className={recent.length > 0 ? "mt-2" : "mt-3 border-t border-ink-800 pt-2"}>
         <button onClick={() => setShowReport((v) => !v)} className="text-xs text-ink-400 hover:underline" data-testid="toggle-report">{showReport ? "▾" : "▸"} Fairness report</button>
+        <Link to="/academy/fairness" className="ml-3 text-xs text-brand-300 hover:underline" data-testid="full-report">Full report →</Link>
         {showReport && <FairnessReport />}
       </div>
       {toast && <div className="mt-3 rounded-lg bg-ink-800 px-3 py-2 text-sm text-white">{toast}</div>}

@@ -55,8 +55,8 @@ export interface ScoreResult {
 /** The live detector stamps `dub`/`dubr` at solve time from 2026-09-08. For
  *  earlier solves (no `dub` field) the same pure detector is replayed over the
  *  stored timings so the score means the same thing across the boundary. */
-const DETECTOR_LIVE = new Date("2026-09-08T00:00:00Z");
-function withRetroFlags(rs: RoundLite[]): RoundLite[] {
+export const DETECTOR_LIVE = new Date("2026-09-08T00:00:00Z");
+export function withRetroFlags(rs: RoundLite[]): RoundLite[] {
   const out: RoundLite[] = [];
   const hardWins: number[] = [];   // ms of wins on 2400+ in order
   for (const x of rs) {

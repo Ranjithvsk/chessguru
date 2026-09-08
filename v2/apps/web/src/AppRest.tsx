@@ -66,6 +66,7 @@ import StudentsManagerPage from "./pages/StudentsManager";
 import StudentPerformancePage from "./pages/StudentPerformance";
 import BatchPerformancePage from "./pages/BatchPerformance";
 import AcademyPerformancePage from "./pages/AcademyPerformance";
+import AcademyFairnessPage from "./pages/AcademyFairness";
 import LeaderboardPage from "./pages/Leaderboard";
 import AttendancePage from "./pages/Attendance";
 import AttendanceDashboardPage from "./pages/AttendanceDashboard";
@@ -252,6 +253,7 @@ export default function AppRest() {
         <Route path="messages/:userId"    element={<ErrorBoundary label="Messages"><Suspense fallback={<LazyFallback />}><MessagesPage /></Suspense></ErrorBoundary>} />
         <Route path="students" element={<StudentsManagerPage />} />
         <Route path="academy/performance" element={<ErrorBoundary label="Student performance"><AcademyPerformancePage /></ErrorBoundary>} />
+        <Route path="academy/fairness" element={<ErrorBoundary label="Fairness report"><AcademyFairnessPage /></ErrorBoundary>} />
         <Route path="academy/leaderboard" element={<ErrorBoundary label="Academy leaderboard"><LeaderboardPage /></ErrorBoundary>} />
         <Route path="academy/attendance" element={<ErrorBoundary label="Academy attendance"><AttendancePage /></ErrorBoundary>} />
         <Route path="academy/attendance/dashboard" element={<ErrorBoundary label="Attendance dashboard"><AttendanceDashboardPage /></ErrorBoundary>} />

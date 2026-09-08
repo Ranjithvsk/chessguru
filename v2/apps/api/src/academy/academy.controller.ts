@@ -120,6 +120,12 @@ export class AcademyController {
     return this.svc.fairplayReport(req.session, month);
   }
 
+  /** Coach/owner: the detailed report — incidents, how each was detected, what the engine did. */
+  @Get("fairplay-report/detail")
+  fairplayReportDetail(@Req() req: any, @Query("month") month?: string) {
+    return this.svc.fairplayReport(req.session, month, true);
+  }
+
   /** Coach/owner: Clear a listed student with a note (window restarts). Body: { note } */
   @Post("suspicious-solves/:id/clear")
   suspiciousClear(@Req() req: any, @Param("id") id: string, @Body() body: any) {

@@ -248,3 +248,20 @@ Seeded example from today's reset · refit stays at the hand weights (flags 3.33
 ### Open
 - The acceptance ("< 1 false alarm per 500 solves on cleared students; median time to Review < 24 h") is measured by the report every month; it cannot be claimed until there are decisions.
 - Today's manual reset audit row lacked `academyId` — patched in place so the report counts it.
+
+---
+
+## Fair Play — detailed Fairness report page for coaches (2026-09-08, late)
+
+Owner ask: *"detailed fairness report, with many features for coach to understand what issues happened, how it was detected by fairness engine."*
+
+- **Page** `/academy/fairness?month=YYYY-MM` (`apps/web/src/pages/AcademyFairness.tsx`; menu → 🛡 Fairness report; "Full report →" on the panel; printable). Owner sees the academy, a coach their own roster (`scope`).
+- **API** `GET /api/academy/fairplay-report/detail?month=` → `FairplayService.fairnessReportDetail` (0.4 s on Guna's September). Sections:
+  1. **At a glance** — solves, flagged, listed, false alarms per 500 (target), catches, time to Review (target), held wins, decisions.
+  2. **Incidents** — one card per student with any event / audited reset / current Watch-Review-hold this month: header (band now, rating, peak score + day, counts), **timeline** (first flagged solve, score peak with the component split, Watch, Review, owner emailed, Hold/Clear/Reset with who), **daily score sparkline** (trailing-30-day score per day of the month, Watch/Review lines), **How it was detected** — `explainDetection()` writes numbered plain-words sentences per component with the points ("31 wins on 2400+ puzzles took under 5 s — they won 94% of 133… the academy's honest solvers take 25–50 s there. Worth 30 points."), **What the engine did** (flagged wins with no rating, held wins, Review entry + hours after first flag, owner email, the decision), **evidence table** (each flagged solve: time, puzzle link to replay, rating, seconds, per-move gaps, rule names; plus the fastest hard wins), proctored-exam leaves, decision box with note.
+  3. **What the engine did this month** — the six live rules in coach words with solves/students each; fast solves on 2000+, excused as drills, left-the-tab solves, held wins.
+  4. **Exams and homework** — proctored attempts clean/left with per-student leaves; homework solves that lost focus.
+  5. **Signal health** — crowd baseline coverage + band medians; model status + leave-one-out; hand-vs-model disagreements.
+  6. **How detection works** — the rules, the score, the bands, decisions, proctoring, "students see none of this".
+- **Replayed flags.** Solves before the live detector (8 Sep) carry no stored `dub`; the report replays the detector (`withRetroFlags`, exported from `score.ts`) so the evidence and the 40 flag points are explained, and says plainly that those wins *did* move rating at the time. Audited resets without an event become the decision. `RULES` (labels + meanings) and `explainDetection` are exported for reuse in mail.
+- Verified on Guna September: mageswaran card — first replayed flag 3 Sep 08:58 (2579 in 5.2 s, engine rhythm), peak 100 on 3 Sep (40/30/15/8/10), reset 8 Sep with the audit note; 55 flagged solves (47 streak, 30 fast hard, 11 rhythm); the six "how" sentences; evidence rows with 1.1–1.8 s gaps. Coach `sarika`: roster scope, 2 students, 0 incidents. Page renders on chessguru.cc without script errors; screenshots in scratchpad.

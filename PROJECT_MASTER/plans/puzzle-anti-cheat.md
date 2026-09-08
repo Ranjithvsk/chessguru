@@ -59,3 +59,7 @@ Clear-with-note and Hold for coach and owner (audited as labelled examples, `fai
 ## Status — Phase 3 BUILT 2026-09-08 (late), model in SHADOW
 
 Labelled examples from every Clear/Hold/Reset (plus audited resets replayed), a logistic model over the seven components with a prior centred on the hand weights (`fairplay/model.ts`), refit nightly, **shadow until ≥ 10 assisted + ≥ 20 honest decisions and leave-one-out accuracy ≥ 0.9** — then it sets the bands. Monthly fairness report per academy (false alarms per 500 solves, catches, time to Review, decisions, model status) on the panel and emailed on the 1st. Today: 1 labelled example, shadow, agreement 91/91. The plan is now fully built; what remains is a month of coach decisions.
+
+## Addendum 2026-09-08 (late) — Fairness report page
+
+`/academy/fairness` — the coach-facing monthly report: incidents with timeline, daily score, evidence and a plain-words "how it was detected" per component, what the engine did, live-rule counts, exam/homework proctoring, signal health, and an explainer. See the session note.

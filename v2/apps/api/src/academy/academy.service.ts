@@ -2681,12 +2681,15 @@ Thank you!`;
     return { days: 30, students: out, bands: { watch: 25, review: 60 }, recent, model: { active: model.active, reason: model.reason, n: model.n, cv: model.cv, trainedAt: model.trainedAt } };
   }
 
-  /** Coach/owner: the academy's monthly fairness report (Phase 3). */
-  async fairplayReport(session: any, month?: string) {
+  /** Coach/owner: the academy's monthly fairness report (Phase 3). A coach
+   *  sees their own roster's numbers. */
+  async fairplayReport(session: any, month?: string, detail = false) {
     const g = this.ensureCoachOrOwner(session);
     const now = new Date();
     const m = typeof month === "string" && /^\d{4}-\d{2}$/.test(month) ? month : `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
-    return this.fairplay.fairnessReport(g.academyId, m);
+    let roster: string[] | null = null;
+    if (g.role === "coach") roster = (await this.users().find({ academyId: g.academyId, role: "student", coachId: g.userId }, { projection: { _id: 1 } }).toArray()).map((u: any) => String(u._id));
+    return detail ? this.fairplay.fairnessReportDetail(g.academyId, m, roster) : this.fairplay.fairnessReport(g.academyId, m, roster);
   }
 
   /** Coach/owner: Clear (with note) or Hold a listed student. Audited. */
