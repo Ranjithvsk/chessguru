@@ -2,8 +2,12 @@
 // liveDeviation / constants) is the same frozen port used by the puzzle path in
 // apps/api/src/glicko (which should migrate onto this package to dedupe). Adds a
 // player-vs-player `rateGame` helper for live games.
+// Starting deviation 350, as Lichess. It was 500 until 2026-09-08: a new player's
+// first rated loss then cost ~600 points (owner's own account went 1500 → 901 in one
+// abandoned rapid game), which reads as a punishment, not a measurement. 350 still
+// lets the first few games move the rating quickly, just not off a cliff.
 export const DEFAULT_RATING = 1500,
-  DEFAULT_DEVIATION = 500,
+  DEFAULT_DEVIATION = 350,
   DEFAULT_VOLATILITY = 0.09;
 const TAU = 0.75,
   RATING_PERIODS_PER_DAY = 0.21436,
