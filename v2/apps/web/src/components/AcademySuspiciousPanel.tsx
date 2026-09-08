@@ -5,6 +5,7 @@
 // GET /api/academy/suspicious-solves/:id (the drawer). Students are never
 // told anything from here (owner decision 2026-09-08).
 import { useEffect, useState } from "react";
+import type React from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, post } from "../lib/api";
@@ -13,19 +14,28 @@ interface Fastest { puzzleId: string; pr: number; ms: number; mvMs: number[] | n
 interface Components { flags: number; fastHard: number; accuracy: number; crowd: number; climb: number; themeFlat: number; playGap: number }
 interface Decision { kind: "clear" | "hold" | "reset"; by: string; note: string; at: string }
 interface Recent { userId: string; name: string; kind: "clear" | "hold" | "reset" | "review"; by: string | null; byName: string | null; note: string; score: number | null; at: string }
+interface ModelStatus { active: boolean; reason: string; n: { assisted: number; honest: number }; cv: { accuracy: number | null; correct: number; total: number; falseAlarms: number; missed: number }; trainedAt: string }
+interface Report {
+  month: string; solves: number; flagged: number; activeStudents: number; students: number;
+  listed: { userId: string; name: string }[]; falseAlarms: { userId: string; name: string }[]; falseAlarmsPer500: number | null;
+  catches: { userId: string; name: string }[]; reviews: number; timeToReviewHours: { median: number | null; n: number; all: number[] };
+  decisions: { clear: number; hold: number; reset: number };
+  model: ModelStatus & { agreement: { agree: number; total: number } };
+  acceptance: { falseAlarms: boolean | null; timeToReview: boolean | null };
+}
 interface Row {
   userId: string; name: string; ratingNow: number | null; ratingStart: number | null; ratingEnd: number | null; climb: number;
   solves: number; dubious: number; reasons: Record<string, number>;
   hard: { n: number; wins: number; winPct: number | null; medianMs: number | null; fast: number };
   fastest: Fastest[]; score: number; band: "clear" | "watch" | "review"; hold: boolean; components: Components; crowdRatio: number | null;
   reviewSince: string | null; windowStart: string; lastReset: { at: string } | null;
-  decision: Decision | null;
+  decision: Decision | null; handScore: number; modelScore: number;
 }
 interface Solve { pid: string; at: string; pr: number; r: number; w: boolean; ms: number | null; mvMs: number[] | null; dub: boolean; dubr: string[] | null; held: boolean; crowdMedMs: number | null }
 interface Detail {
   ok: boolean; error?: string; userId: string; name: string; score: number; band: Row["band"]; hold: boolean; components: Components;
   evidence: { solves: number; flagged: number; reasons: Record<string, number>; hard: Row["hard"]; atLevel: { n: number; winPct: number | null }; above: { n: number; winPct: number | null }; crowdRatio: number | null; ratingStart: number | null; ratingEnd: number | null; climb: number; fastest: { pid: string; pr: number; ms: number; mvMs: number[] | null; at: string }[]; sessions: { day: string; solves: number; wins: number }[]; peakHour: { hour: string; solves: number } | null; themes: { n: number; sd: number; min: number; max: number } | null; play: { speed: string; r: number; nb: number; gap: number } | null };
-  windowStart: string; lastReset: string | null; solves: Solve[]; decision: Decision | null;
+  windowStart: string; lastReset: string | null; solves: Solve[]; decision: Decision | null; handScore: number; modelScore: number; modelActive: boolean;
 }
 const REASON_LABEL: Record<string, string> = {
   fast_hard: "2400+ puzzle under 4 s",
@@ -43,6 +53,47 @@ function DecisionChip({ d }: { d: Decision | null }) {
   if (!d) return null;
   const label = d.kind === "clear" ? "cleared" : d.kind === "hold" ? "held" : "reset";
   return <span className={`rounded-md px-1.5 py-0.5 text-xs ${d.kind === "hold" ? "bg-amber-500/15 text-amber-200" : "bg-ink-800 text-ink-300"}`} title={d.note || undefined}>{label} by {d.by} · {day(d.at)}{d.note ? ` · “${d.note.length > 60 ? d.note.slice(0, 60) + "…" : d.note}”` : ""}</span>;
+}
+
+const monthKey = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+const monthLabel = (k: string) => new Date(Number(k.slice(0, 4)), Number(k.slice(5, 7)) - 1, 1).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+const names = (xs: { name: string }[]) => (xs.length ? xs.map((x) => x.name).join(", ") : "none");
+
+/** Phase 3: the monthly fairness report — the two acceptance numbers, what
+ *  was decided, and where the fitted model stands. */
+function FairnessReport() {
+  const now = new Date();
+  const months = [0, 1, 2].map((i) => monthKey(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1))));
+  const [month, setMonth] = useState(months[0]!);
+  const q = useQuery({ queryKey: ["academy-fairplay-report", month], queryFn: () => get<Report>(`/api/academy/fairplay-report?month=${month}`), staleTime: 5 * 60_000 });
+  const r = q.data;
+  const Row = ({ k, v, ok }: { k: string; v: React.ReactNode; ok?: boolean | null }) => (
+    <div className="flex items-start gap-3 text-xs">
+      <span className="w-32 shrink-0 text-ink-400">{k}</span>
+      <span className="text-ink-200">{v}{ok === true && <span className="ml-2 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-200">on target</span>}{ok === false && <span className="ml-2 rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-rose-200">above target</span>}</span>
+    </div>
+  );
+  return (
+    <div className="mt-3 rounded-xl border border-ink-800 bg-ink-900/60 p-3" data-testid="fairness-report">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-400">Fairness report</h3>
+        <div className="inline-flex rounded-full border border-ink-700 bg-ink-900 p-0.5 text-[11px]">
+          {months.map((m) => <button key={m} onClick={() => setMonth(m)} className={`rounded-full px-2.5 py-0.5 ${month === m ? "bg-ink-700 text-white" : "text-ink-400 hover:underline"}`}>{monthLabel(m)}</button>)}
+        </div>
+      </div>
+      {q.isLoading || !r ? <div className="h-16 animate-pulse rounded-lg bg-ink-800/60" /> : (
+        <div className="space-y-1.5">
+          <Row k="Solves" v={`${r.solves} by ${r.activeStudents} of ${r.students} students · ${r.flagged} flagged`} />
+          <Row k="Put on the list" v={`${r.listed.length} — ${names(r.listed)}`} />
+          <Row k="False alarms" v={`${r.falseAlarms.length} (${r.falseAlarmsPer500 ?? "—"} per 500 solves, target under 1) — ${names(r.falseAlarms)}`} ok={r.acceptance.falseAlarms} />
+          <Row k="Catches" v={`${r.catches.length} held or reset — ${names(r.catches)}`} />
+          <Row k="Time to Review" v={r.timeToReviewHours.median === null ? "no Review this month" : `median ${r.timeToReviewHours.median} h over ${r.timeToReviewHours.n} (target under 24 h)`} ok={r.acceptance.timeToReview} />
+          <Row k="Decisions" v={`${r.decisions.clear} cleared · ${r.decisions.hold} held · ${r.decisions.reset} reset`} />
+          <Row k="Model" v={`${r.model.reason}. Agrees with the hand score on ${r.model.agreement.agree} of ${r.model.agreement.total} students.`} />
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** Clear (with note) and Hold, for coach and owner. The server refuses a
@@ -185,6 +236,7 @@ function Drawer({ userId, isOwner, busy, onClose, onReset, onDecide }: { userId:
                   <BandPill band={d.band} hold={d.hold} />
                 </div>
                 <p className="mt-1 text-xs text-ink-400">Fair-play score <b className="text-white">{d.score}</b>/100 · window since {day(d.windowStart)}{d.lastReset ? ` (last reset ${day(d.lastReset)})` : ""} · {e!.solves} solves</p>
+                <p className="mt-0.5 text-[11px] text-ink-500">{d.modelActive ? `Fitted model ${d.modelScore} (in use) · hand weights ${d.handScore}` : `Hand weights ${d.handScore} (in use) · fitted model ${d.modelScore} (shadow)`}</p>
                 {d.hold && <p className="mt-1 text-xs text-amber-200">Rated gains are held until {isOwner ? "you reset or clear" : "the owner resets or clears"} this student. The student has not been told.</p>}
                 {d.decision && <div className="mt-1.5"><DecisionChip d={d.decision} /></div>}
               </div>
@@ -234,13 +286,15 @@ export default function AcademySuspiciousPanel({ isOwner, compact = false }: { i
   const [open, setOpen] = useState<string | null>(null);
   const qc = useQueryClient();
   const [showRecent, setShowRecent] = useState(false);
+  const [showReport, setShowReport] = useState(false);
   const q = useQuery({
     queryKey: ["academy-suspicious"],
-    queryFn: () => get<{ days: number; students: Row[]; recent: Recent[] }>(`/api/academy/suspicious-solves`),
+    queryFn: () => get<{ days: number; students: Row[]; recent: Recent[]; model: ModelStatus }>(`/api/academy/suspicious-solves`),
     staleTime: 60_000,
   });
   const rows = q.data?.students ?? [];
   const recent = q.data?.recent ?? [];
+  const model = q.data?.model;
   if (compact && (!q.data || rows.length === 0)) return null;
 
   const decide = async (a: Actor, kind: "clear" | "hold") => {
@@ -284,6 +338,11 @@ export default function AcademySuspiciousPanel({ isOwner, compact = false }: { i
         </div>
         {rows.length > 0 && <span className="text-[11px] text-ink-400">{reviewN} in review · {rows.length - reviewN} on watch</span>}
       </div>
+      {model && (
+        <p className="mb-3 text-[11px] text-ink-500" data-testid="model-status" title={model.cv.accuracy !== null ? `leave-one-out: ${model.cv.correct}/${model.cv.total} right, ${model.cv.falseAlarms} false alarms, ${model.cv.missed} missed` : undefined}>
+          🧠 Learning from your decisions: <span className={model.active ? "text-emerald-200" : "text-ink-300"}>{model.reason}</span>{model.active ? " — the fitted model now sets the bands." : " — hand weights set the bands; the model scores in the background."}
+        </p>
+      )}
       {q.isLoading ? (
         <div className="h-16 animate-pulse rounded-lg bg-ink-800/60" />
       ) : rows.length === 0 ? (
@@ -306,6 +365,7 @@ export default function AcademySuspiciousPanel({ isOwner, compact = false }: { i
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <ScoreBar score={r.score} />
+                  {r.modelScore !== r.score && <span className="font-mono text-[10px] text-ink-500" title="What the fitted model would score (shadow)">model {r.modelScore}</span>}
                   <button onClick={() => setOpen(r.userId)} className="rounded-lg border border-ink-700 bg-ink-800/60 px-2.5 py-1 text-xs font-semibold text-ink-100 hover:bg-ink-700" data-testid="open-detail">Details</button>
                   <DecisionButtons a={{ userId: r.userId, name: r.name, hold: r.hold }} busy={busy} onDecide={decide} />
                   {isOwner && (
@@ -356,6 +416,10 @@ export default function AcademySuspiciousPanel({ isOwner, compact = false }: { i
           )}
         </div>
       )}
+      <div className={recent.length > 0 ? "mt-2" : "mt-3 border-t border-ink-800 pt-2"}>
+        <button onClick={() => setShowReport((v) => !v)} className="text-xs text-ink-400 hover:underline" data-testid="toggle-report">{showReport ? "▾" : "▸"} Fairness report</button>
+        {showReport && <FairnessReport />}
+      </div>
       {toast && <div className="mt-3 rounded-lg bg-ink-800 px-3 py-2 text-sm text-white">{toast}</div>}
       {open && <Drawer userId={open} isOwner={isOwner} busy={busy} onClose={() => setOpen(null)} onReset={reset} onDecide={decide} />}
     </section>

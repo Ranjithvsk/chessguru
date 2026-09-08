@@ -219,3 +219,32 @@ Five focus-loss solves → Watch 32 · coach Hold with note → `hold`, event `h
 ### Open
 - Coach Clear lifts nothing on a held student by design; the owner's Clear does. A Clear restarts the window, so the same evidence never re-lists them — new evidence does.
 - Play cross-check uses the best speed with 10+ games; a student who only plays bots rated is still "rated play" (bots are rated by owner decision).
+
+---
+
+## Fair Play Trainer — Phase 3 BUILT & LIVE in shadow (2026-09-08, late)
+
+The plan said Phase 3 comes "after a month of decisions". There are **zero coach decisions yet**, so the fitted model cannot take over honestly. Built so it learns from day one and switches itself on only when it has earned it.
+
+### Labelled examples (`FairplayService.labelledExamples`)
+- Every `fairplayEvents` row with `label` (Clear → honest; Hold / Reset → assisted) carries the score components at the time — that is the training row.
+- Resets made before decisions were evented (`ratingAdjustments`) are replayed: components over the 30 days before the reset → assisted. Today that yields exactly one example, mageswaran (40/30/15/8/10/0/0 → model 100).
+
+### The model (`apps/api/src/fairplay/model.ts`, pure)
+- Logistic regression on the seven components scaled by their caps. **Prior centred on the hand weights**: weights `cap/12`, bias `−5`, so `score = 60 + 12·logit(p)` reproduces the hand score exactly with no data; every decision pulls it away (L2 toward the hand weights, λ 0.3, gradient descent, no deps).
+- `train()` → weights, `n` per label, leave-one-out replay (`cv`: accuracy, false alarms, missed), `active`, `reason`. **Gate**: ≥ 10 assisted and ≥ 20 honest decisions and leave-one-out accuracy ≥ 0.9; otherwise shadow.
+- Nightly `refitModel()` (in `runNightly`, before scoring) → `fairplayModel{_id:"current"}` + `fairplayModelHistory`. `scoreUser` computes `handScore` and `modelScore` every time; `score`/`band` come from the model only when `active`. `fairplay` docs store both plus `modelActive`.
+- Panel: "🧠 Learning from your decisions: shadow — needs 10 assisted and 20 honest decisions (have 1 / 0)"; rows show `model N` when the shadow score differs; the drawer says which is in use.
+
+### Monthly fairness report (`fairnessReport(academyId, "YYYY-MM")`)
+- Solves and flagged solves by the academy's students that month; students put on the list (new `watch` events, plus `review`); **false alarms** = students cleared that month who had been listed before → **per 500 solves, target < 1**; catches = held or reset (incl. audited resets); **time to Review** = hours from the first flagged solve in the window to the Review event, median, **target < 24 h**; decisions; model status and hand/model band agreement.
+- `GET /api/academy/fairplay-report?month=` (coach/owner) → panel "Fairness report" section with a three-month picker and on-target / above-target badges. Emailed to each academy owner on the **1st at 03:00 UTC** for the previous month (`runMonthly`, job-guarded); silent for academies with no solves.
+- September so far (Guna): 3014 solves by 33 of 90 students, 1 flagged, 0 listed, 0 false alarms (on target), 1 catch (mageswaran), no Review yet, model shadow 1/0, agreement 91/91.
+- `scripts/fairplay-model.ts [users…]` (`REPORT=<academy>:<YYYY-MM>`) lists the examples, refits, prints hand→fitted weights and leave-one-out; `fairplay-nightly.ts` gained `MONTHLY=dry`.
+
+### Verified
+Seeded example from today's reset · refit stays at the hand weights (flags 3.33→3.38, bias −5→−4.94 with one positive) · clean students score 0 hand / 1 model · list response carries `model` · report endpoint for 2026-09 / 2026-08 / bad month → defaults to this month · monthly dry run renders for both academies without sending · owner UI shows the status line, the report with badges and the month picker.
+
+### Open
+- The acceptance ("< 1 false alarm per 500 solves on cleared students; median time to Review < 24 h") is measured by the report every month; it cannot be claimed until there are decisions.
+- Today's manual reset audit row lacked `academyId` — patched in place so the report counts it.

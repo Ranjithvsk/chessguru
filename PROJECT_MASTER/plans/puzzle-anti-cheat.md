@@ -55,3 +55,7 @@ Owner decisions: students never told · reset owner-only · Review at 60. Built 
 ## Status — Phase 2 BUILT & LIVE 2026-09-08 (night)
 
 Clear-with-note and Hold for coach and owner (audited as labelled examples, `fairplayEvents.label` honest/assisted, coach cannot lift a hold), Recent decisions strip, theme-spread and play-cross-check signals in the score and drawer, proctored exams (gate → full screen, focus/full-screen changes recorded per position and per attempt, Proctor column on results, default on) and homework proctor chips (solves stamped with the homework they credited). "Message the student" dropped — students are never told. Details: `sessions/2026-09-08-play-games-history.md` ("Fair Play Trainer — Phase 2"). Phase 3 (fitted model from coach labels, monthly fairness report) waits for a month of decisions.
+
+## Status — Phase 3 BUILT 2026-09-08 (late), model in SHADOW
+
+Labelled examples from every Clear/Hold/Reset (plus audited resets replayed), a logistic model over the seven components with a prior centred on the hand weights (`fairplay/model.ts`), refit nightly, **shadow until ≥ 10 assisted + ≥ 20 honest decisions and leave-one-out accuracy ≥ 0.9** — then it sets the bands. Monthly fairness report per academy (false alarms per 500 solves, catches, time to Review, decisions, model status) on the panel and emailed on the 1st. Today: 1 labelled example, shadow, agreement 91/91. The plan is now fully built; what remains is a month of coach decisions.

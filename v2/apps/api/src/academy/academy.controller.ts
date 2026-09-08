@@ -114,6 +114,12 @@ export class AcademyController {
     return this.svc.suspiciousDetail(req.session, id);
   }
 
+  /** Coach/owner: monthly fairness report. ?month=YYYY-MM (default: this month) */
+  @Get("fairplay-report")
+  fairplayReport(@Req() req: any, @Query("month") month?: string) {
+    return this.svc.fairplayReport(req.session, month);
+  }
+
   /** Coach/owner: Clear a listed student with a note (window restarts). Body: { note } */
   @Post("suspicious-solves/:id/clear")
   suspiciousClear(@Req() req: any, @Param("id") id: string, @Body() body: any) {

@@ -2672,12 +2672,21 @@ Thank you!`;
         score: r.score, band: r.band, hold: r.hold, components: r.components, crowdRatio: e.crowdRatio,
         reviewSince: r.reviewSince, windowStart: r.windowStart,
         lastReset: r.lastReset ? { at: r.lastReset } : null,
-        decision: r.decision,
+        decision: r.decision, handScore: r.handScore, modelScore: r.modelScore,
       });
     }
     out.sort((a, b) => b.score - a.score);
     const recent = await this.fairplay.recentDecisions(g.academyId, g.role === "coach" ? students.map((s: any) => String(s._id)) : null);
-    return { days: 30, students: out, bands: { watch: 25, review: 60 }, recent };
+    const model = await this.fairplay.currentModel();
+    return { days: 30, students: out, bands: { watch: 25, review: 60 }, recent, model: { active: model.active, reason: model.reason, n: model.n, cv: model.cv, trainedAt: model.trainedAt } };
+  }
+
+  /** Coach/owner: the academy's monthly fairness report (Phase 3). */
+  async fairplayReport(session: any, month?: string) {
+    const g = this.ensureCoachOrOwner(session);
+    const now = new Date();
+    const m = typeof month === "string" && /^\d{4}-\d{2}$/.test(month) ? month : `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+    return this.fairplay.fairnessReport(g.academyId, m);
   }
 
   /** Coach/owner: Clear (with note) or Hold a listed student. Audited. */
@@ -2701,7 +2710,7 @@ Thank you!`;
     const r = await this.fairplay.scoreUser(studentId, g.academyId, { notify: false });
     const { rounds } = await this.fairplay.roundsFor(studentId);
     const solves = rounds.slice(-1500).map((x) => ({ pid: x.pid, at: x.d, pr: x.pr, r: x.r, w: x.w, ms: x.ms ?? null, mvMs: x.mv_ms ?? null, dub: !!x.dub, dubr: x.dubr ?? null, held: !!x.held, crowdMedMs: this.fairplay.crowdMedianMs(x.pid, x.pr) }));
-    return { ok: true, userId: studentId, name: st.name || st.username || studentId, score: r.score, band: r.band, hold: r.hold, components: r.components, evidence: r.evidence, windowStart: r.windowStart, lastReset: r.lastReset, solves };
+    return { ok: true, userId: studentId, name: st.name || st.username || studentId, score: r.score, band: r.band, hold: r.hold, components: r.components, evidence: r.evidence, windowStart: r.windowStart, lastReset: r.lastReset, solves, decision: r.decision, handScore: r.handScore, modelScore: r.modelScore, modelActive: r.modelActive };
   }
 
   /** Owner-only: set a student's puzzle rating (400–3000), clamp inflated

@@ -8,10 +8,11 @@ import { FairplayService } from "../src/fairplay/fairplay.service";
 (async () => {
   await mongoose.connect(process.env.MONGO_URI || "mongodb://127.0.0.1:27017/chessguru");
   const svc = new FairplayService(mongoose.connection as any);
-  if (process.env.DIGEST === "dry") {
+  if (process.env.DIGEST === "dry" || process.env.MONTHLY === "dry") {
     const mail = require("../src/lib/mail");
     mail.sendMail = async (m: any) => { console.log(`\n--- would send to ${m.to}: ${m.subject}\n${m.text}`); return { ok: true, id: "dry" }; };
-    await svc.runDigest();
+    if (process.env.DIGEST === "dry") await svc.runDigest();
+    if (process.env.MONTHLY === "dry") { (svc as any).runMonthlyFor = undefined; await svc.runMonthly(); }
   } else {
     const r = await svc.runNightly();
     console.log(JSON.stringify(r));
