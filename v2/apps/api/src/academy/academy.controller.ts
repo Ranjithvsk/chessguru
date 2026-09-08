@@ -102,6 +102,18 @@ export class AcademyController {
     return this.svc.listStudents(req.session);
   }
 
+  /** Coach/owner: students whose recent solving looks assisted. ?days=30 */
+  @Get("suspicious-solves")
+  suspiciousSolves(@Req() req: any, @Query("days") days?: string) {
+    return this.svc.suspiciousSolves(req.session, days);
+  }
+
+  /** Owner-only: set a student's puzzle rating. Body: { rating, reason } */
+  @Post("students/:id/reset-puzzle-rating")
+  resetPuzzleRating(@Req() req: any, @Param("id") id: string, @Body() body: any) {
+    return this.svc.resetPuzzleRating(req.session, id, body);
+  }
+
   /** Attendance sheet for a date (default today). Returns every eligible
    *  student pre-filled to "present"; overlay of prior marks flips them to
    *  late/absent. Owner sees all coaches; coach pinned to their roster. */

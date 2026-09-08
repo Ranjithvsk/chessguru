@@ -9,6 +9,7 @@
 // All lists auto-refresh so accepted invites turn into real rows without a
 // manual reload.
 import { useEffect, useMemo, useRef, useState } from "react";
+import AcademySuspiciousPanel from "../components/AcademySuspiciousPanel";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 // qrcode import retired 2026-08-30 with the UPI QR invoice card.
@@ -2494,6 +2495,9 @@ export default function AcademyDashboardPage() {
       {/* ── Master Coach directives (owner instructs coaches on topics /
               homework / student notes; coach sees their inbox) ── */}
       {canManage && <DirectivesPanel isOwner={isOwner} coaches={coaches ?? []} students={students} />}
+      {/* Only renders when someone is flagged — the full panel with its
+          empty state lives on /academy/performance. */}
+      {canManage && <AcademySuspiciousPanel isOwner={isOwner} compact />}
 
       {/* ── Batches (also mounted on /fees/batches — same shared widget). ── */}
       {canManage && (

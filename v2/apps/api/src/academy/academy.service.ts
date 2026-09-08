@@ -2645,6 +2645,86 @@ Thank you!`;
    *  Enriches each row with:
    *    - puzzleRating (from userperfs.puzzle.gl.r)
    *    - attendedTotal + attendedThisWeek + lastAttendedAt (from classAttendance) */
+  /** Students whose recent puzzle solving looks assisted: flagged solves,
+   *  implausibly fast wins on 2400+ puzzles, steep climbs. Coach sees own
+   *  roster, owner sees the academy. Score sorts the list; 0 = not listed. */
+  async suspiciousSolves(session: any, daysRaw?: string) {
+    const g = this.ensureCoachOrOwner(session);
+    const days = Math.min(90, Math.max(1, Number(daysRaw) || 30));
+    const since = new Date(Date.now() - days * 86400000);
+    const filter: any = { academyId: g.academyId, role: "student" };
+    if (g.role === "coach") filter.coachId = g.userId;
+    const students = await this.users().find(filter, { projection: { _id: 1, username: 1, name: 1 } }).toArray();
+    const rounds = this.conn.db!.collection("rounds");
+    const perfs = this.conn.db!.collection("userperfs");
+    const esc = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const median = (a: number[]) => { const s = a.slice().sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)]! : null; };
+    const out: any[] = [];
+    for (const st of students as any[]) {
+      const rows: any[] = await rounds
+        .find({ _id: { $regex: `^${esc(st._id)}:` } as any, k: "puzzle", d: { $gte: since } }, { projection: { d: 1, pr: 1, r: 1, ms: 1, mv_ms: 1, dub: 1, dubr: 1, w: 1 } as any })
+        .sort({ d: 1 }).toArray();
+      if (!rows.length) continue;
+      const dub = rows.filter((x) => x.dub);
+      const hard = rows.filter((x) => typeof x.pr === "number" && x.pr >= 2400 && typeof x.ms === "number");
+      const hardWins = hard.filter((x) => x.w);
+      const fastHard = hardWins.filter((x) => x.ms < 5000);
+      const first = rows[0].r, last = rows[rows.length - 1].r;
+      const climb = typeof first === "number" && typeof last === "number" ? Math.round(last - first) : 0;
+      const hardWinPct = hard.length ? Math.round((hardWins.length / hard.length) * 100) : null;
+      // A climb alone is not evidence — every new account climbs out of its
+      // provisional start. It counts only alongside fast hard wins or flags,
+      // and a high win rate on hard puzzles only when it is also quick.
+      const hasSpeedSignal = fastHard.length >= 3 || dub.length >= 1;
+      const medianHard = median(hardWins.map((x) => x.ms));
+      const score = dub.length * 3 + fastHard.length * 2
+        + (climb >= 500 && hasSpeedSignal ? 3 : 0)
+        + (hard.length >= 10 && hardWinPct !== null && hardWinPct >= 85 && medianHard !== null && medianHard < 15000 ? 2 : 0);
+      if (score < 4) continue;
+      const reasons: Record<string, number> = {};
+      for (const x of dub) for (const f of (Array.isArray(x.dubr) ? x.dubr : ["fast_above_level"])) reasons[f] = (reasons[f] || 0) + 1;
+      const perf: any = await perfs.findOne({ _id: st._id as any }, { projection: { "puzzle.gl": 1 } });
+      const lastReset: any = await this.conn.db!.collection("ratingAdjustments").find({ userId: st._id }).sort({ at: -1 }).limit(1).next();
+      out.push({
+        userId: String(st._id), name: st.name || st.username || String(st._id),
+        ratingNow: perf?.puzzle?.gl?.r ? Math.round(perf.puzzle.gl.r) : null,
+        ratingStart: first ?? null, ratingEnd: last ?? null, climb,
+        solves: rows.length, dubious: dub.length, reasons,
+        hard: { n: hard.length, wins: hardWins.length, winPct: hardWinPct, medianMs: median(hardWins.map((x) => x.ms)), fast: fastHard.length },
+        fastest: hardWins.slice().sort((a, b) => a.ms - b.ms).slice(0, 3).map((x) => ({ puzzleId: String(x._id).slice(String(st._id).length + 1), pr: x.pr, ms: x.ms, mvMs: Array.isArray(x.mv_ms) ? x.mv_ms : null, at: x.d })),
+        score,
+        lastReset: lastReset ? { at: lastReset.at, to: lastReset.after?.r ?? null, from: lastReset.before?.r ?? null } : null,
+      });
+    }
+    out.sort((a, b) => b.score - a.score);
+    return { days, students: out };
+  }
+
+  /** Owner-only: set a student's puzzle rating (400–3000), clamp inflated
+   *  per-theme ratings down to it, widen the deviation so it re-settles, and
+   *  keep an audit row in ratingAdjustments. */
+  async resetPuzzleRating(session: any, studentId: string, body: any): Promise<any> {
+    const g = this.ensureCoachOrOwner(session);
+    if (g.role !== "academy_owner") return { ok: false, error: "Only the academy owner can reset a rating." };
+    const target = Math.round(Number(body?.rating));
+    if (!isFinite(target) || target < 400 || target > 3000) return { ok: false, error: "Rating must be between 400 and 3000." };
+    const reason = String(body?.reason || "").trim().slice(0, 500) || "Reset by academy owner";
+    const student: any = await this.users().findOne({ _id: studentId as any, academyId: g.academyId, role: "student" }, { projection: { _id: 1 } });
+    if (!student) return { ok: false, error: "That student isn't in this academy." };
+    const perfs = this.conn.db!.collection("userperfs");
+    const u: any = await perfs.findOne({ _id: studentId as any });
+    const before = u?.puzzle?.gl ? { r: Math.round(u.puzzle.gl.r), d: Math.round(u.puzzle.gl.d), nb: u.puzzle.nb ?? 0 } : null;
+    const sets: Record<string, any> = { "puzzle.gl.r": target, "puzzle.gl.d": Math.max(200, u?.puzzle?.gl?.d ?? 0), "puzzle.gl.v": 0.09 };
+    let clamped = 0;
+    for (const [t, v] of Object.entries((u?.themes || {}) as Record<string, any>)) {
+      if (v?.gl && v.gl.r > target) { sets[`themes.${t}.gl.r`] = target; sets[`themes.${t}.gl.d`] = Math.max(200, v.gl.d || 0); clamped++; }
+    }
+    await perfs.updateOne({ _id: studentId as any }, { $set: sets }, { upsert: true });
+    await this.conn.db!.collection("ratingAdjustments").insertOne({ userId: studentId, kind: "puzzle", before, after: { r: target, d: sets["puzzle.gl.d"] }, themesClamped: clamped, reason, by: g.userId, academyId: g.academyId, at: new Date() });
+    await this.users().updateOne({ _id: studentId as any }, { $set: { puzzleRatingResetAt: new Date() } });
+    return { ok: true, before, after: { r: target }, themesClamped: clamped };
+  }
+
   async listStudents(session: any) {
     const g = this.ensureCoachOrOwner(session);
     const filter: any = { academyId: g.academyId, role: "student" };

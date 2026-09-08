@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
-import { updatePuzzleRating, isProvisional, DEFAULT_VOLATILITY, DAILY_RATED_LIMIT, isDubiousSolve, isCrazyRatingDelta } from "../glicko/glicko";
+import { updatePuzzleRating, isProvisional, DEFAULT_VOLATILITY, DAILY_RATED_LIMIT, assessSuspicion, isCrazyRatingDelta } from "../glicko/glicko";
 import { fmtPuzzle, applyLastMove } from "../lib/puzzle-format";
 import { recordAndCelebrate } from "./milestones";
 import { PushService } from "../push/push.service";
@@ -973,7 +973,26 @@ export class PuzzlesService {
       // False positives are non-punitive here — just a paper trail so we
       // can spot chronic offenders across many rounds.
       const solveMs = typeof body.ms === "number" && isFinite(body.ms) ? body.ms : undefined;
-      const dubious = isDubiousSolve(perf.gl.r, puzzleGlicko.r, solveMs, win);
+      const mvMsForCheck: number[] = Array.isArray(body.moves_ms) ? body.moves_ms.filter((n: any) => typeof n === "number" && isFinite(n)) : [];
+      let recentFastHardWins = 0;
+      if (win && puzzleGlicko.r >= 2400) {
+        const uidRe3 = { $regex: `^${userId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:` } as any;
+        const recent = await this.conn.db!.collection("rounds")
+          .find({ _id: uidRe3, k: "puzzle", w: true, pr: { $gte: 2400 } }, { projection: { ms: 1 } as any })
+          .sort({ d: -1 }).limit(10).toArray();
+        recentFastHardWins = recent.filter((r: any) => typeof r.ms === "number" && r.ms < 6000).length;
+      }
+      const suspicion = assessSuspicion({ userR: perf.gl.r, puzzleR: puzzleGlicko.r, ms: solveMs, mvMs: mvMsForCheck, win, recentFastHardWins });
+      const dubious = suspicion.flags.length > 0;
+      if (dubious) {
+        // A flagged solve is recorded (and shown to the coach in the
+        // Suspicious solving panel) but does not move the rating, global or
+        // per-theme. Owner 2026-09-08, after a 1314 → 3043 climb in 19 days
+        // that the old rule never caught.
+        upd.ratingDiff = 0;
+        upd.userPerf = { ...perf, nb: perf.nb || 0 };
+        console.warn(`[dubiousSolve] user=${userId} puzzle=${id} pr=${Math.round(puzzleGlicko.r)} r=${Math.round(perf.gl.r)} ms=${solveMs} flags=${suspicion.flags.join(",")}`);
+      }
 
       // ── SAFEGUARD 3: crazyGlicko — huge rating swing on an established
       // user. Post-weight/fatigue, an established player (nb≥30, d≤110)
@@ -989,7 +1008,7 @@ export class PuzzlesService {
       // Each theme on the puzzle gets its own Glicko track. NOT used by the
       // picker anymore (which uses global only) — kept for display + weakness
       // detection. Clamped to global ± 300 on write to prevent drift.
-      if (Array.isArray(pz.themes)) {
+      if (Array.isArray(pz.themes) && !dubious) {
         const themeNs = key === "blindfold" ? "themesBf" : "themes";
         const globalR = upd.userPerf.gl.r;
         const startR = key === "blindfold" ? 800 : 1500;
@@ -1050,7 +1069,7 @@ export class PuzzlesService {
         ...(ms != null ? { ms } : {}),                      // solve time in ms (missing on older rows)
         ...(mv_ms && mv_ms.length ? { mv_ms } : {}),        // per-move deltas — [t1, t2-t1, ...]
         ...(wrong != null ? { wr: wrong } : {}),            // wrong-move UCI (misses only, missing on wins)
-        ...(dubious ? { dub: true } : {}),                  // flagged suspicious solve (fast win on >+300 pr)
+        ...(dubious ? { dub: true, dubr: suspicion.flags } : {}),  // flagged suspicious solve + why (see assessSuspicion)
         // Difficulty the user was on when they solved this — stored so
         // history tiles can show it (Easier/Easiest are practice-mode
         // hints so kids can spot why their rating moved less).

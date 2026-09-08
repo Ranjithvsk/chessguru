@@ -15,6 +15,7 @@ import { Link, Navigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, get } from "../lib/api";
 import { AcademyRecentMistakesPanel } from "../components/AcademyRecentMistakesPanel";
+import AcademySuspiciousPanel from "../components/AcademySuspiciousPanel";
 
 type Student = {
   _id: string;
@@ -243,6 +244,10 @@ export default function AcademyPerformancePage() {
           student the caller can see. Sits above the roster table so the
           coach lands on "who needs attention" before drilling into anyone. */}
       <AcademyRecentMistakesPanel enabled={!!canManage} />
+
+      {/* Assisted-solving watch — flagged solves, sub-5 s wins on 2400+
+          puzzles, steep climbs. Owner can reset a rating from here. */}
+      {canManage && <AcademySuspiciousPanel isOwner={auth?.role === "academy_owner"} />}
 
       {/* Roster table — sticky header, scrollable body capped at ~20 rows so
           the coach can scan without the page becoming a mile long. On <sm,

@@ -129,3 +129,32 @@ level — you are rated ≈N; everything near that you have solved, and puzzles 
 are never served" with **Mix all themes** / **Try again** (or **Normal trainer** in the Master
 Games section). Verified as mageswaran on gunachess.com: overlay on Smothered Mate, Mix → a
 2800-rated puzzle loads.
+
+## Assisted solving: mageswaran reset, detector rewritten, coach panel (owner: "do all three, reset him to 1700")
+
+**Evidence (30 days):** 1314 → 3043 in 19 days; on 2500–2800 puzzles 91% wins at a 9.8 s median
+(deepakcharanv 67% / 26 s, akshayprathab 63% / 32 s, the coach gunachess 32% / 46 s); eight
+fastest 2600+ wins in 2.6–3.8 s with 1.2–1.3 s between every move; slower and less accurate on
+1800–2200 (21 s, 84%) than on 2500–2800 — backwards for a human. Zero dubious flags because the
+old rule only fired on a puzzle 300+ above the player, which a climbing rating never is.
+
+**Reset:** `userperfs.mageswaran.puzzle.gl` 3013/d109 → 1700/d200, all 57 per-theme ratings
+clamped to 1700 (d≥200), `ratingAdjustments` audit row, `users.puzzleRatingResetAt`.
+
+**Detector** (`glicko.ts assessSuspicion`, used in `complete()`): flags `fast_above_level`
+(300+ above, <4 s), `fast_hard` (2400+ puzzle <4 s at any rating), `metronome` (2200+, <8 s,
+every move gap 0.7–1.7 s), `streak` (2400+ <6 s while 4 of the last 10 hard wins were <6 s).
+A flagged win is recorded with `dub:true, dubr:[…]` but moves NO rating (global or per-theme)
+and logs `[dubiousSolve]`. Proof with a throwaway 1600 student: 2.5 s win on a 2550 →
+`dubious:true`, rating 1600 unchanged, three reasons; a 45 s win → +15.
+
+**Panel** (`GET /api/academy/suspicious-solves?days=`, coach = own roster, owner = academy):
+per student flagged count + reasons, 2400+ win% / median / sub-5 s count, three fastest hard wins
+(link to review, per-move times on hover), climb, last reset. Score = flags×3 + fast hard wins×2
+(+3 for a ≥500 climb only alongside speed signals, +2 for ≥85% on 10+ hard puzzles only if the
+median is <15 s); listed at score ≥4 — a climb from a provisional start alone lists nobody.
+`AcademySuspiciousPanel` on `/academy/performance` (with empty state) and compact on `/academy`
+(hidden when clean). Owner-only **Reset rating…** → `POST /api/academy/students/:id/reset-puzzle-rating
+{rating, reason}` (same clamp + audit as the manual reset). Verified as gunachess: 5 rows
+(mageswaran 99, deepakcharanv 17, haritha 10, sabarivasan 8, test 5), reset endpoint 1615 → 1200
+with audit, students get 403. Throwaway removed.

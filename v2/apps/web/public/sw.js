@@ -25,7 +25,7 @@
 // Dashboard push toggle handles that automatically.
 
 // Bumped on every deploy by scripts/deploy.sh (sed).
-const VERSION = "cg-20260908153442";
+const VERSION = "cg-20260908155827";
 // eslint-disable-next-line no-console
 console.log("[sw] boot", VERSION);
 

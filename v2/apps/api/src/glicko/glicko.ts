@@ -154,6 +154,33 @@ export function isDubiousSolve(userR: number, puzzleR: number, ms: number | unde
   return (puzzleR - userR) >= 300 && ms < 4000;
 }
 
+export interface SuspicionInput {
+  userR: number; puzzleR: number; ms?: number; mvMs?: number[]; win: boolean;
+  /** Of the player's last 10 wins on 2400+ puzzles, how many were under 6 s. */
+  recentFastHardWins: number;
+}
+/** Why a win looks assisted, if it does. Empty = clean. Each flag is
+ *  independent of the player's CURRENT rating where possible: the old check
+ *  only fired on a puzzle 300+ above the player, so a rating that climbed
+ *  with every win never tripped it (2026-09-08: 1314 → 3043 in 19 days,
+ *  2600+ puzzles in 2.6–3.8 s with 1.2–1.3 s between moves, zero flags).
+ *   fast_above_level — the original rule: 300+ above, under 4 s
+ *   fast_hard        — a 2400+ puzzle won in under 4 s, whatever the rating
+ *   metronome        — 2200+ puzzle, under 8 s, every gap between moves 0.7–1.7 s
+ *                      (a line being read off, not calculated)
+ *   streak           — 2400+ under 6 s while 4+ of the last 10 hard wins were too */
+export function assessSuspicion(i: SuspicionInput): { flags: string[] } {
+  const flags: string[] = [];
+  if (!i.win || typeof i.ms !== "number" || !(i.ms > 0)) return { flags };
+  if (i.puzzleR - i.userR >= 300 && i.ms < 4000) flags.push("fast_above_level");
+  if (i.puzzleR >= 2400 && i.ms < 4000) flags.push("fast_hard");
+  const mv = Array.isArray(i.mvMs) ? i.mvMs.filter((n) => typeof n === "number" && isFinite(n)) : [];
+  const gaps = mv.slice(1);
+  if (i.puzzleR >= 2200 && i.ms < 8000 && gaps.length >= 1 && gaps.every((g) => g >= 700 && g <= 1700) && (mv[0] ?? 0) < 3500) flags.push("metronome");
+  if (i.puzzleR >= 2400 && i.ms < 6000 && i.recentFastHardWins >= 4) flags.push("streak");
+  return { flags };
+}
+
 /** Flag rating deltas that shouldn't be possible for an established user.
  *  Post-weight, we should be seeing <150 pt swings on established players
  *  (nb ≥ 30, d ≤ 110). Anything bigger deserves a look. */
