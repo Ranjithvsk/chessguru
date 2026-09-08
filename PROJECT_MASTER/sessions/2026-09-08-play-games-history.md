@@ -158,3 +158,35 @@ median is <15 s); listed at score ≥4 — a climb from a provisional start alon
 {rating, reason}` (same clamp + audit as the manual reset). Verified as gunachess: 5 rows
 (mageswaran 99, deepakcharanv 17, haritha 10, sabarivasan 8, test 5), reset endpoint 1615 → 1200
 with audit, students get 403. Throwaway removed.
+
+---
+
+## Fair Play Trainer — Phase 1 BUILT & LIVE (2026-09-08, evening)
+
+Owner decisions fixed before the build: **students are never told**, **reset stays owner-only**, **Review starts at 60**. Design: `plans/puzzle-anti-cheat.md`.
+
+### What shipped
+- **Trust score** `apps/api/src/fairplay/score.ts` — pure `scoreStudent(rounds, crowdMedian)` over the window (last 30 d or since the last reset). Components: flags 8 per flagged solve *beyond the first* (cap 40) · fastHard 2 per 2400+ win under 5 s (cap 30) · accuracy 15 (win% 200+ above ≥ win% at level, n ≥ 10 each, or 85%+ on 10+ hard) · crowd 15/8 (typical win < 25% / < 40% of the crowd's time, n ≥ 10) · climb 10 (≥ 500 with 3+ flags or fastHard ≥ 15). Bands clear < 25 / watch 25–59 / review ≥ 60. Solves before the detector went live get the same detector replayed over their stored timings (`withRetroFlags`) so the score means one thing across the boundary.
+- **Drills don't count.** One-move puzzles never flag (a 1050 kid solving 1500 mate-in-1s in 3 s is pattern recognition). Mate-theme drills (`mateIn2`, `smotheredMate`, … — the solver was told the pattern) tighten the 4 s limits to 2 s, need three metronome gaps, no streak; they are excluded from the speed/accuracy components. `isDrill/isMateTheme/isOneMove` in `glicko.ts`. Metronome now needs **two** gaps (a single quick forced reply is human).
+- **New live flags** in `assessSuspicion`: `crowd_fast` (1800+ puzzle won in < 15% of the crowd median, median ≥ 8 s) and `focus_loss` (tab/window hidden ≥ 3 s after load, first move ≤ 2 s after returning; client telemetry `focus{hiddenMs,hiddenCount,firstMoveAfterReturnMs}` from `usePuzzleGame.ts`, stored on the round as `fx`).
+- **FairplayService** (`@Global` module, one instance shared by PuzzlesService + AcademyService): nightly 21:00 UTC — rebuild crowd baselines (`puzzleSolveStats` per puzzle n ≥ 3, `crowdBands` per 100 pts, `$median`) → score every academy student → `fairplay` doc per student → on entering Review: `hold:true`, `fairplayEvents{kind:review}`, **email to the academy owner** once. Leave-one-out band medians per student (a heavy solver was a big share of "the crowd" on hard puzzles). Monday 02:00 UTC digest per academy owner (entered Review / on hold / Watch / resets this week), silent when there is nothing to say. Jobs guarded by `fairplayJobs`.
+- **Hold**: `complete()` checks `isHeld(userId)` (60 s cache) — a held win records normally, `ratingDiff 0`, no perf/theme update, round `held:true`, nothing in the response. A hold persists until `resetPuzzleRating` (owner) calls `clearAfterReset` — score decay never lifts it; a held student stays listed even if Clear.
+- **Panel** (`AcademySuspiciousPanel.tsx`): band pill + score bar per row (days toggle gone — the window is fixed), **Details drawer** per student: score breakdown with the evidence behind each component, speed-vs-difficulty scatter (log seconds; flagged red ring, held amber ring, 5 s floor), rhythm strip of the fastest 2400+ wins (per-move gaps), sessions timeline. Endpoints: `GET /api/academy/suspicious-solves` (roster scored on demand), `GET /api/academy/suspicious-solves/:id` (drawer), reset unchanged.
+- Scripts: `apps/api/scripts/fairplay-backtest.ts <users…>` (day-by-day replay), `fairplay-nightly.ts` (run the nightly by hand; `DIGEST=dry` renders the digest without sending).
+
+### Backtest (acceptance)
+| student | score today | first Watch | first Review | note |
+|---|---|---|---|---|
+| mageswaran | 100 | 28 Aug | **28 Aug** (day 1 of the assisted phase — 19–24 Aug was honest: 16–32 s medians, 72–83%) | flags 40 · fastHard 30 · accuracy 15 · crowd 8 · climb 10 |
+| deepakcharanv | 2 | never | never | a 4–7 Sep burst of quick 2400+ wins was a mateIn2 drill → discounted |
+| akshayprathab / gunachess / ashwanth / haritha | 0 / 0 / 0 / 2 | never | never | ashwanth + haritha were false positives before the drill rule (mate-in-1 / mate-in-2 drills) |
+
+Before the drill rule the live Phase 0 detector would also have zeroed honest gains on mate-in-1 drills — no live solve had been flagged yet today, so no harm done.
+
+### Verified live (throwaway student in Guna Chess, forged sessions, all deleted after)
+hold → win gives `ratingDiff 0`, round `held:true`, rating unchanged · owner list keeps a hold · owner reset → hold lifts, window restarts, next win +137 · five `focus_loss` solves → each `ratingDiff 0`, `dubr:["focus_loss"]`, `fx` stored → student listed on **Watch 32** · `crowd_fast` fires at 1.5 s on a 2000 puzzle (band median 16.1 s) · a coach outside the roster gets "not in your roster" · owner UI on chessguru.cc: panel row + drawer render (screenshots in scratchpad) · seed nightly scored 98 students: 0 Review, 0 Watch · digest dry run renders correctly. Nothing was emailed to the owner (no Review transitions).
+
+### Open
+- Crowd baseline is thin (4 heavy solvers on 2400+): the crowd component reaches 8 for the real case, never 15. It will firm up as more academies solve.
+- `focus_loss` is only sent when the tab/window actually left — a second device or a phone beside the screen is invisible to it (by design; see plan Phase 2).
+- Owner email for Review goes to the academy owner's `users.email`; academies whose owner has no email get the event only (panel + digest skip).

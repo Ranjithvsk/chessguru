@@ -75,6 +75,41 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   // cheat detection (engine users have flat, near-constant inter-move gaps —
   // legit humans' gaps rise on complex positions).
   const moveTsRef = useRef<number[]>([]);
+  // Focus telemetry (fair play, 2026-09-08): did the tab/window leave between
+  // puzzle load and the FIRST move, and how soon after coming back did that
+  // move land? Sent as `focus` only when the window left at least once.
+  // Never shown to the student.
+  const focusRef = useRef<{ hiddenSince: number | null; hiddenMs: number; hiddenCount: number; returnedAt: number | null; firstMoveAfterReturnMs: number | null }>({ hiddenSince: null, hiddenMs: 0, hiddenCount: 0, returnedAt: null, firstMoveAfterReturnMs: null });
+  const noteMove = useCallback(() => {
+    const now = Date.now();
+    if (moveTsRef.current.length === 0) {
+      const f = focusRef.current;
+      if (f.hiddenSince != null) { f.hiddenMs += now - f.hiddenSince; f.hiddenSince = null; f.returnedAt = now; }
+      f.firstMoveAfterReturnMs = f.returnedAt != null ? now - f.returnedAt : null;
+    }
+    moveTsRef.current.push(now);
+  }, []);
+  useEffect(() => {
+    const onHide = () => {
+      const f = focusRef.current;
+      if (startedAtRef.current == null || moveTsRef.current.length > 0 || f.hiddenSince != null) return;
+      f.hiddenSince = Date.now(); f.hiddenCount++;
+    };
+    const onShow = () => {
+      const f = focusRef.current;
+      if (f.hiddenSince == null) return;
+      f.hiddenMs += Date.now() - f.hiddenSince; f.hiddenSince = null; f.returnedAt = Date.now();
+    };
+    const onVis = () => { if (document.visibilityState === "hidden") onHide(); else onShow(); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("blur", onHide);
+    window.addEventListener("focus", onShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("blur", onHide);
+      window.removeEventListener("focus", onShow);
+    };
+  }, []);
   // Frozen into solveMs on first submit so subsequent hint/replay clicks don't reset it.
   const startedAtRef = useRef<number | null>(null);
   const solveMsRef = useRef<number | null>(null);
@@ -161,6 +196,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
       solveMsRef.current = null;
       setSolveMs(null);
       moveTsRef.current = [];
+      focusRef.current = { hiddenSince: null, hiddenMs: 0, hiddenCount: 0, returnedAt: null, firstMoveAfterReturnMs: null };
       wrongMoveRef.current = null;
       try { if (puzzle.id) localStorage.setItem(STORE_KEY, JSON.stringify({ id: puzzle.id, theme, maxPc: maxPc ?? 0 })); } catch { /* */ }
     }
@@ -193,6 +229,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
       ...(ms != null ? { ms } : {}),
       ...(movesMs && movesMs.length ? { moves_ms: movesMs } : {}),
       ...(wrongMoveRef.current ? { wrong: wrongMoveRef.current } : {}),
+      ...(focusRef.current.hiddenCount > 0 ? { focus: { hiddenMs: focusRef.current.hiddenMs, hiddenCount: focusRef.current.hiddenCount, firstMoveAfterReturnMs: focusRef.current.firstMoveAfterReturnMs } } : {}),
     }).then((r) => {
       if (typeof r.ratingDiff === "number") setRatingDiff(r.ratingDiff);
       if (r.glicko) setDisplayRating(Math.round(r.glicko.r));
@@ -236,7 +273,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
       game.current.move({ from, to, promotion: promo });
       idx.current += 1;
       // Stamp the timestamp of this correct user move for per-move timing.
-      moveTsRef.current.push(Date.now());
+      noteMove();
       setLastMove([from, to]);
       setFen(game.current.fen());
       if (idx.current >= solution.current.length) { finish(); return; }
@@ -252,7 +289,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
       if (mates) {
         game.current.move({ from, to, promotion: promo });
         idx.current = solution.current.length;
-        moveTsRef.current.push(Date.now());
+        noteMove();
         setLastMove([from, to]);
         setFen(game.current.fen());
         finish();

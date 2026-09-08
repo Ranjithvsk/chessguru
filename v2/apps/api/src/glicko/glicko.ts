@@ -154,30 +154,58 @@ export function isDubiousSolve(userR: number, puzzleR: number, ms: number | unde
   return (puzzleR - userR) >= 300 && ms < 4000;
 }
 
+/** A theme that tells the solver the mate pattern in advance (mateIn2,
+ *  smotheredMate, …). Knowing it collapses the search, so speed on such a
+ *  drill is weak evidence and the thresholds tighten. */
+export const isMateTheme = (t: string | null | undefined): boolean => !!t && (t === "mate" || /^mateIn\d/.test(t) || /Mate$/.test(t));
+/** One-move puzzles are pattern recognition whatever their rating: never
+ *  evidence. A mate-theme drill is a "drill" too but only softens thresholds. */
+export const isOneMove = (themes: string[] | null | undefined): boolean => Array.isArray(themes) && themes.includes("oneMove");
+export const isDrill = (themes: string[] | null | undefined, sel: string | null | undefined): boolean => isOneMove(themes) || isMateTheme(sel);
+
 export interface SuspicionInput {
   userR: number; puzzleR: number; ms?: number; mvMs?: number[]; win: boolean;
+  /** The puzzle's themes and the theme the solver picked ("mix" or absent = mixed). */
+  themes?: string[] | null; sel?: string | null;
   /** Of the player's last 10 wins on 2400+ puzzles, how many were under 6 s. */
   recentFastHardWins: number;
+  /** Median ms the crowd needs on this puzzle (or its band), if known. */
+  crowdMedMs?: number | null;
+  /** Client telemetry: tab hidden between puzzle load and the first move. */
+  focus?: { hiddenMs?: number; hiddenCount?: number; firstMoveAfterReturnMs?: number | null } | null;
 }
 /** Why a win looks assisted, if it does. Empty = clean. Each flag is
  *  independent of the player's CURRENT rating where possible: the old check
  *  only fired on a puzzle 300+ above the player, so a rating that climbed
  *  with every win never tripped it (2026-09-08: 1314 → 3043 in 19 days,
  *  2600+ puzzles in 2.6–3.8 s with 1.2–1.3 s between moves, zero flags).
- *   fast_above_level — the original rule: 300+ above, under 4 s
+ *   (one-move puzzles never flag; on a mate-theme drill the 4 s limits become
+ *    2 s, metronome needs three gaps and streak is off — see isDrill)
+ *   fast_above_level — 1800+ puzzle 300+ above the player, under 4 s
  *   fast_hard        — a 2400+ puzzle won in under 4 s, whatever the rating
  *   metronome        — 2200+ puzzle, under 8 s, every gap between moves 0.7–1.7 s
- *                      (a line being read off, not calculated)
+ *                      across at least two gaps (a line being read off, not
+ *                      calculated). One quick follow-up after the key move is
+ *                      human — the reply is forced — so two-move puzzles never fire.
  *   streak           — 2400+ under 6 s while 4+ of the last 10 hard wins were too */
 export function assessSuspicion(i: SuspicionInput): { flags: string[] } {
   const flags: string[] = [];
   if (!i.win || typeof i.ms !== "number" || !(i.ms > 0)) return { flags };
-  if (i.puzzleR - i.userR >= 300 && i.ms < 4000) flags.push("fast_above_level");
-  if (i.puzzleR >= 2400 && i.ms < 4000) flags.push("fast_hard");
+  if (isOneMove(i.themes)) return { flags };            // one move = pattern recognition, never evidence
+  const drill = isMateTheme(i.sel);                      // told the mate pattern: only blitz-instant speed counts
+  const fastMs = drill ? 2000 : 4000;
+  if (i.puzzleR >= 1800 && i.puzzleR - i.userR >= 300 && i.ms < fastMs) flags.push("fast_above_level");
+  if (i.puzzleR >= 2400 && i.ms < fastMs) flags.push("fast_hard");
   const mv = Array.isArray(i.mvMs) ? i.mvMs.filter((n) => typeof n === "number" && isFinite(n)) : [];
   const gaps = mv.slice(1);
-  if (i.puzzleR >= 2200 && i.ms < 8000 && gaps.length >= 1 && gaps.every((g) => g >= 700 && g <= 1700) && (mv[0] ?? 0) < 3500) flags.push("metronome");
-  if (i.puzzleR >= 2400 && i.ms < 6000 && i.recentFastHardWins >= 4) flags.push("streak");
+  if (i.puzzleR >= 2200 && i.ms < 8000 && gaps.length >= (drill ? 3 : 2) && gaps.every((g) => g >= 700 && g <= 1700) && (mv[0] ?? 0) < 3500) flags.push("metronome");
+  if (!drill && i.puzzleR >= 2400 && i.ms < 6000 && i.recentFastHardWins >= 4) flags.push("streak");
+  //   crowd_fast   — 1800+ puzzle won in under 15% of the time the crowd needs on it
+  if (i.puzzleR >= 1800 && typeof i.crowdMedMs === "number" && i.crowdMedMs >= 8000 && i.ms < i.crowdMedMs * 0.15) flags.push("crowd_fast");
+  //   focus_loss   — the tab left for 3 s+ after the puzzle loaded, and the first
+  //                  move landed within 2 s of coming back (another window did the work)
+  const f = i.focus;
+  if (i.puzzleR >= 2000 && f && (f.hiddenMs ?? 0) >= 3000 && typeof f.firstMoveAfterReturnMs === "number" && f.firstMoveAfterReturnMs >= 0 && f.firstMoveAfterReturnMs <= 2000) flags.push("focus_loss");
   return { flags };
 }
 

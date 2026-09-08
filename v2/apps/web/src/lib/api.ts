@@ -63,7 +63,7 @@ export interface RandomPuzzleOpts { theme: string; rating: number; difficulty: D
   exactRating?: number;
 }
 export interface MasterPlayer { name: string; count: number; }
-export interface CompleteBody { win: boolean; hint: boolean; difficulty: Difficulty; userId: string | null; mode?: "puzzle" | "blindfold"; rating?: number; deviation?: number; theme?: string; ms?: number; moves_ms?: number[]; wrong?: string; daily?: boolean; }
+export interface CompleteBody { win: boolean; hint: boolean; difficulty: Difficulty; userId: string | null; mode?: "puzzle" | "blindfold"; rating?: number; deviation?: number; theme?: string; ms?: number; moves_ms?: number[]; wrong?: string; daily?: boolean;  focus?: { hiddenMs: number; hiddenCount: number; firstMoveAfterReturnMs: number | null };}
 export interface AuthResult { ok: boolean; error?: string; }
 
 export interface Overview { total: number; engineGenerated: number; verified: number; engineGames: number; pools: { bfPools: number; piecePools: number; paths: number }; users: number; }

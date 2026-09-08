@@ -1,7 +1,8 @@
 import { Injectable } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
-import { updatePuzzleRating, isProvisional, DEFAULT_VOLATILITY, DAILY_RATED_LIMIT, assessSuspicion, isCrazyRatingDelta } from "../glicko/glicko";
+import { FairplayService } from "../fairplay/fairplay.service";
+import { updatePuzzleRating, isProvisional, DEFAULT_VOLATILITY, DAILY_RATED_LIMIT, assessSuspicion, isCrazyRatingDelta, isDrill } from "../glicko/glicko";
 import { fmtPuzzle, applyLastMove } from "../lib/puzzle-format";
 import { recordAndCelebrate } from "./milestones";
 import { PushService } from "../push/push.service";
@@ -18,6 +19,7 @@ export class PuzzlesService {
   constructor(
     @InjectConnection() private readonly conn: Connection,
     private readonly push: PushService,
+    private readonly fairplay: FairplayService,
   ) {}
   private col() { return this.conn.db!.collection("puzzles"); }
 
@@ -978,12 +980,24 @@ export class PuzzlesService {
       if (win && puzzleGlicko.r >= 2400) {
         const uidRe3 = { $regex: `^${userId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:` } as any;
         const recent = await this.conn.db!.collection("rounds")
-          .find({ _id: uidRe3, k: "puzzle", w: true, pr: { $gte: 2400 } }, { projection: { ms: 1 } as any })
+          .find({ _id: uidRe3, k: "puzzle", w: true, pr: { $gte: 2400 } }, { projection: { ms: 1, th: 1, sel: 1 } as any })
           .sort({ d: -1 }).limit(10).toArray();
-        recentFastHardWins = recent.filter((r: any) => typeof r.ms === "number" && r.ms < 6000).length;
+        recentFastHardWins = recent.filter((r: any) => typeof r.ms === "number" && r.ms < 6000 && !isDrill(r.th, r.sel)).length;
       }
-      const suspicion = assessSuspicion({ userR: perf.gl.r, puzzleR: puzzleGlicko.r, ms: solveMs, mvMs: mvMsForCheck, win, recentFastHardWins });
+      await this.fairplay.loadCrowdStats().catch(() => {});
+      const focusRaw: any = (body as any).focus;
+      const focus = focusRaw && typeof focusRaw === "object"
+        ? { hiddenMs: Number(focusRaw.hiddenMs) || 0, hiddenCount: Number(focusRaw.hiddenCount) || 0, firstMoveAfterReturnMs: typeof focusRaw.firstMoveAfterReturnMs === "number" ? focusRaw.firstMoveAfterReturnMs : null }
+        : null;
+      const suspicion = assessSuspicion({ userR: perf.gl.r, puzzleR: puzzleGlicko.r, ms: solveMs, mvMs: mvMsForCheck, win, recentFastHardWins, themes: Array.isArray(pz.themes) ? pz.themes : null, sel: typeof body.theme === "string" ? body.theme : null, crowdMedMs: this.fairplay.crowdMedianMs(id, puzzleGlicko.r), focus });
       const dubious = suspicion.flags.length > 0;
+      // Review band: every rated gain is held until the owner resets. The solve
+      // is recorded normally; the student is not told (owner decision 2026-09-08).
+      const held = !dubious && win && (await this.fairplay.isHeld(userId).catch(() => false));
+      if (held) {
+        upd.ratingDiff = 0;
+        upd.userPerf = { ...perf, nb: perf.nb || 0 };
+      }
       if (dubious) {
         // A flagged solve is recorded (and shown to the coach in the
         // Suspicious solving panel) but does not move the rating, global or
@@ -1008,7 +1022,7 @@ export class PuzzlesService {
       // Each theme on the puzzle gets its own Glicko track. NOT used by the
       // picker anymore (which uses global only) — kept for display + weakness
       // detection. Clamped to global ± 300 on write to prevent drift.
-      if (Array.isArray(pz.themes) && !dubious) {
+      if (Array.isArray(pz.themes) && !dubious && !held) {
         const themeNs = key === "blindfold" ? "themesBf" : "themes";
         const globalR = upd.userPerf.gl.r;
         const startR = key === "blindfold" ? 800 : 1500;
@@ -1070,6 +1084,8 @@ export class PuzzlesService {
         ...(mv_ms && mv_ms.length ? { mv_ms } : {}),        // per-move deltas — [t1, t2-t1, ...]
         ...(wrong != null ? { wr: wrong } : {}),            // wrong-move UCI (misses only, missing on wins)
         ...(dubious ? { dub: true, dubr: suspicion.flags } : {}),  // flagged suspicious solve + why (see assessSuspicion)
+        ...(held ? { held: true } : {}),                             // rated gain withheld: student is in the Review band
+        ...(focus && focus.hiddenCount > 0 ? { fx: focus } : {}),   // focus telemetry, kept for the panel
         // Difficulty the user was on when they solved this — stored so
         // history tiles can show it (Easier/Easiest are practice-mode
         // hints so kids can spot why their rating moved less).

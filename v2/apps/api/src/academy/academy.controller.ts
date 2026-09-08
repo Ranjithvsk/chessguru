@@ -108,6 +108,12 @@ export class AcademyController {
     return this.svc.suspiciousSolves(req.session, days);
   }
 
+  /** Coach/owner: one student's fair-play detail (solves, sessions, components). */
+  @Get("suspicious-solves/:id")
+  suspiciousDetail(@Req() req: any, @Param("id") id: string) {
+    return this.svc.suspiciousDetail(req.session, id);
+  }
+
   /** Owner-only: set a student's puzzle rating. Body: { rating, reason } */
   @Post("students/:id/reset-puzzle-rating")
   resetPuzzleRating(@Req() req: any, @Param("id") id: string, @Body() body: any) {

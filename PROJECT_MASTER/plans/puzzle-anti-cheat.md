@@ -45,3 +45,9 @@ is not told which solve was flagged; every action audited; coaches decide, the s
 
 ## Decisions for the owner
 Tell the student when gains are held? · Coaches allowed to reset own roster? · Review threshold 60?
+
+---
+
+## Status — Phase 1 BUILT & LIVE 2026-09-08
+
+Owner decisions: students never told · reset owner-only · Review at 60. Built exactly as scoped with two tuning changes found by the replay over August: **drills don't count** (one-move puzzles never flag; mate-theme drills get 2 s limits and are left out of the speed/accuracy components — ashwanth and haritha were false positives without this) and **one stray flag a month is forgiven**. Backtest: mageswaran reaches Review on the first assisted day (28 Aug, score 62 → 100); deepakcharanv, akshayprathab, gunachess, ashwanth, haritha all Clear. Details: `sessions/2026-09-08-play-games-history.md` ("Fair Play Trainer — Phase 1"). Code: `apps/api/src/fairplay/`, `glicko.ts assessSuspicion`, `AcademySuspiciousPanel.tsx`, scripts `fairplay-backtest.ts` / `fairplay-nightly.ts`.

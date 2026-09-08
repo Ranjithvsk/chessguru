@@ -10,6 +10,7 @@
 // point is that possession of the URL = right to become that role.
 
 import { BadRequestException, ForbiddenException, Injectable } from "@nestjs/common";
+import { FairplayService } from "../fairplay/fairplay.service";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { randomBytes } from "crypto";
@@ -60,6 +61,7 @@ const escHtml = (s: string) => String(s).replace(/[&<>"']/g, (c) => (
 export class AcademyService {
   constructor(
     @InjectConnection() private readonly conn: Connection,
+    private readonly fairplay: FairplayService,
     // FeesService for batch → enrolment auto-sync (2026-08-30). See
     // AcademyModule import comment for why this is safe (no cycle).
     private readonly fees: FeesService,
@@ -2645,59 +2647,49 @@ Thank you!`;
    *  Enriches each row with:
    *    - puzzleRating (from userperfs.puzzle.gl.r)
    *    - attendedTotal + attendedThisWeek + lastAttendedAt (from classAttendance) */
-  /** Students whose recent puzzle solving looks assisted: flagged solves,
-   *  implausibly fast wins on 2400+ puzzles, steep climbs. Coach sees own
-   *  roster, owner sees the academy. Score sorts the list; 0 = not listed. */
-  async suspiciousSolves(session: any, daysRaw?: string) {
+  /** Fair play: every student in the caller's roster scored now (window = last
+   *  30 days or since their last reset), stored, and returned when Watch or
+   *  Review. Coach sees own roster, owner the academy. */
+  async suspiciousSolves(session: any, _daysRaw?: string) {
     const g = this.ensureCoachOrOwner(session);
-    const days = Math.min(90, Math.max(1, Number(daysRaw) || 30));
-    const since = new Date(Date.now() - days * 86400000);
     const filter: any = { academyId: g.academyId, role: "student" };
     if (g.role === "coach") filter.coachId = g.userId;
     const students = await this.users().find(filter, { projection: { _id: 1, username: 1, name: 1 } }).toArray();
-    const rounds = this.conn.db!.collection("rounds");
     const perfs = this.conn.db!.collection("userperfs");
-    const esc = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const median = (a: number[]) => { const s = a.slice().sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)]! : null; };
     const out: any[] = [];
     for (const st of students as any[]) {
-      const rows: any[] = await rounds
-        .find({ _id: { $regex: `^${esc(st._id)}:` } as any, k: "puzzle", d: { $gte: since } }, { projection: { d: 1, pr: 1, r: 1, ms: 1, mv_ms: 1, dub: 1, dubr: 1, w: 1 } as any })
-        .sort({ d: 1 }).toArray();
-      if (!rows.length) continue;
-      const dub = rows.filter((x) => x.dub);
-      const hard = rows.filter((x) => typeof x.pr === "number" && x.pr >= 2400 && typeof x.ms === "number");
-      const hardWins = hard.filter((x) => x.w);
-      const fastHard = hardWins.filter((x) => x.ms < 5000);
-      const first = rows[0].r, last = rows[rows.length - 1].r;
-      const climb = typeof first === "number" && typeof last === "number" ? Math.round(last - first) : 0;
-      const hardWinPct = hard.length ? Math.round((hardWins.length / hard.length) * 100) : null;
-      // A climb alone is not evidence — every new account climbs out of its
-      // provisional start. It counts only alongside fast hard wins or flags,
-      // and a high win rate on hard puzzles only when it is also quick.
-      const hasSpeedSignal = fastHard.length >= 3 || dub.length >= 1;
-      const medianHard = median(hardWins.map((x) => x.ms));
-      const score = dub.length * 3 + fastHard.length * 2
-        + (climb >= 500 && hasSpeedSignal ? 3 : 0)
-        + (hard.length >= 10 && hardWinPct !== null && hardWinPct >= 85 && medianHard !== null && medianHard < 15000 ? 2 : 0);
-      if (score < 4) continue;
-      const reasons: Record<string, number> = {};
-      for (const x of dub) for (const f of (Array.isArray(x.dubr) ? x.dubr : ["fast_above_level"])) reasons[f] = (reasons[f] || 0) + 1;
+      const r = await this.fairplay.scoreUser(String(st._id), g.academyId);
+      if (r.band === "clear" && !r.hold) continue;   // a held student stays listed until the owner resets
       const perf: any = await perfs.findOne({ _id: st._id as any }, { projection: { "puzzle.gl": 1 } });
-      const lastReset: any = await this.conn.db!.collection("ratingAdjustments").find({ userId: st._id }).sort({ at: -1 }).limit(1).next();
+      const e = r.evidence;
       out.push({
         userId: String(st._id), name: st.name || st.username || String(st._id),
         ratingNow: perf?.puzzle?.gl?.r ? Math.round(perf.puzzle.gl.r) : null,
-        ratingStart: first ?? null, ratingEnd: last ?? null, climb,
-        solves: rows.length, dubious: dub.length, reasons,
-        hard: { n: hard.length, wins: hardWins.length, winPct: hardWinPct, medianMs: median(hardWins.map((x) => x.ms)), fast: fastHard.length },
-        fastest: hardWins.slice().sort((a, b) => a.ms - b.ms).slice(0, 3).map((x) => ({ puzzleId: String(x._id).slice(String(st._id).length + 1), pr: x.pr, ms: x.ms, mvMs: Array.isArray(x.mv_ms) ? x.mv_ms : null, at: x.d })),
-        score,
-        lastReset: lastReset ? { at: lastReset.at, to: lastReset.after?.r ?? null, from: lastReset.before?.r ?? null } : null,
+        ratingStart: e.ratingStart, ratingEnd: e.ratingEnd, climb: e.climb,
+        solves: e.solves, dubious: e.flagged, reasons: e.reasons,
+        hard: { n: e.hard.n, wins: e.hard.wins, winPct: e.hard.winPct, medianMs: e.hard.medianMs, fast: e.hard.fast },
+        fastest: e.fastest.slice(0, 3).map((f) => ({ puzzleId: f.pid, pr: f.pr, ms: f.ms, mvMs: f.mvMs, at: f.at })),
+        score: r.score, band: r.band, hold: r.hold, components: r.components, crowdRatio: e.crowdRatio,
+        reviewSince: r.reviewSince, windowStart: r.windowStart,
+        lastReset: r.lastReset ? { at: r.lastReset } : null,
       });
     }
     out.sort((a, b) => b.score - a.score);
-    return { days, students: out };
+    return { days: 30, students: out, bands: { watch: 25, review: 60 } };
+  }
+
+  /** Everything behind one student's score: each solve in the window (for the
+   *  speed chart), per-day sessions, the components, the fastest hard wins. */
+  async suspiciousDetail(session: any, studentId: string) {
+    const g = this.ensureCoachOrOwner(session);
+    const filter: any = { _id: studentId as any, academyId: g.academyId, role: "student" };
+    if (g.role === "coach") filter.coachId = g.userId;
+    const st: any = await this.users().findOne(filter, { projection: { _id: 1, username: 1, name: 1 } });
+    if (!st) return { ok: false, error: "That student isn't in your roster." };
+    const r = await this.fairplay.scoreUser(studentId, g.academyId, { notify: false });
+    const { rounds } = await this.fairplay.roundsFor(studentId);
+    const solves = rounds.slice(-1500).map((x) => ({ pid: x.pid, at: x.d, pr: x.pr, r: x.r, w: x.w, ms: x.ms ?? null, mvMs: x.mv_ms ?? null, dub: !!x.dub, dubr: x.dubr ?? null, held: !!x.held, crowdMedMs: this.fairplay.crowdMedianMs(x.pid, x.pr) }));
+    return { ok: true, userId: studentId, name: st.name || st.username || studentId, score: r.score, band: r.band, hold: r.hold, components: r.components, evidence: r.evidence, windowStart: r.windowStart, lastReset: r.lastReset, solves };
   }
 
   /** Owner-only: set a student's puzzle rating (400–3000), clamp inflated
@@ -2722,6 +2714,8 @@ Thank you!`;
     await perfs.updateOne({ _id: studentId as any }, { $set: sets }, { upsert: true });
     await this.conn.db!.collection("ratingAdjustments").insertOne({ userId: studentId, kind: "puzzle", before, after: { r: target, d: sets["puzzle.gl.d"] }, themesClamped: clamped, reason, by: g.userId, academyId: g.academyId, at: new Date() });
     await this.users().updateOne({ _id: studentId as any }, { $set: { puzzleRatingResetAt: new Date() } });
+    // The reset IS the review: the fair-play window restarts and the hold lifts.
+    await this.fairplay.clearAfterReset(studentId, g.academyId, g.userId);
     return { ok: true, before, after: { r: target }, themesClamped: clamped };
   }
 

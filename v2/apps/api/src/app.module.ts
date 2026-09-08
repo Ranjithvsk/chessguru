@@ -28,6 +28,7 @@ import { MyGamesController } from "./my-games/my-games.controller";
 import { MyGamesService } from "./my-games/my-games.service";
 import { LiveGamesController } from "./live-games/live-games.controller";
 import { LiveGamesService } from "./live-games/live-games.service";
+import { FairplayModule } from "./fairplay/fairplay.module";
 import { InsightsController } from "./insights/insights.controller";
 import { InsightsService } from "./insights/insights.service";
 import { CoachBoardController } from "./coach-board/coach-board.controller";
@@ -97,7 +98,7 @@ import { MailHealthService } from "./errors/mail-health.service";
 const MONGO_URI = process.env.MONGO_URI ?? "mongodb://localhost:27017/chessguru";
 
 @Module({
-  imports: [MongooseModule.forRoot(MONGO_URI), IntegrationsModule, LivekitModule, AcademyModule, FeesModule],
+  imports: [FairplayModule, MongooseModule.forRoot(MONGO_URI), IntegrationsModule, LivekitModule, AcademyModule, FeesModule],
   controllers: [HealthController, MiscController, BroadcastsController, PuzzlesController, AuthController, AdminController, AdminDomainsController, EngineController, ExplorerController, StudyController, StudiesController, BooksController, RevisionsController, ExamsController, MyGamesController, LiveGamesController, InsightsController, CoachBoardController, ParentReportsController, ParentPortalController, BookDiagramsController, ClassRecordingController, ClassScheduleController, ClassAttendanceController, ClassSnapController, ClassOptOutController, MailWebhookController, IceConfigController, DigestOptOutController, EmailOptOutController, PushController, AnnouncementsController, VisionController, HomeworkController, ClassNotesController, MyClassNotesController, AcademyClassNotesController, ClassPositionPacksController, NotebookController, ClassLiveController, MaterialsController, MyMaterialsController, MaterialsFileController, OpeningNotesController, CoachPublicController, MyCoachProfileController, AcademyPublicController, MyAcademyProfileController, SavedLinesController, OpeningTrainerController, PlayController, ConnectController, PairingsController, ResultsController, ResultsRenderController, ChessdbController, GameplayReviseController, SupportController, MyChallengesController, ChallengeMarkController, MessagesController, ErrorsController],
   providers: [PuzzlesService, AuthService, AdminService, EngineService, ExplorerService, StudyService, StudiesService, BooksService, RevisionsService, ExamsService, MyGamesService, LiveGamesService, InsightsService, CoachBoardService, ParentReportsService, BookDiagramsService, ClassReminderService, ClassAbandonedSweepService, WeeklyDigestService, StreakReminderService, PushService, AnnouncementsService, VisionService, HomeworkService, MaterialReminderService, OpeningNotesService, CoachProfileService, CoachDomainService, AcademyProfileService, AcademyDomainService, ChessdbService, GameplayReviseService, ErrorAlertsService, MailHealthService, SupportFallbackDrainService],
 })
