@@ -45,6 +45,8 @@ export interface PlayState {
   canAbort: boolean;
   /** Whether the current game counts for rating. */
   rated: boolean;
+  /** Id of the current / just-finished game (for the replay link). */
+  gameId: string | null;
   /** Our rating change once a rated game ends. */
   ratingDiff: number | null;
   seek: (clock: TimeControl, rated?: boolean) => void;
@@ -109,6 +111,7 @@ export function usePlay(guest: string | null): PlayState {
   const [oppGone, setOppGone] = useState<{ since: number; claimableAt: number } | null>(null);
   const [rated, setRated] = useState(false);
   const [ratingDiff, setRatingDiff] = useState<number | null>(null);
+  const [gameId, setGameId] = useState<string | null>(null);
 
   const clearPending = () => {
     pendingRef.current = null;
@@ -156,6 +159,7 @@ export function usePlay(guest: string | null): PlayState {
     setChallengeId(null);
     setOppGone(null);
     setRatingDiff(null);
+    setGameId(g);
     remember(g);
     client.current?.sub(g);
     setStatus("playing");
@@ -194,6 +198,7 @@ export function usePlay(guest: string | null): PlayState {
           }
           colorRef.current = mine;
           setColor(mine);
+          setGameId(m.g);
           setOpponent(mine === "white" ? m.d.players.black : m.d.players.white);
           setResult(null);
           setReason(null);
@@ -390,6 +395,7 @@ export function usePlay(guest: string | null): PlayState {
   }, []);
   const newGame = useCallback(() => {
     gameIdRef.current = null;
+    setGameId(null);
     remember(null);
     setOppGone(null);
     setStatus("idle");
@@ -424,7 +430,7 @@ export function usePlay(guest: string | null): PlayState {
 
   return {
     status, color, fen, turn, ply, moves, lastMove, clock: liveClock, opponent, result, reason, incomingDraw, challengeId,
-    pendingPromotion, boardEpoch, dests, myTurn, selfId, connected, oppGone, canAbort, rated, ratingDiff,
+    pendingPromotion, boardEpoch, dests, myTurn, selfId, connected, oppGone, canAbort, rated, ratingDiff, gameId,
     seek, cancelSeek, abort, claim, createChallenge, sendMove, premove, choosePromotion, cancelPromotion, resign, offerDraw, acceptDraw, declineDraw, rematch, newGame,
   };
 }

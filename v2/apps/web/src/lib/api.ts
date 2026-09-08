@@ -95,6 +95,44 @@ export interface HistoryReport {
 }
 
 export interface MyRound { win: boolean; date: string; ratingDiff: number | null; ms: number | null; wrong: string | null; best: string | null; }
+
+// ── Online play history (/api/live-games) ───────────────────────────────────
+export type LiveSpeed = "bullet" | "blitz" | "rapid" | "classical";
+export type LiveOutcome = "win" | "loss" | "draw";
+export interface LiveGameSummary {
+  id: string; startedAt: string; finishedAt: string; durationMs: number;
+  speed: LiveSpeed; timeControl: { initial: number; increment: number }; rated: boolean;
+  myColor: "white" | "black"; opponent: { id: string; name: string };
+  result: string | null; status: string; outcome: LiveOutcome; reasonText: string; plies: number;
+  ratingBefore: number | null; ratingAfter: number | null; ratingDiff: number | null; opponentRating: number | null;
+}
+export interface LiveGameFull extends LiveGameSummary {
+  players: { white: { id: string | null; name: string }; black: { id: string | null; name: string } };
+  initialFen: string; moves: string[]; moveTimes: number[]; sans: string[]; fens: string[]; checks: boolean[];
+  clocks: { white: number; black: number }[];
+  rating: { white: { before: number; after: number }; black: { before: number; after: number } } | null;
+  pgn: string;
+}
+export interface LiveSpeedStats { games: number; wins: number; losses: number; draws: number; rating: number | null; provisional: boolean; history: { t: string; r: number }[] }
+export interface LiveGamesStats {
+  games: number; wins: number; losses: number; draws: number; winRate: number;
+  currentStreak: number; longestStreak: number; totalMs: number; avgPlies: number;
+  colors: { white: { games: number; wins: number }; black: { games: number; wins: number } };
+  bestWin: { opponent: string; rating: number; id: string } | null;
+  bySpeed: Record<LiveSpeed, LiveSpeedStats>;
+  form: LiveOutcome[]; lastPlayedAt: string | null;
+}
+export const liveGames = {
+  list: (q: { speed?: string; outcome?: string; rated?: string; offset?: number; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== "" && v !== "all") params.set(k, String(v));
+    const qs = params.toString();
+    return get<{ total: number; offset: number; items: LiveGameSummary[] }>(`/api/live-games${qs ? `?${qs}` : ""}`);
+  },
+  stats: () => get<LiveGamesStats>("/api/live-games/stats"),
+  get: (id: string) => get<LiveGameFull>(`/api/live-games/${encodeURIComponent(id)}`),
+};
+
 export const api = {
   me: () => get<AuthMe>("/auth/me"),
   myRating: () => get<MeRating>("/api/me/rating"),

@@ -1,8 +1,44 @@
 import { useEffect, useMemo, useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { Link, useOutletContext } from "react-router-dom";
 import Board from "../components/Board";
 import { usePlay, type Promo } from "../hooks/usePlay";
 import PassPlay from "../components/PassPlay";
+import { liveGames, type LiveGamesStats } from "../lib/api";
+import { FormDots, SPEED_META } from "./PlayHistory";
+
+/** "My games" teaser on the Play page: last results + per-speed ratings, refreshed
+ *  whenever a game ends so the new result shows up straight away. */
+function MyGamesStrip({ signedIn, refreshKey }: { signedIn: boolean; refreshKey: number }) {
+  const [stats, setStats] = useState<LiveGamesStats | null>(null);
+  useEffect(() => {
+    if (!signedIn) return;
+    liveGames.stats().then(setStats).catch(() => {});
+  }, [signedIn, refreshKey]);
+  if (!signedIn) {
+    return (
+      <div className="flex items-center justify-between rounded-xl border border-ink-700 bg-ink-900/60 px-3 py-2 text-xs text-ink-400" data-testid="my-games-strip">
+        <span>Sign in to keep your games, rating and replays.</span>
+        <Link to="/login?back=/play" className="rounded-md bg-brand-600 px-2 py-1 font-semibold text-white hover:bg-brand-500">Sign in</Link>
+      </div>
+    );
+  }
+  return (
+    <Link to="/play/history" className="group flex flex-wrap items-center justify-between gap-2 rounded-xl border border-ink-700 bg-gradient-to-r from-brand-500/10 via-ink-900/60 to-fuchsia-500/10 px-3 py-2 transition hover:border-brand-500/60" data-testid="my-games-strip">
+      <div className="flex items-center gap-3">
+        <span className="text-sm font-semibold text-white">📜 My games</span>
+        <FormDots form={stats?.form ?? []} size="sm" />
+      </div>
+      <div className="flex items-center gap-2 text-[11px] text-ink-300">
+        {stats && (Object.keys(SPEED_META) as (keyof typeof SPEED_META)[]).map((s) => {
+          const st = stats.bySpeed[s];
+          if (!st || st.games === 0) return null;
+          return <span key={s} className="rounded-md bg-ink-800 px-1.5 py-0.5">{SPEED_META[s].emoji} {st.rating ?? "—"}{st.provisional && st.rating !== null ? "?" : ""}</span>;
+        })}
+        <span className="text-brand-300 group-hover:text-brand-200">{stats ? `${stats.games} game${stats.games === 1 ? "" : "s"} →` : "→"}</span>
+      </div>
+    </Link>
+  );
+}
 
 function guestToken(): string {
   const k = "cg_play_token";
@@ -63,6 +99,9 @@ export default function PlayPage() {
   const [wantRated, setWantRated] = useState(true);
   const signedIn = !!ctx?.userId;
   const rated = signedIn && wantRated;
+  // Bump once per finished game so the strip picks up the new result.
+  const [endedCount, setEndedCount] = useState(0);
+  useEffect(() => { if (p.status === "ended") setEndedCount((c) => c + 1); }, [p.status]);
   // Ticks once a second while the opponent is away so the claim countdown moves.
   const [nowTick, setNowTick] = useState(Date.now());
   useEffect(() => {
@@ -113,6 +152,8 @@ export default function PlayPage() {
       {mode === "local" ? (
         <PassPlay />
       ) : (
+      <div className="space-y-4">
+      <MyGamesStrip signedIn={signedIn} refreshKey={endedCount} />
       <div className="grid gap-6 md:grid-cols-[minmax(0,520px)_1fr]">
       <div>
         <div className="mb-2 flex items-center justify-between text-sm text-ink-300" data-testid="opp-clock">
@@ -239,13 +280,18 @@ export default function PlayPage() {
         {(p.status === "idle" || p.status === "ended") && (
           <div className="rounded-xl border border-ink-700 bg-ink-900/60 p-4">
             {p.status === "ended" && (
-              <div className="mb-3 flex gap-2">
+              <div className="mb-3 flex flex-wrap gap-2">
                 <button data-testid="rematch" onClick={p.rematch} className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-500">
                   Rematch
                 </button>
                 <button data-testid="new-game" onClick={p.newGame} className="rounded-lg border border-ink-700 px-3 py-2 text-sm text-ink-300 hover:text-white">
                   New game
                 </button>
+                {signedIn && p.gameId && p.reason !== "aborted" && (
+                  <Link to={`/play/games/${encodeURIComponent(p.gameId)}`} data-testid="replay-link" className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-3 py-2 text-sm text-brand-200 hover:bg-brand-500/20">
+                    ▶ Replay
+                  </Link>
+                )}
               </div>
             )}
             <div className="mb-2 flex items-center justify-between">
@@ -359,6 +405,7 @@ export default function PlayPage() {
           </ol>
         </div>
       </aside>
+      </div>
       </div>
       )}
     </div>

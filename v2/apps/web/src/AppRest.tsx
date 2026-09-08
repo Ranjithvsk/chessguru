@@ -111,6 +111,8 @@ import ParentReportGeneratePage from "./pages/ParentReportGenerate";
 import ParentReportViewPage from "./pages/ParentReportView";
 import DailyPage from "./pages/Daily";
 import PlayPage from "./pages/Play";
+import PlayHistoryPage from "./pages/PlayHistory";
+import PlayGameReplayPage from "./pages/PlayGameReplay";
 import FeedbackUITestPage from "./pages/FeedbackUITest";
 import BookPage from "./pages/Book";
 import ClassReplayPage from "./pages/ClassReplay";
@@ -158,6 +160,8 @@ export default function AppRest() {
       <Route element={<App />}>
         <Route index element={<PuzzlesPage />} />
         <Route path="play" element={<PlayPage />} />
+        <Route path="play/history" element={<PlayHistoryPage />} />
+        <Route path="play/games/:id" element={<PlayGameReplayPage />} />
         <Route path="puzzles" element={<PuzzlesPage />} />
         <Route path="blindfold" element={<BlindfoldPage />} />
         <Route path="history" element={<HistoryPage />} />
