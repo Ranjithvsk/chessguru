@@ -123,3 +123,9 @@ queries only run when a specific player is requested — scanning for them was t
 Probes after: akshay 2122 → 1946/2075 mix, 2145 attackingF2F7, 1880 smotheredMate; mageswaran
 3013 → 3109 mix, 404 smotheredMate; kashika → 1607; deepakcharanv hardest → 2554; all master
 puzzles, 36–153 ms.
+**Web:** the trainer used to sit on "Loading…" with an empty board when the picker answered 404.
+`usePuzzleGame` now exposes `noPuzzle`; `Puzzles.tsx` overlays "No more <theme> puzzles at your
+level — you are rated ≈N; everything near that you have solved, and puzzles far below your level
+are never served" with **Mix all themes** / **Try again** (or **Normal trainer** in the Master
+Games section). Verified as mageswaran on gunachess.com: overlay on Smothered Mate, Mix → a
+2800-rated puzzle loads.

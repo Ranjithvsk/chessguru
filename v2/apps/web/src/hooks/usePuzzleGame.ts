@@ -34,7 +34,7 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   const qc = useQueryClient();
   const STORE_KEY = mode === "blindfold" ? "cg_puzzle_bf" : section === "masters" ? "cg_puzzle_masters" : "cg_puzzle";
 
-  const { data: puzzle, isFetching } = useQuery({
+  const { data: puzzle, isFetching, isError, error } = useQuery({
     // exactRating goes in the queryKey so a curriculum step-change (e.g.
     // 1200 → 1230) triggers a fresh fetch instead of reusing the cache.
     queryKey: ["puzzle", mode, section ?? "normal", player ?? "", theme, difficulty, maxPc ?? 0, userId ?? "guest", reviewId ?? "", exactRating ?? 0, nonce],
@@ -399,8 +399,14 @@ export function usePuzzleGame(opts: UsePuzzleGameOpts) {
   }, [puzzle]);
 
   const exploring = exploreFen != null;
+  // The picker answers 404 "no puzzle" when a theme has nothing left at the
+  // player's level (it never serves below rating − 250). Surface that as its
+  // own state so the page can offer a way out instead of "Loading…" forever
+  // (owner report 2026-09-08, a 3013-rated student on Smothered Mate).
+  const loadError = isError ? String((error as any)?.message || error) : null;
+  const noPuzzle = isError && !isFetching && /404/.test(loadError || "");
   return {
-    puzzle, isFetching,
+    puzzle, isFetching, noPuzzle, loadError,
     fen: exploring ? exploreFen! : replayView ? replayView.fen : fen,
     orientation,
     turnColor: exploring ? (exploreGame.current.turn() === "w" ? "white" : "black") : playerColor(),

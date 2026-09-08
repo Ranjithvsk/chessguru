@@ -460,7 +460,34 @@ export default function PuzzlesPage() {
             width on the column, so chessground filled both dimensions without
             respecting its intrinsic 1:1 aspect. Wrapping in aspect-square + a
             height cap keeps the board square regardless of column shape. */}
-        <div className="mx-auto aspect-square w-full" style={{ maxWidth: "min(100%, calc(100dvh - 11rem))", maxHeight: "calc(100dvh - 11rem)" }}>
+        <div className="relative mx-auto aspect-square w-full" style={{ maxWidth: "min(100%, calc(100dvh - 11rem))", maxHeight: "calc(100dvh - 11rem)" }}>
+          {g.noPuzzle && (
+            <div className="absolute inset-0 z-20 grid place-items-center bg-ink-950/85 p-6 text-center backdrop-blur-sm" data-testid="no-puzzles">
+              <div className="max-w-sm space-y-3 rounded-2xl border border-ink-700 bg-ink-900 p-5 shadow-2xl">
+                <div className="text-4xl">🏁</div>
+                <div className="font-display text-xl text-white">
+                  {theme === "mix" ? "Nothing left at your level here" : `No more ${prettify(theme)} puzzles at your level`}
+                </div>
+                <p className="text-sm text-ink-300">
+                  You are rated ≈{effectiveRating}. Everything {theme === "mix" ? "in this section" : "this theme has"} near that rating, you have already solved — and puzzles far below your level are never served.
+                </p>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {theme !== "mix" && (
+                    <button
+                      onClick={() => { try { localStorage.setItem("cg_theme", "mix"); localStorage.removeItem("cg_puzzle"); } catch { /* */ } setTheme("mix"); }}
+                      className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-500"
+                      data-testid="no-puzzles-mix"
+                    >Mix all themes</button>
+                  )}
+                  {section === "masters" ? (
+                    <Link to="/puzzles" className="rounded-lg border border-ink-700 px-4 py-2 text-sm text-ink-200 hover:bg-ink-800">Normal trainer</Link>
+                  ) : (
+                    <button onClick={() => { try { localStorage.removeItem("cg_puzzle"); } catch { /* */ } g.next(); }} className="rounded-lg border border-ink-700 px-4 py-2 text-sm text-ink-200 hover:bg-ink-800">Try again</button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
           <Board
             fen={g.fen} orientation={g.orientation} turnColor={g.turnColor}
             movableColor={g.movableColor} dests={g.dests} lastMove={g.lastMove}
@@ -553,7 +580,7 @@ export default function PuzzlesPage() {
               <div className="min-w-0">
                 <h1 className="font-display text-xl text-white">{section === "masters" ? "\u{1F451} Master Games" : g.reviewing && g.puzzle?.themes?.length ? prettify(primaryTheme(g.puzzle?.themes)) : theme === "mix" ? "Mixed puzzles" : prettify(theme)}</h1>
                 <p className="truncate text-sm text-ink-400">
-                  {g.puzzle ? <>#{g.puzzle.id} · Rating {g.puzzle.rating} · Played {g.puzzle.plays ?? 0}</> : "Loading…"}
+                  {g.puzzle ? <>#{g.puzzle.id} · Rating {g.puzzle.rating} · Played {g.puzzle.plays ?? 0}</> : g.noPuzzle ? "Nothing left at your level" : "Loading…"}
                 </p>
               </div>
             </div>
