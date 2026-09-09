@@ -187,6 +187,7 @@
               '<div class="msg">' +
                 '<div class="waiting"><b>Loading ChessGuru…</b><br>Hang on — first load can take a few seconds on slow connections.</div>' +
                 '<div class="stuck-msg" style="display:none"><b>Still loading.</b><br>Your connection is slow — wait a bit longer, or hard-reset to clear caches and try again.</div>' +
+                '<div class="cg-err" style="display:none;margin-top:8px;font:12px/1.4 ui-monospace,monospace;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:6px 8px;text-align:left;word-break:break-word;max-height:9em;overflow:auto"></div>' +
               '</div>' +
               '<div class="actions">' +
                 '<button class="primary" id="cg-wait">Wait longer</button>' +
@@ -240,11 +241,40 @@
           return status;
         }
         function hideStatus() { if (status) status.classList.add("hidden"); }
+        // Capture whatever actually went wrong. A blank page tells the user
+        // nothing and tells us less: on 2026-09-09 a coach hit a white screen
+        // on one domain while the SAME build worked on another, and with no
+        // console on iPhone there was no way to tell a slow download from a
+        // thrown exception. Both look identical from outside. Show it instead.
+        var cgLastError = "";
+        function noteError(what) {
+          if (!cgLastError) cgLastError = String(what || "").slice(0, 400);
+          var s = status;
+          if (s && s.classList.contains("stuck")) showError();
+        }
+        function showError() {
+          if (!status || !cgLastError) return;
+          var box = status.querySelector(".cg-err");
+          if (!box) return;
+          box.textContent = cgLastError;
+          box.style.display = "";
+        }
+        window.addEventListener("error", function (e) {
+          noteError((e && e.message ? e.message : "script error") +
+                    (e && e.filename ? " @ " + String(e.filename).split("/").pop() : "") +
+                    (e && e.lineno ? ":" + e.lineno : ""));
+        }, true);
+        window.addEventListener("unhandledrejection", function (e) {
+          var r = e && e.reason;
+          noteError("unhandled: " + (r && r.message ? r.message : String(r)));
+        });
+
         function markStuck() {
           var s = ensureStatus();
           s.classList.add("stuck");
           s.querySelector(".waiting").style.display = "none";
           s.querySelector(".stuck-msg").style.display = "";
+          showError();
         }
         var stuckTimer = null;
         function scheduleStuck(ms) {

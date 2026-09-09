@@ -20,13 +20,40 @@ export interface MoveNode {
 // state — omit the arg for the shared default. Empty tree = don't persist
 // (avoids a stale empty write clobbering a real session on quick remounts).
 const STORAGE_KEY = "cg_freeplay_v1";
+/** new Chess(fen) that can never take the app down.
+ *
+ *  chess.js THROWS on an unplayable FEN, and this hook seeds itself from a
+ *  localStorage value. A board scan can legitimately produce a position with no
+ *  black king — a misread piece or a crop that clipped a rank — and the editor
+ *  places it deliberately so the coach only has to fix the wrong squares. Once
+ *  that FEN was persisted, every later visit threw during the first render,
+ *  React unmounted the tree, and the site was a white screen on that origin
+ *  FOREVER: a reload re-read the same value, and no amount of hard-refreshing
+ *  clears localStorage. Reported 2026-09-09 as
+ *  "Error: Invalid FEN: missing black king", one domain dead while the same
+ *  build worked on another. A saved position must never be able to do that. */
+function safeChess(fen?: string): Chess | null {
+  if (!fen) return null;
+  try { return new Chess(fen); } catch { return null; }
+}
+
 function loadPersisted(): { tree: MoveNode[]; path: number[]; startFen?: string } | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const j = JSON.parse(raw);
     if (!Array.isArray(j?.tree) || !Array.isArray(j?.path)) return null;
-    return { tree: j.tree, path: j.path, startFen: typeof j.startFen === "string" ? j.startFen : undefined };
+    let startFen = typeof j.startFen === "string" ? j.startFen : undefined;
+    // Drop an unloadable saved position rather than carry it forward. Keep the
+    // move tree: it is replayed defensively below and cannot throw.
+    if (startFen && !safeChess(startFen)) {
+      startFen = undefined;
+      try {
+        const fixed = { ...j }; delete fixed.startFen;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(fixed));
+      } catch { /* quota / disabled — the in-memory drop is what matters */ }
+    }
+    return { tree: j.tree, path: j.path, startFen };
   } catch { return null; }
 }
 function savePersisted(tree: MoveNode[], path: number[], startFen: string) {
@@ -55,8 +82,10 @@ export function useFreePlay(initialFen?: string) {
   // Seed chess.js from initialFen > persisted.startFen > standard. So a
   // reload after Setup Position lands on the same custom board, not the
   // standard start (paired with startFen state below).
+  // initialFen comes from a caller (a prop, a URL), so it is not covered by the
+  // loadPersisted sanitising above and gets the same guard.
   const seededStart = initialFen ?? persisted?.startFen ?? "";
-  const game = useRef(seededStart ? new Chess(seededStart) : new Chess());
+  const game = useRef(safeChess(seededStart) ?? new Chess());
   const [fen, setFen] = useState(() => {
     if (!persisted) return game.current.fen();
     // Replay the persisted path so fen matches the saved cursor position.
@@ -85,7 +114,7 @@ export function useFreePlay(initialFen?: string) {
   const [startFen, setStartFen] = useState<string>(initialFen ?? persisted?.startFen ?? "");
   const startFenRef = useRef<string>(startFen);
   useEffect(() => { startFenRef.current = startFen; }, [startFen]);
-  const freshChess = () => (startFenRef.current ? new Chess(startFenRef.current) : new Chess());
+  const freshChess = () => safeChess(startFenRef.current) ?? new Chess();
   // Persist on every tree/path/startFen change (fire-and-forget, quota-safe).
   useEffect(() => { savePersisted(tree, path, startFen); }, [tree, path, startFen]);
 

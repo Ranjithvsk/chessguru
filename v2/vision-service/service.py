@@ -189,6 +189,21 @@ def _encode_b64_png(img: np.ndarray) -> str:
     return base64.b64encode(buf.tobytes()).decode("ascii")
 
 
+def _encode_b64_jpg(img: np.ndarray, quality: int = 90) -> str:
+    """JPEG, for the picker's board candidates only.
+
+    These are photographs, and PNG is the wrong container for them: a page of
+    12 diagrams came to ~1 MB per crop, and the chosen crop is posted straight
+    back to be classified, so it is paid for twice. JPEG at 90 costs an order of
+    magnitude less with no measurable effect on the read — the training
+    composites are themselves JPEGs at 78-90.
+    """
+    ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+    if not ok:
+        raise HTTPException(status_code=500, detail="jpeg encode failed")
+    return base64.b64encode(buf.tobytes()).decode("ascii")
+
+
 def _classify_via_own(board_bgr: np.ndarray, cv_pipeline, own_yolo):
     """Split the warped board into 64 x 64x64 crops, batch-infer through OUR
     MIT YOLOv8n-cls, then run Tandberg's chess-rules validate_position on the
@@ -768,7 +783,7 @@ def _get_seg_model():
     return _seg_model
 
 
-def _detect_all_boards(img: np.ndarray, max_n: int = 8, conf: float = 0.75,
+def _detect_all_boards(img: np.ndarray, max_n: int = 24, conf: float = 0.75,
                        min_boards: int = 2) -> list[dict[str, Any]]:
     """Every board the extractor can see, in reading order (top-to-bottom,
     left-to-right).
@@ -848,11 +863,24 @@ def _detect_all_boards(img: np.ndarray, max_n: int = 8, conf: float = 0.75,
                    max(0, int(x1) - pad): min(W, int(x2) + pad)]
         if crop.size == 0:
             continue
+        # The chosen crop is posted straight back for classification, so it has
+        # to stay usable — but the pipeline warps to 512 anyway, so anything
+        # past ~640 on the long side is payload for nothing. A page of 12
+        # diagrams at full resolution would otherwise be a multi-megabyte
+        # response over a phone connection.
+        ch, cw = crop.shape[:2]
+        longest = max(ch, cw)
+        if longest > 640:
+            s = 640.0 / longest
+            crop = cv2.resize(crop, (max(1, int(cw * s)), max(1, int(ch * s))),
+                              interpolation=cv2.INTER_AREA)
         out.append({
             "index": i,
             "confidence": round(c, 3),
             "box": [round(v) for v in (x1, y1, x2, y2)],
-            "boardPngBase64": _encode_b64_png(crop),
+            # JPEG, not PNG — see _encode_b64_jpg. The field keeps its name so
+            # the client contract is unchanged; the decoder does not care.
+            "boardPngBase64": _encode_b64_jpg(crop),
         })
     return out
 
@@ -885,8 +913,21 @@ def classify(body: ImageIn) -> dict[str, Any]:
             ext_result = cv.extract_board(img)
             warped = ext_result.board_image
             if warped is None:
-                raise HTTPException(status_code=422, detail="board not found")
-            extractor_source = "server-yolo"
+                # TIER 3: our own segmentation detections. The wrapper returns a
+                # SINGLE board or nothing, and on a hard photo -- a sideways book
+                # page, several diagrams, a shadow band across it -- it returns
+                # nothing and the coach got "board not found" with no way
+                # forward. Meanwhile the same weights, queried directly, found
+                # SIX boards at 0.76-0.97 on exactly that photo (reported
+                # 2026-09-09). Refusing while we can plainly see the boards is
+                # the worst of both. Take the best one and offer the rest.
+                _fallback = _detect_all_boards(img, min_boards=1)
+                if not _fallback:
+                    raise HTTPException(status_code=422, detail="board not found")
+                warped = _decode_b64_image(_fallback[0]["boardPngBase64"])
+                extractor_source = "seg-fallback"
+            else:
+                extractor_source = "server-yolo"
 
         # Tighten YOLO's crop via FFT 8-cycle detection (strips text margins
         # that would shift every square by 1 rank/file). Skipped for Hough
@@ -1039,7 +1080,11 @@ def classify(body: ImageIn) -> dict[str, Any]:
         # A single detection is worth offering too, not just several: on a full
         # book page whose pipeline crop scored 0.013, the lone detection scored
         # 0.934 and classified to the printed position exactly, 64/64 at 0.997.
+        # Always offer the alternatives when we only got here via the tier-3
+        # fallback: the wrapper could not find a board at all, so the one we
+        # picked is a guess among several and the coach should see the rest.
         "candidates": [] if (body.warped_board_base64
-                             or (_warp_q.get("quality") != "bad" and _kings_ok))
+                             or (extractor_source != "seg-fallback"
+                                 and _warp_q.get("quality") != "bad" and _kings_ok))
         else _detect_all_boards(_decode_b64_image(body.image_base64), min_boards=1),
     }
