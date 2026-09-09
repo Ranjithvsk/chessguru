@@ -470,15 +470,28 @@ export default function BoardEditorPage() {
         for (let c2 = 0; c2 < 8; c2++) {
           const cell = j.squares[r2]?.[c2];
           const conf = cell?.confidence ?? 1;
-          // A square the model calls EMPTY needs a much lower score before it is
-          // worth flagging. Measured over two real coach scans of photographed
-          // book diagrams: every ringed square holding a PIECE was a genuine
-          // error (5 of 5 — phantom pawns bled in from a coordinate strip), and
-          // every ringed square called EMPTY was correct (5 of 5 false alarms,
-          // at 0.53-0.69). Hatched print scores a blank square middlingly while
-          // still getting it right, so a flat 0.7 bar mostly cries wolf. Pieces
-          // keep the old bar; empties must be genuinely ambiguous to earn a ring.
-          const limit = cell?.piece ? 0.7 : 0.45;
+          // A square the model calls EMPTY needs a far lower score before it is
+          // worth flagging. Measured across three real coach scans of
+          // photographed book diagrams from different books:
+          //
+          //   low-confidence EMPTY squares:  0.431 0.485 0.529 0.570 0.649
+          //                                  0.686 0.693  -- ALL were correct
+          //   low-confidence PIECE squares:  0.549 0.566 0.579 0.622 0.659
+          //                                  -- ALL were genuine errors
+          //                                  (phantom pawns bled in from a
+          //                                   coordinate strip in the crop)
+          //
+          // Hatched book print scores a blank square middlingly while still
+          // getting it right, so a flat 0.7 bar cries wolf on every scan. 0.35
+          // sits below the lowest correct empty seen (0.431) with headroom.
+          //
+          // Known residual risk: a genuinely MISSED piece — the model calling a
+          // occupied square empty at low confidence — would now go unflagged.
+          // No such case has appeared in these scans, but the sample is small,
+          // so pieces keep the cautious bar and only empties were relaxed. The
+          // better fix is a top-2 margin rather than a threshold, which needs
+          // the service to return the runner-up class; see the roadmap.
+          const limit = cell?.piece ? 0.7 : 0.35;
           if (conf < limit) {
             uncertain++;
             shapes.push({ orig: `${files[c2]}${8 - r2}`, brush: "yellow" });
