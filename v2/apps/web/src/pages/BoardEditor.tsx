@@ -326,6 +326,10 @@ export default function BoardEditorPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ boardPngBase64 }),
       });
+      // Scanning now requires a session (it is a coach tool, and an open
+      // inference endpoint can be farmed to copy the model). Say so plainly
+      // instead of surfacing a raw 401 body.
+      if (r.status === 401) throw new Error("Please sign in to scan a position — the scanner is for signed-in coaches and students.");
       if (!r.ok) throw new Error(await r.text());
       const j = await r.json();
       // Always populate. Even an illegal position preserves the correct pieces
@@ -401,12 +405,23 @@ export default function BoardEditorPage() {
       if (warped) {
         const warpedB64 = typeof warped === "string" ? warped : warped.toDataURL("image/png");
         body.warpedBoardPngBase64 = warpedB64.replace(/^data:image\/[a-z]+;base64,/, "");
+        // Picking a board off the picker used to re-upload the ENTIRE page
+        // alongside the crop — measured on a real coach page, 3.56 MB of raw
+        // plus 2.87 MB of crop, a 6.4 MB POST from a phone. That is what
+        // produced "Ultra AI failed: Load failed" on tap. The raw is only kept
+        // for the scan log when a crop is supplied, and the first scan of this
+        // very page already logged it, so send the crop alone.
+        if (typeof warped === "string") body.rawImagePngBase64 = body.warpedBoardPngBase64;
       }
       const r = await fetch(`${API_BASE}/api/vision/classify-board-ultra`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      // Scanning now requires a session (it is a coach tool, and an open
+      // inference endpoint can be farmed to copy the model). Say so plainly
+      // instead of surfacing a raw 401 body.
+      if (r.status === 401) throw new Error("Please sign in to scan a position — the scanner is for signed-in coaches and students.");
       if (!r.ok) throw new Error(await r.text());
       const j = await r.json();
       // Warp-quality gate: if the server graded the crop "bad" (mis-aligned to

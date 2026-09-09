@@ -54,7 +54,13 @@ export class VisionController {
    *  Latency budget ~3-6s (CPU inference, 64 sequential embeds). Not
    *  session-guarded but rate-limited via body-size cap in main.ts. */
   @Post("classify-board")
-  async classifyBoard(@Body() body: ClassifyBoardBody) {
+  async classifyBoard(@Req() req: any, @Body() body: ClassifyBoardBody) {
+    // Scanning is a coach tool and it is expensive: ~2.6 core-seconds a call
+    // on the box that also serves live classes. It used to take no auth at
+    // all, so anyone could farm it -- and enough call/answer pairs are all
+    // you need to distil a copy of our extractor without ever touching the
+    // weights. Signed-in only, and rate limited in nginx besides.
+    if (!req.session?.userId) throw new UnauthorizedException("login required to scan");
     if (!body?.boardPngBase64) throw new BadRequestException("boardPngBase64 required");
     try {
       return await this.svc.classifyBoard(body.boardPngBase64);
@@ -67,7 +73,13 @@ export class VisionController {
    *  Same request shape as classify-board; response uses the same
    *  ClassifiedSquare structure so the client can consume either. */
   @Post("classify-board-v2")
-  async classifyBoardV2(@Body() body: ClassifyBoardBody) {
+  async classifyBoardV2(@Req() req: any, @Body() body: ClassifyBoardBody) {
+    // Scanning is a coach tool and it is expensive: ~2.6 core-seconds a call
+    // on the box that also serves live classes. It used to take no auth at
+    // all, so anyone could farm it -- and enough call/answer pairs are all
+    // you need to distil a copy of our extractor without ever touching the
+    // weights. Signed-in only, and rate limited in nginx besides.
+    if (!req.session?.userId) throw new UnauthorizedException("login required to scan");
     if (!body?.boardPngBase64) throw new BadRequestException("boardPngBase64 required");
     try {
       return await this.svc.classifyBoardV2(body.boardPngBase64);
@@ -82,7 +94,8 @@ export class VisionController {
    *  Body: { boardPngBase64, source } where source is a free-form tag
    *  ("upload", "camera", "paste", etc.). Response is trivial. */
   @Post("log-scan")
-  async logScan(@Body() body: { boardPngBase64: string; source?: string }) {
+  async logScan(@Req() req: any, @Body() body: { boardPngBase64: string; source?: string }) {
+    if (!req.session?.userId) throw new UnauthorizedException("login required to scan");
     if (!body?.boardPngBase64) throw new BadRequestException("boardPngBase64 required");
     try {
       await this.svc.logScanOnly(body.boardPngBase64, body.source || "upload");
@@ -97,7 +110,13 @@ export class VisionController {
    *  unfamiliar book fonts. Legal-only FEN output guaranteed via top-3
    *  beam-search repair pass. */
   @Post("classify-board-v4")
-  async classifyBoardV4(@Body() body: ClassifyBoardBody) {
+  async classifyBoardV4(@Req() req: any, @Body() body: ClassifyBoardBody) {
+    // Scanning is a coach tool and it is expensive: ~2.6 core-seconds a call
+    // on the box that also serves live classes. It used to take no auth at
+    // all, so anyone could farm it -- and enough call/answer pairs are all
+    // you need to distil a copy of our extractor without ever touching the
+    // weights. Signed-in only, and rate limited in nginx besides.
+    if (!req.session?.userId) throw new UnauthorizedException("login required to scan");
     if (!body?.boardPngBase64) throw new BadRequestException("boardPngBase64 required");
     try {
       return await this.svc.classifyBoardV4(body.boardPngBase64);
@@ -114,8 +133,10 @@ export class VisionController {
    *  screen photos where the server extractor picks up UI chrome. */
   @Post("classify-board-ultra")
   async classifyBoardUltra(
+    @Req() req: any,
     @Body() body: { rawImagePngBase64: string; warpedBoardPngBase64?: string },
   ) {
+    if (!req.session?.userId) throw new UnauthorizedException("login required to scan");
     if (!body?.rawImagePngBase64) throw new BadRequestException("rawImagePngBase64 required");
     try {
       return await this.svc.classifyBoardUltra(body.rawImagePngBase64, body.warpedBoardPngBase64);
@@ -131,8 +152,10 @@ export class VisionController {
    *  mobile users on cellular. */
   @Post("warp-with-corners")
   async warpWithCorners(
+    @Req() req: any,
     @Body() body: { rawImagePngBase64: string; corners: Array<{ x: number; y: number }> },
   ) {
+    if (!req.session?.userId) throw new UnauthorizedException("login required to scan");
     if (!body?.rawImagePngBase64 || body?.corners?.length !== 4) {
       throw new BadRequestException("rawImagePngBase64 + 4 corners required");
     }
@@ -152,6 +175,7 @@ export class VisionController {
     @Req() req: any,
     @Body() body: { rawImagePngBase64: string; corners: Array<{ x: number; y: number }>; sourceRef?: string },
   ) {
+    if (!req.session?.userId) throw new UnauthorizedException("login required to scan");
     if (!body?.rawImagePngBase64 || body?.corners?.length !== 4) {
       throw new BadRequestException("rawImagePngBase64 + 4 corners required");
     }
@@ -174,7 +198,8 @@ export class VisionController {
    *  Ultra AI result so the user picks the correct one (both training
    *  signal AND ToS-compliant use of a paid oracle). */
   @Post("classify-board-chessvision")
-  async classifyBoardChessVision(@Body() body: { rawImagePngBase64: string }) {
+  async classifyBoardChessVision(@Req() req: any, @Body() body: { rawImagePngBase64: string }) {
+    if (!req.session?.userId) throw new UnauthorizedException("login required to scan");
     if (!body?.rawImagePngBase64) throw new BadRequestException("rawImagePngBase64 required");
     try {
       return await this.svc.classifyBoardChessVision(body.rawImagePngBase64);
