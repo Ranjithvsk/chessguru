@@ -141,6 +141,17 @@ export default function BoardEditorPage() {
     Array<{ index: number; confidence: number; boardPngBase64: string }>
   >([]);
   const [rawUploadDataUrl, setRawUploadDataUrl] = useState<string | null>(null);
+  /** The last Ultra scan, kept so we can tell what the COACH changed.
+   *  Correction capture used to fire only from Edit position -> Apply, a path
+   *  almost nobody takes: the natural fix is to drag a piece and copy the FEN.
+   *  Result was 140 stored corrections, none since 11 August, while the
+   *  classifier stayed wrong on exactly the squares people were fixing by
+   *  hand. This is the only ground truth we generate, so capture it from the
+   *  path people actually use. */
+  const [scanRef, setScanRef] = useState<
+    { squares: any[][]; boardPngBase64: string; fen: string } | null
+  >(null);
+  const scanUploadedRef = useRef<string>("");
   // Fetch the crowd-sourced reference bank on first mount. See loadServerRefsOnce.
   useEffect(() => { void loadServerRefsOnce(); }, []);
   // NB: previously auto-preloaded OpenCV.js here to "warm the cache" for
@@ -514,6 +525,10 @@ export default function BoardEditorPage() {
         }
       }
       setUncertainShapes(shapes);
+      if (j.boardPngBase64) {
+        setScanRef({ squares: j.squares, boardPngBase64: j.boardPngBase64, fen: fullFen });
+        scanUploadedRef.current = "";
+      }
       const uncertainTag = uncertain > 0 ? ` · ⚠ ${uncertain} uncertain` : "";
       // Missing-king guard. Every real chess position has both kings, and a
       // printed diagram always shows them. When a king is absent the read has
@@ -592,7 +607,77 @@ export default function BoardEditorPage() {
     else setMsg("Invalid FEN.");
     setTimeout(() => setMsg(""), 1500);
   };
-  const copyFen = () => { navigator.clipboard?.writeText(fp.fen); setMsg("FEN copied."); setTimeout(() => setMsg(""), 1500); };
+  /** Upload every square the user changed after a scan.
+   *
+   *  Copying the FEN is the moment a coach says "this position is right now",
+   *  which makes it the honest confirmation signal: whatever differs from the
+   *  scan at that point is a correction they stand behind. Each one is sent
+   *  with the square's own crop and with what the model had said, so training
+   *  can weight it and a human can audit it. Fire-and-forget — a failed upload
+   *  must never interrupt copying a FEN. */
+  const captureCorrections = async () => {
+    const ref = scanRef;
+    if (!ref || scanUploadedRef.current === fp.fen) return;
+    const board = fp.fen.split(" ")[0] ?? "";
+    const scanned = ref.fen.split(" ")[0] ?? "";
+    if (!board || board === scanned) return;      // nothing changed
+    scanUploadedRef.current = fp.fen;
+    try {
+      const expand = (f: string) => {
+        const out: (string | null)[] = [];
+        for (const ch of f.replace(/\//g, "")) {
+          if (ch >= "1" && ch <= "8") for (let i = 0; i < +ch; i++) out.push(null);
+          else out.push(ch);
+        }
+        return out.length === 64 ? out : null;
+      };
+      const now = expand(board), was = expand(scanned);
+      if (!now || !was) return;
+      const canvas = await dataUrlToCanvas(`data:image/png;base64,${ref.boardPngBase64}`);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      const cell = canvas.width / 8;
+      const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
+      let sent = 0;
+      for (let i = 0; i < 64; i++) {
+        if (now[i] === was[i]) continue;
+        const r = Math.floor(i / 8), c = i % 8;
+        const ch = now[i];
+        const color: "w" | "b" = ch && ch === ch.toUpperCase() ? "w" : "b";
+        const piece = ch ? (ch.toUpperCase() as PieceType) : ("empty" as any);
+        let silhouettePng: string;
+        try {
+          const sig = extractSilhouetteFromSquare(ctx, c * cell, r * cell, cell, cell, color, "print");
+          silhouettePng = silhouetteToPngDataUrl(sig);
+        } catch { continue; }
+        const sq = ref.squares?.[r]?.[c];
+        const crop = document.createElement("canvas");
+        crop.width = crop.height = Math.round(cell);
+        crop.getContext("2d")?.drawImage(canvas, c * cell, r * cell, cell, cell, 0, 0, crop.width, crop.height);
+        void fetch(`${API_BASE}/api/vision/feedback`, {
+          method: "POST", credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            piece, color, silhouettePng,
+            rawCropPng: crop.toDataURL("image/png"),
+            setHint: "scan-correction",
+            square: `${files[c]}${8 - r}`,
+            modelPiece: sq?.piece ? String(sq.piece) : "empty",
+            modelConf: typeof sq?.confidence === "number" ? sq.confidence : undefined,
+          }),
+        }).catch(() => { /* never block the copy */ });
+        sent++;
+      }
+      if (sent) setMsg(`FEN copied. ${sent} correction${sent > 1 ? "s" : ""} saved to improve the scanner.`);
+    } catch { /* capture is best-effort */ }
+  };
+
+  const copyFen = () => {
+    navigator.clipboard?.writeText(fp.fen);
+    setMsg("FEN copied.");
+    void captureCorrections();
+    setTimeout(() => setMsg(""), 3000);
+  };
   /** Rotate the position 180° in-place. Used when a scan comes back with
    *  pieces correctly identified but the board oriented upside-down — a
    *  common failure for iPad/tablet photos where the coordinate labels

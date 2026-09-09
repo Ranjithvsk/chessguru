@@ -79,6 +79,16 @@ export interface FeedbackInput {
   silhouettePng: string;
   rawCropPng?: string;
   setHint?: string;
+  /** What the scan said for this square, and how sure it was. Students scan
+   *  too, so a correction is evidence, not gospel: overturning a 0.99 read is
+   *  as likely to be a user slip as a real catch, while correcting a 0.55 read
+   *  is almost certainly genuine. Stored so training can weight them and a
+   *  human can audit any single claim. */
+  modelPiece?: string;
+  modelConf?: number;
+  /** Algebraic square, e.g. "d1" — lets a correction be traced back to the
+   *  scan it came from. */
+  square?: string;
 }
 
 export interface VisionRefDoc {
@@ -218,7 +228,14 @@ export class VisionService {
       ...(isEmpty ? { isEmpty: true } : {}),
       createdBy: userId,
       createdAt: new Date(),
-      approved: true,
+      ...(input.square ? { square: String(input.square).slice(0, 3) } : {}),
+      ...(input.modelPiece ? { modelPiece: String(input.modelPiece).slice(0, 6) } : {}),
+      ...(typeof input.modelConf === "number" ? { modelConf: input.modelConf } : {}),
+      // Auto-approve only where the model was genuinely unsure. A correction
+      // that overturns a CONFIDENT read is held for review instead of feeding
+      // training unchecked — that is the case where a user slip and a real
+      // catch look identical, and students use the scanner too.
+      approved: typeof input.modelConf === "number" ? input.modelConf < 0.9 : true,
     };
     const r = await this.col().insertOne(doc as any);
     return { ok: true, id: String(r.insertedId), embedded: !!embedding };
