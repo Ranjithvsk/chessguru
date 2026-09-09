@@ -64,10 +64,13 @@ for _p, _alts in FIGURINE_OCR_CONFUSIONS.items():
 # is only a-h and 1-8 — a far smaller space than general OCR faces.
 FILE_CONFUSIONS = {"a": "a", "b": "b", "c": "c", "d": "d", "e": "e", "f": "f",
                    "g": "g", "h": "h", "9": "g", "6": "b", "0": "d", "l": "b"}
+# A rank is 1-8 and NOTHING else, so a confusion that lands on 0 or 9 is dead
+# weight — it can never form a legal square. Every value here is in range.
 RANK_CONFUSIONS = {"1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6",
                    "7": "7", "8": "8", "l": "1", "I": "1", "i": "1", "|": "1",
-                   "O": "0", "o": "0", "S": "5", "s": "5", "B": "8", "g": "9",
-                   "q": "9", "Z": "2", "z": "2", "G": "6", "b": "6"}
+                   "!": "1", "S": "5", "s": "5", "B": "8", "&": "8", "Z": "2",
+                   "z": "2", "G": "6", "b": "6", "T": "7", "?": "7", "A": "4",
+                   "q": "4", "E": "3", "O": "8", "o": "8"}
 
 SAN_RE = re.compile(
     r"^(?:O-O-O|0-0-0|O-O|0-0)[+#]?$|"
@@ -198,10 +201,58 @@ def _san_candidates(raw: str) -> list[str]:
     return [c for c in cands if SAN_RE.match(c)]
 
 
+# Cost of guessing a piece with no glyph evidence at all. Deliberately above
+# any combination of table-backed repairs (max 1 + 2) so the two never tie.
+_BRUTE = 5
+
+_CASTLE_RE = re.compile(r"^[O0oQD°]\-[O0oQD°](\-[O0oQD°])?[+#]?$")
+
+
+def _square_variants(body: str) -> list[tuple[str, int]]:
+    """Repair the destination square of a move body, with a cost.
+
+    Everything after the piece letter ends in a square, and a square is drawn
+    from an eight-by-eight alphabet — a far smaller space than general OCR
+    faces, which is why a confusion table works here and would not work on
+    prose. Any check, mate or promotion marker is set aside first so the last
+    two characters really are the square.
+    """
+    out = [(body, 0)]
+    core, suf = body, ""
+    m = re.search(r"[+#]+$", core)
+    if m:
+        core, suf = core[:m.start()], core[m.start():]
+    promo = ""
+    m = re.search(r"=(.)$", core)
+    if m:
+        promo, core = core[m.start():], core[:m.start()]
+    if len(core) >= 2:
+        f, r = core[-2], core[-1]
+        nf = FILE_CONFUSIONS.get(f) or FILE_CONFUSIONS.get(f.lower())
+        nr = RANK_CONFUSIONS.get(r)
+        if nf and nr:
+            cost = int(nf != f) + int(nr != r)
+            if cost:
+                out.append((core[:-2] + nf + nr + promo + suf, cost))
+    return out
+
+
 def _ranked_candidates(raw: str) -> list[tuple[str, int]]:
-    """SAN candidates with a cost: 0 = exactly what OCR said, 1 = a known glyph
-    confusion, 2 = a brute-force piece substitution. Cheaper is likelier."""
-    s = raw.strip().strip(".,;:()[]")
+    """Every plausible reading of one token, cheapest first.
+
+    Cost is edit plausibility: 0 = exactly what OCR said, 1 = a known glyph
+    confusion, 2 = two such repairs, 5 = a brute-force piece substitution for a
+    glyph no table knows. Legality decides between them later; cost only decides
+    what to try first. The brute-force tier sits at 5 rather than 3 so it can
+    never tie with a table-backed reading — a tie there would hide the fact that
+    the glyph contributed no evidence whatsoever.
+
+    The piece glyph and the square are repaired INDEPENDENTLY and then combined.
+    An earlier version only repaired the square of a reading that was already
+    valid SAN, which meant a token like "NfE" — a mangled rank, the commonest
+    corruption there is — produced no candidates at all and was left untouched.
+    """
+    s = raw.strip().strip(".,;:()[]!?’'\"")
     if not s:
         return []
     out: dict[str, int] = {}
@@ -210,39 +261,51 @@ def _ranked_candidates(raw: str) -> list[tuple[str, int]]:
         if SAN_RE.match(c) and out.get(c, 99) > cost:
             out[c] = cost
 
-    add(s, 0)
+    if _CASTLE_RE.match(s):
+        add("O-O-O" if s.count("-") == 2 else "O-O", 0 if s[0] == "O" else 1)
+        return sorted(out.items(), key=lambda kv: kv[1])
+
+    # (piece letter, rest of the token, cost) — the ways the first glyph reads.
+    heads: list[tuple[str, str, int]] = [("", s, 0)]      # pawn move, or already fine
+    if s[0] in "KQRBN":
+        heads.append((s[0], s[1:], 0))
     if s[0] in FIGURINE:
-        add(FIGURINE[s[0]] + s[1:], 1)
+        heads.append((FIGURINE[s[0]], s[1:], 1))
     for alt in _OCR_TO_PIECE.get(s[0], []):
-        add(alt + s[1:], 1)
-    for c in list(out):
-        if len(c) >= 2:
-            f, r = c[-2], c[-1]
-            nf, nr = FILE_CONFUSIONS.get(f.lower()), RANK_CONFUSIONS.get(r)
-            if nf and nr and (nf != f or nr != r):
-                add(c[:-2] + nf + nr, out[c] + 1)
-    tail = s[1:] if len(s) > 1 else ""
-    if re.fullmatch(r"[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?", tail):
-        for piece in ("N", "B", "R", "Q", "K", ""):
-            add(piece + tail, 2)
+        heads.append((alt, s[1:], 1))
+    # A glyph no table knows. Books use fonts we have never seen, so the table
+    # is a hint and not a limit: try every piece and let legality settle it.
+    if len(s) > 1 and not s[0].isalnum():
+        for piece in ("N", "B", "R", "Q", "K"):
+            heads.append((piece, s[1:], _BRUTE))
+
+    for piece, body, pcost in heads:
+        for fixed, bcost in _square_variants(body):
+            add(piece + fixed, pcost + bcost)
     return sorted(out.items(), key=lambda kv: kv[1])
 
 
 def apply_chess_constraints(tokens: list[Token], start_fen: str | None,
-                            beam: int = 6) -> list[Token]:
+                            beam: int = 10) -> list[Token]:
     """Replay the moves and repair what cannot be legal — with a BEAM.
 
     This is where a chess page beats a general document: every move must be legal
-    in the position reached so far, and a garbled token usually has exactly one
+    in the position reached so far, and a garbled token often has exactly one
     legal reading, which makes the answer proved rather than guessed.
 
-    The beam matters more than it looks. A single greedy pass picks arbitrarily
-    when two readings are both legal, and the wrong pick poisons the position so
-    that every later move fails too — measured, one bad choice at move 8 turned
-    a 20-move line from 20/20 into 16/20. Keeping several candidate lines alive
-    and preferring the one that lets the REST of the moves parse means a later
-    move disambiguates an earlier one, which is exactly how a human reads a
-    garbled score sheet.
+    Two things were learned by measuring rather than by reasoning:
+
+    1. A single greedy pass picks arbitrarily when two readings are both legal,
+       and the wrong pick poisons the position so every later move fails too.
+       Keeping several lines alive lets a LATER move disambiguate an EARLIER one,
+       which is how a human reads a smudged score sheet.
+
+    2. "Exactly one legal reading" is NOT proof. It is only proof *given the
+       moves before it*, and if those are wrong the whole claim is worthless.
+       Measured over 2,377 tokens, judging uniqueness inside one line marked 130
+       moves certain that were wrong. Certainty is therefore only claimed when
+       every surviving line agrees on the token AND it was uniquely legal — a
+       token the alternatives could not talk us out of.
     """
     if not start_fen:
         return tokens
@@ -256,7 +319,7 @@ def apply_chess_constraints(tokens: list[Token], start_fen: str | None,
     except Exception:
         return tokens
 
-    # A path = (board, cost, [(index, san, unique)]).
+    # A path = (board, cost, [(index, san, uniquely-legal-here)]).
     paths: list[tuple[Any, int, list[tuple[int, str, bool]]]] = [
         (chess.Board(start_fen), 0, [])
     ]
@@ -280,23 +343,42 @@ def apply_chess_constraints(tokens: list[Token], start_fen: str | None,
             for c, ccost in legal:
                 b2 = board.copy(stack=False)
                 b2.push_san(c)
-                nxt.append((b2, cost + ccost, hist + [(i, c, len(legal) == 1)]))
+                # Certainty needs the reading to ALSO be OCR's most plausible
+                # one. Being driven off the cheapest candidate means legality
+                # overruled the glyph, and that is exactly what happens when the
+                # line has already diverged and the position is wrong — 10 of
+                # the 12 surviving false-certain tokens looked like this.
+                # ...and it must carry some glyph evidence. A brute-force read
+                # means the glyph said nothing and legality chose alone, which
+                # is only proof if the position is right — and that is the one
+                # thing we cannot check from inside the line.
+                sure = (len(legal) == 1 and ccost == cands[0][1]
+                        and ccost < _BRUTE)
+                nxt.append((b2, cost + ccost, hist + [(i, c, sure)]))
         if not nxt:
-            continue                      # unreadable token: keep the paths alive
+            continue                      # unreadable token: keep the lines alive
         nxt.sort(key=lambda p: p[1])
         paths = nxt[:beam]
 
     if not paths:
         return tokens
-    best = paths[0][2]
-    for idx, san, unique in best:
+
+    # What did the surviving lines disagree about? Disagreement is the honest
+    # signal that we guessed, however cheap the guess looked.
+    votes: dict[int, set[str]] = {}
+    for _b, _c, hist in paths:
+        for idx, san, _u in hist:
+            votes.setdefault(idx, set()).add(san)
+
+    for idx, san, unique in paths[0][2]:
         t = tokens[idx]
         if san != t.text:
             t.original = t.text
             t.text = san
         t.kind = "move"
-        t.verified = unique
-        t.confidence = 1.0 if unique else 0.75
+        agreed = len(votes.get(idx, ())) == 1
+        t.verified = unique and agreed
+        t.confidence = 1.0 if t.verified else (0.8 if agreed else 0.5)
     return tokens
 
 
