@@ -325,13 +325,18 @@ export default function BoardEditorPage() {
       setServerMsg({ tone: "err", text: `Server AI failed: ${(e as Error).message.slice(0, 120)}` });
     } finally { setServerBusy(false); }
   }
-  /** Manual "Try Server AI" button handler -- uses whatever snapshot the
-   *  last client detection produced. Same code path as the auto-trigger
-   *  in runVision, but wired to the visible button so coaches can re-run
-   *  server classification on demand (e.g. after adjusting orientation). */
+  /** Re-classify using the crop the last client-side detection produced,
+   *  rather than letting the server extractor pick the region again.
+   *
+   *  This used to call runServerClassifyOnCanvas (the in-process DINOv2 route,
+   *  self-described as "3-30s"). That route runs 64 model forwards on Node's
+   *  single thread, so while it worked NOTHING else the API serves could be
+   *  answered — including live class WebSockets and /api/health. It now goes
+   *  through the Ultra microservice like every other scan path. See the note
+   *  on the Adjust-corners handler below for the incident this caused. */
   async function runServerClassify() {
     if (!visionSnapshot) { setServerMsg({ tone: "err", text: "Upload a board image first." }); return; }
-    await runServerClassifyOnCanvas(visionSnapshot.canvas);
+    await runUltraScan(visionSnapshot.canvas);
   }
   /** "Ultra AI" — MIT YOLO extractor + 3-model classifier ensemble on the
    *  server. If we already have a tight client-warped board (from OpenCV.js
@@ -339,27 +344,31 @@ export default function BoardEditorPage() {
    *  This fixes iPad screen photos where the server extractor over-reaches
    *  into UI chrome (title bar/bezel) and misaligns the 8×8 tile split.
    *  Latency ~1-3s. */
-  async function runUltraScan(warpedCanvas?: HTMLCanvasElement, rawDataUrlOverride?: string) {
+  async function runUltraScan(warped?: HTMLCanvasElement | string, rawDataUrlOverride?: string) {
     // rawDataUrlOverride lets runVision pass the raw synchronously (before
     // React state has propagated). Falls back to state for the manual button.
     const raw = rawDataUrlOverride || rawUploadDataUrl;
     if (!raw) { setServerMsg({ tone: "err", text: "Upload an image first." }); return; }
-    // Bypass serverBusy guard when we have a client-side warp — that call
-    // is the "reliable path" (server skips its flaky extractor). Should
-    // overwrite the earlier raw-only call if it's still in flight.
-    if (serverBusy && !warpedCanvas) return;
+    // `warped` is either a client-side OpenCV.js canvas or a base64 PNG the
+    // server already warped from the coach's four corners. Either way the
+    // microservice skips its own extractor and trusts the crop we hand it.
+    // Bypass serverBusy guard when we have a warp — that call is the
+    // "reliable path" and should overwrite an earlier raw-only call still
+    // in flight.
+    if (serverBusy && !warped) return;
     setServerBusy(true);
     setServerMsg({
       tone: "info",
-      text: warpedCanvas
-        ? "✨ Ultra AI (reliable): using client warp, skipping server extract…"
+      text: warped
+        ? "✨ Ultra AI (reliable): using your crop, skipping server extract…"
         : "✨ Ultra AI: extract + ensemble classify (1-3s)…",
     });
     try {
       const rawB64 = raw.replace(/^data:image\/[a-z]+;base64,/, "");
       const body: { rawImagePngBase64: string; warpedBoardPngBase64?: string } = { rawImagePngBase64: rawB64 };
-      if (warpedCanvas) {
-        body.warpedBoardPngBase64 = warpedCanvas.toDataURL("image/png").replace(/^data:image\/[a-z]+;base64,/, "");
+      if (warped) {
+        const warpedB64 = typeof warped === "string" ? warped : warped.toDataURL("image/png");
+        body.warpedBoardPngBase64 = warpedB64.replace(/^data:image\/[a-z]+;base64,/, "");
       }
       const r = await fetch(`${API_BASE}/api/vision/classify-board-ultra`, {
         method: "POST", credentials: "include",
@@ -404,12 +413,28 @@ export default function BoardEditorPage() {
       }
       setUncertainShapes(shapes);
       const uncertainTag = uncertain > 0 ? ` · ⚠ ${uncertain} uncertain` : "";
+      // Missing-king guard. Every real chess position has both kings, and a
+      // printed diagram always shows them. When a king is absent the read has
+      // failed — most often because the crop included the a-h / 1-8 coordinate
+      // labels, which shifts the 8x8 split by half a square so every piece is
+      // sliced across two tiles and reads as a confident "empty" (TKT-166).
+      // Deliberately NOT gated on warpQuality.parity: measured on real logged
+      // crops, parity does not separate good reads from bad ones — a verified
+      // 64/64 scan scored 0.641 while the broken TKT-166 crop scored 0.719.
+      const board = j.fen.split(" ")[0];
+      const missingKings = [
+        board.includes("K") ? "" : "white",
+        board.includes("k") ? "" : "black",
+      ].filter(Boolean);
+      const kingWarn = missingKings.length
+        ? ` ⚠ No ${missingKings.join(" or ")} king found — the crop is probably off. Tap "Adjust corners" and put the handles on the corners of the 64 squares, inside the a-h and 1-8 labels.`
+        : "";
       setServerMsg({
-        tone: placed ? "ok" : "err",
+        tone: placed && !missingKings.length ? "ok" : "err",
         text: placed
           ? (legal
-              ? `✨ Ultra AI: ${pieceCount} pieces, avg conf ${avgConf}% (${timing}${uncertainTag}).`
-              : `✨ Ultra AI placed ${pieceCount} pieces (conf ${avgConf}%${uncertainTag}). Position illegal — fix the misread squares.`)
+              ? `✨ Ultra AI: ${pieceCount} pieces, avg conf ${avgConf}% (${timing}${uncertainTag}).${kingWarn}`
+              : `✨ Ultra AI placed ${pieceCount} pieces (conf ${avgConf}%${uncertainTag}). Position illegal — fix the misread squares.${kingWarn}`)
           : `Ultra AI unparseable FEN: ${j.fen}`,
       });
     } catch (e) {
@@ -582,7 +607,7 @@ export default function BoardEditorPage() {
             <span className="text-[10px] text-ink-500">Ctrl-V paste works too</span>
           </div>
           <p className="mb-2 text-[11px] text-ink-400 leading-snug">
-            Upload a cropped chess screenshot (Lichess / Chess.com / any diagram). Detection is naive right now — colours + occupancy only; piece TYPE comes back as a pawn placeholder. Drag pieces around to fix the position, then Copy FEN.
+            Upload a screenshot or a photo of a diagram (Lichess / Chess.com / a book page). The scan reads every piece type, not just occupancy, and usually takes a few seconds. For a photo of a book, frame the 64 squares and leave the a-h / 1-8 labels outside the shot — including them shifts the grid and every piece is misread. Squares it is unsure about get a yellow ring. Drag pieces to fix anything wrong, then Copy FEN.
           </p>
           <input ref={fileInputRef} type="file" accept="image/*" onChange={onPickFile}
             className="block w-full text-[11px] text-ink-300 file:mr-2 file:rounded-lg file:border-0 file:bg-brand-600 file:px-3 file:py-1 file:text-white file:hover:bg-brand-500" />
@@ -610,7 +635,7 @@ export default function BoardEditorPage() {
               {visionSnapshot && (
                 <button onClick={runServerClassify} disabled={serverBusy}
                   className="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-500 disabled:cursor-wait disabled:bg-brand-800">
-                  {serverBusy ? "🚀 Classifying…" : "🚀 Try Server AI (DINOv2)"}
+                  {serverBusy ? "🚀 Classifying…" : "🚀 Re-read my crop"}
                 </button>
               )}
               <button onClick={() => runUltraScan()} disabled={serverBusy}
@@ -664,26 +689,19 @@ export default function BoardEditorPage() {
                   });
                   if (saveR.ok) setServerMsg({ tone: "ok", text: "✓ Corners saved. Classifying…" });
                 } catch { /* save failure shouldn't block the classify below */ }
-                // Set preview + classify using the server's warped board
+                // Set preview, then classify through the SAME Ultra path the
+                // auto scan uses, handing it the board the server just warped
+                // from the coach's corners.
+                //
+                // This used to POST to /classify-board-v2, the old DINOv2-base
+                // ONNX route that runs 64 sequential forwards INSIDE the API
+                // process — ~26-31s of CPU in the same process that holds every
+                // live class WebSocket. TKT-166 died on exactly that call.
+                // classify-board-ultra proxies to the :5100 microservice
+                // instead: out of process, ~1-3s, and it already accepts a
+                // pre-warped board via warpedBoardPngBase64.
                 setVisionPreview(`data:image/png;base64,${warpJ.boardPngBase64}`);
-                setServerMsg({ tone: "info", text: "🚀 Server AI classifying (2-8s)…" });
-                const classR = await fetch(`${API_BASE}/api/vision/classify-board-v2`, {
-                  method: "POST", credentials: "include",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ boardPngBase64: warpJ.boardPngBase64 }),
-                });
-                if (!classR.ok) throw new Error(`classify ${classR.status}: ${(await classR.text()).slice(0, 120)}`);
-                const classJ = await classR.json();
-                const placed = fp.loadPermissive(classJ.fen);
-                const legal = fp.load(classJ.fen);
-                const pieceCount = classJ.fen.split(" ")[0].replace(/[^KQRBNPkqrbnp]/g, "").length;
-                const avgConf = (classJ.squares.flat().reduce((s: number, sq: any) => s + sq.confidence, 0) / 64 * 100).toFixed(0);
-                setServerMsg({
-                  tone: placed ? "ok" : "err",
-                  text: placed
-                    ? `${legal ? "✓" : "⚠"} Loaded ${pieceCount} pieces (conf ${avgConf}%). ${legal ? "" : "Position illegal — fix wrong squares."}`
-                    : "Couldn't parse FEN.",
-                });
+                await runUltraScan(String(warpJ.boardPngBase64), rawUploadDataUrl);
               } catch (e) {
                 setServerMsg({ tone: "err", text: `Manual warp failed: ${(e as Error).message.slice(0, 160)}` });
               } finally { setServerBusy(false); }

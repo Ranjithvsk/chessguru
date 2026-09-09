@@ -136,7 +136,11 @@ export function CornerAdjuster({ imageSrc, initialCorners, onCancel, onConfirm }
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-start overflow-y-auto bg-black/85 p-4">
       <div className="mb-3 text-center text-sm text-white">
-        <div className="font-semibold">Drag the 4 handles to the corners of the chess board</div>
+        <div className="font-semibold">Drag the 4 handles to the corners of the 64 squares</div>
+        <div className="text-ink-300 text-xs mt-1">
+          Put them on the playing area only — <span className="text-amber-300">inside</span> the a-h and 1-8 labels.
+          Including the labels shifts the grid by half a square and every piece is misread.
+        </div>
         <div className="text-ink-300 text-xs mt-1">Then tap Confirm to re-classify</div>
       </div>
       {img && (
