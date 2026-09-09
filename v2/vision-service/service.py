@@ -955,6 +955,44 @@ def _detect_all_boards(img: np.ndarray, max_n: int = 24, conf: float = 0.75,
     return out
 
 
+class BookIngestIn(BaseModel):
+    book_id: str
+    pdf_path: str
+
+
+@app.post("/book/ingest")
+def book_ingest(body: BookIngestIn) -> dict[str, Any]:
+    """Start reading a whole book in the background. Returns immediately.
+
+    Ingest is a one-time cost per book (~100s for 29 pages) and must never
+    block a worker, so it runs in a thread and reports through /book/status.
+    """
+    import book_ingest as bi
+    if not os.path.isfile(body.pdf_path):
+        raise HTTPException(status_code=400, detail="pdf not found")
+    cur = bi.read_status(body.book_id)
+    if cur.get("state") in ("queued", "rendering"):
+        return {"ok": True, "already": True, **cur}
+
+    def _classify(img, warped=None):
+        b64 = _encode_b64_png(img)
+        payload = ImageIn(image_base64=b64,
+                          warped_board_base64=_encode_b64_png(warped) if warped is not None else None)
+        return classify(payload)
+
+    def _detect(img):
+        return _detect_all_boards(img, min_boards=1)
+
+    bi.start(body.book_id, body.pdf_path, _classify, _detect)
+    return {"ok": True, "started": True}
+
+
+@app.get("/book/status/{book_id}")
+def book_status(book_id: str) -> dict[str, Any]:
+    import book_ingest as bi
+    return bi.read_status(book_id)
+
+
 @app.post("/classify")
 def classify(body: ImageIn) -> dict[str, Any]:
     """Full pipeline (own MIT extractor + Tandberg YOLO classifier +
