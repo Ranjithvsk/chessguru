@@ -37,6 +37,12 @@ export default function BookReaderPage() {
   const [active, setActive] = useState<number | null>(null);
   const [page, setPage] = useState(0);
   const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  /** Natural pixel size of each rendered page, learned when the image loads.
+   *  Hotspots are stored in page pixels, so they are positioned as a PERCENTAGE
+   *  of that. An earlier version cached a scale factor on load instead, which
+   *  was captured at whatever width the window happened to be and never
+   *  recomputed — resize the window and every hotspot drifted off its diagram. */
+  const [pageSize, setPageSize] = useState<Record<number, [number, number]>>({});
   const fp = useFreePlay();
 
   useEffect(() => {
@@ -121,15 +127,17 @@ export default function BookReaderPage() {
                 loading="lazy"
                 className="block w-full"
                 onLoad={(e) => {
-                  // Hotspots are in ORIGINAL page pixels; scale them to however
-                  // wide the image actually rendered.
                   const img = e.currentTarget;
-                  img.parentElement?.style.setProperty("--sx", String(img.clientWidth / (img.naturalWidth || 1)));
-                  img.parentElement?.style.setProperty("--sy", String(img.clientHeight / (img.naturalHeight || 1)));
+                  if (img.naturalWidth && img.naturalHeight) {
+                    setPageSize((m) => (m[p] ? m : { ...m, [p]: [img.naturalWidth, img.naturalHeight] }));
+                  }
                 }}
               />
               {(byPage[p] ?? []).map((d) => {
                 if (!d.bbox || d.bbox.length < 4) return null;
+                const size = pageSize[p];
+                if (!size) return null;            // wait until we know the page's real size
+                const [nw, nh] = size;
                 const [x1, y1, x2, y2] = d.bbox as [number, number, number, number];
                 const unsure = (d.conf ?? 1) < 0.9;
                 return (
@@ -144,10 +152,10 @@ export default function BookReaderPage() {
                           ? "ring-2 ring-amber-400/70 hover:bg-amber-300/15"
                           : "ring-2 ring-brand-400/50 hover:bg-brand-400/15"}`}
                     style={{
-                      left: `calc(${x1}px * var(--sx, 1))`,
-                      top: `calc(${y1}px * var(--sy, 1))`,
-                      width: `calc(${x2 - x1}px * var(--sx, 1))`,
-                      height: `calc(${y2 - y1}px * var(--sy, 1))`,
+                      left: `${(x1 / nw) * 100}%`,
+                      top: `${(y1 / nh) * 100}%`,
+                      width: `${((x2 - x1) / nw) * 100}%`,
+                      height: `${((y2 - y1) / nh) * 100}%`,
                     }}
                   >
                     <span className="absolute -left-1 -top-1 rounded-full bg-brand-600 px-2 py-0.5 text-[10px] font-bold text-white shadow group-hover:bg-brand-500">
@@ -164,7 +172,7 @@ export default function BookReaderPage() {
         </div>
 
         {/* Board — sticky so it stays with you as the book scrolls */}
-        <aside className="lg:sticky lg:top-4 lg:self-start">
+        <aside className="lg:sticky lg:top-20 lg:self-start">
           <div className="rounded-2xl border border-ink-700 bg-ink-900 p-3">
             {activeDiagram ? (
               <>
@@ -197,11 +205,12 @@ export default function BookReaderPage() {
       {/* Filmstrip — every position in the book, at a glance */}
       {book.diagrams.length > 0 && (
         <div className="fixed inset-x-0 bottom-0 z-20 border-t border-ink-700 bg-ink-950/95 px-3 py-2 backdrop-blur">
-          <div className="mb-1 flex items-center gap-2 text-[11px] text-ink-400">
+          <div className="mb-1 flex items-center gap-2 pl-44 text-[11px] text-ink-400 sm:pl-48">
             <span className="font-semibold text-ink-200">{book.diagrams.length} positions</span>
             <span>· tap to jump</span>
           </div>
-          <div className="flex gap-1.5 overflow-x-auto pb-1">
+          {/* left padding clears the global "Scan position" button, which sits bottom-left */}
+            <div className="flex gap-1.5 overflow-x-auto pb-1 pl-44 sm:pl-48">
             {book.diagrams.map((d) => (
               <button
                 key={d.n}
