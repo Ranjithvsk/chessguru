@@ -145,6 +145,39 @@ def apply_chess_logic(labels: list[str], probs, square_names: list[str],
                     need = sum(max(0, c[q] - START_MAX[q]) for q in ("Q", "R", "B", "N"))
                     afford = 8 - c["P"]
 
+    # --- Rule: colour balance ---------------------------------------------
+    # The strongest correctable signal we have. If BOTH sides' counts of a
+    # piece type still add up to the starting total (4 rooks, 4 knights, 4
+    # bishops, 2 queens) but the split is wrong -- one side over, the other
+    # under -- then nothing was promoted or captured: a COLOUR was misread.
+    # Flip the one that is cheapest to flip and both counts come right.
+    #
+    # This is what a bare legality check misses. Reported 2026-09-09: a scan
+    # read a white rook on d1 as a black rook at 0.954, giving Black three
+    # rooks and White one. Promotions were affordable on paper (Black had five
+    # pawns, so three were missing), so a promotion-budget rule stays silent —
+    # yet four rooks on the board with a 3/1 split can only be a colour error.
+    START_TOTAL = {"Q": 2, "R": 4, "B": 4, "N": 4}
+    for k, total in START_TOTAL.items():
+        w_sym, b_sym = k, k.lower()
+        w = sum(1 for p in labels if p == w_sym)
+        b = sum(1 for p in labels if p == b_sym)
+        if w + b != total:
+            continue                      # a real capture or promotion happened
+        for over, under in ((w_sym, b_sym), (b_sym, w_sym)):
+            n_over = sum(1 for p in labels if p == over)
+            n_under = sum(1 for p in labels if p == under)
+            while n_over > START_MAX[k] and n_under < START_MAX[k]:
+                idxs = [i for i, p in enumerate(labels) if p == over]
+                if not idxs:
+                    break
+                # Cheapest flip = the square least sure it is this colour and
+                # most willing to be the other.
+                i = min(idxs, key=lambda i: prob_of(i, over) - prob_of(i, under))
+                swap(i, under, "colour_balance")
+                n_over -= 1
+                n_under += 1
+
     # --- Warn: legal but implausible --------------------------------------
     # Above the starting complement is legal after a promotion, so this is NEVER
     # auto-corrected. It is, however, far likelier to be a misread piece.

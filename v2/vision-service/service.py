@@ -1094,25 +1094,86 @@ def classify(body: ImageIn) -> dict[str, Any]:
     _kings_ok = _board_field.count("K") == 1 and _board_field.count("k") == 1
     probs = pos.model_probabilities   # (64, 13)
     label_names = constants.LABEL_NAMES
+    # Chess-logic repair. The classifier reads each square independently, so it
+    # cannot notice it has just given Black three rooks while White has one --
+    # four rooks total, so nothing was promoted and a COLOUR was misread. We
+    # still hold the full 64x13 probability matrix here, which is what makes a
+    # cheap, principled correction possible instead of a bare warning.
+    # Start from the EXISTING validation pass's output, not the raw argmax.
+    # pos.fen has already had Tandberg's rules applied (pawns off the back
+    # ranks), and starting from argmax silently threw those away -- measured on
+    # a known-good diagram, it reintroduced two kings on the 8th rank that had
+    # already been corrected. Parse its board field back into 64 labels in
+    # square_names order (a8..h1) so our pass ADDS to that work.
+    def _labels_from_fen(fen: str) -> list[str] | None:
+        board = (fen or "").split(" ")[0]
+        ranks = board.split("/")
+        if len(ranks) != 8:
+            return None
+        out: list[str] = []
+        for rk in ranks:
+            for ch in rk:
+                if ch.isdigit():
+                    out.extend(["f"] * int(ch))
+                else:
+                    out.append(ch)
+        return out if len(out) == 64 else None
+
+    _labels = _labels_from_fen(pos.fen) or [label_names[int(probs[i].argmax())] for i in range(64)]
+    _logic_fixes: list[dict[str, Any]] = []
+    _logic_warnings: list[str] = []
+    try:
+        import chess_logic
+        _labels, _logic_fixes, _logic_warnings = chess_logic.apply_chess_logic(
+            _labels, probs, list(pos.square_names), list(label_names))
+        if _logic_fixes:
+            log.info("chess-logic applied %d fix(es): %s", len(_logic_fixes),
+                     ", ".join(f"{f['square']} {f['from']}->{f['to']} ({f['rule']})"
+                               for f in _logic_fixes))
+    except Exception as e:  # a repair pass must never break a scan
+        log.warning("chess-logic pass skipped: %s", e)
+
     grid: list[list[dict[str, Any]]] = [[{} for _ in range(8)] for _ in range(8)]
+    _rows_out: list[str] = []
     for i, sq in enumerate(pos.square_names):
         file_c = ord(sq[0]) - ord("a")
         rank_c = int(sq[1])
         row = 8 - rank_c
         col = file_c
-        top_idx = int(probs[i].argmax())
-        conf = float(probs[i, top_idx])
-        label = label_names[top_idx]
+        label = _labels[i]
+        try:
+            conf = float(probs[i, label_names.index(label)])
+        except Exception:
+            conf = float(probs[i].max())
         if label == "f":
             grid[row][col] = {"piece": None, "color": None, "confidence": conf, "matchedSetName": "tandberg-yolo-cls"}
         else:
             grid[row][col] = {"piece": label.upper(), "color": "w" if label.isupper() else "b",
                               "confidence": conf, "matchedSetName": "tandberg-yolo-cls"}
     avg = sum(sq["confidence"] for row in grid for sq in row) / 64.0
+    # FEN from the REPAIRED labels (square_names run a8..h1).
+    _fen_rows, _run = [], 0
+    for i, _l in enumerate(_labels):
+        if _l == "f":
+            _run += 1
+        else:
+            if _run:
+                _fen_rows.append(str(_run)); _run = 0
+            _fen_rows.append(_l)
+        if (i + 1) % 8 == 0:
+            if _run:
+                _fen_rows.append(str(_run)); _run = 0
+            _fen_rows.append("/")
+    _repaired_fen = "".join(_fen_rows).rstrip("/")
     return {
         "ok": True,
-        "fen": pos.fen,
-        "originalFen": pos.original_fen,
+        # The chess-logic pass may have corrected squares the classifier read
+        # independently and wrongly, so serve ITS board. originalFen keeps the
+        # pre-repair reading so a fix is always auditable.
+        "fen": _repaired_fen or pos.fen,
+        "originalFen": pos.fen,
+        "logicFixes": _logic_fixes,
+        "logicWarnings": _logic_warnings,
         "squares": grid,
         "boardPngBase64": _encode_b64_png(warped),
         "meta": {
