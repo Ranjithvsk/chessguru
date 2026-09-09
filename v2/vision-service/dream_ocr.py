@@ -23,6 +23,7 @@ interface without touching anything below.
 """
 from __future__ import annotations
 
+import difflib
 import logging
 import os
 import re
@@ -284,71 +285,70 @@ def available_engines() -> list[Engine]:
 
 
 # ── Consensus ──────────────────────────────────────────────────────────────
-def consensus(per_engine: dict[str, list[tuple[str, float]]]) -> list[Token]:
-    """Merge engines position-by-position.
+def consensus(per_engine: dict[str, list[tuple[str, float]]],
+              weights: dict[str, float] | None = None) -> list[Token]:
+    """Merge engines by ALIGNING their word sequences, not by index.
 
-    Deliberately simple: engines that read the same page produce nearly the same
-    word sequence, so index alignment is enough in practice and a full
-    edit-distance alignment (ROVER) is only worth it once we have three or more
-    engines disagreeing often. Weighted vote, ties broken by confidence.
+    The first version voted position-by-position on the assumption that engines
+    reading the same page produce nearly the same sequence. Measuring four
+    engines on one book page killed that assumption outright: they returned 55,
+    40, 41 and 40 words, and not in the same order — Surya put the page number
+    before the running head, docTR dropped it, Paddle inserted a stray glyph
+    from the diagram. Voting on index 3 of four sequences like that compares
+    words from different parts of the page and produces confident nonsense.
+
+    So: take the engine carrying the most confidence mass as the spine, align
+    each other engine to it with a longest-matching-block diff, and vote only
+    where the alignment actually pairs words up. Insertions and deletions are
+    left alone rather than forced into a slot they do not belong in.
     """
     if not per_engine:
         return []
-    names = list(per_engine)
-    longest = max(len(v) for v in per_engine.values())
-    out: list[Token] = []
-    for i in range(longest):
-        votes: dict[str, float] = {}
-        seen: dict[str, str] = {}
-        for n in names:
-            seq = per_engine[n]
-            if i >= len(seq):
-                continue
-            w, c = seq[i]
-            votes[w] = votes.get(w, 0.0) + max(c, 0.05)
-            seen[n] = w
-        if not votes:
+    weights = weights or {}
+    live = {n: v for n, v in per_engine.items() if v}
+    if not live:
+        return []
+
+    def mass(n: str) -> float:
+        return sum(c for _, c in live[n]) * weights.get(n, 1.0)
+
+    spine_name = max(live, key=mass)
+    spine = live[spine_name]
+    spine_words = [w for w, _ in spine]
+
+    # votes[i][word] -> accumulated weight, and who said it
+    votes: list[dict[str, float]] = [
+        {w: max(c, 0.05) * weights.get(spine_name, 1.0)} for w, c in spine
+    ]
+    said: list[dict[str, str]] = [{spine_name: w} for w, _ in spine]
+
+    for name, seq in live.items():
+        if name == spine_name:
             continue
-        best = max(votes, key=lambda k: votes[k])
-        total = sum(votes.values()) or 1.0
-        out.append(Token(text=best, confidence=votes[best] / total, engines=seen))
+        other_words = [w for w, _ in seq]
+        sm = difflib.SequenceMatcher(a=spine_words, b=other_words, autojunk=False)
+        for tag, i1, i2, j1, j2 in sm.get_opcodes():
+            if tag == "equal" or (tag == "replace" and (i2 - i1) == (j2 - j1)):
+                for k in range(i2 - i1):
+                    w, c = seq[j1 + k]
+                    idx = i1 + k
+                    votes[idx][w] = (votes[idx].get(w, 0.0)
+                                     + max(c, 0.05) * weights.get(name, 1.0))
+                    said[idx][name] = w
+            # insert / delete / ragged replace: no honest pairing exists, skip
+
+    out: list[Token] = []
+    for idx, v in enumerate(votes):
+        if not v:
+            continue
+        best = max(v, key=lambda k: v[k])
+        total = sum(v.values()) or 1.0
+        out.append(Token(text=best, confidence=v[best] / total,
+                         engines=dict(said[idx])))
     return out
 
 
 # ── Chess constraint pass ──────────────────────────────────────────────────
-def _san_candidates(raw: str) -> list[str]:
-    """Every plausible SAN this token could have been, cheapest edits first."""
-    s = raw.strip().strip(".,;:()[]")
-    if not s:
-        return []
-    cands = {s}
-    # figurine or mis-OCR'd piece letter at the front
-    if s[0] in FIGURINE:
-        cands.add(FIGURINE[s[0]] + s[1:])
-    for alt in _OCR_TO_PIECE.get(s[0], []):
-        cands.add(alt + s[1:])
-    # square-name repairs, applied only to the last two characters
-    fixed = set()
-    for c in cands:
-        if len(c) >= 2:
-            f, r = c[-2], c[-1]
-            nf = FILE_CONFUSIONS.get(f.lower())
-            nr = RANK_CONFUSIONS.get(r)
-            if nf and nr and (nf != f or nr != r):
-                fixed.add(c[:-2] + nf + nr)
-    cands |= fixed
-    # Last resort: if the token LOOKS like a move but its leading character is
-    # not a piece letter we recognise, try every piece. The confusion table is a
-    # hint, not a limit — books use fonts we have never seen, and legality will
-    # pick the one true reading anyway. Without this, a knight rendered as "&"
-    # (which our table only knew as a bishop or king) stayed unread.
-    tail = s[1:] if len(s) > 1 else ""
-    if re.fullmatch(r"x?[a-h][1-8](?:=[QRBN])?[+#]?", tail):
-        for piece in ("K", "Q", "R", "B", "N", ""):
-            cands.add(piece + tail)
-    return [c for c in cands if SAN_RE.match(c)]
-
-
 # Cost of guessing a piece with no glyph evidence at all. Deliberately above
 # any combination of table-backed repairs (max 1 + 2) so the two never tie.
 _BRUTE = 5
