@@ -468,8 +468,18 @@ export default function BoardEditorPage() {
       let uncertain = 0;
       for (let r2 = 0; r2 < 8; r2++) {
         for (let c2 = 0; c2 < 8; c2++) {
-          const conf = j.squares[r2]?.[c2]?.confidence ?? 1;
-          if (conf < 0.7) {
+          const cell = j.squares[r2]?.[c2];
+          const conf = cell?.confidence ?? 1;
+          // A square the model calls EMPTY needs a much lower score before it is
+          // worth flagging. Measured over two real coach scans of photographed
+          // book diagrams: every ringed square holding a PIECE was a genuine
+          // error (5 of 5 — phantom pawns bled in from a coordinate strip), and
+          // every ringed square called EMPTY was correct (5 of 5 false alarms,
+          // at 0.53-0.69). Hatched print scores a blank square middlingly while
+          // still getting it right, so a flat 0.7 bar mostly cries wolf. Pieces
+          // keep the old bar; empties must be genuinely ambiguous to earn a ring.
+          const limit = cell?.piece ? 0.7 : 0.45;
+          if (conf < limit) {
             uncertain++;
             shapes.push({ orig: `${files[c2]}${8 - r2}`, brush: "yellow" });
           }
