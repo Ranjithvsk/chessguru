@@ -513,15 +513,34 @@ export default function BoardEditorPage() {
         board.includes("K") ? "" : "white",
         board.includes("k") ? "" : "black",
       ].filter(Boolean);
+      // Piece-count sanity. Confidence cannot catch a CONFIDENTLY wrong read: a
+      // coach scan on 2026-09-09 turned a black knight on b8 into a bishop at
+      // 0.926, which no threshold would ever flag. But the resulting position
+      // gave Black three rooks and three bishops, and that is visible for free.
+      // A count above the starting complement needs promotions, which in a
+      // diagram with most pawns still on the board is far less likely than a
+      // misread piece. Warn, never block — promotions do happen.
+      const excess: string[] = [];
+      for (const [ch, max, plural] of [["R", 2, "rooks"], ["N", 2, "knights"],
+                                       ["B", 2, "bishops"], ["Q", 1, "queens"]] as const) {
+        for (const side of ["w", "b"] as const) {
+          const sym = side === "w" ? ch : ch.toLowerCase();
+          const n = board.split("").filter((x: string) => x === sym).length;
+          if (n > max) excess.push(`${side === "w" ? "White" : "Black"} has ${n} ${plural}`);
+        }
+      }
+      const countWarn = excess.length
+        ? ` ⚠ ${excess.join(", ")} — at least one piece is misread. Check that rank before using this position.`
+        : "";
       const kingWarn = missingKings.length
         ? ` ⚠ No ${missingKings.join(" or ")} king found — the crop is probably off. Tap "Adjust corners" and put the handles on the corners of the 64 squares, inside the a-h and 1-8 labels.`
         : "";
       setServerMsg({
-        tone: placed && !missingKings.length ? "ok" : "err",
+        tone: placed && !missingKings.length && !excess.length ? "ok" : "err",
         text: placed
           ? (legal
-              ? `✨ Ultra AI: ${pieceCount} pieces, avg conf ${avgConf}% (${timing}${uncertainTag}).${kingWarn}`
-              : `✨ Ultra AI placed ${pieceCount} pieces (conf ${avgConf}%${uncertainTag}). Position illegal — fix the misread squares.${kingWarn}`)
+              ? `✨ Ultra AI: ${pieceCount} pieces, avg conf ${avgConf}% (${timing}${uncertainTag}).${kingWarn}${countWarn}`
+              : `✨ Ultra AI placed ${pieceCount} pieces (conf ${avgConf}%${uncertainTag}). Position illegal — fix the misread squares.${kingWarn}${countWarn}`)
           : `Ultra AI unparseable FEN: ${j.fen}`,
       });
     } catch (e) {
