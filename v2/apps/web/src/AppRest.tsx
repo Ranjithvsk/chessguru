@@ -117,6 +117,7 @@ import ChangePasswordPage from "./pages/ChangePassword";
 import PlayGameReplayPage from "./pages/PlayGameReplay";
 import FeedbackUITestPage from "./pages/FeedbackUITest";
 import BookPage from "./pages/Book";
+import BookReaderPage from "./pages/BookReader";
 import ClassReplayPage from "./pages/ClassReplay";
 import ClassV2Page from "./pages/ClassV2";
 import NotebookPage, { NotebookPackDetailPage, NotebookReviseSessionPage } from "./pages/Notebook";
@@ -269,6 +270,8 @@ export default function AppRest() {
         <Route path="history/external/:id" element={<ExternalGamePage />} />
         <Route path="test/feedback-ui" element={<FeedbackUITestPage />} />
         <Route path="book" element={<BookPage />} />
+        {/* "My Books" — a coach's own PDF, ingested once and read here. */}
+        <Route path="books/read/:id" element={<BookReaderPage />} />
         <Route path="class" element={<Navigate to="/dashboard" replace />} />
         <Route path="class/:id" element={<ClassIdRedirect />} />
         <Route path="class/:id/replay/:filename" element={<ClassReplayPage />} />
