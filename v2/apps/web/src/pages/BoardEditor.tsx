@@ -24,6 +24,18 @@ import {
 
 const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
 
+/** The vision service answers with the board field alone — "3rr2k/pppqn2p/..."
+ *  — not a complete FEN. chess.js requires all six fields and rejects the short
+ *  form, so any legality check run on the raw value fails regardless of the
+ *  position. Fill in sensible defaults for the fields a scanned diagram cannot
+ *  know: White to move, no castling rights, no en-passant square. */
+function normalizeScanFen(fen: string): string {
+  const parts = (fen || "").trim().split(/\s+/);
+  if (parts.length >= 6) return fen.trim();
+  const board = parts[0] || "";
+  return `${board} w - - 0 1`;
+}
+
 /** One-time (page-load-scoped) fetch of the server-side reference bank so
  *  coach-corrections from other coaches boost the detector before the user
  *  opens the vision panel. Fails silently -- offline / API down still
@@ -318,8 +330,17 @@ export default function BoardEditorPage() {
       const j = await r.json();
       // Always populate. Even an illegal position preserves the correct pieces
       // so the coach only fixes the wrong squares instead of starting empty.
-      const placed = fp.loadPermissive(j.fen);
-      const legal = fp.load(j.fen);
+      // The vision service returns the BOARD FIELD ONLY ("3rr2k/pppqn2p/...").
+      // chess.js rejects a one-field FEN outright, so fp.load() was failing on
+      // every scan and we told the coach "Position illegal — fix the misread
+      // squares" even when all 64 squares were right. Verified 2026-09-09: a
+      // scan that reproduced its book diagram exactly was reported illegal.
+      // loadPermissive already retried with the missing fields appended, which
+      // is why the board itself looked correct while the message contradicted
+      // it. Normalise once, then both calls agree.
+      const fullFen = normalizeScanFen(j.fen);
+      const placed = fp.loadPermissive(fullFen);
+      const legal = fp.load(fullFen);
       const avgConf = (j.squares.flat().reduce((s: number, sq: any) => s + sq.confidence, 0) / 64 * 100).toFixed(0);
       const pieceCount = j.fen.split(" ")[0].replace(/[^KQRBNPkqrbnp]/g, "").length;
       setServerMsg({
@@ -415,8 +436,17 @@ export default function BoardEditorPage() {
         setAdjusterOpen(true);
         return;
       }
-      const placed = fp.loadPermissive(j.fen);
-      const legal = fp.load(j.fen);
+      // The vision service returns the BOARD FIELD ONLY ("3rr2k/pppqn2p/...").
+      // chess.js rejects a one-field FEN outright, so fp.load() was failing on
+      // every scan and we told the coach "Position illegal — fix the misread
+      // squares" even when all 64 squares were right. Verified 2026-09-09: a
+      // scan that reproduced its book diagram exactly was reported illegal.
+      // loadPermissive already retried with the missing fields appended, which
+      // is why the board itself looked correct while the message contradicted
+      // it. Normalise once, then both calls agree.
+      const fullFen = normalizeScanFen(j.fen);
+      const placed = fp.loadPermissive(fullFen);
+      const legal = fp.load(fullFen);
       const avgConf = (j.squares.flat().reduce((s: number, sq: any) => s + sq.confidence, 0) / 64 * 100).toFixed(0);
       const pieceCount = j.fen.split(" ")[0].replace(/[^KQRBNPkqrbnp]/g, "").length;
       const timing = `extract ${j.extractLatencyMs}ms + classify ${j.meta.latencyMs}ms`;
