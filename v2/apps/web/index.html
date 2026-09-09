@@ -213,7 +213,26 @@
                   var keys = await caches.keys();
                   for (var j = 0; j < keys.length; j++) await caches.delete(keys[j]);
                 }
-                try { sessionStorage.removeItem("cg_recovered"); } catch (e) {}
+                // Storage too. Clearing only the SW and caches left one real
+                // failure unfixable from inside the app: 2026-09-09, a phone
+                // showed this panel then a blank page on ONE origin while the
+                // SAME build worked on another, with both domains serving
+                // byte-identical JS. Nothing server-side could explain it, and
+                // Hard reset could not clear what was actually stuck. The user
+                // was left deleting website data in iOS Settings. Whatever a
+                // bad persisted value is, it should not survive a reset the
+                // user explicitly asked for. Sign-in lives in an httpOnly
+                // cookie, so this costs preferences, not the session.
+                try { localStorage.clear(); } catch (e) {}
+                try { sessionStorage.clear(); } catch (e) {}
+                try {
+                  if (window.indexedDB && indexedDB.databases) {
+                    var dbs = await indexedDB.databases();
+                    for (var k = 0; k < dbs.length; k++) {
+                      if (dbs[k] && dbs[k].name) indexedDB.deleteDatabase(dbs[k].name);
+                    }
+                  }
+                } catch (e) {}
               } catch (e) {}
               location.reload();
             })();
