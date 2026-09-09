@@ -121,6 +121,8 @@ def tesseract_engine() -> Engine | None:
             out.append((t, max(0.0, c)))
         return out
 
+    # 1.0: perfect on clean prose in 1.1s, but hallucinates text off DIAGRAMS
+    # (53 words where 40 are printed), so never the spine on a chess page.
     return Engine("tesseract", run, weight=1.0)
 
 
@@ -184,7 +186,9 @@ def surya_engine() -> Engine | None:
                     out.append((w, conf))
         return out
 
-    return Engine("surya", run, weight=1.3)
+    # 1.1: strongest on hard input, but MEASURED slightly behind Paddle on clean
+    # typeset pages (97.5% vs 100%) and 4x the cost. Not the default spine.
+    return Engine("surya", run, weight=1.1)
 
 
 def doctr_engine() -> Engine | None:
@@ -212,7 +216,8 @@ def doctr_engine() -> Engine | None:
                             out.append((t, float(w.get("confidence") or 0.0)))
         return out
 
-    return Engine("doctr", run, weight=1.2)
+    # 0.9: MEASURED weakest on pages carrying diagrams (60% on page 20).
+    return Engine("doctr", run, weight=0.9)
 
 
 def paddle_engine() -> Engine | None:
@@ -266,7 +271,9 @@ def paddle_engine() -> Engine | None:
                     out.append((w, float(sc)))
         return out
 
-    return Engine("paddle", run, weight=1.2)
+    # 1.4: MEASURED best of the four — 100% on both a prose page and a
+    # four-diagram page, at a quarter of Surya's runtime.
+    return Engine("paddle", run, weight=1.4)
 
 
 def available_engines() -> list[Engine]:
@@ -309,14 +316,26 @@ def consensus(per_engine: dict[str, list[tuple[str, float]]],
     if not live:
         return []
 
-    def quality(n: str) -> float:
-        """MEAN confidence, not total. Total rewards whichever engine wrote the
+    def quality(n: str) -> tuple[float, float]:
+        """Declared weight FIRST, self-reported confidence only as a tiebreak.
+
+        Two things had to be learned the hard way here.
+
+        Total confidence mass is wrong: it rewards whichever engine wrote the
         most words, and on a chess page the most verbose engine is the one
-        hallucinating text off the DIAGRAM — Tesseract reads a board as
-        'Vi, Wi, Wi, Ui "O86 @ U27)'. Picking it as the spine drags that noise
-        into the merged page. Mean confidence picks the cleanest reader."""
+        hallucinating text off the DIAGRAM. Tesseract reads a board as
+        'Vi, Wi, Wi, Ui "O86 @ U27)' and so won the spine with 55 words to
+        Surya's 40, dragging all of it into the merged page.
+
+        Mean confidence is wrong too, and more subtly. Confidence is NOT
+        comparable across engines — each one's number means something different,
+        and Surya reports ~1.00 on everything it emits. That is overconfidence,
+        not accuracy. Measured against a page transcribed by eye, adding Surya to
+        Paddle made the result WORSE, 100% to 97.5%, purely because Surya seized
+        the spine. So the spine is chosen by a weight WE set from measurement,
+        and the engine's own opinion of itself only breaks ties."""
         seq = live[n]
-        return (sum(c for _, c in seq) / len(seq)) * weights.get(n, 1.0)
+        return (weights.get(n, 1.0), sum(c for _, c in seq) / len(seq))
 
     spine_name = max(live, key=quality)
     spine = live[spine_name]

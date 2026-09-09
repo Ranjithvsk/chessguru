@@ -98,12 +98,49 @@ any move-shaped token gets all five piece letters tried and legality settles it.
 
 ## Engines
 
-| Engine | Version | On one book page |
-|---|---|---|
-| Tesseract | 5.5.0 | 0.8s, 55 words, avg conf 0.78 |
-| docTR | 1.1.0 | 9.1s, 40 words, avg conf 0.92 |
-| PaddleOCR / PP-Structure | 3.7.0 | 22.5s, 41 words, avg conf 0.98 |
-| Surya | 0.16.7 | 81.1s, 40 words, avg conf 1.00 |
+Scored against two pages transcribed **by eye from the images**, not against
+each other. Precision here means "of the words it emitted, how many are really
+printed" — which is what catches an engine inventing text off a diagram.
+
+| Engine | Prose page (114 words) | Four-diagram page (40 words) | sec/page |
+|---|---|---|---|
+| **PaddleOCR** 3.7.0 | **100%** | **100%** | 16-32 |
+| Surya 0.16.7 | 99.1% | 97.5% | 72-131 |
+| Tesseract 5.5.0 | **100%** | 69.8% | 0.7-1.1 |
+| docTR 1.1.0 | 100% | 60.0% | 2.4-3.8 |
+| all four | 100% | 100% | 91-168 |
+
+**The ensemble buys nothing on a clean typeset page.** Paddle alone equals all
+four at a fifth of the cost. Tesseract is perfect on prose in ONE SECOND and
+collapses to 69.8% on a page with diagrams, because it reads the board as text —
+53 words where 40 are printed. That is the whole story of why an ensemble is
+worth having at all: not accuracy on easy pages, but not falling over on hard
+ones.
+
+For book ingest, run **Paddle alone**: a 300-page book is ~2 hours instead of
+~10. Keep the rest for hard input — photographs, skew, unusual fonts — which is
+untested because we have no such pages yet.
+
+### The measurement trap I fell into
+
+The first sweep scored each engine subset against the FOUR-ENGINE CONSENSUS and
+concluded Surya was essential. That was circular: Surya was usually the spine, so
+it agreed with the reference by construction. Two of the six pages were also a
+3-word title page and a **blank** one, which every engine "agreed" on perfectly
+and which inflated every row to ~100%.
+
+Transcribing two pages by eye reversed the conclusion completely.
+
+### Confidence is not comparable across engines
+
+Surya reports ~1.00 on everything it emits. That is overconfidence, not accuracy.
+Because the spine was picked by mean confidence, Surya always seized it — and
+adding Surya to Paddle made the merged page WORSE, 100% down to 97.5%. An
+ensemble that degrades when you add an engine to it is broken.
+
+The spine is now chosen by a weight WE set from measurement (Paddle 1.4, Surya
+1.1, Tesseract 1.0, docTR 0.9), and an engine's opinion of itself only breaks
+ties. With that fixed, all four together score 100% on both pages.
 
 Three of the four needed fixing before they produced a single word:
 
