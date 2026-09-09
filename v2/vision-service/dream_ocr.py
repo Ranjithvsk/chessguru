@@ -24,6 +24,7 @@ interface without touching anything below.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -122,14 +123,161 @@ def tesseract_engine() -> Engine | None:
     return Engine("tesseract", run, weight=1.0)
 
 
+# Loaded models are expensive (Surya pulls ~1 GB of weights) so they are built
+# once, on first use, and kept. Nothing here loads at import time — the live
+# scanner imports this module and must not pay for models it will never call.
+_MODELS: dict[str, Any] = {}
+
+
+def _pil(img):
+    """Engines want a PIL RGB image; our pipeline passes OpenCV BGR arrays."""
+    from PIL import Image
+    if hasattr(img, "shape"):
+        arr = img
+        if getattr(arr, "ndim", 0) == 3 and arr.shape[2] == 3:
+            arr = arr[:, :, ::-1]
+        return Image.fromarray(arr.astype("uint8"))
+    return img
+
+
+def surya_engine() -> Engine | None:
+    """Surya — transformer OCR, strongest of the four on unusual layouts."""
+    try:
+        import surya.recognition  # noqa: F401
+    except Exception:
+        return None
+
+    def run(img):
+        if "surya" not in _MODELS:
+            from surya.detection import DetectionPredictor
+            from surya.recognition import RecognitionPredictor
+            try:
+                # 0.16+ splits the shared vision backbone into its own object
+                # and expects it injected; older builds construct it themselves.
+                from surya.foundation import FoundationPredictor
+                rec_p = RecognitionPredictor(FoundationPredictor())
+            except Exception:
+                rec_p = RecognitionPredictor()
+            _MODELS["surya"] = (rec_p, DetectionPredictor())
+        rec, det = _MODELS["surya"]
+        page_img = _pil(img)
+        pages = None
+        errs = []
+        # Surya's call signature has changed repeatedly across releases, so try
+        # the known shapes rather than pin a version we would have to chase.
+        for attempt in (lambda: rec([page_img], det_predictor=det),
+                        lambda: rec([page_img]),
+                        lambda: rec([page_img], full_page=True)):
+            try:
+                pages = attempt()
+                break
+            except Exception as ex:
+                errs.append(str(ex)[:120])
+        if pages is None:
+            log.warning("surya produced nothing: %s", "; ".join(errs))
+        out = []
+        for page in pages or []:
+            for line in getattr(page, "text_lines", None) or []:
+                conf = float(getattr(line, "confidence", 0.0) or 0.0)
+                for w in (getattr(line, "text", "") or "").split():
+                    out.append((w, conf))
+        return out
+
+    return Engine("surya", run, weight=1.3)
+
+
+def doctr_engine() -> Engine | None:
+    """docTR — word-level boxes and per-word confidence, which suits voting."""
+    try:
+        import doctr  # noqa: F401
+    except Exception:
+        return None
+
+    def run(img):
+        import numpy as np
+        if "doctr" not in _MODELS:
+            from doctr.models import ocr_predictor
+            _MODELS["doctr"] = ocr_predictor(pretrained=True)
+        model = _MODELS["doctr"]
+        arr = np.array(_pil(img))
+        res = model([np.ascontiguousarray(arr)])
+        out = []
+        for page in res.export().get("pages", []):
+            for blk in page.get("blocks", []):
+                for line in blk.get("lines", []):
+                    for w in line.get("words", []):
+                        t = (w.get("value") or "").strip()
+                        if t:
+                            out.append((t, float(w.get("confidence") or 0.0)))
+        return out
+
+    return Engine("doctr", run, weight=1.2)
+
+
+def paddle_engine() -> Engine | None:
+    """PaddleOCR / PP-Structure — fastest here, and the layout model is the one
+    worth having when a page mixes diagrams, columns and tables."""
+    try:
+        import paddleocr  # noqa: F401
+    except Exception:
+        return None
+
+    def run(img):
+        import numpy as np
+        if "paddle" not in _MODELS:
+            # oneDNN is Paddle's default CPU backend and it dies on this box
+            # with "ConvertPirAttribute2RuntimeAttribute not support" the moment
+            # text detection runs. Turning it off costs a little speed and makes
+            # the engine work at all.
+            os.environ.setdefault("FLAGS_use_mkldnn", "0")
+            from paddleocr import PaddleOCR
+            try:
+                _MODELS["paddle"] = PaddleOCR(lang="en", enable_mkldnn=False)
+            except TypeError:
+                _MODELS["paddle"] = PaddleOCR(lang="en")
+        ocr = _MODELS["paddle"]
+        arr = np.array(_pil(img))[:, :, ::-1]        # back to BGR for paddle
+        res = None
+        errs = []
+        for attempt in (lambda: ocr.predict(arr), lambda: ocr.ocr(arr)):
+            try:
+                res = attempt()
+                break
+            except Exception as ex:
+                errs.append(str(ex)[:120])
+        if res is None:
+            # An engine that fails silently is worse than one that is absent:
+            # the page still reads, just worse, and nobody ever finds out.
+            log.warning("paddle produced nothing: %s", "; ".join(errs))
+        out = []
+        for page in res or []:
+            d = page
+            if not isinstance(d, dict):
+                d = getattr(page, "json", None) or getattr(page, "res", None) or {}
+                if isinstance(d, dict) and "res" in d:
+                    d = d["res"]
+            if not isinstance(d, dict):
+                continue
+            texts = d.get("rec_texts") or []
+            scores = d.get("rec_scores") or []
+            for t, sc in zip(texts, scores):
+                for w in str(t).split():
+                    out.append((w, float(sc)))
+        return out
+
+    return Engine("paddle", run, weight=1.2)
+
+
 def available_engines() -> list[Engine]:
     """Every engine we can actually run right now.
 
-    Surya, PaddleOCR/PP-Structure and docTR each return the same
-    [(word, confidence)] shape; add them here once installed and the consensus
-    and chess passes below pick them up with no further change.
+    All four return the same [(word, confidence)] shape, so the consensus and
+    chess passes below neither know nor care which ones ran. An engine whose
+    package is not installed simply returns None here — which is why the live
+    scanner, whose venv has only Tesseract, imports this module safely.
     """
-    got = [e for e in (tesseract_engine(),) if e]
+    got = [e for e in (tesseract_engine(), doctr_engine(),
+                       paddle_engine(), surya_engine()) if e]
     if not got:
         log.warning("no OCR engine available")
     return got
