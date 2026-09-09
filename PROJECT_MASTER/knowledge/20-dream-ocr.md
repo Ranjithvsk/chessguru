@@ -34,7 +34,7 @@ the repair. 8,000 move tokens across 5 unseen seeds.
 "certain" and is wrong is worse than one that says "unsure", because nobody checks
 it. It is 0 on 7 of 8 runs and 1 token on the eighth.
 
-## Four bugs that only measuring would ever have found
+## Six bugs that only measuring would ever have found
 
 The first version passed a hand-made 20-move test 20/20 and was nearly worthless.
 The first honest run scored 55.3% -> 58.1%.
@@ -60,7 +60,24 @@ The first honest run scored 55.3% -> 58.1%.
    diagram. Index voting produced duplicated, scrambled output — real example:
    `White to mate in three moves moves White to mate in three ... White to 60 in
    three mate Problem three 60`. Now aligned with a longest-matching-block diff
-   against whichever engine carries the most confidence mass.
+   against a spine engine. **65% -> 98% precision on a real page.**
+
+   The spine must be chosen by MEAN confidence, not total. Total rewards
+   whichever engine wrote the most words, and on a chess page the most verbose
+   engine is the one hallucinating text off the DIAGRAM — Tesseract reads a board
+   as `Vi, Wi, Wi, Ui "O86 @ U27), Y, BZ`. Picking it as the spine dragged all of
+   that into the merged page.
+
+| Page 21 of the test book | Words | Match printed text | Precision | Recall |
+|---|---|---|---|---|
+| Index-aligned | 55 | 36 | 65% | 90% |
+| Diff-aligned, mean-confidence spine | 40 | 39 | **98%** | **98%** |
+
+5. **Per-engine weights were never passed.** `read_page` called `consensus(per)`
+   without them, so Surya at 1.3 and Tesseract at 1.0 counted the same.
+6. **Move numbers were never labelled.** The token was stripped of punctuation
+   before the move-number test ran, and the trailing dot is the only thing that
+   distinguishes `12.` from anything else.
 
 ## The beam
 

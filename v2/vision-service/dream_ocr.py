@@ -309,10 +309,16 @@ def consensus(per_engine: dict[str, list[tuple[str, float]]],
     if not live:
         return []
 
-    def mass(n: str) -> float:
-        return sum(c for _, c in live[n]) * weights.get(n, 1.0)
+    def quality(n: str) -> float:
+        """MEAN confidence, not total. Total rewards whichever engine wrote the
+        most words, and on a chess page the most verbose engine is the one
+        hallucinating text off the DIAGRAM — Tesseract reads a board as
+        'Vi, Wi, Wi, Ui "O86 @ U27)'. Picking it as the spine drags that noise
+        into the merged page. Mean confidence picks the cleanest reader."""
+        seq = live[n]
+        return (sum(c for _, c in seq) / len(seq)) * weights.get(n, 1.0)
 
-    spine_name = max(live, key=mass)
+    spine_name = max(live, key=quality)
     spine = live[spine_name]
     spine_words = [w for w, _ in spine]
 
@@ -472,10 +478,14 @@ def apply_chess_constraints(tokens: list[Token], start_fen: str | None,
         (chess.Board(start_fen), 0, [])
     ]
     for i, t in enumerate(tokens):
-        s = t.text.strip().strip(".,;:")
-        if re.fullmatch(r"\d{1,3}\.{1,3}", s):
+        raw = t.text.strip()
+        # Test BEFORE stripping punctuation. The trailing dot is the only thing
+        # separating the move number "12." from anything else, and stripping it
+        # first meant no token was ever labelled a move number.
+        if re.fullmatch(r"\d{1,3}\.{1,3}", raw):
             t.kind = "movenum"
             continue
+        s = raw.strip(".,;:")
         cands = _ranked_candidates(s)
         if not cands:
             continue
@@ -539,7 +549,9 @@ def read_page(img, start_fen: str | None = None) -> dict[str, Any]:
             per[e.name] = e.run(img)
         except Exception as ex:
             log.warning("engine %s failed: %s", e.name, ex)
-    toks = apply_chess_constraints(consensus(per), start_fen)
+    # The weights on each Engine were doing nothing until this passed them.
+    toks = apply_chess_constraints(
+        consensus(per, {e.name: e.weight for e in engines}), start_fen)
     moves = [t for t in toks if t.kind == "move"]
     return {
         "engines": list(per),
