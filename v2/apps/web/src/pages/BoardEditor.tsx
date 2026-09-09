@@ -419,6 +419,7 @@ export default function BoardEditorPage() {
       // The server only sends candidates when it found several at high
       // confidence, so reaching here means the choice is real.
       const cands = (j.candidates ?? []) as Array<{ index: number; confidence: number; boardPngBase64: string }>;
+      const wq = j.warpQuality as { quality?: string; score?: number } | undefined;
       if (!warped && cands.length > 1) {
         setBoardChoices(cands);
         setServerMsg({
@@ -427,7 +428,17 @@ export default function BoardEditorPage() {
         });
         return;
       }
-      const wq = j.warpQuality as { quality?: string; score?: number } | undefined;
+      // Our own crop is bad but the detector is sure it saw one board. That
+      // detection is usually the answer the pipeline discarded — on a full book
+      // page whose crop scored 0.013, the lone detection scored 0.934 and read
+      // the printed position exactly. Retry with it rather than making the
+      // coach draw corners. Safe from recursion: the retry passes a crop, and a
+      // crop never comes back with candidates.
+      if (!warped && cands.length === 1 && wq?.quality === "bad") {
+        setServerMsg({ tone: "info", text: "Auto-crop looked wrong — retrying with the board we found…" });
+        await runUltraScan(cands[0]!.boardPngBase64, raw);
+        return;
+      }
       if (wq?.quality === "bad") {
         setServerMsg({
           tone: "err",
