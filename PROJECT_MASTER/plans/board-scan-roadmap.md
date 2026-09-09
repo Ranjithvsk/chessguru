@@ -16,6 +16,15 @@ each item below was ranked by evidence, not by how interesting it is to build._
   sampling, sharding.
 - **All three retrain pipelines repaired** (see `sessions/2026-09-09-...`).
 
+## Also done, later on 2026-09-09 (evening)
+
+Multi-board picker; mask-based angle correction; chess-logic repair
+(`chess_logic.py`, colour-balance rule); tier-3 extractor fallback; payload cut
+14x; session required + nginx rate limit on all scan routes; correction capture
+wired to Copy FEN with confidence-gated approval. Plus the day's worst bug: a
+saved king-less FEN permanently white-screened an origin. See
+`sessions/2026-09-09-scan-made-usable-and-safe.md`.
+
 ## Next, in order
 
 ### 1. Retrain the extractor on the corrected composites
