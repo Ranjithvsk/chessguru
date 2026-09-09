@@ -783,6 +783,51 @@ def _get_seg_model():
     return _seg_model
 
 
+def _warp_from_mask(img: np.ndarray, mask_u8: np.ndarray, out: int = 512):
+    """Rectify a board from its segmentation mask: outline -> 4 corners -> warp.
+
+    This is the "cross angle" fix. A photo taken from the side gives a board
+    that is a quadrilateral, not a rectangle, and cropping its axis-aligned
+    bounding box keeps the skew AND drags in surrounding page, so the 8x8 split
+    reads every square from the wrong place. The mask carries the true outline,
+    which Douglas-Peucker reduces to four corners, and a perspective transform
+    then removes the angle entirely.
+
+    Measured on a sideways book page (2026-09-09): box crops produced 0 legal
+    positions from 5 candidates; mask warps produced 2, at 0.96 and 0.99.
+    Returns None when no sane quadrilateral can be found, so the caller can
+    fall back to the box crop.
+    """
+    cnts, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not cnts:
+        return None
+    c = max(cnts, key=cv2.contourArea)
+    if cv2.contourArea(c) < 400:
+        return None
+    quad = None
+    peri = cv2.arcLength(c, True)
+    for f in (0.01, 0.02, 0.03, 0.04, 0.06, 0.08):
+        ap = cv2.approxPolyDP(c, f * peri, True)
+        if len(ap) == 4:
+            quad = ap.reshape(4, 2).astype(np.float32)
+            break
+    if quad is None:
+        # No clean quad (curled page, occluded corner). The minimum-area
+        # ROTATED rect still beats an axis-aligned box on a tilted board.
+        quad = cv2.boxPoints(cv2.minAreaRect(c)).astype(np.float32)
+    s = quad.sum(1)
+    d = np.diff(quad, axis=1).ravel()
+    ordered = np.array([quad[np.argmin(s)], quad[np.argmin(d)],
+                        quad[np.argmax(s)], quad[np.argmax(d)]], dtype=np.float32)
+    dst = np.array([[0, 0], [out - 1, 0], [out - 1, out - 1], [0, out - 1]],
+                   dtype=np.float32)
+    try:
+        return cv2.warpPerspective(img, cv2.getPerspectiveTransform(ordered, dst),
+                                   (out, out))
+    except Exception:
+        return None
+
+
 def _detect_all_boards(img: np.ndarray, max_n: int = 24, conf: float = 0.75,
                        min_boards: int = 2) -> list[dict[str, Any]]:
     """Every board the extractor can see, in reading order (top-to-bottom,
@@ -816,12 +861,25 @@ def _detect_all_boards(img: np.ndarray, max_n: int = 24, conf: float = 0.75,
     if res.boxes is None or len(res.boxes) < min_boards:
         return []
     H, W = img.shape[:2]
+    # Per-detection masks, kept alongside the boxes. An axis-aligned box around
+    # a board photographed at an ANGLE contains a lot of page and a skewed
+    # board, so the 8x8 split lands on the wrong pixels and every square is
+    # read from the wrong place. The mask knows the board's true outline, so we
+    # reduce it to four corners and warp the perspective out. Measured on a
+    # sideways book page (2026-09-09): box crops gave 0 legal positions out of
+    # 5 candidates, mask warps gave 2 at 0.96 and 0.99.
+    _masks = None
+    try:
+        if res.masks is not None:
+            _masks = res.masks.data.cpu().numpy()
+    except Exception:
+        _masks = None
     rows = []
-    for box, c in zip(res.boxes.xyxy.tolist(), res.boxes.conf.tolist()):
+    for i, (box, c) in enumerate(zip(res.boxes.xyxy.tolist(), res.boxes.conf.tolist())):
         x1, y1, x2, y2 = box
         if (x2 - x1) < 40 or (y2 - y1) < 40:
             continue
-        rows.append((float(c), [float(x1), float(y1), float(x2), float(y2)]))
+        rows.append((float(c), [float(x1), float(y1), float(x2), float(y2)], i))
     # Collapse overlapping boxes. On a single tight diagram the detector happily
     # returns several boxes over the SAME board -- measured on one crop: four at
     # 0.77-0.92, all sharing a left edge and overlapping vertically. Without this
@@ -839,7 +897,7 @@ def _detect_all_boards(img: np.ndarray, max_n: int = 24, conf: float = 0.75,
         return inter / ua if ua > 0 else 0.0
 
     rows.sort(key=lambda r: -r[0])          # confidence first, for suppression
-    kept: list[tuple[float, list[float]]] = []
+    kept: list[tuple[float, list[float], int]] = []
     for cand in rows:
         if all(_iou(cand[1], k[1]) < 0.25 for k in kept):
             kept.append(cand)
@@ -850,18 +908,30 @@ def _detect_all_boards(img: np.ndarray, max_n: int = 24, conf: float = 0.75,
     # If one detection already covers most of the frame, the caller handed us a
     # picture that IS a board. Nothing to choose between.
     frame = float(H * W)
-    if frame > 0 and any(((b[2] - b[0]) * (b[3] - b[1])) / frame > 0.6 for _, b in rows):
+    if frame > 0 and any(((b[2] - b[0]) * (b[3] - b[1])) / frame > 0.6 for _, b, _mi in rows):
         return []
     # Reading order, not confidence order — a coach scanning a page thinks in
     # "the third diagram", so band the y coordinate before sorting by x.
     band = max(H // 12, 1)
     rows.sort(key=lambda r: (int(r[1][1] // band), r[1][0]))
     out: list[dict[str, Any]] = []
-    for i, (c, (x1, y1, x2, y2)) in enumerate(rows[:max_n]):
-        pad = int(0.02 * max(x2 - x1, y2 - y1))
-        crop = img[max(0, int(y1) - pad): min(H, int(y2) + pad),
-                   max(0, int(x1) - pad): min(W, int(x2) + pad)]
-        if crop.size == 0:
+    for i, (c, (x1, y1, x2, y2), mi) in enumerate(rows[:max_n]):
+        crop = None
+        # Prefer the perspective-corrected warp built from this detection's mask.
+        if _masks is not None and 0 <= mi < len(_masks):
+            try:
+                mk = cv2.resize((_masks[mi] * 255).astype(np.uint8), (W, H),
+                                interpolation=cv2.INTER_NEAREST)
+                crop = _warp_from_mask(img, mk)
+            except Exception as e:
+                log.warning("mask warp failed for detection %d: %s", mi, e)
+                crop = None
+        if crop is None:
+            # No usable outline: fall back to the plain box crop.
+            pad = int(0.02 * max(x2 - x1, y2 - y1))
+            crop = img[max(0, int(y1) - pad): min(H, int(y2) + pad),
+                       max(0, int(x1) - pad): min(W, int(x2) + pad)]
+        if crop is None or crop.size == 0:
             continue
         # The chosen crop is posted straight back for classification, so it has
         # to stay usable — but the pipeline warps to 512 anyway, so anything
