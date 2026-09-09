@@ -119,6 +119,15 @@ export default function BoardEditorPage() {
   // Keeps the raw uploaded image dataURL so the coach can re-warp with
   // manually-placed corners. Null when adjuster is closed.
   const [adjusterOpen, setAdjusterOpen] = useState(false);
+  /** Every board the extractor found, when a page holds more than one. A book
+   *  page of puzzles has six diagrams; the scanner used to collapse them into a
+   *  single crop spanning several boards and return a confident nonsense FEN.
+   *  The extractor already finds all of them (6/6 at 0.93-0.95 on the page that
+   *  produced TKT-166's sibling failure), so we show them and let the coach say
+   *  which position they meant. */
+  const [boardChoices, setBoardChoices] = useState<
+    Array<{ index: number; confidence: number; boardPngBase64: string }>
+  >([]);
   const [rawUploadDataUrl, setRawUploadDataUrl] = useState<string | null>(null);
   // Fetch the crowd-sourced reference bank on first mount. See loadServerRefsOnce.
   useEffect(() => { void loadServerRefsOnce(); }, []);
@@ -356,6 +365,8 @@ export default function BoardEditorPage() {
     // "reliable path" and should overwrite an earlier raw-only call still
     // in flight.
     if (serverBusy && !warped) return;
+    // A fresh whole-image scan invalidates any previous page's board choices.
+    if (!warped) setBoardChoices([]);
     setServerBusy(true);
     setServerMsg({
       tone: "info",
@@ -383,6 +394,18 @@ export default function BoardEditorPage() {
       // Corners modal so the user can draw the board edges. The OpenCV freeze
       // that made us disable this earlier is fixed (pre-scale + no preload
       // + only-on-demand load).
+      // More than one board on the page? Don't guess which one they meant.
+      // The server only sends candidates when it found several at high
+      // confidence, so reaching here means the choice is real.
+      const cands = (j.candidates ?? []) as Array<{ index: number; confidence: number; boardPngBase64: string }>;
+      if (!warped && cands.length > 1) {
+        setBoardChoices(cands);
+        setServerMsg({
+          tone: "info",
+          text: `Found ${cands.length} boards on this page. Tap the position you want.`,
+        });
+        return;
+      }
       const wq = j.warpQuality as { quality?: string; score?: number } | undefined;
       if (wq?.quality === "bad") {
         setServerMsg({
@@ -648,6 +671,39 @@ export default function BoardEditorPage() {
                 ✂ Adjust corners
               </button>
               <span className="text-[10px] text-ink-500 w-full">Auto-crop wrong? Tap "Adjust corners" to draw the board edges yourself.</span>
+              {boardChoices.length > 1 && (
+                <div className="w-full">
+                  <div className="mb-1 text-[11px] font-semibold text-ink-200">
+                    {boardChoices.length} boards on this page — tap the one you want
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {boardChoices.map((c) => (
+                      <button
+                        key={c.index}
+                        onClick={() => { setBoardChoices([]); void runUltraScan(c.boardPngBase64); }}
+                        disabled={serverBusy}
+                        title={`Board ${c.index + 1} · detector confidence ${(c.confidence * 100).toFixed(0)}%`}
+                        className="group relative rounded-lg border border-ink-700 p-1 hover:border-brand-500 disabled:cursor-wait disabled:opacity-60"
+                      >
+                        <img
+                          src={`data:image/png;base64,${c.boardPngBase64}`}
+                          alt={`Board ${c.index + 1}`}
+                          className="h-20 w-20 rounded object-cover"
+                        />
+                        <span className="absolute left-1 top-1 rounded bg-black/70 px-1 text-[10px] font-semibold text-white">
+                          {c.index + 1}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => setBoardChoices([])}
+                    className="mt-1 text-[10px] text-ink-500 underline hover:text-ink-300"
+                  >
+                    none of these — let me draw the corners
+                  </button>
+                </div>
+              )}
               {serverMsg && (
                 <div className={`mt-1 w-full rounded border px-2 py-1 text-[11px] ${serverMsg.tone === "ok" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"
                   : serverMsg.tone === "err" ? "border-rose-500/40 bg-rose-500/10 text-rose-100"

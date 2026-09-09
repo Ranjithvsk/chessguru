@@ -25,6 +25,8 @@ _Created 2026-05-29 · expanded the same day with a full codebase read. Live: ht
 - ⚠️ [10-known-issues-and-risks.md](knowledge/10-known-issues-and-risks.md) — consolidated bug/security register (read this)
 - ⭐ [11-working-rules.md](knowledge/11-working-rules.md) — **commit & documentation discipline (change→note→commit; ideas→folder)**
 - 🚀 [17-v2-deploy-playbook.md](knowledge/17-v2-deploy-playbook.md) — **step-by-step deploy for v2 (NestJS + Vite): merge → build → rsync → restart → smoke → session note**
+- ⭐ [18-board-scan-what-actually-fails.md](knowledge/18-board-scan-what-actually-fails.md) — **MEASURED: framing decides scan success, not the classifier**; 3 failure modes; the guard that looks useful and isn't; 3 auto-crop approaches that failed
+- ⭐ [19-vision-training-assets.md](knowledge/19-vision-training-assets.md) — every diagram/photo pile, which have ground truth, and the 405k-image pile no trainer was reading
 
 ## Decisions (ADRs)
 - [ADR-0001](decisions/ADR-0001-server3-is-the-entrypoint.md) — `server3.js` is the only live entrypoint; routes load inside the connect callback
@@ -44,6 +46,7 @@ _Created 2026-05-29 · expanded the same day with a full codebase read. Live: ht
   - ↳ ⭐ [plans/online-play-realtime-architecture.md](plans/online-play-realtime-architecture.md) — PROPOSED (deep): realtime play architecture — grain directory (Orleans-style single-writer), uWS gateway tier, wire protocol, server-truth clocks, failure/recovery, M0–M5 build phases — **M0–M5 BUILT & verified — Phase 1 complete**
     - ↳ [plans/online-play-m0-walking-skeleton.md](plans/online-play-m0-walking-skeleton.md) — ✅ BUILT & VERIFIED (13/13): M0 walking skeleton — concrete monorepo packages (apps/ws, apps/game-engine, packages/protocol) + 6 exit criteria proving directory/single-writer/rehydration
 - ⭐ [plans/human-like-bot-opponent.md](plans/human-like-bot-opponent.md) — PROPOSED: Maia-3 opponent when the seek pool is empty — plays at the seeker's rating, Indian name, fully disguised, rated; **AGPL: never fork/patch the engine**; rated go-live still gated — calibration round 1 measured **0.46x Elo compression**, so `SelfElo` must not map 1:1 to student rating
+- ⭐ [plans/board-scan-roadmap.md](plans/board-scan-roadmap.md) — board scan ordered by leverage: what shipped 2026-09-09, the extractor retrain, orientation-from-coordinates, the big-pile repoint, classifier pseudo-labelling, ChessVision oracle (blocked on API key); plus what we deliberately won't do
 - [plans/own-opening-explorer.md](plans/own-opening-explorer.md) — IN PROGRESS: own NestJS+Mongo opening book (position-keyed), Lichess-compatible /api/explorer
 - [plans/ovh-migration.md](plans/ovh-migration.md) — DONE (co-located on the DreamWorld OVH VPS)
 - [plans/code-cleanup.md](plans/code-cleanup.md) — archived dead files + remaining follow-ups
@@ -73,3 +76,4 @@ _Created 2026-05-29 · expanded the same day with a full codebase read. Live: ht
 ---
 _The original flat `PROJECT_MASTER.md` and `CLAUDE.md` remain in the repo root. `CLAUDE.md` is the
 authoritative engineering guide for Claude Code; this folder is the human-readable knowledge hub._
+
