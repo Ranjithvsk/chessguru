@@ -22,7 +22,7 @@ import { PalettePieceBtn } from "../components/SharedClassBoard";
 
 const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
 
-type Diagram = { n: number; page: number; bbox: number[] | null; fen: string; conf?: number };
+type Diagram = { n: number; page: number; bbox: number[] | null; fen: string; conf?: number; modelConf?: number; warnings?: string[] };
 type BookDetail = {
   id: string; title: string; pages: number; state: string; done: number;
   seconds: number | null; diagrams: Diagram[];
@@ -287,18 +287,28 @@ export default function BookReaderPage() {
                 // position while a wrong one sat there in confident blue.
                 // The underlying reasons are still worth SHOWING, so they are
                 // reported as facts in the tooltip rather than as a verdict.
+                // Two SEPARATE facts, never mixed again:
+                //   verified — a human has checked this one (green)
+                //   lowConf  — what the classifier itself reported (amber)
+                // modelConf is kept apart from conf precisely because an earlier
+                // pass overwrote the model's own number with a synthetic one and
+                // destroyed the signal the coach wanted to see.
                 const verified = d.conf === 1;
+                const lowConf = !verified && (d.modelConf ?? 1) < 0.9;
                 return (
                   <button
                     key={d.n}
                     onClick={() => open(d)}
-                    title={`Position ${d.n}${verified ? " — you have checked this one" : ""}`}
+                    title={`Position ${d.n}${verified ? " — you have checked this one"
+                      : lowConf ? ` — the scanner read this one at ${Math.round((d.modelConf ?? 0) * 100)}% confidence` : ""}`}
                     className={`group absolute rounded-lg transition
                       ${active === d.n
                         ? "ring-4 ring-brand-400 bg-brand-400/10"
                         : verified
                           ? "ring-2 ring-emerald-400/60 hover:bg-emerald-300/15"
-                          : "ring-2 ring-brand-400/50 hover:bg-brand-400/15"}`}
+                          : lowConf
+                            ? "ring-2 ring-amber-400/70 hover:bg-amber-300/15"
+                            : "ring-2 ring-brand-400/50 hover:bg-brand-400/15"}`}
                     style={{
                       left: `${(x1 / nw) * 100}%`,
                       top: `${(y1 / nh) * 100}%`,
@@ -469,6 +479,11 @@ export default function BookReaderPage() {
                     proved worthless — 0 of 6 wrong diagrams flagged, 1 false
                     alarm — so the note now says only what actually happened,
                     and never implies the position is likely wrong. */}
+                {activeDiagram.conf !== 1 && (activeDiagram.modelConf ?? 1) < 0.9 && (
+                  <p className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-100">
+                    The scanner read this one at {Math.round((activeDiagram.modelConf ?? 0) * 100)}% confidence.
+                  </p>
+                )}
                 {activeDiagram.conf === 1 && (
                   <p className="mt-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-100">
                     You have checked this one.
@@ -517,7 +532,9 @@ export default function BookReaderPage() {
                     ? "bg-brand-600 text-white"
                     : d.conf === 1
                       ? "bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25"
-                      : "bg-ink-800 text-ink-300 hover:bg-ink-700"}`}
+                      : (d.modelConf ?? 1) < 0.9
+                        ? "bg-amber-500/15 text-amber-200 hover:bg-amber-500/25"
+                        : "bg-ink-800 text-ink-300 hover:bg-ink-700"}`}
                 title={`Position ${d.n} · page ${d.page + 1}`}
               >
                 {d.n}
