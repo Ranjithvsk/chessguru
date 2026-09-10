@@ -705,7 +705,10 @@ function fenCharToPieceClass(p: string): string {
   const type = PIECE_TYPE_CLASS[p.toLowerCase()];
   return `${type} ${color}`;
 }
-function PalettePieceBtn({ p, selected, onClick }: { p: string; selected: boolean; onClick: () => void }) {
+/** Exported so the book reader's in-page editor shows the SAME pieces. Owner,
+ *  2026-08-12 on this very component: "edit piece make it same like pieces on
+ *  board" — that applies wherever a palette appears, not just in class. */
+export function PalettePieceBtn({ p, selected, onClick }: { p: string; selected: boolean; onClick: () => void }) {
   const isWhite = p === p.toUpperCase();
   return (
     <button

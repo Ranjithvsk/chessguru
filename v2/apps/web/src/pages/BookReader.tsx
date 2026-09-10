@@ -14,6 +14,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import Board from "../components/Board";
 import { useFreePlay } from "../hooks/useFreePlay";
+// The SAME palette button the class Setup editor uses, so the pieces you pick
+// are the identical cburnett SVGs sitting on the board — not unicode glyphs
+// beside SVG pieces. Owner on that component, 2026-08-12: "edit piece make it
+// same like pieces on board".
+import { PalettePieceBtn } from "../components/SharedClassBoard";
 
 const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
 
@@ -45,11 +50,9 @@ function rotate180(fen: string): string {
   return [flipped, ...rest].join(" ");
 }
 
-const PALETTE = ["K", "Q", "R", "B", "N", "P", "k", "q", "r", "b", "n", "p"] as const;
-const GLYPH: Record<string, string> = {
-  K: "♔", Q: "♕", R: "♖", B: "♗", N: "♘", P: "♙",
-  k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟",
-};
+// White on top, black below — the order the class editor uses.
+const PALETTE_W = ["K", "Q", "R", "B", "N", "P"] as const;
+const PALETTE_B = ["k", "q", "r", "b", "n", "p"] as const;
 
 /** Put one piece on one square (or clear it) and hand back a FEN.
  *  Kept here rather than reusing the class Setup modal: that one is a fixed
@@ -254,17 +257,21 @@ export default function BookReaderPage() {
                     <div className="mb-1 text-[11px] text-brand-200">
                       Pick a piece, then tap squares. The page stays on the left so you can compare.
                     </div>
-                    <div className="flex flex-wrap gap-1">
-                      {PALETTE.map((pc) => (
-                        <button key={pc} onClick={() => setBrush(pc)}
-                          className={`h-8 w-8 rounded text-xl leading-none transition ${
-                            brush === pc ? "bg-brand-600 text-white" : "bg-ink-800 text-ink-100 hover:bg-ink-700"}`}
-                          title={pc}>{GLYPH[pc]}</button>
-                      ))}
-                      <button onClick={() => setBrush("")}
-                        className={`h-8 rounded px-2 text-[11px] font-semibold transition ${
-                          brush === "" ? "bg-rose-600 text-white" : "bg-ink-800 text-ink-300 hover:bg-ink-700"}`}
-                        title="Erase">✕ Erase</button>
+                    <div className="flex flex-col gap-1">
+                      <div className="flex flex-wrap gap-1">
+                        {PALETTE_W.map((pc) => (
+                          <PalettePieceBtn key={pc} p={pc} selected={brush === pc} onClick={() => setBrush(pc)} />
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {PALETTE_B.map((pc) => (
+                          <PalettePieceBtn key={pc} p={pc} selected={brush === pc} onClick={() => setBrush(pc)} />
+                        ))}
+                        <button onClick={() => setBrush("")}
+                          className={`grid h-11 w-11 place-items-center rounded-lg border text-[11px] font-semibold transition ${
+                            brush === "" ? "border-rose-400 bg-rose-600 text-white ring-2 ring-rose-300" : "border-ink-700 bg-ink-800 text-ink-300 hover:bg-ink-700"}`}
+                          title="Erase a square">✕</button>
+                      </div>
                     </div>
                   </div>
                 )}
