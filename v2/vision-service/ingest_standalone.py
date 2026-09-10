@@ -57,6 +57,22 @@ def dkey(page, bbox) -> str:
                           int(((bbox[1] + bbox[3]) / 2) // 10) * 10)
 
 
+def nearest_ruling(page, bbox):
+    """The coach's ruling for this diagram, matched by where it sits."""
+    if not bbox or len(bbox) < 4:
+        return None
+    cx, cy = (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
+    best = None
+    for r in RULED.values():
+        rb = r.get("bbox")
+        if r.get("page") != page or not rb:
+            continue
+        dist = abs((rb[0] + rb[2]) / 2 - cx) + abs((rb[1] + rb[3]) / 2 - cy)
+        if dist < 60 and (best is None or dist < best[0]):
+            best = (dist, r)
+    return best[1] if best else None
+
+
 def load_rulings(dest_dir: str) -> dict:
     """Every diagram the coach has corrected or confirmed, keyed by position.
     Re-ingesting must never silently discard human work."""
@@ -75,7 +91,8 @@ def load_rulings(dest_dir: str) -> dict:
         if r.get("action") == "reject" or not r.get("now"):
             continue
         out[r.get("key") or dkey(r.get("page"), r.get("bbox"))] = {
-            "fen": r["now"], "corrected": r.get("was") != r.get("now")}
+            "fen": r["now"], "corrected": r.get("was") != r.get("now"),
+            "page": r.get("page"), "bbox": r.get("bbox")}
     return out
 
 dest = os.path.join(STORE, BOOK_ID)
@@ -207,7 +224,13 @@ for i, fn in enumerate(pages):
             entry["warnings"] = warns
             entry["conf"] = min(float(conf or 1.0), 0.5)
         # A coach's ruling outranks anything re-derived here.
-        prev = RULED.get(dkey(i, bbox))
+        # Matched by PROXIMITY, never an exact key. A re-ingest re-detects each
+        # board and the centre shifts a few pixels; with key matching that
+        # crossed a rounding boundary and three of the owner's twelve rulings
+        # were silently overwritten — including an 8-square fix done by hand.
+        # A board is ~275px wide, so within 60px on the same page is the same
+        # diagram, and detector jitter cannot break it.
+        prev = nearest_ruling(i, bbox)
         if prev:
             entry.update({"fen": prev["fen"], "conf": 1.0,
                           "corrected": prev.get("corrected", True)})
