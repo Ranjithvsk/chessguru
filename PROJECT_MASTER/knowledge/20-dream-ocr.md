@@ -208,6 +208,86 @@ The blocker is hardware, not preference: this box is CPU-only, so a 7B model
 book. The realistic candidate if we want a fifth engine is **GOT-OCR 2.0 (580M)**,
 purpose-built for OCR and CPU-feasible.
 
+## Real scanned books — where it actually breaks (2026-09-10)
+
+Everything above was measured on a clean, digitally-typeset PDF. Pandolfini's
+*Kasparov and Deep Blue* is a **photograph of paper**: two-page spreads, gutter
+shadow, curvature, skew, italic sidebars, no text layer at all. Ground truth came
+from transcribing eight spreads by eye — 87 printed moves.
+
+Six defects, none of which the clean book could have shown.
+
+1. **The extractor found NO diagram on four of eight spreads**, so the chess
+   constraint pass — the entire point — could not run on half the book. A
+   diagram on a two-page scan fills a small fraction of the frame. **Splitting at
+   the gutter** doubles its share:
+
+   | Spread | Whole frame | Split |
+   |---|---|---|
+   | page-25 | 0 | 1 |
+   | page-35 | 0 | 1 |
+   | page-50 | 0 | 2 |
+   | page-60 | 1 | 1 |
+   | page-30 | 2 | 2 |
+   | page-45 | 2 | 2 |
+   | **total** | **5** | **9** |
+
+   Every blind page fixed, none made worse. Note the 40,234-composite retrain
+   aimed at exactly this failure changed nothing end-to-end. **Framing beat
+   training.**
+
+2. **Long algebraic was invisible.** Books print `Qe8-d8`, `d2-d3`, `c2-c4`.
+   SAN_RE allowed an `x` between source and destination but not a `-`, so those
+   produced ZERO candidates. 6 of 87 moves, ~7% of a real book, silently
+   unreadable. python-chess parses the long form natively; only our gate was wrong.
+
+3. **The constraint pass was CORRUPTING correct moves** — measured recovery went
+   DOWN, 78.2% -> 77.0%. It overwrote moves OCR had read right with legal-but-
+   wrong alternatives from a drifted line. It now repairs what is broken and
+   leaves a properly-formed move alone unless the replacement is proved.
+
+4. **"Zero false certainty" was flattered by the scoring.** The eval compared
+   OCR's own spelling against truth, so a diverged line recording "Ne3" scored
+   correct while the board played Nxe3 elsewhere. Recording what the board plays
+   exposed 14 wrong-but-certain moves. Fixed by requiring the book's notation and
+   the board's to agree on piece, destination, capture, disambiguation AND check.
+   The check marker mattered most: forgiving it left exactly 10 such moves.
+
+5. **Diagram border labels look exactly like moves.** Every board is ringed with
+   a-h / 1-8 and OCR drops them beside the move list. They arrive as a RUN
+   climbing a ladder, which prose never does, so runs are stripped and isolated
+   squares kept.
+
+6. **Words break across lines and pages** (`cru-` / `cial`), leaving both halves
+   wrong.
+
+### Cost on real spreads (1755x1275)
+
+| Engine | sec/spread |
+|---|---|
+| Tesseract | 3 |
+| docTR | 9-21 |
+| PaddleOCR | 115-164 |
+| GOT-OCR 2.0 | 31-49 |
+| Qwen3-VL-4B | 181-337 (now capped at 1400px) |
+| Surya 0.22.1 | **948** |
+
+Surya at sixteen minutes a spread is not viable for book ingest at any accuracy.
+
+### The recurring hazard: engines that fail SILENTLY
+
+Four in one session, none of which raised anything:
+- **Paddle** returned zero words from a oneDNN backend crash
+- **Surya 0.22** returned zero from a perfectly working server whose result shape
+  had moved from `text_lines` to `blocks`
+- **Tesseract** reported itself available on a box with no tesseract binary,
+  because pytesseract is only a wrapper that imports fine and throws per page
+- **Both GPU engines** vanished when installing Surya pulled `torch+cpu` over the
+  CUDA build
+
+Every adapter now logs. Assume a new engine is lying about working until a page
+comes back with words on it.
+
 ## Files
 
 - `v2/vision-service/dream_ocr.py` — engines, consensus, figurine mapping, constraint pass
