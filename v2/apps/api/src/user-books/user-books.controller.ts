@@ -84,9 +84,12 @@ export class UserBooksController {
           done: status.done ?? 0,
         };
       })
-      // Own books only. A book with no recorded owner is treated as shared
-      // seed content rather than someone else's private upload.
-      .filter((b) => b.owner === null || b.owner === uid);
+      // Own books only, and FAIL CLOSED. This used to treat a missing owner as
+      // "shared seed content", which meant every book without one was visible to
+      // any signed-in coach or student — including a coach's own copyrighted
+      // library. These are books someone owns a copy of; we are giving them a
+      // better way to read it, not publishing it.
+      .filter((b) => b.owner === uid);
     return { books };
   }
 
@@ -103,7 +106,7 @@ export class UserBooksController {
     const dir = bookDir(id);
     if (!existsSync(dir)) throw new NotFoundException("book not found");
     const meta = readJson<any>(join(dir, "meta.json"), {});
-    if (meta.owner && meta.owner !== uid) throw new NotFoundException("book not found");
+    if (meta.owner !== uid) throw new NotFoundException("book not found");
     const status = readJson<any>(join(dir, "status.json"), {});
     const diagrams = readJson<Diagram[]>(join(dir, "diagrams.json"), []);
     return {
@@ -140,7 +143,7 @@ export class UserBooksController {
     const dir = bookDir(id);
     if (!existsSync(dir)) throw new NotFoundException("book not found");
     const meta = readJson<any>(join(dir, "meta.json"), {});
-    if (meta.owner && meta.owner !== uid) throw new NotFoundException("book not found");
+    if (meta.owner !== uid) throw new NotFoundException("book not found");
 
     const action = body?.action === "reject" ? "reject"
                  : body?.action === "confirm" ? "confirm" : "correct";
@@ -195,7 +198,7 @@ export class UserBooksController {
     const uid = this.requireUser(req);
     const dir = bookDir(id);
     const meta = readJson<any>(join(dir, "meta.json"), {});
-    if (meta.owner && meta.owner !== uid) throw new NotFoundException("page not found");
+    if (meta.owner !== uid) throw new NotFoundException("page not found");
     const idx = Number(n);
     if (!Number.isInteger(idx) || idx < 0 || idx > 9999) throw new NotFoundException("page not found");
     const file = join(dir, "pages", `p${String(idx).padStart(4, "0")}.jpg`);
