@@ -702,7 +702,11 @@ def strip_board_labels(tokens: list[Token], min_run: int = 4) -> tuple[list[Toke
         j = i
         while j < n and len(tokens[j].text.strip()) == 1:
             j += 1
-        run = "".join(t.text.strip().lower() for t in tokens[i:j])
+        # One character per token, ALWAYS. str.lower() can lengthen a string
+        # (Turkish dotted capital I becomes two codepoints), and indexing `run`
+        # back into `keep` then walked off the end — a real IndexError, on a
+        # character that could plausibly appear in a Turkish chess book.
+        run = "".join((t.text.strip().lower() or " ")[0] for t in tokens[i:j])
         k = 0
         while k < len(run):
             best = 0
@@ -858,7 +862,8 @@ _STRICT_SAN = re.compile(
 )
 
 
-_LONG_ALG = re.compile(r"^([KQRBN]?)([a-h][1-8])[-x]?([a-h][1-8])(?:=[QRBN])?$")
+# The separator is CAPTURED: "-" and "x" say different things about the board.
+_LONG_ALG = re.compile(r"^([KQRBN]?)([a-h][1-8])([-x]?)([a-h][1-8])(?:=[QRBN])?$")
 
 
 def _notation_agrees(book: str, std: str) -> bool:
@@ -882,7 +887,16 @@ def _notation_agrees(book: str, std: str) -> bool:
     castling, and long algebraic, which is a different way of writing the same
     move rather than a different claim about the board.
     """
-    if book.rstrip("#").endswith("+") != std.rstrip("#").endswith("+"):
+    def _mark(x: str) -> str:
+        """The check/mate marker, as the writer meant it."""
+        x = x.strip()
+        return "#" if x.endswith("#") else ("+" if x.endswith("+") else "")
+
+    # BOTH markers, not just '+'. Comparing only '+' after stripping '#' from
+    # each side made a mate disagreement invisible: a book printing "Ra8" against
+    # a board insisting "Ra8#" agreed, and the move was called CERTAIN in a
+    # position that must therefore have been wrong.
+    if _mark(book) != _mark(std):
         return False
     b = book.rstrip("+#").replace("0", "O")
     t = std.rstrip("+#").replace("0", "O")
@@ -890,8 +904,14 @@ def _notation_agrees(book: str, std: str) -> bool:
         return True
     m = _LONG_ALG.match(book.rstrip("+#"))
     if m:                                    # "Qe8-d8" vs "Qd8", "d2-d3" vs "d3"
-        piece, _src, dst = m.groups()
-        return t == piece + dst or t.endswith(dst)
+        piece, _src, sep, dst = m.groups()
+        # The separator is evidence, not punctuation. A book writes "-" for a
+        # quiet move and "x" for a capture, so "Nd1-e3" against a board that
+        # insists on "Nxe3" is a DISAGREEMENT about the position, not a
+        # difference of spelling. Forgiving it marked such moves certain.
+        if (sep == "x") != ("x" in t):
+            return False
+        return t == piece + dst or t == piece + "x" + dst
     return False
 
 
@@ -941,6 +961,13 @@ def apply_chess_constraints(tokens: list[Token], start_fen: str | None,
         if re.fullmatch(r"\d{1,3}\.{1,3}", raw):
             t.kind = "movenum"
             continue
+        # Plenty of books set the number TIGHT against the move — "1.e4", "23...Nf6"
+        # — and OCR then hands us one token. That produced no candidates at all,
+        # so a page printed that way lost its ENTIRE move list silently. Peel the
+        # number off and read what follows.
+        glued = re.fullmatch(r"(\d{1,3}\.{1,3})\s*(.+)", raw)
+        if glued:
+            raw = glued.group(2).strip()
         s = raw.strip(".,;:")
         cands = _ranked_candidates(s)
         if not cands:
@@ -1057,6 +1084,41 @@ def page_views(img, wide_ratio: float = 1.25):
     return views
 
 
+def _castling_from_board(board: str) -> str:
+    """Guess castling rights from where the kings and rooks stand.
+
+    A diagram says nothing about castling rights, and hard-coding "-" made
+    castling IMPOSSIBLE to prove from any diagram — O-O simply never parsed. The
+    opposite default is the useful one: assume a side may still castle when its
+    king and the relevant rook are both on their home squares, which is exactly
+    the situation in which the book is about to print O-O. Being generous here
+    only ever ADMITS a candidate; legality and the agreement rules still decide.
+    """
+    rows = board.split("/")
+    if len(rows) != 8:
+        return "-"
+
+    def expand(row: str) -> str:
+        out = ""
+        for ch in row:
+            out += "." * int(ch) if ch.isdigit() else ch
+        return out.ljust(8, ".")[:8]
+
+    back_w, back_b = expand(rows[7]), expand(rows[0])
+    r = ""
+    if back_w[4] == "K":
+        if back_w[7] == "R":
+            r += "K"
+        if back_w[0] == "R":
+            r += "Q"
+    if back_b[4] == "k":
+        if back_b[7] == "r":
+            r += "k"
+        if back_b[0] == "r":
+            r += "q"
+    return r or "-"
+
+
 def _count_verified(tokens: list[Token]) -> int:
     return sum(1 for t in tokens if t.kind == "move" and t.verified)
 
@@ -1097,7 +1159,8 @@ def choose_start(tokens: list[Token], candidate_fens: list[str],
         if len(parts) >= 6:
             expanded.append(f.strip())
         else:
-            expanded += [parts[0] + " w - - 0 1", parts[0] + " b - - 0 1"]
+            expanded += [parts[0] + " w " + _castling_from_board(parts[0]) + " - 0 1",
+                         parts[0] + " b " + _castling_from_board(parts[0]) + " - 0 1"]
 
     # 0, never -1. A sentinel that looks like a count leaks into whatever the
     # caller sums — seen for real, a bulk run reported "-1 proved" per page and
