@@ -255,7 +255,7 @@ export default function BookReaderPage() {
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
         {/* Pages */}
-        <div className={`space-y-6 ${activeDiagram ? "max-lg:pb-[52vh]" : ""}`}>
+        <div className={`space-y-6 ${activeDiagram ? "max-lg:pb-[60vh]" : ""}`}>
           {Array.from({ length: book.pages }, (_, p) => (
             <div
               key={p}
@@ -347,7 +347,7 @@ export default function BookReaderPage() {
         <aside
           className={`lg:sticky lg:top-20 lg:self-start lg:max-h-[calc(100vh-7.5rem)] lg:overflow-y-auto lg:pr-1 ${
             activeDiagram
-              ? "max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:top-1/2 max-lg:z-30 max-lg:overflow-y-auto max-lg:border-t max-lg:border-ink-700 max-lg:bg-ink-950/98 max-lg:px-3 max-lg:pt-2 max-lg:backdrop-blur"
+              ? "max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:top-[42%] max-lg:z-30 max-lg:overflow-y-auto max-lg:border-t max-lg:border-ink-700 max-lg:bg-ink-950/98 max-lg:px-3 max-lg:pt-2 max-lg:backdrop-blur"
               : ""
           }`}
         >
@@ -375,6 +375,14 @@ export default function BookReaderPage() {
                     Owner: "white to play is there, i cant play white directly".
                     turnColor follows the side-to-move toggle above, so setting
                     it to White really does let White move. */}
+                {/* The board sizes itself to its container WIDTH. Pinned to the
+                    lower half of a phone that produced a 340px board inside a
+                    422px panel, so the last rank and every control beneath it
+                    — side to move, save, edit — fell off the bottom and the
+                    position could be looked at but not used. Capping the width
+                    against the available HEIGHT keeps the whole board and its
+                    buttons on screen. */}
+                <div className="mx-auto w-full max-lg:max-w-[calc(58vh-190px)]">
                 <Board
                   fen={fp.fen}
                   orientation={fp.orientation}
@@ -385,6 +393,7 @@ export default function BookReaderPage() {
                   onSelect={editing ? paintSquare : undefined}
                   showDests
                 />
+                </div>
 
                 {editing && (
                   <div className="mt-2 rounded-xl border border-brand-500/40 bg-brand-500/5 p-2">
@@ -430,16 +439,6 @@ export default function BookReaderPage() {
                   </div>
                 </div>
 
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <button onClick={() => fp.load(rotate180(fp.fen))}
-                    title="The scan could not tell which way up the diagram was printed"
-                    className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">↻ Rotate 180°</button>
-                  <button onClick={fp.flip} className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">⇅ Flip view</button>
-                  <button onClick={() => activeDiagram && fp.load(fullFen(activeDiagram.fen))}
-                    title="Undo your moves and go back to the printed position"
-                    className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">⟲ Reset</button>
-                  <button onClick={() => navigator.clipboard?.writeText(fp.fen)} className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">Copy FEN</button>
-                </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {/* Edit HERE, not on another page. Sending the reader away to
                       /board-editor lost their place in the book — and the whole
@@ -492,6 +491,16 @@ export default function BookReaderPage() {
                         : "✓ This one is correct"}
                     </button>
                   )}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button onClick={() => fp.load(rotate180(fp.fen))}
+                    title="The scan could not tell which way up the diagram was printed"
+                    className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">↻ Rotate 180°</button>
+                  <button onClick={fp.flip} className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">⇅ Flip view</button>
+                  <button onClick={() => activeDiagram && fp.load(fullFen(activeDiagram.fen))}
+                    title="Undo your moves and go back to the printed position"
+                    className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">⟲ Reset</button>
+                  <button onClick={() => navigator.clipboard?.writeText(fp.fen)} className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">Copy FEN</button>
                 </div>
                 <p className="mt-2 text-[11px] text-ink-500">
                   Move the pieces on the board above to play from this position — Reset puts the printed one back.

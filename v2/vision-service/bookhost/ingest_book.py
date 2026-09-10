@@ -71,14 +71,33 @@ def warps(img, conf=0.5, max_n=12):
     return out
 
 
-def board_fen(warp) -> str:
+def board_fen(warp):
+    """Returns (fen, per-square probabilities in LAB order, confidence).
+
+    It used to return the FEN alone and drop the probabilities on the floor,
+    which cost twice. The logic pass downstream had to invent a flat 0.95 for
+    every square, so it could not tell a square it was sure of from one it had
+    guessed. And every diagram was stored with modelConf: None, so the reader
+    had nothing to colour and the low-confidence marker never appeared on a
+    book read here.
+
+    Confidence is the WEAKEST square, not the average: one badly-read square is
+    enough to make the whole position wrong, and an average over 64 squares
+    drowns it — 63 easy empty squares hide the one piece that was a guess.
+    """
     _, cls = models()
     tiles = [cv2.cvtColor(warp[r * 64:(r + 1) * 64, c * 64:(c + 1) * 64], cv2.COLOR_BGR2RGB)
              for r in range(8) for c in range(8)]
     a = cls.predict(tiles, imgsz=64, verbose=False)
     b = cls.predict([cv2.flip(t, 1) for t in tiles], imgsz=64, verbose=False)
-    chars = [ORDER[int((0.5 * (x.probs.data.cpu().numpy() + y.probs.data.cpu().numpy())).argmax())]
-             for x, y in zip(a, b)]
+    avg = np.stack([0.5 * (x.probs.data.cpu().numpy() + y.probs.data.cpu().numpy())
+                    for x, y in zip(a, b)])                     # (64, 13) in ORDER
+    chars = [ORDER[int(row.argmax())] for row in avg]
+    conf = float(avg.max(axis=1).min())
+    # chess_logic indexes by LAB, the classifier outputs ORDER — same labels,
+    # different order. Handing it the raw matrix would silently mislabel every
+    # square.
+    lab_probs = np.stack([avg[:, ORDER.index(l)] for l in LAB], axis=1)
     rows = []
     for r in range(8):
         row, blank = "", 0
@@ -94,10 +113,10 @@ def board_fen(warp) -> str:
         if blank:
             row += str(blank)
         rows.append(row)
-    return "/".join(rows)
+    return "/".join(rows), lab_probs, conf
 
 
-def logic_pass(fen: str):
+def logic_pass(fen: str, probs=None):
     """Auto-fixes the engine is confident about, plus warnings worth showing."""
     labels = []
     for row in fen.split("/"):
@@ -105,9 +124,13 @@ def logic_pass(fen: str):
             labels += ["f"] * int(ch) if ch.isdigit() else [ch]
     if len(labels) != 64:
         return fen, []
-    probs = np.full((64, 13), 0.01, dtype=np.float32)
-    for i, l in enumerate(labels):
-        probs[i, LAB.index(l)] = 0.95
+    if probs is None:
+        # Only for a board whose probabilities were not kept. A flat 0.95 tells
+        # the logic pass every square is equally certain, so it cannot prefer
+        # changing the square it was least sure of.
+        probs = np.full((64, 13), 0.01, dtype=np.float32)
+        for i, l in enumerate(labels):
+            probs[i, LAB.index(l)] = 0.95
     try:
         out, fixes, warns = _cl.apply_chess_logic(list(labels), probs, NAMES, LAB)
     except Exception:
@@ -193,21 +216,25 @@ def main(pdf_path: str, book_id: str, title: str) -> None:
         for view, dx in views:
             for warp, box in warps(view):
                 try:
-                    fen = board_fen(warp)
+                    fen, probs, conf = board_fen(warp)
                 except Exception:
                     continue
                 bb = [box[0] + dx, box[1], box[2] + dx, box[3]]
-                found.append((bb, fen, (bb[2] - bb[0]) * (bb[3] - bb[1])))
+                found.append((bb, fen, probs, conf, (bb[2] - bb[0]) * (bb[3] - bb[1])))
         kept = []
-        for bb, fen, area in sorted(found, key=lambda t: -t[2]):
+        for bb, fen, probs, conf, area in sorted(found, key=lambda t: -t[4]):
             if any(same_spot(bb, k[0]) for k in kept):
                 continue
-            kept.append((bb, fen, area))
-        for bb, fen, _a in kept:
-            fen, warns = logic_pass(fen)
+            kept.append((bb, fen, probs, conf, area))
+        for bb, fen, probs, conf, _a in kept:
+            fen, warns = logic_pass(fen, probs)
             if why_not_a_position(fen):
                 continue
-            entry = {"page": i, "bbox": [round(v) for v in bb], "fen": fen, "modelConf": None}
+            entry = {"page": i, "bbox": [round(v) for v in bb], "fen": fen,
+                     # The reader colours anything under 0.9 amber. This was
+                     # None on every diagram, which became 1 in the reader, so
+                     # no position on a book read here was ever flagged.
+                     "modelConf": round(conf, 3)}
             if warns:
                 entry["warnings"] = warns
             for r in ruled:
