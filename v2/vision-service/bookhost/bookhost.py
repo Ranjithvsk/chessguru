@@ -224,7 +224,7 @@ def scan_catalogue() -> list:
         # Duplicates moved out for review still sit inside the chess folder,
         # so without this the next scan would put every one of them straight
         # back on the shelf.
-        if "_duplicates" in dirpath:
+        if "_duplicates" in dirpath or "_chessguru-backup" in dirpath:
             continue
         for fn in files:
             if not fn.lower().endswith(".pdf"):
@@ -363,6 +363,11 @@ class H(BaseHTTPRequestHandler):
                             "pages": st.get("pages", 0), "done": st.get("done", 0),
                             "diagrams": st.get("diagrams", 0), "state": st.get("state", "unknown")})
             return self._send(200, {"books": out})
+        m = re.match(r"^/book/([^/]+)/analysis$", p)
+        if m:
+            return self._send(200, load(os.path.join(book_dir(unquote(m.group(1))),
+                                                     "analysis.json"), {}))
+
         m = re.match(r"^/book/([^/]+)/(diagrams|status|meta)$", p)
         if m:
             return self._send(200, load(os.path.join(book_dir(unquote(m.group(1))),
@@ -400,6 +405,29 @@ class H(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(n) or b"{}")
         except Exception:
             body = {}
+        m = re.match(r"^/book/([^/]+)/analysis/([^/]+)$", p)
+        if m:
+            # Lines a coach worked out on a position, kept BESIDE the book so
+            # they survive a browser, a device and a re-ingest. Keyed by the
+            # diagram's stable page+centre key, not its index, because a
+            # de-duplication pass renumbers diagrams and index-keyed notes end
+            # up attached to the wrong board.
+            bid, key = unquote(m.group(1)), unquote(m.group(2))
+            d = book_dir(bid)
+            path = os.path.join(d, "analysis.json")
+            with _lock:
+                cur = load(path, {})
+                tree = body.get("tree")
+                if not tree:
+                    cur.pop(key, None)          # empty tree = clear the note
+                else:
+                    cur[key] = {"tree": tree,
+                                "startFen": body.get("startFen") or "",
+                                "by": body.get("by"),
+                                "at": time.time()}
+                save(path, cur)
+            return self._send(200, {"ok": True, "key": key, "saved": bool(body.get("tree"))})
+
         m = re.match(r"^/book/([^/]+)/cover$", p)
         if m:
             # Which page to show on the shelf. Page 0 is usually the cover, but

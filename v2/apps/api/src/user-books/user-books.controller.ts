@@ -187,6 +187,7 @@ export class UserBooksController {
       seconds: status.seconds ?? null,
       // Numbered in reading order so the reader can label them "position 12"
       // the way the book labels its problems.
+      analysis: readJson<Record<string, any>>(join(dir, "analysis.json"), {}),
       diagrams: diagrams.map((d, i) => ({ n: i + 1, key: diagramKey(d), ...d })),
     };
   }
@@ -197,12 +198,13 @@ export class UserBooksController {
    *  which is the point: the page images stay on the machine that made them
    *  instead of being copied to a second store that can drift out of step. */
   private async remoteDetail(id: string, uid: string) {
-    let meta: any, status: any, diagrams: any[];
+    let meta: any, status: any, diagrams: any[], analysis: any;
     try {
-      [meta, status, diagrams] = await Promise.all([
+      [meta, status, diagrams, analysis] = await Promise.all([
         this.bookHost(`/book/${encodeURIComponent(id)}/meta`),
         this.bookHost(`/book/${encodeURIComponent(id)}/status`),
         this.bookHost(`/book/${encodeURIComponent(id)}/diagrams`),
+        this.bookHost(`/book/${encodeURIComponent(id)}/analysis`).catch(() => ({})),
       ]);
     } catch {
       throw new NotFoundException("book not found");
@@ -216,6 +218,7 @@ export class UserBooksController {
       done: status?.done ?? 0,
       seconds: status?.seconds ?? null,
       remote: true,
+      analysis: analysis ?? {},
       diagrams: (diagrams ?? []).map((d: any, i: number) => ({
         n: i + 1, key: diagramKey(d), ...d,
         // The ingest writes modelConf; the reader reads conf. Without this the
@@ -391,6 +394,56 @@ export class UserBooksController {
       return readJson<any>(join(dir, "meta.json"), {}).owner === uid;
     }
     return this.remoteOwns(id, uid);
+  }
+
+  /** Lines worked out on a position, saved beside the book.
+   *
+   *  Keyed by the diagram's stable page-plus-centre key rather than its index:
+   *  a de-duplication pass renumbers diagrams, and index-keyed notes then point
+   *  at the wrong board — which has already happened once with corrections. */
+  @Post(":id/diagram/:n/analysis")
+  async saveAnalysis(@Param("id") id: string, @Param("n") n: string,
+                     @Body() body: { tree?: unknown; startFen?: string }, @Req() req: any) {
+    const uid = this.requireUser(req);
+    const idx = Number(n) - 1;
+    if (!Number.isInteger(idx) || idx < 0) throw new BadRequestException("bad diagram");
+    const tree = Array.isArray(body?.tree) ? body.tree : null;
+    const dir = bookDir(id);
+
+    if (!existsSync(dir)) {
+      if (!(await this.remoteOwns(id, uid))) throw new NotFoundException("book not found");
+      const dg = await this.bookHost(`/book/${encodeURIComponent(id)}/diagrams`);
+      const d = (dg ?? [])[idx];
+      if (!d) throw new NotFoundException("diagram not found");
+      try {
+        return await this.bookHost(
+          `/book/${encodeURIComponent(id)}/analysis/${encodeURIComponent(diagramKey(d))}`,
+          { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tree, startFen: body?.startFen ?? "", by: uid }) });
+      } catch {
+        throw new ServiceUnavailableException("could not save — the book host is not reachable");
+      }
+    }
+
+    const meta = readJson<any>(join(dir, "meta.json"), {});
+    if (meta.owner !== uid) throw new NotFoundException("book not found");
+    const diagrams = readJson<Diagram[]>(join(dir, "diagrams.json"), []);
+    const d = diagrams[idx];
+    if (!d) throw new NotFoundException("diagram not found");
+    const key = diagramKey(d);
+    const path = join(dir, "analysis.json");
+    const all = readJson<Record<string, any>>(path, {});
+    if (!tree || !tree.length) delete all[key];
+    else all[key] = { tree, startFen: body?.startFen ?? "", by: uid, at: new Date().toISOString() };
+    try {
+      writeFileSync(path, JSON.stringify(all));
+    } catch (e: any) {
+      throw new ServiceUnavailableException(
+        e?.code === "EACCES" || e?.code === "EPERM"
+          ? "this book is not writable by the server — its files were created by a different user"
+          : `could not save (${e?.code || "unknown error"})`);
+    }
+    return { ok: true, key, saved: !!(tree && tree.length) };
   }
 
   @Get(":id/page/:n")

@@ -19,13 +19,16 @@ import { useFreePlay } from "../hooks/useFreePlay";
 // beside SVG pieces. Owner on that component, 2026-08-12: "edit piece make it
 // same like pieces on board".
 import { PalettePieceBtn } from "../components/SharedClassBoard";
+import MoveTree from "../components/MoveTree";
 
 const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
 
-type Diagram = { n: number; page: number; bbox: number[] | null; fen: string; conf?: number; modelConf?: number; warnings?: string[] };
+type Diagram = { n: number; key?: string; page: number; bbox: number[] | null; fen: string; conf?: number; modelConf?: number; warnings?: string[] };
 type BookDetail = {
   id: string; title: string; pages: number; state: string; done: number;
   seconds: number | null; diagrams: Diagram[];
+  /** Lines saved on a position, keyed by the diagram's stable key. */
+  analysis?: Record<string, { tree: any[]; startFen?: string }>;
 };
 
 /** A scanned position knows nothing about castling or the clock, so fill the
@@ -111,7 +114,17 @@ export default function BookReaderPage() {
   const [book, setBook] = useState<BookDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [active, setActive] = useState<number | null>(null);
+  const activeDiagramRef = useRef<number | null>(null);
   const [page, setPage] = useState(0);
+  // Dream PDF: the book's own contents, and full-text search across it. Both
+  // come from the PDF itself via PyMuPDF — the text is already in there, so a
+  // chess book need not be scrolled 854 pages to find an opening by name.
+  const [toc, setToc] = useState<{ level: number; title: string; page: number }[]>([]);
+  const [panel, setPanel] = useState<"" | "toc" | "find">("");
+  const [lineSaved, setLineSaved] = useState<"" | "saving" | "saved" | "failed">("");
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState<{ page: number; snippet: string }[] | null>(null);
+  const [finding, setFinding] = useState(false);
   const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
   /** Natural pixel size of each rendered page, learned when the image loads.
    *  Hotspots are stored in page pixels, so they are positioned as a PERCENTAGE
@@ -164,7 +177,16 @@ export default function BookReaderPage() {
     // which is both wrong and alarming — it reads as though you had already
     // edited a board you have not looked at yet.
     setSaving(""); setSaveErr(""); setEditing(false);
-  }, [fp]);
+    setLineSaved("");
+    // Restore the lines saved on THIS position, if any. load() above already
+    // put the printed board up, so a book with no saved analysis behaves
+    // exactly as before.
+    const saved = book?.analysis?.[d.key ?? ""];
+    if (saved?.tree?.length) {
+      fp.loadTree(saved.tree, saved.startFen || fullFen(d.fen));
+      fp.goTo([]);                       // start at the printed position, not the end of the line
+    }
+  }, [fp, book]);
 
   /** Paint one square, Dream Meet's rules: the selected piece on a square that
    *  already holds it REMOVES it, anything else places or replaces. Without the
@@ -213,6 +235,128 @@ export default function BookReaderPage() {
     } catch (e) { setSaving("failed"); setSaveErr((e as Error).message || ""); }
   }, [fp, book]);
 
+  useEffect(() => {
+    if (!id) return;
+    let dead = false;
+    (async () => {
+      try {
+        const r = await fetch(`${API_BASE}/api/user-books/${encodeURIComponent(id)}/toc`,
+                              { credentials: "include" });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!dead) setToc(j.toc ?? []);
+      } catch { /* a book without contents just has no contents button */ }
+    })();
+    return () => { dead = true; };
+  }, [id]);
+
+  const runSearch = useCallback(async () => {
+    const needle = q.trim();
+    if (!id || needle.length < 2) { setHits(null); return; }
+    setFinding(true);
+    try {
+      const r = await fetch(
+        `${API_BASE}/api/user-books/${encodeURIComponent(id)}/search?q=${encodeURIComponent(needle)}`,
+        { credentials: "include" });
+      const j = r.ok ? await r.json() : { hits: [] };
+      setHits(j.hits ?? []);
+    } catch { setHits([]); }
+    finally { setFinding(false); }
+  }, [id, q]);
+
+  /** Every move of the line being viewed, not just the ones already played.
+   *
+   *  The board hook's `history` stops at the cursor, so wiring the notation
+   *  panel straight to it would make the moves ahead of you VANISH the moment
+   *  you stepped back — which is the opposite of what a notation panel is for.
+   *  Walk to the cursor, then keep following first children to the end. */
+  const lineSans = useMemo(() => {
+    const out = [...fp.history];
+    let cur: any[] = fp.tree;
+    for (const idx of fp.path) {
+      const n = cur[idx];
+      if (!n) return out;
+      cur = n.children;
+    }
+    while (cur.length) { out.push(cur[0].san); cur = cur[0].children; }
+    return out;
+  }, [fp.tree, fp.path, fp.history]);
+
+  /** How many moves were tried at THIS point. More than one means the move you
+   *  are on is a branch, and the up/down buttons switch between them. */
+  const siblingCount = useMemo(() => {
+    if (fp.path.length === 0) return 0;
+    let cur: any[] = fp.tree;
+    for (const idx of fp.path.slice(0, -1)) {
+      const n = cur[idx];
+      if (!n) return 0;
+      cur = n.children;
+    }
+    return cur.length;
+  }, [fp.tree, fp.path]);
+
+  /** Off the mainline anywhere along the path. Promote and "make main line"
+   *  only mean something then, so the buttons stay hidden otherwise rather
+   *  than sitting there greyed out. */
+  const onVariation = useMemo(() => fp.path.some((idx) => idx > 0), [fp.path]);
+
+  /** Keep the lines worked out on this position, beside the book.
+   *
+   *  Without this an analysis lived only in this browser tab: reopening the
+   *  book, or opening it on another device, lost it. Saving an empty tree
+   *  clears the note rather than storing nothing, so "delete everything then
+   *  save" means what it looks like. */
+  const saveLine = useCallback(async () => {
+    if (!id || !activeDiagramRef.current) return;
+    setLineSaved("saving");
+    try {
+      const r = await fetch(
+        `${API_BASE}/api/user-books/${encodeURIComponent(id)}/diagram/${activeDiagramRef.current}/analysis`,
+        { method: "POST", credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tree: fp.tree, startFen: fp.startFen || "" }) });
+      if (!r.ok) throw new Error("save failed");
+      setLineSaved("saved");
+      // Keep the page's own copy in step so reopening this position in the
+      // same session shows what was just saved.
+      setBook((b) => {
+        if (!b) return b;
+        const key = book?.diagrams.find((x) => x.n === active)?.key ?? "";
+        const next = { ...(b.analysis ?? {}) } as Record<string, any>;
+        if (fp.tree.length) next[key] = { tree: fp.tree, startFen: fp.startFen || "" };
+        else delete next[key];
+        return { ...b, analysis: next };
+      });
+    } catch { setLineSaved("failed"); }
+  }, [id, fp.tree, fp.startFen, book, active]);
+
+  // A "Saved" tick must not linger over a line that has changed since.
+  useEffect(() => { setLineSaved(""); }, [fp.tree]);
+
+  const pickPly = useCallback((n: number) => {
+    // At or behind the cursor, truncate the path. Ahead of it, follow the
+    // mainline down — the extra plies are all first children by construction.
+    if (n <= fp.path.length) fp.goTo(fp.path.slice(0, n));
+    else fp.goTo([...fp.path, ...Array(n - fp.path.length).fill(0)]);
+  }, [fp]);
+
+  // Arrow keys, the way every board people already use behaves. Ignored while
+  // typing, or the book search box would eat its own left/right arrows.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+      if (active == null) return;          // no position open, nothing to step through
+      if (e.key === "ArrowLeft") { e.preventDefault(); fp.goPrev(); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); fp.goNext(); }
+      else if (e.key === "Home") { e.preventDefault(); fp.goTo([]); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fp, active]);
+
+  useEffect(() => { activeDiagramRef.current = active; }, [active]);
+
   const jumpToPage = (p: number) => {
     setPage(p);
     pageRefs.current[p]?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -252,6 +396,73 @@ export default function BookReaderPage() {
           )}
         </div>
       </div>
+
+      {/* Find and Contents. A chess book is mostly text, so searching it beats
+          scrolling it — "zugzwang" is 147 places in one endgame book. */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <form
+          onSubmit={(e) => { e.preventDefault(); setPanel("find"); void runSearch(); }}
+          className="flex min-w-[220px] flex-1 items-center gap-2"
+        >
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search inside this book…"
+            className="min-w-0 flex-1 rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={finding || q.trim().length < 2}
+            className="shrink-0 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50"
+          >
+            {finding ? "…" : "Find"}
+          </button>
+        </form>
+        {toc.length > 0 && (
+          <button
+            onClick={() => setPanel((v) => (v === "toc" ? "" : "toc"))}
+            className={`shrink-0 rounded-lg border px-3 py-2 text-sm ${
+              panel === "toc" ? "border-brand-500 text-brand-200" : "border-ink-700 text-ink-300 hover:text-white"}`}
+          >
+            Contents ({toc.length})
+          </button>
+        )}
+      </div>
+
+      {panel === "toc" && toc.length > 0 && (
+        <div className="mb-4 max-h-72 overflow-y-auto rounded-xl2 border border-ink-700 bg-ink-900 p-2">
+          {toc.map((e, i) => (
+            <button
+              key={i}
+              onClick={() => { jumpToPage(e.page); setPanel(""); }}
+              className="flex w-full items-baseline gap-2 rounded px-2 py-1.5 text-left text-sm text-ink-200 hover:bg-ink-800 hover:text-white"
+              style={{ paddingLeft: `${0.5 + (e.level - 1) * 0.9}rem` }}
+            >
+              <span className="min-w-0 flex-1 truncate">{e.title}</span>
+              <span className="shrink-0 text-[11px] text-ink-500">p{e.page + 1}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {panel === "find" && hits !== null && (
+        <div className="mb-4 max-h-72 overflow-y-auto rounded-xl2 border border-ink-700 bg-ink-900 p-2">
+          <div className="px-2 pb-1 text-[11px] text-ink-500">
+            {hits.length === 0 ? `Nothing found for “${q.trim()}”.`
+              : `${hits.length} result${hits.length === 1 ? "" : "s"} for “${q.trim()}”`}
+          </div>
+          {hits.map((h, i) => (
+            <button
+              key={i}
+              onClick={() => { jumpToPage(h.page); setPanel(""); }}
+              className="flex w-full items-baseline gap-2 rounded px-2 py-1.5 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-white"
+            >
+              <span className="shrink-0 text-[11px] text-ink-500">p{h.page + 1}</span>
+              <span className="min-w-0 flex-1 truncate">{h.snippet}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
         {/* Pages */}
@@ -404,6 +615,118 @@ export default function BookReaderPage() {
                   showDests
                 />
                 </div>
+
+                {/* Navigation + notation, the same shape as the Dream Meet class
+                    room: arrows to step, a two-column move table, click any
+                    move to jump there. Hidden while editing — the palette owns
+                    the board then, and there is no line to walk. */}
+                {!editing && (
+                  <div className="mt-2 rounded-xl border border-ink-700 bg-ink-950/60 p-2">
+                    <div className="mb-2 flex items-center gap-1">
+                      <button
+                        onClick={() => fp.goTo([])}
+                        disabled={fp.ply === 0}
+                        title="Back to the printed position (Home)"
+                        className="rounded-lg border border-ink-700 px-2 py-1 text-xs text-ink-300 hover:bg-ink-800 disabled:opacity-40"
+                      >⏮</button>
+                      <button
+                        onClick={fp.goPrev}
+                        disabled={fp.ply === 0}
+                        title="Previous move (←)"
+                        className="rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-ink-300 hover:bg-ink-800 disabled:opacity-40"
+                      >◀</button>
+                      <button
+                        onClick={fp.goNext}
+                        disabled={!fp.hasNext}
+                        title="Next move (→)"
+                        className="rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-ink-300 hover:bg-ink-800 disabled:opacity-40"
+                      >▶</button>
+                      <button
+                        onClick={() => pickPly(lineSans.length)}
+                        disabled={fp.ply >= lineSans.length}
+                        title="To the end of the line"
+                        className="rounded-lg border border-ink-700 px-2 py-1 text-xs text-ink-300 hover:bg-ink-800 disabled:opacity-40"
+                      >⏭</button>
+                      {siblingCount > 1 && (
+                        <>
+                          <button
+                            onClick={() => fp.goSibling(-1)}
+                            title="Previous variation at this move"
+                            className="ml-1 rounded-lg border border-amber-500/40 px-2 py-1 text-xs text-amber-200 hover:bg-amber-500/10"
+                          >⤴</button>
+                          <button
+                            onClick={() => fp.goSibling(1)}
+                            title="Next variation at this move"
+                            className="rounded-lg border border-amber-500/40 px-2 py-1 text-xs text-amber-200 hover:bg-amber-500/10"
+                          >⤵</button>
+                        </>
+                      )}
+                      {onVariation && (
+                        <>
+                          <button
+                            onClick={() => fp.promoteVariation(fp.path)}
+                            title="Move this variation up one place"
+                            className="rounded-lg border border-ink-700 px-2 py-1 text-xs text-ink-300 hover:bg-ink-800"
+                          >⬆</button>
+                          <button
+                            onClick={() => fp.makeMainLine(fp.path)}
+                            title="Make this the main line"
+                            className="rounded-lg border border-ink-700 px-2 py-1 text-xs text-ink-300 hover:bg-ink-800"
+                          >★</button>
+                        </>
+                      )}
+                      {fp.ply > 0 && (
+                        <button
+                          onClick={() => {
+                            // Takes this move AND everything after it. Cheap to
+                            // replay, but not undoable, so it asks first.
+                            const n = Math.ceil(fp.ply / 2);
+                            if (window.confirm(`Delete move ${n} and everything after it?`)) {
+                              fp.deleteFrom(fp.path);
+                            }
+                          }}
+                          title="Delete this move and everything after it"
+                          className="rounded-lg border border-rose-500/40 px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/10"
+                        >🗑</button>
+                      )}
+                      <button
+                        onClick={() => void saveLine()}
+                        disabled={lineSaved === "saving"}
+                        title="Keep these lines on this position"
+                        className={`rounded-lg px-2 py-1 text-xs font-semibold transition disabled:opacity-60 ${
+                          lineSaved === "saved" ? "bg-emerald-600 text-white"
+                            : lineSaved === "failed" ? "bg-rose-600 text-white"
+                            : "bg-brand-600 text-white hover:bg-brand-500"}`}
+                      >
+                        {lineSaved === "saving" ? "…"
+                          : lineSaved === "saved" ? "✓ Saved"
+                          : lineSaved === "failed" ? "✕ Retry"
+                          : "Save line"}
+                      </button>
+                      <span className="ml-auto text-[11px] text-ink-500">
+                        {lineSans.length === 0 ? "no moves yet"
+                          : `move ${Math.ceil(fp.ply / 2) || 0} · ply ${fp.ply}/${lineSans.length}`}
+                        {siblingCount > 1 && (
+                          <span className="ml-1 text-amber-300">
+                            · {siblingCount} variations here
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    {lineSans.length > 0 ? (
+                      <MoveTree
+                        tree={fp.tree}
+                        path={fp.path}
+                        onPick={fp.goTo}
+                        className="max-h-40 overflow-y-auto pr-1"
+                      />
+                    ) : (
+                      <p className="px-1 py-2 text-[11px] text-ink-500">
+                        Play a move on the board and it appears here.
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {editing && (
                   <div className="mt-2 rounded-xl border border-brand-500/40 bg-brand-500/5 p-2">
