@@ -255,7 +255,7 @@ export default function BookReaderPage() {
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
         {/* Pages */}
-        <div className="space-y-6">
+        <div className={`space-y-6 ${activeDiagram ? "max-lg:pb-[52vh]" : ""}`}>
           {Array.from({ length: book.pages }, (_, p) => (
             <div
               key={p}
@@ -340,13 +340,34 @@ export default function BookReaderPage() {
          *  is taller than the viewport, and a sticky element simply clips —
          *  the buttons below the board became unreachable. Capped to the space
          *  between the header and the filmstrip, then scrollable. */}
-        <aside className="lg:sticky lg:top-20 lg:self-start lg:max-h-[calc(100vh-7.5rem)] lg:overflow-y-auto lg:pr-1">
+        {/* On a phone or tablet the sidebar falls BELOW the pages, so tapping a
+            position updated a board that was a screenful further down and
+            looked like nothing happened. Pinned to the lower half instead: the
+            page stays visible on top, the board is always where you tapped. */}
+        <aside
+          className={`lg:sticky lg:top-20 lg:self-start lg:max-h-[calc(100vh-7.5rem)] lg:overflow-y-auto lg:pr-1 ${
+            activeDiagram
+              ? "max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:top-1/2 max-lg:z-30 max-lg:overflow-y-auto max-lg:border-t max-lg:border-ink-700 max-lg:bg-ink-950/98 max-lg:px-3 max-lg:pt-2 max-lg:backdrop-blur"
+              : ""
+          }`}
+        >
           <div className="rounded-2xl border border-ink-700 bg-ink-900 p-3 pb-4">
             {activeDiagram ? (
               <>
-                <div className="mb-2 flex items-center justify-between">
+                <div className="mb-2 flex items-center justify-between gap-2">
                   <span className="text-sm font-semibold text-ink-100">Position {activeDiagram.n}</span>
-                  <span className="text-[11px] text-ink-400">page {activeDiagram.page + 1}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-ink-400">page {activeDiagram.page + 1}</span>
+                    {/* Mobile only: the pinned half hides the filmstrip, so
+                        without this there is no way back to the book. */}
+                    <button
+                      onClick={() => { setActive(null); setEditing(false); }}
+                      aria-label="Close the board"
+                      className="grid h-7 w-7 place-items-center rounded-lg border border-ink-700 text-ink-300 hover:bg-ink-800 lg:hidden"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
                 {/* movableColor is REQUIRED for the board to accept a move —
                     chessground's own default is "nobody", and without it the
@@ -507,7 +528,11 @@ export default function BookReaderPage() {
 
       {/* Filmstrip — every position in the book, at a glance */}
       {book.diagrams.length > 0 && (
-        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-ink-700 bg-ink-950/95 px-3 py-2 backdrop-blur">
+        <div className={`fixed inset-x-0 bottom-0 z-20 border-t border-ink-700 bg-ink-950/95 px-3 py-2 backdrop-blur ${
+          // The board now owns the bottom half on mobile. Leaving the strip
+          // there too would just put one on top of the other.
+          activeDiagram ? "max-lg:hidden" : ""
+        }`}>
           {/* Collapsible: on a long book this strip is hundreds of buttons
            *  pinned across the bottom of every page, eating screen the reader
            *  wants for the book itself. Collapsed it keeps one line, so you can
