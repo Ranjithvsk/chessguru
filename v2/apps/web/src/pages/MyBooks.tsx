@@ -16,6 +16,7 @@ type Book = {
 
 export default function MyBooksPage() {
   const [books, setBooks] = useState<Book[] | null>(null);
+  const [q, setQ] = useState("");
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -45,17 +46,24 @@ export default function MyBooksPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-6">
-      <div className="mb-6 rounded-2xl bg-gradient-to-r from-brand-600/25 via-fuchsia-600/10 to-transparent p-5 ring-1 ring-brand-500/20">
-        <h1 className="text-xl font-bold text-ink-50">📖 My Books</h1>
-        <p className="mt-1 text-sm text-ink-300">
-          Books read by the vision pipeline. Tap one, then tap any diagram to put it on a board.
-        </p>
-        <Link
-          to="/books/library"
-          className="mt-3 inline-block rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-500"
-        >
-          Browse the library →
+      {/* Same header treatment as the Learn library: plain heading on the left,
+          the action on the right, a search box under it. A different-looking
+          page for the same job just makes the app feel like two apps. */}
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="font-display text-2xl text-white">My Books</h1>
+          <p className="text-sm text-ink-400">Read by the vision pipeline. Open one, then tap any diagram to put it on a board.</p>
+        </div>
+        <Link to="/books/library"
+          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-glow hover:bg-brand-500">
+          Browse the library
         </Link>
+      </div>
+
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <input value={q} onChange={(e) => setQ(e.target.value)}
+          placeholder="Search title…"
+          className="min-w-[200px] flex-1 rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
       </div>
 
       {books === null && (
@@ -74,7 +82,9 @@ export default function MyBooksPage() {
       )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {(books ?? []).map((b) => (
+        {(books ?? [])
+          .filter((b) => b.title.toLowerCase().includes(q.trim().toLowerCase()))
+          .map((b) => (
           <BookCard
             key={b.id}
             b={b}

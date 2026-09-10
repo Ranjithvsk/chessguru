@@ -13,7 +13,7 @@
 // Books are private to their uploader. These are copyrighted works a coach
 // owns a copy of — we are giving them a better way to read it, not building a
 // library, so there is no public listing and no cross-user access.
-import { Body, Controller, Get, Param, Post, Req, Res, BadRequestException, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, Req, Res, BadRequestException, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import { appendFileSync, createReadStream, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -359,6 +359,38 @@ export class UserBooksController {
           : `could not save the cover (${e?.code || "unknown error"})`);
     }
     return { ok: true, coverPage: page };
+  }
+
+  /** The book's own table of contents, when the PDF carries one. */
+  @Get(":id/toc")
+  async toc(@Param("id") id: string, @Req() req: any) {
+    const uid = this.requireUser(req);
+    if (!(await this.ownsBook(id, uid))) throw new NotFoundException("book not found");
+    try {
+      return await this.bookHost(`/book/${encodeURIComponent(id)}/toc`);
+    } catch { return { toc: [] }; }
+  }
+
+  /** Full-text search across one book. */
+  @Get(":id/search")
+  async search(@Param("id") id: string, @Query("q") q: string, @Req() req: any) {
+    const uid = this.requireUser(req);
+    if (!(await this.ownsBook(id, uid))) throw new NotFoundException("book not found");
+    const needle = String(q ?? "").trim();
+    if (needle.length < 2) return { hits: [] };
+    try {
+      return await this.bookHost(
+        `/book/${encodeURIComponent(id)}/search?q=${encodeURIComponent(needle)}`);
+    } catch { return { hits: [] }; }
+  }
+
+  /** Is this book mine, wherever it is held? */
+  private async ownsBook(id: string, uid: string): Promise<boolean> {
+    const dir = bookDir(id);
+    if (existsSync(dir)) {
+      return readJson<any>(join(dir, "meta.json"), {}).owner === uid;
+    }
+    return this.remoteOwns(id, uid);
   }
 
   @Get(":id/page/:n")

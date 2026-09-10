@@ -16,6 +16,7 @@ machine also trains models; a queue that hammers it helps nobody.
 from __future__ import annotations
 
 import json
+import gzip
 import io
 import os
 import re
@@ -24,7 +25,7 @@ import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 ROOT = r"G:\My Drive\Chess"
 STORE = r"F:\chessguru-books"          # F: has the space (888 GB free)
@@ -114,6 +115,71 @@ def _open_doc(bid: str):
                 pass
         _docs[bid] = (doc, time.time())
     return doc
+
+
+def text_index(bid: str) -> list:
+    """Every page's text, built once and cached gzipped beside the book.
+
+    Extraction runs at ~3.8ms a page — 3.2s for an 854-page book — and the
+    index gzips to 0.29 MB. That is worth paying once so a search is a string
+    scan instead of re-reading the PDF, and it is nothing beside the 163 MB of
+    page images this book used to leave behind.
+    """
+    path = os.path.join(book_dir(bid), "text.json.gz")
+    if os.path.exists(path):
+        try:
+            with gzip.open(path, "rt", encoding="utf8") as fh:
+                return json.load(fh)
+        except Exception:
+            pass                      # a truncated index rebuilds rather than throws
+    doc = _open_doc(bid)
+    if doc is None:
+        return []
+    pages = [doc[i].get_text("text") for i in range(len(doc))]
+    try:
+        with gzip.open(path, "wt", encoding="utf8") as fh:
+            json.dump(pages, fh)
+    except Exception:
+        pass                          # searchable even if it cannot be cached
+    return pages
+
+
+def contents(bid: str) -> list:
+    """The book's own table of contents, when the PDF carries one."""
+    doc = _open_doc(bid)
+    if doc is None:
+        return []
+    out = []
+    for entry in (doc.get_toc() or []):
+        try:
+            level, title, page = entry[0], entry[1], entry[2]
+        except Exception:
+            continue
+        # get_toc numbers pages from 1; everything else here is 0-based.
+        out.append({"level": int(level), "title": str(title).strip(),
+                    "page": max(0, int(page) - 1)})
+    return out
+
+
+def search_book(bid: str, q: str, limit: int = 200) -> list:
+    needle = q.strip().lower()
+    if len(needle) < 2:
+        return []
+    hits = []
+    for i, text in enumerate(text_index(bid)):
+        low = text.lower()
+        start = low.find(needle)
+        while start >= 0 and len(hits) < limit:
+            # A snippet with the match in the middle, so a result is readable
+            # without opening the page.
+            a, b = max(0, start - 60), min(len(text), start + len(needle) + 60)
+            hits.append({"page": i,
+                         "snippet": " ".join(text[a:b].split()),
+                         "at": start - a})
+            start = low.find(needle, start + len(needle))
+        if len(hits) >= limit:
+            break
+    return hits
 
 
 def render_page(bid: str, n: int):
@@ -301,6 +367,21 @@ class H(BaseHTTPRequestHandler):
         if m:
             return self._send(200, load(os.path.join(book_dir(unquote(m.group(1))),
                                                      m.group(2) + ".json"), {}))
+        m = re.match(r"^/book/([^/]+)/toc$", p)
+        if m:
+            try:
+                return self._send(200, {"toc": contents(unquote(m.group(1)))})
+            except Exception:
+                return self._send(200, {"toc": []})
+        m = re.match(r"^/book/([^/]+)/search$", p)
+        if m:
+            qs = parse_qs(urlparse(self.path).query)
+            q = (qs.get("q") or [""])[0]
+            try:
+                return self._send(200, {"hits": search_book(unquote(m.group(1)), q)})
+            except Exception:
+                return self._send(200, {"hits": []})
+
         m = re.match(r"^/book/([^/]+)/page/(\d+)$", p)
         if m:
             try:

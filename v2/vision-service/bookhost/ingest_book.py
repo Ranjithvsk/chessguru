@@ -255,6 +255,16 @@ def main(pdf_path: str, book_id: str, title: str) -> None:
     # library — to hold a second copy of a book we already have. Rendering a
     # page from the PDF takes ~88ms, which is fast enough to do when someone
     # actually turns to it, so the images are dropped and the diagrams kept.
+    # Build the search index while the document is already open. Extraction is
+    # ~3.8ms a page and the result gzips to well under a megabyte, so doing it
+    # here saves every reader the first-search wait.
+    try:
+        import gzip
+        with gzip.open(os.path.join(dest, "text.json.gz"), "wt", encoding="utf8") as fh:
+            json.dump([doc[i].get_text("text") for i in range(len(doc))], fh)
+    except Exception as e:
+        print("text index skipped: %s" % e, flush=True)
+
     pages_dir = os.path.join(dest, "pages")
     if os.environ.get("KEEP_PAGES") != "1" and os.path.isdir(pages_dir):
         freed = 0
