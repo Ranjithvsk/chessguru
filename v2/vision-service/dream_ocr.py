@@ -758,6 +758,10 @@ def rejoin_hyphens(tokens: list[Token]) -> tuple[list[Token], int]:
 # any combination of table-backed repairs (max 1 + 2) so the two never tie.
 _BRUTE = 5
 
+# Cost of ignoring a token rather than playing it. Above a clean move (0) and a
+# glyph repair (1), below a brute-force guess (5).
+_SKIP = 2
+
 _CASTLE_RE = re.compile(r"^[O0oQD°]\-[O0oQD°](\-[O0oQD°])?[+#]?$")
 
 
@@ -938,6 +942,15 @@ def apply_chess_constraints(tokens: list[Token], start_fen: str | None,
             continue
         nxt: list[tuple[Any, int, list[tuple[int, str, bool]]]] = []
         for board, cost, hist in paths:
+            # A line may always SKIP a token. Real pages are not a move list:
+            # a book prints moves in a table and then MENTIONS them again in
+            # prose, often in long algebraic, so the same move appears twice and
+            # out of order. Measured on one spread, "c4" and "c2-c4" are one move
+            # printed twice, and replaying every token as consecutive play proved
+            # NOTHING on that page. Skipping costs more than playing a clean move
+            # (_SKIP > 0), so a line only ignores a token when playing it will not
+            # fit — which is exactly what a repeated prose mention looks like.
+            nxt.append((board, cost + _SKIP, hist))
             legal = []
             for c, ccost in cands:
                 try:
