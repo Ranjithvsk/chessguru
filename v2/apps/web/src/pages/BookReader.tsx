@@ -13,10 +13,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import Board from "../components/Board";
-// Reuse the class Setup editor rather than write a second one. It is the same
-// job — paint pieces onto a board and hand back a FEN — and the coach already
-// knows how it behaves from Dream Meet.
-import { PositionEditorModal } from "../components/SharedClassBoard";
 import { useFreePlay } from "../hooks/useFreePlay";
 
 const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
@@ -49,6 +45,42 @@ function rotate180(fen: string): string {
   return [flipped, ...rest].join(" ");
 }
 
+const PALETTE = ["K", "Q", "R", "B", "N", "P", "k", "q", "r", "b", "n", "p"] as const;
+const GLYPH: Record<string, string> = {
+  K: "♔", Q: "♕", R: "♖", B: "♗", N: "♘", P: "♙",
+  k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟",
+};
+
+/** Put one piece on one square (or clear it) and hand back a FEN.
+ *  Kept here rather than reusing the class Setup modal: that one is a fixed
+ *  viewport overlay, and covering the page defeats the purpose — the reason to
+ *  edit at all is to fix a square the scan misread WHILE the printed diagram is
+ *  visible beside it. */
+function setSquare(fen: string, square: string, piece: string): string {
+  const parts = fullFen(fen).split(" ");
+  const ranks = (parts[0] || "").split("/");
+  const file = square.charCodeAt(0) - 97;          // a..h -> 0..7
+  const rank = 8 - Number(square[1]);              // "8".."1" -> 0..7
+  if (file < 0 || file > 7 || rank < 0 || rank > 7) return fullFen(fen);
+  const cells: string[] = [];
+  for (const ch of ranks[rank] || "8") {
+    if (/\d/.test(ch)) for (let i = 0; i < Number(ch); i++) cells.push("");
+    else cells.push(ch);
+  }
+  while (cells.length < 8) cells.push("");
+  cells[file] = piece;                              // "" clears it
+  let row = "", blanks = 0;
+  for (const c of cells.slice(0, 8)) {
+    if (!c) { blanks++; continue; }
+    if (blanks) { row += String(blanks); blanks = 0; }
+    row += c;
+  }
+  if (blanks) row += String(blanks);
+  ranks[rank] = row;
+  parts[0] = ranks.join("/");
+  return parts.join(" ");
+}
+
 /** Swap whose turn it is. A diagram says "White to move" in prose we may not
  *  have read, so the reader has to be able to say so. */
 function withSideToMove(fen: string, side: "w" | "b"): string {
@@ -71,6 +103,7 @@ export default function BookReaderPage() {
    *  recomputed — resize the window and every hotspot drifted off its diagram. */
   const [pageSize, setPageSize] = useState<Record<number, [number, number]>>({});
   const [editing, setEditing] = useState(false);
+  const [brush, setBrush] = useState<string>("P");
   const fp = useFreePlay();
 
   useEffect(() => {
@@ -208,7 +241,33 @@ export default function BookReaderPage() {
                   <span className="text-sm font-semibold text-ink-100">Position {activeDiagram.n}</span>
                   <span className="text-[11px] text-ink-400">page {activeDiagram.page + 1}</span>
                 </div>
-                <Board fen={fp.fen} orientation={fp.orientation} dests={fp.dests} onMove={fp.onMove} />
+                <Board
+                  fen={fp.fen}
+                  orientation={fp.orientation}
+                  dests={editing ? new Map() : fp.dests}
+                  onMove={fp.onMove}
+                  onSelect={editing ? (sq: string) => fp.loadPermissive?.(setSquare(fp.fen, sq, brush)) ?? fp.load(setSquare(fp.fen, sq, brush)) : undefined}
+                />
+
+                {editing && (
+                  <div className="mt-2 rounded-xl border border-brand-500/40 bg-brand-500/5 p-2">
+                    <div className="mb-1 text-[11px] text-brand-200">
+                      Pick a piece, then tap squares. The page stays on the left so you can compare.
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {PALETTE.map((pc) => (
+                        <button key={pc} onClick={() => setBrush(pc)}
+                          className={`h-8 w-8 rounded text-xl leading-none transition ${
+                            brush === pc ? "bg-brand-600 text-white" : "bg-ink-800 text-ink-100 hover:bg-ink-700"}`}
+                          title={pc}>{GLYPH[pc]}</button>
+                      ))}
+                      <button onClick={() => setBrush("")}
+                        className={`h-8 rounded px-2 text-[11px] font-semibold transition ${
+                          brush === "" ? "bg-rose-600 text-white" : "bg-ink-800 text-ink-300 hover:bg-ink-700"}`}
+                        title="Erase">✕ Erase</button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Whose move. A diagram never states it in the pieces, so this
                     has to be settable — and it changes what is playable. */}
@@ -245,7 +304,11 @@ export default function BookReaderPage() {
                       /board-editor lost their place in the book — and the whole
                       point is fixing a square the scan misread while looking at
                       the printed diagram right next to it. */}
-                  <button onClick={() => setEditing(true)} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-500">✏️ Edit position</button>
+                  <button onClick={() => setEditing((v) => !v)}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold text-white ${
+                      editing ? "bg-emerald-600 hover:bg-emerald-500" : "bg-brand-600 hover:bg-brand-500"}`}>
+                    {editing ? "✓ Done editing" : "✏️ Edit position"}
+                  </button>
                   {/* Deliberately NOT /play?fen= — that page ignores a fen
                       parameter entirely and would start an ordinary new game,
                       silently dropping the position the reader just chose. The
@@ -270,15 +333,6 @@ export default function BookReaderPage() {
           </div>
         </aside>
       </div>
-
-      {editing && (
-        <PositionEditorModal
-          initialFen={fullFen(fp.fen)}
-          onApply={(f) => fp.load(f)}
-          onClose={() => setEditing(false)}
-          error={null}
-        />
-      )}
 
       {/* Filmstrip — every position in the book, at a glance */}
       {book.diagrams.length > 0 && (
