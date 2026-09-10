@@ -1099,7 +1099,12 @@ def choose_start(tokens: list[Token], candidate_fens: list[str],
         else:
             expanded += [parts[0] + " w - - 0 1", parts[0] + " b - - 0 1"]
 
-    best: tuple[list[Token], str | None, int] = (tokens, None, -1)
+    # 0, never -1. A sentinel that looks like a count leaks into whatever the
+    # caller sums — seen for real, a bulk run reported "-1 proved" per page and
+    # quietly subtracted from its own total.
+    best: tuple[list[Token], str | None, int] = (tokens, None, 0)
+    if not expanded:
+        return best
     for fen in expanded:
         trial = apply_chess_constraints([t.copy() for t in tokens], fen, beam)
         n = _count_verified(trial)
