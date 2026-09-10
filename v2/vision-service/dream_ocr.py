@@ -98,6 +98,10 @@ class Token:
     verified: bool = False             # proved legal in the position
     original: str | None = None        # before any correction
 
+    def copy(self) -> "Token":
+        """A fresh Token for a trial replay — the constraint pass mutates."""
+        return Token(**dict(self.__dict__))
+
 
 @dataclass
 class Engine:
@@ -792,8 +796,49 @@ def apply_chess_constraints(tokens: list[Token], start_fen: str | None,
     return tokens
 
 
-def read_page(img, start_fen: str | None = None) -> dict[str, Any]:
-    """Full pipeline for one page image."""
+def _count_verified(tokens: list[Token]) -> int:
+    return sum(1 for t in tokens if t.kind == "move" and t.verified)
+
+
+def choose_start(tokens: list[Token], candidate_fens: list[str],
+                 beam: int = 10) -> tuple[list[Token], str | None, int]:
+    """Let the MOVES pick which diagram they belong to.
+
+    A book page carries diagrams and move text together, and the constraint pass
+    needs to know which position the moves start from. Associating them by
+    layout would need bounding boxes the engines discard, so instead every
+    candidate position from the page is tried and the one that legally explains
+    the most moves wins.
+
+    This is stronger than picking by position on the page, because it also
+    survives a MISREAD diagram: a FEN with a piece in the wrong place will not
+    make the printed moves legal, so it loses to one that does. The diagram and
+    the move text check each other.
+    """
+    best: tuple[list[Token], str | None, int] = (tokens, None, -1)
+    for fen in [f for f in candidate_fens if f]:
+        trial = apply_chess_constraints([t.copy() for t in tokens], fen, beam)
+        n = _count_verified(trial)
+        if n > best[2]:
+            best = (trial, fen, n)
+    return best
+
+
+def read_page(img, start_fen: str | None = None,
+              candidate_fens: list[str] | None = None,
+              classify_board: Callable[[Any], str | None] | None = None,
+              detect_boards: Callable[[Any], list[Any]] | None = None) -> dict[str, Any]:
+    """Full pipeline for one page image.
+
+    `classify_board` and `detect_boards` are INJECTED rather than imported, so
+    this module never depends on the vision service and stays testable on its
+    own — the same arrangement book_ingest.py uses.
+
+    Supply either a known `start_fen`, a list of `candidate_fens`, or the two
+    callables and the page's own diagrams become the candidates. With none of
+    these the chess constraint pass cannot run and this degrades to ordinary
+    ensemble OCR, which is exactly what it did everywhere before this existed.
+    """
     engines = available_engines()
     per = {}
     for e in engines:
@@ -801,9 +846,31 @@ def read_page(img, start_fen: str | None = None) -> dict[str, Any]:
             per[e.name] = e.run(img)
         except Exception as ex:
             log.warning("engine %s failed: %s", e.name, ex)
-    # The weights on each Engine were doing nothing until this passed them.
-    toks = apply_chess_constraints(
-        consensus(per, {e.name: e.weight for e in engines}), start_fen)
+
+    toks = consensus(per, {e.name: e.weight for e in engines})
+
+    # Where does the position come from?
+    cands = list(candidate_fens or [])
+    if start_fen:
+        cands.insert(0, start_fen)
+    if not cands and detect_boards and classify_board:
+        try:
+            for c in detect_boards(img) or []:
+                try:
+                    fen = classify_board(c)
+                    if fen:
+                        cands.append(fen)
+                except Exception as ex:
+                    log.warning("board classify failed: %s", ex)
+        except Exception as ex:
+            log.warning("board detect failed: %s", ex)
+
+    chosen = None
+    if cands:
+        toks, chosen, _ = choose_start(toks, cands)
+    elif start_fen:
+        toks = apply_chess_constraints(toks, start_fen)
+
     moves = [t for t in toks if t.kind == "move"]
     return {
         "engines": list(per),
@@ -812,4 +879,8 @@ def read_page(img, start_fen: str | None = None) -> dict[str, Any]:
         "moves": [t.text for t in moves],
         "movesVerified": sum(1 for t in moves if t.verified),
         "movesTotal": len(moves),
+        "startFen": chosen,
+        "startFenCandidates": len(cands),
+        # Stated plainly so a caller cannot mistake plain OCR for the real thing.
+        "chessConstraintsRan": bool(cands),
     }
