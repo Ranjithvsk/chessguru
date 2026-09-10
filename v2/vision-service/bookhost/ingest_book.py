@@ -193,7 +193,10 @@ def main(pdf_path: str, book_id: str, title: str) -> None:
             if r.get("now") and r.get("bbox"):
                 ruled.append(r)
 
-    json.dump({"title": title, "owner": os.environ.get("BOOK_OWNER", "ranjith_vsk")},
+    # The source path matters now: pages are rendered from the PDF on demand
+    # rather than kept as JPEGs, so the book host needs to find the file again.
+    json.dump({"title": title, "owner": os.environ.get("BOOK_OWNER", "ranjith_vsk"),
+               "pdf": pdf_path},
               open(os.path.join(dest, "meta.json"), "w"))
     doc = fitz.open(pdf_path)
     n = len(doc)
@@ -246,6 +249,23 @@ def main(pdf_path: str, book_id: str, title: str) -> None:
             diagrams.append(entry)
         status(done=i + 1, diagrams=len(diagrams))
     json.dump(diagrams, open(os.path.join(dest, "diagrams.json"), "w"))
+
+    # The pages have done their job: the positions are extracted and stored.
+    # Keeping them would cost ~3.2x the PDF in JPEGs — about 127 GB across the
+    # library — to hold a second copy of a book we already have. Rendering a
+    # page from the PDF takes ~88ms, which is fast enough to do when someone
+    # actually turns to it, so the images are dropped and the diagrams kept.
+    pages_dir = os.path.join(dest, "pages")
+    if os.environ.get("KEEP_PAGES") != "1" and os.path.isdir(pages_dir):
+        freed = 0
+        for fn in os.listdir(pages_dir):
+            f = os.path.join(pages_dir, fn)
+            try:
+                freed += os.path.getsize(f)
+                os.remove(f)
+            except OSError:
+                pass
+        print("dropped rendered pages, freed %.0f MB" % (freed / 1e6), flush=True)
     status(state="done", diagrams=len(diagrams), seconds=round(time.time() - t0, 1))
     print("%s: %d pages, %d diagrams, %.0fs" % (book_id, n, len(diagrams), time.time() - t0))
 

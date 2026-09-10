@@ -19,6 +19,7 @@ import json
 import io
 import os
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -67,6 +68,75 @@ def shelved(cat: list) -> list:
     return out
 
 QUEUE = os.path.join(STORE, "queue.json")
+
+# Stop reading books before the drive fills. Reading the whole library
+# is a multi-day unattended job at ~0.19 MB per page, and a full disk
+# would not just stop ingest — it would break the books already read,
+# the corrections written beside them, and anything else on F:.
+MIN_FREE_GB = 50
+
+# --- Dream PDF: pages come from the PDF, not from a second copy of the book ---
+#
+# Ingest used to leave every page behind as a JPEG. That is ~3.2x the PDF in
+# images — about 127 GB across this library — to store a book we already have.
+# PyMuPDF renders a page in ~88ms, which is fast enough to do when a reader
+# actually turns to it, so the pages are rendered on demand instead.
+#
+# Documents are kept OPEN between requests: opening an 854-page PDF costs far
+# more than rendering one page from an already-open one, and a reader turning
+# pages would otherwise pay that cost on every single page.
+_docs = {}                       # book id -> (fitz.Document, last used)
+_docs_lock = threading.Lock()
+MAX_OPEN_DOCS = 8
+
+
+def _open_doc(bid: str):
+    import fitz
+    with _docs_lock:
+        hit = _docs.get(bid)
+        if hit:
+            _docs[bid] = (hit[0], time.time())
+            return hit[0]
+    meta = load(os.path.join(book_dir(bid), "meta.json"), {})
+    path = meta.get("pdf")
+    if not path or not os.path.exists(path):
+        return None
+    doc = fitz.open(path)
+    with _docs_lock:
+        # Cheap LRU. Chess PDFs are large and a handful open at once is plenty
+        # for one reader; letting this grow unbounded would exhaust memory on a
+        # box that is also running the GPU pipeline.
+        while len(_docs) >= MAX_OPEN_DOCS:
+            oldest = min(_docs, key=lambda k: _docs[k][1])
+            try:
+                _docs.pop(oldest)[0].close()
+            except Exception:
+                pass
+        _docs[bid] = (doc, time.time())
+    return doc
+
+
+def render_page(bid: str, n: int):
+    """One page as JPEG bytes, from the cached file if ingest left one, else
+    straight from the PDF."""
+    cached = os.path.join(book_dir(bid), "pages", "p%04d.jpg" % n)
+    if os.path.exists(cached):
+        with open(cached, "rb") as fh:
+            return fh.read()
+    import fitz
+    doc = _open_doc(bid)
+    if doc is None or n < 0 or n >= len(doc):
+        return None
+    mat = fitz.Matrix(150 / 72, 150 / 72)      # the DPI the positions were found at
+    return doc[n].get_pixmap(matrix=mat).tobytes("jpeg", jpg_quality=82)
+
+
+def free_gb() -> float:
+    try:
+        return shutil.disk_usage(STORE).free / (1024 ** 3)
+    except Exception:
+        return 999.0
+
 
 os.makedirs(STORE, exist_ok=True)
 _lock = threading.Lock()
@@ -142,6 +212,18 @@ def worker():
             if not nxt:
                 time.sleep(5)
                 continue
+            if free_gb() < MIN_FREE_GB:
+                # Put it back and wait. Better a queue that stalls visibly than
+                # a disk that fills silently and corrupts what is already there.
+                with _lock:
+                    q = load(QUEUE, [])
+                    for x in q:
+                        if x["id"] == nxt["id"] and x.get("state") == "working":
+                            x["state"] = "queued"
+                            x["error"] = "paused: only %.0f GB free" % free_gb()
+                    save(QUEUE, q)
+                time.sleep(300)
+                continue
             rc = subprocess.run(
                 [os.path.join(os.path.dirname(__file__), "..", "ocr-gpu", "Scripts", "python.exe")
                  if False else r"E:\ocr-gpu\Scripts\python.exe",
@@ -199,7 +281,8 @@ class H(BaseHTTPRequestHandler):
             save(CATALOGUE, cat)
             return self._send(200, {"books": len(cat)})
         if p == "/queue":
-            return self._send(200, {"queue": load(QUEUE, [])})
+            return self._send(200, {"queue": load(QUEUE, []),
+                                    "freeGb": round(free_gb(), 1)})
         if p == "/books":
             out = []
             for d in sorted(os.listdir(STORE)):
@@ -220,12 +303,13 @@ class H(BaseHTTPRequestHandler):
                                                      m.group(2) + ".json"), {}))
         m = re.match(r"^/book/([^/]+)/page/(\d+)$", p)
         if m:
-            f = os.path.join(book_dir(unquote(m.group(1))), "pages",
-                             "p%04d.jpg" % int(m.group(2)))
-            if not os.path.exists(f):
+            try:
+                data = render_page(unquote(m.group(1)), int(m.group(2)))
+            except Exception:
+                data = None
+            if data is None:
                 return self._send(404, {"ok": False})
-            with open(f, "rb") as fh:
-                return self._send(200, fh.read(), "image/jpeg")
+            return self._send(200, data, "image/jpeg")
         self._send(404, {"ok": False})
 
     def do_POST(self):
@@ -318,6 +402,18 @@ class H(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    # A restart kills the child process mid-book, leaving its queue entry stuck
+    # on "working" — and the worker only ever picks up "queued", so the whole
+    # queue would stall behind it.
+    _q = load(QUEUE, [])
+    _requeued = 0
+    for _x in _q:
+        if _x.get("state") == "working":
+            _x["state"] = "queued"
+            _requeued += 1
+    if _requeued:
+        save(QUEUE, _q)
+        print("requeued %d book(s) interrupted by a restart" % _requeued, flush=True)
     threading.Thread(target=worker, daemon=True).start()
     print("bookhost on 127.0.0.1:%d, store %s" % (PORT, STORE), flush=True)
     ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()
