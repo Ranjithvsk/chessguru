@@ -209,12 +209,12 @@ export default function SignupAcademyPage() {
       </nav>
 
       {/* ── HERO ─────────────────────────────────────────────────────────── */}
-      <section className="relative overflow-hidden" style={{ paddingTop: "120px", paddingBottom: "80px" }}>
+      <section className="relative overflow-hidden" style={{ paddingTop: "104px", paddingBottom: "64px" }}>
         {/* Aurora blobs */}
         <div className="absolute -top-20 -left-20 w-[600px] h-[600px] rounded-full opacity-40 cg-hero-blob" style={{ background: "radial-gradient(circle, #a855f7 0%, transparent 65%)" }} />
         <div className="absolute top-40 -right-40 w-[700px] h-[700px] rounded-full opacity-30 cg-hero-blob-2" style={{ background: "radial-gradient(circle, #f59e0b 0%, transparent 65%)" }} />
 
-        <div className="relative max-w-7xl mx-auto px-6 grid lg:grid-cols-2 gap-12 items-center">
+        <div className="relative max-w-7xl mx-auto px-6 grid lg:grid-cols-2 gap-12 items-center lg:items-start">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full px-3 py-1 mb-6 text-xs font-medium border border-amber-400/30" style={{ background: "rgba(251, 191, 36, 0.08)", color: "#fbbf24" }}>
               <span>✨</span> 30 days free · No card required · ₹1,000/month after
@@ -243,10 +243,55 @@ export default function SignupAcademyPage() {
             </div>
           </div>
 
-          <div className="relative">
-            <div className="absolute inset-0 rounded-3xl blur-2xl opacity-40" style={{ background: "linear-gradient(135deg, #f59e0b, #a855f7)" }} />
-            <img src="/marketing/hero.webp" alt="A student thinking through a chess position at their study desk"
-                 className="relative rounded-3xl shadow-2xl w-full h-auto cg-float" loading="eager" />
+          <div id="signup" ref={formRef} className="relative lg:max-w-xl lg:ml-auto w-full">
+    <div className="relative rounded-3xl p-8 md:p-10 border border-white/10 shadow-2xl" style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.4))" }}>
+              <div className="absolute -top-3 -right-3 rounded-full w-16 h-16 flex items-center justify-center text-2xl font-black text-black shadow-lg" style={{ background: "linear-gradient(135deg, #fbbf24, #f59e0b)" }}>
+                30d
+              </div>
+              <h2 className="text-2xl md:text-3xl font-black mb-2">Start your free trial</h2>
+              <p className="text-sm opacity-70 mb-6">30 days on us. No card. Full access.</p>
+
+              <form onSubmit={submit} className="space-y-4">
+                <Input label="Academy name" value={f.academyName} onChange={(v) => setF({ ...f, academyName: v })} placeholder="Stephens Chess Academy" required />
+                <Input label="Your name" value={f.fullName} onChange={(v) => setF({ ...f, fullName: v })} placeholder="Ranjith VS" required />
+                <Input label="Email address" type="email" value={f.ownerEmail} onChange={(v) => setF({ ...f, ownerEmail: v })} placeholder="you@school.com" required />
+                <Input
+                  label="Mobile number"
+                  type="tel"
+                  required
+                  value={f.ownerMobile}
+                  onChange={(v) => setF({ ...f, ownerMobile: v })}
+                  placeholder="+91 98765 43210"
+                  help="Required — so we can reach you about your academy. Never shown to students."
+                />
+                {f.ownerMobile && (
+                  <label className="flex items-start gap-2 text-xs opacity-80 cursor-pointer">
+                    <input type="checkbox" checked={f.mobileConsent} onChange={(e) => setF({ ...f, mobileConsent: e.target.checked })} className="mt-0.5 accent-amber-400" />
+                    <span>Yes — send me WhatsApp updates about my trial (no spam, cancel any time)</span>
+                  </label>
+                )}
+                <Input label="Choose a password" type="password" value={f.password} onChange={(v) => setF({ ...f, password: v })} placeholder="At least 6 characters" required />
+
+                {msg && (
+                  <div className={`text-sm px-4 py-3 rounded-xl border ${msg.ok ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300" : "border-rose-400/40 bg-rose-500/10 text-rose-300"}`}>
+                    {msg.text}
+                  </div>
+                )}
+
+                <button
+                  type="submit" disabled={busy}
+                  className="w-full rounded-full py-3.5 font-bold text-black shadow-xl shadow-amber-500/30 text-base disabled:opacity-60"
+                  style={{ background: "linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)" }}
+                >
+                  {busy ? "Starting your trial…" : "Start my 30-day trial →"}
+                </button>
+
+                <p className="text-xs opacity-60 text-center pt-2">
+                  Already have an account?{" "}
+                  <a href="/login" className="underline underline-offset-2 hover:opacity-100">Sign in</a>
+                </p>
+              </form>
+            </div>
           </div>
         </div>
       </section>
@@ -477,55 +522,20 @@ export default function SignupAcademyPage() {
         </div>
       </section>
 
-      {/* ── Signup form ──────────────────────────────────────────────────── */}
-      <section id="signup" ref={formRef} className="max-w-2xl mx-auto px-6 py-20">
-        <div className="relative rounded-3xl p-8 md:p-10 border border-white/10 shadow-2xl" style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.4))" }}>
-          <div className="absolute -top-3 -right-3 rounded-full w-16 h-16 flex items-center justify-center text-2xl font-black text-black shadow-lg" style={{ background: "linear-gradient(135deg, #fbbf24, #f59e0b)" }}>
-            30d
-          </div>
-          <h2 className="text-2xl md:text-3xl font-black mb-2">Start your free trial</h2>
+      {/* ── Image showcase + final CTA (form lives in the hero now — owner ask
+          2026-09-10: "start your free trial signup in top itself") ────── */}
+      <section className="max-w-5xl mx-auto px-6 py-20">
+        <div className="relative">
+          <div className="absolute inset-0 rounded-3xl blur-2xl opacity-40" style={{ background: "linear-gradient(135deg, #f59e0b, #a855f7)" }} />
+          <img src="/marketing/hero.webp" alt="A student thinking through a chess position at their study desk"
+               className="relative rounded-3xl shadow-2xl w-full h-auto" loading="lazy" />
+        </div>
+        <div className="mt-10 text-center">
+          <h2 className="text-2xl md:text-3xl font-black mb-3">Ready when you are.</h2>
           <p className="text-sm opacity-70 mb-6">30 days on us. No card. Full access.</p>
-
-          <form onSubmit={submit} className="space-y-4">
-            <Input label="Academy name" value={f.academyName} onChange={(v) => setF({ ...f, academyName: v })} placeholder="Stephens Chess Academy" required />
-            <Input label="Your name" value={f.fullName} onChange={(v) => setF({ ...f, fullName: v })} placeholder="Ranjith VS" required />
-            <Input label="Email address" type="email" value={f.ownerEmail} onChange={(v) => setF({ ...f, ownerEmail: v })} placeholder="you@school.com" required />
-            <Input
-              label="Mobile number"
-              type="tel"
-              required
-              value={f.ownerMobile}
-              onChange={(v) => setF({ ...f, ownerMobile: v })}
-              placeholder="+91 98765 43210"
-              help="Required — so we can reach you about your academy. Never shown to students."
-            />
-            {f.ownerMobile && (
-              <label className="flex items-start gap-2 text-xs opacity-80 cursor-pointer">
-                <input type="checkbox" checked={f.mobileConsent} onChange={(e) => setF({ ...f, mobileConsent: e.target.checked })} className="mt-0.5 accent-amber-400" />
-                <span>Yes — send me WhatsApp updates about my trial (no spam, cancel any time)</span>
-              </label>
-            )}
-            <Input label="Choose a password" type="password" value={f.password} onChange={(v) => setF({ ...f, password: v })} placeholder="At least 6 characters" required />
-
-            {msg && (
-              <div className={`text-sm px-4 py-3 rounded-xl border ${msg.ok ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300" : "border-rose-400/40 bg-rose-500/10 text-rose-300"}`}>
-                {msg.text}
-              </div>
-            )}
-
-            <button
-              type="submit" disabled={busy}
-              className="w-full rounded-full py-3.5 font-bold text-black shadow-xl shadow-amber-500/30 text-base disabled:opacity-60"
-              style={{ background: "linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)" }}
-            >
-              {busy ? "Starting your trial…" : "Start my 30-day trial →"}
-            </button>
-
-            <p className="text-xs opacity-60 text-center pt-2">
-              Already have an account?{" "}
-              <a href="/login" className="underline underline-offset-2 hover:opacity-100">Sign in</a>
-            </p>
-          </form>
+          <button onClick={scrollToForm} className="rounded-full px-8 py-3.5 font-bold text-black shadow-xl shadow-amber-500/30 text-base" style={{ background: "linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)" }}>
+            Start my 30-day trial →
+          </button>
         </div>
       </section>
 
