@@ -350,34 +350,43 @@ export default function BookReaderPage() {
                       /board-editor lost their place in the book — and the whole
                       point is fixing a square the scan misread while looking at
                       the printed diagram right next to it. */}
-                  <button onClick={() => setEditing((v) => !v)}
-                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold text-white ${
-                      editing ? "bg-emerald-600 hover:bg-emerald-500" : "bg-brand-600 hover:bg-brand-500"}`}>
-                    {editing ? "✓ Done editing" : "✏️ Edit position"}
+                  {/* ONE key, not two. "Done editing" and "Save correction"
+                      were separate, which invites the worst outcome available:
+                      a coach fixes a square, presses Done, and loses the fix
+                      because Save was a different button. Finishing an edit IS
+                      saving it. Edit mode only closes once the save succeeds —
+                      on failure it stays open with the position intact so the
+                      work is never silently thrown away. */}
+                  <button
+                    disabled={saving === "saving"}
+                    onClick={async () => {
+                      if (!editing) { setEditing(true); setSaving(""); return; }
+                      if (!activeDiagram) { setEditing(false); return; }
+                      setSaving("saving");
+                      const boardOnly = fp.fen.split(" ")[0] ?? "";
+                      try {
+                        const r = await fetch(
+                          `${API_BASE}/api/user-books/${encodeURIComponent(book.id)}/diagram/${activeDiagram.n}`,
+                          { method: "POST", credentials: "include",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ fen: boardOnly }) });
+                        if (!r.ok) throw new Error(String(r.status));
+                        setSaving("saved");
+                        // Keep the page in step with what is now stored.
+                        setBook((b) => b && ({ ...b, diagrams: b.diagrams.map((d) =>
+                          d.n === activeDiagram.n ? { ...d, fen: boardOnly, conf: 1 } : d) }));
+                        setEditing(false);
+                      } catch { setSaving("failed"); }
+                    }}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60 ${
+                      saving === "failed" ? "bg-rose-600 hover:bg-rose-500"
+                        : editing ? "bg-emerald-600 hover:bg-emerald-500"
+                        : "bg-brand-600 hover:bg-brand-500"}`}>
+                    {!editing ? (saving === "saved" ? "✓ Saved · edit again" : "✏️ Edit position")
+                      : saving === "saving" ? "Saving…"
+                      : saving === "failed" ? "✕ Save failed · retry"
+                      : "💾 Save & done"}
                   </button>
-                  {editing && activeDiagram && (
-                    <button
-                      onClick={async () => {
-                        setSaving("saving");
-                        const boardOnly = fp.fen.split(" ")[0] ?? "";
-                        try {
-                          const r = await fetch(
-                            `${API_BASE}/api/user-books/${encodeURIComponent(book.id)}/diagram/${activeDiagram.n}`,
-                            { method: "POST", credentials: "include",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ fen: boardOnly }) });
-                          if (!r.ok) throw new Error(String(r.status));
-                          setSaving("saved");
-                          // Keep the page in step with what is now stored.
-                          setBook((b) => b && ({ ...b, diagrams: b.diagrams.map((d) =>
-                            d.n === activeDiagram.n ? { ...d, fen: boardOnly, conf: 1 } : d) }));
-                        } catch { setSaving("failed"); }
-                      }}
-                      className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-500">
-                      {saving === "saving" ? "Saving…" : saving === "saved" ? "✓ Saved" :
-                       saving === "failed" ? "✕ Retry save" : "💾 Save correction"}
-                    </button>
-                  )}
                   {/* Deliberately NOT /play?fen= — that page ignores a fen
                       parameter entirely and would start an ordinary new game,
                       silently dropping the position the reader just chose. The
