@@ -83,20 +83,24 @@ export default function MyBooksPage() {
               to={`/books/read/${encodeURIComponent(b.id)}`}
               className="group rounded-2xl border border-ink-700 bg-ink-900 p-4 transition hover:border-brand-500/60 hover:bg-ink-800"
             >
-              {/* The real front cover, not an emoji. Page 0 IS the cover, and
-                  the API already serves page images — a shelf of actual covers
-                  is how you find a book you know by sight. */}
-              <div className="mb-3 overflow-hidden rounded-lg bg-ink-950 ring-1 ring-ink-700">
+              {/* The real front cover, not an emoji — a shelf of actual covers
+                  is how you find a book you know by sight.
+
+                  Portrait frame, and object-CONTAIN rather than cover. A book
+                  cover is portrait but page 0 is not always: the Pandolfini
+                  scan opens on a landscape two-page spread, and cropping it to
+                  a wide strip cut the title off. Containing it letterboxes the
+                  odd one instead of mangling every one. */}
+              <div className="mb-3 grid aspect-[3/4] place-items-center overflow-hidden rounded-lg bg-ink-950 ring-1 ring-ink-700">
                 <img
                   src={`${API_BASE}/api/user-books/${encodeURIComponent(b.id)}/page/0`}
                   alt=""
                   loading="lazy"
-                  className="h-40 w-full object-cover object-top transition group-hover:scale-[1.03]"
+                  className="max-h-full max-w-full object-contain transition group-hover:scale-[1.03]"
                   onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
                 />
               </div>
-              <div className="mb-2 flex items-start justify-between gap-2">
-                <span className="text-2xl">📕</span>
+              <div className="mb-2 flex items-start justify-end gap-2">
                 {busy ? (
                   <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-200">
                     reading {pct}%
