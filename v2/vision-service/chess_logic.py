@@ -162,8 +162,19 @@ def apply_chess_logic(labels: list[str], probs, square_names: list[str],
         w_sym, b_sym = k, k.lower()
         w = sum(1 for p in labels if p == w_sym)
         b = sum(1 for p in labels if p == b_sym)
-        if w + b != total:
-            continue                      # a real capture or promotion happened
+        # The total may be SHORT — pieces get captured — and requiring it to
+        # match exactly was too strict. Reported 2026-09-10: a scan gave Black
+        # THREE rooks and White NONE, total 3, so this rule stayed silent and a
+        # coach fixed g4 by hand. Yet 3/0 is a stronger signal than the 3/1 case
+        # this rule already caught: it needs Black to promote a rook AND both
+        # White rooks to be gone, against the single misread colour that
+        # explains it in one step.
+        #
+        # A total ABOVE the starting count is different — that is a promotion,
+        # and flipping a colour would not fix it — so that case is still left
+        # alone.
+        if w + b > total:
+            continue
         for over, under in ((w_sym, b_sym), (b_sym, w_sym)):
             n_over = sum(1 for p in labels if p == over)
             n_under = sum(1 for p in labels if p == under)
