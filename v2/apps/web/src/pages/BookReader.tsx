@@ -159,6 +159,11 @@ export default function BookReaderPage() {
     setActive(d.n);
     fp.load(fullFen(d.fen));
     setPage(d.page);
+    // Saved/failed state belongs to the diagram it happened on. Leaving it set
+    // made every position you opened afterwards claim "✓ Saved · edit again",
+    // which is both wrong and alarming — it reads as though you had already
+    // edited a board you have not looked at yet.
+    setSaving(""); setSaveErr(""); setEditing(false);
   }, [fp]);
 
   /** Paint one square, Dream Meet's rules: the selected piece on a square that
@@ -411,7 +416,7 @@ export default function BookReaderPage() {
                       saving === "failed" ? "bg-rose-600 hover:bg-rose-500"
                         : editing ? "bg-emerald-600 hover:bg-emerald-500"
                         : "bg-brand-600 hover:bg-brand-500"}`}>
-                    {!editing ? (saving === "saved" ? "✓ Saved · edit again" : "✏️ Edit position")
+                    {!editing ? "✏️ Edit position"
                       : saving === "saving" ? "Saving…"
                       : saving === "failed" ? "✕ Save failed · retry"
                       : "💾 Save & done"}

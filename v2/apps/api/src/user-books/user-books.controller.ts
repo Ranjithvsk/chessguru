@@ -41,8 +41,13 @@ function bookDir(id: string): string {
 function diagramKey(d: { page: number; bbox: number[] | null }): string {
   const b = d.bbox;
   if (!b || b.length < 4) return `p${d.page}`;
-  const cx = Math.round(((b[0]! + b[2]!) / 2) / 10) * 10;
-  const cy = Math.round(((b[1]! + b[3]!) / 2) / 10) * 10;
+  // FLOOR, not round. Math.round and Python's round() disagree on exact halves
+  // — JS rounds half up, Python rounds half to even — so a board centred on
+  // x=605 keyed as p18_610_260 from the API and p18_600_260 from the analysis
+  // scripts, and a real correction looked like it belonged to no diagram at
+  // all. floor() means the same thing in every language.
+  const cx = Math.floor(((b[0]! + b[2]!) / 2) / 10) * 10;
+  const cy = Math.floor(((b[1]! + b[3]!) / 2) / 10) * 10;
   return `p${d.page}_${cx}_${cy}`;
 }
 
