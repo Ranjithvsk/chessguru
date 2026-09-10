@@ -224,7 +224,17 @@ def _ensure_llama_server() -> None:
             # The Linux build loads its shared objects from beside itself.
             os.environ["LD_LIBRARY_PATH"] = (
                 dirn + os.pathsep + os.environ.get("LD_LIBRARY_PATH", ""))
-            log.info("using bundled llama-server at %s", dirn)
+            # Two settings decide whether Surya uses this binary at all, and
+            # both must be right BEFORE surya.settings is imported.
+            #
+            # SURYA_INFERENCE_BACKEND unset means Surya chooses, and on Windows
+            # it chose vLLM-in-Docker, then failed with "docker binary not
+            # found" — while a perfectly good llama-server sat on PATH.
+            # LLAMA_CPP_BINARY defaults to the extension-less name, which
+            # Windows will not execute. Point it at the actual file.
+            os.environ.setdefault("SURYA_INFERENCE_BACKEND", "llamacpp")
+            os.environ.setdefault("LLAMA_CPP_BINARY", cand)
+            log.info("surya backend=llamacpp binary=%s", cand)
             return
     log.warning("llama-server not found; Surya 0.22+ will return nothing. "
                 "Set CHESSGURU_LLAMA_DIR or drop the binary in %s",
@@ -233,6 +243,9 @@ def _ensure_llama_server() -> None:
 
 def surya_engine() -> Engine | None:
     """Surya — transformer OCR, strongest of the four on unusual layouts."""
+    # BEFORE the import: surya.settings reads these at module load and freezes
+    # them, so setting them later in run() would have no effect at all.
+    _ensure_llama_server()
     try:
         import surya.recognition  # noqa: F401
     except Exception:
@@ -381,7 +394,14 @@ def paddle_engine() -> Engine | None:
                 continue
             texts = d.get("rec_texts") or []
             scores = d.get("rec_scores") or []
-            boxes = d.get("rec_boxes") or d.get("rec_polys") or []
+            # `a or b` on a numpy array raises "truth value of an array with
+            # more than one element is ambiguous" — Paddle returns arrays here,
+            # so the fallback has to be written out explicitly.
+            boxes = d.get("rec_boxes")
+            if boxes is None or len(boxes) == 0:
+                boxes = d.get("rec_polys")
+            if boxes is None:
+                boxes = []
             for i, (t, sc) in enumerate(zip(texts, scores)):
                 bb = None
                 if i < len(boxes):
