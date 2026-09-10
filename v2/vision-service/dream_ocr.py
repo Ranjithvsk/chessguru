@@ -144,6 +144,21 @@ def tesseract_engine() -> Engine | None:
 _MODELS: dict[str, Any] = {}
 
 
+def _downscale(img, max_side: int):
+    """Cap the long edge. A VLM's cost scales with the number of image tokens,
+    and a two-page book scan is large: Qwen took 337s on a 1755px spread against
+    37s for GOT-OCR. Nothing else here cares about size."""
+    import numpy as np
+    if not hasattr(img, "shape") or max_side <= 0:
+        return img
+    h, w = img.shape[:2]
+    if max(h, w) <= max_side:
+        return img
+    import cv2
+    sc = max_side / float(max(h, w))
+    return cv2.resize(img, (int(w * sc), int(h * sc)), interpolation=cv2.INTER_AREA)
+
+
 def _pil(img):
     """Engines want a PIL RGB image; our pipeline passes OpenCV BGR arrays."""
     from PIL import Image
@@ -425,7 +440,8 @@ CHESS_PAGE_PROMPT = (
 )
 
 
-def qwen_engine(model_id: str = "Qwen/Qwen3-VL-4B-Instruct") -> Engine | None:
+def qwen_engine(model_id: str = "Qwen/Qwen3-VL-4B-Instruct",
+                max_side: int = 1400) -> Engine | None:
     """Qwen3-VL — the only engine here that can be told what it is reading.
 
     4B is the largest of the current line that fits 10 GB on an Ampere card; the
@@ -453,7 +469,7 @@ def qwen_engine(model_id: str = "Qwen/Qwen3-VL-4B-Instruct") -> Engine | None:
             _MODELS["qwen"] = (proc, mdl.eval())
         proc, mdl = _MODELS["qwen"]
         msgs = [{"role": "user", "content": [
-            {"type": "image", "image": _pil(img)},
+            {"type": "image", "image": _pil(_downscale(img, max_side))},
             {"type": "text", "text": CHESS_PAGE_PROMPT}]}]
         inputs = proc.apply_chat_template(
             msgs, tokenize=True, add_generation_prompt=True,
@@ -565,6 +581,91 @@ def consensus(per_engine: dict[str, list[tuple[str, float]]],
         out.append(Token(text=best, confidence=v[best] / total,
                          engines=dict(said[idx])))
     return out
+
+
+# ── Page cleanup, before the chess pass sees anything ──────────────────────
+# Two kinds of junk on a real book page look exactly like chess moves to any
+# grammar, and both were found by transcribing real scans rather than by
+# reasoning about them.
+
+# Both directions: a board prints files left-to-right and ranks top-to-bottom,
+# and the strips below/right of it read the other way.
+_LADDERS = ("abcdefgh", "hgfedcba", "12345678", "87654321")
+
+
+def strip_board_labels(tokens: list[Token], min_run: int = 4) -> tuple[list[Token], int]:
+    """Drop the a-h / 1-8 coordinate strips printed around a diagram.
+
+    Every diagram in a chess book is ringed with file and rank labels, and OCR
+    reads them as text sitting right beside the move list. A lone "e4" off a
+    board's border is indistinguishable from the move e4 — except that border
+    labels arrive as a RUN of CONSECUTIVE single characters climbing a ladder,
+    which prose never does. Isolated letters and digits are left alone, so
+    "weakens the light squares e6 and g6" survives intact.
+
+    The runs also merge: a diagram's files and ranks come back as one stretch
+    like "abcdefgh87654321", matching no single ladder, so ladder SEGMENTS are
+    found inside the run rather than testing the run whole.
+    """
+    keep = [True] * len(tokens)
+    n = len(tokens)
+    i = 0
+    while i < n:
+        if len(tokens[i].text.strip()) != 1:
+            i += 1
+            continue
+        j = i
+        while j < n and len(tokens[j].text.strip()) == 1:
+            j += 1
+        run = "".join(t.text.strip().lower() for t in tokens[i:j])
+        k = 0
+        while k < len(run):
+            best = 0
+            for lad in _LADDERS:
+                m = 0
+                while k + m < len(run) and run[k:k + m + 1] in lad:
+                    m += 1
+                best = max(best, m)
+            if best >= min_run:
+                for x in range(i + k, i + k + best):
+                    keep[x] = False
+                k += best
+            else:
+                k += 1
+        i = j
+    out = [t for t, kp in zip(tokens, keep) if kp]
+    return out, len(tokens) - len(out)
+
+
+def rejoin_hyphens(tokens: list[Token]) -> tuple[list[Token], int]:
+    """Put back words the typesetter broke across a line.
+
+    This book splits "cru-" / "cial" and "pub-" / "lished" across lines and even
+    across PAGES. Left alone both halves are wrong, and a fragment like "f-" can
+    also be mistaken for the start of a move.
+
+    A trailing hyphen only rejoins when the next token is lowercase, so genuine
+    long algebraic ("Qe8-d8") and real hyphenated words are never merged.
+    """
+    out: list[Token] = []
+    merged = 0
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+        if (t.text.endswith("-") and len(t.text) > 1 and nxt
+                and nxt.text[:1].islower() and not _LONG_ALG.match(t.text[:-1])):
+            j = t.copy()
+            j.original = t.text + " " + nxt.text
+            j.text = t.text[:-1] + nxt.text
+            j.confidence = min(t.confidence, nxt.confidence)
+            out.append(j)
+            merged += 1
+            i += 2
+            continue
+        out.append(t)
+        i += 1
+    return out, merged
 
 
 # ── Chess constraint pass ──────────────────────────────────────────────────
@@ -815,8 +916,20 @@ def choose_start(tokens: list[Token], candidate_fens: list[str],
     make the printed moves legal, so it loses to one that does. The diagram and
     the move text check each other.
     """
+    # A scan yields a BOARD, not a game state: nothing in a diagram says whose
+    # turn it is, and books print "WHITE TO MOVE" as prose we may not have read.
+    # So each candidate is tried both ways and the moves settle it, exactly as
+    # they settle which diagram it was.
+    expanded: list[str] = []
+    for f in [f for f in candidate_fens if f]:
+        parts = f.strip().split()
+        if len(parts) >= 6:
+            expanded.append(f.strip())
+        else:
+            expanded += [parts[0] + " w - - 0 1", parts[0] + " b - - 0 1"]
+
     best: tuple[list[Token], str | None, int] = (tokens, None, -1)
-    for fen in [f for f in candidate_fens if f]:
+    for fen in expanded:
         trial = apply_chess_constraints([t.copy() for t in tokens], fen, beam)
         n = _count_verified(trial)
         if n > best[2]:
@@ -848,6 +961,10 @@ def read_page(img, start_fen: str | None = None,
             log.warning("engine %s failed: %s", e.name, ex)
 
     toks = consensus(per, {e.name: e.weight for e in engines})
+    # Clean the page BEFORE the chess pass, so a diagram's own border labels
+    # cannot be mistaken for moves and broken words are whole again.
+    toks, dropped_labels = strip_board_labels(toks)
+    toks, rejoined = rejoin_hyphens(toks)
 
     # Where does the position come from?
     cands = list(candidate_fens or [])
@@ -881,6 +998,8 @@ def read_page(img, start_fen: str | None = None,
         "movesTotal": len(moves),
         "startFen": chosen,
         "startFenCandidates": len(cands),
+        "boardLabelsDropped": dropped_labels,
+        "hyphensRejoined": rejoined,
         # Stated plainly so a caller cannot mistake plain OCR for the real thing.
         "chessConstraintsRan": bool(cands),
     }
