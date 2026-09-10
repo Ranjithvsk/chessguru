@@ -81,6 +81,7 @@ import AdminPage from "./pages/Admin";
 import AdminUsersPage from "./pages/AdminUsers";
 import AdminMailLogPage from "./pages/AdminMailLog";
 import AdminErrorsPage from "./pages/AdminErrors";
+import AdminVisionPage from "./pages/AdminVision";
 import AdminWhitelabelPage from "./pages/AdminWhitelabel";
 import AdminDomainsPage from "./pages/AdminDomains";
 import AcademyBrandingPage from "./pages/AcademyBranding";
@@ -202,6 +203,7 @@ export default function AppRest() {
         <Route path="admin/users" element={<AdminUsersPage />} />
         <Route path="admin/mail-log" element={<AdminMailLogPage />} />
         <Route path="admin/errors" element={<AdminErrorsPage />} />
+        <Route path="admin/vision" element={<AdminVisionPage />} />
         <Route path="admin/whitelabel" element={<AdminWhitelabelPage />} />
         <Route path="admin/domains" element={<AdminDomainsPage />} />
         <Route path="academy/branding" element={<AcademyBrandingPage />} />
