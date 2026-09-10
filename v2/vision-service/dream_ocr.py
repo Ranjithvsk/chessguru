@@ -97,6 +97,7 @@ class Token:
     engines: dict[str, str] = field(default_factory=dict)
     verified: bool = False             # proved legal in the position
     original: str | None = None        # before any correction
+    box: list[float] | None = None     # [x1,y1,x2,y2] on the page, when known
 
     def copy(self) -> "Token":
         """A fresh Token for a trial replay — the constraint pass mutates."""
@@ -106,7 +107,11 @@ class Token:
 @dataclass
 class Engine:
     name: str
-    run: Callable[[Any], list[tuple[str, float]]]   # image -> [(word, conf)]
+    # image -> [(word, conf)] or [(word, conf, [x1,y1,x2,y2])]. The box is
+    # optional because a vision-language model emits free text with no
+    # geometry at all, but the engines that CAN report it are what make
+    # proven moves traceable back to their pixels.
+    run: Callable[[Any], list[Any]]
     weight: float = 1.0
 
 
@@ -130,20 +135,30 @@ def tesseract_engine() -> Engine | None:
         from pytesseract import Output
         d = pytesseract.image_to_data(img, output_type=Output.DICT)
         out = []
-        for text, conf in zip(d["text"], d["conf"]):
-            t = (text or "").strip()
+        for i in range(len(d["text"])):
+            t = (d["text"][i] or "").strip()
             if not t:
                 continue
             try:
-                c = float(conf) / 100.0
+                c = float(d["conf"][i]) / 100.0
             except Exception:
                 c = 0.0
-            out.append((t, max(0.0, c)))
+            x, y = d["left"][i], d["top"][i]
+            out.append((t, max(0.0, c), [x, y, x + d["width"][i], y + d["height"][i]]))
         return out
 
     # 1.0: perfect on clean prose in 1.1s, but hallucinates text off DIAGRAMS
     # (53 words where 40 are printed), so never the spine on a chess page.
     return Engine("tesseract", run, weight=1.0)
+
+
+def _wc(item) -> tuple[str, float]:
+    """Word and confidence, whether the engine reported a box or not."""
+    return (item[0], item[1])
+
+
+def _bx(item):
+    return item[2] if len(item) > 2 else None
 
 
 # Loaded models are expensive (Surya pulls ~1 GB of weights) so they are built
@@ -179,25 +194,41 @@ def _pil(img):
 
 
 def _ensure_llama_server() -> None:
-    """Put our bundled llama-server on PATH for Surya 0.22+.
+    """Put a llama-server binary on PATH for Surya 0.22+.
 
-    Surya moved its recognition model to a llama.cpp backend and now shells out
-    to a `llama-server` binary, failing with an install message if it is not on
-    PATH. We ship one under llama/ rather than asking the machine to have it, and
-    set LD_LIBRARY_PATH too because the binary loads its own shared objects from
-    the same directory.
+    Surya moved its recognition model to a llama.cpp backend and shells out to
+    `llama-server`. Without it, it does not fail loudly — it falls back to
+    looking for Docker, fails that too, and returns ZERO WORDS from an engine
+    that reported itself available.
+
+    Searches several places because the binary is named differently and lives
+    elsewhere on each machine: Windows wants `llama-server.exe`, and the Linux
+    build unpacks into a versioned subdirectory. CHESSGURU_LLAMA_DIR overrides.
     """
     import glob
-    if shutil.which("llama-server"):
+    if shutil.which("llama-server") or shutil.which("llama-server.exe"):
         return
     here = os.path.dirname(os.path.abspath(__file__))
-    for cand in glob.glob(os.path.join(here, "llama", "*", "llama-server")):
-        d = os.path.dirname(cand)
-        os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
-        os.environ["LD_LIBRARY_PATH"] = d + os.pathsep + os.environ.get("LD_LIBRARY_PATH", "")
-        log.info("using bundled llama-server at %s", d)
-        return
-    log.warning("llama-server not found; Surya 0.22+ cannot run without it")
+    roots = [os.environ.get("CHESSGURU_LLAMA_DIR"),
+             os.path.join(here, "llama"),
+             "E:\\llama", "C:\\llama", "/opt/chessguru-vision/llama"]
+    pats = []
+    for r in [r for r in roots if r]:
+        for name in ("llama-server", "llama-server.exe"):
+            pats += [os.path.join(r, name), os.path.join(r, "*", name),
+                     os.path.join(r, "*", "*", name)]
+    for pat in pats:
+        for cand in glob.glob(pat):
+            dirn = os.path.dirname(cand)
+            os.environ["PATH"] = dirn + os.pathsep + os.environ.get("PATH", "")
+            # The Linux build loads its shared objects from beside itself.
+            os.environ["LD_LIBRARY_PATH"] = (
+                dirn + os.pathsep + os.environ.get("LD_LIBRARY_PATH", ""))
+            log.info("using bundled llama-server at %s", dirn)
+            return
+    log.warning("llama-server not found; Surya 0.22+ will return nothing. "
+                "Set CHESSGURU_LLAMA_DIR or drop the binary in %s",
+                os.path.join(here, "llama"))
 
 
 def surya_engine() -> Engine | None:
@@ -256,8 +287,10 @@ def surya_engine() -> Engine | None:
                     continue
                 conf = float(getattr(b, "confidence", 0.0) or 0.0)
                 text = re.sub(r"<[^>]+>", " ", getattr(b, "html", "") or "")
+                bb = getattr(b, "bbox", None)
+                bb = [float(v) for v in bb] if bb else None
                 for w in html_mod.unescape(text).split():
-                    out.append((w, conf))
+                    out.append((w, conf, bb))
         return out
 
     # 1.1: strongest on hard input, but MEASURED slightly behind Paddle on clean
@@ -282,12 +315,20 @@ def doctr_engine() -> Engine | None:
         res = model([np.ascontiguousarray(arr)])
         out = []
         for page in res.export().get("pages", []):
+            ph, pw = page.get("dimensions", (arr.shape[0], arr.shape[1]))
             for blk in page.get("blocks", []):
                 for line in blk.get("lines", []):
                     for w in line.get("words", []):
                         t = (w.get("value") or "").strip()
-                        if t:
-                            out.append((t, float(w.get("confidence") or 0.0)))
+                        if not t:
+                            continue
+                        g = w.get("geometry")
+                        box = None
+                        if g:
+                            # docTR reports geometry as fractions of the page.
+                            (x0, y0), (x1, y1) = g[0], g[1]
+                            box = [x0 * pw, y0 * ph, x1 * pw, y1 * ph]
+                        out.append((t, float(w.get("confidence") or 0.0), box))
         return out
 
     # 0.9: MEASURED weakest on pages carrying diagrams (60% on page 20).
@@ -340,9 +381,20 @@ def paddle_engine() -> Engine | None:
                 continue
             texts = d.get("rec_texts") or []
             scores = d.get("rec_scores") or []
-            for t, sc in zip(texts, scores):
+            boxes = d.get("rec_boxes") or d.get("rec_polys") or []
+            for i, (t, sc) in enumerate(zip(texts, scores)):
+                bb = None
+                if i < len(boxes):
+                    try:
+                        pts = np.array(boxes[i], dtype=float).reshape(-1, 2)
+                        bb = [float(pts[:, 0].min()), float(pts[:, 1].min()),
+                              float(pts[:, 0].max()), float(pts[:, 1].max())]
+                    except Exception:
+                        bb = None
+                # Paddle recognises a whole LINE, so every word in it shares the
+                # line's box. Coarser than per-word, still enough to crop back to.
                 for w in str(t).split():
-                    out.append((w, float(sc)))
+                    out.append((w, float(sc), bb))
         return out
 
     # 1.4: MEASURED best of the four — 100% on both a prose page and a
@@ -534,6 +586,9 @@ def consensus(per_engine: dict[str, list[tuple[str, float]]],
     if not live:
         return []
 
+    def _conf(seq):
+        return [_wc(x)[1] for x in seq]
+
     def quality(n: str) -> tuple[float, float]:
         """Declared weight FIRST, self-reported confidence only as a tiebreak.
 
@@ -552,28 +607,29 @@ def consensus(per_engine: dict[str, list[tuple[str, float]]],
         Paddle made the result WORSE, 100% to 97.5%, purely because Surya seized
         the spine. So the spine is chosen by a weight WE set from measurement,
         and the engine's own opinion of itself only breaks ties."""
-        seq = live[n]
-        return (weights.get(n, 1.0), sum(c for _, c in seq) / len(seq))
+        cs = _conf(live[n])
+        return (weights.get(n, 1.0), sum(cs) / len(cs))
 
     spine_name = max(live, key=quality)
     spine = live[spine_name]
-    spine_words = [w for w, _ in spine]
+    spine_words = [_wc(x)[0] for x in spine]
+    spine_boxes = [_bx(x) for x in spine]
 
     # votes[i][word] -> accumulated weight, and who said it
     votes: list[dict[str, float]] = [
-        {w: max(c, 0.05) * weights.get(spine_name, 1.0)} for w, c in spine
+        {_wc(x)[0]: max(_wc(x)[1], 0.05) * weights.get(spine_name, 1.0)} for x in spine
     ]
-    said: list[dict[str, str]] = [{spine_name: w} for w, _ in spine]
+    said: list[dict[str, str]] = [{spine_name: _wc(x)[0]} for x in spine]
 
     for name, seq in live.items():
         if name == spine_name:
             continue
-        other_words = [w for w, _ in seq]
+        other_words = [_wc(x)[0] for x in seq]
         sm = difflib.SequenceMatcher(a=spine_words, b=other_words, autojunk=False)
         for tag, i1, i2, j1, j2 in sm.get_opcodes():
             if tag == "equal" or (tag == "replace" and (i2 - i1) == (j2 - j1)):
                 for k in range(i2 - i1):
-                    w, c = seq[j1 + k]
+                    w, c = _wc(seq[j1 + k])
                     idx = i1 + k
                     votes[idx][w] = (votes[idx].get(w, 0.0)
                                      + max(c, 0.05) * weights.get(name, 1.0))
@@ -587,7 +643,8 @@ def consensus(per_engine: dict[str, list[tuple[str, float]]],
         best = max(v, key=lambda k: v[k])
         total = sum(v.values()) or 1.0
         out.append(Token(text=best, confidence=v[best] / total,
-                         engines=dict(said[idx])))
+                         engines=dict(said[idx]),
+                         box=spine_boxes[idx] if idx < len(spine_boxes) else None))
     return out
 
 
@@ -986,6 +1043,53 @@ def choose_start(tokens: list[Token], candidate_fens: list[str],
         if n > best[2]:
             best = (trial, fen, n)
     return best
+
+
+def export_training_pairs(img, tokens: list[Token], out_dir: str,
+                          source: str = "", pad: int = 3) -> int:
+    """Save every PROVED move as a labelled crop. This is the training loop.
+
+    A verified move is not a guess. It was uniquely legal in the position, agreed
+    across every surviving line of the beam, matched OCR's own cheapest reading,
+    and agreed on capture, disambiguation and check. So the pair (this patch of
+    paper, this text) is CERTAIN, and it cost nothing to produce — no annotator,
+    no review, just a chess book.
+
+    That is what makes this improvable rather than fixed. The engines are other
+    people's pre-trained models, and the constraint pass is rules rather than
+    weights, so neither learns on its own. But every book run through it yields
+    proven labels of exactly the thing general OCR is worst at: chess notation in
+    a book's own font. Those labels are what a fine-tune would need.
+
+    Deliberately exports ONLY verified moves. Unverified text is where the errors
+    live, and training on it would teach the mistakes back in.
+    """
+    import json as _json
+    import cv2
+    os.makedirs(out_dir, exist_ok=True)
+    manifest = os.path.join(out_dir, "labels.jsonl")
+    h, w = img.shape[:2]
+    n = 0
+    with open(manifest, "a", encoding="utf8") as mf:
+        for i, t in enumerate(tokens):
+            if not (t.kind == "move" and t.verified and t.box):
+                continue
+            x1, y1, x2, y2 = [int(round(v)) for v in t.box]
+            x1 = max(0, x1 - pad); y1 = max(0, y1 - pad)
+            x2 = min(w, x2 + pad); y2 = min(h, y2 + pad)
+            if x2 - x1 < 4 or y2 - y1 < 4:
+                continue
+            name = "%s_%04d.png" % (re.sub(r"\W+", "_", source or "page"), i)
+            cv2.imwrite(os.path.join(out_dir, name), img[y1:y2, x1:x2])
+            mf.write(_json.dumps({
+                "image": name,
+                "text": t.text,                 # the PROVEN standard SAN
+                "printed": t.original or t.text,  # what the book actually shows
+                "source": source,
+                "box": [x1, y1, x2, y2],
+            }) + "\n")
+            n += 1
+    return n
 
 
 def read_page(img, start_fen: str | None = None,
