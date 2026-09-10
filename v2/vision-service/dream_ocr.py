@@ -914,6 +914,32 @@ def apply_chess_constraints(tokens: list[Token], start_fen: str | None,
     return tokens
 
 
+def page_views(img, wide_ratio: float = 1.25):
+    """The page, and — if it is a two-page SPREAD — each half as well.
+
+    A scanned book is usually photographed two pages at a time, which leaves any
+    one diagram filling a small fraction of the frame. That is precisely what the
+    board extractor is worst at: measured on eight real spreads it found NO legal
+    diagram on four of them, and splitting at the gutter recovered a diagram on
+    every page that had failed.
+
+    Worth stating plainly, because it cost a night to learn the hard way: a
+    40,000-composite retrain aimed at exactly this failure moved nothing, and
+    slicing the image in half fixes it for free. Framing beat training.
+
+    Only landscape images are split, so a single portrait page is left alone.
+    """
+    views = [img]
+    try:
+        h, w = img.shape[:2]
+    except Exception:
+        return views
+    if w >= h * wide_ratio:
+        views.append(img[:, : w // 2])
+        views.append(img[:, w // 2:])
+    return views
+
+
 def _count_verified(tokens: list[Token]) -> int:
     return sum(1 for t in tokens if t.kind == "move" and t.verified)
 
@@ -988,16 +1014,19 @@ def read_page(img, start_fen: str | None = None,
     if start_fen:
         cands.insert(0, start_fen)
     if not cands and detect_boards and classify_board:
-        try:
-            for c in detect_boards(img) or []:
-                try:
-                    fen = classify_board(c)
-                    if fen:
-                        cands.append(fen)
-                except Exception as ex:
-                    log.warning("board classify failed: %s", ex)
-        except Exception as ex:
-            log.warning("board detect failed: %s", ex)
+        # Look at the whole page AND each half of a spread. Duplicates are
+        # harmless — the moves pick which position they belong to anyway.
+        for view in page_views(img):
+            try:
+                for c in detect_boards(view) or []:
+                    try:
+                        fen = classify_board(c)
+                        if fen and fen not in cands:
+                            cands.append(fen)
+                    except Exception as ex:
+                        log.warning("board classify failed: %s", ex)
+            except Exception as ex:
+                log.warning("board detect failed: %s", ex)
 
     chosen = None
     if cands:
