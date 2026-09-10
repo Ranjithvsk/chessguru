@@ -114,6 +114,7 @@ const GROUPS: Group[] = [
     items: [
       { to: "/board-editor", label: "📷 Scan position", desc: "Upload/paste/camera → auto-detect FEN (Server AI)" },
       { to: "/board-editor", label: "✏️ Board editor", desc: "Set up any position" },
+      { to: "/books/read", label: "📖 Book reader", desc: "Read a book, tap any diagram to play it" },
     ],
   },
 ];

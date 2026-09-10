@@ -30,6 +30,29 @@ function fullFen(board: string): string {
   return parts.length >= 6 ? board.trim() : `${parts[0] ?? ""} w - - 0 1`;
 }
 
+/** Turn the board through 180 degrees.
+ *  A scan cannot tell which way up a diagram was printed — nothing in the
+ *  picture says which side is White — so a position read upside down is a real
+ *  and common outcome. FLIPPING THE VIEW DOES NOT FIX IT: that changes which
+ *  side you look from, while the pieces stay on the wrong squares. This moves
+ *  the pieces, a1 to h8, which is what the reader actually needs.
+ *  Ranks are reversed and each rank string reversed; FEN run-lengths are always
+ *  a single digit 1-8, so reversing the characters stays valid. */
+function rotate180(fen: string): string {
+  const [board = "", ...rest] = fullFen(fen).split(" ");
+  const flipped = board.split("/").reverse()
+    .map((r) => r.split("").reverse().join("")).join("/");
+  return [flipped, ...rest].join(" ");
+}
+
+/** Swap whose turn it is. A diagram says "White to move" in prose we may not
+ *  have read, so the reader has to be able to say so. */
+function withSideToMove(fen: string, side: "w" | "b"): string {
+  const parts = fullFen(fen).split(" ");
+  parts[1] = side;
+  return parts.join(" ");
+}
+
 export default function BookReaderPage() {
   const { id = "" } = useParams();
   const [book, setBook] = useState<BookDetail | null>(null);
@@ -181,11 +204,48 @@ export default function BookReaderPage() {
                   <span className="text-[11px] text-ink-400">page {activeDiagram.page + 1}</span>
                 </div>
                 <Board fen={fp.fen} orientation={fp.orientation} dests={fp.dests} onMove={fp.onMove} />
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <button onClick={fp.flip} className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">⇅ Flip</button>
-                  <button onClick={() => navigator.clipboard?.writeText(fp.fen)} className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">Copy FEN</button>
-                  <a href={`/board-editor?fen=${encodeURIComponent(fp.fen)}`} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-500">Analyse ↗</a>
+
+                {/* Whose move. A diagram never states it in the pieces, so this
+                    has to be settable — and it changes what is playable. */}
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="text-[11px] text-ink-400">To play</span>
+                  <div className="inline-flex overflow-hidden rounded-lg border border-ink-700">
+                    {(["w", "b"] as const).map((side) => (
+                      <button
+                        key={side}
+                        onClick={() => fp.load(withSideToMove(fp.fen, side))}
+                        className={`px-3 py-1 text-xs font-semibold transition ${
+                          fp.fen.split(" ")[1] === side
+                            ? "bg-brand-600 text-white"
+                            : "bg-ink-900 text-ink-300 hover:bg-ink-800"}`}
+                      >
+                        {side === "w" ? "♔ White" : "♚ Black"}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button onClick={() => fp.load(rotate180(fp.fen))}
+                    title="The scan could not tell which way up the diagram was printed"
+                    className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">↻ Rotate 180°</button>
+                  <button onClick={fp.flip} className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">⇅ Flip view</button>
+                  <button onClick={() => activeDiagram && fp.load(fullFen(activeDiagram.fen))}
+                    title="Undo your moves and go back to the printed position"
+                    className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">⟲ Reset</button>
+                  <button onClick={() => navigator.clipboard?.writeText(fp.fen)} className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">Copy FEN</button>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <a href={`/board-editor?fen=${encodeURIComponent(fp.fen)}`} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-500">✏️ Edit position ↗</a>
+                  {/* Deliberately NOT /play?fen= — that page ignores a fen
+                      parameter entirely and would start an ordinary new game,
+                      silently dropping the position the reader just chose. The
+                      board editor is the one page that honours it. */}
+                  <a href={`/board-editor?fen=${encodeURIComponent(fp.fen)}&play=1`} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500">▶ Play from here ↗</a>
+                </div>
+                <p className="mt-2 text-[11px] text-ink-500">
+                  You can also just move the pieces on the board above — Reset puts the printed position back.
+                </p>
                 {(activeDiagram.conf ?? 1) < 0.9 && (
                   <p className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-100">
                     This one was read with low confidence. Check it against the page before using it.
