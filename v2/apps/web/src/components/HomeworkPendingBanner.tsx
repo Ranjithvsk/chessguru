@@ -53,6 +53,7 @@ export default function HomeworkPendingBanner() {
   for (const h of open) {
     for (let i = 0; i < h.tasks.length; i++) {
       const t = h.tasks[i];
+      if (!t) continue; // index access is T | undefined under strict settings
       const done = h.progress?.[String(i)] ?? 0;
       const target = t.kind === "puzzle_pack" ? (t.targetCount || 1) : 1;
       if (done < target) {
@@ -74,7 +75,7 @@ export default function HomeworkPendingBanner() {
   for (const h of open) {
     for (let i = 0; i < h.tasks.length; i++) {
       const t = h.tasks[i];
-      if (t.kind !== "puzzle_pack" || !t.theme) continue;
+      if (!t || t.kind !== "puzzle_pack" || !t.theme) continue;
       const done = h.progress?.[String(i)] ?? 0;
       const target = t.targetCount || 5;
       if (done >= target) continue;

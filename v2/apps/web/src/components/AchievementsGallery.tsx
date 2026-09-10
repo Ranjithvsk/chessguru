@@ -14,6 +14,10 @@ type Ach = {
   chessBenefit: string;
   unlocked: boolean;
   progress: number;
+  // Carried through from the server catalogue (achievements.catalog.ts): the rule family and its
+  // target. The gallery used to read them through `(a as any)` because the type left them out.
+  kind: string;
+  n?: number;
   progressLabel: string;
   unlockedAt: string | null;
 };
@@ -45,8 +49,8 @@ function AchBadge({ a }: { a: Ach }) {
   const lockedCls = "border border-ink-800 bg-ink-900/40 opacity-60";
   const unlockedCls = `border border-transparent bg-gradient-to-br ${TIER_BG[a.tier]} ring-2 text-white`;
   const pct = a.unlocked ? 100 :
-    a.kind === "current-rating" || a.kind === "peak-rating" ? Math.round((a.progress / (a as any).n) * 100) :
-    Math.min(100, Math.round((a.progress / Math.max(1, (a as any).n || 1)) * 100));
+    a.kind === "current-rating" || a.kind === "peak-rating" ? Math.round((a.progress / Math.max(1, a.n ?? 1)) * 100) :
+    Math.min(100, Math.round((a.progress / Math.max(1, a.n || 1)) * 100));
   return (
     <div className={`group relative rounded-xl p-3 transition hover:-translate-y-0.5 ${a.unlocked ? unlockedCls : lockedCls}`}
       title={a.chessBenefit}>
