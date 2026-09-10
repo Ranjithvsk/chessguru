@@ -559,14 +559,24 @@ export default function BoardEditorPage() {
           if (n > max) excess.push(`${side === "w" ? "White" : "Black"} has ${n} ${plural}`);
         }
       }
-      const countWarn = excess.length
-        ? ` ⚠ ${excess.join(", ")} — at least one piece is misread. Check that rank before using this position.`
+      // The SERVER's logic engine also reports warnings — and knows things this
+      // client-side count cannot, such as both bishops standing on the same
+      // colour square, which is likewise only possible after a promotion. Those
+      // were computed on every scan and thrown away here, so a position the
+      // engine had already doubted was reported as clean.
+      const serverWarn: string[] = Array.isArray(j.logicWarnings) ? j.logicWarnings : [];
+      // Do not say the same thing twice: drop any server line already covered
+      // by the piece-count check above.
+      const extraWarn = serverWarn.filter(
+        (w: string) => !excess.some((e) => w.includes(e)));
+      const countWarn = excess.length || extraWarn.length
+        ? ` ⚠ ${[...excess.map((e) => `${e} — at least one piece is misread`), ...extraWarn].join(" ")} Check those squares before using this position.`
         : "";
       const kingWarn = missingKings.length
         ? ` ⚠ No ${missingKings.join(" or ")} king found — the crop is probably off. Tap "Adjust corners" and put the handles on the corners of the 64 squares, inside the a-h and 1-8 labels.`
         : "";
       setServerMsg({
-        tone: placed && !missingKings.length && !excess.length ? "ok" : "err",
+        tone: placed && !missingKings.length && !excess.length && !extraWarn.length ? "ok" : "err",
         text: placed
           ? (legal
               ? `✨ Ultra AI: ${pieceCount} pieces, avg conf ${avgConf}% (${timing}${uncertainTag}).${kingWarn}${countWarn}`
