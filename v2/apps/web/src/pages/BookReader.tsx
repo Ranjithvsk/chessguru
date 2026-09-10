@@ -452,14 +452,9 @@ export default function BookReaderPage() {
                       ✕ Not a position
                     </button>
                   )}
-                  {/* Deliberately NOT /play?fen= — that page ignores a fen
-                      parameter entirely and would start an ordinary new game,
-                      silently dropping the position the reader just chose. The
-                      board editor is the one page that honours it. */}
-                  <a href={`/board-editor?fen=${encodeURIComponent(fp.fen)}&play=1`} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500">▶ Play from here ↗</a>
                 </div>
                 <p className="mt-2 text-[11px] text-ink-500">
-                  You can also just move the pieces on the board above — Reset puts the printed position back.
+                  Move the pieces on the board above to play from this position — Reset puts the printed one back.
                 </p>
                 {(activeDiagram.conf ?? 1) < 0.9 && (
                   <p className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-100">
