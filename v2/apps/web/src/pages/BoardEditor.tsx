@@ -168,6 +168,7 @@ export default function BoardEditorPage() {
   const [palettePick, setPalettePick] = useState<string | null>(null); // e.g. "K", "p", or "-" (erase)
   const [editSide, setEditSide] = useState<"w" | "b">("w");
   const editorRef = useRef<Chess>(new Chess());
+  const lastScanIdRef = useRef<string | null>(null);
   const [editorTick, setEditorTick] = useState(0); // force re-render on editor mutations
   useEffect(() => {
     // Sync editor buffer from current board state whenever the user enters
@@ -234,7 +235,7 @@ export default function BoardEditorPage() {
                 void fetch(`${API_BASE}/api/vision/feedback`, {
                   method: "POST", credentials: "include",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ piece: "empty", color: "w", silhouettePng: buildSilhouette("w"), rawCropPng: buildRawCrop() }),
+                  body: JSON.stringify({ scanId: lastScanIdRef.current ?? undefined, piece: "empty", color: "w", silhouettePng: buildSilhouette("w"), rawCropPng: buildRawCrop() }),
                 }).catch(() => {});
                 sent++;
               } catch { /* silent */ }
@@ -248,7 +249,7 @@ export default function BoardEditorPage() {
               void fetch(`${API_BASE}/api/vision/feedback`, {
                 method: "POST", credentials: "include",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ piece: coachType, color: cell88.color, silhouettePng: buildSilhouette(cell88.color as "w" | "b"), rawCropPng: buildRawCrop() }),
+                body: JSON.stringify({ scanId: lastScanIdRef.current ?? undefined, piece: coachType, color: cell88.color, silhouettePng: buildSilhouette(cell88.color as "w" | "b"), rawCropPng: buildRawCrop() }),
               }).catch(() => {});
               sent++;
             } catch { /* silent */ }
@@ -356,6 +357,9 @@ export default function BoardEditorPage() {
       const fullFen = normalizeScanFen(j.fen);
       const placed = fp.loadPermissive(fullFen);
       const legal = fp.load(fullFen);
+      // The server now records every classified board and hands back its id. Corrections made
+      // to this board carry it, so the admin analytics can tell "accepted as read" from "edited".
+      lastScanIdRef.current = typeof j.scanId === "string" ? j.scanId : null;
       const avgConf = (j.squares.flat().reduce((s: number, sq: any) => s + sq.confidence, 0) / 64 * 100).toFixed(0);
       const pieceCount = j.fen.split(" ")[0].replace(/[^KQRBNPkqrbnp]/g, "").length;
       setServerMsg({
@@ -668,6 +672,7 @@ export default function BoardEditorPage() {
           method: "POST", credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            scanId: lastScanIdRef.current ?? undefined,
             piece, color, silhouettePng,
             rawCropPng: crop.toDataURL("image/png"),
             setHint: "scan-correction",

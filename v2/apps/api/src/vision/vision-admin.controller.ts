@@ -105,6 +105,85 @@ export class VisionAdminController {
     return { ok: r.matchedCount === 1 };
   }
 
+  /** The numbers the owner asked for: positions scanned, how many came back correct, how many were
+   *  edited, and the book library. Scan-level truth starts on 2026-09-10, when scans began writing
+   *  their own record; anything earlier is disk images and one seeding session, and is labelled so. */
+  @Get("admin/vision/analytics")
+  async analytics(@Req() req: any) {
+    this.guard(req);
+    const scans = this.conn.db!.collection<any>("visionScans");
+    const now = Date.now();
+    const win = async (days: number | null) => {
+      const q: any = days ? { at: { $gte: new Date(now - days * 86_400_000) } } : {};
+      const [total, edited, agg] = await Promise.all([
+        scans.countDocuments(q),
+        scans.countDocuments({ ...q, corrections: { $gt: 0 } }),
+        scans.aggregate([{ $match: q }, { $group: { _id: null, corrections: { $sum: "$corrections" }, avgConf: { $avg: "$avgConf" }, lowSq: { $avg: "$lowConfSquares" }, users: { $addToSet: "$userId" } } }]).toArray(),
+      ]);
+      const a = agg[0] ?? { corrections: 0, avgConf: null, lowSq: null, users: [] };
+      return {
+        scanned: total, edited, acceptedAsRead: total - edited,
+        correctPct: total ? Math.round(((total - edited) / total) * 1000) / 10 : null,
+        squaresCorrected: a.corrections,
+        squareAccuracyPct: total ? Math.round((1 - a.corrections / (64 * total)) * 1000) / 10 : null,
+        avgConfPct: a.avgConf == null ? null : Math.round(a.avgConf * 1000) / 10,
+        weakSquaresPerScan: a.lowSq == null ? null : Math.round(a.lowSq * 10) / 10,
+        scanners: (a.users ?? []).filter(Boolean).length,
+      };
+    };
+    const [all, d30, d7, first] = await Promise.all([win(null), win(30), win(7), scans.find({}, { projection: { at: 1 } }).sort({ at: 1 }).limit(1).toArray()]);
+
+    // What the model gets wrong, as a confusion list: what it said -> what the coach said.
+    const confusion = await this.refs().aggregate([
+      { $match: { source: "correction", modelPiece: { $exists: true } } },
+      { $group: { _id: { from: "$modelPiece", to: { $cond: ["$isEmpty", "empty", "$piece"] } }, n: { $sum: 1 } } },
+      { $sort: { n: -1 } }, { $limit: 12 },
+    ]).toArray();
+
+    // Books: the library lives on the book host (a laptop behind a tunnel), so it can be away.
+    let books: any = { reachable: false };
+    try {
+      const r = await fetch("http://127.0.0.1:8791/books", { signal: AbortSignal.timeout(6000) });
+      const j = await r.json() as { books?: Array<{ pages?: string | number; done?: string | number; diagrams?: string | number; state?: string }> };
+      const list = Array.isArray(j?.books) ? j.books : [];
+      const num = (v: unknown) => Number(v) || 0;
+      books = {
+        reachable: true, total: list.length,
+        done: list.filter((b) => b.state === "done").length,
+        inProgress: list.filter((b) => b.state && b.state !== "done").length,
+        pages: list.reduce((a, b) => a + num(b.pages), 0),
+        pagesDone: list.reduce((a, b) => a + num(b.done), 0),
+        diagrams: list.reduce((a, b) => a + num(b.diagrams), 0),
+      };
+    } catch (e) { books = { reachable: false, error: (e as Error).message }; }
+
+    // Reader corrections on book diagrams live next to each locally served book.
+    const readerFixes = this.bookDiagramCorrections();
+
+    // Pre-instrumentation history, labelled as what it is.
+    const legacy = {
+      seedingCorrections: await this.refs().countDocuments({ source: "correction", scanId: { $exists: false } }),
+      scanImagesOnDisk: this.scansByDay(lastNDays(1)).totalFiles,
+      note: "Before 2026-09-10 no scan wrote a record of itself. The 128 corrections from 11 August were one seeding session by one person, not coach activity.",
+    };
+    return { since: first[0]?.at ?? null, all, last30: d30, last7: d7, confusion: confusion.map((c) => ({ modelSaid: c._id.from, coachSaid: c._id.to, n: c.n })), books, readerFixes, legacy };
+  }
+
+  private bookDiagramCorrections() {
+    const STORE = "/var/lib/chessguru/user-books";
+    let books = 0, diagrams = 0, corrected = 0, disputed = 0, events = 0;
+    try {
+      for (const id of readdirSync(STORE)) {
+        try {
+          const d = JSON.parse(readFileSync(`${STORE}/${id}/diagrams.json`, "utf8")) as Array<{ corrected?: boolean; disputed?: boolean }>;
+          books++; diagrams += d.length; corrected += d.filter((x) => x.corrected).length; disputed += d.filter((x) => x.disputed).length;
+        } catch { /* not a book dir */ }
+        try { events += readFileSync(`${STORE}/${id}/corrections.jsonl`, "utf8").split("\n").filter(Boolean).length; } catch { /* none */ }
+      }
+    } catch { /* store absent */ }
+    return { books, diagrams, corrected, disputed, events };
+  }
+
   // ---- pieces ---------------------------------------------------------------------------------
 
   private async serviceHealth() {

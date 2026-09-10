@@ -89,6 +89,10 @@ export interface FeedbackInput {
   /** Algebraic square, e.g. "d1" — lets a correction be traced back to the
    *  scan it came from. */
   square?: string;
+  /** The visionScans record this correction belongs to. With it, a scan can be told apart as
+   *  "accepted as read" (no corrections) or "edited" (some), which is the accuracy number the
+   *  owner asked for. Absent on corrections made before scans were recorded. */
+  scanId?: string;
 }
 
 export interface VisionRefDoc {
@@ -231,6 +235,7 @@ export class VisionService {
       ...(input.square ? { square: String(input.square).slice(0, 3) } : {}),
       ...(input.modelPiece ? { modelPiece: String(input.modelPiece).slice(0, 6) } : {}),
       ...(typeof input.modelConf === "number" ? { modelConf: input.modelConf } : {}),
+      ...(input.scanId ? { scanId: String(input.scanId).slice(0, 40) } : {}),
       // Auto-approve only where the model was genuinely unsure. A correction
       // that overturns a CONFIDENT read is held for review instead of feeding
       // training unchecked — that is the case where a user slip and a real
@@ -238,12 +243,42 @@ export class VisionService {
       approved: typeof input.modelConf === "number" ? input.modelConf < 0.9 : true,
     };
     const r = await this.col().insertOne(doc as any);
+    if (input.scanId) {
+      // The scan this square came from is now "edited", however many more squares follow.
+      await this.conn.db!.collection<any>("visionScans").updateOne(
+        { _id: String(input.scanId).slice(0, 40) },
+        { $inc: { corrections: 1 }, $set: { status: "edited", lastCorrectionAt: new Date() } },
+      ).catch(() => {});
+    }
     return { ok: true, id: String(r.insertedId), embedded: !!embedding };
   }
 
   /** Fire-and-forget input logger for the client (called on every image
    *  upload so we capture inputs even when the coach only uses the
    *  client-side detector, never touches Server AI). */
+  /** Persist one classified board. The id is a compact random token (not an ObjectId) because it
+   *  travels through the browser and back inside correction payloads. Per-square confidence is
+   *  summarised here rather than stored raw: the analytics need "how sure, how many weak squares",
+   *  not 64 floats per scan for ever. */
+  async recordScan(userId: string, academyId: string | null, source: string, j: any): Promise<string> {
+    const squares: any[] = Array.isArray(j?.squares) ? j.squares.flat() : [];
+    const confs = squares.map((q) => Number(q?.confidence)).filter((n) => Number.isFinite(n));
+    const avg = confs.length ? confs.reduce((a, b) => a + b, 0) / confs.length : null;
+    const min = confs.length ? Math.min(...confs) : null;
+    const low = confs.filter((c) => c < 0.7).length;
+    const fen: string | null = typeof j?.fen === "string" ? j.fen : null;
+    const pieceCount = fen ? (fen.split(" ")[0] ?? "").replace(/[^KQRBNPkqrbnp]/g, "").length : null;
+    const id = "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    await this.conn.db!.collection<any>("visionScans").insertOne({
+      _id: id as any, at: new Date(), userId, academyId, source,
+      fen, avgConf: avg, minConf: min, lowConfSquares: low, pieceCount,
+      warnings: Array.isArray(j?.warnings) ? j.warnings.slice(0, 8) : [],
+      extractLatencyMs: typeof j?.extractLatencyMs === "number" ? j.extractLatencyMs : null,
+      corrections: 0, status: "scanned",
+    } as any);
+    return id;
+  }
+
   async logScanOnly(boardPngBase64: string, source: string): Promise<void> {
     const b64 = boardPngBase64.replace(/^data:image\/[a-z]+;base64,/, "");
     if (b64.length < 100 || b64.length > 5_000_000) return;

@@ -42,3 +42,6 @@
 - 89 remaining `tsc -b` errors (Navbar, OpeningExplorer, AcademyPublic, CoachEdit, …).
 - Retrain log has no dates; module dates runs from model mtimes. Consider `date` prefix in `chess-vision-retrain.sh`.
 - Vinayaka sleep keeps taking the book host offline; nothing in code fixes that.
+
+## Addendum (same day)
+- Every classified board now writes a `visionScans` record (id, fen, avg/min conf, weak squares, warnings); corrections carry `scanId`, so scans split into "accepted as read" vs "edited". `GET /api/admin/vision/analytics` + an Analytics section on /admin/vision: positions scanned (7d/30d/all), correct %, squares corrected, square accuracy, confidence, books from the book host (187 books, 43,549 pages, 67,847 diagrams), reader fixes on locally served books, confusion list. History before 2026-09-10 is labelled as pre-instrumentation.

@@ -23,6 +23,14 @@ type Status = {
   trainingSet: { byClass: Record<string, { correction: number; seed: number }>; total: number; unapproved: number };
   pendingReview: number;
 };
+type Win = { scanned: number; edited: number; acceptedAsRead: number; correctPct: number | null; squaresCorrected: number; squareAccuracyPct: number | null; avgConfPct: number | null; weakSquaresPerScan: number | null; scanners: number };
+type Analytics = {
+  since: string | null; all: Win; last30: Win; last7: Win;
+  confusion: Array<{ modelSaid: string; coachSaid: string; n: number }>;
+  books: { reachable: boolean; total?: number; done?: number; inProgress?: number; pages?: number; pagesDone?: number; diagrams?: number; error?: string };
+  readerFixes: { books: number; diagrams: number; corrected: number; disputed: number; events: number };
+  legacy: { seedingCorrections: number; scanImagesOnDisk: number; note: string };
+};
 type ReviewRow = { id: string; piece: string; color: string; setName: string | null; modelConf: number | null; modelPiece: string | null; modelColor: string | null; by: string | null; at: string | null; thumb: string | null };
 
 const mb = (b: number) => `${(b / 1_048_576).toFixed(1)} MB`;
@@ -69,6 +77,7 @@ export default function AdminVisionPage() {
   const { data: auth, isLoading: authLoading } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
   const { data, isLoading, error } = useQuery({ queryKey: ["admin-vision-status"], queryFn: () => get<Status>("/api/admin/vision/status"), refetchInterval: 60_000 });
   const { data: review } = useQuery({ queryKey: ["admin-vision-review"], queryFn: () => get<{ rows: ReviewRow[] }>("/api/admin/vision/review?limit=60"), refetchInterval: 60_000 });
+  const { data: an } = useQuery({ queryKey: ["admin-vision-analytics"], queryFn: () => get<Analytics>("/api/admin/vision/analytics"), refetchInterval: 60_000 });
   const [busy, setBusy] = useState<string | null>(null);
 
   if (authLoading) return <div className="p-6 text-ink-400">Loading…</div>;
@@ -112,6 +121,52 @@ export default function AdminVisionPage() {
           served model {apiModel?.present ? `${ago(apiModel.mtime)}${s.models.changedByLastRetrain ? ", changed by the last retrain" : ", NOT changed by the last retrain"}` : "missing"}
         </div>
       </div>
+
+      {an && (
+        <Card title="Analytics — positions and books">
+          <div className="grid min-w-0 gap-4 md:grid-cols-3">
+            {([["Last 7 days", an.last7], ["Last 30 days", an.last30], ["Since records began", an.all]] as Array<[string, Win]>).map(([label, w]) => (
+              <div key={label} className="min-w-0 rounded-lg border border-ink-800 bg-ink-950 p-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-ink-500">{label}</div>
+                <div className="mt-1 text-2xl font-semibold text-white">{w.scanned} <span className="text-sm font-normal text-ink-400">positions scanned</span></div>
+                <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
+                  <div className="text-ink-400">correct as read</div><div className="text-right tabular-nums text-emerald-300">{w.acceptedAsRead}{w.correctPct != null && <span className="text-ink-500"> · {w.correctPct}%</span>}</div>
+                  <div className="text-ink-400">edited by a coach</div><div className="text-right tabular-nums text-amber-300">{w.edited}</div>
+                  <div className="text-ink-400">squares corrected</div><div className="text-right tabular-nums text-ink-200">{w.squaresCorrected}</div>
+                  <div className="text-ink-400">square accuracy</div><div className="text-right tabular-nums text-white">{w.squareAccuracyPct != null ? `${w.squareAccuracyPct}%` : "—"}</div>
+                  <div className="text-ink-400">avg confidence</div><div className="text-right tabular-nums text-ink-200">{w.avgConfPct != null ? `${w.avgConfPct}%` : "—"}</div>
+                  <div className="text-ink-400">weak squares / scan</div><div className="text-right tabular-nums text-ink-200">{w.weakSquaresPerScan ?? "—"}</div>
+                  <div className="text-ink-400">people scanning</div><div className="text-right tabular-nums text-ink-200">{w.scanners}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 break-words text-xs text-ink-500">
+            Records begin {an.since ? new Date(an.since).toLocaleString() : "with the next scan"}. A position counts as correct when nobody changed a square after scanning it.
+            {" "}{an.legacy.note} ({an.legacy.seedingCorrections} such corrections, {an.legacy.scanImagesOnDisk} scan images on disk.)
+          </p>
+          <div className="mt-4 grid min-w-0 gap-4 md:grid-cols-2">
+            <div className="min-w-0 rounded-lg border border-ink-800 bg-ink-950 p-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-ink-500">Books scanned</div>
+              {an.books.reachable ? (
+                <>
+                  <div className="mt-1 text-2xl font-semibold text-white">{an.books.total} <span className="text-sm font-normal text-ink-400">books · {an.books.done} finished · {an.books.inProgress} in progress</span></div>
+                  <div className="mt-1 text-sm text-ink-300">{an.books.pages?.toLocaleString()} pages · {an.books.diagrams?.toLocaleString()} diagrams extracted</div>
+                </>
+              ) : <div className="mt-1 break-all text-sm text-rose-300">Book host unreachable{an.books.error ? `: ${an.books.error}` : ""}. It runs on the laptop; if it is asleep, this is why.</div>}
+              <div className="mt-2 text-xs text-ink-400">Read here: {an.readerFixes.books} books · {an.readerFixes.diagrams} diagrams · {an.readerFixes.corrected} corrected by readers · {an.readerFixes.disputed} disputed · {an.readerFixes.events} correction events</div>
+            </div>
+            <div className="min-w-0 rounded-lg border border-ink-800 bg-ink-950 p-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-ink-500">What the model confuses</div>
+              {an.confusion.length ? (
+                <ul className="mt-1 space-y-0.5 text-sm">
+                  {an.confusion.map((c, i) => <li key={i} className="flex justify-between"><span className="text-ink-300">said <span className="text-ink-100">{c.modelSaid}</span>, coach said <span className="text-white">{c.coachSaid}</span></span><span className="tabular-nums text-amber-300">{c.n}×</span></li>)}
+                </ul>
+              ) : <div className="mt-1 text-sm text-ink-500">No corrections with a recorded model guess yet.</div>}
+            </div>
+          </div>
+        </Card>
+      )}
 
       <div className="grid min-w-0 gap-4 md:grid-cols-3">
         <Card title="Service" tone={s.service.ok ? "" : "border-rose-700"}>

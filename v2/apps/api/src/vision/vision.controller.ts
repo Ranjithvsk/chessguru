@@ -139,7 +139,13 @@ export class VisionController {
     if (!req.session?.userId) throw new UnauthorizedException("login required to scan");
     if (!body?.rawImagePngBase64) throw new BadRequestException("rawImagePngBase64 required");
     try {
-      return await this.svc.classifyBoardUltra(body.rawImagePngBase64, body.warpedBoardPngBase64);
+      const j = await this.svc.classifyBoardUltra(body.rawImagePngBase64, body.warpedBoardPngBase64);
+      // One record per classified board, so "how many positions were scanned, and how many came
+      // back correct" is a real number from today rather than a guess from image files on disk.
+      // Corrections carry the id back (see recordCorrection), which is what turns "scanned" into
+      // "edited" or "accepted as read". Best-effort: a logging failure must never fail a scan.
+      const scanId = await this.svc.recordScan(String(req.session.userId), req.session?.academyId ?? null, "editor", j).catch(() => null);
+      return scanId ? { ...j, scanId } : j;
     } catch (e) {
       throw new BadRequestException((e as Error).message);
     }
