@@ -77,6 +77,18 @@ export default function MyBooksPage() {
               to={`/books/read/${encodeURIComponent(b.id)}`}
               className="group rounded-2xl border border-ink-700 bg-ink-900 p-4 transition hover:border-brand-500/60 hover:bg-ink-800"
             >
+              {/* The real front cover, not an emoji. Page 0 IS the cover, and
+                  the API already serves page images — a shelf of actual covers
+                  is how you find a book you know by sight. */}
+              <div className="mb-3 overflow-hidden rounded-lg bg-ink-950 ring-1 ring-ink-700">
+                <img
+                  src={`${API_BASE}/api/user-books/${encodeURIComponent(b.id)}/page/0`}
+                  alt=""
+                  loading="lazy"
+                  className="h-40 w-full object-cover object-top transition group-hover:scale-[1.03]"
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                />
+              </div>
               <div className="mb-2 flex items-start justify-between gap-2">
                 <span className="text-2xl">📕</span>
                 {busy ? (
