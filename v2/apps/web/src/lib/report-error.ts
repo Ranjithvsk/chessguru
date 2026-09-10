@@ -35,7 +35,14 @@ export function reportClientError(message: string, stack?: string, route?: strin
 /** Global handlers for errors that escape React entirely — async callbacks,
  *  event handlers, rejected promises. */
 export function installGlobalErrorReporting() {
+  // A half-built position is not a fault. The board editor validates what the user is typing or
+  // painting through chess.js, whose validator throws "Invalid FEN: missing black king" and the
+  // like until the position is complete; 24 of those reached the admin errors page in one week
+  // from /board-editor alone, each one somebody mid-edit. Real editor faults still report.
+  const isPositionInputNoise = (msg: string) =>
+    /^(Uncaught )?(Error: )?Invalid FEN\b/i.test(msg) && /\/(board-editor|class-v2)\b/.test(location.pathname);
   window.addEventListener("error", (e) => {
+    if (isPositionInputNoise(e.message || String(e.error))) return;
     // Failed <img>/<script> loads also fire this with no `error` object; those
     // are noise, not crashes.
     if (!e.error && !e.message) return;

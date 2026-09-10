@@ -333,6 +333,36 @@ function fenToGrid(fen: string): string[][] {
   }
   return grid;
 }
+// Castling rights the position can actually support. chess.js validates a FEN's SHAPE but not
+// whether "KQkq" is possible, and a rights flag with the king off its home square makes the move
+// generator emit a phantom castling move whose target is off the board. Playing or even probing
+// that move XORs an undefined key into the position hash and the page dies with "Cannot mix
+// BigInt and other types". Three students and the owner hit exactly that in one class on
+// 2026-09-09: an endgame drawn in the editor with the king on h1, still carrying the "KQkq" it
+// inherited from the start position. Rights are only ever REMOVED here, never granted.
+function castlingFor(placement: string, wanted: string): string {
+  const ranks = placement.split("/");
+  const at = (rank: number, file: number): string => {
+    const row = ranks[8 - rank] ?? ""; let f = 0;
+    for (const ch of row) { if (/\d/.test(ch)) { f += Number(ch); if (f > file) return ""; continue; } if (f === file) return ch; f++; }
+    return "";
+  };
+  const w = wanted === "-" ? "" : wanted;
+  const out =
+    (w.includes("K") && at(1, 4) === "K" && at(1, 7) === "R" ? "K" : "") +
+    (w.includes("Q") && at(1, 4) === "K" && at(1, 0) === "R" ? "Q" : "") +
+    (w.includes("k") && at(8, 4) === "k" && at(8, 7) === "r" ? "k" : "") +
+    (w.includes("q") && at(8, 4) === "k" && at(8, 0) === "r" ? "q" : "");
+  return out || "-";
+}
+export function normalizeCastling(fen: string): string {
+  const parts = fen.trim().split(/\s+/);
+  const placement = parts[0], rights = parts[2];
+  if (placement === undefined || rights === undefined) return fen;
+  parts[2] = castlingFor(placement, rights);
+  return parts.join(" ");
+}
+
 function gridToFen(grid: string[][], turn: "w" | "b", castling: string, ep: string): string {
   const ranks: string[] = [];
   for (let r = 0; r < 8; r++) {
@@ -345,7 +375,8 @@ function gridToFen(grid: string[][], turn: "w" | "b", castling: string, ep: stri
     if (empty > 0) s += empty;
     ranks.push(s);
   }
-  return `${ranks.join("/")} ${turn} ${castling || "-"} ${ep || "-"} 0 1`;
+  const placement = ranks.join("/");
+  return `${placement} ${turn} ${castlingFor(placement, castling || "-")} ${ep || "-"} 0 1`;
 }
 function squareToRowCol(sq: string): [number, number] | null {
   if (sq.length !== 2) return null;
@@ -807,7 +838,9 @@ export default function SharedClassBoard(
   // Server is truth: rebuild the local engine from its fen; if chess.js rejects
   // it, fall back to a fresh game so dests stop offering moves for a bad board.
   const applyFen = (nextFen: string, nextLast: BoardMove | null) => {
-    try { gameRef.current = new Chess(nextFen); }
+    // Strip castling rights the position cannot support before the engine sees it — packs and
+    // snapshots saved before castlingFor() existed still carry a bogus "KQkq" (see castlingFor).
+    try { gameRef.current = new Chess(normalizeCastling(nextFen)); }
     catch { gameRef.current = new Chess(); }
     setLastMove(nextLast);
     setFen(gameRef.current.fen());

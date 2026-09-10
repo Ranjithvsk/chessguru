@@ -314,8 +314,13 @@ export class ParentReportsService {
     ).sort({ d: -1 }).limit(limit).toArray();
     if (!missRows.length) return [];
     const pids = missRows.map((r: any) => String(r._id).split(":")[1]).filter(Boolean) as string[];
+    // Was `$or: [{ puzzleId: { $in } }, { _id: { $in } }]`. Not one of the 6,058,405 puzzles carries a
+    // `puzzleId` field, so that branch could never match — but an $or needs an index on EVERY branch
+    // or the planner falls back to a full collection scan, and there is no index on a field that
+    // does not exist. Measured: 6,058,405 documents examined to return 27, 10.3 s, on every open of
+    // the mistakes screen, for every student. _id alone is the primary key: 27 documents, ~1 ms.
     const puzDocs = await this.puzzles().find(
-      { $or: [{ puzzleId: { $in: pids } }, { _id: { $in: pids as any } }] },
+      { _id: { $in: pids as any } },
       { projection: { puzzleId: 1, _id: 1, fen: 1, solution: 1, themes: 1, rating: 1 } },
     ).toArray();
     const byId = new Map<string, any>();
@@ -409,7 +414,7 @@ export class ParentReportsService {
     const studyPuzIds = studyQuery.map((r: any) => String(r._id).split(":")[1]).filter(Boolean) as string[];
     const [puzDocs, studyDocs] = await Promise.all([
       puzIds.length
-        ? this.puzzles().find({ $or: [{ puzzleId: { $in: puzIds } }, { _id: { $in: puzIds as any } }] }, { projection: { puzzleId: 1, _id: 1, fen: 1, solution: 1, themes: 1, rating: 1 } }).toArray()
+        ? this.puzzles().find({ _id: { $in: puzIds as any } }, { projection: { puzzleId: 1, _id: 1, fen: 1, solution: 1, themes: 1, rating: 1 } }).toArray()
         : Promise.resolve([]),
       // study_puzzles use ObjectId _id — decode from hex.
       studyPuzIds.length

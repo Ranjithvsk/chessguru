@@ -37,6 +37,7 @@ export interface ErrorReport {
 
 const RETAIN_DAYS = 30;
 const COOLDOWN_MS = 60 * 60 * 1000;
+const COALESCE_MS = 10 * 60_000; // repeats of one signature inside this window share a row
 const MAX_MAILS_PER_HOUR = 20;
 const MAX_STACK = 4000;
 const MAX_MESSAGE = 500;
@@ -94,7 +95,18 @@ export class ErrorAlertsService implements OnModuleInit {
       ip: trunc(ev.ip, 60),
       sig: `${ev.kind}|${ev.route || ev.url || "-"}|${normalize(message)}`,
     };
-    await this.conn.db!.collection("errorEvents").insertOne(doc as any).catch(() => {});
+    // One outage, one row. A nine-minute nap of the book host on 2026-09-10 wrote 105 separate
+    // "server error" rows for one reader paging through one book, and a slow endpoint writes a
+    // row per request, so the admin page read like a hundred distinct failures when it was one
+    // thing happening a hundred times. A repeat of the same signature within the window bumps a
+    // counter on the last row instead; the admin aggregates sum that counter, so nothing is lost.
+    const col = this.conn.db!.collection("errorEvents");
+    const since = new Date(Date.now() - COALESCE_MS);
+    const bumped = await col.updateOne(
+      { sig: doc.sig, at: { $gte: since } },
+      { $inc: { n: 1 }, $set: { lastAt: doc.at } },
+    ).catch(() => ({ matchedCount: 0 }));
+    if (!bumped.matchedCount) await col.insertOne({ ...doc, n: 1 } as any).catch(() => {});
     if (ev.notify !== false && this.shouldMail(doc.sig)) await this.mail(doc);
   }
 

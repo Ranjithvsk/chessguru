@@ -71,14 +71,14 @@ export class ErrorsController {
     const since = new Date(Date.now() - 86_400_000);
     const top = await col.aggregate([
       { $match: { ...q, at: { $gte: since } } },
-      { $group: { _id: "$sig", n: { $sum: 1 }, kind: { $last: "$kind" }, message: { $last: "$message" }, route: { $last: "$route" }, last: { $max: "$at" } } },
+      { $group: { _id: "$sig", n: { $sum: { $ifNull: ["$n", 1] } }, kind: { $last: "$kind" }, message: { $last: "$message" }, route: { $last: "$route" }, last: { $max: "$at" } } },
       { $sort: { n: -1 } },
       { $limit: 20 },
     ]).toArray();
 
     const counts = await col.aggregate([
       { $match: { at: { $gte: since } } },
-      { $group: { _id: "$kind", n: { $sum: 1 } } },
+      { $group: { _id: "$kind", n: { $sum: { $ifNull: ["$n", 1] } } } },
     ]).toArray();
 
     return { rows, top, counts, mail: this.mailHealth.current() };
