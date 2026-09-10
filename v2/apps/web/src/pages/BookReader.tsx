@@ -172,6 +172,42 @@ export default function BookReaderPage() {
     fp.loadPermissive(setSquare(fp.fen, sq, next));
   }, [fp, brush]);
 
+  /** Tell the server what this diagram really is. Three answers, not one:
+   *  it is right, it is wrong and here is the fix, or it is not a board at all.
+   *  The third is a NEGATIVE example for the extractor — a different model from
+   *  the one that reads the squares — and there was no way to say it before. */
+  const sendFeedback = useCallback(async (
+    action: "correct" | "confirm" | "reject", d: Diagram,
+  ) => {
+    setSaving("saving"); setSaveErr("");
+    const boardOnly = fp.fen.split(" ")[0] ?? "";
+    try {
+      const r = await fetch(
+        `${API_BASE}/api/user-books/${encodeURIComponent(book!.id)}/diagram/${d.n}`,
+        { method: "POST", credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fen: boardOnly, action }) });
+      if (!r.ok) {
+        let why = `HTTP ${r.status}`;
+        try { const j = await r.json(); if (j?.message) why = String(j.message); } catch { /* not json */ }
+        throw new Error(why);
+      }
+      setSaving("saved");
+      setBook((b) => {
+        if (!b) return b;
+        if (action === "reject") {
+          // Gone from the book, so renumber and let go of the selection.
+          const left = b.diagrams.filter((x) => x.n !== d.n).map((x, i) => ({ ...x, n: i + 1 }));
+          setActive(null);
+          return { ...b, diagrams: left };
+        }
+        return { ...b, diagrams: b.diagrams.map((x) =>
+          x.n === d.n ? { ...x, fen: action === "correct" ? boardOnly : x.fen, conf: 1 } : x) };
+      });
+      if (action !== "reject") setEditing(false);
+    } catch (e) { setSaving("failed"); setSaveErr((e as Error).message || ""); }
+  }, [fp, book]);
+
   const jumpToPage = (p: number) => {
     setPage(p);
     pageRefs.current[p]?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -369,28 +405,7 @@ export default function BookReaderPage() {
                     onClick={async () => {
                       if (!editing) { setEditing(true); setSaving(""); return; }
                       if (!activeDiagram) { setEditing(false); return; }
-                      setSaving("saving");
-                      const boardOnly = fp.fen.split(" ")[0] ?? "";
-                      try {
-                        const r = await fetch(
-                          `${API_BASE}/api/user-books/${encodeURIComponent(book.id)}/diagram/${activeDiagram.n}`,
-                          { method: "POST", credentials: "include",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ fen: boardOnly }) });
-                        if (!r.ok) {
-                          // Surface the server's reason. "Save failed" alone
-                          // sent the owner hunting through a book page for a
-                          // fault that was a file permission on the server.
-                          let why = `HTTP ${r.status}`;
-                          try { const j = await r.json(); if (j?.message) why = String(j.message); } catch { /* not json */ }
-                          throw new Error(why);
-                        }
-                        setSaving("saved");
-                        // Keep the page in step with what is now stored.
-                        setBook((b) => b && ({ ...b, diagrams: b.diagrams.map((d) =>
-                          d.n === activeDiagram.n ? { ...d, fen: boardOnly, conf: 1 } : d) }));
-                        setEditing(false);
-                      } catch (e) { setSaving("failed"); setSaveErr((e as Error).message || ""); }
+                      await sendFeedback("correct", activeDiagram);
                     }}
                     className={`rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60 ${
                       saving === "failed" ? "bg-rose-600 hover:bg-rose-500"
@@ -413,26 +428,23 @@ export default function BookReaderPage() {
                     <button
                       disabled={saving === "saving"}
                       onClick={async () => {
-                        setSaving("saving"); setSaveErr("");
-                        const boardOnly = fp.fen.split(" ")[0] ?? "";
-                        try {
-                          const r = await fetch(
-                            `${API_BASE}/api/user-books/${encodeURIComponent(book.id)}/diagram/${activeDiagram.n}`,
-                            { method: "POST", credentials: "include",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ fen: boardOnly }) });
-                          if (!r.ok) {
-                            let why = `HTTP ${r.status}`;
-                            try { const j = await r.json(); if (j?.message) why = String(j.message); } catch { /* not json */ }
-                            throw new Error(why);
-                          }
-                          setSaving("saved");
-                          setBook((b) => b && ({ ...b, diagrams: b.diagrams.map((d) =>
-                            d.n === activeDiagram.n ? { ...d, conf: 1 } : d) }));
-                        } catch (e) { setSaving("failed"); setSaveErr((e as Error).message || ""); }
+                        await sendFeedback("confirm", activeDiagram);
                       }}
                       className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-60">
                       ✓ This one is correct
+                    </button>
+                  )}
+                  {!editing && activeDiagram && (
+                    <button
+                      disabled={saving === "saving"}
+                      onClick={() => {
+                        if (confirm("Remove this from the book? Tell us it is not a chess position at all.")) {
+                          void sendFeedback("reject", activeDiagram);
+                        }
+                      }}
+                      title="The scanner found a board here, but there isn't one"
+                      className="rounded-lg border border-rose-500/50 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-200 hover:bg-rose-500/20 disabled:opacity-60">
+                      ✕ Not a position
                     </button>
                   )}
                   {/* Deliberately NOT /play?fen= — that page ignores a fen

@@ -19,13 +19,31 @@ import { join, resolve } from "node:path";
 
 const STORE = "/var/lib/chessguru/user-books";
 
-type Diagram = { page: number; bbox: number[] | null; fen: string; conf?: number; corrected?: boolean };
+type Diagram = { page: number; bbox: number[] | null; fen: string; conf?: number; corrected?: boolean; disputed?: boolean };
 
 function bookDir(id: string): string {
   // Defend the path: an id is an opaque handle, never a traversal.
   const dir = resolve(STORE, id);
   if (!dir.startsWith(STORE + "/")) throw new NotFoundException("book not found");
   return dir;
+}
+
+/** A diagram's identity that SURVIVES a cleanup.
+ *
+ *  Feedback used to reference the array index ("#8"). Then a de-duplication
+ *  pass and a sanity pass took the book from 126 diagrams to 86, every index
+ *  shifted, and both the stored records and the coach's own notes pointed at
+ *  the wrong board — owner: "position 8 is not a position" about a diagram that
+ *  had already been removed, while the current #8 was fine.
+ *
+ *  Page plus the board's centre, rounded to 10px, does not move when other
+ *  diagrams are deleted. */
+function diagramKey(d: { page: number; bbox: number[] | null }): string {
+  const b = d.bbox;
+  if (!b || b.length < 4) return `p${d.page}`;
+  const cx = Math.round(((b[0]! + b[2]!) / 2) / 10) * 10;
+  const cy = Math.round(((b[1]! + b[3]!) / 2) / 10) * 10;
+  return `p${d.page}_${cx}_${cy}`;
 }
 
 function readJson<T>(p: string, fallback: T): T {
@@ -68,7 +86,14 @@ export class UserBooksController {
   }
 
   @Get(":id")
-  detail(@Param("id") id: string, @Req() req: any) {
+  detail(@Param("id") id: string, @Req() req: any, @Res({ passthrough: true }) res?: any) {
+    // NEVER cache this. Diagrams change under the reader — a coach corrects a
+    // position, a de-duplication pass removes phantom entries — and a browser
+    // reusing an old body shows positions the book no longer has. Owner saw
+    // exactly that: "SAME 14, 15 HIGHLIGHT SAME POSITION" persisting after the
+    // duplicates were already gone from disk. The page IMAGES are still cached
+    // hard, because those really are immutable once rendered.
+    res?.setHeader?.("Cache-Control", "no-store");
     const uid = this.requireUser(req);
     const dir = bookDir(id);
     if (!existsSync(dir)) throw new NotFoundException("book not found");
@@ -85,7 +110,7 @@ export class UserBooksController {
       seconds: status.seconds ?? null,
       // Numbered in reading order so the reader can label them "position 12"
       // the way the book labels its problems.
-      diagrams: diagrams.map((d, i) => ({ n: i + 1, ...d })),
+      diagrams: diagrams.map((d, i) => ({ n: i + 1, key: diagramKey(d), ...d })),
     };
   }
 
@@ -104,18 +129,24 @@ export class UserBooksController {
    */
   @Post(":id/diagram/:n")
   correct(@Param("id") id: string, @Param("n") n: string,
-          @Body() body: { fen?: string }, @Req() req: any) {
+          @Body() body: { fen?: string; action?: "correct" | "confirm" | "reject" },
+          @Req() req: any) {
     const uid = this.requireUser(req);
     const dir = bookDir(id);
     if (!existsSync(dir)) throw new NotFoundException("book not found");
     const meta = readJson<any>(join(dir, "meta.json"), {});
     if (meta.owner && meta.owner !== uid) throw new NotFoundException("book not found");
 
+    const action = body?.action === "reject" ? "reject"
+                 : body?.action === "confirm" ? "confirm" : "correct";
     const fen = String(body?.fen || "").trim();
     // Board field only: 8 ranks of pieces and run-lengths. Anything else is a
     // client bug or someone poking at the endpoint.
     const board = fen.split(" ")[0] || "";
-    if (!/^([1-8pnbrqkPNBRQK]+\/){7}[1-8pnbrqkPNBRQK]+$/.test(board)) {
+    // A rejection says "this is not a board at all", so it carries no position
+    // to validate — that is the whole point of the action.
+    if (action !== "reject"
+        && !/^([1-8pnbrqkPNBRQK]+\/){7}[1-8pnbrqkPNBRQK]+$/.test(board)) {
       throw new BadRequestException("not a board position");
     }
     const idx = Number(n) - 1;             // the reader numbers them from 1
@@ -123,13 +154,23 @@ export class UserBooksController {
     if (!Number.isInteger(idx) || idx < 0 || idx >= diagrams.length) {
       throw new NotFoundException("diagram not found");
     }
-    const before = diagrams[idx];
+    const before = diagrams[idx] as Diagram;
     const wasFen = String(before?.fen ?? "");
-    diagrams[idx] = { ...(before as Diagram), fen, conf: 1, corrected: true } as Diagram;
+    const key = diagramKey(before);
+    if (action === "reject") {
+      // Not a board. Drop it from the reader, and keep the region on record —
+      // a rejected crop is a NEGATIVE example for the extractor, which is a
+      // different model from the one that reads the squares.
+      diagrams.splice(idx, 1);
+    } else {
+      diagrams[idx] = { ...before, fen, conf: 1, corrected: action === "correct" } as Diagram;
+    }
     try {
       writeFileSync(join(dir, "diagrams.json"), JSON.stringify(diagrams));
       appendFileSync(join(dir, "corrections.jsonl"),
-        JSON.stringify({ n: idx + 1, page: before?.page, was: wasFen, now: fen,
+        JSON.stringify({ key, action, n: idx + 1, page: before?.page,
+                         bbox: before?.bbox ?? null, was: wasFen,
+                         now: action === "reject" ? null : fen,
                          by: uid, at: new Date().toISOString() }) + "\n");
     } catch (e: any) {
       // Say WHY. A book ingested by the wrong unix user is readable but not
@@ -140,7 +181,8 @@ export class UserBooksController {
         : `could not write the correction (${e?.code || "unknown error"})`;
       throw new ServiceUnavailableException(code);
     }
-    return { ok: true, n: idx + 1, was: wasFen, now: fen };
+    return { ok: true, key, action, n: idx + 1, was: wasFen,
+             now: action === "reject" ? null : fen };
   }
 
   @Get(":id/page/:n")
