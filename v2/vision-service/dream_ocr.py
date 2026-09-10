@@ -753,6 +753,17 @@ def _ranked_candidates(raw: str) -> list[tuple[str, int]]:
     return sorted(out.items(), key=lambda kv: kv[1])
 
 
+# What a correctly-read move looks like: a piece move CARRIES its piece letter,
+# and a pawn move is a file (optionally taking) then a rank. Deliberately
+# stricter than SAN_RE, which is a net cast wide to catch garbled input — SAN_RE
+# happily matches "8b5", which is not something a book ever prints.
+_STRICT_SAN = re.compile(
+    r"^(?:O-O-O|O-O|0-0-0|0-0)[+#]?$"
+    r"|^[KQRBN][a-h]?[1-8]?x?[a-h][1-8][+#]?$"
+    r"|^[a-h](?:x[a-h])?[1-8](?:=[QRBN])?[+#]?$"
+)
+
+
 _LONG_ALG = re.compile(r"^([KQRBN]?)([a-h][1-8])[-x]?([a-h][1-8])(?:=[QRBN])?$")
 
 
@@ -887,7 +898,13 @@ def apply_chess_constraints(tokens: list[Token], start_fen: str | None,
 
     for idx, san, unique in paths[0][2]:
         t = tokens[idx]
-        if san != t.text:
+        # Repair what is BROKEN; do not rewrite what is already fine unless the
+        # rewrite is proved. Measured on a real scanned spread, an unguarded pass
+        # took move recovery DOWN from 78% to 73% — it was overwriting moves OCR
+        # had read correctly with legal-but-wrong alternatives from a line that
+        # had drifted. A clean move stands unless we can prove a better one.
+        clean = bool(_STRICT_SAN.match(t.text.strip()))
+        if san != t.text and (unique or not clean):
             t.original = t.text
             t.text = san
         t.kind = "move"
