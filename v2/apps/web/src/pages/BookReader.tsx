@@ -13,6 +13,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import Board from "../components/Board";
+// Reuse the class Setup editor rather than write a second one. It is the same
+// job — paint pieces onto a board and hand back a FEN — and the coach already
+// knows how it behaves from Dream Meet.
+import { PositionEditorModal } from "../components/SharedClassBoard";
 import { useFreePlay } from "../hooks/useFreePlay";
 
 const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
@@ -66,6 +70,7 @@ export default function BookReaderPage() {
    *  was captured at whatever width the window happened to be and never
    *  recomputed — resize the window and every hotspot drifted off its diagram. */
   const [pageSize, setPageSize] = useState<Record<number, [number, number]>>({});
+  const [editing, setEditing] = useState(false);
   const fp = useFreePlay();
 
   useEffect(() => {
@@ -236,7 +241,11 @@ export default function BookReaderPage() {
                   <button onClick={() => navigator.clipboard?.writeText(fp.fen)} className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">Copy FEN</button>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <a href={`/board-editor?fen=${encodeURIComponent(fp.fen)}`} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-500">✏️ Edit position ↗</a>
+                  {/* Edit HERE, not on another page. Sending the reader away to
+                      /board-editor lost their place in the book — and the whole
+                      point is fixing a square the scan misread while looking at
+                      the printed diagram right next to it. */}
+                  <button onClick={() => setEditing(true)} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-500">✏️ Edit position</button>
                   {/* Deliberately NOT /play?fen= — that page ignores a fen
                       parameter entirely and would start an ordinary new game,
                       silently dropping the position the reader just chose. The
@@ -261,6 +270,15 @@ export default function BookReaderPage() {
           </div>
         </aside>
       </div>
+
+      {editing && (
+        <PositionEditorModal
+          initialFen={fullFen(fp.fen)}
+          onApply={(f) => fp.load(f)}
+          onClose={() => setEditing(false)}
+          error={null}
+        />
+      )}
 
       {/* Filmstrip — every position in the book, at a glance */}
       {book.diagrams.length > 0 && (
