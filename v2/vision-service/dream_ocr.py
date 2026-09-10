@@ -762,6 +762,11 @@ _BRUTE = 5
 # glyph repair (1), below a brute-force guess (5).
 _SKIP = 2
 
+# How much worse than the best line a path may be and still object to it. 0 =
+# only lines that TIE the best reading get a vote, which is the case that
+# matters: two equally good readings that disagree are a genuine ambiguity.
+_VOTE_MARGIN = 0
+
 _CASTLE_RE = re.compile(r"^[O0oQD°]\-[O0oQD°](\-[O0oQD°])?[+#]?$")
 
 
@@ -950,7 +955,11 @@ def apply_chess_constraints(tokens: list[Token], start_fen: str | None,
             # NOTHING on that page. Skipping costs more than playing a clean move
             # (_SKIP > 0), so a line only ignores a token when playing it will not
             # fit — which is exactly what a repeated prose mention looks like.
-            nxt.append((board, cost + _SKIP, hist))
+            # Recorded as an explicit "" so the agreement check below can SEE
+            # that some line chose to ignore this token. Without that a skip
+            # casts no vote and cannot disagree, which let a prose mention be
+            # played as a real move and still be called certain.
+            nxt.append((board, cost + _SKIP, hist + [(i, "", False)]))
             legal = []
             for c, ccost in cands:
                 try:
@@ -989,12 +998,22 @@ def apply_chess_constraints(tokens: list[Token], start_fen: str | None,
 
     # What did the surviving lines disagree about? Disagreement is the honest
     # signal that we guessed, however cheap the guess looked.
+    # Only lines that are genuinely COMPETITIVE get a vote. Skipping is always
+    # available, so without a margin there is always some line that ignored a
+    # token, and certainty collapses — measured, it fell from 69.8% to 57.8%
+    # when every straggler could veto. A line far more expensive than the best
+    # is not a plausible reading of the page and should not overrule one.
+    best_cost = paths[0][1]
     votes: dict[int, set[str]] = {}
-    for _b, _c, hist in paths:
+    for _b, cost, hist in paths:
+        if cost > best_cost + _VOTE_MARGIN:
+            continue
         for idx, san, _u in hist:
             votes.setdefault(idx, set()).add(san)
 
     for idx, san, unique in paths[0][2]:
+        if not san:                       # this line skipped the token
+            continue
         t = tokens[idx]
         # Repair what is BROKEN; do not rewrite what is already fine unless the
         # rewrite is proved. Measured on a real scanned spread, an unguarded pass
@@ -1062,7 +1081,18 @@ def choose_start(tokens: list[Token], candidate_fens: list[str],
     # So each candidate is tried both ways and the moves settle it, exactly as
     # they settle which diagram it was.
     expanded: list[str] = []
-    for f in [f for f in candidate_fens if f]:
+    # Books print games FROM MOVE ONE constantly, and the diagram on such a page
+    # shows a position several moves LATER — so no diagram there can explain the
+    # move list. Measured on one spread: "1. Nf3 d5 2. g3 Bg4 3. Bg2 Nd7 4. h3
+    # Bxf3" with a single diagram of the position after all of it. The opening
+    # setup is therefore always offered as a candidate; it costs one extra replay
+    # and wins only if it explains more moves than any diagram does.
+    try:
+        import chess as _c
+        cands_in = list(candidate_fens) + [_c.STARTING_FEN]
+    except Exception:
+        cands_in = list(candidate_fens)
+    for f in [f for f in cands_in if f]:
         parts = f.strip().split()
         if len(parts) >= 6:
             expanded.append(f.strip())
