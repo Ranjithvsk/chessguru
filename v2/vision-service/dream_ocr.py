@@ -113,8 +113,16 @@ class Engine:
 # ── Engines ────────────────────────────────────────────────────────────────
 def tesseract_engine() -> Engine | None:
     try:
-        import pytesseract  # noqa: F401
+        import pytesseract
     except Exception:
+        return None
+    # pytesseract is only a WRAPPER. Without the tesseract binary it imports
+    # perfectly and then throws on every page. Seen for real: a Windows box with
+    # the Python package and no binary reported Tesseract as an available engine.
+    try:
+        pytesseract.get_tesseract_version()
+    except Exception:
+        log.info("pytesseract present but the tesseract binary is not; skipping")
         return None
 
     def run(img):
