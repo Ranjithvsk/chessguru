@@ -640,6 +640,10 @@ def consensus(per_engine: dict[str, list[tuple[str, float]]],
         {_wc(x)[0]: max(_wc(x)[1], 0.05) * weights.get(spine_name, 1.0)} for x in spine
     ]
     said: list[dict[str, str]] = [{spine_name: _wc(x)[0]} for x in spine]
+    # Geometry from WHOEVER has it, not only the spine. A vision-language model
+    # emits no boxes at all, and it can win the spine — at which point every
+    # token lost its geometry and export_training_pairs produced NOTHING, with
+    # no error. The spine's own box is preferred; any aligned engine fills a gap.
 
     for name, seq in live.items():
         if name == spine_name:
@@ -654,6 +658,10 @@ def consensus(per_engine: dict[str, list[tuple[str, float]]],
                     votes[idx][w] = (votes[idx].get(w, 0.0)
                                      + max(c, 0.05) * weights.get(name, 1.0))
                     said[idx][name] = w
+                    if spine_boxes[idx] is None:
+                        b = _bx(seq[j1 + k])
+                        if b:
+                            spine_boxes[idx] = b
             # insert / delete / ragged replace: no honest pairing exists, skip
 
     out: list[Token] = []
@@ -828,7 +836,13 @@ def _ranked_candidates(raw: str) -> list[tuple[str, int]]:
             out[c] = cost
 
     if _CASTLE_RE.match(s):
-        add("O-O-O" if s.count("-") == 2 else "O-O", 0 if s[0] == "O" else 1)
+        # Keep the check/mate marker. Every other move shape carries it through
+        # _square_variants; castling was rebuilt bare, so "O-O+" became "O-O",
+        # the board's own SAN said "O-O+", and the marker-agreement rule then
+        # refused to call a perfectly good castling move certain.
+        suf = "#" if s.endswith("#") else ("+" if s.endswith("+") else "")
+        base = "O-O-O" if s.rstrip("+#").count("-") == 2 else "O-O"
+        add(base + suf, 0 if s[0] == "O" else 1)
         return sorted(out.items(), key=lambda kv: kv[1])
 
     # (piece letter, rest of the token, cost) — the ways the first glyph reads.
@@ -1156,6 +1170,8 @@ def choose_start(tokens: list[Token], candidate_fens: list[str],
         cands_in = list(candidate_fens)
     for f in [f for f in cands_in if f]:
         parts = f.strip().split()
+        if not parts:                     # "   " is truthy but has no board
+            continue
         if len(parts) >= 6:
             expanded.append(f.strip())
         else:
@@ -1289,6 +1305,10 @@ def read_page(img, start_fen: str | None = None,
         "startFenCandidates": len(cands),
         "boardLabelsDropped": dropped_labels,
         "hyphensRejoined": rejoined,
-        # Stated plainly so a caller cannot mistake plain OCR for the real thing.
-        "chessConstraintsRan": bool(cands),
+        # Whether the pass ACTUALLY ran, not whether we hoped it would. It bails
+        # out silently when python-chess is missing or a FEN will not parse, and
+        # reporting the intention rather than the outcome let a caller treat
+        # plain ensemble OCR as chess-verified text.
+        "chessConstraintsRan": bool(cands) and any(
+            t.kind in ("move", "movenum") for t in toks),
     }
