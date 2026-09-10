@@ -24,8 +24,10 @@ interface without touching anything below.
 from __future__ import annotations
 
 import difflib
+import html as html_mod
 import logging
 import os
+import shutil
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -143,6 +145,28 @@ def _pil(img):
     return img
 
 
+def _ensure_llama_server() -> None:
+    """Put our bundled llama-server on PATH for Surya 0.22+.
+
+    Surya moved its recognition model to a llama.cpp backend and now shells out
+    to a `llama-server` binary, failing with an install message if it is not on
+    PATH. We ship one under llama/ rather than asking the machine to have it, and
+    set LD_LIBRARY_PATH too because the binary loads its own shared objects from
+    the same directory.
+    """
+    import glob
+    if shutil.which("llama-server"):
+        return
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in glob.glob(os.path.join(here, "llama", "*", "llama-server")):
+        d = os.path.dirname(cand)
+        os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+        os.environ["LD_LIBRARY_PATH"] = d + os.pathsep + os.environ.get("LD_LIBRARY_PATH", "")
+        log.info("using bundled llama-server at %s", d)
+        return
+    log.warning("llama-server not found; Surya 0.22+ cannot run without it")
+
+
 def surya_engine() -> Engine | None:
     """Surya — transformer OCR, strongest of the four on unusual layouts."""
     try:
@@ -152,11 +176,14 @@ def surya_engine() -> Engine | None:
 
     def run(img):
         if "surya" not in _MODELS:
+            _ensure_llama_server()
             from surya.detection import DetectionPredictor
             from surya.recognition import RecognitionPredictor
             try:
-                # 0.16+ splits the shared vision backbone into its own object
-                # and expects it injected; older builds construct it themselves.
+                # 0.16 split the shared vision backbone into its own object and
+                # expected it injected. 0.22 dropped that module entirely and
+                # takes an optional inference manager instead. Both shapes are
+                # tried because the package rewrites this every few releases.
                 from surya.foundation import FoundationPredictor
                 rec_p = RecognitionPredictor(FoundationPredictor())
             except Exception:
@@ -180,9 +207,23 @@ def surya_engine() -> Engine | None:
             log.warning("surya produced nothing: %s", "; ".join(errs))
         out = []
         for page in pages or []:
+            # 0.16 shape: flat text_lines, each carrying .text
             for line in getattr(page, "text_lines", None) or []:
                 conf = float(getattr(line, "confidence", 0.0) or 0.0)
                 for w in (getattr(line, "text", "") or "").split():
+                    out.append((w, conf))
+            # 0.22 shape: layout blocks carrying .html, in reading order. Richer
+            # than before, since each block also has a semantic label
+            # (PageHeader, Text, Figure) — but the TEXT MOVED, and a reader that
+            # only knew text_lines returned nothing at all against a server that
+            # was working perfectly. Nothing raised; it just went quiet.
+            blocks = getattr(page, "blocks", None) or []
+            for b in sorted(blocks, key=lambda b: getattr(b, "reading_order", 0)):
+                if getattr(b, "skipped", False) or getattr(b, "error", False):
+                    continue
+                conf = float(getattr(b, "confidence", 0.0) or 0.0)
+                text = re.sub(r"<[^>]+>", " ", getattr(b, "html", "") or "")
+                for w in html_mod.unescape(text).split():
                     out.append((w, conf))
         return out
 
