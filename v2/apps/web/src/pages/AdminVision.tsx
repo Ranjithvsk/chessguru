@@ -57,7 +57,7 @@ function Bars({ days, series, colors }: { days: string[]; series: Array<{ label:
 
 function Card({ title, children, tone = "" }: { title: string; children: ReactNode; tone?: string }) {
   return (
-    <section className={`rounded-xl border border-ink-800 bg-ink-900/60 p-4 ${tone}`}>
+    <section className={`min-w-0 overflow-hidden rounded-xl border border-ink-800 bg-ink-900/60 p-4 ${tone}`}>
       <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-ink-400">{title}</h2>
       {children}
     </section>
@@ -91,7 +91,7 @@ export default function AdminVisionPage() {
   const loopAlive = corr14 > 0;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5 p-4 md:p-6">
+    <div className="mx-auto min-w-0 max-w-6xl space-y-5 overflow-x-hidden p-4 md:p-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl text-white">👁 Vision engines</h1>
@@ -107,22 +107,22 @@ export default function AdminVisionPage() {
             ? `The improvement loop is alive: ${corr14} corrections in 14 days, ${s.pendingReview} waiting for your review.`
             : `The improvement loop is idle: no corrections have reached the training set in 14 days.`}
         </div>
-        <div className="mt-1 text-sm text-ink-300">
+        <div className="mt-1 break-words text-sm text-ink-300">
           Last correction {ago(s.corrections.lastAt)} · last retrain result {lastRun ? `${lastRun.valAcc}% val` : "none in log"} ·
           served model {apiModel?.present ? `${ago(apiModel.mtime)}${s.models.changedByLastRetrain ? ", changed by the last retrain" : ", NOT changed by the last retrain"}` : "missing"}
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid min-w-0 gap-4 md:grid-cols-3">
         <Card title="Service" tone={s.service.ok ? "" : "border-rose-700"}>
           <div className={`text-lg font-semibold ${s.service.ok ? "text-emerald-300" : "text-rose-300"}`}>{s.service.ok ? "Online" : "Down"} <span className="text-sm font-normal text-ink-400">{s.service.ms} ms</span></div>
           <div className="mt-1 text-sm text-ink-300">extractor: {s.service.board_extractor ?? "?"} · classifier: {s.service.classifier ?? "?"}</div>
-          {s.service.error && <div className="mt-1 text-xs text-rose-300">{s.service.error}</div>}
+          {s.service.error && <div className="mt-1 break-all text-xs text-rose-300">{s.service.error}</div>}
         </Card>
         <Card title="Scans">
           <div className="text-lg font-semibold text-white">{scansToday} <span className="text-sm font-normal text-ink-400">today</span> · {scans14} <span className="text-sm font-normal text-ink-400">in 14 days</span></div>
-          <div className="mt-1 text-xs text-ink-400">{s.scans.totalFiles} images on disk · {Object.entries(s.scans.byTag).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([t, n]) => `${t} ${n}`).join(" · ")}</div>
-          {!s.scans.ok && <div className="mt-1 text-xs text-rose-300">{s.scans.error}</div>}
+          <div className="mt-1 break-words text-xs text-ink-400">{s.scans.totalFiles} images on disk · {Object.entries(s.scans.byTag).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([t, n]) => `${t} ${n}`).join(" · ")}</div>
+          {!s.scans.ok && <div className="mt-1 break-all text-xs text-rose-300">{s.scans.error}</div>}
         </Card>
         <Card title="Training set">
           <div className="text-lg font-semibold text-white">{s.trainingSet.total} <span className="text-sm font-normal text-ink-400">approved samples</span></div>
@@ -130,7 +130,7 @@ export default function AdminVisionPage() {
         </Card>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid min-w-0 gap-4 md:grid-cols-2">
         <Card title="Scans and corrections, last 14 days">
           <Bars days={s.days} series={[{ label: "scans", byDay: s.scans.byDay }, { label: "corrections", byDay: s.corrections.byDay }, { label: "auto-approved", byDay: s.corrections.autoApprovedByDay }]} colors={["bg-sky-500", "bg-amber-400", "bg-emerald-500"]} />
           <p className="mt-2 text-xs text-ink-400">A correction is one square a coach changed after a scan. Scans with no corrections were accepted as read.</p>
@@ -138,15 +138,15 @@ export default function AdminVisionPage() {
         <Card title="Nightly retrain">
           {s.retrain.ok ? (
             <>
-              <div className="flex flex-wrap gap-1">
+              <div className="flex max-w-full flex-wrap gap-1">
                 {s.retrain.runs.map((r, i) => (
                   <span key={i} title={r.note} className={`rounded px-2 py-0.5 text-xs ${r.valAcc == null ? "bg-rose-900 text-rose-200" : "bg-ink-800 text-ink-200"}`}>{r.valAcc == null ? "✗" : `${r.valAcc}%`}</span>
                 ))}
               </div>
               <p className="mt-2 text-xs text-ink-400">Validation accuracy per run, oldest to newest. A flat line means the training set did not change between runs.</p>
-              <pre className="mt-2 max-h-32 overflow-auto rounded bg-ink-950 p-2 text-[11px] text-ink-300">{s.retrain.lastLines.join("\n")}</pre>
+              <pre className="mt-2 max-h-32 max-w-full overflow-auto whitespace-pre-wrap break-all rounded bg-ink-950 p-2 text-[11px] text-ink-300">{s.retrain.lastLines.join("\n")}</pre>
             </>
-          ) : <div className="text-sm text-rose-300">Retrain log unreadable: {s.retrain.error}</div>}
+          ) : <div className="break-all text-sm text-rose-300">Retrain log unreadable: {s.retrain.error}</div>}
         </Card>
       </div>
 
@@ -157,7 +157,7 @@ export default function AdminVisionPage() {
             <tbody>
               {s.models.files.map((f) => (
                 <tr key={f.key} className="border-t border-ink-800">
-                  <td className="py-1.5 text-white">{f.label}{!f.present && <span className="ml-2 rounded bg-rose-900 px-1.5 text-xs text-rose-200">missing</span>}</td>
+                  <td className="break-words py-1.5 text-white">{f.label}{!f.present && <span className="ml-2 rounded bg-rose-900 px-1.5 text-xs text-rose-200">missing</span>}</td>
                   <td className="text-ink-300">{f.engine}</td>
                   <td className="tabular-nums text-ink-300">{f.present ? mb(f.bytes) : "—"}</td>
                   <td className="text-ink-300" title={f.mtime ?? ""}>{f.present ? ago(f.mtime) : "—"}</td>
