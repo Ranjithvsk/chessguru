@@ -280,17 +280,24 @@ export default function BookReaderPage() {
                 if (!size) return null;            // wait until we know the page's real size
                 const [nw, nh] = size;
                 const [x1, y1, x2, y2] = d.bbox as [number, number, number, number];
-                const unsure = (d.conf ?? 1) < 0.9;
+                // NOT "unsure" any more. Measured against the coach's own
+                // rulings, this flag caught 0 of 6 wrong diagrams and raised a
+                // false alarm on a correct one — it has no predictive value, and
+                // colouring a board "check me" sent them to verify a good
+                // position while a wrong one sat there in confident blue.
+                // The underlying reasons are still worth SHOWING, so they are
+                // reported as facts in the tooltip rather than as a verdict.
+                const verified = d.conf === 1;
                 return (
                   <button
                     key={d.n}
                     onClick={() => open(d)}
-                    title={`Position ${d.n}${unsure ? " — low confidence, check it" : ""}`}
+                    title={`Position ${d.n}${verified ? " — you have checked this one" : ""}`}
                     className={`group absolute rounded-lg transition
                       ${active === d.n
                         ? "ring-4 ring-brand-400 bg-brand-400/10"
-                        : unsure
-                          ? "ring-2 ring-amber-400/70 hover:bg-amber-300/15"
+                        : verified
+                          ? "ring-2 ring-emerald-400/60 hover:bg-emerald-300/15"
                           : "ring-2 ring-brand-400/50 hover:bg-brand-400/15"}`}
                     style={{
                       left: `${(x1 / nw) * 100}%`,
@@ -444,30 +451,32 @@ export default function BookReaderPage() {
                       onClick={async () => {
                         await sendFeedback("confirm", activeDiagram);
                       }}
-                      className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-60">
-                      ✓ This one is correct
-                    </button>
-                  )}
-                  {!editing && activeDiagram && (
-                    <button
-                      disabled={saving === "saving"}
-                      onClick={() => {
-                        if (confirm("Remove this from the book? Tell us it is not a chess position at all.")) {
-                          void sendFeedback("reject", activeDiagram);
-                        }
-                      }}
-                      title="The scanner found a board here, but there isn't one"
-                      className="rounded-lg border border-rose-500/50 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-200 hover:bg-rose-500/20 disabled:opacity-60">
-                      ✕ Not a position
+                      className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-60 ${
+                        saving === "saved"
+                          ? "border-emerald-400 bg-emerald-500/30 text-white"
+                          : "border-emerald-500/50 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20"}`}>
+                      {saving === "saving" ? "Saving…"
+                        : saving === "saved" ? "✓ Marked correct"
+                        : saving === "failed" ? "✕ Failed · retry"
+                        : "✓ This one is correct"}
                     </button>
                   )}
                 </div>
                 <p className="mt-2 text-[11px] text-ink-500">
                   Move the pieces on the board above to play from this position — Reset puts the printed one back.
                 </p>
-                {(activeDiagram.conf ?? 1) < 0.9 && (
-                  <p className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-100">
-                    This one was read with low confidence. Check it against the page before using it.
+                {/* Report what is TRUE, not a prediction. "Low confidence"
+                    proved worthless — 0 of 6 wrong diagrams flagged, 1 false
+                    alarm — so the note now says only what actually happened,
+                    and never implies the position is likely wrong. */}
+                {activeDiagram.conf === 1 && (
+                  <p className="mt-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-100">
+                    You have checked this one.
+                  </p>
+                )}
+                {Array.isArray((activeDiagram as any).warnings) && (activeDiagram as any).warnings.length > 0 && (
+                  <p className="mt-2 rounded-lg border border-ink-600 bg-ink-800 px-2 py-1 text-[11px] text-ink-200">
+                    {(activeDiagram as any).warnings[0]}
                   </p>
                 )}
               </>
@@ -506,8 +515,8 @@ export default function BookReaderPage() {
                 className={`shrink-0 rounded-lg px-2 py-1 text-[11px] font-semibold transition
                   ${active === d.n
                     ? "bg-brand-600 text-white"
-                    : (d.conf ?? 1) < 0.9
-                      ? "bg-amber-500/15 text-amber-200 hover:bg-amber-500/25"
+                    : d.conf === 1
+                      ? "bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25"
                       : "bg-ink-800 text-ink-300 hover:bg-ink-700"}`}
                 title={`Position ${d.n} · page ${d.page + 1}`}
               >
