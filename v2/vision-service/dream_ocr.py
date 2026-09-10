@@ -317,6 +317,148 @@ def paddle_engine() -> Engine | None:
     return Engine("paddle", run, weight=1.4)
 
 
+# ── GPU engines (vision-language models) ───────────────────────────────────
+# These are a different KIND of reader. The four classical engines detect text
+# regions and recognise glyphs; a VLM looks at the whole page and writes out what
+# it sees, which means it can be TOLD what it is looking at. On a chess page that
+# matters: "keep figurine glyphs, transcribe moves exactly" is an instruction no
+# classical engine can accept.
+#
+# They need a GPU. On a CPU-only box these return None and nothing changes.
+
+def _cuda_ok() -> bool:
+    try:
+        import torch
+        return bool(torch.cuda.is_available())
+    except Exception:
+        return False
+
+
+def _free_vram_for(name: str) -> None:
+    """Keep one large model resident at a time.
+
+    The card here is 10 GB. GOT-OCR is ~1.5 GB and Qwen3-VL-4B is ~8 GB, so both
+    together do not fit. Whichever is not being used is dropped rather than
+    letting the allocator fail halfway through a book.
+    """
+    import gc
+    for other in ("gotocr", "qwen"):
+        if other != name and other in _MODELS:
+            del _MODELS[other]
+            gc.collect()
+            try:
+                import torch
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+
+def _mean_token_confidence(model, out) -> float:
+    """A real confidence from the model's own token probabilities.
+
+    A VLM has no per-word confidence to report, and inventing one would defeat
+    the point of reporting confidence at all. The mean probability of the tokens
+    it actually chose is a genuine signal, so that is what is used.
+    """
+    try:
+        import torch
+        scores = getattr(out, "scores", None)
+        if not scores:
+            return 0.9
+        ps = []
+        for step in scores:
+            pr = torch.softmax(step[0].float(), dim=-1)
+            ps.append(float(pr.max()))
+        return sum(ps) / len(ps) if ps else 0.9
+    except Exception:
+        return 0.9
+
+
+def gotocr_engine() -> Engine | None:
+    """GOT-OCR 2.0 (716M) — small, purpose-built for OCR, fits any GPU."""
+    if not _cuda_ok():
+        return None
+    try:
+        import transformers  # noqa: F401
+    except Exception:
+        return None
+
+    def run(img):
+        import torch
+        from transformers import AutoModelForImageTextToText, AutoProcessor
+        _free_vram_for("gotocr")
+        if "gotocr" not in _MODELS:
+            mid = "stepfun-ai/GOT-OCR-2.0-hf"
+            proc = AutoProcessor.from_pretrained(mid)
+            mdl = AutoModelForImageTextToText.from_pretrained(
+                mid, dtype=torch.bfloat16, device_map={"": "cuda:0"})
+            _MODELS["gotocr"] = (proc, mdl.eval())
+        proc, mdl = _MODELS["gotocr"]
+        inputs = proc(_pil(img), return_tensors="pt").to("cuda")
+        with torch.inference_mode():
+            out = mdl.generate(**inputs, do_sample=False, max_new_tokens=4096,
+                               tokenizer=proc.tokenizer, stop_strings="<|im_end|>",
+                               return_dict_in_generate=True, output_scores=True)
+        seq = out.sequences[0, inputs["input_ids"].shape[1]:]
+        text = proc.decode(seq, skip_special_tokens=True)
+        conf = _mean_token_confidence(mdl, out)
+        return [(w, conf) for w in text.split() if w.strip()]
+
+    return Engine("gotocr", run, weight=1.2)
+
+
+CHESS_PAGE_PROMPT = (
+    "Transcribe every piece of text on this page exactly as printed, in reading "
+    "order. This is a page from a chess book. Keep chess move notation exactly as "
+    "written, including figurine piece symbols. Do not solve, explain, translate "
+    "or summarise anything. Do not describe the diagrams. Output plain text only."
+)
+
+
+def qwen_engine(model_id: str = "Qwen/Qwen3-VL-4B-Instruct") -> Engine | None:
+    """Qwen3-VL — the only engine here that can be told what it is reading.
+
+    4B is the largest of the current line that fits 10 GB on an Ampere card; the
+    8B FP8 build needs Ada or newer for native FP8, and 8B in bf16 wants ~16 GB.
+    """
+    if not _cuda_ok():
+        return None
+    try:
+        import transformers  # noqa: F401
+    except Exception:
+        return None
+
+    def run(img):
+        import torch
+        from transformers import AutoModelForImageTextToText, AutoProcessor
+        _free_vram_for("qwen")
+        if "qwen" not in _MODELS:
+            proc = AutoProcessor.from_pretrained(model_id)
+            # Pin to the card. device_map="auto" let accelerate reserve headroom
+            # and offload layers to CPU — "Some parameters are on the meta device"
+            # — which turned a 45s page into 660s. The 4B weights are ~6 GB and
+            # fit 10 GB with room for activations, so keep them all on the GPU.
+            mdl = AutoModelForImageTextToText.from_pretrained(
+                model_id, dtype=torch.bfloat16, device_map={"": "cuda:0"})
+            _MODELS["qwen"] = (proc, mdl.eval())
+        proc, mdl = _MODELS["qwen"]
+        msgs = [{"role": "user", "content": [
+            {"type": "image", "image": _pil(img)},
+            {"type": "text", "text": CHESS_PAGE_PROMPT}]}]
+        inputs = proc.apply_chat_template(
+            msgs, tokenize=True, add_generation_prompt=True,
+            return_dict=True, return_tensors="pt").to(mdl.device)
+        with torch.inference_mode():
+            out = mdl.generate(**inputs, do_sample=False, max_new_tokens=2048,
+                               return_dict_in_generate=True, output_scores=True)
+        seq = out.sequences[0, inputs["input_ids"].shape[1]:]
+        text = proc.decode(seq, skip_special_tokens=True)
+        conf = _mean_token_confidence(mdl, out)
+        return [(w, conf) for w in text.split() if w.strip()]
+
+    return Engine("qwen", run, weight=1.3)
+
+
 def available_engines() -> list[Engine]:
     """Every engine we can actually run right now.
 
@@ -326,7 +468,8 @@ def available_engines() -> list[Engine]:
     scanner, whose venv has only Tesseract, imports this module safely.
     """
     got = [e for e in (tesseract_engine(), doctr_engine(),
-                       paddle_engine(), surya_engine()) if e]
+                       paddle_engine(), surya_engine(),
+                       gotocr_engine(), qwen_engine()) if e]
     if not got:
         log.warning("no OCR engine available")
     return got
