@@ -84,6 +84,20 @@ function setSquare(fen: string, square: string, piece: string): string {
   return parts.join(" ");
 }
 
+/** What stands on a square right now, "" for empty. */
+function pieceAt(fen: string, square: string): string {
+  const ranks = (fullFen(fen).split(" ")[0] || "").split("/");
+  const file = square.charCodeAt(0) - 97;
+  const rank = 8 - Number(square[1]);
+  if (file < 0 || file > 7 || rank < 0 || rank > 7) return "";
+  const cells: string[] = [];
+  for (const ch of ranks[rank] || "8") {
+    if (/\d/.test(ch)) for (let i = 0; i < Number(ch); i++) cells.push("");
+    else cells.push(ch);
+  }
+  return cells[file] || "";
+}
+
 /** Swap whose turn it is. A diagram says "White to move" in prose we may not
  *  have read, so the reader has to be able to say so. */
 function withSideToMove(fen: string, side: "w" | "b"): string {
@@ -107,6 +121,16 @@ export default function BookReaderPage() {
   const [pageSize, setPageSize] = useState<Record<number, [number, number]>>({});
   const [editing, setEditing] = useState(false);
   const [brush, setBrush] = useState<string>("P");
+  const [saving, setSaving] = useState<"" | "saving" | "saved" | "failed">("");
+  // Remembered per browser: a reader who collapses the strip means it, and
+  // having it spring back open on every page is the annoyance they were
+  // collapsing away from. Wrapped because storage throws in private mode.
+  const [stripOpen, setStripOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem("cg.bookStrip") !== "0"; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("cg.bookStrip", stripOpen ? "1" : "0"); } catch { /* private mode */ }
+  }, [stripOpen]);
   const fp = useFreePlay();
 
   useEffect(() => {
@@ -135,6 +159,17 @@ export default function BookReaderPage() {
     fp.load(fullFen(d.fen));
     setPage(d.page);
   }, [fp]);
+
+  /** Paint one square, Dream Meet's rules: the selected piece on a square that
+   *  already holds it REMOVES it, anything else places or replaces. Without the
+   *  toggle there is no way to clear a square except switching to the eraser,
+   *  which is two taps for the commonest correction of all — the scan seeing a
+   *  piece on an empty square. */
+  const paintSquare = useCallback((sq: string) => {
+    const cur = pieceAt(fp.fen, sq);
+    const next = brush && cur === brush ? "" : brush;
+    fp.loadPermissive(setSquare(fp.fen, sq, next));
+  }, [fp, brush]);
 
   const jumpToPage = (p: number) => {
     setPage(p);
@@ -253,13 +288,13 @@ export default function BookReaderPage() {
                   orientation={fp.orientation}
                   dests={editing ? new Map() : fp.dests}
                   onMove={fp.onMove}
-                  onSelect={editing ? (sq: string) => fp.loadPermissive?.(setSquare(fp.fen, sq, brush)) ?? fp.load(setSquare(fp.fen, sq, brush)) : undefined}
+                  onSelect={editing ? paintSquare : undefined}
                 />
 
                 {editing && (
                   <div className="mt-2 rounded-xl border border-brand-500/40 bg-brand-500/5 p-2">
                     <div className="mb-1 text-[11px] text-brand-200">
-                      Pick a piece, then tap squares. The page stays on the left so you can compare.
+                      Pick a piece, then tap squares. Tapping the same piece again clears that square.
                     </div>
                     <div className="flex flex-col gap-1">
                       <div className="flex flex-wrap gap-1">
@@ -320,6 +355,29 @@ export default function BookReaderPage() {
                       editing ? "bg-emerald-600 hover:bg-emerald-500" : "bg-brand-600 hover:bg-brand-500"}`}>
                     {editing ? "✓ Done editing" : "✏️ Edit position"}
                   </button>
+                  {editing && activeDiagram && (
+                    <button
+                      onClick={async () => {
+                        setSaving("saving");
+                        const boardOnly = fp.fen.split(" ")[0] ?? "";
+                        try {
+                          const r = await fetch(
+                            `${API_BASE}/api/user-books/${encodeURIComponent(book.id)}/diagram/${activeDiagram.n}`,
+                            { method: "POST", credentials: "include",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ fen: boardOnly }) });
+                          if (!r.ok) throw new Error(String(r.status));
+                          setSaving("saved");
+                          // Keep the page in step with what is now stored.
+                          setBook((b) => b && ({ ...b, diagrams: b.diagrams.map((d) =>
+                            d.n === activeDiagram.n ? { ...d, fen: boardOnly, conf: 1 } : d) }));
+                        } catch { setSaving("failed"); }
+                      }}
+                      className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-500">
+                      {saving === "saving" ? "Saving…" : saving === "saved" ? "✓ Saved" :
+                       saving === "failed" ? "✕ Retry save" : "💾 Save correction"}
+                    </button>
+                  )}
                   {/* Deliberately NOT /play?fen= — that page ignores a fen
                       parameter entirely and would start an ordinary new game,
                       silently dropping the position the reader just chose. The
@@ -348,12 +406,21 @@ export default function BookReaderPage() {
       {/* Filmstrip — every position in the book, at a glance */}
       {book.diagrams.length > 0 && (
         <div className="fixed inset-x-0 bottom-0 z-20 border-t border-ink-700 bg-ink-950/95 px-3 py-2 backdrop-blur">
-          <div className="mb-1 flex items-center gap-2 pl-44 text-[11px] text-ink-400 sm:pl-48">
+          {/* Collapsible: on a long book this strip is hundreds of buttons
+           *  pinned across the bottom of every page, eating screen the reader
+           *  wants for the book itself. Collapsed it keeps one line, so you can
+           *  still see how many positions there are and reopen it in a tap. */}
+          <button
+            onClick={() => setStripOpen((v) => !v)}
+            className="mb-1 flex w-full items-center gap-2 pl-44 text-left text-[11px] text-ink-400 hover:text-ink-200 sm:pl-48"
+            aria-expanded={stripOpen}
+          >
             <span className="font-semibold text-ink-200">{book.diagrams.length} positions</span>
-            <span>· tap to jump</span>
-          </div>
+            <span>· {stripOpen ? "tap to jump" : "hidden"}</span>
+            <span className="ml-auto pr-2 text-ink-300">{stripOpen ? "▾ hide" : "▴ show"}</span>
+          </button>
           {/* left padding clears the global "Scan position" button, which sits bottom-left */}
-            <div className="flex gap-1.5 overflow-x-auto pb-1 pl-44 sm:pl-48">
+            <div className={`${stripOpen ? "flex" : "hidden"} gap-1.5 overflow-x-auto pb-1 pl-44 sm:pl-48`}>
             {book.diagrams.map((d) => (
               <button
                 key={d.n}

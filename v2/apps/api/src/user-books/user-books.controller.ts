@@ -13,13 +13,13 @@
 // Books are private to their uploader. These are copyrighted works a coach
 // owns a copy of — we are giving them a better way to read it, not building a
 // library, so there is no public listing and no cross-user access.
-import { Controller, Get, Param, Req, Res, NotFoundException, UnauthorizedException } from "@nestjs/common";
-import { createReadStream, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { Body, Controller, Get, Param, Post, Req, Res, BadRequestException, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import { appendFileSync, createReadStream, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const STORE = "/var/lib/chessguru/user-books";
 
-type Diagram = { page: number; bbox: number[] | null; fen: string; conf?: number };
+type Diagram = { page: number; bbox: number[] | null; fen: string; conf?: number; corrected?: boolean };
 
 function bookDir(id: string): string {
   // Defend the path: an id is an opaque handle, never a traversal.
@@ -87,6 +87,50 @@ export class UserBooksController {
       // the way the book labels its problems.
       diagrams: diagrams.map((d, i) => ({ n: i + 1, ...d })),
     };
+  }
+
+  /** Correct one diagram, from the reader.
+   *
+   *  A coach fixing a square while looking at the printed diagram beside it is
+   *  the most reliable label we will ever get — better than the chess
+   *  constraint pass, which proves legality but cannot know what was PRINTED.
+   *  Before this, that correction lived only in their browser: the stored
+   *  diagram kept the misread, reopening the book lost the fix, and the
+   *  training set never heard about it.
+   *
+   *  Appends to corrections.jsonl as well as updating the diagram, because the
+   *  ORIGINAL matters — a wrong read paired with its human fix is exactly the
+   *  example worth training on, and overwriting it would throw that away.
+   */
+  @Post(":id/diagram/:n")
+  correct(@Param("id") id: string, @Param("n") n: string,
+          @Body() body: { fen?: string }, @Req() req: any) {
+    const uid = this.requireUser(req);
+    const dir = bookDir(id);
+    if (!existsSync(dir)) throw new NotFoundException("book not found");
+    const meta = readJson<any>(join(dir, "meta.json"), {});
+    if (meta.owner && meta.owner !== uid) throw new NotFoundException("book not found");
+
+    const fen = String(body?.fen || "").trim();
+    // Board field only: 8 ranks of pieces and run-lengths. Anything else is a
+    // client bug or someone poking at the endpoint.
+    const board = fen.split(" ")[0] || "";
+    if (!/^([1-8pnbrqkPNBRQK]+\/){7}[1-8pnbrqkPNBRQK]+$/.test(board)) {
+      throw new BadRequestException("not a board position");
+    }
+    const idx = Number(n) - 1;             // the reader numbers them from 1
+    const diagrams = readJson<Diagram[]>(join(dir, "diagrams.json"), []);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= diagrams.length) {
+      throw new NotFoundException("diagram not found");
+    }
+    const before = diagrams[idx];
+    const wasFen = String(before?.fen ?? "");
+    diagrams[idx] = { ...(before as Diagram), fen, conf: 1, corrected: true } as Diagram;
+    writeFileSync(join(dir, "diagrams.json"), JSON.stringify(diagrams));
+    appendFileSync(join(dir, "corrections.jsonl"),
+      JSON.stringify({ n: idx + 1, page: before?.page, was: wasFen, now: fen,
+                       by: uid, at: new Date().toISOString() }) + "\n");
+    return { ok: true, n: idx + 1, was: wasFen, now: fen };
   }
 
   @Get(":id/page/:n")
