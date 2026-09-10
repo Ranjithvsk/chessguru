@@ -8,17 +8,75 @@ Also does what the in-service version could not: splits each spread at the
 gutter, which found diagrams on pages the whole frame missed, and maps the
 half-page boxes back into PAGE coordinates so the reader's hotspots land right.
 """
-import base64, json, os, shutil, subprocess, sys, time
+import base64, json, os, shutil, subprocess, sys, tempfile, time
 import cv2
 
 SRC = sys.argv[1] if len(sys.argv) > 1 else "/opt/chessguru-vision/books/pandolfini-pages"
 BOOK_ID = sys.argv[2] if len(sys.argv) > 2 else "pandolfini-deep-blue"
 TITLE = sys.argv[3] if len(sys.argv) > 3 else "Kasparov and Deep Blue (Pandolfini)"
 STORE = "/var/lib/chessguru/user-books"
-S = "/tmp/claude-1001/-home-dreamworld/ea849402-689f-4cad-afcf-f082be9a7d8a/scratchpad"
+# Scratch space for the request bodies. MUST be writable by whoever runs this:
+# ingest has to run as the API user (`ubuntu`) so the book it writes is writable
+# by the API afterwards, and a path under one developer's home is not.
+S = tempfile.mkdtemp(prefix="cg-ingest-")
 
 sys.path.insert(0, "/opt/chessguru-vision")
 import dream_ocr as d
+import numpy as _np
+import chess as _chess
+import chess_logic as _cl
+from diagram_sanity import why_not_a_position as sanity
+
+_LAB = ["B", "K", "N", "P", "Q", "R", "b", "k", "n", "p", "q", "r", "f"]
+_NAMES = [_chess.square_name(_chess.square(c, 7 - r)) for r in range(8) for c in range(8)]
+
+
+def logic_warnings(fen: str) -> list:
+    """What the logic engine already knows and the ingest used to discard."""
+    labels = []
+    for row in fen.split("/"):
+        for ch in row:
+            labels += ["f"] * int(ch) if ch.isdigit() else [ch]
+    if len(labels) != 64:
+        return []
+    probs = _np.full((64, 13), 0.01, dtype=_np.float32)
+    for i, l in enumerate(labels):
+        probs[i, _LAB.index(l)] = 0.95
+    try:
+        _o, _f, warns = _cl.apply_chess_logic(list(labels), probs, _NAMES, _LAB)
+        return warns
+    except Exception:
+        return []
+
+
+def dkey(page, bbox) -> str:
+    """floor, to match the API — Math.round and Python round() disagree on .5."""
+    if not bbox or len(bbox) < 4:
+        return "p%s" % page
+    return "p%s_%d_%d" % (page, int(((bbox[0] + bbox[2]) / 2) // 10) * 10,
+                          int(((bbox[1] + bbox[3]) / 2) // 10) * 10)
+
+
+def load_rulings(dest_dir: str) -> dict:
+    """Every diagram the coach has corrected or confirmed, keyed by position.
+    Re-ingesting must never silently discard human work."""
+    out = {}
+    p = os.path.join(dest_dir, "corrections.jsonl")
+    if not os.path.exists(p):
+        return out
+    for line in open(p):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+        except Exception:
+            continue
+        if r.get("action") == "reject" or not r.get("now"):
+            continue
+        out[r.get("key") or dkey(r.get("page"), r.get("bbox"))] = {
+            "fen": r["now"], "corrected": r.get("was") != r.get("now")}
+    return out
 
 dest = os.path.join(STORE, BOOK_ID)
 os.makedirs(os.path.join(dest, "pages"), exist_ok=True)
@@ -60,6 +118,8 @@ def status(**kw):
 
 pages = sorted(f for f in os.listdir(SRC) if f.lower().endswith((".jpg", ".png")))
 json.dump({"title": TITLE, "owner": None}, open(os.path.join(dest, "meta.json"), "w"))
+RULED = load_rulings(dest)
+print("preserving %d diagrams the coach has already ruled on" % len(RULED), flush=True)
 status(state="reading", pages=len(pages), done=0, diagrams=0)
 print("ingesting %d pages -> %s" % (len(pages), dest), flush=True)
 
@@ -132,8 +192,28 @@ for i, fn in enumerate(pages):
             continue
         kept.append((bbox, fen, conf, area))
     for bbox, fen, conf, _area in kept:
-        page_fens.append(fen)
-        diagrams.append({"page": i, "bbox": bbox, "fen": fen, "conf": conf})
+        # Is this a board at all? The extractor finds square-ish regions and the
+        # classifier reads 64 squares off whatever it is handed — Pandolfini's
+        # front COVER became a position with six white knights.
+        bad = sanity(fen)
+        if bad:
+            print("    page %d: dropped a non-position (%s)" % (i, bad[0]), flush=True)
+            continue
+        entry = {"page": i, "bbox": bbox, "fen": fen, "conf": conf}
+        # The logic engine's warnings were computed and thrown away. A diagram
+        # it already doubts must not be stored looking confident.
+        warns = logic_warnings(fen)
+        if warns:
+            entry["warnings"] = warns
+            entry["conf"] = min(float(conf or 1.0), 0.5)
+        # A coach's ruling outranks anything re-derived here.
+        prev = RULED.get(dkey(i, bbox))
+        if prev:
+            entry.update({"fen": prev["fen"], "conf": 1.0,
+                          "corrected": prev.get("corrected", True)})
+            entry.pop("warnings", None)
+        page_fens.append(entry["fen"])
+        diagrams.append(entry)
     if use:
         try:
             per = {n: engines[n].run(img) for n in use}
