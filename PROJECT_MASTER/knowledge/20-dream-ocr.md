@@ -121,6 +121,38 @@ For book ingest, run **Paddle alone**: a 300-page book is ~2 hours instead of
 ~10. Keep the rest for hard input — photographs, skew, unusual fonts — which is
 untested because we have no such pages yet.
 
+### GPU engines (added 2026-09-10, after the owner pointed out Vinayaka has a 3080)
+
+My "a VLM is not practical" verdict was about the Linux box, which has no GPU. It
+does not apply to Vinayaka. Model choice is forced by 10 GB on an **Ampere** card:
+Qwen3-VL-8B needs ~16 GB in bf16, and its FP8 build needs Ada or newer, so 4B is
+the largest of the current line that fits.
+
+| Engine | Four-diagram page | Prose page | sec/page | Confidence | Runs on |
+|---|---|---|---|---|---|
+| **PaddleOCR** | 100% | 100% | 16-32 | 0.98 | CPU |
+| **GOT-OCR 2.0** | 100% | 99.1% | ~17 | 0.97-0.99 | GPU |
+| **Qwen3-VL-4B** | 100% | 99.1% | 14-23 | 1.00 flat | GPU |
+| Surya 0.22.1 | 100% | — | ~55 | 0.95 | CPU |
+| Tesseract | 69.8% | 100% | ~1 | 0.78 | CPU |
+| docTR | 60.0% | 100% | 2-4 | 0.92 | CPU |
+
+**Pin the VLM to the card.** `device_map="auto"` let accelerate reserve headroom
+and offload layers to CPU — *"Some parameters are on the meta device"* — which
+turned a 22s page into **660s**. Pinning to `cuda:0` was a 29x speedup. It sits
+at ~9.7 GB of 10 GB, which is tight; a much larger page may need downscaling.
+
+Only ONE large model stays resident, because Qwen alone is ~6 GB of a 10 GB card.
+
+**Qwen is the only engine that can be told what it is looking at.** "Keep
+figurine symbols, transcribe moves exactly, do not solve or explain" is an
+instruction no classical engine can accept. That, not raw accuracy, is why it
+earns a slot — on clean pages it merely ties.
+
+Its confidence is the mean probability of the tokens it actually chose, because a
+VLM has no per-word confidence and inventing one would defeat the purpose. It
+still reads ~1.00 on easy pages, so it is NOT trusted for spine selection.
+
 ### The measurement trap I fell into
 
 The first sweep scored each engine subset against the FOUR-ENGINE CONSENSUS and
