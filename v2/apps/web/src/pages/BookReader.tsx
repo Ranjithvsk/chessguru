@@ -235,9 +235,13 @@ export default function BookReaderPage() {
           ))}
         </div>
 
-        {/* Board — sticky so it stays with you as the book scrolls */}
-        <aside className="lg:sticky lg:top-20 lg:self-start">
-          <div className="rounded-2xl border border-ink-700 bg-ink-900 p-3">
+        {/* Board — sticky so it stays with you as the book scrolls.
+         *  It must SCROLL WITHIN ITSELF: with the editor palette open the panel
+         *  is taller than the viewport, and a sticky element simply clips —
+         *  the buttons below the board became unreachable. Capped to the space
+         *  between the header and the filmstrip, then scrollable. */}
+        <aside className="lg:sticky lg:top-20 lg:self-start lg:max-h-[calc(100vh-7.5rem)] lg:overflow-y-auto lg:pr-1">
+          <div className="rounded-2xl border border-ink-700 bg-ink-900 p-3 pb-4">
             {activeDiagram ? (
               <>
                 <div className="mb-2 flex items-center justify-between">
