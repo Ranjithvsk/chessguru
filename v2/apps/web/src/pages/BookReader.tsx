@@ -404,6 +404,37 @@ export default function BookReaderPage() {
                   {saving === "failed" && saveErr && (
                     <p className="w-full text-[11px] text-rose-300">{saveErr}</p>
                   )}
+                  {/* Confirming a GOOD read matters as much as fixing a bad
+                      one. It is 64 human-verified squares — the same training
+                      value as a correction — and it is the only way to measure
+                      real accuracy rather than guess at it. Posts the position
+                      unchanged, so the record shows was == now. */}
+                  {!editing && activeDiagram && (
+                    <button
+                      disabled={saving === "saving"}
+                      onClick={async () => {
+                        setSaving("saving"); setSaveErr("");
+                        const boardOnly = fp.fen.split(" ")[0] ?? "";
+                        try {
+                          const r = await fetch(
+                            `${API_BASE}/api/user-books/${encodeURIComponent(book.id)}/diagram/${activeDiagram.n}`,
+                            { method: "POST", credentials: "include",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ fen: boardOnly }) });
+                          if (!r.ok) {
+                            let why = `HTTP ${r.status}`;
+                            try { const j = await r.json(); if (j?.message) why = String(j.message); } catch { /* not json */ }
+                            throw new Error(why);
+                          }
+                          setSaving("saved");
+                          setBook((b) => b && ({ ...b, diagrams: b.diagrams.map((d) =>
+                            d.n === activeDiagram.n ? { ...d, conf: 1 } : d) }));
+                        } catch (e) { setSaving("failed"); setSaveErr((e as Error).message || ""); }
+                      }}
+                      className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-60">
+                      ✓ This one is correct
+                    </button>
+                  )}
                   {/* Deliberately NOT /play?fen= — that page ignores a fen
                       parameter entirely and would start an ordinary new game,
                       silently dropping the position the reader just chose. The
