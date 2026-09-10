@@ -240,7 +240,9 @@ export class VisionService {
       // that overturns a CONFIDENT read is held for review instead of feeding
       // training unchecked — that is the case where a user slip and a real
       // catch look identical, and students use the scanner too.
-      approved: typeof input.modelConf === "number" ? input.modelConf < 0.9 : true,
+      // Auto-approve only what the model was unsure about; the threshold is a setting the
+      // owner can move from /admin/vision as the review queue earns trust (feature 3).
+      approved: typeof input.modelConf === "number" ? input.modelConf < (await this.autoApproveBelow()) : true,
     };
     const r = await this.col().insertOne(doc as any);
     if (input.scanId) {
@@ -277,6 +279,27 @@ export class VisionService {
       corrections: 0, status: "scanned",
     } as any);
     return id;
+  }
+
+  private _settingsCache: { at: number; autoApproveBelow: number } | null = null;
+  /** visionSettings._id="vision" holds the few knobs the admin page exposes. Cached a minute so a
+   *  burst of 64 corrections does not read Mongo 64 times. */
+  async autoApproveBelow(): Promise<number> {
+    if (this._settingsCache && Date.now() - this._settingsCache.at < 60_000) return this._settingsCache.autoApproveBelow;
+    const doc = await this.conn.db!.collection<any>("visionSettings").findOne({ _id: "vision" as any }).catch(() => null);
+    const v = typeof doc?.autoApproveBelow === "number" && doc.autoApproveBelow >= 0 && doc.autoApproveBelow <= 1 ? doc.autoApproveBelow : 0.9;
+    this._settingsCache = { at: Date.now(), autoApproveBelow: v };
+    return v;
+  }
+
+  /** A coach saying "this position is correct" (feature 1). Positive confirmation beats silence:
+   *  it is a label for the whole board, and it records that the weak squares were looked at. */
+  async acceptScan(userId: string, scanId: string, finalFen: string | null, weakConfirmed: number | null): Promise<boolean> {
+    const r = await this.conn.db!.collection<any>("visionScans").updateOne(
+      { _id: String(scanId).slice(0, 40), userId },
+      { $set: { accepted: true, acceptedAt: new Date(), ...(finalFen ? { finalFen: String(finalFen).slice(0, 120) } : {}), ...(weakConfirmed != null ? { weakConfirmed } : {}) } },
+    );
+    return r.matchedCount === 1;
   }
 
   async logScanOnly(boardPngBase64: string, source: string): Promise<void> {

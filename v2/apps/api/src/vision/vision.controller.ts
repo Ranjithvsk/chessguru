@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, UnauthorizedException, BadRequestException } from "@nestjs/common";
+import { Body, Controller, Param, Get, Post, Req, UnauthorizedException, BadRequestException } from "@nestjs/common";
 import { VisionService, type FeedbackInput } from "./vision.service";
 
 interface ClassifyBoardBody {
@@ -93,6 +93,14 @@ export class VisionController {
    *  never presses "Server AI" (client-side detection alone doesn't log).
    *  Body: { boardPngBase64, source } where source is a free-form tag
    *  ("upload", "camera", "paste", etc.). Response is trivial. */
+  /** "Use this position" — the coach confirms the scan was right (feature 1). */
+  @Post("scan/:id/accept")
+  async acceptScan(@Req() req: any, @Param("id") id: string, @Body() body: { finalFen?: string; weakConfirmed?: number }) {
+    if (!req.session?.userId) throw new UnauthorizedException("login required");
+    const ok = await this.svc.acceptScan(String(req.session.userId), id, body?.finalFen ?? null, typeof body?.weakConfirmed === "number" ? body.weakConfirmed : null);
+    return { ok };
+  }
+
   @Post("log-scan")
   async logScan(@Req() req: any, @Body() body: { boardPngBase64: string; source?: string }) {
     if (!req.session?.userId) throw new UnauthorizedException("login required to scan");

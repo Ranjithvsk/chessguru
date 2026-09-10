@@ -169,6 +169,20 @@ export default function BoardEditorPage() {
   const [editSide, setEditSide] = useState<"w" | "b">("w");
   const editorRef = useRef<Chess>(new Chess());
   const lastScanIdRef = useRef<string | null>(null);
+  const [scanConfirmed, setScanConfirmed] = useState(false);
+  // "Use this position" (feature 1): a positive confirmation beats silence. The weak-square count
+  // rides along so the record says those squares were looked at, not merely tolerated (feature 2).
+  const confirmScan = async () => {
+    const id = lastScanIdRef.current; if (!id) return;
+    setScanConfirmed(true);
+    try {
+      await fetch(`${API_BASE}/api/vision/scan/${encodeURIComponent(id)}/accept`, {
+        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ finalFen: fp.fen, weakConfirmed: visionMeta?.uncertain ?? 0 }),
+      });
+      setMsg("✓ Marked correct — thank you, that helps the scanner learn.");
+    } catch { /* best-effort */ }
+  };
   const [editorTick, setEditorTick] = useState(0); // force re-render on editor mutations
   useEffect(() => {
     // Sync editor buffer from current board state whenever the user enters
@@ -360,6 +374,7 @@ export default function BoardEditorPage() {
       // The server now records every classified board and hands back its id. Corrections made
       // to this board carry it, so the admin analytics can tell "accepted as read" from "edited".
       lastScanIdRef.current = typeof j.scanId === "string" ? j.scanId : null;
+      setScanConfirmed(false);
       const avgConf = (j.squares.flat().reduce((s: number, sq: any) => s + sq.confidence, 0) / 64 * 100).toFixed(0);
       const pieceCount = j.fen.split(" ")[0].replace(/[^KQRBNPkqrbnp]/g, "").length;
       setServerMsg({
@@ -853,6 +868,13 @@ export default function BoardEditorPage() {
           )}
           {rawUploadDataUrl && (
             <div className="mt-3 border-t border-brand-500/20 pt-2 flex flex-wrap gap-2 items-center">
+              {visionSnapshot && lastScanIdRef.current && (
+                <button onClick={() => void confirmScan()} disabled={serverBusy || scanConfirmed}
+                  title={visionMeta?.uncertain ? `Confirm after checking the ${visionMeta.uncertain} uncertain square${visionMeta.uncertain > 1 ? "s" : ""} (ringed)` : "Confirm the scan read the position correctly"}
+                  className="inline-flex items-center gap-1 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-600 disabled:opacity-50">
+                  {scanConfirmed ? "✓ Confirmed" : visionMeta?.uncertain ? `✓ Correct — checked ${visionMeta.uncertain} uncertain` : "✓ Position is correct"}
+                </button>
+              )}
               {visionSnapshot && (
                 <button onClick={runServerClassify} disabled={serverBusy}
                   className="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-500 disabled:cursor-wait disabled:bg-brand-800">

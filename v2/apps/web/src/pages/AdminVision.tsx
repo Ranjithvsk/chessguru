@@ -19,18 +19,21 @@ type Status = {
   scans: { ok: boolean; byDay: Record<string, number>; byTag: Record<string, number>; totalFiles: number; error?: string };
   corrections: { byDay: Record<string, number>; autoApprovedByDay: Record<string, number>; total: number; lastAt: string | null };
   cornerLabels: { byDay: Record<string, number>; total: number; lastAt: string | null };
-  retrain: { ok: boolean; runs: Array<{ valAcc: number | null; note: string }>; lastLines: string[]; lastClassCounts: Record<string, number>; error?: string };
+  retrain: { ok: boolean; runs: Array<{ valAcc: number | null; note: string; startedAt?: string | null }>; lastLines: string[]; lastClassCounts: Record<string, number>; error?: string };
   trainingSet: { byClass: Record<string, { correction: number; seed: number }>; total: number; unapproved: number };
   pendingReview: number;
 };
-type Win = { scanned: number; edited: number; acceptedAsRead: number; correctPct: number | null; squaresCorrected: number; squareAccuracyPct: number | null; avgConfPct: number | null; weakSquaresPerScan: number | null; scanners: number };
+type Win = { scanned: number; edited: number; acceptedAsRead: number; confirmed: number; correctPct: number | null; squaresCorrected: number; squareAccuracyPct: number | null; avgConfPct: number | null; weakSquaresPerScan: number | null; scanners: number };
 type Analytics = {
   since: string | null; all: Win; last30: Win; last7: Win;
   confusion: Array<{ modelSaid: string; coachSaid: string; n: number }>;
   books: { reachable: boolean; total?: number; done?: number; inProgress?: number; pages?: number; pagesDone?: number; diagrams?: number; error?: string };
   readerFixes: { books: number; diagrams: number; corrected: number; disputed: number; events: number };
   legacy: { seedingCorrections: number; scanImagesOnDisk: number; note: string };
+  benchmark: { size: number; runs: Array<{ at: string; n: number; positionAccPct: number | null; squareAccPct: number | null; model?: string | null }> };
+  perBook: Array<{ book: string; diagrams: number; avgConfPct: number | null; corrected: number; disputed: number; correctedPct: number | null; events: number }>;
 };
+type Settings = { autoApproveBelow: number; reviewed: number; approvedByHuman: number; rejectedByHuman: number; humanApprovalPct: number | null; lastStallMailAt: string | null };
 type ReviewRow = { id: string; piece: string; color: string; setName: string | null; modelConf: number | null; modelPiece: string | null; modelColor: string | null; by: string | null; at: string | null; thumb: string | null };
 
 const mb = (b: number) => `${(b / 1_048_576).toFixed(1)} MB`;
@@ -78,7 +81,15 @@ export default function AdminVisionPage() {
   const { data, isLoading, error } = useQuery({ queryKey: ["admin-vision-status"], queryFn: () => get<Status>("/api/admin/vision/status"), refetchInterval: 60_000 });
   const { data: review } = useQuery({ queryKey: ["admin-vision-review"], queryFn: () => get<{ rows: ReviewRow[] }>("/api/admin/vision/review?limit=60"), refetchInterval: 60_000 });
   const { data: an } = useQuery({ queryKey: ["admin-vision-analytics"], queryFn: () => get<Analytics>("/api/admin/vision/analytics"), refetchInterval: 60_000 });
+  const { data: st } = useQuery({ queryKey: ["admin-vision-settings"], queryFn: () => get<Settings>("/api/admin/vision/settings") });
+  const [threshold, setThreshold] = useState<string>("");
   const [busy, setBusy] = useState<string | null>(null);
+  const saveThreshold = async () => {
+    const v = Number(threshold); if (!Number.isFinite(v) || v < 0 || v > 1) return;
+    setBusy("threshold");
+    try { await post("/api/admin/vision/settings", { autoApproveBelow: v }); setThreshold(""); }
+    finally { setBusy(null); void qc.invalidateQueries({ queryKey: ["admin-vision-settings"] }); }
+  };
 
   if (authLoading) return <div className="p-6 text-ink-400">Loading…</div>;
   if (auth && !auth.loggedIn) return <Navigate to="/login" replace />;
@@ -131,6 +142,7 @@ export default function AdminVisionPage() {
                 <div className="mt-1 text-2xl font-semibold text-white">{w.scanned} <span className="text-sm font-normal text-ink-400">positions scanned</span></div>
                 <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
                   <div className="text-ink-400">correct as read</div><div className="text-right tabular-nums text-emerald-300">{w.acceptedAsRead}{w.correctPct != null && <span className="text-ink-500"> · {w.correctPct}%</span>}</div>
+                  <div className="text-ink-400">confirmed by a coach</div><div className="text-right tabular-nums text-emerald-200">{w.confirmed}</div>
                   <div className="text-ink-400">edited by a coach</div><div className="text-right tabular-nums text-amber-300">{w.edited}</div>
                   <div className="text-ink-400">squares corrected</div><div className="text-right tabular-nums text-ink-200">{w.squaresCorrected}</div>
                   <div className="text-ink-400">square accuracy</div><div className="text-right tabular-nums text-white">{w.squareAccuracyPct != null ? `${w.squareAccuracyPct}%` : "—"}</div>
@@ -195,7 +207,7 @@ export default function AdminVisionPage() {
             <>
               <div className="flex max-w-full flex-wrap gap-1">
                 {s.retrain.runs.map((r, i) => (
-                  <span key={i} title={r.note} className={`rounded px-2 py-0.5 text-xs ${r.valAcc == null ? "bg-rose-900 text-rose-200" : "bg-ink-800 text-ink-200"}`}>{r.valAcc == null ? "✗" : `${r.valAcc}%`}</span>
+                  <span key={i} title={`${r.startedAt ? r.startedAt.slice(0, 10) + " · " : ""}${r.note}`} className={`rounded px-2 py-0.5 text-xs ${r.valAcc == null ? "bg-rose-900 text-rose-200" : "bg-ink-800 text-ink-200"}`}>{r.valAcc == null ? "✗" : `${r.valAcc}%`}</span>
                 ))}
               </div>
               <p className="mt-2 text-xs text-ink-400">Validation accuracy per run, oldest to newest. A flat line means the training set did not change between runs.</p>
@@ -233,6 +245,55 @@ export default function AdminVisionPage() {
         </div>
         <p className="mt-2 text-xs text-ink-400">Amber means fewer than ten samples. Those classes are where the model will keep guessing.</p>
       </Card>
+
+      <div className="grid min-w-0 gap-4 md:grid-cols-2">
+        <Card title="Auto-approve threshold">
+          {st ? (
+            <>
+              <p className="text-sm text-ink-300">A correction is trained on automatically when the model's own confidence was below <span className="font-semibold text-white">{st.autoApproveBelow}</span>. Above it, the correction waits in the queue for you.</p>
+              <p className="mt-2 text-sm text-ink-300">Your reviews so far: <span className="text-white">{st.reviewed}</span> · approved {st.approvedByHuman} · rejected {st.rejectedByHuman}{st.humanApprovalPct != null && <span> · <span className="font-semibold text-emerald-300">{st.humanApprovalPct}%</span> approved</span>}</p>
+              <p className="mt-1 text-xs text-ink-500">When that percentage stays high for a month, raise the threshold and the queue becomes an exception list. If coaches turn out to be wrong often, lower it.</p>
+              <div className="mt-3 flex items-center gap-2">
+                <input value={threshold} onChange={(e) => setThreshold(e.target.value)} placeholder={String(st.autoApproveBelow)} inputMode="decimal" className="w-24 rounded border border-ink-700 bg-ink-950 px-2 py-1 text-sm text-white" />
+                <button onClick={() => void saveThreshold()} disabled={busy === "threshold" || !threshold} className="rounded bg-brand-600 px-3 py-1 text-sm font-semibold text-white disabled:opacity-50">Set</button>
+              </div>
+              {st.lastStallMailAt && <p className="mt-2 text-xs text-amber-300">Stall alert last sent {ago(st.lastStallMailAt)}.</p>}
+            </>
+          ) : <div className="text-sm text-ink-500">Loading…</div>}
+        </Card>
+        <Card title={`Held-out benchmark — ${an?.benchmark.size ?? 0} verified diagrams`}>
+          {an?.benchmark.runs.length ? (
+            <>
+              <div className="flex flex-wrap gap-1">
+                {an.benchmark.runs.map((r, i) => <span key={i} title={`${new Date(r.at).toLocaleString()} · ${r.n} diagrams · squares ${r.squareAccPct}%`} className="rounded bg-ink-800 px-2 py-0.5 text-xs text-ink-200">{r.positionAccPct != null ? `${r.positionAccPct}%` : "—"}</span>)}
+              </div>
+              <p className="mt-2 text-xs text-ink-400">Whole-position accuracy per nightly run on diagrams the model never trains on, oldest to newest. Latest: {an.benchmark.runs[an.benchmark.runs.length - 1]?.positionAccPct ?? "—"}% positions, {an.benchmark.runs[an.benchmark.runs.length - 1]?.squareAccPct ?? "—"}% squares.</p>
+            </>
+          ) : <p className="text-sm text-ink-500">No run yet. The benchmark scores after each nightly retrain; seeded from reader-verified book diagrams and it grows with every correction you approve.</p>}
+        </Card>
+      </div>
+
+      {an && an.perBook.length > 0 && (
+        <Card title="Accuracy by book (books served from this server)">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left text-xs uppercase text-ink-500"><tr><th className="py-1">Book</th><th>Diagrams</th><th>Avg conf</th><th>Reader-corrected</th><th>Disputed</th></tr></thead>
+              <tbody>
+                {an.perBook.map((b) => (
+                  <tr key={b.book} className="border-t border-ink-800">
+                    <td className="break-all py-1.5 text-white">{b.book}</td>
+                    <td className="tabular-nums text-ink-300">{b.diagrams}</td>
+                    <td className="tabular-nums text-ink-300">{b.avgConfPct != null ? `${b.avgConfPct}%` : "—"}</td>
+                    <td className={`tabular-nums ${(b.correctedPct ?? 0) > 5 ? "text-amber-300" : "text-ink-300"}`}>{b.corrected}{b.correctedPct != null && <span className="text-ink-500"> · {b.correctedPct}%</span>}</td>
+                    <td className="tabular-nums text-ink-300">{b.disputed}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-2 text-xs text-ink-400">A high corrected share on one book usually means one typeface the model has not seen enough of. That is the book to feed the training set from.</p>
+        </Card>
+      )}
 
       <Card title={`Review queue — ${s.pendingReview} corrections the model was confident about`}>
         <p className="mb-3 text-sm text-ink-300">

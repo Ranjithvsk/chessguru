@@ -12,7 +12,7 @@
 // next training set. That queue is the mechanism the 100% goal actually depends on.
 //
 // Read-mostly. The only writes are approve / reject on a correction, admin-gated like the rest.
-import { Controller, ForbiddenException, Get, Param, Post, Query, Req } from "@nestjs/common";
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Param, Post, Query, Req } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection, Types } from "mongoose";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -115,14 +115,15 @@ export class VisionAdminController {
     const now = Date.now();
     const win = async (days: number | null) => {
       const q: any = days ? { at: { $gte: new Date(now - days * 86_400_000) } } : {};
-      const [total, edited, agg] = await Promise.all([
+      const [total, edited, confirmed, agg] = await Promise.all([
         scans.countDocuments(q),
         scans.countDocuments({ ...q, corrections: { $gt: 0 } }),
+        scans.countDocuments({ ...q, accepted: true }),
         scans.aggregate([{ $match: q }, { $group: { _id: null, corrections: { $sum: "$corrections" }, avgConf: { $avg: "$avgConf" }, lowSq: { $avg: "$lowConfSquares" }, users: { $addToSet: "$userId" } } }]).toArray(),
       ]);
       const a = agg[0] ?? { corrections: 0, avgConf: null, lowSq: null, users: [] };
       return {
-        scanned: total, edited, acceptedAsRead: total - edited,
+        scanned: total, edited, acceptedAsRead: total - edited, confirmed,
         correctPct: total ? Math.round(((total - edited) / total) * 1000) / 10 : null,
         squaresCorrected: a.corrections,
         squareAccuracyPct: total ? Math.round((1 - a.corrections / (64 * total)) * 1000) / 10 : null,
@@ -166,7 +167,29 @@ export class VisionAdminController {
       scanImagesOnDisk: this.scansByDay(lastNDays(1)).totalFiles,
       note: "Before 2026-09-10 no scan wrote a record of itself. The 128 corrections from 11 August were one seeding session by one person, not coach activity.",
     };
-    return { since: first[0]?.at ?? null, all, last30: d30, last7: d7, confusion: confusion.map((c) => ({ modelSaid: c._id.from, coachSaid: c._id.to, n: c.n })), books, readerFixes, legacy };
+    const benchmark = await this.conn.db!.collection<any>("visionBenchmarkRuns").find({}, { projection: { at: 1, n: 1, positionAccPct: 1, squareAccPct: 1, model: 1 } }).sort({ at: -1 }).limit(30).toArray();
+    const benchmarkSize = await this.conn.db!.collection<any>("visionBenchmark").countDocuments({});
+    return { benchmark: { size: benchmarkSize, runs: benchmark.reverse() }, perBook: this.perBookAccuracy(), since: first[0]?.at ?? null, all, last30: d30, last7: d7, confusion: confusion.map((c) => ({ modelSaid: c._id.from, coachSaid: c._id.to, n: c.n })), books, readerFixes, legacy };
+  }
+
+  /** Per-book: how sure the extractor was and how often readers had to fix it (feature 5). Only
+   *  books served from this machine carry the per-diagram data; the library counts are elsewhere. */
+  private perBookAccuracy() {
+    const STORE = "/var/lib/chessguru/user-books";
+    const out: Array<{ book: string; diagrams: number; avgConfPct: number | null; corrected: number; disputed: number; correctedPct: number | null; events: number }> = [];
+    try {
+      for (const id of readdirSync(STORE)) {
+        try {
+          const d = JSON.parse(readFileSync(`${STORE}/${id}/diagrams.json`, "utf8")) as Array<{ conf?: number; corrected?: boolean; disputed?: boolean }>;
+          const confs = d.map((x) => Number(x.conf)).filter((n) => Number.isFinite(n));
+          const corrected = d.filter((x) => x.corrected).length;
+          let events = 0; try { events = readFileSync(`${STORE}/${id}/corrections.jsonl`, "utf8").split("\n").filter(Boolean).length; } catch { /* none */ }
+          out.push({ book: id, diagrams: d.length, avgConfPct: confs.length ? Math.round((confs.reduce((a, b) => a + b, 0) / confs.length) * 1000) / 10 : null,
+                     corrected, disputed: d.filter((x) => x.disputed).length, correctedPct: d.length ? Math.round((corrected / d.length) * 1000) / 10 : null, events });
+        } catch { /* not a book dir */ }
+      }
+    } catch { /* store absent */ }
+    return out.sort((a, b) => (b.correctedPct ?? 0) - (a.correctedPct ?? 0));
   }
 
   private bookDiagramCorrections() {
@@ -182,6 +205,30 @@ export class VisionAdminController {
       }
     } catch { /* store absent */ }
     return { books, diagrams, corrected, disputed, events };
+  }
+
+  @Get("admin/vision/settings")
+  async getSettings(@Req() req: any) {
+    this.guard(req);
+    const doc = await this.conn.db!.collection<any>("visionSettings").findOne({ _id: "vision" as any });
+    const refs = this.refs();
+    // How the review queue is being decided — the evidence for moving the threshold (feature 3).
+    const [approvedByHuman, rejectedByHuman] = await Promise.all([
+      refs.countDocuments({ source: "correction", reviewedBy: { $exists: true }, approved: true }),
+      refs.countDocuments({ source: "correction", reviewedBy: { $exists: true }, rejected: true }),
+    ]);
+    const reviewed = approvedByHuman + rejectedByHuman;
+    return { autoApproveBelow: typeof doc?.autoApproveBelow === "number" ? doc.autoApproveBelow : 0.9, reviewed, approvedByHuman, rejectedByHuman,
+             humanApprovalPct: reviewed ? Math.round((approvedByHuman / reviewed) * 1000) / 10 : null, lastStallMailAt: doc?.lastStallMailAt ?? null };
+  }
+
+  @Post("admin/vision/settings")
+  async setSettings(@Req() req: any, @Body() body: { autoApproveBelow?: number }) {
+    this.guard(req);
+    const v = Number(body?.autoApproveBelow);
+    if (!Number.isFinite(v) || v < 0 || v > 1) throw new BadRequestException("autoApproveBelow must be between 0 and 1");
+    await this.conn.db!.collection<any>("visionSettings").updateOne({ _id: "vision" as any }, { $set: { autoApproveBelow: v, updatedBy: req.session.userId, updatedAt: new Date() } }, { upsert: true });
+    return { ok: true, autoApproveBelow: v };
   }
 
   // ---- pieces ---------------------------------------------------------------------------------
@@ -269,11 +316,14 @@ export class VisionAdminController {
     try {
       const text = readFileSync(RETRAIN_LOG, "utf8");
       const lines = text.split("\n");
-      const runs: Array<{ valAcc: number | null; note: string }> = [];
+      const runs: Array<{ valAcc: number | null; note: string; startedAt: string | null }> = [];
+      let startedAt: string | null = null;
       for (const l of lines) {
+        const st = l.match(/retrain started (\S+) ===/);
+        if (st) { startedAt = st[1] ?? null; continue; }
         const m = l.match(/best val_acc=([\d.]+)%/);
-        if (m) runs.push({ valAcc: Number(m[1]), note: l.replace(/^\[[\d:]+\]\s*/, "").slice(0, 120) });
-        else if (/refus|FAIL|error/i.test(l)) runs.push({ valAcc: null, note: l.slice(0, 120) });
+        if (m) { runs.push({ valAcc: Number(m[1]), note: l.replace(/^\[[\d:]+\]\s*/, "").slice(0, 120), startedAt }); startedAt = null; }
+        else if (/refus|FAIL|error/i.test(l)) { runs.push({ valAcc: null, note: l.slice(0, 120), startedAt }); startedAt = null; }
       }
       const counts: Record<string, number> = {};
       for (const l of lines) { const m = l.match(/^\s*([A-Za-z]{2})\s+train=\s*(\d+)\s+val=\s*(\d+)/); if (m) counts[m[1] as string] = Number(m[2]) + Number(m[3]); }

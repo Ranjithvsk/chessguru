@@ -45,3 +45,12 @@
 
 ## Addendum (same day)
 - Every classified board now writes a `visionScans` record (id, fen, avg/min conf, weak squares, warnings); corrections carry `scanId`, so scans split into "accepted as read" vs "edited". `GET /api/admin/vision/analytics` + an Analytics section on /admin/vision: positions scanned (7d/30d/all), correct %, squares corrected, square accuracy, confidence, books from the book host (187 books, 43,549 pages, 67,847 diagrams), reader fixes on locally served books, confusion list. History before 2026-09-10 is labelled as pre-instrumentation.
+
+## Addendum 2 (same day) — the seven suggestions, built
+1. `POST /api/vision/scan/:id/accept` + "✓ Position is correct" button in BoardEditor (weak-square count recorded).
+2. Confirm label names the uncertain-square count; rings already mark them.
+3. `visionSettings.autoApproveBelow` (default 0.9) read by recordCorrection (60 s cache); admin GET/POST settings + human approval stats on the page.
+4. `/opt/chessguru-vision/benchmark.py` scores the live service on `visionBenchmark` (seeded: 10 reader-verified pandolfini diagrams) → `visionBenchmarkRuns`; hooked into chess-vision-retrain.sh after the model install; trend on the page.
+5. Per-book accuracy table from `/var/lib/chessguru/user-books/*/diagrams.json`.
+6. Retrain runs now dated on the page (log already had "retrain started <iso>").
+7. `VisionStallService`: daily check (no approved correction in 7 d, or served ONNX unchanged) → email ERROR_ALERT_TO, max one per 3 days.
