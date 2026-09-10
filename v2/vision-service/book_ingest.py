@@ -60,6 +60,39 @@ def _legal(fen: str) -> bool:
     return b.count("K") == 1 and b.count("k") == 1
 
 
+def _read_text(book_id, page_no, img, page_fens, moves, ocr_pages, labels_dir):
+    """Dream OCR over one page, with this page's diagrams as candidate positions.
+
+    Optional on purpose. If dream_ocr or its engines are unavailable the book
+    still ingests exactly as before — diagrams only — because a coach waiting on
+    an upload should never lose the whole book to a missing OCR dependency.
+    """
+    try:
+        import dream_ocr
+    except Exception:
+        return
+    try:
+        r = dream_ocr.read_page(img, candidate_fens=page_fens)
+    except Exception as e:
+        log.warning("book %s page %d text read failed: %s", book_id, page_no, e)
+        return
+    ocr_pages.append({"page": page_no, "text": r.get("text", ""),
+                      "moves": r.get("moves", []),
+                      "verified": r.get("movesVerified", 0)})
+    for t in r.get("tokens", []):
+        if t.get("kind") == "move" and t.get("verified"):
+            moves.append({"page": page_no, "san": t.get("text"),
+                          "printed": t.get("original") or t.get("text")})
+    # Every PROVED move is a certain training pair, harvested for free.
+    if labels_dir:
+        try:
+            toks = [dream_ocr.Token(**t) for t in r.get("tokens", [])]
+            dream_ocr.export_training_pairs(img, toks, labels_dir,
+                                            source="%s_p%04d" % (book_id, page_no))
+        except Exception as e:
+            log.warning("book %s page %d label export failed: %s", book_id, page_no, e)
+
+
 def ingest(book_id: str, pdf_path: str, classify_image, detect_boards,
            dpi: int = 150, max_pages: int = 400) -> None:
     """Render every page, detect boards, read each one. Blocking; call in a thread.
@@ -77,6 +110,9 @@ def ingest(book_id: str, pdf_path: str, classify_image, detect_boards,
     pages_dir = os.path.join(_book_dir(book_id), "pages")
     os.makedirs(pages_dir, exist_ok=True)
     diagrams: list[dict[str, Any]] = []
+    moves: list[dict[str, Any]] = []
+    ocr_pages: list[dict[str, Any]] = []
+    labels_dir = os.path.join(_book_dir(book_id), "proven-labels")
     t0 = time.time()
     try:
         doc = fitz.open(pdf_path)
@@ -119,6 +155,7 @@ def ingest(book_id: str, pdf_path: str, classify_image, detect_boards,
                 _write_status(book_id, done=i + 1, diagrams=len(diagrams))
                 continue
 
+            page_fens: list[str] = []
             for box, cb in page_boards:
                 if not cb:
                     continue
@@ -133,20 +170,32 @@ def ingest(book_id: str, pdf_path: str, classify_image, detect_boards,
                 # A page of prose yields boards that cannot be legal positions.
                 if not _legal(fen):
                     continue
+                page_fens.append(fen)
                 diagrams.append({
                     "page": i,
                     "bbox": [round(v) for v in box] if box else None,
                     "fen": fen,
                     "conf": (r.get("meta") or {}).get("avgConfidence"),
                 })
-            _write_status(book_id, done=i + 1, diagrams=len(diagrams))
+
+            # Read the page's TEXT too, with the diagrams we just found as the
+            # candidate positions. This is what turns a book from a set of
+            # pictures into something searchable and playable: the move list
+            # beside each diagram, with the legal ones proved.
+            _read_text(book_id, i, img, page_fens, moves, ocr_pages, labels_dir)
+            _write_status(book_id, done=i + 1, diagrams=len(diagrams),
+                          moves=len(moves))
 
         with open(os.path.join(_book_dir(book_id), "diagrams.json"), "w") as f:
             json.dump(diagrams, f)
+        with open(os.path.join(_book_dir(book_id), "text.json"), "w") as f:
+            json.dump(ocr_pages, f)
+        with open(os.path.join(_book_dir(book_id), "moves.json"), "w") as f:
+            json.dump(moves, f)
         _write_status(book_id, state="done", diagrams=len(diagrams),
-                      seconds=round(time.time() - t0, 1))
-        log.info("book %s ingested: %d pages, %d diagrams, %.0fs",
-                 book_id, n, len(diagrams), time.time() - t0)
+                      moves=len(moves), seconds=round(time.time() - t0, 1))
+        log.info("book %s ingested: %d pages, %d diagrams, %d proved moves, %.0fs",
+                 book_id, n, len(diagrams), len(moves), time.time() - t0)
     except Exception as e:
         log.exception("book %s ingest failed", book_id)
         _write_status(book_id, state="error", error=str(e)[:300])
