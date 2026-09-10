@@ -258,7 +258,13 @@ export default function BookReaderPage() {
                       height: `${((y2 - y1) / nh) * 100}%`,
                     }}
                   >
-                    <span className="absolute -left-1 -top-1 rounded-full bg-brand-600 px-2 py-0.5 text-[10px] font-bold text-white shadow group-hover:bg-brand-500">
+                    {/* OUTSIDE the board, not on it. Sitting at -top-1/-left-1
+                        the badge covered a8/b8 — the reader could not check the
+                        very squares most likely to be misread, which defeats
+                        the point of showing the printed diagram at all. Now it
+                        hangs just above the top-left corner and fades until the
+                        diagram is hovered or active. */}
+                    <span className="pointer-events-none absolute bottom-full left-0 mb-0.5 rounded-full bg-brand-600/80 px-1.5 py-0.5 text-[10px] font-bold text-white shadow transition-opacity group-hover:bg-brand-500 group-hover:opacity-100 opacity-70">
                       ▶ {d.n}
                     </span>
                   </button>
