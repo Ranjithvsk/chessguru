@@ -13,7 +13,7 @@
 // Books are private to their uploader. These are copyrighted works a coach
 // owns a copy of — we are giving them a better way to read it, not building a
 // library, so there is no public listing and no cross-user access.
-import { Body, Controller, Get, Param, Post, Req, Res, BadRequestException, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Req, Res, BadRequestException, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import { appendFileSync, createReadStream, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -126,10 +126,20 @@ export class UserBooksController {
     const before = diagrams[idx];
     const wasFen = String(before?.fen ?? "");
     diagrams[idx] = { ...(before as Diagram), fen, conf: 1, corrected: true } as Diagram;
-    writeFileSync(join(dir, "diagrams.json"), JSON.stringify(diagrams));
-    appendFileSync(join(dir, "corrections.jsonl"),
-      JSON.stringify({ n: idx + 1, page: before?.page, was: wasFen, now: fen,
-                       by: uid, at: new Date().toISOString() }) + "\n");
+    try {
+      writeFileSync(join(dir, "diagrams.json"), JSON.stringify(diagrams));
+      appendFileSync(join(dir, "corrections.jsonl"),
+        JSON.stringify({ n: idx + 1, page: before?.page, was: wasFen, now: fen,
+                         by: uid, at: new Date().toISOString() }) + "\n");
+    } catch (e: any) {
+      // Say WHY. A book ingested by the wrong unix user is readable but not
+      // writable by the API, and the coach saw only "Save failed" while the
+      // real cause — EACCES on diagrams.json — sat in a log they cannot read.
+      const code = e?.code === "EACCES" || e?.code === "EPERM"
+        ? "this book is not writable by the server — its files were created by a different user"
+        : `could not write the correction (${e?.code || "unknown error"})`;
+      throw new ServiceUnavailableException(code);
+    }
     return { ok: true, n: idx + 1, was: wasFen, now: fen };
   }
 

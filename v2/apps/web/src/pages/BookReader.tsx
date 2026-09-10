@@ -122,6 +122,7 @@ export default function BookReaderPage() {
   const [editing, setEditing] = useState(false);
   const [brush, setBrush] = useState<string>("P");
   const [saving, setSaving] = useState<"" | "saving" | "saved" | "failed">("");
+  const [saveErr, setSaveErr] = useState<string>("");
   // Remembered per browser: a reader who collapses the strip means it, and
   // having it spring back open on every page is the annoyance they were
   // collapsing away from. Wrapped because storage throws in private mode.
@@ -370,13 +371,20 @@ export default function BookReaderPage() {
                           { method: "POST", credentials: "include",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ fen: boardOnly }) });
-                        if (!r.ok) throw new Error(String(r.status));
+                        if (!r.ok) {
+                          // Surface the server's reason. "Save failed" alone
+                          // sent the owner hunting through a book page for a
+                          // fault that was a file permission on the server.
+                          let why = `HTTP ${r.status}`;
+                          try { const j = await r.json(); if (j?.message) why = String(j.message); } catch { /* not json */ }
+                          throw new Error(why);
+                        }
                         setSaving("saved");
                         // Keep the page in step with what is now stored.
                         setBook((b) => b && ({ ...b, diagrams: b.diagrams.map((d) =>
                           d.n === activeDiagram.n ? { ...d, fen: boardOnly, conf: 1 } : d) }));
                         setEditing(false);
-                      } catch { setSaving("failed"); }
+                      } catch (e) { setSaving("failed"); setSaveErr((e as Error).message || ""); }
                     }}
                     className={`rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60 ${
                       saving === "failed" ? "bg-rose-600 hover:bg-rose-500"
@@ -387,6 +395,9 @@ export default function BookReaderPage() {
                       : saving === "failed" ? "✕ Save failed · retry"
                       : "💾 Save & done"}
                   </button>
+                  {saving === "failed" && saveErr && (
+                    <p className="w-full text-[11px] text-rose-300">{saveErr}</p>
+                  )}
                   {/* Deliberately NOT /play?fen= — that page ignores a fen
                       parameter entirely and would start an ordinary new game,
                       silently dropping the position the reader just chose. The
