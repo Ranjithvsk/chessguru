@@ -210,6 +210,7 @@ class H(BaseHTTPRequestHandler):
                 st = load(os.path.join(full, "status.json"), {})
                 out.append({"id": d, "title": meta.get("title", d),
                             "owner": meta.get("owner"),
+                            "coverPage": meta.get("coverPage", 0),
                             "pages": st.get("pages", 0), "done": st.get("done", 0),
                             "diagrams": st.get("diagrams", 0), "state": st.get("state", "unknown")})
             return self._send(200, {"books": out})
@@ -234,6 +235,25 @@ class H(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(n) or b"{}")
         except Exception:
             body = {}
+        m = re.match(r"^/book/([^/]+)/cover$", p)
+        if m:
+            # Which page to show on the shelf. Page 0 is usually the cover, but
+            # not always — one scan opens on a nearly blank half-title, another
+            # on a two-page spread — so the owner gets to choose.
+            bid = unquote(m.group(1))
+            d = book_dir(bid)
+            meta = load(os.path.join(d, "meta.json"), {})
+            try:
+                page = int(body.get("page"))
+            except (TypeError, ValueError):
+                return self._send(400, {"ok": False, "error": "page must be a number"})
+            if page < 0 or page > 9999:
+                return self._send(400, {"ok": False, "error": "page out of range"})
+            meta["coverPage"] = page
+            with _lock:
+                save(os.path.join(d, "meta.json"), meta)
+            return self._send(200, {"ok": True, "coverPage": page})
+
         m = re.match(r"^/book/([^/]+)/diagram/(\d+)$", p)
         if m:
             bid, idx = unquote(m.group(1)), int(m.group(2)) - 1

@@ -81,6 +81,7 @@ export class UserBooksController {
           id,
           title: meta.title || id,
           owner: meta.owner ?? null,
+          coverPage: Number.isInteger(meta.coverPage) ? meta.coverPage : 0,
           pages: status.pages ?? 0,
           diagrams: diagrams.length,
           state: status.state ?? "unknown",
@@ -111,7 +112,7 @@ export class UserBooksController {
         // The book's OWN owner decides, exactly as for a local book. Being the
         // library owner grants no access to someone else's book.
         .filter((b: any) => b.owner === uid)
-        .map((b: any) => ({ ...b, remote: true }));
+        .map((b: any) => ({ ...b, coverPage: b.coverPage ?? 0, remote: true }));
     } catch {
       return [];
     }
@@ -319,6 +320,45 @@ export class UserBooksController {
     }
     return { ok: true, key, action, n: idx + 1, was: wasFen,
              now: action === "reject" ? null : fen };
+  }
+
+  /** Choose which page the shelf shows as the cover.
+   *
+   *  Page 0 is usually the front cover, but not always: one scan opens on a
+   *  nearly blank half-title, another on a two-page spread. Rather than guess
+   *  harder, let the owner point at the right page. */
+  @Post(":id/cover")
+  async setCover(@Param("id") id: string, @Body() body: { page?: number }, @Req() req: any) {
+    const uid = this.requireUser(req);
+    const page = Number(body?.page);
+    if (!Number.isInteger(page) || page < 0 || page > 9999) {
+      throw new BadRequestException("page must be a page number in this book");
+    }
+    const dir = bookDir(id);
+    if (!existsSync(dir)) {
+      // Held on Vinayaka: the choice belongs next to the book, like corrections.
+      if (!(await this.remoteOwns(id, uid))) throw new NotFoundException("book not found");
+      try {
+        return await this.bookHost(`/book/${encodeURIComponent(id)}/cover`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ page }),
+        });
+      } catch {
+        throw new ServiceUnavailableException("could not save — the book host is not reachable");
+      }
+    }
+    const metaPath = join(dir, "meta.json");
+    const meta = readJson<any>(metaPath, {});
+    if (meta.owner !== uid) throw new NotFoundException("book not found");
+    try {
+      writeFileSync(metaPath, JSON.stringify({ ...meta, coverPage: page }));
+    } catch (e: any) {
+      throw new ServiceUnavailableException(
+        e?.code === "EACCES" || e?.code === "EPERM"
+          ? "this book is not writable by the server — its files were created by a different user"
+          : `could not save the cover (${e?.code || "unknown error"})`);
+    }
+    return { ok: true, coverPage: page };
   }
 
   @Get(":id/page/:n")

@@ -68,7 +68,7 @@ export default function BooksListPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {filtered.map((b) => <BookCard key={b._id} b={b} />)}
       </div>
     </div>
@@ -78,12 +78,17 @@ export default function BooksListPage() {
 function BookCard({ b }: { b: BookSummary }) {
   return (
     <Link to={`/books/${encodeURIComponent(b._id)}`}
-      className="group flex gap-3 rounded-xl2 border border-ink-700 bg-ink-900 p-4 transition hover:border-brand-500/60 hover:shadow-glow">
-      {b.coverImageUrl ? (
-        <img src={b.coverImageUrl} alt="" className="h-24 w-16 flex-shrink-0 rounded border border-ink-700 object-cover" />
-      ) : (
-        <div className="flex h-24 w-16 flex-shrink-0 items-center justify-center rounded border border-ink-700 bg-ink-800 text-3xl">📚</div>
-      )}
+      className="group flex h-full gap-3 rounded-xl2 border border-ink-700 bg-ink-900 p-4 transition hover:border-brand-500/60 hover:shadow-glow">
+      {/* One frame for every book, whether it has a cover or not. Mixed sizes
+          made the rows look ragged, and object-contain shows a whole cover
+          rather than cropping the title off it. */}
+      <div className="grid h-28 w-20 flex-shrink-0 place-items-center overflow-hidden rounded border border-ink-700 bg-ink-800">
+        {b.coverImageUrl ? (
+          <img src={b.coverImageUrl} alt="" loading="lazy" className="max-h-full max-w-full object-contain" />
+        ) : (
+          <span className="text-3xl opacity-60">📚</span>
+        )}
+      </div>
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="mb-1 flex items-center gap-2 text-xs text-ink-400">
           <span className="truncate">{b.author}</span>

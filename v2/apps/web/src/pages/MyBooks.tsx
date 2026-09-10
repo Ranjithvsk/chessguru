@@ -11,7 +11,7 @@ const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
 
 type Book = {
   id: string; title: string; pages: number; diagrams: number;
-  state: string; done: number;
+  state: string; done: number; coverPage?: number;
 };
 
 export default function MyBooksPage() {
@@ -73,58 +73,113 @@ export default function MyBooksPage() {
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {(books ?? []).map((b) => {
-          const busy = b.state !== "done";
-          const pct = b.pages ? Math.round((100 * b.done) / b.pages) : 0;
-          return (
-            <Link
-              key={b.id}
-              to={`/books/read/${encodeURIComponent(b.id)}`}
-              className="group rounded-2xl border border-ink-700 bg-ink-900 p-4 transition hover:border-brand-500/60 hover:bg-ink-800"
-            >
-              {/* The real front cover, not an emoji — a shelf of actual covers
-                  is how you find a book you know by sight.
-
-                  Portrait frame, and object-CONTAIN rather than cover. A book
-                  cover is portrait but page 0 is not always: the Pandolfini
-                  scan opens on a landscape two-page spread, and cropping it to
-                  a wide strip cut the title off. Containing it letterboxes the
-                  odd one instead of mangling every one. */}
-              <div className="mb-3 grid aspect-[3/4] place-items-center overflow-hidden rounded-lg bg-ink-950 ring-1 ring-ink-700">
-                <img
-                  src={`${API_BASE}/api/user-books/${encodeURIComponent(b.id)}/page/0`}
-                  alt=""
-                  loading="lazy"
-                  className="max-h-full max-w-full object-contain transition group-hover:scale-[1.03]"
-                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-                />
-              </div>
-              <div className="mb-2 flex items-start justify-end gap-2">
-                {busy ? (
-                  <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-200">
-                    reading {pct}%
-                  </span>
-                ) : (
-                  <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] text-emerald-200">
-                    ready
-                  </span>
-                )}
-              </div>
-              <div className="font-semibold text-ink-50 group-hover:text-brand-200">{b.title}</div>
-              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-ink-400">
-                <span>{b.pages} pages</span>
-                <span className="text-brand-300">{b.diagrams} playable positions</span>
-              </div>
-              {busy && (
-                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-ink-800">
-                  <div className="h-full rounded-full bg-brand-500 transition-all" style={{ width: `${pct}%` }} />
-                </div>
-              )}
-            </Link>
-          );
-        })}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {(books ?? []).map((b) => (
+          <BookCard
+            key={b.id}
+            b={b}
+            onCover={(page) =>
+              setBooks((prev) => prev && prev.map((x) =>
+                x.id === b.id ? { ...x, coverPage: page } : x))
+            }
+          />
+        ))}
       </div>
+    </div>
+  );
+}
+
+/** One book on the shelf, laid out like the Learn library: a portrait cover
+ *  beside the details rather than a wide banner above them. */
+function BookCard({ b, onCover }: { b: Book; onCover: (page: number) => void }) {
+  const [picking, setPicking] = useState(false);
+  const [busySave, setBusySave] = useState(false);
+  const cover = b.coverPage ?? 0;
+  const reading = b.state !== "done";
+  const pct = b.pages ? Math.round((100 * b.done) / b.pages) : 0;
+
+  const choose = async (page: number) => {
+    if (busySave) return;
+    setBusySave(true);
+    try {
+      const r = await fetch(`${API_BASE}/api/user-books/${encodeURIComponent(b.id)}/cover`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ page }),
+      });
+      if (r.ok) { onCover(page); setPicking(false); }
+    } finally { setBusySave(false); }
+  };
+
+  // How many pages to offer. The cover is near the front of any book, and a
+  // strip of 854 thumbnails would fetch the whole scan to choose one image.
+  const choices = Math.min(b.pages || 0, 12);
+
+  return (
+    <div className="group rounded-xl2 border border-ink-700 bg-ink-900 p-4 transition hover:border-brand-500/60 hover:shadow-glow">
+      <div className="flex h-full gap-3">
+        <Link to={`/books/read/${encodeURIComponent(b.id)}`} className="flex-shrink-0">
+          <div className="grid h-28 w-20 place-items-center overflow-hidden rounded border border-ink-700 bg-ink-800">
+            <img
+              src={`${API_BASE}/api/user-books/${encodeURIComponent(b.id)}/page/${cover}`}
+              alt=""
+              loading="lazy"
+              className="max-h-full max-w-full object-contain"
+              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+            />
+          </div>
+        </Link>
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="mb-1 flex items-center gap-2 text-xs text-ink-400">
+            <span>{b.pages} pages</span>
+            <span className="text-brand-300">· {b.diagrams} positions</span>
+            {reading ? (
+              <span className="ml-auto rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] text-amber-200">reading {pct}%</span>
+            ) : (
+              <span className="ml-auto rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] text-emerald-200">ready</span>
+            )}
+          </div>
+          <Link to={`/books/read/${encodeURIComponent(b.id)}`}
+            className="line-clamp-3 flex-1 font-semibold text-white group-hover:text-brand-200">
+            {b.title}
+          </Link>
+          {b.pages > 1 && (
+            <button
+              onClick={() => setPicking((v) => !v)}
+              className="mt-2 self-start text-[11px] text-ink-500 underline-offset-2 hover:text-brand-300 hover:underline"
+            >
+              {picking ? "cancel" : "change cover"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Page 0 is usually the front cover and sometimes is not: one scan opens
+          on a nearly blank half-title, another on a two-page spread. Rather
+          than guess harder, point at the right page. */}
+      {picking && (
+        <div className="mt-3 border-t border-ink-800 pt-2">
+          <p className="mb-2 text-[11px] text-ink-400">Pick the page to show on the shelf</p>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {Array.from({ length: choices }, (_, i) => (
+              <button
+                key={i}
+                onClick={() => choose(i)}
+                disabled={busySave}
+                title={`Page ${i + 1}`}
+                className={`shrink-0 overflow-hidden rounded border transition disabled:opacity-50 ${
+                  i === cover ? "border-brand-500 ring-1 ring-brand-500" : "border-ink-700 hover:border-brand-500/60"}`}
+              >
+                <img
+                  src={`${API_BASE}/api/user-books/${encodeURIComponent(b.id)}/page/${i}`}
+                  alt="" loading="lazy" className="h-20 w-14 bg-ink-950 object-contain"
+                />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
