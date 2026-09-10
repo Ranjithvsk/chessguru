@@ -260,13 +260,23 @@ export default function BookReaderPage() {
             <div
               key={p}
               ref={(el) => { pageRefs.current[p] = el; }}
+              /* RESERVE the page's height before its image arrives. loading="lazy"
+                 was already set and did nothing: an unloaded <img> makes its
+                 container zero-high, so all 854 pages sat stacked at the top of
+                 the document and the browser judged every one of them to be in
+                 view. It requested the whole book at once. Pages are now
+                 rendered from the PDF on demand rather than served as files, so
+                 that turned into 854 renders and the reader appeared to hang.
+                 An A4-ish ratio holds the space until the real one is known. */
+              style={{ aspectRatio: pageSize[p] ? `${pageSize[p]![0]} / ${pageSize[p]![1]}` : "1 / 1.414" }}
               className="relative overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-ink-700/40"
             >
               <img
                 src={`${API_BASE}/api/user-books/${encodeURIComponent(book.id)}/page/${p}`}
                 alt={`Page ${p + 1}`}
                 loading="lazy"
-                className="block w-full"
+                decoding="async"
+                className="absolute inset-0 block h-full w-full object-contain"
                 onLoad={(e) => {
                   const img = e.currentTarget;
                   if (img.naturalWidth && img.naturalHeight) {
