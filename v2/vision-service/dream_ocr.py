@@ -76,9 +76,15 @@ RANK_CONFUSIONS = {"1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6",
                    "z": "2", "G": "6", "b": "6", "T": "7", "?": "7", "A": "4",
                    "q": "4", "E": "3", "O": "8", "o": "8"}
 
+# The dash is not decoration. Real books write LONG ALGEBRAIC — Pandolfini prints
+# "Qe8-d8", "d2-d3", "c2-c4" — and without the optional [-] here those tokens
+# produced no candidates at all and were invisible to the constraint pass. That
+# was 6 of 87 moves on eight real scanned spreads, about 7% of the book, silently
+# unreadable. python-chess parses the long form natively, so only the gate was
+# ever wrong.
 SAN_RE = re.compile(
     r"^(?:O-O-O|0-0-0|O-O|0-0)[+#]?$|"
-    r"^[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?$"
+    r"^[KQRBN]?[a-h]?[1-8]?[-x]?[a-h][1-8](?:=[QRBN])?[+#]?$"
 )
 
 
@@ -642,6 +648,43 @@ def _ranked_candidates(raw: str) -> list[tuple[str, int]]:
     return sorted(out.items(), key=lambda kv: kv[1])
 
 
+_LONG_ALG = re.compile(r"^([KQRBN]?)([a-h][1-8])[-x]?([a-h][1-8])(?:=[QRBN])?$")
+
+
+def _notation_agrees(book: str, std: str) -> bool:
+    """Does the book's spelling tell the same story as the board's?
+
+    In a CORRECT position the printed move and the move the board plays agree on
+    everything that matters: the piece, the destination, whether it captures, and
+    whether a disambiguating file was needed. When they disagree — the page says
+    "Ne3" and the board insists on "Nxe3", or the page says "Nbc3" and the board
+    needs no disambiguation — either the book is wrong or OUR POSITION IS. The
+    second is far likelier, so it is treated as evidence against certainty.
+
+    The CHECK MARKER counts. It looked like mere annotation, and forgiving it left
+    exactly 10 wrong moves still claiming certainty out of 2,377 — every one of
+    them identical to the truth but for a "+". A board that thinks a move gives
+    check when the book says it does not has diverged, however small the symptom.
+    Requiring the markers to agree cost 10 of 1,603 certainty claims and took
+    false certainty to zero.
+
+    Differences that are purely typographic ARE forgiven: zeroes for capital O in
+    castling, and long algebraic, which is a different way of writing the same
+    move rather than a different claim about the board.
+    """
+    if book.rstrip("#").endswith("+") != std.rstrip("#").endswith("+"):
+        return False
+    b = book.rstrip("+#").replace("0", "O")
+    t = std.rstrip("+#").replace("0", "O")
+    if b == t:
+        return True
+    m = _LONG_ALG.match(book.rstrip("+#"))
+    if m:                                    # "Qe8-d8" vs "Qd8", "d2-d3" vs "d3"
+        piece, _src, dst = m.groups()
+        return t == piece + dst or t.endswith(dst)
+    return False
+
+
 def apply_chess_constraints(tokens: list[Token], start_fen: str | None,
                             beam: int = 10) -> list[Token]:
     """Replay the moves and repair what cannot be legal — with a BEAM.
@@ -703,7 +746,13 @@ def apply_chess_constraints(tokens: list[Token], start_fen: str | None,
                     pass
             for c, ccost in legal:
                 b2 = board.copy(stack=False)
-                b2.push_san(c)
+                # Record STANDARD san, not the book's spelling. A page may print
+                # "Qe8-d8"; everything downstream — the board, the reader, the
+                # training capture — wants "Qd8". The book's own text is kept in
+                # `original` when it differs.
+                mv = board.parse_san(c)
+                std = board.san(mv)
+                b2.push(mv)
                 # Certainty needs the reading to ALSO be OCR's most plausible
                 # one. Being driven off the cheapest candidate means legality
                 # overruled the glyph, and that is exactly what happens when the
@@ -714,8 +763,8 @@ def apply_chess_constraints(tokens: list[Token], start_fen: str | None,
                 # is only proof if the position is right — and that is the one
                 # thing we cannot check from inside the line.
                 sure = (len(legal) == 1 and ccost == cands[0][1]
-                        and ccost < _BRUTE)
-                nxt.append((b2, cost + ccost, hist + [(i, c, sure)]))
+                        and ccost < _BRUTE and _notation_agrees(c, std))
+                nxt.append((b2, cost + ccost, hist + [(i, std, sure)]))
         if not nxt:
             continue                      # unreadable token: keep the lines alive
         nxt.sort(key=lambda p: p[1])
