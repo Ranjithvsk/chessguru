@@ -2936,7 +2936,7 @@ Thank you!`;
 
   /** PUBLIC — accept an invite: create the user, mark invite consumed, set session.
    *  Called from AuthController so we can mutate the session. */
-  async consumeInvite(token: string, username: string, password: string): Promise<
+  async consumeInvite(token: string, username: string, password: string, mobile = ""): Promise<
     { ok: true; user: { _id: string; username: string; academyId: string; role: string } } |
     { ok: false; error: string }
   > {
@@ -2946,6 +2946,16 @@ Thank you!`;
 
     if (!username || !/^[a-zA-Z0-9_-]{2,30}$/.test(username)) return { ok: false, error: "Username must be 2-30 chars (letters, numbers, _ or -)." };
     if (!password || String(password).length < 6) return { ok: false, error: "Password too short (min 6 chars)." };
+    // Phone: required for coaches (owner ask 2026-09-10), optional for everyone
+    // else. Same E.164 normalisation as the owner signup.
+    let mobileE164 = "";
+    if (mobile) {
+      const cleaned = mobile.replace(/[^\d+]/g, "");
+      mobileE164 = cleaned.startsWith("+") ? cleaned : `+${cleaned}`;
+      if (!/^\+\d{8,15}$/.test(mobileE164)) return { ok: false, error: "Mobile number looks invalid — use format like +91 98765 43210." };
+    } else if (inv.role === "coach") {
+      return { ok: false, error: "Mobile number is required for coaches." };
+    }
 
     const uid = username.toLowerCase();
     if (await this.users().findOne({ _id: uid as any })) return { ok: false, error: "That username is taken." };
@@ -2972,6 +2982,7 @@ Thank you!`;
       createdAt: now, lastLogin: now,
     };
     if (coachId) userDoc.coachId = coachId;
+    if (mobileE164) userDoc.mobile = mobileE164;
     await this.users().insertOne(userDoc);
     await this.invites().updateOne(
       { _id: token as any },

@@ -34,7 +34,8 @@ export class AuthService {
     const token = String(body?.token || "");
     const username = String(body?.username || "").trim();
     const password = String(body?.password || "");
-    const r = await this.academy.consumeInvite(token, username, password);
+    const mobile = String(body?.mobile || "").trim();
+    const r = await this.academy.consumeInvite(token, username, password, mobile);
     if (!r.ok) return r;
     session.userId = r.user._id;
     session.username = r.user.username;
@@ -179,12 +180,14 @@ export class AuthService {
     // works (the user can also always sign in via email + password).
     const providedName = String(body?.ownerName || "").trim();
     // v2 signup form adds: fullName (human display, spaces allowed), ownerMobile
-    // (E.164, optional), mobileConsent (bool, opt-in for WhatsApp updates).
+    // (E.164, REQUIRED since 2026-09-10 — owner wants a phone for every coach who
+    // signs up), mobileConsent (bool, opt-in for WhatsApp updates).
     const fullName = String(body?.fullName || "").trim().slice(0, 60);
     const rawMobile = String(body?.ownerMobile || "").trim();
     const mobileConsent = !!body?.mobileConsent;
     let ownerMobile = "";
-    if (rawMobile) {
+    if (!rawMobile) return { ok: false, error: "Mobile number is required — we'll use it to reach you about your academy." };
+    {
       const cleaned = rawMobile.replace(/[^\d+]/g, "");
       const normalized = cleaned.startsWith("+") ? cleaned : `+${cleaned}`;
       if (!/^\+\d{8,15}$/.test(normalized)) {
@@ -229,9 +232,10 @@ export class AuthService {
 
     const hash = await bcrypt.hash(password, 10);
     const now = new Date();
-    // 90-day free trial → then ₹1000/month unlimited. Stored so the app can
+    // 30-day free trial (owner cut it from 90 on 2026-09-10) → then ₹1000/month
+    // unlimited. Stored so the app can
     // decide when to nag / lock down; enforcement is a separate follow-up.
-    const trialEndsAt = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+    const trialEndsAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     const academyDoc: Record<string, any> = {
       _id: slug,
       name: academyName,

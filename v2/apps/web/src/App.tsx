@@ -68,18 +68,22 @@ export default function App() {
   const logout = async () => { await api.logout(); await qc.invalidateQueries(); };
   const userId = auth?.loggedIn ? auth.userId ?? null : rating?.userId ?? null;
   const loc = useLocation();
-  const showGuestWarn = !!auth && !auth.loggedIn && !["/login", "/register"].includes(loc.pathname);
+  // /signup-academy is a self-contained marketing landing with its own sticky
+  // nav + footer; the app chrome (Navbar, guest banner, max-w main, footer)
+  // stacked on top of it as a double header (owner ask 2026-09-10: hide it).
+  const isMarketing = loc.pathname === "/signup-academy";
+  const showGuestWarn = !!auth && !auth.loggedIn && !isMarketing && !["/login", "/register"].includes(loc.pathname);
 
   return (
     <div className="min-h-screen">
-      <Navbar
+      {!isMarketing && <Navbar
         rating={rating?.rating}
         ratingProvisional={rating?.provisional ?? false}
         username={auth?.loggedIn ? auth.username : undefined}
         admin={auth?.loggedIn ? !!auth.admin : false}
         onLogout={logout}
-      />
-      <main className="mx-auto max-w-6xl px-4 py-6">
+      />}
+      <main className={isMarketing ? "" : "mx-auto max-w-6xl px-4 py-6"}>
         {showGuestWarn && (
           <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
             <span>⚠️ You’re not signed in — your puzzle progress won’t be saved.</span>
@@ -94,14 +98,14 @@ export default function App() {
       {/* Global "Powered by ChessGuru" footer — every App-wrapped page.
        *  Clicking ChessGuru → /academy (the academy Resource Planner: batches,
        *  students, coaches, directives, homework). */}
-      <footer className="mt-8 border-t border-ink-800/60 bg-ink-900/50 py-4 text-center text-xs text-ink-400">
+      {!isMarketing && <footer className="mt-8 border-t border-ink-800/60 bg-ink-900/50 py-4 text-center text-xs text-ink-400">
         Powered by <a href="https://harinitharanjith.com/signup-academy" target="_blank" rel="noreferrer" className="font-semibold text-brand-300 hover:text-brand-200 hover:underline">ChessGuru</a>
-      </footer>
+      </footer>}
 
       {/* Global "📷 Scan chess position" FAB. Fixed bottom-left so it's
           always one tap away on phone. Hidden on /board-editor itself
           to avoid redundancy. */}
-      {loc.pathname !== "/board-editor" && (
+      {loc.pathname !== "/board-editor" && !isMarketing && (
         <Link
           to="/board-editor"
           title="Scan chess position from image (camera or file)"

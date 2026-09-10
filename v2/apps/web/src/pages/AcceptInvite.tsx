@@ -38,6 +38,7 @@ export default function AcceptInvitePage() {
   const [peek, setPeek] = useState<PeekResp | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [mobile, setMobile] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -57,7 +58,7 @@ export default function AcceptInvitePage() {
     e.preventDefault();
     setBusy(true); setErr(null);
     try {
-      const r = await post<{ ok: boolean; error?: string; academyId?: string; role?: string }>("/auth/accept-invite", { token, username, password });
+      const r = await post<{ ok: boolean; error?: string; academyId?: string; role?: string }>("/auth/accept-invite", { token, username, password, mobile });
       if (!r.ok) { setErr(r.error || "Signup failed."); return; }
       // Hard nav so /academy sees the fresh auth-me
       window.location.href = "/academy";
@@ -108,6 +109,16 @@ export default function AcceptInvitePage() {
             <input required type="password" minLength={6}
               value={password} onChange={(e) => setPassword(e.target.value)}
               placeholder="Min 6 characters"
+              className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-400">
+              Mobile number{inv.role === "coach" ? "" : " (optional)"}
+            </label>
+            <input required={inv.role === "coach"} type="tel" inputMode="tel" autoComplete="tel"
+              value={mobile} onChange={(e) => setMobile(e.target.value)}
+              pattern="[+]?[0-9 \-]{8,20}"
+              placeholder="+91 98765 43210"
               className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
           </div>
           <button disabled={busy} type="submit"
