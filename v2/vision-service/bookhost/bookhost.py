@@ -16,6 +16,7 @@ machine also trains models; a queue that hammers it helps nobody.
 from __future__ import annotations
 
 import json
+import io
 import os
 import re
 import subprocess
@@ -208,6 +209,7 @@ class H(BaseHTTPRequestHandler):
                 meta = load(os.path.join(full, "meta.json"), {})
                 st = load(os.path.join(full, "status.json"), {})
                 out.append({"id": d, "title": meta.get("title", d),
+                            "owner": meta.get("owner"),
                             "pages": st.get("pages", 0), "done": st.get("done", 0),
                             "diagrams": st.get("diagrams", 0), "state": st.get("state", "unknown")})
             return self._send(200, {"books": out})
@@ -232,6 +234,41 @@ class H(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(n) or b"{}")
         except Exception:
             body = {}
+        m = re.match(r"^/book/([^/]+)/diagram/(\d+)$", p)
+        if m:
+            bid, idx = unquote(m.group(1)), int(m.group(2)) - 1
+            d = book_dir(bid)
+            dg = load(os.path.join(d, "diagrams.json"), [])
+            if not (0 <= idx < len(dg)):
+                return self._send(404, {"ok": False, "error": "diagram not found"})
+            action = body.get("action") or "correct"
+            fen = (body.get("fen") or "").strip()
+            before = dg[idx]
+            was = before.get("fen", "")
+            if action == "reject":
+                dg.pop(idx)
+            else:
+                before = dict(before)
+                before["fen"] = fen
+                before["conf"] = 1
+                before["corrected"] = (action == "correct")
+                dg[idx] = before
+            with _lock:
+                save(os.path.join(d, "diagrams.json"), dg)
+                # Keep the ORIGINAL beside the fix: a wrong read paired with a
+                # human correction is the example worth training on.
+                with io.open(os.path.join(d, "corrections.jsonl"), "a",
+                             encoding="utf8") as fh:
+                    fh.write(json.dumps({
+                        "action": action, "n": idx + 1,
+                        "page": (dg[idx] if action != "reject" and idx < len(dg)
+                                 else {}).get("page"),
+                        "was": was, "now": None if action == "reject" else fen,
+                        "by": body.get("by"), "at": time.time()}) + "\n")
+            return self._send(200, {"ok": True, "action": action,
+                                    "n": idx + 1, "was": was,
+                                    "now": None if action == "reject" else fen})
+
         if p == "/queue":
             want = body.get("ids") or []
             cat = load(CATALOGUE, None) or scan_catalogue()

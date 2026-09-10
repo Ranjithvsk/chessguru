@@ -67,7 +67,7 @@ export class UserBooksController {
   }
 
   @Get()
-  list(@Req() req: any) {
+  async list(@Req() req: any) {
     const uid = this.requireUser(req);
     if (!existsSync(STORE)) return { books: [] };
     const books = readdirSync(STORE)
@@ -93,7 +93,28 @@ export class UserBooksController {
       // library. These are books someone owns a copy of; we are giving them a
       // better way to read it, not publishing it.
       .filter((b) => b.owner === uid);
-    return { books };
+    // A book read on Vinayaka is as much "my book" as one read here; where it
+    // was processed is an implementation detail the shelf should not expose.
+    const remote = await this.remoteBooks(uid);
+    const localIds = new Set(books.map((b) => b.id));
+    return { books: [...books, ...remote.filter((r) => !localIds.has(r.id))] };
+  }
+
+  /** Books that live on Vinayaka, in the same shape as the local ones.
+   *
+   *  Returns [] rather than throwing: the book host being down must not take
+   *  the shelf with it, because the locally-held books are still readable. */
+  private async remoteBooks(uid: string): Promise<any[]> {
+    try {
+      const j = await this.bookHost("/books");
+      return (j.books ?? [])
+        // The book's OWN owner decides, exactly as for a local book. Being the
+        // library owner grants no access to someone else's book.
+        .filter((b: any) => b.owner === uid)
+        .map((b: any) => ({ ...b, remote: true }));
+    } catch {
+      return [];
+    }
   }
 
   /** The owner's Drive library, and the ingest queue, both living on Vinayaka.
@@ -141,7 +162,7 @@ export class UserBooksController {
   }
 
   @Get(":id")
-  detail(@Param("id") id: string, @Req() req: any, @Res({ passthrough: true }) res?: any) {
+  async detail(@Param("id") id: string, @Req() req: any, @Res({ passthrough: true }) res?: any) {
     // NEVER cache this. Diagrams change under the reader — a coach corrects a
     // position, a de-duplication pass removes phantom entries — and a browser
     // reusing an old body shows positions the book no longer has. Owner saw
@@ -151,7 +172,7 @@ export class UserBooksController {
     res?.setHeader?.("Cache-Control", "no-store");
     const uid = this.requireUser(req);
     const dir = bookDir(id);
-    if (!existsSync(dir)) throw new NotFoundException("book not found");
+    if (!existsSync(dir)) return this.remoteDetail(id, uid);
     const meta = readJson<any>(join(dir, "meta.json"), {});
     if (meta.owner !== uid) throw new NotFoundException("book not found");
     const status = readJson<any>(join(dir, "status.json"), {});
@@ -169,6 +190,50 @@ export class UserBooksController {
     };
   }
 
+  /** One book, read on Vinayaka and served through here.
+   *
+   *  Same response as a local book, so the reader cannot tell the difference —
+   *  which is the point: the page images stay on the machine that made them
+   *  instead of being copied to a second store that can drift out of step. */
+  private async remoteDetail(id: string, uid: string) {
+    let meta: any, status: any, diagrams: any[];
+    try {
+      [meta, status, diagrams] = await Promise.all([
+        this.bookHost(`/book/${encodeURIComponent(id)}/meta`),
+        this.bookHost(`/book/${encodeURIComponent(id)}/status`),
+        this.bookHost(`/book/${encodeURIComponent(id)}/diagrams`),
+      ]);
+    } catch {
+      throw new NotFoundException("book not found");
+    }
+    if (!meta || meta.owner !== uid) throw new NotFoundException("book not found");
+    return {
+      id,
+      title: meta.title || id,
+      pages: status?.pages ?? 0,
+      state: status?.state ?? "unknown",
+      done: status?.done ?? 0,
+      seconds: status?.seconds ?? null,
+      remote: true,
+      diagrams: (diagrams ?? []).map((d: any, i: number) => ({
+        n: i + 1, key: diagramKey(d), ...d,
+        // The ingest writes modelConf; the reader reads conf. Without this the
+        // confidence highlight is blank on every remotely-read book.
+        conf: d.conf ?? d.modelConf ?? null,
+      })),
+    };
+  }
+
+  /** Is this remote book mine? Checked before every remote page is served. */
+  private async remoteOwns(id: string, uid: string): Promise<boolean> {
+    try {
+      const meta = await this.bookHost(`/book/${encodeURIComponent(id)}/meta`);
+      return !!meta && meta.owner === uid;
+    } catch {
+      return false;
+    }
+  }
+
   /** Correct one diagram, from the reader.
    *
    *  A coach fixing a square while looking at the printed diagram beside it is
@@ -183,14 +248,16 @@ export class UserBooksController {
    *  example worth training on, and overwriting it would throw that away.
    */
   @Post(":id/diagram/:n")
-  correct(@Param("id") id: string, @Param("n") n: string,
+  async correct(@Param("id") id: string, @Param("n") n: string,
           @Body() body: { fen?: string; action?: "correct" | "confirm" | "reject" },
           @Req() req: any) {
     const uid = this.requireUser(req);
     const dir = bookDir(id);
-    if (!existsSync(dir)) throw new NotFoundException("book not found");
-    const meta = readJson<any>(join(dir, "meta.json"), {});
-    if (meta.owner !== uid) throw new NotFoundException("book not found");
+    const isRemote = !existsSync(dir);
+    if (!isRemote) {
+      const meta = readJson<any>(join(dir, "meta.json"), {});
+      if (meta.owner !== uid) throw new NotFoundException("book not found");
+    }
 
     const action = body?.action === "reject" ? "reject"
                  : body?.action === "confirm" ? "confirm" : "correct";
@@ -205,6 +272,20 @@ export class UserBooksController {
       throw new BadRequestException("not a board position");
     }
     const idx = Number(n) - 1;             // the reader numbers them from 1
+    if (isRemote) {
+      // The book lives on Vinayaka, so the correction belongs beside it. Written
+      // here it would land next to a book that does not exist on this box and be
+      // silently lost — and a coach's fix is the best label the model ever gets.
+      if (!(await this.remoteOwns(id, uid))) throw new NotFoundException("book not found");
+      try {
+        return await this.bookHost(
+          `/book/${encodeURIComponent(id)}/diagram/${idx + 1}`,
+          { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fen, action, by: uid }) });
+      } catch {
+        throw new ServiceUnavailableException("could not save — the book host is not reachable");
+      }
+    }
     const diagrams = readJson<Diagram[]>(join(dir, "diagrams.json"), []);
     if (!Number.isInteger(idx) || idx < 0 || idx >= diagrams.length) {
       throw new NotFoundException("diagram not found");
@@ -241,13 +322,14 @@ export class UserBooksController {
   }
 
   @Get(":id/page/:n")
-  page(@Param("id") id: string, @Param("n") n: string, @Req() req: any, @Res() res: any) {
+  async page(@Param("id") id: string, @Param("n") n: string, @Req() req: any, @Res() res: any) {
     const uid = this.requireUser(req);
     const dir = bookDir(id);
-    const meta = readJson<any>(join(dir, "meta.json"), {});
-    if (meta.owner !== uid) throw new NotFoundException("page not found");
     const idx = Number(n);
     if (!Number.isInteger(idx) || idx < 0 || idx > 9999) throw new NotFoundException("page not found");
+    if (!existsSync(dir)) return this.remotePage(id, idx, uid, res);
+    const meta = readJson<any>(join(dir, "meta.json"), {});
+    if (meta.owner !== uid) throw new NotFoundException("page not found");
     const file = join(dir, "pages", `p${String(idx).padStart(4, "0")}.jpg`);
     if (!existsSync(file)) throw new NotFoundException("page not found");
     // Page images never change once ingested, so let the browser keep them —
@@ -255,5 +337,31 @@ export class UserBooksController {
     res.setHeader("Content-Type", "image/jpeg");
     res.setHeader("Cache-Control", "private, max-age=86400");
     createReadStream(file).pipe(res);
+  }
+
+  /** A page image held on Vinayaka, passed through with the session checked.
+   *
+   *  The book host answers anything that reaches it, so the ownership check
+   *  here is the ONLY thing standing between a signed-in stranger and someone
+   *  else's copyrighted book. It runs before a single byte is fetched. */
+  private async remotePage(id: string, idx: number, uid: string, res: any) {
+    if (!(await this.remoteOwns(id, uid))) throw new NotFoundException("page not found");
+    let r: Response;
+    try {
+      r = await fetch(
+        `http://127.0.0.1:8791/book/${encodeURIComponent(id)}/page/${idx}`,
+        { signal: AbortSignal.timeout(30_000) },
+      );
+    } catch {
+      throw new ServiceUnavailableException("the book host is not reachable");
+    }
+    if (!r.ok) throw new NotFoundException("page not found");
+    const buf = Buffer.from(await r.arrayBuffer());
+    res.setHeader("Content-Type", "image/jpeg");
+    res.setHeader("Content-Length", String(buf.length));
+    // Same as a local page: once rendered it never changes, and this is what
+    // makes turning a page feel like a book rather than a network round trip.
+    res.setHeader("Cache-Control", "private, max-age=86400");
+    res.end(buf);
   }
 }
