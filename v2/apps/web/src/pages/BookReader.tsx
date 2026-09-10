@@ -331,12 +331,21 @@ export default function BookReaderPage() {
                   <span className="text-sm font-semibold text-ink-100">Position {activeDiagram.n}</span>
                   <span className="text-[11px] text-ink-400">page {activeDiagram.page + 1}</span>
                 </div>
+                {/* movableColor is REQUIRED for the board to accept a move —
+                    chessground's own default is "nobody", and without it the
+                    reader looked playable and silently refused every move.
+                    Owner: "white to play is there, i cant play white directly".
+                    turnColor follows the side-to-move toggle above, so setting
+                    it to White really does let White move. */}
                 <Board
                   fen={fp.fen}
                   orientation={fp.orientation}
+                  turnColor={fp.turnColor}
+                  movableColor={editing ? undefined : fp.turnColor}
                   dests={editing ? new Map() : fp.dests}
                   onMove={fp.onMove}
                   onSelect={editing ? paintSquare : undefined}
+                  showDests
                 />
 
                 {editing && (
