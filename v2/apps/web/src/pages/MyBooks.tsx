@@ -50,6 +50,12 @@ export default function MyBooksPage() {
         <p className="mt-1 text-sm text-ink-300">
           Books read by the vision pipeline. Tap one, then tap any diagram to put it on a board.
         </p>
+        <Link
+          to="/books/library"
+          className="mt-3 inline-block rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-500"
+        >
+          Browse the library →
+        </Link>
       </div>
 
       {books === null && (

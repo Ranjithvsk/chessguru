@@ -18,6 +18,9 @@ import { appendFileSync, createReadStream, existsSync, readFileSync, readdirSync
 import { join, resolve } from "node:path";
 
 const STORE = "/var/lib/chessguru/user-books";
+// Whose Drive the book host is pointed at. One library, one owner —
+// these are copyrighted books belonging to a specific person.
+const LIBRARY_OWNER = process.env.CHESSGURU_LIBRARY_OWNER ?? "ranjith_vsk";
 
 type Diagram = { page: number; bbox: number[] | null; fen: string; conf?: number; corrected?: boolean; disputed?: boolean };
 
@@ -91,6 +94,50 @@ export class UserBooksController {
       // better way to read it, not publishing it.
       .filter((b) => b.owner === uid);
     return { books };
+  }
+
+  /** The owner's Drive library, and the ingest queue, both living on Vinayaka.
+   *
+   *  Vinayaka holds the books and the GPU, so rendering and reading a book
+   *  belongs there; this box stays free to serve classes and scans. The book
+   *  host binds 127.0.0.1 only and does NO auth of its own — reachable solely
+   *  through the reverse tunnel, with the session check and ownership enforced
+   *  HERE. Copyrighted books must never be reachable without going through it.
+   */
+  private async bookHost(path: string, init?: any): Promise<any> {
+    const r = await fetch(`http://127.0.0.1:8791${path}`, {
+      ...init,
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!r.ok) throw new ServiceUnavailableException("book host unavailable");
+    return r.json();
+  }
+
+  @Get("library/catalogue")
+  async catalogue(@Req() req: any) {
+    const uid = this.requireUser(req);
+    if (uid !== LIBRARY_OWNER) throw new NotFoundException("no library");
+    return this.bookHost("/catalogue");
+  }
+
+  @Get("library/queue")
+  async queue(@Req() req: any) {
+    const uid = this.requireUser(req);
+    if (uid !== LIBRARY_OWNER) throw new NotFoundException("no library");
+    return this.bookHost("/queue");
+  }
+
+  @Post("library/queue")
+  async enqueue(@Body() body: { ids?: string[] }, @Req() req: any) {
+    const uid = this.requireUser(req);
+    if (uid !== LIBRARY_OWNER) throw new NotFoundException("no library");
+    const ids = Array.isArray(body?.ids) ? body.ids.slice(0, 50) : [];
+    if (!ids.length) throw new BadRequestException("no books chosen");
+    return this.bookHost("/queue", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
   }
 
   @Get(":id")
