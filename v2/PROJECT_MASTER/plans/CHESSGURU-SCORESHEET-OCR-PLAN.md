@@ -189,6 +189,7 @@ linear decay, fp16, light affine/colour jitter, 8 epochs ≈ 40 min on the 3080.
 |---|---|---|---|---|
 | Qwen3-VL-4B zero-shot (M0, different sheets) | — | 53.7 % | — | — |
 | **run3** TrOCR-base, 8 ep | 75.1 → 82.8 → 81.8 → 86.2 → 87.4 → 87.9 → 88.2 → **88.6 %** | **87.9 %** | **88.4 %** | 84.0 → **86.2 %** |
+| **run4** stage 2 from run3, lr 2e-5, label-smooth 0.1, AUG 2 (hung at ep-8 validation; best = ep 5) | 86.1 → 87.2 → 86.9 → 87.9 → **89.2 %** → 88.1 → 88.6 | **89.1 %** | **89.5 %** | 83.1 → **86.7 %** |
 
 Where the remaining 12 % goes (run3, 195 misses): 173 fall after the point where the *label
 sequence itself* stops being legal chess, so they cannot be classified; of the 22 that can, **7 are

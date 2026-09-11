@@ -80,7 +80,10 @@ def main(data_dir: str, out_dir: str, epochs: int = 8):
     dev = torch.device("cuda"); mdl.to(dev)
     dl = DataLoader(Cells(train, data_dir, True), batch_size=BATCH, shuffle=True, num_workers=6,
                     persistent_workers=True, pin_memory=True, collate_fn=collate)
-    vdl = DataLoader(Cells(val, data_dir, False), batch_size=48, shuffle=False, num_workers=4, collate_fn=collate)
+    # Validation loader stays single-process: run4 deadlocked at the epoch-8
+    # validation with 4 spawned workers on Windows (GPU idle, process alive,
+    # 1h40 frozen). 600 cells do not need workers.
+    vdl = DataLoader(Cells(val, data_dir, False), batch_size=48, shuffle=False, num_workers=0, collate_fn=collate)
     def encode(sans):
         ids = tok(sans, max_length=MAXLEN, padding="max_length", truncation=True, return_tensors="pt").input_ids
         ids[ids == tok.pad_token_id] = -100
