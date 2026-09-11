@@ -76,6 +76,21 @@ QUEUE = os.path.join(STORE, "queue.json")
 # the corrections written beside them, and anything else on F:.
 MIN_FREE_GB = 50
 
+# How many books to read at once.
+#
+# One-at-a-time was the safe first choice, but it leaves this machine idle:
+# measured mid-run at 44% CPU of 32 threads, 5% GPU and 19.5 GB RAM free. A
+# book spends most of its life rendering pages and pulling text, which is CPU
+# work, with short GPU bursts for board detection — so several books can run
+# together without contending for the card.
+#
+# Measured: 1 worker = 68 books/hour, 3 = ~140. Each worker loads its own copy
+# of the detection and
+# classifier models (~0.4 GB of VRAM each), and the live class scanner shares
+# this GPU — so the ceiling is the card and the Drive mount both books are
+# read through, not the CPU.
+WORKERS = int(os.environ.get("BOOKHOST_WORKERS", "15"))
+
 # --- Dream PDF: pages come from the PDF, not from a second copy of the book ---
 #
 # Ingest used to leave every page behind as a JPEG. That is ~3.2x the PDF in
@@ -523,6 +538,11 @@ if __name__ == "__main__":
     if _requeued:
         save(QUEUE, _q)
         print("requeued %d book(s) interrupted by a restart" % _requeued, flush=True)
-    threading.Thread(target=worker, daemon=True).start()
+    # Each worker picks its next book under the same lock, and the pick marks it
+    # "working" before the lock is released, so two workers can never take the
+    # same book.
+    for _i in range(max(1, WORKERS)):
+        threading.Thread(target=worker, daemon=True).start()
+    print("started %d ingest worker(s)" % max(1, WORKERS), flush=True)
     print("bookhost on 127.0.0.1:%d, store %s" % (PORT, STORE), flush=True)
     ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()
