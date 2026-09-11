@@ -47,3 +47,25 @@ def tight_crop(im: Image.Image, margin: float = 0.06, min_width_frac: float = 0.
         need = int(w * min_width_frac) - (x1 - x0)
         x0 = max(0, x0 - need // 2); x1 = min(w, x0 + int(w * min_width_frac))
     return im.crop((x0, 0, x1, h))
+
+
+def ink_spans(im: Image.Image) -> list[tuple[int, int]]:
+    """Horizontal spans of handwriting, with a printed move-number band at the
+    far left removed (it is dark ink too, but it is on every white cell)."""
+    g = np.asarray(im.convert("L"), dtype=np.float32)
+    h, w = g.shape
+    core = g[int(h * 0.15): int(h * 0.85), int(w * 0.02): int(w * 0.98)]
+    paper = np.percentile(core, 60)
+    dark = core < paper - max(35.0, 0.25 * paper)
+    ink_cols = dark.sum(axis=0) >= 2
+    spans = [(a + int(w * 0.02), b + int(w * 0.02)) for a, b in _spans(ink_cols, min_gap=int(w * 0.06)) if b - a >= 4]
+    if spans and spans[0][1] < w * 0.18 and (len(spans) == 1 or spans[1][0] - spans[0][1] > w * 0.04):
+        spans = spans[1:]                                   # the number band, alone or leading
+    return spans
+
+
+def has_ink(im: Image.Image, min_width_frac: float = 0.03) -> bool:
+    """Is there handwriting in this cell at all? Blank trailing cells on a sheet
+    (moves after the game ended) must not be read as moves."""
+    w = im.size[0]
+    return any(b - a >= w * min_width_frac for a, b in ink_spans(im))

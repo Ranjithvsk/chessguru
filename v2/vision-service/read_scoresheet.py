@@ -18,7 +18,7 @@ import torch
 from PIL import Image
 import os as _os, sys as _sys
 _sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
-from cellprep import tight_crop
+from cellprep import tight_crop, has_ink
 TIGHT = _os.environ.get("TIGHT", "0") == "1"
 from transformers import VisionEncoderDecoderModel, ViTImageProcessor, RobertaTokenizerFast
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -34,11 +34,24 @@ def load(model_dir: str, device: str):
     return ip, tok, mdl
 
 
+def trim_blank_tail(paths: list[Path]) -> list[Path]:
+    """Drop the run of empty cells after the last written move (a 60-move sheet
+    of a 31-move game has 58 blank cells). Blanks INSIDE the game are kept and
+    come back as unknown, which is what a coach should see."""
+    last = -1
+    for i, p in enumerate(paths):
+        if has_ink(Image.open(p)):
+            last = i
+    return paths[: last + 1]
+
+
 def read_cells(paths: list[Path], ip, tok, mdl, device: str, batch: int = 16) -> list[sb.Cell]:
+    paths = trim_blank_tail(paths)
     cells = []
     for s in range(0, len(paths), batch):
         chunk = paths[s:s + batch]
         ims = [Image.open(p).convert("RGB") for p in chunk]
+        blank = [not has_ink(im) for im in ims]
         if TIGHT: ims = [tight_crop(im) for im in ims]
         pv = ip(images=ims, return_tensors="pt").pixel_values.to(device)
         with torch.inference_mode():
@@ -52,7 +65,7 @@ def read_cells(paths: list[Path], ip, tok, mdl, device: str, batch: int = 16) ->
                 t = texts[i * K + j].strip().replace(" ", "")
                 if t and t not in [c[0] for c in cands]:
                     cands.append((t, math.exp(scores[i * K + j])))
-            cells.append(sb.Cell(p.name, cands or [("", 0.0)]))
+            cells.append(sb.Cell(p.name, [("", 0.0)] if blank[i] else (cands or [("", 0.0)])))
     return cells
 
 
