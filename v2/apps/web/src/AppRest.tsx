@@ -92,6 +92,7 @@ import StudiesTrashPage from "./pages/StudiesTrash";
 import StudyCreatePage from "./pages/StudyCreate";
 import StudyViewPage from "./pages/StudyView";
 import StudyChapterEditPage from "./pages/StudyChapterEdit";
+import StudyBoardPage from "./pages/StudyBoard";
 import BooksListPage from "./pages/BooksList";
 import BookDetailPage from "./pages/BookDetail";
 import BookCreatePage from "./pages/BookCreate";
@@ -215,7 +216,11 @@ export default function AppRest() {
         <Route path="studies/trash" element={<StudiesTrashPage />} />
         <Route path="studies/new" element={<StudyCreatePage />} />
         <Route path="studies/:sid" element={<StudyViewPage />} />
-        <Route path="studies/:sid/edit/:cid" element={<StudyChapterEditPage />} />
+        {/* The chapter editor IS the Dream Meet board (offline). The previous
+            hand-rolled editor stays routed at .../classic as a one-release escape
+            hatch — same chapter, same storage, so nothing is stranded there. */}
+        <Route path="studies/:sid/edit/:cid" element={<StudyBoardPage />} />
+        <Route path="studies/:sid/edit/:cid/classic" element={<StudyChapterEditPage />} />
         <Route path="books" element={<BooksListPage />} />
         <Route path="books/new" element={<BookCreatePage />} />
         <Route path="books/:id" element={<BookDetailPage />} />

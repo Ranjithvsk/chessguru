@@ -12,6 +12,20 @@ import { Chess, validateFen } from "chess.js";
 import type { Key } from "chessground/types";
 import Board from "./Board";
 import { AnnotationToolbar, applyAnnotationClick, useAnnotationTool, type AnnotShape } from "./AnnotationToolbar";
+import { createLocalClassSocket, type LocalRoomState } from "../lib/localClassRoom";
+
+/** The slice of a WebSocket this board actually uses. Satisfied by both a
+ *  real socket (live class) and the loopback in lib/localClassRoom.ts
+ *  (offline study board) — which is what lets ONE component serve both. */
+type ClassSocket = {
+  readyState: number;
+  onopen: ((ev?: any) => void) | null;
+  onmessage: ((ev: { data: any }) => void) | null;
+  onerror: ((ev?: any) => void) | null;
+  onclose: ((ev?: any) => void) | null;
+  send: (data: string) => void;
+  close: () => void;
+};
 
 type BoardMove = { from: string; to: string; promotion?: string };
 
@@ -130,6 +144,11 @@ export function triggerClassDeleteFrom(path: number[]) { _deleteFn?.(path); }
 type AnnotateFn = (path: number[], args: { nag?: string | null; comment?: string | null }) => void;
 let _annotateFn: AnnotateFn | null = null;
 export function triggerClassAnnotateMove(path: number[], args: { nag?: string | null; comment?: string | null }) { _annotateFn?.(path, args); }
+
+// ⭐ revise flag (My Studies only — drives the spaced-repetition queue).
+type ReviseFn = (path: number[], revise: boolean) => void;
+let _reviseFn: ReviseFn | null = null;
+export function triggerClassSetRevise(path: number[], revise: boolean) { _reviseFn?.(path, revise); }
 
 // Teach Opening — coach loads a whole tree into the class board (from
 // repertoire / corpus / master games). Wholesale replaces room.tree +
@@ -767,7 +786,7 @@ export function PalettePieceBtn({ p, selected, onClick }: { p: string; selected:
 }
 
 export default function SharedClassBoard(
-  { room, userId, displayName, onClassEnded, intendedRole }: {
+  { room, userId, displayName, onClassEnded, intendedRole, local, localInitial, onLocalChange }: {
     room: string; userId?: string | null; displayName?: string | null;
     /** Coach explicitly ended the class — parent should navigate away / show a toast. */
     onClassEnded?: (reason: string) => void;
@@ -776,6 +795,14 @@ export default function SharedClassBoard(
      *  no live coach socket — without this a reload would land as student
      *  and the "📋 Setup" / cursor-broadcast privileges would silently go away. */
     intendedRole?: "coach" | "student";
+    /** OFFLINE MODE. Swaps the class-ws socket for an in-browser loopback that
+     *  runs the same reducer, so this exact board + the notation panel work
+     *  with no network, no room, no other people. Used by My Studies. */
+    local?: boolean;
+    /** Seed state for local mode (a saved chapter, a puzzle FEN, a game). */
+    localInitial?: Partial<LocalRoomState> | null;
+    /** Fires after every local state change — drive autosave from this. */
+    onLocalChange?: (state: LocalRoomState) => void;
   },
 ) {
   const COACH_TOKEN_KEY = `cg-coachtoken-${room}`;
@@ -799,8 +826,12 @@ export default function SharedClassBoard(
   // Client role — set from the server's `role` frame after hello resolves.
   // Only the coach sends pointer frames; server drops any student pointer.
   const [role, setRole] = useState<"coach" | "student" | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const wsRef = useRef<ClassSocket | null>(null);
   const gameRef = useRef<Chess>(new Chess());
+  // Kept in refs so changing the seed/callback never tears down the socket.
+  const localInitialRef = useRef(localInitial);
+  const onLocalChangeRef = useRef(onLocalChange);
+  useEffect(() => { onLocalChangeRef.current = onLocalChange; });
   const boardWrapRef = useRef<HTMLDivElement | null>(null);
   const lastPointerSentAt = useRef<number>(0);
   const pointerOffTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -878,7 +909,12 @@ export default function SharedClassBoard(
       if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
       if (wsRef.current) { try { wsRef.current.close(); } catch { /* */ } wsRef.current = null; }
 
-      const ws = new WebSocket(`${proto}//${location.host}/v2api/class-ws/${encodeURIComponent(room)}`);
+      const ws: ClassSocket = local
+        ? createLocalClassSocket({
+            initial: localInitialRef.current,
+            onChange: (st) => { onLocalChangeRef.current?.(st); },
+          })
+        : (new WebSocket(`${proto}//${location.host}/v2api/class-ws/${encodeURIComponent(room)}`) as unknown as ClassSocket);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -1093,7 +1129,7 @@ export default function SharedClassBoard(
       try { wsRef.current?.close(); } catch { /* */ }
       wsRef.current = null;
     };
-  }, [room, userId, displayName]);
+  }, [room, userId, displayName, local]);
 
   // Throttled coach-cursor broadcast (~30Hz) so students see where the coach
   // is gesturing during explanation. Silent no-op for students (server would
@@ -1351,6 +1387,15 @@ export default function SharedClassBoard(
       ws.send(JSON.stringify(body));
     } catch { /* */ }
   };
+  const sendSetRevise: ReviseFn = (path, revise) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!Array.isArray(path) || path.length === 0) return;
+    try {
+      const cleanPath = path.map((n) => Math.max(0, Math.floor(Number(n) || 0)));
+      ws.send(JSON.stringify({ type: "study:revise", path: cleanPath, revise: !!revise }));
+    } catch { /* */ }
+  };
   const sendAnnotateMove: AnnotateFn = (path, args) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -1374,6 +1419,7 @@ export default function SharedClassBoard(
     _deleteFn = sendDelete;
     _loadTreeFn = sendLoadTree;
     _annotateFn = sendAnnotateMove;
+      _reviseFn = sendSetRevise;
     return () => {
       if (_seekFn === sendSeek) _seekFn = null;
       if (_promoteFn === sendPromote) _promoteFn = null;
@@ -1381,6 +1427,7 @@ export default function SharedClassBoard(
       if (_deleteFn === sendDelete) _deleteFn = null;
       if (_loadTreeFn === sendLoadTree) _loadTreeFn = null;
       if (_annotateFn === sendAnnotateMove) _annotateFn = null;
+        if (_reviseFn === sendSetRevise) _reviseFn = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -52,7 +52,7 @@ function shortId(bytes = 8): string {
 }
 
 export interface Shape {
-  brush: "green" | "red" | "blue" | "yellow";
+  brush: "green" | "red" | "blue" | "yellow" | "purple";
   orig: string;         // square, e.g. "e4"
   dest?: string;        // present for arrows, absent for circles
 }
@@ -454,6 +454,10 @@ export class StudiesService {
     if (b.headers && typeof b.headers === "object") {
       set.headers = this.cleanHeaders(b.headers);
     }
+    // Arrows/circles drawn at the STARTING position. Per-move markup lives on
+    // each MoveNode, but the root position had nowhere to put them — a board
+    // that annotates the start and saves would silently lose that markup.
+    if (Array.isArray(b.startShapes)) set.startShapes = this.validateShapes(b.startShapes);
     await this.chapters().updateOne({ _id: chapterId, studyId }, { $set: set });
     await this.studies().updateOne({ _id: studyId }, { $set: { updatedAt: new Date() } });
     // Sync owner's revision queue when moves change (⭐ flags may have flipped).
@@ -647,6 +651,16 @@ export class StudiesService {
   /** Validate a client-supplied moves array by REPLAYING it move-by-move.
    *  Prevents garbage from ever landing in the DB — one bad move short-circuits.
    *  Variations replay from their parent's fenAfter (or startingFen if root). */
+  /** Same shape rules as a MoveNode's shapes[] — used for a chapter's
+   *  start-position markup. */
+  private validateShapes(raw: any[]): Shape[] {
+    return (Array.isArray(raw) ? raw : []).slice(0, 40).map((s: any) => ({
+      brush: ["green", "red", "blue", "yellow", "purple"].includes(s?.brush) ? s.brush : "green",
+      orig: String(s?.orig || "").slice(0, 4),
+      dest: s?.dest ? String(s.dest).slice(0, 4) : undefined,
+    })).filter((s: any) => /^[a-h][1-8]$/.test(s.orig));
+  }
+
   private validateMoves(rawMoves: any[], startingFen: string): MoveNode[] {
     if (!Array.isArray(rawMoves)) throw new BadRequestException("moves must be array");
     if (rawMoves.length > MAX_MOVES) throw new BadRequestException("too many moves");
@@ -687,9 +701,18 @@ export class StudiesService {
         isMainLine: !!m.isMainLine,
       };
       if (typeof m.comment === "string" && m.comment.trim()) node.comment = m.comment.slice(0, MAX_COMMENT);
-      if (typeof m.nag === "number" && m.nag >= 1 && m.nag <= 6) node.nag = m.nag;
+      // Standard PGN NAG codes 1-19. Was capped at 6 (!, ?, !!, ??, !?, ?!),
+      // which silently DROPPED the eight evaluation glyphs the Dream Meet
+      // notation panel offers (=, ∞, +=, =+, ±, ∓, +-, -+ → NAGs 10-19). A
+      // board that can set a glyph the save throws away is not 1:1, so the
+      // range now covers every glyph the panel can produce. Widening only —
+      // no stored value changes meaning.
+      if (typeof m.nag === "number" && Number.isInteger(m.nag) && m.nag >= 1 && m.nag <= 19) node.nag = m.nag;
       if (Array.isArray(m.shapes)) node.shapes = m.shapes.slice(0, 40).map((s: any) => ({
-        brush: ["green", "red", "blue", "yellow"].includes(s.brush) ? s.brush : "green",
+        // purple was missing while the board's brush palette has had five
+        // colours — a purple arrow silently saved as GREEN, changing what the
+        // coach drew. Keep "green" as the fallback for genuine junk only.
+        brush: ["green", "red", "blue", "yellow", "purple"].includes(s.brush) ? s.brush : "green",
         orig: String(s.orig || "").slice(0, 4),
         dest: s.dest ? String(s.dest).slice(0, 4) : undefined,
       }));

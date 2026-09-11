@@ -13,7 +13,7 @@ export interface SourceBook {
 }
 
 export interface Shape {
-  brush: "green" | "red" | "blue" | "yellow";
+  brush: "green" | "red" | "blue" | "yellow" | "purple";
   orig: string;
   dest?: string;
 }
@@ -60,6 +60,9 @@ export interface ChapterSummary {
 
 export interface Chapter extends ChapterSummary {
   moves: MoveNode[];
+  /** Arrows/circles drawn at the starting position (per-move markup lives on
+   *  each MoveNode). */
+  startShapes?: Shape[];
   headers?: Record<string, string>;
 }
 
@@ -110,7 +113,8 @@ export const studiesApi = {
     req<Chapter>("GET", `/api/studies/${encodeURIComponent(sid)}/chapters/${encodeURIComponent(cid)}`),
 
   saveChapter: (sid: string, cid: string, body: {
-    title?: string; startingFen?: string; moves?: MoveNode[]; headers?: Record<string, string>;
+    title?: string; startingFen?: string; moves?: MoveNode[];
+    startShapes?: Shape[]; headers?: Record<string, string>;
   }) => req<{ ok: boolean }>("PATCH", `/api/studies/${encodeURIComponent(sid)}/chapters/${encodeURIComponent(cid)}`, body),
 
   deleteChapter: (sid: string, cid: string) =>
