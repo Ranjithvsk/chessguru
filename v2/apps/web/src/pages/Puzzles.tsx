@@ -580,7 +580,13 @@ export default function PuzzlesPage() {
               ? `${prettify(primaryTheme(displayThemes))} — Puzzle #${g.puzzle.id}`
               : `Puzzle #${g.puzzle.id}`}
             startingFen={g.puzzle.fen}
-            pgn={uciLineToPgn(g.puzzle.fen, g.puzzle.solution)}
+            /* The solution line is withheld until the puzzle is OVER. The title
+               and tags were already gated on revealTheme, but the PGN leaks
+               strictly more than the theme name does: save it mid-puzzle, open
+               it on the board, and you have the whole answer — while the trainer
+               still banks a full-rating solve, because viewSolution() sets the
+               hinted flag and this path would not. */
+            pgn={(g.solved || g.failed) ? uciLineToPgn(g.puzzle.fen, g.puzzle.solution) : undefined}
             defaultTags={revealTheme ? displayThemes : []}
             className="w-full rounded-xl2 border border-ink-700 bg-ink-900 px-4 py-2.5 text-sm font-semibold text-ink-200 hover:border-brand-500 hover:text-brand-200 disabled:opacity-40"
           />

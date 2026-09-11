@@ -586,7 +586,14 @@ export class StudiesService {
       .replace(/;[^\n]*/g, " ")            // strip ;-line comments
       .replace(/\$\d+/g, " ")              // strip $NAG glyphs (kept for future use)
       .replace(/[!?]+/g, " ")              // strip !, ?, !!, ??, !?, ?! move-quality
-      .replace(/\d+\.(\.\.)?/g, " ")       // strip move numbers "12." and "12..."
+      // Strip move numbers. chess.js writes a black-to-move game as "4. ... Bc5"
+      // — with a SPACE before the dots — so the old /\d+\.(\.\.)?/ matched only
+      // "4." and left a bare "..." token, which then reached board.move("...")
+      // and threw. That made saving IMPOSSIBLE for every position where black
+      // moves first: roughly half of all puzzles. Allow whitespace inside the
+      // number, then sweep up any standalone run of dots left anywhere.
+      .replace(/\d+\s*\.(\s*\.+)?/g, " ")    // "12." / "12..." / "12. ..."
+      .replace(/(^|\s)\.+(?=\s|$)/g, " ")    // any orphaned continuation dots
       .replace(/\*|1-0|0-1|1\/2-1\/2/g, " ")  // strip game-termination markers
       .replace(/\s+/g, " ")
       .trim();
@@ -641,7 +648,11 @@ export class StudiesService {
       }
       // A SAN move token. Play it on the current position.
       const board = new Chess(cur.fen);
-      const played = board.move(tok);
+      // chess.js 1.x THROWS on an unparseable SAN rather than returning null,
+      // so this needs a catch — otherwise one bad token escapes as an uncaught
+      // 500 instead of telling the caller what is actually wrong with it.
+      let played: any = null;
+      try { played = board.move(tok); } catch { played = null; }
       if (!played) throw new BadRequestException("PGN replay failed at " + tok);
       if (moves.length >= MAX_MOVES) throw new BadRequestException("PGN too long");
       const id = shortId(6);
