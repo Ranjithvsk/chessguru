@@ -141,13 +141,18 @@ function BookCard({ b, onCover }: { b: Book; onCover: (page: number) => void }) 
         </Link>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="mb-1 flex items-center gap-2 text-xs text-ink-400">
-            <span>{b.pages} pages</span>
-            <span className="text-brand-300">· {b.diagrams} positions</span>
+          {/* One line, never two. On a phone "854 pages · 829 positions" plus a
+              status chip wrapped, which made that card taller than its
+              neighbours and the whole shelf go ragged — the Learn library keeps
+              its author-and-year on a single line and stays even. */}
+          <div className="mb-1 flex min-w-0 items-center gap-2 text-xs text-ink-400">
+            <span className="truncate whitespace-nowrap">
+              {b.pages} pages <span className="text-brand-300">· {b.diagrams} positions</span>
+            </span>
             {reading ? (
-              <span className="ml-auto rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] text-amber-200">reading {pct}%</span>
+              <span className="ml-auto shrink-0 rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] text-amber-200">{pct}%</span>
             ) : (
-              <span className="ml-auto rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] text-emerald-200">ready</span>
+              <span className="ml-auto shrink-0 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] text-emerald-200">ready</span>
             )}
           </div>
           <Link to={`/books/read/${encodeURIComponent(b.id)}`}

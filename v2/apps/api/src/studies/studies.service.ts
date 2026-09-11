@@ -31,6 +31,12 @@ import { randomBytes } from "crypto";
 import { Chess } from "chess.js";
 import { BooksService } from "../books/books.service";
 import { RevisionsService } from "../revisions/revisions.service";
+import {
+  ReadScope,
+  academyScopeFilter,
+  attachAcademyNames,
+  resolveReadScope,
+} from "../lib/academy-scope";
 
 const MAX_TITLE = 140;
 const MAX_COMMENT = 4000;
@@ -142,11 +148,75 @@ export class StudiesService {
     return s;
   }
 
+  /* ─── super-admin cross-academy READ override ──────────────────────────
+   *
+   * Owner ask 2026-09-11: Ranjith_vsk wants to view any academy's studies the
+   * same way he can already view any academy's leaderboard. Reads only — every
+   * write below still resolves the academy from the caller's own session, so an
+   * admin can look at a customer's studies but can never edit, share or delete
+   * one. See src/lib/academy-scope.ts for the full contract.
+   *
+   * THE NULL-academyId RULE, applied consistently everywhere in this file:
+   *
+   *   A study's academy is the `academyId` STAMPED ON THE STUDY DOC at create()
+   *   time. It is never re-derived from the owner's current users.academyId.
+   *   A study whose academyId is null (or absent) belongs to the __platform__
+   *   bucket, exactly like a user with no academy does on the leaderboard.
+   *
+   * Why stamp-at-creation and not an owner join: the stored field is already
+   * what this file's own visibility rule trusts (loadForRead compares
+   * s.academyId to the reader's academy), it is stable, and an owner join would
+   * silently re-parent every study a user owns each time that user moves
+   * academy. Today 30 of 32 studies carry a value and 2 are explicitly null;
+   * the two strategies disagree on exactly those 2 rows, and accounts HAVE been
+   * moved between academies recently, so the join would mis-attribute them.
+   *
+   * THE OTHER HALF of the override, which a naive academyId swap gets wrong:
+   * 29 of the 32 studies in the database are `private` and exactly ONE is
+   * `visibility: "academy"`. Dropping a target academyId into listMine's
+   * ownership/visibility $or would therefore show an admin 1 study for
+   * guna-chess-academy instead of 20 — a screen that looks broken rather than
+   * empty. So the override branch DROPS the ownership/visibility $or entirely
+   * and filters on academy alone; the detail paths short-circuit the visibility
+   * ladder for the same reason.
+   */
+
+  /** Fetch a study for READING under a possible admin cross-academy override.
+   *  The override grants read on any study inside the requested scope
+   *  regardless of visibility (see the block comment above). If the study is
+   *  NOT in the requested scope we fall through to the ordinary ladder, so a
+   *  wrong ?academy= never widens access and never reveals anything. */
+  private async loadForReadScoped(studyId: string, userId: string, academyId: string | null, scope: ReadScope): Promise<StudyDoc> {
+    if (scope.viewingOther) {
+      const s = await this.studies().findOne({
+        _id: studyId,
+        deletedAt: { $exists: false },
+        ...academyScopeFilter(scope),
+      } as any);
+      if (s) return s;
+    }
+    return this.loadForRead(studyId, userId, academyId);
+  }
+
   /* ─── list / create / meta ─────────────────────────────────────────────── */
 
-  /** List studies the caller can see (own + shared + academy-visible). */
-  async listMine(session: any) {
+  /** List studies the caller can see (own + shared + academy-visible).
+   *  Admins may pass ?academy=<slug|__all__|__platform__> to list THAT
+   *  academy's studies instead; everyone else's result is unchanged. */
+  async listMine(session: any, opts: { academy?: string } = {}) {
     const { userId, academyId } = this.ensureUser(session);
+    const scope = resolveReadScope(session, opts);
+    if (scope.viewingOther) {
+      // Admin override: academy alone decides, ownership/visibility ignored.
+      const rows = await this.studies()
+        .find({ ...academyScopeFilter(scope), deletedAt: { $exists: false } } as any, { projection: { moves: 0 } })
+        .sort({ updatedAt: -1 })
+        .limit(200)
+        .toArray();
+      // __all__ mixes academies together, so every row has to say which one
+      // it came from or the list is unreadable.
+      return { items: await attachAcademyNames(this.conn, rows) };
+    }
     const or: any[] = [
       { ownerId: userId },
       { sharedWithUserIds: userId },
@@ -214,13 +284,18 @@ export class StudiesService {
     return { studyId, chapterId };
   }
 
-  async get(session: any, studyId: string) {
+  async get(session: any, studyId: string, opts: { academy?: string } = {}) {
     const { userId, academyId } = this.ensureUser(session);
-    const s = await this.loadForRead(studyId, userId, academyId);
+    const scope = resolveReadScope(session, opts);
+    const s = await this.loadForReadScoped(studyId, userId, academyId, scope);
     const chapters = await this.chapters()
       .find({ studyId: s._id, deletedAt: { $exists: false } } as any, { projection: { moves: 0 } })
       .sort({ order: 1 })
       .toArray();
+    if (scope.viewingOther) {
+      const [labelled] = await attachAcademyNames(this.conn, [s as any]);
+      return { study: labelled, chapters };
+    }
     return { study: s, chapters };
   }
 
@@ -267,6 +342,11 @@ export class StudiesService {
   // Owner-only view of soft-deleted studies for the restore UI (2026-09-03).
   // Only returns studies the caller OWNS — shared/academy visibility doesn't
   // extend to the trash, since it's a personal recovery affordance.
+  //
+  // DELIBERATELY NOT given the admin cross-academy override: trash has no
+  // academy dimension (it filters on ownerId), and a fleet-wide trash view
+  // would expose other people's deleted drafts for no stated benefit. Not part
+  // of the owner's ask; revisit only if he asks for it by name.
   async listTrash(session: any) {
     const { userId } = this.ensureUser(session);
     const rows = await this.studies()
@@ -315,9 +395,10 @@ export class StudiesService {
 
   /* ─── chapters ─────────────────────────────────────────────────────────── */
 
-  async getChapter(session: any, studyId: string, chapterId: string) {
+  async getChapter(session: any, studyId: string, chapterId: string, opts: { academy?: string } = {}) {
     const { userId, academyId } = this.ensureUser(session);
-    await this.loadForRead(studyId, userId, academyId);
+    // The chapter itself carries no academy dimension — the study is the gate.
+    await this.loadForReadScoped(studyId, userId, academyId, resolveReadScope(session, opts));
     const c = await this.chapters().findOne({ _id: chapterId, studyId, deletedAt: { $exists: false } } as any);
     if (!c) throw new NotFoundException("no such chapter");
     return c;

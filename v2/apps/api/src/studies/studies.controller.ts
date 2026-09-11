@@ -1,6 +1,13 @@
 // User-created studies API.
 //
 //   GET    /api/studies                              — list studies I can see
+//
+// Super-admin cross-academy READ override (owner ask 2026-09-11): the three
+// GETs below accept ?academy=<slug|__all__|__platform__>. Only users in the
+// isAdmin() allowlist can use it; for anyone else the param is silently
+// ignored and the response is byte-for-byte what it is today. The write
+// routes (POST/PATCH/DELETE) deliberately do NOT accept it — an admin may
+// look inside a customer's academy, never change it.
 //   POST   /api/studies                              — create study (+ first chapter)
 //   GET    /api/studies/:sid                         — study meta + chapter list
 //   PATCH  /api/studies/:sid                         — update study meta (title, visibility, shares)
@@ -10,7 +17,7 @@
 //   PATCH  /api/studies/:sid/chapters/:cid           — save chapter (title, startingFen, moves, headers)
 //   DELETE /api/studies/:sid/chapters/:cid           — delete chapter
 
-import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
 import { StudiesService } from "./studies.service";
 
 @Controller("studies")
@@ -18,7 +25,9 @@ export class StudiesController {
   constructor(private readonly svc: StudiesService) {}
 
   @Get()
-  list(@Req() req: any) { return this.svc.listMine(req?.session); }
+  list(@Req() req: any, @Query("academy") academy: string) {
+    return this.svc.listMine(req?.session, { academy: academy || undefined });
+  }
 
   // Trash — owner-only list of soft-deleted studies (owner ask 2026-09-03).
   // Kept BEFORE the :sid routes so "/studies/trash" isn't caught by the
@@ -30,7 +39,9 @@ export class StudiesController {
   create(@Body() body: any, @Req() req: any) { return this.svc.create(req?.session, body); }
 
   @Get(":sid")
-  get(@Param("sid") sid: string, @Req() req: any) { return this.svc.get(req?.session, sid); }
+  get(@Param("sid") sid: string, @Req() req: any, @Query("academy") academy: string) {
+    return this.svc.get(req?.session, sid, { academy: academy || undefined });
+  }
 
   @Patch(":sid")
   updateMeta(@Param("sid") sid: string, @Body() body: any, @Req() req: any) {
@@ -50,8 +61,8 @@ export class StudiesController {
   }
 
   @Get(":sid/chapters/:cid")
-  getChapter(@Param("sid") sid: string, @Param("cid") cid: string, @Req() req: any) {
-    return this.svc.getChapter(req?.session, sid, cid);
+  getChapter(@Param("sid") sid: string, @Param("cid") cid: string, @Req() req: any, @Query("academy") academy: string) {
+    return this.svc.getChapter(req?.session, sid, cid, { academy: academy || undefined });
   }
 
   @Patch(":sid/chapters/:cid")

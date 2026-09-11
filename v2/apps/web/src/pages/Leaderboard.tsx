@@ -388,7 +388,7 @@ export default function LeaderboardPage() {
   const [pickedAcademy, setPickedAcademy] = useState<string>(() => urlParams.get("academy") || "");
   const academiesQ = useQuery({
     queryKey: ["admin-academies"],
-    queryFn: () => get<Array<{ id: string; name: string; studentCount: number }>>("/api/admin/academies"),
+    queryFn: () => get<Array<{ id: string; name: string; studentCount: number }>>("/api/admin/academies?slim=1"),
     enabled: isSuperAdmin,
     staleTime: 5 * 60_000,
   });

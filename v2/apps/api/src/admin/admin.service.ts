@@ -10,41 +10,6 @@ export class AdminService {
   private statsCache: { at: number; data: any } | null = null;
   private distCache: { at: number; data: any } | null = null;
 
-  /** All academies + their student counts — powers the super-admin picker on
-   *  /academy/leaderboard so ranjith can hop across tenants. 2026-08-27. */
-  async listAcademies(): Promise<Array<{ id: string; name: string; studentCount: number }>> {
-    const [acads, counts, standaloneCount] = await Promise.all([
-      this.db().collection("academies").find({}, { projection: { _id: 1, name: 1 } }).toArray(),
-      this.db().collection("users").aggregate([
-        { $match: { academyId: { $ne: null }, role: "student" } },
-        { $group: { _id: "$academyId", n: { $sum: 1 } } },
-      ]).toArray(),
-      // Standalone users — self-signups with no academyId (also captures old
-      // accounts predating multi-tenant). Owner ask 2026-08-27 (ranjith):
-      // srinithi_sn / gunal / l-n1234 aren't in any academy but should still
-      // show up somewhere for cross-fleet review.
-      this.db().collection("users").countDocuments({
-        $or: [{ academyId: null }, { academyId: { $exists: false } }],
-      }),
-    ]);
-    const cmap: Record<string, number> = {};
-    for (const c of counts) cmap[String(c._id)] = c.n;
-    const rows = acads
-      .map((a: any) => ({ id: String(a._id), name: String(a.name ?? a._id), studentCount: cmap[String(a._id)] ?? 0 }))
-      .sort((a, b) => b.studentCount - a.studentCount);
-    // Virtual bucket for non-academy self-signup users. Uses a sentinel id
-    // "__platform__" — buildLeaderboard swaps this to `academyId: null` filter.
-    // "All combined" bucket = every student across every tenant + the
-    // standalone bucket. Owner ask 2026-08-27 — ranjith wants the fleet
-    // leaderboard in the same styled UI, not just the flat /admin/users table.
-    const grandTotal = rows.reduce((s, a) => s + a.studentCount, 0) + standaloneCount;
-    return [
-      { id: "__all__", name: "🌐 All ChessGuru users", studentCount: grandTotal },
-      { id: "__platform__", name: "ChessGuru (no academy)", studentCount: standaloneCount },
-      ...rows,
-    ];
-  }
-
   async overview() {
     if (this.statsCache && Date.now() - this.statsCache.at < 60_000) return this.statsCache.data;
     const [total, engineGenerated, verified, engineGames, bfPools, piecePools, paths, users] = await Promise.all([

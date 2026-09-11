@@ -213,6 +213,153 @@ export const adminOverview = () => get<AdminOverview>("/api/admin/overview");
 export interface AdminUserDetail { username: string; email: string | null; createdAt: string | null; lastLogin: string | null; ratings: Record<string, { r: number; nb: number }>; recent: { puzzleId: string; win: boolean; at: string; rating: number | null; ratingDiff: number | null; themes: string[] }[]; recentStudy: { type: string; win: boolean; at: string; rating: number | null; ratingDiff: number | null }[]; solvesToday: number; solvesWeek: number; studySolves: number; studyWins: number; topThemes: { theme: string; n: number }[]; ratingHistory: number[]; }
 export const adminUserDetail = (u: string) => get<AdminUserDetail>(`/api/admin/users/${encodeURIComponent(u)}`);
 
+// --- Admin: per-academy adoption & retention (/admin/academies) -------------
+// Mirrors AdminAcademiesService (apps/api/src/admin/admin-academies.service.ts)
+// by hand — admin payloads are not generated and are not shared through
+// @chessguru/types, so these interfaces have to be kept in step with the service
+// manually.
+//
+// ONE endpoint serves two callers and must not be turned into an envelope:
+// this page, and the super-admin academy picker on Leaderboard.tsx:391 which
+// reads the same URL as a bare Array<{id, name, studentCount}> and needs the
+// "__all__" / "__platform__" sentinel rows. Everything below is additive.
+export type AcademyHealthBand = "thriving" | "growing" | "starting" | "quiet" | "dormant" | "aggregate";
+
+export interface AdminAcademyFeature {
+  key: string;
+  label: string;
+  /** false = an academy-only feature on a bucket that is not a tenant. Renders
+   *  as "n/a", never as "never used". */
+  applicable: boolean;
+  used: boolean;
+  count: number;
+  lastUsedAt: string | null;
+  detail?: Record<string, number>;
+}
+
+export interface AdminAcademySparkPoint {
+  date: string;
+  puzzles: number;
+  studySolves: number;
+  /** Before this academy signed up — those solves are the students' personal
+   *  history and are not credited to the academy anywhere. */
+  preSignup: boolean;
+}
+
+export interface AdminAcademyPeople {
+  students: number; coaches: number; parents: number; owners: number; other: number; total: number;
+  everLoggedIn: number; neverLoggedIn: number;
+  /** Current members who transferred in from another academy. */
+  joinedFromElsewhere: number;
+  /** Accounts that have LEFT. Their activity from while they were here is still
+   *  counted here. */
+  departed: number;
+  /** academyId points at an academy row that no longer exists. */
+  orphaned: number;
+}
+
+export interface AdminAcademyActivity {
+  /** Every window on this page is the last 7 / 30 IST CALENDAR days, today
+   *  included. There is no second, rolling-hours definition anywhere. */
+  activeUsers7d: number; activeUsersPrev7d: number; activeUsers30d: number;
+  puzzles7d: number; puzzlesPrev7d: number; puzzles30d: number;
+  studySolves7d: number; studySolvesPrev7d: number; studySolves30d: number;
+  solves7d: number; solvesPrev7d: number; solves30d: number;
+  puzzlesLifetime: number; studySolvesLifetime: number;
+  /** Solves by current members from before they were members here. */
+  puzzlesBeforeJoining: number;
+  actions7d: number; actions30d: number; activeDays30: number;
+  lastActivityAt: string | null; daysSinceLastActivity: number | null;
+  lastStaffActionAt: string | null; daysSinceStaffAction: number | null;
+  staffActionDays: number; staffActionWindowDays: number;
+  activeStaff: number; staffTotal: number;
+  /** Artefacts a platform admin authored inside this tenant. Excluded from every
+   *  staff-habit number so our own poking cannot make a dead academy look alive. */
+  vendorActions: number;
+}
+
+export interface AdminAcademyRow {
+  id: string;
+  name: string;
+  /** The picker's field. role:"student" only (for the two sentinels it keeps its
+   *  legacy meaning — see the service). */
+  studentCount: number;
+  kind: "academy" | "standalone" | "all";
+  synthetic: boolean;
+  ownerId: string | null; ownerName: string | null;
+  plan: string | null; createdAt: string | null; ageDays: number | null;
+  isTest: boolean; testReason: string | null;
+  /** Owned by a platform admin — our own sandbox, never a customer. */
+  isInternal: boolean;
+  /** Set when this one row could not be computed; the card degrades, the page
+   *  does not fall over. */
+  dataError: string | null;
+  people: AdminAcademyPeople;
+  activity: AdminAcademyActivity;
+  features: AdminAcademyFeature[];
+  featuresUsed: number; featuresApplicable: number; featuresTotal: number;
+  operational: { used: number; applicable: number; total: number; features: AdminAcademyFeature[] };
+  individual: { used: number; applicable: number; total: number; features: AdminAcademyFeature[] };
+  spark: AdminAcademySparkPoint[];
+  /** `severity` ascending = needs attention first; `tier` keeps the vendor
+   *  sandbox, test shells and the standalone bucket out of the customers' way.
+   *  The array arrives in the PICKER's legacy order, so the page sorts on these. */
+  health: { band: AcademyHealthBand; label: string; reason: string; severity: number; tier: number };
+}
+export const adminAcademies = () => get<AdminAcademyRow[]>("/api/admin/academies");
+
+export interface AdminAcademyPerson {
+  userId: string; username: string; name: string; role: string;
+  isStaff: boolean; joinedAt: string | null;
+  joinedFromElsewhere: boolean; detachedFrom: string | null;
+  departed: boolean; departedAt: string | null;
+  orphanedAcademyId: string | null;
+  puzzles7d: number; puzzles30d: number; puzzlesLifetime: number;
+  studySolves7d: number; studySolves30d: number; studySolvesLifetime: number;
+  solves7d: number; studiesCreated: number;
+  puzzleRating: number | null;
+  lastActivityAt: string | null; daysSinceLastActivity: number | null;
+  lastSeen: string | null; lastLogin: string | null;
+  /** express-session, rolling. 30-day horizon — null means "nothing in 30 days". */
+  lastRequestAt: string | null;
+  everLoggedIn: boolean;
+}
+
+export interface AdminAcademySeriesPoint {
+  date: string; puzzles: number; studySolves: number;
+  activeUsers: number; staffActions: number; created: number; preSignup: boolean;
+}
+
+export interface AdminAcademyCreated {
+  kind: string; title: string; by: string | null; at: string | null; note: string | null;
+  /** Identical artefacts made by the same person in the same minute (one
+   *  "assign to the whole batch" click) collapse to one line carrying a count. */
+  count: number;
+}
+
+export interface AdminAcademyDetail {
+  academy: AdminAcademyRow;
+  people: { rows: AdminAcademyPerson[]; total: number; current: number; departed: number; limit: number; offset: number };
+  series: AdminAcademySeriesPoint[];
+  /** Newest first, every kind merged, sorted on real date fields (never on the
+   *  random string _id). `createdTotal` is the REAL total, not the sum of
+   *  truncated fetches. */
+  created: AdminAcademyCreated[];
+  /** The real total of artefacts. `createdLines` is how many lines that is
+   *  after identical bulk rows are collapsed. */
+  createdTotal: number;
+  createdLines: number;
+  createdLimit: number;
+  generatedAt: string;
+  timezone: string;
+  weekDays: number;
+}
+export const adminAcademyDetail = (id: string, opts: { peopleLimit?: number } = {}) =>
+  get<AdminAcademyDetail>(
+    `/api/admin/academies/${encodeURIComponent(id)}`
+    + (opts.peopleLimit ? `?peopleLimit=${opts.peopleLimit}` : ""),
+  );
+
 // ── Broadcast games (Lichess PGN dumps) ───────────────────────────────
 export interface BroadcastListItem {
   id: string; event: string; site: string; round: string; date: string;

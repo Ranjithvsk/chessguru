@@ -16,6 +16,12 @@ import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { randomBytes } from "crypto";
 import { SEED_BOOKS, type SeedBook } from "./books.seed";
+import {
+  academyInScope,
+  academyScopeFilter,
+  attachAcademyNames,
+  resolveReadScope,
+} from "../lib/academy-scope";
 
 const MAX_TITLE = 200;
 const MAX_AUTHOR = 120;
@@ -98,9 +104,48 @@ export class BooksService implements OnModuleInit {
     }
   }
 
-  /** List every book visible to the caller: seeded + own-added + academy-added. */
-  async list(session: any) {
+  /* ─── super-admin cross-academy READ override ──────────────────────────
+   *
+   * Owner ask 2026-09-11 ("study and online book ... i need option to view").
+   * READS ONLY: list + get accept ?academy=<slug|__all__|__platform__> from an
+   * admin. Every write below (create/update/remove/markChapterDone) still
+   * stamps and checks the caller's OWN session.academyId, so an admin can read
+   * another academy's library but can never add to or edit it.
+   *
+   * Two things stay deliberately un-scoped:
+   *   - SEEDED books are platform-wide (30 of the 32 rows, academyId absent by
+   *     design) and every academy already sees all of them, so they stay in the
+   *     result under an override too. Dropping them would make the screen look
+   *     broken, and they are not any academy's private data.
+   *   - PROGRESS (`bookProgress`, keyed `${userId}:${bookId}` with no academy
+   *     field) remains the CALLER's own. Viewing Guna's library shows Ranjith's
+   *     own reading progress, not Guna's. Showing the academy's actual reading
+   *     would need a roster join, which is a different ask — raise it with the
+   *     owner rather than guessing here.
+   *
+   * The null/absent-academyId rule matches studies: a book with no academyId
+   * belongs to the __platform__ bucket. In practice only seeded books are in
+   * that state today; both user-added books are correctly stamped.
+   */
+
+  /** List every book visible to the caller: seeded + own-added + academy-added.
+   *  Admins may pass ?academy=<slug|__all__|__platform__> to see THAT academy's
+   *  added books instead of their own; everyone else's result is unchanged. */
+  async list(session: any, opts: { academy?: string } = {}) {
     const { userId, academyId } = this.ensureUser(session);
+    const scope = resolveReadScope(session, opts);
+    if (scope.viewingOther) {
+      // Admin override: platform-wide seeded books + the target academy's own
+      // additions. The caller's personal `addedByUserId` clause is dropped —
+      // his own books are not part of the academy he asked to look at.
+      const items = await this.books()
+        .find({ $or: [{ isSeeded: true }, { ...academyScopeFilter(scope), isSeeded: false }] }, { projection: { chapters: 0 } })
+        .sort({ isSeeded: -1, title: 1 })
+        .limit(500)
+        .toArray();
+      // __all__ mixes academies together, so label every row.
+      return { items: await attachAcademyNames(this.conn, items) };
+    }
     const or: any[] = [
       { isSeeded: true },
       { addedByUserId: userId },
@@ -114,16 +159,30 @@ export class BooksService implements OnModuleInit {
     return { items };
   }
 
-  async get(session: any, bookId: string) {
+  async get(session: any, bookId: string, opts: { academy?: string } = {}) {
     const { userId, academyId } = this.ensureUser(session);
+    const scope = resolveReadScope(session, opts);
     const book = await this.books().findOne({ _id: bookId });
     if (!book) throw new NotFoundException("no such book");
+    // Admin cross-academy override grants read on seeded books and on any book
+    // inside the requested scope. A book OUTSIDE that scope falls through to
+    // the ordinary rule below, so a wrong ?academy= never widens access.
+    const overrideGrantsRead = scope.viewingOther && (book.isSeeded || academyInScope(book.academyId, scope));
     // Non-seeded books: only visible to their creator or same-academy members.
-    if (!book.isSeeded && book.addedByUserId !== userId && (!book.academyId || book.academyId !== academyId)) {
+    if (!overrideGrantsRead && !book.isSeeded && book.addedByUserId !== userId && (!book.academyId || book.academyId !== academyId)) {
       throw new ForbiddenException("no access");
     }
     // Attach caller's progress in the same round-trip so the UI has everything.
+    // Under an override this is still the ADMIN's own progress — see the note
+    // on the override block above.
     const prog = await this.progress().findOne({ _id: `${userId}:${bookId}` });
+    if (scope.viewingOther) {
+      const [labelled] = await attachAcademyNames(this.conn, [book as any]);
+      return {
+        book: labelled,
+        progress: prog ?? { userId, bookId, chaptersCompleted: [], studiesLinked: [] },
+      };
+    }
     return {
       book,
       progress: prog ?? { userId, bookId, chaptersCompleted: [], studiesLinked: [] },
