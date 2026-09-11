@@ -13,6 +13,8 @@ import MilestoneOverlay from "../components/MilestoneOverlay";
 import { prettify } from "../lib/format";
 import { EngineAnalysisPanel } from "../components/EngineAnalysisPanel";
 import { WeaknessCurriculumCard } from "../components/WeaknessCurriculumCard";
+import { SaveToStudiesButton } from "../components/SaveToStudies";
+import { uciLineToPgn } from "../lib/studyTree";
 
 type Ctx = { userId: string | null; rating: number };
 const DIFFS: Difficulty[] = ["easiest", "easier", "normal", "harder", "hardest"];
@@ -566,6 +568,22 @@ export default function PuzzlesPage() {
             className="w-full rounded-xl2 bg-brand-600 px-3 py-3 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
             {g.isFetching ? "…" : (g.reviewing ? "Back to training →" : "Next →")}
           </button>
+        )}
+        {/* Save to My Studies — keeps the position AND the full solution line so
+            the puzzle can be annotated later. Theme text/tags are withheld until
+            `revealTheme`: in "All themes" mode the motif is the answer, and
+            pre-filling it in the save dialog would spoil an unsolved puzzle. */}
+        {g.puzzle && (
+          <SaveToStudiesButton
+            intent="puzzle"
+            defaultTitle={revealTheme && displayThemes.length
+              ? `${prettify(primaryTheme(displayThemes))} — Puzzle #${g.puzzle.id}`
+              : `Puzzle #${g.puzzle.id}`}
+            startingFen={g.puzzle.fen}
+            pgn={uciLineToPgn(g.puzzle.fen, g.puzzle.solution)}
+            defaultTags={revealTheme ? displayThemes : []}
+            className="w-full rounded-xl2 border border-ink-700 bg-ink-900 px-4 py-2.5 text-sm font-semibold text-ink-200 hover:border-brand-500 hover:text-brand-200 disabled:opacity-40"
+          />
         )}
         {g.puzzle && (
           <div className="flex items-center justify-between rounded-xl2 border border-ink-700 bg-ink-900 px-4 py-2.5">

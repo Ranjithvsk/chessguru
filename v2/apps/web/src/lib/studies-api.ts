@@ -101,7 +101,7 @@ export const studiesApi = {
   create: (body: {
     title?: string; intent?: Intent; visibility?: Visibility;
     startingFen?: string; pgn?: string; chapterTitle?: string;
-    sourceBook?: SourceBook;
+    sourceBook?: SourceBook; tags?: string[];
   }) => req<{ studyId: string; chapterId: string }>("POST", "/api/studies", body),
 
   get: (sid: string) =>

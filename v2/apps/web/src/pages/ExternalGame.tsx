@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Chess } from "chess.js";
 import type { Key } from "chessground/types";
 import Board from "../components/Board";
+import { SaveToStudiesButton } from "../components/SaveToStudies";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -101,6 +102,18 @@ export default function ExternalGamePage() {
             className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-500">
             🔬 Analyze this position in Board editor
           </Link>
+          {data.pgn
+            ? <SaveToStudiesButton
+                intent="game"
+                defaultTitle={`${data.white} vs ${data.black} — ${new Date(data.played).toLocaleDateString()}`}
+                pgn={data.pgn}
+              />
+            : <SaveToStudiesButton
+                intent="game"
+                defaultTitle={`${data.white} vs ${data.black} — ${new Date(data.played).toLocaleDateString()}`}
+                startingFen={positions[cur]!}
+                label="📓 Save position"
+              />}
           <span className="text-[10px] text-ink-500">
             {cur === 0 ? "starts from the initial position" : `carries the position after ply ${cur} — you can move both sides in the editor`}
           </span>

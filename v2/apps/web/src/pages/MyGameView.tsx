@@ -12,6 +12,7 @@ import type { DrawShape } from "chessground/draw";
 import Board from "../components/Board";
 import { api } from "../lib/api";
 import { myGamesApi, type PlyAnalysis } from "../lib/my-games-api";
+import { SaveToStudiesButton } from "../components/SaveToStudies";
 
 const TAG_LABEL: Record<string, string> = {
   missed_mate:        "Missed mate",
@@ -56,6 +57,27 @@ export default function MyGameViewPage() {
 
   const [selectedPly, setSelectedPly] = useState<number>(0); // 0 = starting position
 
+  // RULES OF HOOKS. This useMemo used to sit ~15 lines below, AFTER the three
+  // early returns under it. On the loading → loaded transition the hook count
+  // therefore grew, which is React error #310 ("rendered more hooks than during
+  // the previous render") — the page threw for every real user the moment the
+  // game finished loading. Pre-existing, found while adding the save button,
+  // which sits on this page and so could never have been reached. Derived
+  // defensively from q.data so it is safe before the query resolves.
+  const selPly = (q.data?.analysis?.plies ?? []).find((p: PlyAnalysis) => p.ply === selectedPly);
+  const shapes: DrawShape[] = useMemo(() => {
+    if (!selPly || !selPly.isMistake || !selPly.bestUci) return [];
+    return [{
+      brush: "green" as any,
+      orig: selPly.bestUci.slice(0, 2) as Key,
+      dest: selPly.bestUci.slice(2, 4) as Key,
+    }, {
+      brush: "red" as any,
+      orig: selPly.uci.slice(0, 2) as Key,
+      dest: selPly.uci.slice(2, 4) as Key,
+    }];
+  }, [selPly]);
+
   if (auth && !auth.loggedIn) return <Navigate to={`/login?back=/my-games/${encodeURIComponent(id)}`} replace />;
   if (q.isLoading) return <div className="mx-auto max-w-5xl px-3 py-8 text-sm text-ink-400">Loading…</div>;
   if (q.error || !q.data) return <div className="mx-auto max-w-5xl px-3 py-8">
@@ -69,20 +91,6 @@ export default function MyGameViewPage() {
   const currentPly = plies.find((p) => p.ply === selectedPly);
   const fen = currentPly ? currentPly.fenAfter : (plies[0]?.fenBefore || "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
   const lastMove: [Key, Key] | undefined = currentPly ? [currentPly.uci.slice(0, 2) as Key, currentPly.uci.slice(2, 4) as Key] : undefined;
-
-  // Show best-move arrow when a mistake is selected
-  const shapes: DrawShape[] = useMemo(() => {
-    if (!currentPly || !currentPly.isMistake || !currentPly.bestUci) return [];
-    return [{
-      brush: "green" as any,
-      orig: currentPly.bestUci.slice(0, 2) as Key,
-      dest: currentPly.bestUci.slice(2, 4) as Key,
-    }, {
-      brush: "red" as any,
-      orig: currentPly.uci.slice(0, 2) as Key,
-      dest: currentPly.uci.slice(2, 4) as Key,
-    }];
-  }, [currentPly]);
 
   const orientation: "white" | "black" = game.ourColor === "black" ? "black" : "white";
 
@@ -98,6 +106,12 @@ export default function MyGameViewPage() {
           {game.status}
         </span>
         {game.status === "failed" && game.error && <span className="text-xs text-rose-300">{game.error}</span>}
+        <SaveToStudiesButton
+          intent="game"
+          defaultTitle={`${game.white} vs ${game.black}${game.date ? ` — ${game.date}` : ""}`}
+          startingFen={plies[0]?.fenBefore || undefined}
+          pgn={game.pgn}
+        />
       </div>
 
       {game.status === "queued" && (

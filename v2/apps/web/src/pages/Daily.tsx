@@ -17,6 +17,8 @@ import type { Key } from "chessground/types";
 import { get, api } from "../lib/api";
 import Board from "../components/Board";
 import MilestoneOverlay from "../components/MilestoneOverlay";
+import { SaveToStudiesButton } from "../components/SaveToStudies";
+import { uciLineToPgn } from "../lib/studyTree";
 
 type DailyPayload = {
   date: string;
@@ -267,6 +269,21 @@ export default function DailyPage() {
             onMove={onMove}
             className="w-full"
           />
+          <div className="mt-3 flex justify-end">
+            <SaveToStudiesButton
+              intent="puzzle"
+              defaultTitle={`Daily puzzle — ${fmt(data.date)}`}
+              startingFen={data.puzzle.fen}
+              /* The SOLUTION, not the user's own attempt — game.current holds
+                  whatever moves they have tried, and for an untouched board
+                  chess.js still emits a full tag header, so the old expression
+                  saved an empty game on every reachable path. Withheld until the
+                  puzzle is finished: this page promises "one shot, no hints",
+                  and a saveable solution before attempting is a hint channel. */
+              pgn={(outcome || data.solvedByMe) ? uciLineToPgn(data.puzzle.fen, data.puzzle.solution) : undefined}
+              defaultTags={(outcome || data.solvedByMe) ? data.puzzle.themes.slice(0, 3) : []}
+            />
+          </div>
         </div>
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-4">
           {alreadyDoneOutcome ? (

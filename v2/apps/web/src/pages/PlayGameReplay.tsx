@@ -6,6 +6,7 @@ import { Link, useParams } from "react-router-dom";
 import type { Key } from "chessground/types";
 import Board from "../components/Board";
 import MoveTable from "../components/MoveTable";
+import { SaveToStudiesButton } from "../components/SaveToStudies";
 import { liveGames, type LiveGameFull } from "../lib/api";
 import { OUTCOME_META, SPEED_META, avatarGradient, fmtDuration, tcLabel } from "./PlayHistory";
 
@@ -209,6 +210,13 @@ export default function PlayGameReplayPage() {
 
           <div className="flex flex-wrap gap-2">
             <button onClick={copyPgn} className="rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-ink-200 hover:bg-ink-800">📋 Copy PGN</button>
+            <SaveToStudiesButton
+              intent="game"
+              defaultTitle={`${game.players.white.name} vs ${game.players.black.name} — ${new Date(game.startedAt).toLocaleDateString()}`}
+              startingFen={game.initialFen}
+              pgn={game.pgn}
+              className="rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-ink-200 hover:bg-ink-800"
+            />
             <Link to={`/board-editor?fen=${encodeURIComponent(fen)}`} className="rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-ink-200 hover:bg-ink-800">🔍 Analyse this position</Link>
             <Link to="/play" className="ml-auto rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-500">♟️ Play again</Link>
           </div>

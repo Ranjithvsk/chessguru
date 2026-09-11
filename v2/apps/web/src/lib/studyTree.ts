@@ -53,6 +53,25 @@ export function nagToGlyph(nag?: number): string | undefined {
   return NAG_TO_GLYPH[nag];
 }
 
+/** Replay a UCI line ("g1f3") from a FEN into a PGN. Puzzle solutions are
+ *  stored as UCI, which a study cannot replay, so every "save this puzzle"
+ *  path converts through here. Deliberately non-throwing: a bad move or
+ *  promotion edge returns undefined so the caller saves the position alone
+ *  rather than a broken game. Returns undefined for an empty line too —
+ *  chess.js emits a full seven-tag header for zero moves, which would
+ *  otherwise be saved as a chapter containing nothing. */
+export function uciLineToPgn(fen: string, line: string[] = []): string | undefined {
+  if (!fen || !Array.isArray(line) || line.length === 0) return undefined;
+  try {
+    const c = new Chess(fen);
+    for (const u of line) {
+      const applied = c.move({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: (u[4] as any) || "q" });
+      if (!applied) return undefined;
+    }
+    return c.pgn() || undefined;
+  } catch { return undefined; }
+}
+
 function newId(): string {
   const r = Math.random().toString(36).slice(2, 8);
   return (r + "000000").slice(0, 6);
