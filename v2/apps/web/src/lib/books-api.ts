@@ -58,7 +58,7 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 export const booksApi = {
   list: () => req<{ items: BookSummary[] }>("GET", "/api/books"),
   get: (id: string) => req<{ book: Book; progress: BookProgress }>("GET", `/api/books/${encodeURIComponent(id)}`),
-  create: (body: { title: string; author: string; publisher?: string; year?: number; chapters: BookChapter[] }) =>
+  create: (body: { title: string; author?: string; publisher?: string; year?: number; chapters?: BookChapter[] }) =>
     req<{ bookId: string }>("POST", "/api/books", body),
   update: (id: string, body: Partial<Book>) => req<{ ok: boolean }>("PATCH", `/api/books/${encodeURIComponent(id)}`, body),
   remove: (id: string) => req<{ ok: boolean }>("DELETE", `/api/books/${encodeURIComponent(id)}`),

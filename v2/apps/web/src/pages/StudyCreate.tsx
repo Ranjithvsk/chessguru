@@ -6,7 +6,7 @@
 
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { studiesApi, type Intent } from "../lib/studies-api";
 import { booksApi } from "../lib/books-api";
 
@@ -57,6 +57,19 @@ export default function StudyCreatePage() {
     queryKey: ["book", bookId],
     queryFn: () => booksApi.get(bookId),
     enabled: !!bookId && tile?.intent === "book",
+  });
+
+  // Add a book that is not in the list yet, straight from the search box. It is
+  // only an index entry -- a title somebody typed -- so no author or chapters
+  // are asked for, and it lands in the caller's ACADEMY list the same way any
+  // added book does, where the rest of the academy finds it next time.
+  const qc = useQueryClient();
+  const addBook = useMutation({
+    mutationFn: (name: string) => booksApi.create({ title: name, chapters: [] }),
+    onSuccess: async (r) => {
+      await qc.invalidateQueries({ queryKey: ["books"] });
+      setBookId(r.bookId);
+    },
   });
 
   const filteredBooks = useMemo(() => {
@@ -185,7 +198,25 @@ export default function StudyCreatePage() {
                       <div className="max-h-56 overflow-y-auto rounded-lg border border-ink-700 bg-ink-800/50">
                         {booksQ.isLoading && <div className="p-3 text-xs text-ink-400">Loading…</div>}
                         {filteredBooks.length === 0 && !booksQ.isLoading && (
-                          <div className="p-3 text-xs text-ink-500">No matches. <a href="/books/new" className="text-brand-300 hover:underline">Add your own book</a>.</div>
+                          <div className="p-3">
+                            {bookSearch.trim() ? (
+                              <>
+                                <div className="mb-2 text-xs text-ink-500">Nothing matches “{bookSearch.trim()}”.</div>
+                                <button type="button"
+                                  onClick={() => addBook.mutate(bookSearch.trim())}
+                                  disabled={addBook.isPending}
+                                  className="w-full rounded-lg border border-brand-500/50 bg-brand-500/10 px-3 py-2 text-left text-sm text-brand-100 hover:bg-brand-500/20 disabled:opacity-50">
+                                  {addBook.isPending ? "Adding…" : `➕ Add “${bookSearch.trim()}” to your academy's books`}
+                                </button>
+                                {addBook.error && (
+                                  <div className="mt-2 text-[11px] text-rose-300">Could not add it — {String((addBook.error as any)?.message || addBook.error)}</div>
+                                )}
+                                <div className="mt-2 text-[11px] text-ink-500">Adds the title only — author and chapters can be filled in later from <a href="/books" className="text-brand-300 hover:underline">Books</a>.</div>
+                              </>
+                            ) : (
+                              <div className="text-xs text-ink-500">Type a title or author to search.</div>
+                            )}
+                          </div>
                         )}
                         {filteredBooks.map((b) => (
                           <button key={b._id} type="button" onClick={() => setBookId(b._id)}
@@ -193,7 +224,7 @@ export default function StudyCreatePage() {
                             <span className="text-lg">📚</span>
                             <div className="flex-1">
                               <div className="text-sm font-semibold text-white">{b.title}</div>
-                              <div className="text-[11px] text-ink-400">{b.author}</div>
+                              {b.author && <div className="text-[11px] text-ink-400">{b.author}</div>}
                             </div>
                           </button>
                         ))}

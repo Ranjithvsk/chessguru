@@ -290,7 +290,11 @@ export class BooksService implements OnModuleInit {
     const b: any = body ?? {};
     const title = String(b.title || "").trim().slice(0, MAX_TITLE);
     const author = String(b.author || "").trim().slice(0, MAX_AUTHOR);
-    if (!title || !author) throw new BadRequestException("title + author required");
+    // Author optional. A book added from the study picker is really just a
+    // SEARCH INDEX ENTRY — a title somebody typed because it was not in the
+    // list yet — and demanding an author there would block the one flow the
+    // entry exists for. The full Add-a-book form still asks for one.
+    if (!title) throw new BadRequestException("title required");
     const publisher = b.publisher ? String(b.publisher).trim().slice(0, 120) : undefined;
     const year = Number.isFinite(Number(b.year)) ? Number(b.year) : undefined;
     const coverImageUrl = b.coverImageUrl ? String(b.coverImageUrl).trim().slice(0, 500) : undefined;
