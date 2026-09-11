@@ -20,8 +20,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import chess
 import dream_ocr as d
+import scoresheet_beam as sb
 
-ROOT = Path(__file__).resolve().parent / "data" / "scoresheets" / "m0"
+import os
+ROOT = Path(os.environ.get("SCORESHEET_DIR", str(Path(__file__).resolve().parent / "data" / "scoresheets" / "m0")))
 START = chess.STARTING_FEN
 
 
@@ -55,6 +57,8 @@ def main(reads_path: str = str(ROOT / "reads.json")):
         if it["id"] in reads:
             by_sheet[it["sheet"]].append(it)
     raw_ok = beam_ok = n = false_conf = verified = 0
+    sb_ok = sb_ver = sb_fc = sb_unk = 0
+    sb_legal_ok = sb_legal_n = 0; sb_damage = 0
     fc_truth_illegal = 0
     blank = 0
     clean = 0
@@ -69,6 +73,7 @@ def main(reads_path: str = str(ROOT / "reads.json")):
             toks.append(d.Token(text=txt, confidence=float(reads[it["id"]][0][1]) if reads[it["id"]] else 0.0))
         raw_texts = [t.text for t in toks]
         out = d.apply_chess_constraints([t.copy() for t in toks], START, beam=10)
+        cells = sb.read_sheet([sb.Cell(it["id"], [(str(c[0]), float(c[1])) for c in reads[it["id"]]]) for it in items])
         s_raw = s_beam = 0
         # replay the WRITTEN moves so we know, per cell, whether the player's
         # own move was legal — a false-confident token on an illegal written
@@ -90,6 +95,14 @@ def main(reads_path: str = str(ROOT / "reads.json")):
                 if not ok:
                     false_conf += 1
                     if not tl: fc_truth_illegal += 1
+        for it, c in zip(items, cells):
+            gt = truth[it["id"]]
+            ok2 = norm(c.san) == norm(gt) if c.san else False
+            sb_ok += ok2; sb_unk += (c.status == "unknown")
+            if sheet_meta.get(sheet, {}).get("legal_fraction") == 1.0: sb_legal_n += 1; sb_legal_ok += ok2
+            if norm(c.raw) == norm(gt) and not ok2: sb_damage += 1
+            if c.status == "verified":
+                sb_ver += 1; sb_fc += (not ok2)
         per_sheet.append((sheet, len(items), s_raw, s_beam))
         clean += (s_beam == len(items))
         # over-correction: the beam turned a CORRECT raw read into a wrong one.
@@ -103,6 +116,7 @@ def main(reads_path: str = str(ROOT / "reads.json")):
     print(f"cells scored: {n}   sheets: {len(by_sheet)}")
     print(f"raw MRA   : {raw_ok/n:6.1%}   ({raw_ok}/{n})")
     print(f"beam MRA  : {beam_ok/n:6.1%}   ({beam_ok}/{n})")
+    print(f"sheet-beam: {sb_ok/n:6.1%}   verified {sb_ver/n:.1%}  FALSE-CONFIDENT {sb_fc}  unknown {sb_unk/n:.1%}  damaged-raw {sb_damage}  legal-sheets {(sb_legal_ok/sb_legal_n if sb_legal_n else 0):.1%}   (scoresheet_beam: K-best + handwriting edits + unknown bridging)")
     print(f"verified  : {verified/n:6.1%}   FALSE-CONFIDENT: {false_conf}  (of which the written move was itself illegal or after an illegal one: {fc_truth_illegal})")
     print(f"blank reads (model returned fewer lines than cells): {blank} = {blank/n:.1%}")
     print(f"clean sheets after beam: {clean}/{len(by_sheet)}")

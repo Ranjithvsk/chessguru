@@ -12,8 +12,10 @@ import torch
 from PIL import Image
 from transformers import VisionEncoderDecoderModel, ViTImageProcessor, RobertaTokenizerFast
 
-MODEL = "microsoft/trocr-base-handwritten"
-BATCH = 16
+import os
+MODEL = os.environ.get("TROCR_MODEL", "microsoft/trocr-base-handwritten")   # or a fine-tuned dir, e.g. E:\scoresheets\m3\run1\best
+DEVICE = "cuda" if os.environ.get("TROCR_DEVICE", "cpu") == "cuda" else "cpu"
+BATCH = 64 if DEVICE == "cuda" else 16
 K = 3
 
 
@@ -39,8 +41,9 @@ def main(manifest: str, cells_root: str, out_path: str, limit: int | None = None
                    if t_ and all(ch in ALLOWED for ch in t_.replace("\u0120", ""))] + [tok.eos_token_id]
     allowed_ids = sorted(set(allowed_ids))
     print(f"chess-constrained decoding: {len(allowed_ids)} of {len(vocab)} tokens allowed", flush=True)
-    allow = lambda batch_id, input_ids: allowed_ids
-    mdl = VisionEncoderDecoderModel.from_pretrained(MODEL).eval()
+    allow = (lambda batch_id, input_ids: allowed_ids) if os.environ.get("TROCR_CONSTRAIN", "1") == "1" else None
+    mdl = VisionEncoderDecoderModel.from_pretrained(MODEL).eval().to(DEVICE)
+    print(f"model {MODEL} on {DEVICE}", flush=True)
     out: dict[str, list] = json.load(open(out_path)) if Path(out_path).exists() else {}
     todo = [it for it in items if it["id"] not in out]
     print(f"{len(items)} cells, {len(todo)} to do", flush=True)
@@ -50,7 +53,7 @@ def main(manifest: str, cells_root: str, out_path: str, limit: int | None = None
         ims = [Image.open(Path(cells_root) / it["file"]).convert("RGB") for it in chunk]
         pv = ip(images=ims, return_tensors="pt").pixel_values
         with torch.inference_mode():
-            gen = mdl.generate(pv, num_beams=4, num_return_sequences=K, max_new_tokens=10,
+            gen = mdl.generate(pv.to(DEVICE), num_beams=4, num_return_sequences=K, max_new_tokens=10,
                                prefix_allowed_tokens_fn=allow,
                                output_scores=True, return_dict_in_generate=True)
         texts = tok.batch_decode(gen.sequences, skip_special_tokens=True)
