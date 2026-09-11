@@ -141,7 +141,20 @@ Watched 2026-09-11 06:15–08:15 UTC: commit never dropped below 96 GB of 106; g
 | perfect reads (truth in) | 2568 / 40 sheets | 100 % | 99.96 % | 1 (B5→b5, a case fix) | beam does NOT rewrite players' illegal moves |
 | TrOCR-base-handwritten, zero-shot, CPU France | 176 | 0 % | 0 % | 0 | reads English words: "subjections.", "13March" |
 | TrOCR same, decoder restricted to chess chars | 416 | 0 % | 0 % | 1 | chess-shaped noise: O-O→"0-000", Nf6→"Nfc-"; 4–5 s/cell on 8 cores |
-| Qwen3-VL-4B, Vinayaka GPU | — | pending | pending | — | blocked: book-ingest fleet holds 96–104 GB of the 106 GB commit limit (OSError 1455 at weight load) |
+| **Qwen3-VL-4B, Vinayaka GPU, pass 1** (10-cell strips, unlabelled) | 2568 / 40 sheets | **46.6 %** (59.2 % on the 10 legal sheets) | 46.6 % | 81 (49 on/after a move the player wrote illegally) | 0.8 s/cell; 6 % blanks + whole-sheet line shifts (sheet 014: 3 %) are STRIP-ALIGNMENT failures, not reading failures; misreads are pen-stroke confusions (e/c, g/9, b/6, 6/4/5) the printed-figurine table does not know, so the beam adds ~0 |
+| Qwen3-VL-4B, pass 2 (rows labelled 01..10 on the strip, answer `label: move`) | — | running | — | — | fixes alignment + blanks; launched 2026-09-11 ~09:15 UTC |
+
+### What pass 1 taught
+
+1. Score with normalisation or you measure the prompt, not the reader: raw went 34 % → 46.6 % once
+   `<|im_end|>`, leading move numbers, `0-0`, `a×b3` and inner spaces were folded (`eval_scoresheet.norm`).
+2. A 10-row strip must carry printed row labels. Unlabelled, one skipped cell shifts the rest of the
+   strip and the padding fallback invents blanks — 6 % of cells and two whole sheets were lost that way.
+3. The beam needs a **handwriting** confusion table: e↔c, g↔9, b↔6, 4↔5↔6, a↔o, d↔a, K↔k. The
+   `commonest raw misreads` list from the harness is the evidence to build it from.
+4. False-confident is the number to fear: 81 of 2568. 49 are the beam disagreeing with a player who
+   wrote an illegal move; the other 32 are genuine misreads called certain and must be driven to ~0
+   before a coach sees a "verified" tick.
 
 Conclusion already safe to draw: an off-the-shelf handwriting model has **no** usable
 notion of chess notation, so Phase B fine-tuning on HCS cells is mandatory, not optional.
