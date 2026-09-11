@@ -19,7 +19,7 @@ from torchvision import transforms as T
 from transformers import VisionEncoderDecoderModel, ViTImageProcessor, RobertaTokenizerFast
 
 import os
-MODEL = "microsoft/trocr-base-handwritten"
+MODEL = os.environ.get("TROCR_BASE", "microsoft/trocr-base-handwritten")   # processor/tokenizer source
 INIT = os.environ.get("TROCR_INIT", MODEL)          # continue from a checkpoint dir for stage-2 runs
 BATCH = int(__import__("os").environ.get("BATCH", "12"))   # 24 filled the 10 GB card and thrashed at 5 s/step
 LR = float(os.environ.get("LR", "4e-5"))
