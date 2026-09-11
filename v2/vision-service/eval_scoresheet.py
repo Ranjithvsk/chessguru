@@ -59,6 +59,7 @@ def main(reads_path: str = str(ROOT / "reads.json")):
     raw_ok = beam_ok = n = false_conf = verified = 0
     sb_ok = sb_ver = sb_fc = sb_unk = 0
     sb_legal_ok = sb_legal_n = 0; sb_damage = 0
+    sheet_cells: dict[str, list] = {}
     fc_truth_illegal = 0
     blank = 0
     clean = 0
@@ -74,6 +75,7 @@ def main(reads_path: str = str(ROOT / "reads.json")):
         raw_texts = [t.text for t in toks]
         out = d.apply_chess_constraints([t.copy() for t in toks], START, beam=10)
         cells = sb.read_sheet([sb.Cell(it["id"], [(str(c[0]), float(c[1])) for c in reads[it["id"]]]) for it in items])
+        sheet_cells[sheet] = (items, cells)
         s_raw = s_beam = 0
         # replay the WRITTEN moves so we know, per cell, whether the player's
         # own move was legal — a false-confident token on an illegal written
@@ -119,6 +121,28 @@ def main(reads_path: str = str(ROOT / "reads.json")):
     print(f"sheet-beam: {sb_ok/n:6.1%}   verified {sb_ver/n:.1%}  FALSE-CONFIDENT {sb_fc}  unknown {sb_unk/n:.1%}  damaged-raw {sb_damage}  legal-sheets {(sb_legal_ok/sb_legal_n if sb_legal_n else 0):.1%}   (scoresheet_beam: K-best + handwriting edits + unknown bridging)")
     print(f"verified  : {verified/n:6.1%}   FALSE-CONFIDENT: {false_conf}  (of which the written move was itself illegal or after an illegal one: {fc_truth_illegal})")
     print(f"blank reads (model returned fewer lines than cells): {blank} = {blank/n:.1%}")
+    # Two copies of the same game (HCS pages 0/1): merge and score on the cells
+    # where both players wrote the same move — that is the game itself.
+    games = collections.defaultdict(dict)
+    for sheet, (items, cells) in sheet_cells.items():
+        g, pg = sheet.split("_"); games[g][pg] = (items, cells)
+    pair_n = pair_ok = pair_ver = pair_fc = single_ok = 0; pairs = 0
+    for g, pages in games.items():
+        if len(pages) < 2: continue
+        (ia, ca), (ib, cb) = pages["0"], pages["1"]
+        ka = {(it["move"], it["colour"]): (it, c) for it, c in zip(ia, ca)}
+        kb = {(it["move"], it["colour"]): (it, c) for it, c in zip(ib, cb)}
+        pairs += 1
+        for k in sorted(set(ka) & set(kb), key=lambda x: (x[0], x[1] != "white")):
+            (ita, a), (itb, b) = ka[k], kb[k]
+            ga, gb = truth[ita["id"]], truth[itb["id"]]
+            if norm(ga) != norm(gb): continue                 # players disagree: no ground truth for the game here
+            m = sb.merge_two_sheets([a], [b])[0]
+            pair_n += 1; ok = norm(m.san) == norm(ga) if m.san else False
+            pair_ok += ok; single_ok += (norm(a.san) == norm(ga)) if a.san else 0
+            if m.status == "verified": pair_ver += 1; pair_fc += (not ok)
+    if pair_n:
+        print(f"two-sheet merge: {pairs} games, {pair_n} agreed cells — single copy {single_ok/pair_n:.1%} → merged {pair_ok/pair_n:.1%}   verified {pair_ver/pair_n:.1%}  FALSE-CONFIDENT {pair_fc}")
     print(f"clean sheets after beam: {clean}/{len(by_sheet)}")
     print(f"over-corrected (raw right, beam wrong): {len(damaged)}   of which marked verified: {sum(1 for x in damaged if x[5])}")
     legal = [p for p in per_sheet if sheet_meta.get(p[0], {}).get("legal_fraction") == 1.0]

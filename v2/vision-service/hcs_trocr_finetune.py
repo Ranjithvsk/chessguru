@@ -18,9 +18,12 @@ from PIL import Image, ImageOps
 from torchvision import transforms as T
 from transformers import VisionEncoderDecoderModel, ViTImageProcessor, RobertaTokenizerFast
 
+import os
 MODEL = "microsoft/trocr-base-handwritten"
+INIT = os.environ.get("TROCR_INIT", MODEL)          # continue from a checkpoint dir for stage-2 runs
 BATCH = int(__import__("os").environ.get("BATCH", "12"))   # 24 filled the 10 GB card and thrashed at 5 s/step
-LR = 4e-5
+LR = float(os.environ.get("LR", "4e-5"))
+LABEL_SMOOTH = float(os.environ.get("LABEL_SMOOTH", "0.0"))
 VAL_FRAC = 0.05
 MAXLEN = 12
 
@@ -33,8 +36,10 @@ class Cells(Dataset):
     def __init__(self, rows, root, train):
         self.rows, self.root, self.train = rows, Path(root), train
         base = [T.Resize((384, 384), interpolation=T.InterpolationMode.BILINEAR), T.ToTensor(), T.Normalize([0.5] * 3, [0.5] * 3)]
-        aug = [T.RandomAffine(degrees=2, translate=(0.02, 0.06), scale=(0.9, 1.05), shear=3, fill=255),
-               T.ColorJitter(brightness=0.25, contrast=0.25)] if train else []
+        strong = os.environ.get("AUG", "1") == "2"
+        aug = [T.RandomAffine(degrees=4 if strong else 2, translate=(0.03, 0.08) if strong else (0.02, 0.06), scale=(0.85, 1.1) if strong else (0.9, 1.05), shear=5 if strong else 3, fill=255),
+               T.ColorJitter(brightness=0.35 if strong else 0.25, contrast=0.35 if strong else 0.25),
+               T.RandomApply([T.GaussianBlur(3, sigma=(0.1, 1.0))], p=0.3 if strong else 0.0)] if train else []
         self.tf = T.Compose(aug + base)
 
     def __len__(self): return len(self.rows)
@@ -59,7 +64,8 @@ def main(data_dir: str, out_dir: str, epochs: int = 8):
     nval = int(len(rows) * VAL_FRAC); val, train = rows[:nval], rows[nval:]
     say(f"train {len(train)} val {len(val)} epochs {epochs} batch {BATCH} lr {LR}")
     ip = ViTImageProcessor.from_pretrained(MODEL); tok = RobertaTokenizerFast.from_pretrained(MODEL)
-    mdl = VisionEncoderDecoderModel.from_pretrained(MODEL)
+    mdl = VisionEncoderDecoderModel.from_pretrained(INIT)
+    say(f"init from {INIT}  label_smooth {LABEL_SMOOTH}")
     mdl.config.decoder_start_token_id = tok.cls_token_id
     mdl.config.pad_token_id = tok.pad_token_id
     mdl.config.eos_token_id = tok.sep_token_id
@@ -101,7 +107,13 @@ def main(data_dir: str, out_dir: str, epochs: int = 8):
         for pv, sans in dl:
             labels = encode(sans)
             with torch.autocast("cuda", dtype=torch.float16):
-                loss = mdl(pixel_values=pv.to(dev, non_blocking=True), labels=labels.to(dev)).loss
+                if LABEL_SMOOTH > 0:
+                    out_ = mdl(pixel_values=pv.to(dev, non_blocking=True), labels=labels.to(dev))
+                    logits = out_.logits.float()
+                    loss = torch.nn.functional.cross_entropy(logits.view(-1, logits.size(-1)), labels.to(dev).view(-1),
+                                                             ignore_index=-100, label_smoothing=LABEL_SMOOTH)
+                else:
+                    loss = mdl(pixel_values=pv.to(dev, non_blocking=True), labels=labels.to(dev)).loss
             opt.zero_grad(set_to_none=True)
             scaler.scale(loss).backward(); scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(mdl.parameters(), 1.0)

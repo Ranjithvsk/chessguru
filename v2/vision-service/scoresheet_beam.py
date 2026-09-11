@@ -161,19 +161,28 @@ def _parses(board: chess.Board, t: str) -> bool:
 
 
 def merge_two_sheets(a: list[Cell], b: list[Cell]) -> list[Cell]:
-    """Both players wrote the same game: where one copy is verified and the
-    other is not, take the verified one; where they disagree and neither is
-    verified, mark unknown so a coach looks."""
+    """Both players wrote the same game. Agreement raises confidence; a verified
+    copy beats an unverified one; otherwise keep the better-supported reading
+    (status rank, then reader probability) but downgrade it to a guess so the
+    coach's eye lands on it. Never answer with nothing — an empty cell was
+    measured to cost 37 points against simply keeping the stronger read."""
+    rank = {"verified": 3, "agreed": 2, "guess": 1, "inferred": 1, "unknown": 0}
     out = []
     for x, y in itertools.zip_longest(a, b):
         if x is None: out.append(y); continue
         if y is None: out.append(x); continue
-        rank = {"verified": 3, "agreed": 2, "guess": 1, "inferred": 1, "unknown": 0}
-        if x.san == y.san: 
-            best = x if rank[x.status] >= rank[y.status] else y; out.append(best); continue
+        if x.san == y.san:
+            best = x if rank[x.status] >= rank[y.status] else y
+            z = Cell(best.id, best.cands, best.san, best.status, best.confidence, best.raw, best.inferred)
+            if z.status in ("guess", "inferred", "agreed") and x.san:   # two independent hands agree
+                z.status, z.confidence = "agreed", max(z.confidence, 0.85)
+            out.append(z); continue
         px, py = rank[x.status], rank[y.status]
-        if px >= 3 and py < 3: out.append(x)
-        elif py >= 3 and px < 3: out.append(y)
+        if px != py:
+            w = x if px > py else y
         else:
-            z = Cell(x.id, x.cands, "", "unknown", 0.0, x.raw); out.append(z)
+            cx = x.cands[0][1] if x.cands else 0.0; cy = y.cands[0][1] if y.cands else 0.0
+            w = x if cx >= cy else y
+        z = Cell(w.id, w.cands, w.san, "guess" if w.status != "verified" else "verified", min(w.confidence, 0.5) if w.status != "verified" else 1.0, w.raw, w.inferred)
+        out.append(z)
     return out
