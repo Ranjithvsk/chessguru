@@ -35,6 +35,20 @@ import chess
 FILE_ALT = {"a": "adgo", "b": "bh6", "c": "cegd", "d": "dagc", "e": "ecfg", "f": "feg", "g": "gdaef9", "h": "hbn"}
 RANK_ALT = {"1": "147l", "2": "273", "3": "3527", "4": "4719", "5": "536", "6": "6b0", "7": "7421", "8": "83"}
 PIECE_ALT = {"K": "KBR", "Q": "QO0", "R": "RBK", "B": "BRK8", "N": "NM"}
+
+
+def _symmetrise(table: dict) -> dict:
+    """Confusions run both ways: if d is read as g, g is read as d. The measured
+    table only lists truth→read, so close it under reversal (and add every
+    reverse key, e.g. 'o' → 'a', which a raw ink read may contain)."""
+    out = {k: set(v) for k, v in table.items()}
+    for k, v in table.items():
+        for ch in v:
+            out.setdefault(ch, set()).add(ch); out[ch].add(k)
+    return {k: "".join(sorted(v)) for k, v in out.items()}
+
+
+FILE_ALT, RANK_ALT, PIECE_ALT = _symmetrise(FILE_ALT), _symmetrise(RANK_ALT), _symmetrise(PIECE_ALT)
 SAN_RE = re.compile(r"^(?:O-O-O|O-O)[+#]?$|^[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?$")
 
 
@@ -83,13 +97,40 @@ _SKIP = 6
 _VOTE_MARGIN = 2
 
 
-def read_sheet(cells: list[Cell], beam: int = 12) -> list[Cell]:
+def read_sheet(cells: list[Cell], beam: int = 12, override: bool = False) -> list[Cell]:
+    """Annotate (and, only if `override`, correct) a sheet's reads.
+
+    Measured on 1,675 held-out HCS cells with the fine-tuned reader: letting
+    the beam REPLACE ink reads cost ~1 point at move level (89.5 → 88.6),
+    because a legal alternative on an uncertain board is fiction more often
+    than the reader is wrong. So by default the ink read stays the answer and
+    the beam contributes STATUS only: verified / agreed / guess / inferred /
+    unknown. `override=True` restores the older behaviour for experiments."""
+    cells = _read_sheet(cells, beam)
+    if not override:
+        for c in cells:
+            ink = clean(c.raw)
+            if SAN_RE.match(ink) and c.san != ink:
+                c.inferred = c.san or c.inferred
+                c.san = ink
+                if c.status == "verified": c.status = "guess"; c.confidence = 0.5
+    return cells
+
+
+def _read_sheet(cells: list[Cell], beam: int = 12) -> list[Cell]:
     # path = (board, cost, history, anchor) — anchor counts consecutive reader-legal
     # moves since the last unknown; a line that just lost the thread must earn
     # trust back before anything on it can be called verified.
     paths: list[tuple[chess.Board, float, list[tuple[str, bool, bool]], int]] = [(chess.Board(), 0.0, [], 99)]
-    for ci, c in enumerate(cells):
+    ci = -1
+    while ci + 1 < len(cells):
+        ci += 1
+        c = cells[ci]
         c.raw = c.cands[0][0] if c.cands else ""
+        # a line whose history is already past this cell (a 2-cell bridge) just carries over
+        carry = [p for p in paths if len(p[2]) > ci]
+        if carry and len(carry) == len(paths):
+            continue
         # candidate pool: reader K-best, then confusion edits of each, with costs
         # Two pools. Anchored lines (the board is trusted) may use 2nd/3rd
         # candidates and handwriting edits — legality is real evidence there.
@@ -132,18 +173,25 @@ def read_sheet(cells: list[Cell], beam: int = 12) -> list[Cell]:
                 # override (2nd candidate, edit) resets it so a wrong fix cannot
                 # drag a confident-looking line across the rest of the sheet.
                 nxt.append((b2, cost + ccost, hist + [(san, unique, from_reader)], anchor + 1 if ccost == 0.0 else 0))
-            # unknown: keep the board, pay for it. One-ply lookahead happens
-            # implicitly: the next cell is parsed against this same board only
-            # if it is legal there; otherwise we try every legal move here as a
-            # bridge (cost _SKIP+1) so a single unreadable cell does not sink
-            # the rest of the sheet.
+            # unknown: keep the board, pay for it.
             nxt.append((board, cost + unk_cost, hist + [("", False, False)], 0))
-            if ci + 1 < len(cells) and anchor >= 4:
-                nxt_texts = [clean(t) for t, _ in cells[ci + 1].cands[:2]]
-                for bridge in board.legal_moves:
-                    b2 = board.copy(stack=False); b2.push(bridge)
-                    if any(_parses(b2, t) for t in nxt_texts):
-                        nxt.append((b2, cost + unk_cost + 1, hist + [("?" + board.san(bridge), False, False)], 0))
+            # RESYNC. A frozen board strands every later cell (42 % of held-out
+            # cells sat adrift). So when nothing fits, look for the one legal
+            # move — or two — after which the next few raw reads are all legal
+            # again. Those reads are the evidence; the bridge itself is only
+            # ever `inferred`, and the line restarts with low trust.
+            if not legal and anchor >= 0:
+                ink_edits = set(edits(clean(c.raw))) if c.raw else set()
+                bridges = _resync(board, cells, ci, confirm=3)
+                for bridge_hist, b2 in bridges:
+                    first = bridge_hist[0][0][1:]
+                    matches_ink = first in ink_edits or (SAN_RE.match(clean(c.raw) or "") and first == clean(c.raw))
+                    # an ink-compatible bridge is cheap; an arbitrary one among several is dear
+                    extra = 0.5 if matches_ink else (1.0 if len(bridges) == 1 else 3.0)
+                    tag = "?" if matches_ink or len(bridges) == 1 else "??"
+                    bh = [(tag + h[0][1:], h[1], h[2]) for h in bridge_hist]
+                    nxt.append((b2, cost + unk_cost + extra * len(bh), hist + bh, 1))
+        nxt += [p for p in paths if len(p[2]) > ci]          # lines already past this cell
         nxt.sort(key=lambda p: p[1]); paths = nxt[:beam]
     best_cost = paths[0][1]
     votes: dict[int, set[str]] = {}
@@ -152,7 +200,13 @@ def read_sheet(cells: list[Cell], beam: int = 12) -> list[Cell]:
         for i, (san, _u, _r) in enumerate(hist): votes.setdefault(i, set()).add(san)
     for i, (san, unique, from_reader) in enumerate(paths[0][2]):
         c = cells[i]; agreed = len(votes.get(i, ())) == 1
-        if san.startswith("?"):
+        if san.startswith("??"):
+            # an arbitrary bridge among several: the board moved on, but this
+            # cell is a hole for the coach, not a transcription
+            c.inferred = san[2:]; ink = clean(c.raw)
+            c.san = ink if SAN_RE.match(ink) else ""
+            c.status, c.confidence = "unknown", 0.0
+        elif san.startswith("?"):
             # keep the INK as the answer; the bridge is a hint for the coach, not
             # a transcription. Replacing ink with a bridge was 36 damaged reads.
             c.inferred = san[1:]
@@ -169,6 +223,60 @@ def read_sheet(cells: list[Cell], beam: int = 12) -> list[Cell]:
             # the ink, which is what HCS truth is.
             c.san, c.status, c.confidence = clean(c.raw), "unknown", 0.0
     return cells
+
+
+def _raw_texts(cells: list[Cell], i: int) -> list[str]:
+    return [clean(t) for t, _ in cells[i].cands[:2]] if 0 <= i < len(cells) else []
+
+
+def _confirms(board: chess.Board, cells: list[Cell], start: int, n: int) -> bool:
+    """Do the next n raw reads all parse as legal, one after another?"""
+    b = board.copy(stack=False)
+    for j in range(start, min(start + n, len(cells))):
+        ok = False
+        for t in _raw_texts(cells, j):
+            try:
+                b.push(b.parse_san(t)); ok = True; break
+            except Exception:
+                pass
+        if not ok:
+            return False
+    return True
+
+
+_RESYNC_CACHE: dict = {}
+
+
+def _resync(board: chess.Board, cells: list[Cell], i: int, confirm: int = 3) -> list[tuple[list, chess.Board]]:
+    key = (board.fen(), i, id(cells))
+    if key in _RESYNC_CACHE:
+        return [(h, b.copy(stack=False)) for h, b in _RESYNC_CACHE[key]]
+    res = _resync_uncached(board, cells, i, confirm)
+    if len(_RESYNC_CACHE) > 50000: _RESYNC_CACHE.clear()
+    _RESYNC_CACHE[key] = res
+    return [(h, b.copy(stack=False)) for h, b in res]
+
+
+def _resync_uncached(board: chess.Board, cells: list[Cell], i: int, confirm: int = 3) -> list[tuple[list, chess.Board]]:
+    """Bridges of one or two legal moves over unreadable cells i (and i+1) such
+    that the following `confirm` reads are legal. Returns (history, board)."""
+    out = []
+    if i + confirm >= len(cells) + 1:
+        return out
+    for x in board.legal_moves:
+        b1 = board.copy(stack=False); sx = board.san(x); b1.push(x)
+        if _confirms(b1, cells, i + 1, confirm):
+            out.append(([("?" + sx, False, False)], b1))
+    if not out and i + 1 < len(cells) and any(SAN_RE.match(t) for t in _raw_texts(cells, i + 2)):
+        for x in board.legal_moves:
+            b1 = board.copy(stack=False); sx = board.san(x); b1.push(x)
+            for y in b1.legal_moves:
+                b2 = b1.copy(stack=False); sy = b1.san(y); b2.push(y)
+                if _confirms(b2, cells, i + 2, confirm):
+                    out.append(([("?" + sx, False, False), ("?" + sy, False, False)], b2))
+        if len(out) > 3:          # too ambiguous to be worth anything
+            out = []
+    return out[:3]
 
 
 def _parses(board: chess.Board, t: str) -> bool:

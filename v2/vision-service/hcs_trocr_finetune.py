@@ -18,7 +18,7 @@ from PIL import Image
 import os as _os, sys as _sys
 _sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
 from cellprep import tight_crop
-TIGHT = _os.environ.get("TIGHT", "0") == "1", ImageOps
+TIGHT = _os.environ.get("TIGHT", "0") == "1"
 from torchvision import transforms as T
 from transformers import VisionEncoderDecoderModel, ViTImageProcessor, RobertaTokenizerFast
 

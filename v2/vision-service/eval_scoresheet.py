@@ -21,6 +21,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import chess
 import dream_ocr as d
 import scoresheet_beam as sb
+try:
+    from rerank_prior import rerank as prior_rerank
+    from san_prior import SanPrior
+    _PRIOR = SanPrior(str(Path(__file__).resolve().parent / "data" / "scoresheets" / "san_prior.json")) if (Path(__file__).resolve().parent / "data" / "scoresheets" / "san_prior.json").exists() else None
+except Exception:
+    _PRIOR = None
 
 import os
 ROOT = Path(os.environ.get("SCORESHEET_DIR", str(Path(__file__).resolve().parent / "data" / "scoresheets" / "m0")))
@@ -73,6 +79,7 @@ def main(reads_path: str = str(ROOT / "reads.json")):
     sb_ok = sb_ver = sb_fc = sb_unk = 0
     sb_legal_ok = sb_legal_n = 0; sb_damage = 0
     sb_mv_ok = raw_mv_ok = 0
+    pr_ok = pr_mv_ok = 0
     sheet_cells: dict[str, list] = {}
     fc_truth_illegal = 0
     blank = 0
@@ -90,6 +97,10 @@ def main(reads_path: str = str(ROOT / "reads.json")):
         out = d.apply_chess_constraints([t.copy() for t in toks], START, beam=10)
         cells = sb.read_sheet([sb.Cell(it["id"], [(str(c[0]), float(c[1])) for c in reads[it["id"]]]) for it in items])
         sheet_cells[sheet] = (items, cells)
+        if _PRIOR is not None:
+            chosen = prior_rerank([[sb.clean(str(c[0])) for c in reads[it["id"]]] for it in items], _PRIOR)
+            for it, ch in zip(items, chosen):
+                gt = truth[it["id"]]; pr_ok += (norm(ch) == norm(gt)); pr_mv_ok += (move_key(ch) == move_key(gt))
         s_raw = s_beam = 0
         # replay the WRITTEN moves so we know, per cell, whether the player's
         # own move was legal — a false-confident token on an illegal written
@@ -135,6 +146,7 @@ def main(reads_path: str = str(ROOT / "reads.json")):
     print(f"raw MRA   : {raw_ok/n:6.1%}   ({raw_ok}/{n})")
     print(f"beam MRA  : {beam_ok/n:6.1%}   ({beam_ok}/{n})")
     print(f"move-level : raw {raw_mv_ok/n:.1%}  sheet-beam {sb_mv_ok/n:.1%}   (same move, spelling ignored)")
+    if _PRIOR is not None: print(f"prior-rerank: {pr_ok/n:.1%} strict  {pr_mv_ok/n:.1%} move-level   (Viterbi over top-3 with the SAN bigram prior)")
     print(f"sheet-beam: {sb_ok/n:6.1%}   verified {sb_ver/n:.1%}  FALSE-CONFIDENT {sb_fc}  unknown {sb_unk/n:.1%}  damaged-raw {sb_damage}  legal-sheets {(sb_legal_ok/sb_legal_n if sb_legal_n else 0):.1%}   (scoresheet_beam: K-best + handwriting edits + unknown bridging)")
     print(f"verified  : {verified/n:6.1%}   FALSE-CONFIDENT: {false_conf}  (of which the written move was itself illegal or after an illegal one: {fc_truth_illegal})")
     print(f"blank reads (model returned fewer lines than cells): {blank} = {blank/n:.1%}")

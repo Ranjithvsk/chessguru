@@ -8,6 +8,8 @@ order), then appends each reader's remaining candidates. The beam downstream
 sees the consensus first and the alternatives after it.
 """
 import json, sys, collections
+sys.path.insert(0, __import__('os').path.dirname(__import__('os').path.abspath(__file__)))
+from scoresheet_beam import clean
 out_path, specs = sys.argv[1], sys.argv[2:]
 readers = []
 for sp in specs:
@@ -21,9 +23,9 @@ for k in keys:
     for reads, w in readers:
         cands = reads.get(k, [])
         if not cands: continue
-        top = str(cands[0][0]).replace(" ", "")
+        top = clean(str(cands[0][0]))
         votes[top] = votes.get(top, 0.0) + w
-        rest += [str(c[0]).replace(" ", "") for c in cands[1:]]
+        rest += [clean(str(c[0])) for c in cands[1:]]
     ranked = sorted(votes.items(), key=lambda kv: -kv[1])
     if ranked and len(votes) == 1: agree += 1
     seen, merged = set(), []
