@@ -208,3 +208,37 @@ on run3: 7 of 1,675.
 Queued (automatic): run4 = stage 2 from run3/best, lr 2e-5, label smoothing 0.1, stronger
 augmentation, 10 ep; Qwen on the same held-out cells (ensemble candidates); run5 = TrOCR-large.
 Production CLI: `read_scoresheet.py <model_dir> <cells_dir> [--pair a b]` → PGN with {?}/{??}.
+
+## 11. Choosing among candidates — what was measured (2026-09-12, early hours)
+
+The correct move is inside run4's **top-3** for **94.9 %** of held-out cells, so the last five
+points are a choosing problem. Three choosers were tried, all scored on the same 1,675 cells:
+
+| Chooser | move-level | vs raw 89.5 % | verdict |
+|---|---|---|---|
+| SAN bigram prior (60k master games via ChessDB API), Viterbi over top-3, grid over λ/penalties | 89.4–89.5 % | ±0.1 | no signal: Nc6 vs Nc5 are both plausible chess without the position |
+| Legality beam allowed to OVERRIDE the ink (with resync bridges after unreadable cells) | 88.6 % | −0.9 | a legal alternative on an uncertain board is fiction more often than the reader is wrong |
+| Legality beam **annotate-only** (ink stays, beam gives a status) | **89.3 %** | −0.2 | ships: 3 false "verified" in 1,675 cells |
+| Three-reader vote (run4 1.2, run3 1.0, Qwen 0.8) | 87.9 % | −1.6 | weaker readers outvote the best one |
+| Two-sheet merge (both players' copies, 4 games / 225 agreed cells) | 86.7 → **90.2 %** | **+3.5** | ships; the only chooser that pays |
+
+Status calibration (run4, 8 sheets): verified 4.6 % of cells at **100 %** precision, agreed 61 % at
+93 %, unknown 30 % at 80 % (mostly cells after the board was lost — the ink is usually still right),
+guess 3 % at 79 %, inferred 1 % at 40 %. Coach review order: inferred → guess → unknown.
+
+Other runs: run5 (TrOCR-large) died at launch on an import I broke while wiring the crop — not
+retried; run6 (ink-tight crop, from run4/best) tracked the from-scratch curve (82.3 → 82.8 → 83.3 %
+over three 12-minute epochs) and was stopped: the crop is a new task for the model and would need
+a full schedule to pay off. Splitter prototype (`split_scoresheet.py`): 5 of 10 HCS sheets crop
+identically to the dataset's own cells, 70 % of cells overall.
+
+**Production model** (`final/`): run4's recipe continued on all 13,751 labelled cells (holdout
+included), lr 2e-5, label smoothing 0.1, 5 epochs. Its held-out number is by construction run4's
+(89.1 % raw / 89.3 % annotated / 90.2 % merged); more data can only help.
+
+**Honest summary against the ask ("almost 100 %")**: 89–90 % per move on adult club handwriting
+from a single sheet, 90 %+ with both players' sheets, with a trustworthy "verified" flag and a
+label set whose own error rate caps any reader in the mid-90s. Reaching the published 95 % needs
+(a) more handwriting — our own Indian sheets, and every coach correction harvested — and
+(b) a larger/longer-trained reader (TrOCR-large or the tight-crop model on a full schedule); the
+chess-side levers are exhausted at this reader quality.
