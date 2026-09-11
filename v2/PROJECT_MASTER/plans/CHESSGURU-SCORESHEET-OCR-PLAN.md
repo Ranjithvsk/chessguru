@@ -142,7 +142,7 @@ Watched 2026-09-11 06:15–08:15 UTC: commit never dropped below 96 GB of 106; g
 | TrOCR-base-handwritten, zero-shot, CPU France | 176 | 0 % | 0 % | 0 | reads English words: "subjections.", "13March" |
 | TrOCR same, decoder restricted to chess chars | 416 | 0 % | 0 % | 1 | chess-shaped noise: O-O→"0-000", Nf6→"Nfc-"; 4–5 s/cell on 8 cores |
 | **Qwen3-VL-4B, Vinayaka GPU, pass 1** (10-cell strips, unlabelled) | 2568 / 40 sheets | **46.6 %** (59.2 % on the 10 legal sheets) | 46.6 % | 81 (49 on/after a move the player wrote illegally) | 0.8 s/cell; 6 % blanks + whole-sheet line shifts (sheet 014: 3 %) are STRIP-ALIGNMENT failures, not reading failures; misreads are pen-stroke confusions (e/c, g/9, b/6, 6/4/5) the printed-figurine table does not know, so the beam adds ~0 |
-| Qwen3-VL-4B, pass 2 (rows labelled 01..10 on the strip, answer `label: move`) | — | running | — | — | fixes alignment + blanks; launched 2026-09-11 ~09:15 UTC |
+| **Qwen3-VL-4B, pass 2** (rows labelled 01..10 on the strip, answer `label: move`, output cap 9 tok/row) | 2568 / 40 sheets | **53.7 %** (64.3 % on the 10 legal sheets) | 53.8 % | 42 (29 on/after a player's illegal move → 13 genuine) | ~1 s/cell; blanks 3.2 %; per-sheet raw min 20 % / median 58 % / max 81 %, 8 of 40 sheets under 40 %; either pass right = 59.9 % |
 
 ### What pass 1 taught
 
@@ -155,6 +155,19 @@ Watched 2026-09-11 06:15–08:15 UTC: commit never dropped below 96 GB of 106; g
 4. False-confident is the number to fear: 81 of 2568. 49 are the beam disagreeing with a player who
    wrote an illegal move; the other 32 are genuine misreads called certain and must be driven to ~0
    before a coach sees a "verified" tick.
+
+### M0 verdict (2026-09-11)
+
+Phase A, an untrained VLM: **54 % of adult handwritten moves read correctly**, 64 % on cleanly
+written sheets, one sheet in forty above 80 %. Usable as a first pass a coach corrects, not as a
+reader. The 90 % Phase A target in §4 was wrong for zero-shot; keep it as the Phase B target.
+Labelled strips were worth +7 points over plain strips (alignment, not reading). The beam adds
+< 1 point until it gets a handwriting confusion table. Zero over-corrections of players' own
+moves in both passes, and the genuine false-confident count fell 32 → 13 with better reads.
+
+Next: **M3 first, then M1.** Fine-tune TrOCR-small on the 13.8k HCS cells (Vinayaka, ~1–2 h),
+score with the same harness, and only then build the phone-photo cell splitter — a splitter is
+worthless in front of a 54 % reader.
 
 Conclusion already safe to draw: an off-the-shelf handwriting model has **no** usable
 notion of chess notation, so Phase B fine-tuning on HCS cells is mandatory, not optional.
