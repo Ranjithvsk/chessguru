@@ -120,6 +120,20 @@ HCS adults' handwriting will score higher than our kids'; report both.
   - `eval_scoresheet.py` therefore reports an **over-correction** count (raw right → beam wrong)
     alongside MRA and false-confidence, and a fully-legal-sheet subset for the clean-chess number.
 
+
+### Resuming the Qwen pass (everything is staged on Vinayaka)
+
+Cells, manifest and reader are already at `E:\scoresheets\` (2,568 cells, 40 sheets). Needs
+~10 GB of free commit on the box, i.e. the book-ingest fleet paused or finished. Then, from France:
+
+```
+ssh vinayaka "powershell -NoProfile -Command \"Start-Process -FilePath 'E:\ocr-gpu\Scripts\python.exe' -ArgumentList '-u','E:\scoresheets\hcs_qwen_read.py','E:\scoresheets\manifest.json','E:\scoresheets','E:\scoresheets\reads.json' -WorkingDirectory 'E:\scoresheets' -RedirectStandardOutput 'E:\scoresheets\read.log' -RedirectStandardError 'E:\scoresheets\read.err' -WindowStyle Hidden\""
+# ...wait for "done" in E:\scoresheets\read.log, then:
+scp vinayaka:E:/scoresheets/reads.json v2/vision-service/data/scoresheets/m0/reads.json
+/opt/chessguru-vision/.venv-ocr/bin/python v2/vision-service/eval_scoresheet.py
+```
+Watched 2026-09-11 06:15–08:15 UTC: commit never dropped below 96 GB of 106; gave up polling.
+
 ### M0 numbers so far
 
 | Reader | Cells | raw MRA | beam MRA | false-confident | note |
