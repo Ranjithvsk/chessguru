@@ -64,6 +64,26 @@ export default function StudyCreatePage() {
   // are asked for, and it lands in the caller's ACADEMY list the same way any
   // added book does, where the rest of the academy finds it next time.
   const qc = useQueryClient();
+
+  // The owner's real library lives on the Vinayaka host — thousands of books,
+  // against the handful ever attached here. Searched server-side so the 1.2 MB
+  // catalogue never reaches the browser, and only once there is something to
+  // search for.
+  const libQ = useQuery({
+    queryKey: ["book-library", bookSearch.trim()],
+    queryFn: () => booksApi.librarySearch(bookSearch.trim(), 25),
+    enabled: tile?.intent === "book" && bookSearch.trim().length >= 2,
+    staleTime: 60_000,
+  });
+  // Attaching a library book creates its row here on first use, chapters and
+  // all, instead of importing three thousand rows nobody asked for.
+  const adopt = useMutation({
+    mutationFn: (hostId: string) => booksApi.adoptLibrary(hostId),
+    onSuccess: async (r) => {
+      await qc.invalidateQueries({ queryKey: ["books"] });
+      setBookId(r.bookId);
+    },
+  });
   const addBook = useMutation({
     mutationFn: (name: string) => booksApi.create({ title: name, chapters: [] }),
     onSuccess: async (r) => {
@@ -71,6 +91,13 @@ export default function StudyCreatePage() {
       setBookId(r.bookId);
     },
   });
+
+  // Library hits, minus anything already attached here (adopt is idempotent, so
+  // a duplicate row would just be two doors to the same book).
+  const libRows = useMemo(() => {
+    const have = new Set((booksQ.data?.items ?? []).map((b: any) => String(b.title || "").toLowerCase()));
+    return (libQ.data?.items ?? []).filter((b) => !have.has(String(b.title || "").toLowerCase()));
+  }, [libQ.data, booksQ.data]);
 
   const filteredBooks = useMemo(() => {
     const arr = booksQ.data?.items ?? [];
@@ -197,7 +224,7 @@ export default function StudyCreatePage() {
                         className="mb-2 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
                       <div className="max-h-56 overflow-y-auto rounded-lg border border-ink-700 bg-ink-800/50">
                         {booksQ.isLoading && <div className="p-3 text-xs text-ink-400">Loading…</div>}
-                        {filteredBooks.length === 0 && !booksQ.isLoading && (
+                        {filteredBooks.length === 0 && libRows.length === 0 && !booksQ.isLoading && !libQ.isFetching && (
                           <div className="p-3">
                             {bookSearch.trim() ? (
                               <>
@@ -228,6 +255,27 @@ export default function StudyCreatePage() {
                             </div>
                           </button>
                         ))}
+                        {libQ.isFetching && (
+                          <div className="border-t border-ink-800 px-3 py-2 text-[11px] text-ink-500">Searching the library…</div>
+                        )}
+                        {libRows.length > 0 && (
+                          <div className="border-t border-ink-800 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-500">
+                            From the library{libQ.data && libQ.data.total > libRows.length ? ` · ${libQ.data.total} matches` : ""}
+                          </div>
+                        )}
+                        {libRows.map((b) => (
+                          <button key={b.id} type="button" onClick={() => adopt.mutate(b.id)} disabled={adopt.isPending}
+                            className="flex w-full items-center gap-2 border-b border-ink-800 px-3 py-2 text-left last:border-0 hover:bg-ink-800 disabled:opacity-50">
+                            <span className="text-lg">📖</span>
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm font-semibold text-white">{b.title}</div>
+                              <div className="truncate text-[11px] text-ink-400">{[b.author, b.shelf].filter(Boolean).join(" · ")}</div>
+                            </div>
+                          </button>
+                        ))}
+                        {adopt.error && (
+                          <div className="border-t border-ink-800 px-3 py-2 text-[11px] text-rose-300">Could not attach that book — {String((adopt.error as any)?.message || adopt.error)}</div>
+                        )}
                       </div>
                     </>
                   ) : (

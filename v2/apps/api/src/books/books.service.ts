@@ -48,6 +48,11 @@ export interface BookDoc {
   pdfUrl?: string;               // static-served PDF, e.g. /book-files/<slug>.pdf
   chapters: Chapter[];
   isSeeded: boolean;
+  /** The id of the same book on the Vinayaka library host, when this row was
+   *  created by attaching a study to a library book. */
+  hostBookId?: string;
+  /** Which shelf the library filed it under (Openings, Endgames, ...). */
+  shelf?: string;
   addedByUserId?: string;
   academyId?: string | null;
   createdAt: Date;
@@ -315,4 +320,125 @@ export class BooksService implements OnModuleInit {
     }
     return { title, author, publisher, year, coverImageUrl, chapters };
   }
+
+  /* ─── the owner's real library, hosted on Vinayaka ──────────────────────
+   *
+   * 3,032 books live on the GPU box and are already reachable through the
+   * bookhost tunnel. They are NOT copied into this collection: a second copy
+   * of a catalogue that someone keeps adding to would drift the day it was
+   * written. Instead the picker SEARCHES the live catalogue, and a book only
+   * becomes a row here once somebody actually attaches a study to it.
+   *
+   * The raw catalogue is 1.2 MB and every row carries the owner's Google
+   * Drive path, so it is cached in memory here and only ever leaves as slim,
+   * path-free matches. */
+  private static libCache: { at: number; rows: Array<{ id: string; title: string; author: string; shelf: string }> } | null = null;
+
+  private async bookHost(path: string): Promise<any> {
+    const r = await fetch(`http://127.0.0.1:8791${path}`, { signal: AbortSignal.timeout(45_000) });
+    if (!r.ok) throw new Error(`bookhost ${r.status}`);
+    return r.json();
+  }
+
+  /** Cached slim catalogue, with cleaned titles laid over the filename-derived
+   *  ones where we have them. */
+  private async libraryRows() {
+    const fresh = BooksService.libCache && Date.now() - BooksService.libCache.at < 10 * 60_000;
+    if (fresh) return BooksService.libCache!.rows;
+    const raw = await this.bookHost("/catalogue");
+    const clean = new Map<string, { title?: string; author?: string }>();
+    try {
+      const docs = await this.conn.db!.collection("bookTitles").find({}).toArray();
+      for (const d of docs) clean.set(String(d._id), { title: (d as any).title, author: (d as any).author });
+    } catch { /* overlay is optional */ }
+    const rows = (raw?.books ?? []).map((b: any) => {
+      const c = clean.get(b.id) || {};
+      return {
+        id: String(b.id),
+        title: String(c.title || b.title || b.id),
+        author: String(c.author || b.author || ""),
+        shelf: String(b.shelf || ""),
+      };
+    });
+    BooksService.libCache = { at: Date.now(), rows };
+    return rows;
+  }
+
+  /** Search the library by title or author. Returns slim rows only — never the
+   *  Drive path, never the full 3,032. */
+  async searchLibrary(session: any, q: string, limit = 25) {
+    this.ensureUser(session);
+    const rows = await this.libraryRows();
+    const needle = String(q || "").trim().toLowerCase();
+    if (!needle) return { items: rows.slice(0, limit), total: rows.length };
+    const terms = needle.split(/\s+/).filter(Boolean);
+    const scored: Array<{ r: any; s: number }> = [];
+    for (const r of rows) {
+      const hay = (r.title + " " + r.author).toLowerCase();
+      if (!terms.every((t) => hay.includes(t))) continue;
+      // Prefix matches on the title first, then earlier matches.
+      const idx = r.title.toLowerCase().indexOf(terms[0]!);
+      scored.push({ r, s: (idx === 0 ? 0 : idx < 0 ? 500 : 100 + idx) + r.title.length / 100 });
+    }
+    scored.sort((a, b) => a.s - b.s);
+    return { items: scored.slice(0, limit).map((x) => x.r), total: scored.length };
+  }
+
+  /** Turn a PDF outline into a usable chapter list. A raw outline is mostly
+   *  front matter and sub-entries — one book here has 1,007 of them — so keep
+   *  top-level entries, drop the boilerplate, and cap it. */
+  private tocToChapters(toc: any[]): Chapter[] {
+    const JUNK = /^(title|contents?|copyright|index|bibliography|about the author|acknowledg|preface|foreword|dedication|table of contents|symbols|introduction to the|colophon|cover)\b/i;
+    const lvl1 = (Array.isArray(toc) ? toc : []).filter((t) => Number(t?.level ?? 1) === 1);
+    const src = lvl1.length >= 3 ? lvl1 : (Array.isArray(toc) ? toc : []);
+    const out: Chapter[] = [];
+    const seen = new Set<string>();
+    for (const t of src) {
+      const title = String(t?.title || "").replace(/\s+/g, " ").trim();
+      if (!title || title.length > 160) continue;
+      if (JUNK.test(title)) continue;
+      const key = title.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ number: out.length + 1, title, tags: [] });
+      if (out.length >= 80) break;
+    }
+    return out;
+  }
+
+  /** Attach a library book to this collection so a study can point at it.
+   *  Idempotent: the same host book always resolves to the same row, so two
+   *  people attaching the same book share it rather than making duplicates.
+   *  Chapters are pulled from the book's outline at this moment — the one time
+   *  it is worth asking the GPU box to open the PDF. */
+  async adoptLibraryBook(session: any, hostId: string) {
+    this.ensureUser(session);
+    const id = String(hostId || "").trim();
+    if (!id) throw new BadRequestException("hostId required");
+    const existing = await this.books().findOne({ hostBookId: id } as any);
+    if (existing) return { bookId: existing._id, reused: true };
+    const rows = await this.libraryRows();
+    const row = rows.find((r: { id: string; title: string; author: string; shelf: string }) => r.id === id);
+    if (!row) throw new NotFoundException("not in the library catalogue");
+    let chapters: Chapter[] = [];
+    try {
+      const t = await this.bookHost(`/book/${encodeURIComponent(id)}/toc`);
+      chapters = this.tocToChapters(t?.toc ?? []);
+    } catch { chapters = []; }
+    const now = new Date();
+    const bookId = "lib_" + id.slice(0, 40);
+    await this.books().insertOne({
+      _id: bookId,
+      title: row.title,
+      author: row.author,
+      chapters,
+      isSeeded: true,          // from the shared library, not one person's addition
+      hostBookId: id,
+      shelf: row.shelf,
+      createdAt: now,
+      updatedAt: now,
+    } as any);
+    return { bookId, reused: false, chapters: chapters.length };
+  }
+
 }

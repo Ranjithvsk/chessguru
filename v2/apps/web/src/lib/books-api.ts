@@ -57,6 +57,18 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 
 export const booksApi = {
   list: () => req<{ items: BookSummary[] }>("GET", "/api/books"),
+
+  /** Search the owner's real library on the Vinayaka host — thousands of books,
+   *  not the handful already attached here. Server-side so the 1.2 MB
+   *  catalogue (and the Drive paths in it) never reach the browser. */
+  librarySearch: (q: string, limit = 25) =>
+    req<{ items: Array<{ id: string; title: string; author: string; shelf: string }>; total: number }>(
+      "GET", `/api/books/library/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+
+  /** Attach a library book so a study can point at it. Idempotent — the same
+   *  library book always resolves to the same row. */
+  adoptLibrary: (hostId: string) =>
+    req<{ bookId: string; reused: boolean; chapters?: number }>("POST", "/api/books/library/adopt", { hostId }),
   get: (id: string) => req<{ book: Book; progress: BookProgress }>("GET", `/api/books/${encodeURIComponent(id)}`),
   create: (body: { title: string; author?: string; publisher?: string; year?: number; chapters?: BookChapter[] }) =>
     req<{ bookId: string }>("POST", "/api/books", body),

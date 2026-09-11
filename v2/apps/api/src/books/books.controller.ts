@@ -27,6 +27,19 @@ export class BooksController {
   @Post()
   create(@Body() body: any, @Req() req: any) { return this.svc.create(req?.session, body); }
 
+  // BOTH of these must stay above @Get(":id") or "library" is read as a book id.
+  /** Search the owner's real library on the Vinayaka host (3,032 books). */
+  @Get("library/search")
+  searchLibrary(@Req() req: any, @Query("q") q: string, @Query("limit") limit: string) {
+    return this.svc.searchLibrary(req?.session, q || "", Math.min(50, Math.max(1, Number(limit) || 25)));
+  }
+
+  /** Attach a library book so a study can point at it. Idempotent. */
+  @Post("library/adopt")
+  adoptLibrary(@Body() body: any, @Req() req: any) {
+    return this.svc.adoptLibraryBook(req?.session, body?.hostId);
+  }
+
   @Get(":id")
   get(@Param("id") id: string, @Req() req: any, @Query("academy") academy: string) {
     return this.svc.get(req?.session, id, { academy: academy || undefined });
