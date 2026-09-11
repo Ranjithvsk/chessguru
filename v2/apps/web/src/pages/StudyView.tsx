@@ -5,9 +5,10 @@
 
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { api } from "../lib/api";
 import { studiesApi, type Visibility } from "../lib/studies-api";
+import { TagChips } from "../components/TagEditor";
 import { revisionsApi } from "../lib/revisions-api";
 
 const VIS_OPTIONS: { value: Visibility; label: string; hint: string }[] = [
@@ -156,28 +157,12 @@ export default function StudyViewPage() {
         )}
       </div>
 
-      <div className="space-y-2">
-        {chapters.length === 0 && (
-          <div className="rounded border border-dashed border-ink-700 p-6 text-center text-sm text-ink-400">
-            No chapters yet.
-          </div>
-        )}
-        {chapters.map((c, i) => (
-          <div key={c._id} className="flex items-center gap-3 rounded-xl border border-ink-700 bg-ink-900 p-3">
-            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded bg-ink-800 text-xs font-semibold text-ink-300">{i + 1}</div>
-            <Link to={`/studies/${encodeURIComponent(sid)}/edit/${encodeURIComponent(c._id)}`}
-              className="flex-1 text-sm font-semibold text-white hover:text-brand-200">
-              {c.title || `Chapter ${i + 1}`}
-            </Link>
-            {isOwner && (
-              <button onClick={() => { if (confirm(`Delete chapter "${c.title}"?`)) deleteChapter.mutate(c._id); }}
-                className="rounded px-2 py-1 text-xs text-rose-400 hover:bg-rose-500/10 hover:text-rose-300">
-                Delete
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
+      <ChapterList
+        chapters={chapters}
+        sid={sid}
+        isOwner={isOwner}
+        onDelete={(id, title) => { if (confirm(`Delete chapter "${title}"?`)) deleteChapter.mutate(id); }}
+      />
 
       {/* Delete study */}
       {isOwner && (
@@ -192,5 +177,141 @@ export default function StudyViewPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/** Chapter list with topic grouping. A chapter can carry several tags, so in
+ *  grouped mode it appears under each of them — that is the point of tagging
+ *  rather than foldering. Clicking any tag filters to it. */
+function ChapterList({
+  chapters, sid, isOwner, onDelete,
+}: {
+  chapters: Array<{ _id: string; title: string; tags?: string[] }>;
+  sid: string;
+  isOwner: boolean | undefined;
+  onDelete: (id: string, title: string) => void;
+}) {
+  const [grouped, setGrouped] = useState(true);
+  const [filter, setFilter] = useState<string | null>(null);
+
+  // Original position, so numbering stays stable however the list is sliced.
+  const orderOf = useMemo(() => {
+    const m = new Map<string, number>();
+    chapters.forEach((c, i) => m.set(c._id, i + 1));
+    return m;
+  }, [chapters]);
+
+  const allTags = useMemo(() => {
+    const m = new Map<string, { tag: string; count: number }>();
+    for (const c of chapters) {
+      for (const t of c.tags || []) {
+        const k = t.toLowerCase();
+        const e = m.get(k);
+        if (e) e.count++; else m.set(k, { tag: t, count: 1 });
+      }
+    }
+    return [...m.values()].sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+  }, [chapters]);
+
+  const shown = useMemo(
+    () => (filter ? chapters.filter((c) => (c.tags || []).some((t) => t.toLowerCase() === filter)) : chapters),
+    [chapters, filter],
+  );
+
+  const groups = useMemo(() => {
+    if (!grouped) return [{ tag: null as string | null, items: shown }];
+    const m = new Map<string, { tag: string; items: typeof shown }>();
+    const untagged: typeof shown = [];
+    for (const c of shown) {
+      const ts = c.tags || [];
+      if (ts.length === 0) { untagged.push(c); continue; }
+      for (const t of ts) {
+        const k = t.toLowerCase();
+        const e = m.get(k);
+        if (e) e.items.push(c); else m.set(k, { tag: t, items: [c] });
+      }
+    }
+    const out: Array<{ tag: string | null; items: typeof shown }> =
+      [...m.values()].sort((a, b) => b.items.length - a.items.length || a.tag.localeCompare(b.tag));
+    if (untagged.length) out.push({ tag: null, items: untagged });
+    return out;
+  }, [shown, grouped]);
+
+  if (chapters.length === 0) {
+    return (
+      <div className="rounded border border-dashed border-ink-700 p-6 text-center text-sm text-ink-400">
+        No chapters yet.
+      </div>
+    );
+  }
+
+  const row = (c: { _id: string; title: string; tags?: string[] }) => (
+    <div key={c._id} className="flex items-start gap-3 rounded-xl border border-ink-700 bg-ink-900 p-3">
+      <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded bg-ink-800 text-xs font-semibold text-ink-300">
+        {orderOf.get(c._id)}
+      </div>
+      <div className="min-w-0 flex-1">
+        <Link to={`/studies/${encodeURIComponent(sid)}/edit/${encodeURIComponent(c._id)}`}
+          className="text-sm font-semibold text-white hover:text-brand-200">
+          {c.title || `Chapter ${orderOf.get(c._id)}`}
+        </Link>
+        <TagChips tags={c.tags} onClick={(t) => setFilter(t.toLowerCase())} />
+      </div>
+      {isOwner && (
+        <button onClick={() => onDelete(c._id, c.title)}
+          className="rounded px-2 py-1 text-xs text-rose-400 hover:bg-rose-500/10 hover:text-rose-300">
+          Delete
+        </button>
+      )}
+    </div>
+  );
+
+  return (
+    <>
+      {allTags.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          <button
+            onClick={() => setFilter(null)}
+            className={`rounded-full px-2.5 py-1 text-xs font-semibold ${filter === null ? "bg-brand-500/30 text-brand-100" : "bg-ink-800 text-ink-300 hover:bg-ink-700"}`}
+          >
+            All ({chapters.length})
+          </button>
+          {allTags.map((t) => (
+            <button
+              key={t.tag}
+              onClick={() => setFilter(filter === t.tag.toLowerCase() ? null : t.tag.toLowerCase())}
+              className={`rounded-full px-2.5 py-1 text-xs font-semibold ${filter === t.tag.toLowerCase() ? "bg-brand-500/30 text-brand-100" : "bg-ink-800 text-ink-300 hover:bg-ink-700"}`}
+            >
+              {t.tag} ({t.count})
+            </button>
+          ))}
+          <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-xs text-ink-400">
+            <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} className="accent-brand-500" />
+            Group by topic
+          </label>
+        </div>
+      )}
+
+      {shown.length === 0 && (
+        <div className="rounded border border-dashed border-ink-700 p-6 text-center text-sm text-ink-400">
+          No chapters with that topic.
+        </div>
+      )}
+
+      {groups.map((g) => (
+        <div key={g.tag ?? "__untagged"} className="mb-4">
+          {grouped && allTags.length > 0 && (
+            <div className="mb-1.5 flex items-center gap-2">
+              <span className={`text-xs font-semibold uppercase tracking-wider ${g.tag ? "text-brand-300" : "text-ink-500"}`}>
+                {g.tag ?? "No topic"}
+              </span>
+              <span className="text-[11px] text-ink-500">{g.items.length}</span>
+              <span className="h-px flex-1 bg-ink-800" />
+            </div>
+          )}
+          <div className="space-y-2">{g.items.map(row)}</div>
+        </div>
+      ))}
+    </>
   );
 }

@@ -25,6 +25,7 @@ import SharedClassBoard, {
 } from "../components/SharedClassBoard";
 import { ClassNotationPanel } from "../components/ClassNotationPanel";
 import { studyMovesToTree, treeToStudyMoves } from "../lib/studyTree";
+import { TagEditor } from "../components/TagEditor";
 import type { LocalRoomState, LocalTreeNode } from "../lib/localClassRoom";
 
 type SaveStatus = "saved" | "dirty" | "saving" | "error";
@@ -70,6 +71,9 @@ export default function StudyBoardPage() {
 function Editor({ sid, cid, chapter }: { sid: string; cid: string; chapter: Chapter }) {
   const qc = useQueryClient();
   const [title, setTitle] = useState(chapter.title || "Chapter");
+  const [tags, setTags] = useState<string[]>(chapter.tags || []);
+  // Tags the user already uses anywhere — keeps spellings consistent.
+  const tagList = useQuery({ queryKey: ["study-tags"], queryFn: studiesApi.listTags, staleTime: 60_000 });
   const [status, setStatus] = useState<SaveStatus>("saved");
   const stateRef = useRef<LocalRoomState | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -82,9 +86,9 @@ function Editor({ sid, cid, chapter }: { sid: string; cid: string; chapter: Chap
   }), [chapter]);
 
   const save = useMutation({
-    mutationFn: async (opts?: { title?: string }) => {
+    mutationFn: async (opts?: { title?: string; tags?: string[] }) => {
       const st = stateRef.current;
-      const body: any = { title: opts?.title ?? title };
+      const body: any = { title: opts?.title ?? title, tags: opts?.tags ?? tags };
       if (st) {
         body.startingFen = st.startFen;
         body.moves = treeToStudyMoves(st.startFen, st.tree);
@@ -96,6 +100,8 @@ function Editor({ sid, cid, chapter }: { sid: string; cid: string; chapter: Chap
     onSuccess: () => {
       setStatus("saved");
       qc.invalidateQueries({ queryKey: ["studies"] });
+      qc.invalidateQueries({ queryKey: ["study-tags"] });
+      qc.invalidateQueries({ queryKey: ["study", sid] });
     },
     onError: () => setStatus("error"),
   });
@@ -140,6 +146,17 @@ function Editor({ sid, cid, chapter }: { sid: string; cid: string; chapter: Chap
           placeholder="Chapter title"
         />
         <SavePill status={status} onClick={flush} />
+      </div>
+
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wider text-ink-500">Topics</span>
+        <div className="min-w-[18rem] flex-1">
+          <TagEditor
+            tags={tags}
+            suggestions={tagList.data?.tags || []}
+            onChange={(next) => { setTags(next); setStatus("dirty"); saveRef.current.mutate({ tags: next }); }}
+          />
+        </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_400px]">

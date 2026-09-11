@@ -40,6 +40,8 @@ import {
 
 const MAX_TITLE = 140;
 const MAX_COMMENT = 4000;
+const MAX_TAG = 24;      // a topic label, not a sentence
+const MAX_TAGS = 12;     // per chapter
 const MAX_MOVES = 2000; // largest reasonable study chapter (deep opening prep)
 const MAX_CHAPTERS = 60;
 
@@ -98,6 +100,12 @@ export interface ChapterDoc {
   title: string;
   startingFen: string;
   moves: MoveNode[];
+  /** Arrows/circles drawn at the STARTING position (per-move markup lives on
+   *  each MoveNode). */
+  startShapes?: Shape[];
+  /** Free-form topic labels — a chapter can carry several, and the chapter
+   *  list groups by them. */
+  tags?: string[];
   headers?: Record<string, string>;
   createdAt: Date;
   updatedAt: Date;
@@ -277,6 +285,7 @@ export class StudiesService {
       title: chapterTitle,
       startingFen,
       moves,
+      tags: this.validateTags(b.tags),
       headers,
       createdAt: now,
       updatedAt: now,
@@ -409,6 +418,7 @@ export class StudiesService {
     const s = await this.loadForWrite(studyId, userId);
     if (s.chapterCount >= MAX_CHAPTERS) throw new BadRequestException("chapter limit reached");
     const b: any = body ?? {};
+    const tags = this.validateTags(b.tags);
     const title = String(b.title || "").trim().slice(0, MAX_TITLE) || `Chapter ${s.chapterCount + 1}`;
     const startingFen = this.normalizeFen(b.startingFen);
     let moves: MoveNode[] = [];
@@ -427,6 +437,7 @@ export class StudiesService {
       title,
       startingFen,
       moves,
+      tags,
       headers,
       createdAt: now,
       updatedAt: now,
@@ -458,6 +469,7 @@ export class StudiesService {
     // each MoveNode, but the root position had nowhere to put them — a board
     // that annotates the start and saves would silently lose that markup.
     if (Array.isArray(b.startShapes)) set.startShapes = this.validateShapes(b.startShapes);
+    if (Array.isArray(b.tags)) set.tags = this.validateTags(b.tags);
     await this.chapters().updateOne({ _id: chapterId, studyId }, { $set: set });
     await this.studies().updateOne({ _id: studyId }, { $set: { updatedAt: new Date() } });
     // Sync owner's revision queue when moves change (⭐ flags may have flipped).
@@ -651,6 +663,44 @@ export class StudiesService {
   /** Validate a client-supplied moves array by REPLAYING it move-by-move.
    *  Prevents garbage from ever landing in the DB — one bad move short-circuits.
    *  Variations replay from their parent's fenAfter (or startingFen if root). */
+  /** Free-form topic labels on a chapter ("Sicilian", "endgame", "for Arjun").
+   *  Trimmed, de-duplicated case-insensitively but stored with the casing the
+   *  user typed, capped in both length and count. */
+  private validateTags(raw: any): string[] {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const t of Array.isArray(raw) ? raw : []) {
+      if (typeof t !== "string") continue;
+      const v = t.trim().replace(/\s+/g, " ").slice(0, MAX_TAG);
+      if (!v) continue;
+      const k = v.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(v);
+      if (out.length >= MAX_TAGS) break;
+    }
+    return out;
+  }
+
+  /** Every tag the caller has used, with how many chapters carry it — powers
+   *  the tag picker's suggestions and the grouped chapter view. */
+  async listChapterTags(session: any) {
+    const { userId } = this.ensureUser(session);
+    const mine = await this.studies()
+      .find({ ownerId: userId, deletedAt: { $exists: false } } as any, { projection: { _id: 1 } })
+      .toArray();
+    const ids = mine.map((x: any) => x._id);
+    if (ids.length === 0) return { tags: [] as Array<{ tag: string; count: number }> };
+    const rows = await this.chapters().aggregate([
+      { $match: { studyId: { $in: ids }, deletedAt: { $exists: false }, tags: { $exists: true, $ne: [] } } },
+      { $unwind: "$tags" },
+      { $group: { _id: { $toLower: "$tags" }, label: { $first: "$tags" }, count: { $sum: 1 } } },
+      { $sort: { count: -1, _id: 1 } },
+      { $limit: 200 },
+    ] as any).toArray();
+    return { tags: rows.map((r: any) => ({ tag: r.label as string, count: r.count as number })) };
+  }
+
   /** Same shape rules as a MoveNode's shapes[] — used for a chapter's
    *  start-position markup. */
   private validateShapes(raw: any[]): Shape[] {

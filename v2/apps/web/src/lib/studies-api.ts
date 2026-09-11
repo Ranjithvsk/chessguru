@@ -53,6 +53,9 @@ export interface ChapterSummary {
   studyId: string;
   order: number;
   title: string;
+  /** Free-form topic labels. A chapter can carry several; the chapter list
+   *  groups by them. */
+  tags?: string[];
   startingFen: string;
   createdAt: string;
   updatedAt: string;
@@ -88,6 +91,9 @@ export const studiesApi = {
   // Server sorts by deletedAt desc so newest deletions show first.
   listTrash: () => req<{ items: StudySummary[] }>("GET", "/api/studies/trash"),
 
+  // Every chapter tag the caller has used, with how many chapters carry it.
+  listTags: () => req<{ tags: Array<{ tag: string; count: number }> }>("GET", "/api/studies/tags"),
+
   // Restore a soft-deleted study — clears its deletedAt flag.
   restore: (sid: string) =>
     req<{ ok: boolean; alreadyLive?: boolean }>("POST", `/api/studies/${encodeURIComponent(sid)}/restore`),
@@ -106,7 +112,7 @@ export const studiesApi = {
 
   remove: (sid: string) => req<{ ok: boolean }>("DELETE", `/api/studies/${encodeURIComponent(sid)}`),
 
-  addChapter: (sid: string, body: { title?: string; startingFen?: string; pgn?: string }) =>
+  addChapter: (sid: string, body: { title?: string; startingFen?: string; pgn?: string; tags?: string[] }) =>
     req<{ chapterId: string }>("POST", `/api/studies/${encodeURIComponent(sid)}/chapters`, body),
 
   getChapter: (sid: string, cid: string) =>
@@ -114,7 +120,7 @@ export const studiesApi = {
 
   saveChapter: (sid: string, cid: string, body: {
     title?: string; startingFen?: string; moves?: MoveNode[];
-    startShapes?: Shape[]; headers?: Record<string, string>;
+    startShapes?: Shape[]; tags?: string[]; headers?: Record<string, string>;
   }) => req<{ ok: boolean }>("PATCH", `/api/studies/${encodeURIComponent(sid)}/chapters/${encodeURIComponent(cid)}`, body),
 
   deleteChapter: (sid: string, cid: string) =>

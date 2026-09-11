@@ -35,6 +35,10 @@ export class StudiesController {
   @Get("trash")
   listTrash(@Req() req: any) { return this.svc.listTrash(req?.session); }
 
+  // Also BEFORE :sid — every chapter tag the caller has used, with counts.
+  @Get("tags")
+  listTags(@Req() req: any) { return this.svc.listChapterTags(req?.session); }
+
   @Post()
   create(@Body() body: any, @Req() req: any) { return this.svc.create(req?.session, body); }
 
