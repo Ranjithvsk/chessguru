@@ -360,8 +360,19 @@ export class BooksService implements OnModuleInit {
         shelf: String(b.shelf || ""),
       };
     });
-    BooksService.libCache = { at: Date.now(), rows };
-    return rows;
+    // The catalogue lists some books more than once — the same title sitting in
+    // two folders, or a second scan of it. Showing "Positional Play" three
+    // times in a picker is noise, so collapse on title+author and keep the
+    // first. The duplicates stay in the library itself; this is display only.
+    const seen = new Set<string>();
+    const deduped = rows.filter((r: { title: string; author: string }) => {
+      const k = (r.title + "|" + r.author).toLowerCase().replace(/\s+/g, " ").trim();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    BooksService.libCache = { at: Date.now(), rows: deduped };
+    return deduped;
   }
 
   /** Search the library by title or author. Returns slim rows only — never the
