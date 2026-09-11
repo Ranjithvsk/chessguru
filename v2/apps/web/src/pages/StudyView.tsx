@@ -259,36 +259,40 @@ function ChapterList({
      deliberately does not ship `moves`. */
   const card = (c: ChapterRow) => (
     <div key={c._id} className="overflow-hidden rounded-xl border border-ink-700 bg-ink-900 transition hover:border-brand-500/60">
-      <div className="relative">
-        <Link
-          to={`/studies/${encodeURIComponent(sid)}/edit/${encodeURIComponent(c._id)}`}
-          className="block"
-          title="Open on the board"
-          aria-hidden
-          tabIndex={-1}
-        >
-          <MiniFenBoard fen={c.previewFen || c.startingFen || "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"} />
-        </Link>
-        <span className="pointer-events-none absolute left-2 top-2 flex h-6 min-w-6 items-center justify-center rounded bg-ink-950/80 px-1.5 text-[11px] font-semibold text-ink-100 ring-1 ring-black/30">
-          {orderOf.get(c._id)}
-        </span>
-        {isOwner && (
-          <button
-            onClick={() => onDelete(c._id, c.title)}
-            title={`Delete "${c.title}"`}
-            aria-label={`Delete chapter ${c.title}`}
-            className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded bg-ink-950/80 text-xs text-ink-300 ring-1 ring-black/30 hover:bg-rose-600 hover:text-white"
-          >
-            ✕
-          </button>
-        )}
-      </div>
+      {/* Nothing overlays the board. The number badge and the delete control
+          used to float in its corners and covered a1/h8 — on an endgame with a
+          piece on a corner square that hides the position itself. They live in
+          the row underneath instead. */}
+      <Link
+        to={`/studies/${encodeURIComponent(sid)}/edit/${encodeURIComponent(c._id)}`}
+        className="block"
+        title="Open on the board"
+        aria-hidden
+        tabIndex={-1}
+      >
+        <MiniFenBoard fen={c.previewFen || c.startingFen || "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"} />
+      </Link>
       <div className="p-2.5">
-        <Link to={`/studies/${encodeURIComponent(sid)}/edit/${encodeURIComponent(c._id)}`}
-          className="block truncate text-sm font-semibold text-white hover:text-brand-200"
-          title={c.title}>
-          {c.title || `Chapter ${orderOf.get(c._id)}`}
-        </Link>
+        <div className="flex items-center gap-1.5">
+          <span className="flex h-5 min-w-[1.25rem] flex-shrink-0 items-center justify-center rounded bg-ink-800 px-1 text-[11px] font-semibold text-ink-300">
+            {orderOf.get(c._id)}
+          </span>
+          <Link to={`/studies/${encodeURIComponent(sid)}/edit/${encodeURIComponent(c._id)}`}
+            className="min-w-0 flex-1 truncate text-sm font-semibold text-white hover:text-brand-200"
+            title={c.title}>
+            {c.title || `Chapter ${orderOf.get(c._id)}`}
+          </Link>
+          {isOwner && (
+            <button
+              onClick={() => onDelete(c._id, c.title)}
+              title={`Delete "${c.title}"`}
+              aria-label={`Delete chapter ${c.title}`}
+              className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-xs text-ink-500 hover:bg-rose-600 hover:text-white"
+            >
+              ✕
+            </button>
+          )}
+        </div>
         <TagChips tags={c.tags} onClick={(t) => setFilter(t.toLowerCase())} />
       </div>
     </div>
