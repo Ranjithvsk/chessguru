@@ -25,7 +25,7 @@ was the only legal candidate at that point AND it came from the reader (not
 brute-forced). Mirrors the discipline in dream_ocr, kept here for scoresheets.
 """
 from __future__ import annotations
-import itertools, re
+import itertools, math, re
 from dataclasses import dataclass, field
 import chess
 
@@ -85,7 +85,7 @@ def read_sheet(cells: list[Cell], beam: int = 12) -> list[Cell]:
     # path = (board, cost, history, anchor) — anchor counts consecutive reader-legal
     # moves since the last unknown; a line that just lost the thread must earn
     # trust back before anything on it can be called verified.
-    paths: list[tuple[chess.Board, int, list[tuple[str, bool, bool]], int]] = [(chess.Board(), 0, [], 99)]
+    paths: list[tuple[chess.Board, float, list[tuple[str, bool, bool]], int]] = [(chess.Board(), 0.0, [], 99)]
     for ci, c in enumerate(cells):
         c.raw = c.cands[0][0] if c.cands else ""
         # candidate pool: reader K-best, then confusion edits of each, with costs
@@ -94,14 +94,25 @@ def read_sheet(cells: list[Cell], beam: int = 12) -> list[Cell]:
         # Adrift lines (just after an unknown) may NOT: on a wrong board a
         # "legal alternative" is fiction, and measured on HCS this trap turned
         # correct raw reads into wrong legal moves (41 % vs 54 % raw).
-        def make_pool(full: bool) -> dict[str, int]:
-            pool: dict[str, int] = {}
-            for k, (t, p) in enumerate(c.cands[:3] if full else c.cands[:1]):
+        # Costs come from the reader's own probabilities. A confident top read
+        # that is illegal is almost always the PLAYER's error (30 of 40 HCS
+        # sheets contain one), so alternatives must get expensive as p_top
+        # rises, and "unknown — keep the ink" must become the cheap move.
+        # Rank-based costs. TrOCR's beam scores are length-normalised log-probs
+        # and every alternative comes back near 1.0, so they cannot price the
+        # candidates; the ORDER can. Unknown (keep the ink) sits between the
+        # 2nd candidate and an edit: a confident illegal read is most often the
+        # player's error, and only a clearly plausible alternative may override it.
+        unk_cost = 5.0
+        RANK_COST = {0: 0.0, 1: 3.5, 2: 4.5}
+        def make_pool(full: bool) -> dict[str, float]:
+            pool: dict[str, float] = {}
+            for k, (t, pk) in enumerate(c.cands[:3] if full else c.cands[:1]):
                 t = clean(t)
                 if not t: continue
-                pool.setdefault(t, k)                      # 0,1,2
+                pool.setdefault(t, RANK_COST[k])
                 if full:
-                    for e in edits(t): pool.setdefault(e, k + 3)   # never ties a reader candidate inside the vote margin
+                    for e in edits(t): pool.setdefault(e, RANK_COST[k] + 6.0)
             return pool
         pool_full, pool_raw = make_pool(True), make_pool(False)
         nxt = []
@@ -111,23 +122,26 @@ def read_sheet(cells: list[Cell], beam: int = 12) -> list[Cell]:
             for t, ccost in pool.items():
                 try: mv = board.parse_san(t)
                 except Exception: continue
-                legal.append((board.san(mv), mv, ccost, ccost < 3))
+                legal.append((board.san(mv), mv, ccost, ccost < 3.0))          # from the reader, not an edit
             for san, mv, ccost, from_reader in legal:
                 b2 = board.copy(stack=False); b2.push(mv)
                 unique = len(legal) == 1 and from_reader and anchor >= 4
-                nxt.append((b2, cost + ccost, hist + [(san, unique, from_reader)], anchor + 1 if from_reader else 0))
+                # trust grows only on top reads that were legal as written; any
+                # override (2nd candidate, edit) resets it so a wrong fix cannot
+                # drag a confident-looking line across the rest of the sheet.
+                nxt.append((b2, cost + ccost, hist + [(san, unique, from_reader)], anchor + 1 if ccost == 0.0 else 0))
             # unknown: keep the board, pay for it. One-ply lookahead happens
             # implicitly: the next cell is parsed against this same board only
             # if it is legal there; otherwise we try every legal move here as a
             # bridge (cost _SKIP+1) so a single unreadable cell does not sink
             # the rest of the sheet.
-            nxt.append((board, cost + _SKIP, hist + [("", False, False)], 0))
+            nxt.append((board, cost + unk_cost, hist + [("", False, False)], 0))
             if ci + 1 < len(cells) and anchor >= 4:
                 nxt_texts = [clean(t) for t, _ in cells[ci + 1].cands[:2]]
                 for bridge in board.legal_moves:
                     b2 = board.copy(stack=False); b2.push(bridge)
                     if any(_parses(b2, t) for t in nxt_texts):
-                        nxt.append((b2, cost + _SKIP + 1, hist + [("?" + board.san(bridge), False, False)], 0))
+                        nxt.append((b2, cost + unk_cost + 1, hist + [("?" + board.san(bridge), False, False)], 0))
         nxt.sort(key=lambda p: p[1]); paths = nxt[:beam]
     best_cost = paths[0][1]
     votes: dict[int, set[str]] = {}

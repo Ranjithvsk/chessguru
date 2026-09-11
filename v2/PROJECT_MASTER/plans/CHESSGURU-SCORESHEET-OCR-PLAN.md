@@ -177,3 +177,33 @@ chess-only decoding) — swap MODEL for the fine-tuned checkpoint.
 - Vinayaka already has the venv (`E:\ocr-gpu`, torch 2.14 cu126, transformers 5.17) and
   Qwen3-VL-4B cached; the reader is `hcs_qwen_read.py` (10 cells stacked per strip, resumable,
   runs detached, logs to `E:\scoresheets\read.log`). Sample = 40 sheets (all 10 legal + 30 random).
+
+## 10. Phase B — fine-tuned TrOCR (2026-09-11 evening)
+
+Setup: `hcs_trocr_finetune.py`, TrOCR-base-handwritten, 11,473 train / 603 val cells, **20 whole
+games held out** (24 sheets, 1,675 cells) so sheets can be scored with the beam exactly like M0.
+Batch 12 (24 filled the 10 GB card and thrashed 5 s/step; 12 runs 3.5 steps/s), lr 4e-5 warm-up +
+linear decay, fp16, light affine/colour jitter, 8 epochs ≈ 40 min on the 3080.
+
+| | val exact | held-out raw (strict) | held-out move-level | two-sheet merge (225 agreed cells, 4 games) |
+|---|---|---|---|---|
+| Qwen3-VL-4B zero-shot (M0, different sheets) | — | 53.7 % | — | — |
+| **run3** TrOCR-base, 8 ep | 75.1 → 82.8 → 81.8 → 86.2 → 87.4 → 87.9 → 88.2 → **88.6 %** | **87.9 %** | **88.4 %** | 84.0 → **86.2 %** |
+
+Where the remaining 12 % goes (run3, 195 misses): 173 fall after the point where the *label
+sequence itself* stops being legal chess, so they cannot be classified; of the 22 that can, **7 are
+cases where our read is the legal move and the label is not** (label says Bc7/Bf2/d5, the game had
+Bg7/Be2/d4 — annotator or player error), 8 are genuine OCR errors, 6 are both-legal ambiguities
+(Na4/Nd4). So the HCS ground truth has an error rate of its own, a few percent, and "almost 100 %
+against HCS labels" is not reachable by any reader; ~95 % is the honest ceiling on this data.
+
+Beam status: on a 54 % reader (Qwen) the legality beam can add nothing; on run3 it is neutral at
+move level (88.4 raw vs 88.2 beam) because most held-out sheets go off the legal rails within the
+first 5 moves (label errors + continuation pages that start mid-game), which strands the beam
+without a trusted board. Costs are now rank-based (TrOCR beam scores are not probabilities), any
+override of a top read resets the trust counter, and unknown cells keep the ink. False-confident
+on run3: 7 of 1,675.
+
+Queued (automatic): run4 = stage 2 from run3/best, lr 2e-5, label smoothing 0.1, stronger
+augmentation, 10 ep; Qwen on the same held-out cells (ensemble candidates); run5 = TrOCR-large.
+Production CLI: `read_scoresheet.py <model_dir> <cells_dir> [--pair a b]` → PGN with {?}/{??}.

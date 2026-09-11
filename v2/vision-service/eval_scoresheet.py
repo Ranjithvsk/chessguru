@@ -48,6 +48,19 @@ def norm(s: str) -> str:
     return re.sub(r"^[kqrn](?=[a-h1-8x])", lambda m: m.group(0).upper(), s)
 
 
+def move_key(s: str) -> str:
+    """The MOVE, not the spelling: piece + destination (+ promotion). Drops the
+    capture x, check marks and file/rank disambiguation, so a player's "Rab1"
+    equals the beam's standard "Rb1" and "exf" equals "exf5" when the
+    destination is present. Castling keeps its own key."""
+    s = norm(s)
+    if re.fullmatch(r"O-O(-O)?", s): return s
+    m = re.fullmatch(r"([KQRBN]?)([a-h]?)([1-8]?)x?([a-h][1-8])(=[QRBN])?", s)
+    if not m: return s
+    piece = m.group(1) or ("P" + (m.group(2) or ""))     # pawn moves keep the source file (exd5 vs cxd5 differ)
+    return piece + m.group(4) + (m.group(5) or "")
+
+
 def main(reads_path: str = str(ROOT / "reads.json")):
     manifest = json.load(open(ROOT / "manifest.json"))
     truth = json.load(open(ROOT / "truth.json"))
@@ -59,6 +72,7 @@ def main(reads_path: str = str(ROOT / "reads.json")):
     raw_ok = beam_ok = n = false_conf = verified = 0
     sb_ok = sb_ver = sb_fc = sb_unk = 0
     sb_legal_ok = sb_legal_n = 0; sb_damage = 0
+    sb_mv_ok = raw_mv_ok = 0
     sheet_cells: dict[str, list] = {}
     fc_truth_illegal = 0
     blank = 0
@@ -101,8 +115,10 @@ def main(reads_path: str = str(ROOT / "reads.json")):
             gt = truth[it["id"]]
             ok2 = norm(c.san) == norm(gt) if c.san else False
             sb_ok += ok2; sb_unk += (c.status == "unknown")
+            sb_mv_ok += (move_key(c.san) == move_key(gt)) if c.san else 0
+            raw_mv_ok += (move_key(c.raw) == move_key(gt))
             if sheet_meta.get(sheet, {}).get("legal_fraction") == 1.0: sb_legal_n += 1; sb_legal_ok += ok2
-            if norm(c.raw) == norm(gt) and not ok2: sb_damage += 1
+            if move_key(c.raw) == move_key(gt) and move_key(c.san) != move_key(gt): sb_damage += 1
             if c.status == "verified":
                 sb_ver += 1; sb_fc += (not ok2)
         per_sheet.append((sheet, len(items), s_raw, s_beam))
@@ -118,6 +134,7 @@ def main(reads_path: str = str(ROOT / "reads.json")):
     print(f"cells scored: {n}   sheets: {len(by_sheet)}")
     print(f"raw MRA   : {raw_ok/n:6.1%}   ({raw_ok}/{n})")
     print(f"beam MRA  : {beam_ok/n:6.1%}   ({beam_ok}/{n})")
+    print(f"move-level : raw {raw_mv_ok/n:.1%}  sheet-beam {sb_mv_ok/n:.1%}   (same move, spelling ignored)")
     print(f"sheet-beam: {sb_ok/n:6.1%}   verified {sb_ver/n:.1%}  FALSE-CONFIDENT {sb_fc}  unknown {sb_unk/n:.1%}  damaged-raw {sb_damage}  legal-sheets {(sb_legal_ok/sb_legal_n if sb_legal_n else 0):.1%}   (scoresheet_beam: K-best + handwriting edits + unknown bridging)")
     print(f"verified  : {verified/n:6.1%}   FALSE-CONFIDENT: {false_conf}  (of which the written move was itself illegal or after an illegal one: {fc_truth_illegal})")
     print(f"blank reads (model returned fewer lines than cells): {blank} = {blank/n:.1%}")
