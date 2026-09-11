@@ -29,10 +29,12 @@ import itertools, math, re
 from dataclasses import dataclass, field
 import chess
 
-# Pen-stroke confusions seen in HCS reads (eval_scoresheet misread list).
-FILE_ALT = {"a": "aod", "b": "bh6", "c": "ce", "d": "dao", "e": "ec", "f": "ft", "g": "g9q", "h": "hbn"}
-RANK_ALT = {"1": "17l", "2": "27z", "3": "35", "4": "459", "5": "563", "6": "6b04", "7": "712", "8": "83"}
-PIECE_ALT = {"K": "KRk", "Q": "QOD0", "R": "RKB", "B": "BR8", "N": "NMH"}
+# Pen-stroke confusions MEASURED on the fine-tuned reader's held-out misreads
+# (run3, single-character substitutions, truth→read): d↔g 7, 3↔5 7, 4↔7 6,
+# d↔a 6, b↔B/h 5, c↔e 4, f↔e 4, B↔R 4, c↔g 4, g↔a/f/e 3, 2↔7 3, 4↔1 3, 3↔2 3.
+FILE_ALT = {"a": "adgo", "b": "bh6", "c": "cegd", "d": "dagc", "e": "ecfg", "f": "feg", "g": "gdaef9", "h": "hbn"}
+RANK_ALT = {"1": "147l", "2": "273", "3": "3527", "4": "4719", "5": "536", "6": "6b0", "7": "7421", "8": "83"}
+PIECE_ALT = {"K": "KBR", "Q": "QO0", "R": "RBK", "B": "BRK8", "N": "NM"}
 SAN_RE = re.compile(r"^(?:O-O-O|O-O)[+#]?$|^[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?$")
 
 

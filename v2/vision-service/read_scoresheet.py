@@ -16,6 +16,10 @@ import argparse, json, math, sys
 from pathlib import Path
 import torch
 from PIL import Image
+import os as _os, sys as _sys
+_sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+from cellprep import tight_crop
+TIGHT = _os.environ.get("TIGHT", "0") == "1"
 from transformers import VisionEncoderDecoderModel, ViTImageProcessor, RobertaTokenizerFast
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import scoresheet_beam as sb
@@ -35,6 +39,7 @@ def read_cells(paths: list[Path], ip, tok, mdl, device: str, batch: int = 16) ->
     for s in range(0, len(paths), batch):
         chunk = paths[s:s + batch]
         ims = [Image.open(p).convert("RGB") for p in chunk]
+        if TIGHT: ims = [tight_crop(im) for im in ims]
         pv = ip(images=ims, return_tensors="pt").pixel_values.to(device)
         with torch.inference_mode():
             gen = mdl.generate(pv, num_beams=4, num_return_sequences=K, max_new_tokens=12,

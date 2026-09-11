@@ -14,7 +14,11 @@ import sys, time, random, math, json
 from pathlib import Path
 import torch
 from torch.utils.data import Dataset, DataLoader
-from PIL import Image, ImageOps
+from PIL import Image
+import os as _os, sys as _sys
+_sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+from cellprep import tight_crop
+TIGHT = _os.environ.get("TIGHT", "0") == "1", ImageOps
 from torchvision import transforms as T
 from transformers import VisionEncoderDecoderModel, ViTImageProcessor, RobertaTokenizerFast
 
@@ -47,6 +51,7 @@ class Cells(Dataset):
     def __getitem__(self, i):
         f, san = self.rows[i]
         im = Image.open(self.root / "cells" / f).convert("RGB")
+        if TIGHT: im = tight_crop(im)
         return self.tf(im), san
 
 
@@ -59,7 +64,9 @@ def main(data_dir: str, out_dir: str, epochs: int = 8):
     log = open(out / "train.log", "a", buffering=1)
     def say(*a):
         msg = time.strftime("%H:%M:%S ") + " ".join(str(x) for x in a); print(msg, flush=True); log.write(msg + "\n")
-    rows = [l.rstrip("\n").split("\t") for l in open(Path(data_dir) / "train_labels.tsv", encoding="utf-8") if "\t" in l]
+    labels_file = os.environ.get("LABELS", "train_labels.tsv")          # train_all_labels.tsv for the final no-holdout model
+    rows = [l.rstrip("\n").split("\t") for l in open(Path(data_dir) / labels_file, encoding="utf-8") if "\t" in l]
+    say(f"labels: {labels_file}")
     random.seed(3); random.shuffle(rows)
     nval = int(len(rows) * VAL_FRAC); val, train = rows[:nval], rows[nval:]
     say(f"train {len(train)} val {len(val)} epochs {epochs} batch {BATCH} lr {LR}")
