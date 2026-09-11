@@ -73,7 +73,7 @@ export default function StudyViewPage() {
   const isOwner = auth?.loggedIn && auth.userId === study.ownerId;
 
   return (
-    <div className="mx-auto max-w-3xl px-3 py-6">
+    <div className="mx-auto max-w-7xl px-3 py-6">
       <Link to="/studies" className="mb-3 inline-block text-xs text-ink-400 hover:text-ink-200">← My studies</Link>
 
       {/* Book link badge (if this study is tied to a book chapter) */}
@@ -251,37 +251,46 @@ function ChapterList({
     );
   }
 
-  const row = (c: ChapterRow) => (
-    <div key={c._id} className="flex items-start gap-3 rounded-xl border border-ink-700 bg-ink-900 p-3">
-      <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded bg-ink-800 text-xs font-semibold text-ink-300">
-        {orderOf.get(c._id)}
+  /* A card, three to a row, board first. The board is the thing you actually
+     recognise a chapter by, so it gets the whole card width rather than a
+     thumbnail beside the text. The position drawn is the one the MAIN LINE
+     reaches — a start position would render an identical untouched board for
+     every opening chapter. previewFen is stored server-side because this list
+     deliberately does not ship `moves`. */
+  const card = (c: ChapterRow) => (
+    <div key={c._id} className="overflow-hidden rounded-xl border border-ink-700 bg-ink-900 transition hover:border-brand-500/60">
+      <div className="relative">
+        <Link
+          to={`/studies/${encodeURIComponent(sid)}/edit/${encodeURIComponent(c._id)}`}
+          className="block"
+          title="Open on the board"
+          aria-hidden
+          tabIndex={-1}
+        >
+          <MiniFenBoard fen={c.previewFen || c.startingFen || "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"} />
+        </Link>
+        <span className="pointer-events-none absolute left-2 top-2 flex h-6 min-w-6 items-center justify-center rounded bg-ink-950/80 px-1.5 text-[11px] font-semibold text-ink-100 ring-1 ring-black/30">
+          {orderOf.get(c._id)}
+        </span>
+        {isOwner && (
+          <button
+            onClick={() => onDelete(c._id, c.title)}
+            title={`Delete "${c.title}"`}
+            aria-label={`Delete chapter ${c.title}`}
+            className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded bg-ink-950/80 text-xs text-ink-300 ring-1 ring-black/30 hover:bg-rose-600 hover:text-white"
+          >
+            ✕
+          </button>
+        )}
       </div>
-      {/* The position the chapter actually reaches — its main line played out,
-          not its start position, which would draw an identical untouched board
-          for every opening chapter. previewFen is stored server-side because
-          this list deliberately does not ship `moves`. */}
-      <Link
-        to={`/studies/${encodeURIComponent(sid)}/edit/${encodeURIComponent(c._id)}`}
-        className="block w-16 flex-shrink-0 overflow-hidden rounded ring-1 ring-ink-700 transition hover:ring-brand-500 sm:w-20"
-        title="Open on the board"
-        aria-hidden
-        tabIndex={-1}
-      >
-        <MiniFenBoard fen={c.previewFen || c.startingFen || "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"} />
-      </Link>
-      <div className="min-w-0 flex-1">
+      <div className="p-2.5">
         <Link to={`/studies/${encodeURIComponent(sid)}/edit/${encodeURIComponent(c._id)}`}
-          className="text-sm font-semibold text-white hover:text-brand-200">
+          className="block truncate text-sm font-semibold text-white hover:text-brand-200"
+          title={c.title}>
           {c.title || `Chapter ${orderOf.get(c._id)}`}
         </Link>
         <TagChips tags={c.tags} onClick={(t) => setFilter(t.toLowerCase())} />
       </div>
-      {isOwner && (
-        <button onClick={() => onDelete(c._id, c.title)}
-          className="rounded px-2 py-1 text-xs text-rose-400 hover:bg-rose-500/10 hover:text-rose-300">
-          Delete
-        </button>
-      )}
     </div>
   );
 
@@ -340,7 +349,7 @@ function ChapterList({
               <span className="h-px flex-1 bg-ink-800" />
             </div>
           )}
-          <div className="space-y-2">{g.items.map(row)}</div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">{g.items.map(card)}</div>
         </div>
       ))}
     </>
