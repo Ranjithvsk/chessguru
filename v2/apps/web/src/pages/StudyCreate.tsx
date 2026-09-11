@@ -20,11 +20,15 @@ interface Tile {
 }
 
 const TILES: Tile[] = [
-  { intent: "game",     icon: "🎮", title: "Game analysis",     blurb: "Paste a PGN or enter moves — annotate as you go.",  needs: ["pgn"],   chapterTitle: "Game" },
+  // The six categories My Studies is organised by, in the order a game is played.
+  { intent: "opening",      icon: "📖", title: "Opening",            blurb: "Build a repertoire tree from your favourite lines.",   needs: ["opening"], chapterTitle: "Line 1" },
+  { intent: "middlegame",   icon: "⚔️", title: "Middlegame",         blurb: "Plans, structures and typical positions.",             needs: ["fen"],   chapterTitle: "Position" },
+  { intent: "endgame",      icon: "👑", title: "Endgame",            blurb: "Study or drill from a specific endgame position.",     needs: ["fen"],   chapterTitle: "Position" },
+  { intent: "game",         icon: "🎮", title: "Own game revision",  blurb: "Go back over a game you played and mark the turns.",   needs: ["pgn"],   chapterTitle: "Game" },
+  { intent: "gm-game",      icon: "🏆", title: "Grandmaster game",   blurb: "Work through a master game and revise the key ideas.", needs: ["pgn"],   chapterTitle: "Game" },
+  { intent: "classic-game", icon: "🏛️", title: "Classic game",       blurb: "The famous games worth knowing by heart.",             needs: ["pgn"],   chapterTitle: "Game" },
   { intent: "puzzle",   icon: "🧩", title: "Puzzle / tactic",   blurb: "Start from a specific position — teach the answer.", needs: ["fen"],   chapterTitle: "Position" },
   { intent: "concept",  icon: "💡", title: "Concept lesson",    blurb: "Blank board, add slides as you teach.",              needs: [],        chapterTitle: "Slide 1" },
-  { intent: "opening",  icon: "📖", title: "Opening",           blurb: "Build a repertoire tree from your favourite lines.", needs: ["opening"], chapterTitle: "Line 1" },
-  { intent: "endgame",  icon: "👑", title: "Endgame",           blurb: "Study or drill from a specific endgame position.",   needs: ["fen"],   chapterTitle: "Position" },
   { intent: "notebook", icon: "📝", title: "Class notebook",    blurb: "Free-form — add chapters as class progresses.",      needs: [],        chapterTitle: "Session 1" },
   { intent: "book",     icon: "📚", title: "From a book",       blurb: "Link this study to a chapter of a chess book you own.", needs: ["book"], chapterTitle: "Chapter notes" },
 ];

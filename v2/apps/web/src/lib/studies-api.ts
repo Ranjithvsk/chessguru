@@ -3,7 +3,12 @@
 
 const BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
 
-export type Intent = "game" | "puzzle" | "concept" | "opening" | "endgame" | "notebook" | "book";
+export type Intent =
+  // The six chess categories My Studies is organised by. "game" is the user's
+  // OWN game — the key predates the label, so it stays for existing studies.
+  | "opening" | "middlegame" | "endgame" | "game" | "gm-game" | "classic-game"
+  // Older general-purpose kinds, still creatable.
+  | "puzzle" | "concept" | "notebook" | "book";
 export type Visibility = "private" | "shared" | "academy" | "public";
 
 export interface SourceBook {

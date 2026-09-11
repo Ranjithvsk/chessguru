@@ -1,20 +1,32 @@
 // My Studies — grid of studies I've created or been shared on.
 // Route: /studies
 
+import { useMemo } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { studiesApi, type StudySummary } from "../lib/studies-api";
 
 const INTENT_META: Record<string, { icon: string; label: string }> = {
-  game:     { icon: "🎮", label: "Game analysis" },
-  puzzle:   { icon: "🧩", label: "Puzzle / tactic" },
-  concept:  { icon: "💡", label: "Concept lesson" },
-  opening:  { icon: "📖", label: "Opening" },
-  endgame:  { icon: "👑", label: "Endgame" },
-  notebook: { icon: "📝", label: "Notebook" },
-  book:     { icon: "📚", label: "From a book" },
+  opening:        { icon: "📖", label: "Opening" },
+  middlegame:     { icon: "⚔️", label: "Middlegame" },
+  endgame:        { icon: "👑", label: "Endgame" },
+  game:           { icon: "🎮", label: "Own game revision" },
+  "gm-game":      { icon: "🏆", label: "Grandmaster games" },
+  "classic-game": { icon: "🏛️", label: "Classic games" },
+  puzzle:         { icon: "🧩", label: "Puzzle / tactic" },
+  concept:        { icon: "💡", label: "Concept lesson" },
+  notebook:       { icon: "📝", label: "Notebook" },
+  book:           { icon: "📚", label: "From a book" },
 };
+
+/** The order My Studies groups by — a game's own order, then the general kinds.
+ *  Anything not listed falls into "Other" at the end. */
+const SECTION_ORDER = [
+  "opening", "middlegame", "endgame",
+  "game", "gm-game", "classic-game",
+  "puzzle", "concept", "notebook", "book",
+];
 
 const VIS_LABEL: Record<string, string> = {
   private: "Private",
@@ -39,6 +51,26 @@ export default function StudiesListPage() {
   if (auth && !auth.loggedIn) return <Navigate to="/login?back=/studies" replace />;
 
   const items = list.data?.items ?? [];
+
+  // Bucket studies by category, in SECTION_ORDER, dropping empty buckets. An
+  // unrecognised intent (an older study, or one created before a category
+  // existed) collects under "Other" rather than vanishing from the page.
+  const sections = useMemo(() => {
+    const by = new Map<string, StudySummary[]>();
+    for (const st of items) {
+      const k = INTENT_META[st.intent] ? st.intent : "__other__";
+      const arr = by.get(k);
+      if (arr) arr.push(st); else by.set(k, [st]);
+    }
+    const out: Array<{ intent: string; meta: { icon: string; label: string }; items: StudySummary[] }> = [];
+    for (const k of SECTION_ORDER) {
+      const rows = by.get(k);
+      if (rows && rows.length) out.push({ intent: k, meta: INTENT_META[k]!, items: rows });
+    }
+    const other = by.get("__other__");
+    if (other && other.length) out.push({ intent: "__other__", meta: { icon: "📁", label: "Other" }, items: other });
+    return out;
+  }, [items]);
 
   return (
     <div className="mx-auto max-w-5xl px-3 py-6">
@@ -73,9 +105,27 @@ export default function StudiesListPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {items.map((s) => <StudyCard key={s._id} s={s} />)}
-      </div>
+      {/* Grouped by category rather than one flat wall of cards: a coach's
+          opening prep and their endgame work are different bodies of study and
+          reading them apart is the point. Sections follow a game's own order —
+          opening, middlegame, endgame — then the revision kinds. Empty
+          categories are omitted, so this collapses to a single list until
+          there is actually a mix. */}
+      {sections.map((sec) => (
+        <div key={sec.intent} className="mb-6">
+          {sections.length > 1 && (
+            <div className="mb-2 flex items-center gap-2">
+              <span className="text-base">{sec.meta.icon}</span>
+              <span className="text-xs font-semibold uppercase tracking-wider text-brand-300">{sec.meta.label}</span>
+              <span className="text-[11px] text-ink-500">{sec.items.length}</span>
+              <span className="h-px flex-1 bg-ink-800" />
+            </div>
+          )}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {sec.items.map((s) => <StudyCard key={s._id} s={s} />)}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

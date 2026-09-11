@@ -46,7 +46,9 @@ const MAX_MOVES = 2000; // largest reasonable study chapter (deep opening prep)
 const MAX_CHAPTERS = 60;
 
 // Intent picker on the create-study screen — decides how the editor opens.
-const INTENTS = new Set(["game", "puzzle", "concept", "opening", "endgame", "notebook", "book"]);
+// Study categories. "game" predates the rest and means the user's OWN game —
+// kept under that key so existing studies keep working; only its label changed.
+const INTENTS = new Set(["game", "puzzle", "concept", "opening", "middlegame", "endgame", "notebook", "book", "gm-game", "classic-game"]);
 const VISIBILITIES = new Set(["private", "shared", "academy", "public"]);
 
 function shortId(bytes = 8): string {
