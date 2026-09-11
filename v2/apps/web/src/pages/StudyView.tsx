@@ -9,6 +9,7 @@ import { useMemo, useState } from "react";
 import { api } from "../lib/api";
 import { studiesApi, type Visibility } from "../lib/studies-api";
 import { TagChips } from "../components/TagEditor";
+import { MiniFenBoard } from "../components/MiniFenBoard";
 import { revisionsApi } from "../lib/revisions-api";
 
 const VIS_OPTIONS: { value: Visibility; label: string; hint: string }[] = [
@@ -180,13 +181,18 @@ export default function StudyViewPage() {
   );
 }
 
+type ChapterRow = {
+  _id: string; title: string; tags?: string[];
+  startingFen?: string; previewFen?: string;
+};
+
 /** Chapter list with topic grouping. A chapter can carry several tags, so in
  *  grouped mode it appears under each of them — that is the point of tagging
  *  rather than foldering. Clicking any tag filters to it. */
 function ChapterList({
   chapters, sid, isOwner, onDelete,
 }: {
-  chapters: Array<{ _id: string; title: string; tags?: string[] }>;
+  chapters: ChapterRow[];
   sid: string;
   isOwner: boolean | undefined;
   onDelete: (id: string, title: string) => void;
@@ -245,11 +251,24 @@ function ChapterList({
     );
   }
 
-  const row = (c: { _id: string; title: string; tags?: string[] }) => (
+  const row = (c: ChapterRow) => (
     <div key={c._id} className="flex items-start gap-3 rounded-xl border border-ink-700 bg-ink-900 p-3">
       <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded bg-ink-800 text-xs font-semibold text-ink-300">
         {orderOf.get(c._id)}
       </div>
+      {/* The position the chapter actually reaches — its main line played out,
+          not its start position, which would draw an identical untouched board
+          for every opening chapter. previewFen is stored server-side because
+          this list deliberately does not ship `moves`. */}
+      <Link
+        to={`/studies/${encodeURIComponent(sid)}/edit/${encodeURIComponent(c._id)}`}
+        className="block w-16 flex-shrink-0 overflow-hidden rounded ring-1 ring-ink-700 transition hover:ring-brand-500 sm:w-20"
+        title="Open on the board"
+        aria-hidden
+        tabIndex={-1}
+      >
+        <MiniFenBoard fen={c.previewFen || c.startingFen || "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"} />
+      </Link>
       <div className="min-w-0 flex-1">
         <Link to={`/studies/${encodeURIComponent(sid)}/edit/${encodeURIComponent(c._id)}`}
           className="text-sm font-semibold text-white hover:text-brand-200">
@@ -289,6 +308,18 @@ function ChapterList({
             <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} className="accent-brand-500" />
             Group by topic
           </label>
+        </div>
+      )}
+
+      {/* Without this the feature is invisible: the chips + "Group by topic"
+          toggle only render once something carries a tag, so a user with no
+          tags yet sees an unchanged page and no hint that topics exist at all.
+          Owner could not find the feature for exactly this reason. */}
+      {allTags.length === 0 && (
+        <div className="mb-3 rounded-lg border border-dashed border-ink-700 px-3 py-2 text-xs text-ink-400">
+          🏷️ No topics yet. Open a chapter and add one in the{" "}
+          <span className="font-semibold text-ink-200">Topics</span> row above the board —
+          chapters then group by topic here, and a chapter can carry several.
         </div>
       )}
 

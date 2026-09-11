@@ -106,6 +106,11 @@ export interface ChapterDoc {
   /** Free-form topic labels — a chapter can carry several, and the chapter
    *  list groups by them. */
   tags?: string[];
+  /** Position at the END of the main line, so the chapter list can show a real
+   *  board instead of a title. Stored rather than derived because the list
+   *  query deliberately projects `moves` OUT — deriving it would mean shipping
+   *  every move of every chapter just to draw a thumbnail. */
+  previewFen?: string;
   headers?: Record<string, string>;
   createdAt: Date;
   updatedAt: Date;
@@ -286,6 +291,7 @@ export class StudiesService {
       startingFen,
       moves,
       tags: this.validateTags(b.tags),
+      previewFen: this.computePreviewFen(moves, startingFen),
       headers,
       createdAt: now,
       updatedAt: now,
@@ -438,6 +444,7 @@ export class StudiesService {
       startingFen,
       moves,
       tags,
+      previewFen: this.computePreviewFen(moves, startingFen),
       headers,
       createdAt: now,
       updatedAt: now,
@@ -461,6 +468,7 @@ export class StudiesService {
     if (typeof b.startingFen === "string") set.startingFen = this.normalizeFen(b.startingFen);
     if (Array.isArray(b.moves)) {
       set.moves = this.validateMoves(b.moves, set.startingFen ?? c.startingFen);
+      set.previewFen = this.computePreviewFen(set.moves, set.startingFen ?? c.startingFen);
     }
     if (b.headers && typeof b.headers === "object") {
       set.headers = this.cleanHeaders(b.headers);
@@ -674,6 +682,32 @@ export class StudiesService {
   /** Validate a client-supplied moves array by REPLAYING it move-by-move.
    *  Prevents garbage from ever landing in the DB — one bad move short-circuits.
    *  Variations replay from their parent's fenAfter (or startingFen if root). */
+  /** Walk the main line to its last node and return the position there. That
+   *  is what a chapter actually "looks like" — the start position would show an
+   *  identical untouched board for every opening chapter. Falls back to the
+   *  starting position for a chapter with no moves yet. */
+  private computePreviewFen(moves: MoveNode[], startingFen: string): string {
+    const byParent = new Map<string | null, MoveNode[]>();
+    for (const m of moves || []) {
+      const k = m.parentId ?? null;
+      const arr = byParent.get(k);
+      if (arr) arr.push(m); else byParent.set(k, [m]);
+    }
+    let cur: string | null = null;
+    let fen = startingFen;
+    const guard = new Set<string>();
+    for (;;) {
+      const kids = byParent.get(cur);
+      if (!kids || kids.length === 0) break;
+      const next = kids.find((k) => k.isMainLine) ?? kids[0]!;
+      if (guard.has(next.id)) break;   // malformed parent cycle
+      guard.add(next.id);
+      if (next.fenAfter) fen = next.fenAfter;
+      cur = next.id;
+    }
+    return fen;
+  }
+
   /** Free-form topic labels on a chapter ("Sicilian", "endgame", "for Arjun").
    *  Trimmed, de-duplicated case-insensitively but stored with the casing the
    *  user typed, capped in both length and count. */

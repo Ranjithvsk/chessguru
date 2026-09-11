@@ -56,6 +56,9 @@ export interface ChapterSummary {
   /** Free-form topic labels. A chapter can carry several; the chapter list
    *  groups by them. */
   tags?: string[];
+  /** Position at the end of the main line — what the chapter list draws as a
+   *  board. Stored server-side because the list query omits `moves`. */
+  previewFen?: string;
   startingFen: string;
   createdAt: string;
   updatedAt: string;
