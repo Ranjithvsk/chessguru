@@ -268,7 +268,7 @@ function AcademyCard({ a, selected, onOpen }: { a: AdminAcademyRow; selected: bo
             )}
             {a.people.departed > 0 && (
               <span className="tabular-nums" title="Accounts that have since left. What they did while they were here still counts here.">
-                {plural(a.people.departed, "account")} has left
+                {plural(a.people.departed, "account")} {a.people.departed === 1 ? "has" : "have"} left
               </span>
             )}
             {a.activity.vendorActions > 0 && (
