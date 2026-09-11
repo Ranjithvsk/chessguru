@@ -342,7 +342,7 @@ export function applyAnnotationClick(
  *  palette + 🎯 Attack toggle + Clear. Keyboard shortcuts shown in tooltips. */
 export function AnnotationToolbar({
   tool, brush, onToolChange, onBrushChange, onClear, hasShapes, attackMode, onAttackModeChange,
-  textLabel, onTextLabelChange, pinsMode, onPinsModeChange,
+  textLabel, onTextLabelChange, pinsMode, onPinsModeChange, showBrushes = true,
 }: {
   tool: AnnotationTool;
   brush: AnnotationBrush;
@@ -356,6 +356,12 @@ export function AnnotationToolbar({
   onTextLabelChange?: (t: { text: string; fill: string }) => void;
   pinsMode?: boolean;
   onPinsModeChange?: (v: boolean) => void;
+  /** Show the five brush-colour circles. Default true — the live class room
+   *  needs them, a coach picks a colour mid-lesson. The openings explorer
+   *  passes false (owner ask 2026-09-11): there the row sat under the board
+   *  as five bare dots with no lesson to use them for. Drawing still works,
+   *  it just uses whichever colour is already selected. */
+  showBrushes?: boolean;
 }) {
   return (
     <div className="mt-2 flex flex-col items-center gap-1">
@@ -375,9 +381,9 @@ export function AnnotationToolbar({
           </button>
         );
       })}
-      <span className="mx-1 h-5 w-px bg-ink-700" aria-hidden />
+      {showBrushes && <span className="mx-1 h-5 w-px bg-ink-700" aria-hidden />}
       {/* Colours */}
-      {(Object.keys(BRUSH_META) as AnnotationBrush[]).map((b, i) => {
+      {showBrushes && (Object.keys(BRUSH_META) as AnnotationBrush[]).map((b, i) => {
         const meta = BRUSH_META[b];
         const active = brush === b;
         return (

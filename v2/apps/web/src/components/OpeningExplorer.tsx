@@ -399,6 +399,7 @@ export default function OpeningExplorer(
         {/* Annotation toolbar (Phase 1, 2026-09-02) — sits directly below
          *  the board so it doesn't crowd the analysis panel on the right. */}
         <AnnotationToolbar
+          showBrushes={false}
           tool={annotTool.tool}
           brush={annotTool.brush}
           onToolChange={annotTool.setTool}
