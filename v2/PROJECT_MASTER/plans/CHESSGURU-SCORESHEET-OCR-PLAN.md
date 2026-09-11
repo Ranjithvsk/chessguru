@@ -119,6 +119,21 @@ HCS adults' handwriting will score higher than our kids'; report both.
     and re-anchor the position from the coach's fix (or from the opponent's sheet).
   - `eval_scoresheet.py` therefore reports an **over-correction** count (raw right → beam wrong)
     alongside MRA and false-confidence, and a fully-legal-sheet subset for the clean-chess number.
+
+### M0 numbers so far
+
+| Reader | Cells | raw MRA | beam MRA | false-confident | note |
+|---|---|---|---|---|---|
+| perfect reads (truth in) | 2568 / 40 sheets | 100 % | 99.96 % | 1 (B5→b5, a case fix) | beam does NOT rewrite players' illegal moves |
+| TrOCR-base-handwritten, zero-shot, CPU France | 176 | 0 % | 0 % | 0 | reads English words: "subjections.", "13March" |
+| TrOCR same, decoder restricted to chess chars | 416 | 0 % | 0 % | 1 | chess-shaped noise: O-O→"0-000", Nf6→"Nfc-"; 4–5 s/cell on 8 cores |
+| Qwen3-VL-4B, Vinayaka GPU | — | pending | pending | — | blocked: book-ingest fleet holds 96–104 GB of the 106 GB commit limit (OSError 1455 at weight load) |
+
+Conclusion already safe to draw: an off-the-shelf handwriting model has **no** usable
+notion of chess notation, so Phase B fine-tuning on HCS cells is mandatory, not optional.
+`hcs_trocr_read.py` is kept as the Phase B inference skeleton (batching, K-best candidates,
+chess-only decoding) — swap MODEL for the fine-tuned checkpoint.
+
 - Vinayaka already has the venv (`E:\ocr-gpu`, torch 2.14 cu126, transformers 5.17) and
   Qwen3-VL-4B cached; the reader is `hcs_qwen_read.py` (10 cells stacked per strip, resumable,
   runs detached, logs to `E:\scoresheets\read.log`). Sample = 40 sheets (all 10 legal + 30 random).
