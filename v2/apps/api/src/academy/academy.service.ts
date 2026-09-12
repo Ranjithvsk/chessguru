@@ -1374,8 +1374,15 @@ export class AcademyService {
         : rec?.qr ? "qr"
         : rec?.auto ? "live-class"
         : "default";
-      const status: "present" | "late" | "absent" =
-        !mark ? "present"                       // no mark at all = default present
+      // Owner directive 2026-09-12, replacing the 2026-08-23 one: an unmarked
+      // student is UNMARKED, not present. Defaulting to present meant a sheet
+      // nobody had touched looked identical to a class where everyone turned
+      // up — the register claimed attendance that was never taken. Nothing
+      // downstream reads unmarked as absent: the absent-notification flow is
+      // handed an explicit student list by the page, and the streak and report
+      // counters walk stored marks rather than this sheet.
+      const status: "present" | "late" | "absent" | "unmarked" =
+        !mark ? "unmarked"                      // no mark yet = not taken
         : mark.status === "absent" ? "absent"
         : mark.status === "late" ? "late"
         : "present";

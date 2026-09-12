@@ -16,7 +16,12 @@ import QRCode from "qrcode";
 import { api, get, post } from "../lib/api";
 import { loadFaceApi, detectAllFaces } from "../lib/faceApi";
 
+// What a coach can SET. "unmarked" is deliberately not in here — it means no
+// record exists, so it is a state you arrive at by not having marked, never one
+// you send to the server.
 type Status = "present" | "late" | "absent";
+// What a row can BE, which includes never having been marked at all.
+type RowStatus = Status | "unmarked";
 type DayStatus = "present" | "late" | "absent" | "unmarked";
 type Row = {
   studentId: string;
@@ -24,7 +29,7 @@ type Row = {
   username: string;
   avatarKey: string | null;
   coachId: string | null;
-  status: Status;
+  status: RowStatus;
   lateMinutes: number | null;
   reason: string | null;
   markedAt: string | null;
@@ -46,14 +51,22 @@ type Batch = { _id: string; name: string; coachUserId: string; studentIds: strin
 
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-// Owner directive 2026-08-23: first tap = ABSENT (the common case — most
-// students are present by default, coach only touches the ones missing).
-// Cycle: Present → Absent → Late → Present.
-function nextStatus(s: Status): Status {
-  return s === "present" ? "absent" : s === "absent" ? "late" : "present";
+// Owner directive 2026-09-12, replacing the 2026-08-23 "default everyone
+// present" one: a sheet starts EMPTY, the first tap marks present, the next
+// marks absent. Nobody is counted as having attended a class the coach never
+// took the register for.
+//
+// "Late" left the tap cycle so two taps cannot overshoot into it. It is still
+// set from the long-press detail panel, together with its minutes.
+function nextStatus(s: RowStatus): Status {
+  if (s === "unmarked") return "present";
+  if (s === "present") return "absent";
+  return "present";           // absent or late, tap returns to present
 }
 
-function statusStyle(s: Status, excused = false): { ring: string; bg: string; text: string; label: string; emoji: string } {
+function statusStyle(s: RowStatus, excused = false): { ring: string; bg: string; text: string; label: string; emoji: string } {
+  // Unmarked reads as empty on purpose — no tick, no cross, nothing implied.
+  if (s === "unmarked") return { ring: "ring-ink-700", bg: "bg-ink-900/40 hover:bg-ink-800/60", text: "text-ink-500", label: "Not marked", emoji: "○" };
   if (s === "present") return { ring: "ring-emerald-400/60", bg: "bg-emerald-500/10 hover:bg-emerald-500/20", text: "text-emerald-200", label: "Present",  emoji: "✅" };
   if (s === "late")    return { ring: "ring-amber-400/70",   bg: "bg-amber-500/10 hover:bg-amber-500/20",     text: "text-amber-200",   label: "Late",     emoji: "⏰" };
   // Excused = softer purple treatment vs the harsh rose for unexcused absent.
@@ -204,9 +217,14 @@ export default function AttendancePage() {
     const late = rows.filter((r) => r.status === "late").length;
     const absent = rows.filter((r) => r.status === "absent").length;
     const autoDetected = rows.filter((r) => r.source === "live-class" || r.source === "qr").length;
+    const unmarked = rows.filter((r) => r.status === "unmarked").length;
     const total = rows.length;
-    const rate = total ? Math.round(((present + late) / total) * 100) : 0;
-    return { present, late, absent, autoDetected, total, rate };
+    // Rate is out of those actually MARKED. Dividing by the whole roster while
+    // half of it is untouched would report a falling attendance rate purely
+    // because the coach has not finished taking the register.
+    const marked = present + late + absent;
+    const rate = marked ? Math.round(((present + late) / marked) * 100) : 0;
+    return { present, late, absent, unmarked, autoDetected, total, marked, rate };
   }, [rows]);
 
   function toggleOne(row: Row) {
@@ -299,10 +317,14 @@ export default function AttendancePage() {
           <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 font-semibold text-emerald-300">✅ {stats.present}</span>
           <span className="rounded-full bg-amber-500/15 px-2.5 py-1 font-semibold text-amber-300">⏰ {stats.late}</span>
           <span className="rounded-full bg-rose-500/15 px-2.5 py-1 font-semibold text-rose-300">❌ {stats.absent}</span>
+          {stats.unmarked > 0 && (
+            <span className="rounded-full border border-ink-700 px-2.5 py-1 font-semibold text-ink-400"
+              title={`${stats.unmarked} student${stats.unmarked === 1 ? "" : "s"} not marked yet`}>○ {stats.unmarked}</span>
+          )}
           {stats.autoDetected > 0 && (
             <span className="rounded-full bg-sky-500/15 px-2.5 py-1 font-semibold text-sky-300" title="Auto-detected from Live Class join">✨ {stats.autoDetected} live</span>
           )}
-          <span className="rounded-full border border-ink-700 px-2.5 py-1 font-semibold text-ink-300 tabular-nums">{stats.rate}%</span>
+          <span className="rounded-full border border-ink-700 px-2.5 py-1 font-semibold text-ink-300 tabular-nums" title={`${stats.present + stats.late} of ${stats.marked} marked`}>{stats.rate}%</span>
         </div>
       </div>
 
@@ -1416,7 +1438,7 @@ function DetailModal({ row, date, onClose, onSave }: {
   onClose: () => void;
   onSave: (status: Status, lateMinutes: number | null, reason: string | null) => void;
 }) {
-  const [status, setStatus] = useState<Status>(row.status);
+  const [status, setStatus] = useState<Status>(row.status === "unmarked" ? "present" : row.status);
   const [lateMinutes, setLateMinutes] = useState<number>(row.lateMinutes || 5);
   const [reason, setReason] = useState<string>(row.reason || "");
 
