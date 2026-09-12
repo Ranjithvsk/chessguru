@@ -28,6 +28,8 @@ const DEPTH = 12;                 // per position, capped by MOVETIME_MS — a 1
 const MOVETIME_MS = 120;
 const PARALLEL = 2;               // two engines side by side; the box has 8 cores and the other analyzer uses one
 const POLL_MS = 20_000;
+const EVAL_TIMEOUT_MS = 15_000;   // a position that takes longer than this means the engine is gone — drop it, retry the game later
+const TICK_MAX_MS = 4 * 60_000;   // a tick older than this is stuck (engine hung without a reply) — reset and start over
 const LOOKBACK_DAYS = 45;
 const TACTIC_MIN_GAIN_CP = 150;   // best line must be worth this much more than the played move to count as a missed tactic
 const FOUND_TOLERANCE_CP = 30;    // played move within this of the best = found
@@ -88,6 +90,7 @@ type MotifEvent = {
 export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
   private timer: NodeJS.Timeout | null = null;
   private ticking = false;
+  private tickStartedAt = 0;
   private shuttingDown = false;
   private engines: Array<Stockfish | null> = [];
 
@@ -175,14 +178,24 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
     for (const g of my as any[]) out.push({ key: `my:${g._id}`, users: [String(g.ownerId)], at: g.createdAt ?? new Date() });
     const ext = await this.col("externalGames").find({ userId: { $in: ids }, $or: [{ played: { $gte: since } }, { played: { $gte: since.toISOString() } }] }, { projection: { userId: 1, played: 1 } }).sort({ played: -1 }).limit(limit).toArray();
     for (const g of ext as any[]) out.push({ key: `ext:${g._id}`, users: [String(g.userId)], at: g.played ? new Date(g.played) : new Date() });
-    const doneIds = new Set((await this.done().find({ _id: { $in: out.map((o) => o.key) as never[] } }, { projection: { _id: 1 } }).toArray()).map((d) => d._id));
+    const retryBefore = new Date(Date.now() - 3600_000);
+    const doneIds = new Set((await this.done().find({ _id: { $in: out.map((o) => o.key) as never[] }, $or: [{ error: { $exists: false } }, { analyzedAt: { $gte: retryBefore } }] }, { projection: { _id: 1 } }).toArray()).map((d) => d._id));
     return out.filter((o) => !doneIds.has(o.key)).sort((a, b) => b.at.getTime() - a.at.getTime()).slice(0, limit);
   }
 
   // ── worker ──────────────────────────────────────────────────────────────────
   private async tick() {
-    if (this.ticking || this.shuttingDown) return;
-    this.ticking = true;
+    if (this.shuttingDown) return;
+    if (this.ticking) {
+      // 17:18 UTC 2026-09-12: two engines answered nothing after a restart and the worker sat on
+      // `ticking` for good. Self-heal: kill the engines, forget the tick, carry on.
+      if (Date.now() - this.tickStartedAt > TICK_MAX_MS) {
+        console.error("[game-motifs] tick stuck for >4 min — resetting engines");
+        for (let i = 0; i < this.engines.length; i++) await this.dropEngine(i);
+        this.ticking = false;
+      } else return;
+    }
+    this.ticking = true; this.tickStartedAt = Date.now();
     try {
       const batch = await this.candidates(null, PARALLEL);
       if (!batch.length) return;
@@ -203,6 +216,16 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
     return this.engines[slot]!;
   }
   private async dropEngine(slot: number) { const e = this.engines[slot]; this.engines[slot] = null; if (e) await e.stop().catch(() => null); }
+  private async evalAt(engine: Stockfish, slot: number, fen: string): Promise<PositionEval> {
+    let timer: NodeJS.Timeout | null = null;
+    try {
+      return await Promise.race([
+        engine.analyze(fen, DEPTH, MOVETIME_MS),
+        new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error("engine did not answer within 15 s")), EVAL_TIMEOUT_MS); }),
+      ]);
+    } catch (e) { await this.dropEngine(slot); throw e; }
+    finally { if (timer) clearTimeout(timer); }
+  }
 
   /** Analyze one game for the tracked users (userId → academyId). Idempotent: replaces the game's events. */
   async analyzeGame(gameId: string, tracked: Map<string, string>, slot = 0): Promise<{ events: number; plies: number }> {
@@ -212,7 +235,7 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
     const board = new Chess();
     const events: MotifEvent[] = [];
     let cur: PositionEval;
-    try { cur = await engine.analyze(board.fen(), DEPTH, MOVETIME_MS); } catch (e) { await this.dropEngine(slot); throw e; }
+    cur = await this.evalAt(engine, slot, board.fen());
     const moves = g.moves ?? [];
     let prevWhiteCp: number | null = null; // eval (white POV) BEFORE the opponent's last move — the baseline for "did a tactic appear?"
     for (let i = 0; i < moves.length; i++) {
@@ -228,7 +251,7 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
       const mv = board.move({ from: playedUci.slice(0, 2), to: playedUci.slice(2, 4), promotion: playedUci.slice(4) || undefined } as never);
       if (!mv) break; // corrupt game record — stop here
       let next: PositionEval;
-      try { next = await engine.analyze(board.fen(), DEPTH, MOVETIME_MS); } catch (e) { await this.dropEngine(slot); throw e; }
+      next = await this.evalAt(engine, slot, board.fen());
       const whiteBefore = toWhiteCp(cur, sideToMove);
       if (playerId && academyId && bestUci) {
         // Both from the mover's point of view: what the position was worth, and what it is worth now.
@@ -267,6 +290,7 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
     await this.events().deleteMany({ gameId });
     if (events.length) await this.events().insertMany(events);
     await this.done().updateOne({ _id: gameId }, { $set: { academyIds: Array.from(new Set(tracked.values())), analyzedAt: new Date(), plies: moves.length, events: events.length } }, { upsert: true });
+    console.log(`[game-motifs] ${gameId}: ${moves.length} plies, ${events.length} moments`);
     return { events: events.length, plies: moves.length };
   }
 
