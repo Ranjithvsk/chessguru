@@ -274,7 +274,16 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
     for (const g of ext as any[]) out.push({ key: `ext:${g._id}`, users: [String(g.userId)], at: g.played ? new Date(g.played) : new Date() });
     const retryBefore = new Date(Date.now() - 3600_000);
     const doneIds = new Set((await this.done().find({ _id: { $in: out.map((o) => o.key) as never[] }, $or: [{ error: { $exists: false } }, { analyzedAt: { $gte: retryBefore } }] }, { projection: { _id: 1 } }).toArray()).map((d) => d._id));
-    return out.filter((o) => !doneIds.has(o.key)).sort((a, b) => b.at.getTime() - a.at.getTime()).slice(0, limit);
+    // Newest first WITHIN each source, then round-robin across sources (arena / uploaded / external) so
+    // a pile of freshly imported PGNs never starves the arena or Lichess/chess.com games (18:34 2026-09-12).
+    const bySource = new Map<string, Array<{ key: string; users: string[]; at: Date }>>();
+    for (const o of out.filter((x) => !doneIds.has(x.key)).sort((a, b) => b.at.getTime() - a.at.getTime())) {
+      const src = o.key.slice(0, o.key.indexOf(":"));
+      (bySource.get(src) ?? bySource.set(src, []).get(src)!).push(o);
+    }
+    const queues = [...bySource.values()], picked: Array<{ key: string; users: string[] }> = [];
+    for (let i = 0; picked.length < limit && queues.some((q) => q.length); i++) { const q = queues[i % queues.length]!; const o = q.shift(); if (o) picked.push({ key: o.key, users: o.users }); }
+    return picked;
   }
 
   // ── worker ──────────────────────────────────────────────────────────────────
