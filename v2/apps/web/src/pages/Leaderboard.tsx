@@ -899,7 +899,9 @@ type GameAwardEvent = { gameId: string; ply: number; color: "white" | "black"; f
 // Arrows: green = the engine's move, red = what was played when it differs. Same ?fen=&shapes= deep
 // link the coach board uses.
 /** Owner 2026-09-12: moments open on the My Studies board (a chapter in the viewer's "🎯 Game awards" study). */
-function momentStudyUrl(e: GameAwardEvent): string { return `/api/game-motifs/open/${encodeURIComponent(e.gameId)}/${e.ply}`; }
+// Plain link (not fetch): the API answers with a redirect to /studies/:sid/edit/:cid. The API base is the
+// same-origin /v2api prefix (VITE_API_BASE) — a bare /api/... path lands on the SPA and shows the app shell.
+function momentStudyUrl(e: GameAwardEvent): string { return `${(import.meta as any).env?.VITE_API_BASE ?? ""}/api/game-motifs/open/${encodeURIComponent(e.gameId)}/${e.ply}`; }
 function momentEditorUrl(e: GameAwardEvent): string {
   const shapes: Array<{ orig: string; dest: string; brush: string }> = [];
   if (e.bestUci?.length >= 4) shapes.push({ orig: e.bestUci.slice(0, 2), dest: e.bestUci.slice(2, 4), brush: "green" });

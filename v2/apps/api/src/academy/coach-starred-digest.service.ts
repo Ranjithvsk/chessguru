@@ -339,7 +339,7 @@ export class CoachStarredDigestService implements OnModuleInit {
             by.set(e.userId, b);
           }
           const nameOf = (id: string) => { const u: any = students.find((x: any) => String(x._id) === id); return u?.name || u?.username || id; };
-          const editor = (e: any) => `${PUBLIC_ORIGIN}/api/game-motifs/open/${encodeURIComponent(e.gameId)}/${e.ply}`; // → My Studies board with the arrows drawn
+          const editor = (e: any) => `${PUBLIC_ORIGIN}${process.env.API_PUBLIC_PREFIX ?? "/v2api"}/api/game-motifs/open/${encodeURIComponent(e.gameId)}/${e.ply}`; // → My Studies board with the arrows drawn (API sits under /v2api on the web origin)
           const label = (m: string) => String(m).replace(/([A-Z])/g, " $1").toLowerCase();
           const rows = [...by.entries()].sort((a, b) => b[1].score - a[1].score);
           awardsHtml = `<h3 style="color:#111;margin:18px 0 4px">🎯 Game awards ${esc(windowLabel)}</h3><ul style="line-height:1.6;padding-left:20px;color:#333;font-size:13px">` +
