@@ -211,7 +211,7 @@ export class MyGamesService implements OnModuleInit, OnModuleDestroy {
     if (!username) throw new BadRequestException("username required");
     const max = Math.max(1, Math.min(50, Number(body?.max) || 10));
     // Public games export: https://lichess.org/api/games/user/<name>?max=N&pgnInJson=false
-    const url = `https://lichess.org/api/games/user/${encodeURIComponent(username)}?max=${max}&clocks=false&evals=false&opening=true`;
+    const url = `https://lichess.org/api/games/user/${encodeURIComponent(username)}?max=${max}&clocks=true&evals=false&opening=true`; // clocks → %clk in the PGN → time-trouble tagging in game awards
     let text: string;
     try {
       const r = await fetch(url, { headers: { Accept: "application/x-chess-pgn" } });

@@ -55,3 +55,8 @@ user played a named bot.
 5. **Coach digest**: `coach-starred-digest.service.ts` adds "🎯 Game awards this week" (score, ✅/❌, best and worst moment as board-editor links) for the coach's students, html + text. Never fails the digest.
 6. **Classmates-only seek**: protocol `LobbySeek.academyOnly` (client `seek.d.academyOnly`), ws router passes it, lobby puts the seek in pool `tc|acad:<academyId>` (looked up from `users.academyId`), bot-player skips `|acad:` pools, Play.tsx "classmates only" checkbox (signed-in only) → `usePlay.seek(clock, rated, academyOnly)` → `live.ts`.
 Deployed: API rebuilt + restarted; play-lobby / play-gateway / play-bot restarted (sources synced into the ubuntu clone by tee — lobby/ws/protocol/bot are NOT symlinked); web deployed.
+
+## Clocks for Lichess / chess.com games (owner: "lichess games, we can request time right?")
+- `games-fetch.service.ts`: Lichess import now asks `clocks=true` and stores `clock {initial, increment}` (ms) + `clocks[]` (remaining after each ply, ms); chess.com stores `clock` parsed from `time_control` ("600+5") and `clocks[]` parsed from the PGN's `{[%clk h:mm:ss.d]}` comments (`clocksFromPgn`, `parseTimeControl` exported). `my-games` Lichess import also asks `clocks=true` so uploaded PGNs carry `%clk`.
+- Scorer: `GameToScore.clocksMs` (remaining-after-move series) — `clockAt()` derives the clock before the move from the same side's previous ply and think time = before + inc − after. Uploaded PGNs use `[TimeControl]` header + `%clk`.
+- Backfill: 393/397 stored Lichess games got clocks via `POST /api/games/export/_ids?clocks=true` (4 are unclocked/correspondence). All `ext:`/`my:` gameMotifGames rows deleted so the worker re-scores them with time-trouble tagging.

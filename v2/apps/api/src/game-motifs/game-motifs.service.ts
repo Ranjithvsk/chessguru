@@ -6,6 +6,7 @@
 // leaderboard at /academy/game-awards. Owner 2026-09-12: "award them for finding good moves, like
 // fork, pin, mate, all the motifs, and a negative score for the missed ones".
 import { Injectable, OnModuleInit, OnModuleDestroy, ForbiddenException, UnauthorizedException, NotFoundException } from "@nestjs/common";
+import { clocksFromPgn, parseTimeControl } from "../integrations/games-fetch.service";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { Chess } from "chess.js";
@@ -92,7 +93,9 @@ type LiveGame = { _id: string; players: { white: string; black: string }; moves:
 type GameSource = "live" | "my" | "lichess" | "chesscom";
 type GameToScore = { key: string; source: GameSource; url: string | null; moves: string[]; white: string | null; black: string | null; at: Date; label: string;
   // arena games carry the clock: per-ply think time (ms) and the time control, for time-trouble tagging
-  moveTimes?: number[]; timeControl?: { initial: number; increment: number } | null };
+  moveTimes?: number[]; timeControl?: { initial: number; increment: number } | null;
+  // external / uploaded games: the clock remaining AFTER each ply (Lichess `clocks`, chess.com `%clk`), ms
+  clocksMs?: number[] | null };
 type MotifEvent = {
   _id: string; gameId: string; ply: number; userId: string; academyId: string; color: "white" | "black";
   fen: string; bestUci: string; bestSan: string | null; playedUci: string; playedSan: string | null;
@@ -136,6 +139,12 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
     return new Map(rows.map((r: any) => [String(r._id), String(r.academyId)]));
   }
   private static uid(p: string | undefined): string | null { return p && p.startsWith("u:") ? p.slice(2) : null; }
+  /** `[TimeControl "600+5"]` header of an uploaded PGN, if any. */
+  private static pgnTimeControl(pgn: unknown): { initial: number; increment: number } | null {
+    if (typeof pgn !== "string") return null;
+    const m = pgn.match(/\[TimeControl\s+"([^"]+)"\]/);
+    return m ? parseTimeControl(m[1]) : null;
+  }
   /** The student's repertoire lines (their own + their coach's), as SAN arrays. */
   private async repertoireFor(userId: string): Promise<Array<{ name: string; sans: string[] }>> {
     try {
@@ -227,7 +236,7 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
       const moves = GameMotifsService.pgnToUci(g.pgn);
       const our: "white" | "black" | null = g.ourColor === "white" || g.ourColor === "black" ? g.ourColor : null;
       const url = g.externalId && String(g.externalId).includes("http") ? String(g.externalId).replace(/^[a-z]+:/, "") : null;
-      return { key, source: "my", url, moves, white: our === "white" ? String(g.ownerId) : null, black: our === "black" ? String(g.ownerId) : null, at: g.createdAt ?? new Date(), label: `${g.white ?? "?"} vs ${g.black ?? "?"}` };
+      return { key, source: "my", url, moves, white: our === "white" ? String(g.ownerId) : null, black: our === "black" ? String(g.ownerId) : null, at: g.createdAt ?? new Date(), label: `${g.white ?? "?"} vs ${g.black ?? "?"}`, clocksMs: clocksFromPgn(g.pgn), timeControl: GameMotifsService.pgnTimeControl(g.pgn) };
     }
     if (source === "ext") {
       const g: any = await this.col("externalGames").findOne({ _id: id as never });
@@ -236,7 +245,9 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
       const handle = g.source === "lichess" ? u?.linkedAccounts?.lichess?.username : u?.linkedAccounts?.chesscom?.username;
       const our = GameMotifsService.colourFor(handle, g.white, g.black);
       const moves = GameMotifsService.pgnToUci(g.pgn);
-      return { key, source: g.source === "chesscom" ? "chesscom" : "lichess", url: g.url ?? GameMotifsService.externalUrl(g.source, g.gameId), moves, white: our === "white" ? String(g.userId) : null, black: our === "black" ? String(g.userId) : null, at: g.played ? new Date(g.played) : (g.importedAt ?? new Date()), label: `${g.white ?? "?"} vs ${g.black ?? "?"}` };
+      const clocksMs: number[] | null = Array.isArray(g.clocks) && g.clocks.length ? g.clocks : clocksFromPgn(g.pgn);
+      const timeControl = g.clock && typeof g.clock.initial === "number" ? g.clock : parseTimeControl(g.timeControl) ?? GameMotifsService.pgnTimeControl(g.pgn);
+      return { key, source: g.source === "chesscom" ? "chesscom" : "lichess", url: g.url ?? GameMotifsService.externalUrl(g.source, g.gameId), moves, white: our === "white" ? String(g.userId) : null, black: our === "black" ? String(g.userId) : null, at: g.played ? new Date(g.played) : (g.importedAt ?? new Date()), label: `${g.white ?? "?"} vs ${g.black ?? "?"}`, clocksMs, timeControl };
     }
     return null;
   }
@@ -330,6 +341,13 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
     // with seconds left is tagged as time trouble and costs less.
     const clock: Record<"white" | "black", number | null> = { white: g.timeControl?.initial ?? null, black: g.timeControl?.initial ?? null };
     const clockAt = (side: "white" | "black", ply: number): { clockMs: number | null; thinkMs: number | null } => {
+      if (g.clocksMs?.length) {
+        // remaining-after-move series: the clock BEFORE this move is what was left after the same side's previous move
+        const after = g.clocksMs[ply]; const before = ply >= 2 ? g.clocksMs[ply - 2] : (g.timeControl?.initial ?? after);
+        if (typeof before !== "number") return { clockMs: null, thinkMs: null };
+        const think = typeof after === "number" ? Math.max(0, before + (g.timeControl?.increment ?? 0) - after) : null;
+        return { clockMs: before, thinkMs: think };
+      }
       const t = g.moveTimes?.[ply]; const before = clock[side];
       if (before == null || typeof t !== "number") return { clockMs: null, thinkMs: typeof t === "number" ? t : null };
       clock[side] = Math.max(0, before - t + (g.timeControl?.increment ?? 0));

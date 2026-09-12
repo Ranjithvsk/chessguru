@@ -62,7 +62,7 @@ export class GamesFetchService {
       const j: any = await acct.json();
       handle = j.username;
     }
-    const url = `https://lichess.org/api/games/user/${encodeURIComponent(handle)}?max=${LICHESS_PULL}&pgnInJson=true&opening=true`;
+    const url = `https://lichess.org/api/games/user/${encodeURIComponent(handle)}?max=${LICHESS_PULL}&pgnInJson=true&opening=true&clocks=true`; // clocks: per-ply remaining time → game-awards time-trouble tagging
     const res = await fetch(url, { headers: { Accept: "application/x-ndjson" } });
     if (!res.ok) throw new Error(`lichess games ${res.status}`);
     const text = await res.text();
@@ -85,6 +85,9 @@ export class GamesFetchService {
         blackRating: g.players?.black?.rating ?? null,
         result: g.winner ? (g.winner === "white" ? "1-0" : "0-1") : "1/2-1/2",
         timeControl: g.speed || null,
+        // clock in ms: {initial, increment}; clocks = remaining time after each ply (Lichess sends centiseconds)
+        clock: g.clock && typeof g.clock.initial === "number" ? { initial: g.clock.initial * 1000, increment: (g.clock.increment ?? 0) * 1000 } : null,
+        clocks: Array.isArray(g.clocks) ? g.clocks.map((c: number) => c * 10) : null,
         opening: g.opening?.name ?? null,
         pgn: g.pgn ?? null,
         importedAt: new Date(),
@@ -127,6 +130,8 @@ export class GamesFetchService {
           blackRating: g.black?.rating ?? null,
           result: g.white?.result === "win" ? "1-0" : g.black?.result === "win" ? "0-1" : "1/2-1/2",
           timeControl: g.time_control ?? null,
+          clock: parseTimeControl(g.time_control), // "600+5" → ms; daily "1/86400" → null
+          clocks: clocksFromPgn(g.pgn),            // chess.com PGNs carry {[%clk h:mm:ss.d]} after every move
           opening: g.eco ?? null,
           pgn: g.pgn ?? null,
           importedAt: new Date(),
@@ -138,4 +143,18 @@ export class GamesFetchService {
     if (ops.length) await this.col().bulkWrite(ops, { ordered: false });
     return n;
   }
+}
+
+/** "600+5" / "180" → { initial, increment } in ms; daily ("1/86400") and unknown forms → null. */
+export function parseTimeControl(tc: unknown): { initial: number; increment: number } | null {
+  if (typeof tc !== "string" || !/^\d+(\+\d+)?$/.test(tc)) return null;
+  const [i, inc] = tc.split("+").map(Number);
+  return { initial: i! * 1000, increment: (inc ?? 0) * 1000 };
+}
+/** Remaining clock after each ply, in ms, from PGN `{[%clk 0:04:32.1]}` comments (null when the PGN has none). */
+export function clocksFromPgn(pgn: unknown): number[] | null {
+  if (typeof pgn !== "string") return null;
+  const out: number[] = [];
+  for (const m of pgn.matchAll(/\[%clk\s+(\d+):(\d{1,2}):(\d{1,2}(?:\.\d+)?)\]/g)) out.push(Math.round((Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])) * 1000));
+  return out.length ? out : null;
 }
