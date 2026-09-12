@@ -112,6 +112,9 @@ def main():
         ca = sb.read_sheet(read_cells(list_cells(a.pair[0]), ip, tok, mdl, a.device, fast=fast))
         cb = sb.read_sheet(read_cells(list_cells(a.pair[1]), ip, tok, mdl, a.device, fast=fast))
         cells = sb.merge_two_sheets(ca, cb)
+        if a.json:
+            for tag, cc in (("copyA", ca), ("copyB", cb)):
+                Path(a.json.replace(".json", f".{tag}.json")).write_text(json.dumps([{"id": c.id, "ink": sb.clean(c.raw), "san": c.san, "status": c.status, "candidates": c.cands} for c in cc]))
     else:
         cells = sb.read_sheet(read_cells(list_cells(a.cells), ip, tok, mdl, a.device, fast=fast))
     pgn = to_pgn(cells)

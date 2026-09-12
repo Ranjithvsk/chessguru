@@ -284,29 +284,43 @@ def _parses(board: chess.Board, t: str) -> bool:
     except Exception: return False
 
 
+def _mk(s: str) -> str:
+    s = clean(s)
+    m = re.fullmatch(r"([KQRBN]?)([a-h]?)([1-8]?)x?([a-h][1-8])(=[QRBN])?[+#]?", s)
+    return (m.group(1) or "P" + (m.group(2) or "")) + m.group(4) + (m.group(5) or "") if m else s
+
+
 def merge_two_sheets(a: list[Cell], b: list[Cell]) -> list[Cell]:
-    """Both players wrote the same game. Agreement raises confidence; a verified
-    copy beats an unverified one; otherwise keep the better-supported reading
-    (status rank, then reader probability) but downgrade it to a guess so the
-    coach's eye lands on it. Never answer with nothing — an empty cell was
-    measured to cost 37 points against simply keeping the stronger read."""
+    """Both players wrote the same game — but not always in the same boxes.
+    Measured on HCS game 103, copy B skipped a box at move 11 and an
+    index-aligned merge was one ply off for the rest of the sheet (38 %
+    against 97 % for copy A alone). So align the two copies by CONTENT
+    (sequence alignment on the moves), keep copy A's box numbering, and only
+    compare cells the alignment pairs up. Agreement raises confidence; a
+    verified copy beats an unverified one; otherwise keep the better-supported
+    reading, downgraded to a guess so the coach's eye lands on it."""
+    import difflib
     rank = {"verified": 3, "agreed": 2, "guess": 1, "inferred": 1, "unknown": 0}
+    ka = [_mk(c.san or c.raw) for c in a]; kb = [_mk(c.san or c.raw) for c in b]
+    pair: dict[int, int] = {}
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, ka, kb, autojunk=False).get_opcodes():
+        if tag in ("equal", "replace"):
+            for k in range(min(i2 - i1, j2 - j1)):
+                pair[i1 + k] = j1 + k
     out = []
-    for x, y in itertools.zip_longest(a, b):
-        if x is None: out.append(y); continue
-        if y is None: out.append(x); continue
-        if x.san == y.san:
+    for i, x in enumerate(a):
+        j = pair.get(i)
+        if j is None:
+            out.append(x); continue
+        y = b[j]
+        if _mk(x.san) == _mk(y.san) and x.san:
             best = x if rank[x.status] >= rank[y.status] else y
-            z = Cell(best.id, best.cands, best.san, best.status, best.confidence, best.raw, best.inferred)
-            if z.status in ("guess", "inferred", "agreed") and x.san:   # two independent hands agree
+            z = Cell(x.id, x.cands, x.san, best.status, best.confidence, x.raw, x.inferred)
+            if z.status in ("guess", "inferred", "agreed"):
                 z.status, z.confidence = "agreed", max(z.confidence, 0.85)
             out.append(z); continue
         px, py = rank[x.status], rank[y.status]
-        if px != py:
-            w = x if px > py else y
-        else:
-            cx = x.cands[0][1] if x.cands else 0.0; cy = y.cands[0][1] if y.cands else 0.0
-            w = x if cx >= cy else y
-        z = Cell(w.id, w.cands, w.san, "guess" if w.status != "verified" else "verified", min(w.confidence, 0.5) if w.status != "verified" else 1.0, w.raw, w.inferred)
-        out.append(z)
+        w = x if px > py else (y if py > px else (x if (x.cands[0][1] if x.cands else 0) >= (y.cands[0][1] if y.cands else 0) else y))
+        out.append(Cell(x.id, x.cands, w.san, "verified" if w.status == "verified" else "guess",
+                        1.0 if w.status == "verified" else min(w.confidence, 0.5), x.raw, w.inferred))
     return out
