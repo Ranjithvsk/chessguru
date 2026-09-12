@@ -905,6 +905,84 @@ function momentEditorUrl(e: GameAwardEvent): string {
 }
 const GAME_SRC: Record<string, string> = { live: "Arena", my: "My Games", lichess: "Lichess", chesscom: "Chess.com" };
 
+// Owner 2026-09-12: "when opened a user, it looks clumsy — organise it properly". One summary strip,
+// then the moments grouped per game in a real table (move / what / result / points / clock / actions).
+function StudentMoments({ events, label, canStar, onStar, starPending, row }: {
+  events: GameAwardEvent[]; label: (m: string) => string; canStar: boolean; onStar: (e: GameAwardEvent) => void; starPending: boolean; row: GameAwardRow;
+}) {
+  const [show, setShow] = useState<"all" | "found" | "missed">("all");
+  if (events.length === 0) return <div className="text-xs text-ink-400">No scored moments in this period.</div>;
+  const found = events.filter((e) => e.found), missed = events.filter((e) => !e.found);
+  const score = events.reduce((a, e) => a + e.points, 0);
+  const topFound = Object.entries(found.reduce<Record<string, number>>((m, e) => { m[e.primary] = (m[e.primary] ?? 0) + 1; return m; }, {})).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const topMissed = Object.entries(missed.reduce<Record<string, number>>((m, e) => { m[e.primary] = (m[e.primary] ?? 0) + 1; return m; }, {})).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const games = new Map<string, GameAwardEvent[]>();
+  for (const e of events) { if (show === "found" && !e.found) continue; if (show === "missed" && e.found) continue; (games.get(e.gameId) ?? games.set(e.gameId, []).get(e.gameId)!).push(e); }
+  const gameList = [...games.entries()].sort((a, b) => new Date(b[1][0]!.at).getTime() - new Date(a[1][0]!.at).getTime());
+  const fmtDate = (d: string) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+  const style = Object.entries(row.character ?? {}).filter(([, v]) => v).map(([k]) => k);
+  return (
+    <div className="grid gap-3 rounded-xl border border-ink-800 bg-ink-950/70 p-3">
+      {/* summary strip */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="rounded-lg bg-ink-900/70 px-3 py-2"><div className="text-[10px] uppercase tracking-wide text-ink-500">Score</div><div className={`text-xl font-extrabold tabular-nums ${score >= 0 ? "text-emerald-200" : "text-rose-300"}`}>{score > 0 ? "+" : ""}{score}</div></div>
+        <div className="rounded-lg bg-ink-900/70 px-3 py-2"><div className="text-[10px] uppercase tracking-wide text-ink-500">Found</div><div className="text-xl font-extrabold tabular-nums text-emerald-200">✅ {found.length}</div></div>
+        <div className="rounded-lg bg-ink-900/70 px-3 py-2"><div className="text-[10px] uppercase tracking-wide text-ink-500">Missed</div><div className="text-xl font-extrabold tabular-nums text-rose-300">❌ {missed.length}</div></div>
+        <div className="rounded-lg bg-ink-900/70 px-3 py-2"><div className="text-[10px] uppercase tracking-wide text-ink-500">Games</div><div className="text-xl font-extrabold tabular-nums text-white">{new Set(events.map((e) => e.gameId)).size}</div></div>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+        {topFound.length > 0 && <span className="text-ink-400">Best at: {topFound.map(([k, n]) => <span key={k} className="ml-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-emerald-100">{label(k)} ×{n}</span>)}</span>}
+        {topMissed.length > 0 && <span className="text-ink-400">Missing: {topMissed.map(([k, n]) => <span key={k} className="ml-1 rounded-full bg-rose-500/15 px-2 py-0.5 text-rose-100">{label(k)} ×{n}</span>)}</span>}
+        {row.opening && <span className="text-ink-400">📖 Opening {row.opening.accuracy != null ? `${row.opening.accuracy}%` : "—"}{row.opening.favourite ? ` · ${row.opening.favourite}` : ""}</span>}
+        {style.length > 0 && <span className="text-ink-400">Style: {style.join(", ")}</span>}
+        <span className="ml-auto flex gap-1 rounded-full bg-ink-900/70 p-0.5 font-semibold">
+          {(["all", "found", "missed"] as const).map((k) => <button key={k} onClick={() => setShow(k)} className={`rounded-full px-2 py-0.5 ${show === k ? "bg-white/15 text-white" : "text-ink-400 hover:text-ink-200"}`}>{k === "all" ? `All ${events.length}` : k === "found" ? `Found ${found.length}` : `Missed ${missed.length}`}</button>)}
+        </span>
+      </div>
+      {/* one card per game */}
+      {gameList.map(([gameId, evs]) => {
+        const first = evs[0]!; const total = evs.reduce((a, e) => a + e.points, 0);
+        return (
+          <div key={gameId} className="overflow-hidden rounded-lg border border-ink-800">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 bg-ink-900/80 px-3 py-1.5 text-[11px]">
+              <span className="font-semibold text-white">{first.label}</span>
+              <span className="text-ink-500">{fmtDate(first.at)} · {GAME_SRC[first.source] ?? first.source}</span>
+              <span className={`ml-auto font-bold tabular-nums ${total >= 0 ? "text-emerald-200" : "text-rose-300"}`}>{total > 0 ? "+" : ""}{total}</span>
+              {first.url && (first.url.startsWith("http")
+                ? <a href={first.url} target="_blank" rel="noreferrer" className="text-ink-500 hover:text-ink-300" title={`Original game on ${GAME_SRC[first.source] ?? "the source site"} (leaves ChessGuru)`}>source ↗</a>
+                : <Link to={first.url} className="text-ink-400 hover:text-white">replay</Link>)}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="text-[10px] uppercase tracking-wide text-ink-500">
+                  <tr><th className="px-3 py-1 text-left">Move</th><th className="px-2 py-1 text-left">What</th><th className="px-2 py-1 text-left">Result</th><th className="px-2 py-1 text-right">Pts</th><th className="hidden px-2 py-1 text-right sm:table-cell">Clock</th><th className="px-2 py-1 text-right"></th></tr>
+                </thead>
+                <tbody>
+                  {evs.sort((a, b) => a.ply - b.ply).map((e) => (
+                    <tr key={`${e.gameId}:${e.ply}`} className="border-t border-ink-800/70">
+                      <td className="px-3 py-1.5 font-mono text-ink-100"><Link to={momentEditorUrl(e)} className="hover:text-white" title="Open this position on the ChessGuru board">{Math.ceil(e.ply / 2)}{e.color === "black" ? "…" : "."} {e.playedSan}</Link></td>
+                      <td className="px-2 py-1.5"><span className="rounded-full bg-white/10 px-2 py-0.5 font-semibold text-white">{label(e.primary)}</span></td>
+                      <td className="px-2 py-1.5">{e.found ? <span className="text-emerald-300">✅ found</span> : <span className="text-rose-300">❌ missed <span className="text-ink-400">— best {e.bestSan}{e.mateIn ? `, mate in ${e.mateIn}` : ""}</span></span>}</td>
+                      <td className={`px-2 py-1.5 text-right font-extrabold tabular-nums ${e.found ? "text-emerald-300" : "text-rose-300"}`}>{e.points > 0 ? "+" : ""}{e.points}</td>
+                      <td className="hidden px-2 py-1.5 text-right tabular-nums sm:table-cell">{e.timeTrouble ? <span className="rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] text-amber-200" title="Time trouble — the penalty is halved">⏱ {e.clockMs != null ? Math.round(e.clockMs / 1000) + "s" : ""}</span> : e.clockMs != null ? <span className="text-ink-500">{Math.round(e.clockMs / 1000)}s</span> : <span className="text-ink-700">—</span>}</td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-right">
+                        <Link to={momentEditorUrl(e)} className="rounded-md bg-brand-500/20 px-2 py-0.5 text-[10px] font-semibold text-brand-200" title="Open on the ChessGuru board with the engine's move drawn">♟ board</Link>
+                        {canStar && (e.starredBy
+                          ? <span className="ml-1 text-[10px] text-amber-300" title="On your class-board shortlist and in Sunday's digest">★</span>
+                          : <button onClick={() => onStar(e)} disabled={starPending} className="ml-1 rounded-md bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold text-amber-200" title="Star for class — class-board shortlist + Sunday digest">☆ star</button>)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function GameAwardsSection({ period, bucket }: { period: Period; bucket: Bucket }) {
   const [open, setOpen] = useState<string | null>(null);
   const periodLabel = PERIODS.find((p) => p.key === period)?.label ?? period;
@@ -1054,25 +1132,7 @@ function GameAwardsSection({ period, bucket }: { period: Period; bucket: Bucket 
                       <tr key={r.studentId + ":moments"} className="bg-ink-950/60">
                         <td colSpan={10} className="px-2 py-2 sm:px-3">
                           {ev.isLoading && <div className="text-xs text-ink-400">Loading moments…</div>}
-                          {ev.data && (
-                            <div className="grid gap-1">
-                              {ev.data.events.length === 0 && <div className="text-xs text-ink-400">No scored moments in this period.</div>}
-                              {ev.data.events.map((e) => (
-                                <div key={`${e.gameId}:${e.ply}`} className="flex flex-wrap items-center gap-2 rounded-lg bg-ink-900/60 px-2 py-1.5 text-xs">
-                                  <span className={`w-10 text-center font-extrabold tabular-nums ${e.found ? "text-emerald-300" : "text-rose-300"}`}>{e.points > 0 ? "+" : ""}{e.points}</span>
-                                  {e.timeTrouble && <span className="rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] text-amber-200" title={`Time trouble: ${e.clockMs != null ? Math.round(e.clockMs / 1000) + " s" : "seconds"} on the clock — the penalty is halved`}>⏱ {e.clockMs != null ? Math.round(e.clockMs / 1000) + "s" : "clock"}</span>}
-                                  <span className="rounded-full bg-white/10 px-2 py-0.5 font-semibold text-white">{label(e.primary)}</span>
-                                  <Link to={momentEditorUrl(e)} className="text-ink-200 hover:text-white" title="Open this position on the ChessGuru board">{Math.ceil(e.ply / 2)}{e.color === "black" ? "…" : "."} {e.playedSan}{!e.found && <span className="text-ink-500"> (best {e.bestSan}{e.mateIn ? `, mate in ${e.mateIn}` : ""})</span>}</Link>
-                                  <span className="ml-auto text-[10px] text-ink-500">{GAME_SRC[e.source] ?? e.source} · {e.label} · {new Date(e.at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</span>
-                                  <Link to={momentEditorUrl(e)} className="rounded-md bg-brand-500/20 px-2 py-0.5 text-[10px] font-semibold text-brand-200" title="Open this position on the ChessGuru board with the engine's move drawn">♟ open position</Link>
-                                  {canStar && (e.starredBy
-                                    ? <span className="text-[10px] text-amber-300" title="On your class-board shortlist and in Sunday's digest">★ starred</span>
-                                    : <button onClick={() => star.mutate(e)} disabled={star.isPending} className="rounded-md bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold text-amber-200" title="Star for class — goes to your class-board shortlist and Sunday's digest">☆ star for class</button>)}
-                                  {e.url && (e.url.startsWith("http") ? <a href={e.url} target="_blank" rel="noreferrer" className="text-[10px] text-ink-500" title={`Open the original game on ${GAME_SRC[e.source] ?? "the source site"} (leaves ChessGuru)`}>source: {GAME_SRC[e.source] ?? "game"} ↗</a> : <Link to={e.url} className="text-[10px] text-ink-400">replay</Link>)}
-                                </div>
-                              ))}
-                            </div>
-                          )}
+                          {ev.data && <StudentMoments events={ev.data.events} label={label} canStar={canStar} onStar={(e) => star.mutate(e)} starPending={star.isPending} row={r} />}
                         </td>
                       </tr>
                     ),
