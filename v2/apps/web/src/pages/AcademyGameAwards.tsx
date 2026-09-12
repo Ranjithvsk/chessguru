@@ -8,7 +8,7 @@ import { get, post } from "../lib/api";
 
 type Row = { rank: number; studentId: string; username: string; name: string | null; score: number; found: number; missed: number; games: number; lastAt: string; byMotif: Record<string, { found: number; missed: number }>; sources: string[] };
 type Board = { period: string; rows: Row[]; labels: Record<string, string>; points: Record<string, number>; pending: number };
-type Ev = { gameId: string; ply: number; color: "white" | "black"; fen: string; bestSan: string | null; playedSan: string | null; found: boolean; motifs: string[]; points: number; lossCp: number; mateIn: number | null; at: string; source: string; url: string | null; label: string };
+type Ev = { gameId: string; ply: number; color: "white" | "black"; fen: string; bestSan: string | null; playedSan: string | null; found: boolean; motifs: string[]; primary: string; points: number; lossCp: number; mateIn: number | null; at: string; source: string; url: string | null; label: string };
 
 const SRC: Record<string, string> = { live: "ChessGuru arena", my: "My Games", lichess: "Lichess", chesscom: "Chess.com" };
 
@@ -72,7 +72,7 @@ export default function AcademyGameAwardsPage() {
                               <div key={`${e.gameId}:${e.ply}`} className="flex flex-wrap items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm">
                                 <span className={`w-12 text-center font-extrabold ${e.found ? "text-emerald-700" : "text-red-600"}`}>{e.points > 0 ? "+" : ""}{e.points}</span>
                                 <span className="font-semibold">{e.found ? "Found" : "Missed"}</span>
-                                <span className="flex flex-wrap gap-1">{e.motifs.map((m) => <span key={m} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs">{label(m)}</span>)}</span>
+                                <span className="flex flex-wrap gap-1"><span className="rounded-full bg-gray-900 px-2 py-0.5 text-xs font-bold text-white">{label(e.primary)}</span>{e.motifs.filter((m) => m !== e.primary).slice(0, 2).map((m) => <span key={m} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">{label(m)}</span>)}</span>
                                 <span className="text-gray-600">move {Math.ceil(e.ply / 2)}{e.color === "black" ? "…" : "."} {e.found ? e.playedSan : <>{e.playedSan} <span className="text-gray-400">(best {e.bestSan}{e.mateIn ? `, mate in ${e.mateIn}` : ""})</span></>}</span>
                                 <span className="ml-auto text-xs text-gray-400">{SRC[e.source] ?? e.source} · {e.label} · {new Date(e.at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</span>
                                 {e.url && (e.url.startsWith("http") ? <a href={e.url} target="_blank" rel="noreferrer" className="text-xs font-semibold text-blue-600">open ↗</a> : <Link to={e.url} className="text-xs font-semibold text-blue-600">replay</Link>)}
@@ -93,7 +93,7 @@ export default function AcademyGameAwardsPage() {
       )}
       {board.data && (
         <details className="mt-4 text-xs text-gray-500"><summary className="cursor-pointer font-semibold">How points work</summary>
-          <p className="mt-1">At every move the engine looks at the best line and names the tactic in it. If the student played that move (or one within 0.3 pawns of it) the motif is <b>found</b> and earns its points; if they played something at least 1.5 pawns worse, it is <b>missed</b> and costs half the points. Mate patterns 6–8, deflection / attraction / sacrifice / interference 4, fork / pin / skewer / discovered attack 3, hanging piece / defence 2.</p>
+          <p className="mt-1">At every move the engine looks at the best line and names the tactic in it — one main motif per moment, the most specific. A tactic counts only when it actually appeared (the opponent just handed over at least 1.2 pawns, or a mate is on). If the student played the engine's move the motif is <b>found</b> and earns its points; if they played something at least 1.5 pawns worse, it is <b>missed</b> and costs half the points. Mate patterns 6–8, deflection / attraction / sacrifice / interference 4, fork / pin / skewer / discovered attack 3, hanging piece / defence 2.</p>
           <p className="mt-1">{Object.entries(board.data.points).sort((a, b) => b[1] - a[1]).map(([m, p]) => `${label(m)} ${p}`).join(" · ")}</p>
         </details>
       )}

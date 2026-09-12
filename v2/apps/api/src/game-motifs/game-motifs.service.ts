@@ -38,6 +38,10 @@ const PV_PLIES_FOR_TAGS = 5;      // tag the tactic from the first plies of the 
 // castling, advanced pawn…) describe a line, not a tactic the student found or missed.
 const SCORING_TAGS = new Set(["fork", "pin", "skewer", "discoveredAttack", "discoveredCheck", "doubleCheck", "xRayAttack", "hangingPiece", "capturingDefender", "trappedPiece", "deflection", "attraction", "sacrifice", "interference", "clearance", "zugzwang", "promotion", "underPromotion", "enPassant", "intermezzo"]);
 const isMateTag = (t: string) => t === "mate" || /Mate$/.test(t) || /^mateIn\d$/.test(t);
+// The tagger names everything it can see in a line; a student is awarded ONE motif per moment —
+// the most specific. Named mates first, then the classic tactics, then the supporting ideas.
+const MOTIF_ORDER = ["smotheredMate", "anastasiaMate", "arabianMate", "bodenMate", "doubleBishopMate", "dovetailMate", "hookMate", "vukovicMate", "killBoxMate", "morphysMate", "operaMate", "pillsburysMate", "balestraMate", "blindSwineMate", "epauletteMate", "swallowstailMate", "triangleMate", "backRankMate", "cornerMate", "mateIn1", "mateIn2", "mateIn3", "mateIn4", "mateIn5", "mate", "underPromotion", "promotion", "fork", "skewer", "pin", "discoveredCheck", "doubleCheck", "discoveredAttack", "deflection", "attraction", "sacrifice", "capturingDefender", "trappedPiece", "hangingPiece", "xRayAttack", "interference", "clearance", "zugzwang", "enPassant", "intermezzo"];
+const rankOf = (t: string) => { const i = MOTIF_ORDER.indexOf(t); return i < 0 ? 999 : i; };
 
 // Points for finding a motif; a miss costs half (rounded up). Mates weigh most.
 export const MOTIF_POINTS: Record<string, number> = {
@@ -74,7 +78,7 @@ type GameToScore = { key: string; source: GameSource; url: string | null; moves:
 type MotifEvent = {
   _id: string; gameId: string; ply: number; userId: string; academyId: string; color: "white" | "black";
   fen: string; bestUci: string; bestSan: string | null; playedUci: string; playedSan: string | null;
-  found: boolean; motifs: string[]; points: number; lossCp: number; mateIn: number | null; at: Date;
+  found: boolean; motifs: string[]; primary: string; points: number; lossCp: number; mateIn: number | null; at: Date;
   source: GameSource; url: string | null; label: string;
 };
 
@@ -228,18 +232,23 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
         const opportunity = prevWhiteCp === null ? 0 : (whiteBefore - prevWhiteCp) * sign; // how much the opponent's last move handed over
         const mating = cur.mate !== undefined && cur.mate > 0;
         const tags = cook(fenBefore, mating ? pv : pv.slice(0, PV_PLIES_FOR_TAGS), sideToMove);
-        const motifs = tags.filter((t) => !SHAPE_TAGS.has(t) && (SCORING_TAGS.has(t) || isMateTag(t)) && (MOTIF_POINTS[t] ?? 0) > 0);
+        const motifs = tags.filter((t) => !SHAPE_TAGS.has(t) && (SCORING_TAGS.has(t) || isMateTag(t)) && (MOTIF_POINTS[t] ?? 0) > 0).sort((a, b) => rankOf(a) - rankOf(b)).slice(0, 4);
         if (motifs.length && (mating || opportunity >= OPPORTUNITY_MIN_CP || lossCp >= TACTIC_MIN_GAIN_CP)) {
-          const found = (playedUci === bestUci || lossCp <= FOUND_TOLERANCE_CP) && (mating || opportunity >= OPPORTUNITY_MIN_CP);
+          // Found = the student played the engine's move (or another move that still mates as fast).
+          // An "as good" alternative earns nothing here: the motif belongs to the best line, and a
+          // different move is not that motif.
+          const stillMating = mating && next.mate !== undefined && next.mate < 0 && Math.abs(next.mate) <= (cur.mate ?? 0);
+          const found = (playedUci === bestUci || stillMating) && (mating || opportunity >= OPPORTUNITY_MIN_CP);
           const missed = !found && lossCp >= TACTIC_MIN_GAIN_CP;
           if (found || missed) {
-            const base = pointsFor(motifs);
+            const primary = motifs[0]!;
+            const base = MOTIF_POINTS[primary] ?? pointsFor(motifs);
             let bestSan: string | null = null, playedSan: string | null = mv.san;
             try { const b = new Chess(fenBefore); const bm = b.move({ from: bestUci.slice(0, 2), to: bestUci.slice(2, 4), promotion: bestUci.slice(4) || undefined } as never); bestSan = bm?.san ?? null; } catch { /* */ }
             events.push({
               _id: `${gameId}:${i + 1}`, gameId, ply: i + 1, userId: playerId, academyId, color: sideToMove,
-              fen: fenBefore, bestUci, bestSan, playedUci, playedSan, found, motifs,
-              points: found ? base : -Math.ceil(base / 2), lossCp: Math.round(lossCp), mateIn, at: g.at,
+              fen: fenBefore, bestUci, bestSan, playedUci, playedSan, found, motifs, primary,
+              points: found ? base : -Math.ceil(base / 2), lossCp: found ? 0 : Math.round(Math.min(lossCp, 9999)), mateIn, at: g.at,
               source: g.source, url: g.url, label: g.label,
             });
           }
@@ -273,14 +282,14 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
     const rows = await this.events().aggregate([
       { $match: match },
       { $group: { _id: "$userId", score: { $sum: "$points" }, found: { $sum: { $cond: ["$found", 1, 0] } }, missed: { $sum: { $cond: ["$found", 0, 1] } },
-        games: { $addToSet: "$gameId" }, lastAt: { $max: "$at" }, motifs: { $push: { m: "$motifs", f: "$found" } }, sources: { $addToSet: "$source" } } },
+        games: { $addToSet: "$gameId" }, lastAt: { $max: "$at" }, motifs: { $push: { m: "$primary", f: "$found" } }, sources: { $addToSet: "$source" } } },
       { $sort: { score: -1, found: -1 } },
     ]).toArray();
     const users = await this.col("users").find({ _id: { $in: rows.map((r) => r._id) as never[] } }, { projection: { username: 1, name: 1, coachId: 1 } }).toArray();
     const byId = new Map(users.map((u: any) => [String(u._id), u]));
     const out = rows.map((r, i) => {
       const byMotif: Record<string, { found: number; missed: number }> = {};
-      for (const e of r.motifs as Array<{ m: string[]; f: boolean }>) for (const m of e.m) { const b = (byMotif[m] ??= { found: 0, missed: 0 }); if (e.f) b.found++; else b.missed++; }
+      for (const e of r.motifs as Array<{ m: string; f: boolean }>) { const b = (byMotif[e.m] ??= { found: 0, missed: 0 }); if (e.f) b.found++; else b.missed++; }
       const u = byId.get(String(r._id)) as any;
       return { rank: i + 1, studentId: String(r._id), username: u?.username ?? String(r._id), name: u?.name ?? null, coachId: u?.coachId ?? null,
         score: r.score, found: r.found, missed: r.missed, games: (r.games as string[]).length, lastAt: r.lastAt, byMotif, sources: r.sources as string[] };
