@@ -261,7 +261,7 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
   async analyzeGame(gameId: string, tracked: Map<string, string>, slot = 0): Promise<{ events: number; plies: number }> {
     const g = await this.loadGame(gameId);
     if (!g) throw new NotFoundException("game not found");
-    const engine = await this.getEngine(slot);
+    let engine = await this.getEngine(slot);
     const board = new Chess();
     const events: MotifEvent[] = [];
     let cur: PositionEval;
@@ -387,7 +387,11 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
                   oppBestAfter = toWhiteCp(evBest, sideToMove === "white" ? "black" : "white") * -sign;
                   if (nfAfter) { const evPass = await this.evalAt(engine, slot, nfAfter); oppPassAfter = toWhiteCp(evPass, sideToMove) * -sign; }
                 }
-              } catch { /* engine hiccup: score without the null-move ideas */ }
+              } catch {
+                // evalAt dropped the engine on a timeout; get a fresh one so the rest of the game is
+                // still scored (first pass: 5 games died with "stockfish not started" right here)
+                engine = await this.getEngine(slot);
+              }
             }
             const uci = playedBest ? playedUci : bestUci;
             const afterForTags = playedBest ? afterMover : beforeMover; // for a missed idea, judge the BEST move's effect: it keeps the eval
