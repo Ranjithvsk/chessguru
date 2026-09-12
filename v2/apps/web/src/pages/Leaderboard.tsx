@@ -886,7 +886,17 @@ function OpeningsLeaderboardSection() {
 type GameAwardRow = { rank: number; studentId: string; username: string; name: string | null; score: number; found: number; missed: number; games: number; lastAt: string; byMotif: Record<string, { found: number; missed: number }>; sources: string[];
   character?: Record<string, number>; opening?: { accuracy: number | null; mistakes: number; trapsFell: number; trapsSprung: number; favourite: string | null } | null };
 type GameAwardBoard = { period: string; rows: GameAwardRow[]; labels: Record<string, string>; points: Record<string, number>; pending: number };
-type GameAwardEvent = { gameId: string; ply: number; color: "white" | "black"; fen: string; bestSan: string | null; playedSan: string | null; found: boolean; motifs: string[]; primary: string; points: number; lossCp: number; mateIn: number | null; at: string; source: string; url: string | null; label: string };
+type GameAwardEvent = { gameId: string; ply: number; color: "white" | "black"; fen: string; bestUci: string; playedUci: string; bestSan: string | null; playedSan: string | null; found: boolean; motifs: string[]; primary: string; points: number; lossCp: number; mateIn: number | null; at: string; source: string; url: string | null; label: string };
+// Open a moment on OUR board editor (owner 2026-09-12: "why does it open Lichess? our board is good").
+// Arrows: green = the engine's move, red = what was played when it differs. Same ?fen=&shapes= deep
+// link the coach board uses.
+function momentEditorUrl(e: GameAwardEvent): string {
+  const shapes: Array<{ orig: string; dest: string; brush: string }> = [];
+  if (e.bestUci?.length >= 4) shapes.push({ orig: e.bestUci.slice(0, 2), dest: e.bestUci.slice(2, 4), brush: "green" });
+  if (!e.found && e.playedUci?.length >= 4 && e.playedUci !== e.bestUci) shapes.push({ orig: e.playedUci.slice(0, 2), dest: e.playedUci.slice(2, 4), brush: "red" });
+  const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(shapes)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return `/board-editor?fen=${encodeURIComponent(e.fen)}&orientation=${e.color}&shapes=${b64}`;
+}
 const GAME_SRC: Record<string, string> = { live: "Arena", my: "My Games", lichess: "Lichess", chesscom: "Chess.com" };
 
 function GameAwardsSection() {
@@ -1036,8 +1046,8 @@ function GameAwardsSection() {
                                   <span className="rounded-full bg-white/10 px-2 py-0.5 font-semibold text-white">{label(e.primary)}</span>
                                   <span className="text-ink-200">{Math.ceil(e.ply / 2)}{e.color === "black" ? "…" : "."} {e.playedSan}{!e.found && <span className="text-ink-500"> (best {e.bestSan}{e.mateIn ? `, mate in ${e.mateIn}` : ""})</span>}</span>
                                   <span className="ml-auto text-[10px] text-ink-500">{GAME_SRC[e.source] ?? e.source} · {e.label} · {new Date(e.at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</span>
-                                  {e.url && (e.url.startsWith("http") ? <a href={e.url} target="_blank" rel="noreferrer" className="text-[10px] font-semibold text-brand-300">game ↗</a> : <Link to={e.url} className="text-[10px] font-semibold text-brand-300">replay</Link>)}
-                                  <a href={`https://lichess.org/analysis/${e.fen.replace(/ /g, "_")}`} target="_blank" rel="noreferrer" className="text-[10px] text-ink-400">position ↗</a>
+                                  <Link to={momentEditorUrl(e)} className="rounded-md bg-brand-500/20 px-2 py-0.5 text-[10px] font-semibold text-brand-200" title="Open this position on the ChessGuru board with the engine's move drawn">♟ open position</Link>
+                                  {e.url && (e.url.startsWith("http") ? <a href={e.url} target="_blank" rel="noreferrer" className="text-[10px] text-ink-400">{GAME_SRC[e.source] ?? "game"} ↗</a> : <Link to={e.url} className="text-[10px] text-ink-400">replay</Link>)}
                                 </div>
                               ))}
                             </div>
