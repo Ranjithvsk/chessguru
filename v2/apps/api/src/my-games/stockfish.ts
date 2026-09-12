@@ -33,10 +33,12 @@ export class Stockfish {
     await this.waitFor((l) => l === "readyok", () => this.send("isready"));
   }
 
-  async analyze(fen: string, depth: number = 15): Promise<PositionEval> {
+  // movetimeMs (optional): also cap the search by time — UCI stops at whichever limit comes first.
+  // game-motifs uses it to keep a 150-ply game under ~20 s; my-games keeps its depth-only search.
+  async analyze(fen: string, depth: number = 15, movetimeMs?: number): Promise<PositionEval> {
     if (!this.proc) throw new Error("stockfish not started");
     this.send("position fen " + fen);
-    this.send(`go depth ${depth}`);
+    this.send(movetimeMs ? `go depth ${depth} movetime ${Math.max(20, Math.round(movetimeMs))}` : `go depth ${depth}`);
     let latestCp: number | undefined;
     let latestMate: number | undefined;
     let latestDepth = 0;

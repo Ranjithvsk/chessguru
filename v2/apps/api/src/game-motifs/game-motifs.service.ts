@@ -24,8 +24,10 @@ function cook(fen: string, moves: string[], pov: "white" | "black"): string[] {
   } catch { return []; }
 }
 
-const DEPTH = 12;                 // per position; ~0.2 s on the box, a 60-ply game ≈ 15 s
-const POLL_MS = 90_000;
+const DEPTH = 12;                 // per position, capped by MOVETIME_MS — a 150-ply game stays under ~20 s
+const MOVETIME_MS = 120;
+const PARALLEL = 2;               // two engines side by side; the box has 8 cores and the other analyzer uses one
+const POLL_MS = 20_000;
 const LOOKBACK_DAYS = 45;
 const TACTIC_MIN_GAIN_CP = 150;   // best line must be worth this much more than the played move to count as a missed tactic
 const FOUND_TOLERANCE_CP = 30;    // played move within this of the best = found
@@ -87,7 +89,7 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
   private timer: NodeJS.Timeout | null = null;
   private ticking = false;
   private shuttingDown = false;
-  private engine: Stockfish | null = null;
+  private engines: Array<Stockfish | null> = [];
 
   constructor(@InjectConnection() private readonly conn: Connection) {}
 
@@ -102,7 +104,7 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
   async onModuleDestroy() {
     this.shuttingDown = true;
     if (this.timer) clearInterval(this.timer);
-    if (this.engine) { try { await this.engine.stop(); } catch { /* */ } }
+    for (const e of this.engines) if (e) { try { await e.stop(); } catch { /* */ } }
   }
 
   // ── which users belong to which academy ─────────────────────────────────────
@@ -182,30 +184,35 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
     if (this.ticking || this.shuttingDown) return;
     this.ticking = true;
     try {
-      const next = (await this.candidates(null, 1))[0];
-      if (!next) return;
-      const acad = await this.academyOf(next.users);
-      if (!acad.size) { await this.done().updateOne({ _id: next.key }, { $set: { academyIds: [], analyzedAt: new Date(), plies: 0, events: 0 } }, { upsert: true }); return; }
-      try { await this.analyzeGame(next.key, acad); }
-      catch (e: any) { await this.done().updateOne({ _id: next.key }, { $set: { academyIds: [], analyzedAt: new Date(), plies: 0, events: 0, error: String(e?.message || e).slice(0, 200) } }, { upsert: true }); throw e; }
-      // one game per tick — the engine shares the CPU with the other analyzer
+      const batch = await this.candidates(null, PARALLEL);
+      if (!batch.length) return;
+      await Promise.all(batch.map(async (next, slot) => {
+        const acad = await this.academyOf(next.users);
+        if (!acad.size) { await this.done().updateOne({ _id: next.key }, { $set: { academyIds: [], analyzedAt: new Date(), plies: 0, events: 0 } }, { upsert: true }); return; }
+        try { await this.analyzeGame(next.key, acad, slot); }
+        catch (e: any) {
+          console.error(`[game-motifs] ${next.key}:`, e?.message || e);
+          await this.done().updateOne({ _id: next.key }, { $set: { academyIds: [], analyzedAt: new Date(), plies: 0, events: 0, error: String(e?.message || e).slice(0, 200) } }, { upsert: true });
+        }
+      }));
     } finally { this.ticking = false; }
   }
 
-  private async getEngine(): Promise<Stockfish> {
-    if (!this.engine) { this.engine = new Stockfish(); await this.engine.start(); }
-    return this.engine;
+  private async getEngine(slot = 0): Promise<Stockfish> {
+    if (!this.engines[slot]) { const e = new Stockfish(); await e.start(); this.engines[slot] = e; }
+    return this.engines[slot]!;
   }
+  private async dropEngine(slot: number) { const e = this.engines[slot]; this.engines[slot] = null; if (e) await e.stop().catch(() => null); }
 
   /** Analyze one game for the tracked users (userId → academyId). Idempotent: replaces the game's events. */
-  async analyzeGame(gameId: string, tracked: Map<string, string>): Promise<{ events: number; plies: number }> {
+  async analyzeGame(gameId: string, tracked: Map<string, string>, slot = 0): Promise<{ events: number; plies: number }> {
     const g = await this.loadGame(gameId);
     if (!g) throw new NotFoundException("game not found");
-    const engine = await this.getEngine();
+    const engine = await this.getEngine(slot);
     const board = new Chess();
     const events: MotifEvent[] = [];
     let cur: PositionEval;
-    try { cur = await engine.analyze(board.fen(), DEPTH); } catch (e) { await this.engine?.stop().catch(() => null); this.engine = null; throw e; }
+    try { cur = await engine.analyze(board.fen(), DEPTH, MOVETIME_MS); } catch (e) { await this.dropEngine(slot); throw e; }
     const moves = g.moves ?? [];
     let prevWhiteCp: number | null = null; // eval (white POV) BEFORE the opponent's last move — the baseline for "did a tactic appear?"
     for (let i = 0; i < moves.length; i++) {
@@ -221,7 +228,7 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
       const mv = board.move({ from: playedUci.slice(0, 2), to: playedUci.slice(2, 4), promotion: playedUci.slice(4) || undefined } as never);
       if (!mv) break; // corrupt game record — stop here
       let next: PositionEval;
-      try { next = await engine.analyze(board.fen(), DEPTH); } catch (e) { await this.engine?.stop().catch(() => null); this.engine = null; throw e; }
+      try { next = await engine.analyze(board.fen(), DEPTH, MOVETIME_MS); } catch (e) { await this.dropEngine(slot); throw e; }
       const whiteBefore = toWhiteCp(cur, sideToMove);
       if (playerId && academyId && bestUci) {
         // Both from the mover's point of view: what the position was worth, and what it is worth now.
