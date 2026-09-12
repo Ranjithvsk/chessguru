@@ -300,7 +300,14 @@ def merge_two_sheets(a: list[Cell], b: list[Cell]) -> list[Cell]:
     verified copy beats an unverified one; otherwise keep the better-supported
     reading, downgraded to a guess so the coach's eye lands on it."""
     import difflib
-    rank = {"verified": 3, "agreed": 2, "guess": 1, "inferred": 1, "unknown": 0}
+    # "verified" proves the move is unique-legal on ITS OWN copy's line; when the
+    # copies disagree that is no evidence the copy matches the game (game 103:
+    # copy B's verified own-errors overrode copy A's correct reads, 96.6 → 94.0).
+    # So verified and agreed tie, and ties go to copy A, the primary.
+    # An "unknown" cell still carries the ink read, which was right 80–95 % of
+    # the time in measurement — far better than the other copy's opinion on a
+    # disagreement. Only a doubtful cell (guess/inferred) yields to the other copy.
+    rank = {"verified": 3, "agreed": 3, "unknown": 3, "guess": 1, "inferred": 1}
     ka = [_mk(c.san or c.raw) for c in a]; kb = [_mk(c.san or c.raw) for c in b]
     pair: dict[int, int] = {}
     for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, ka, kb, autojunk=False).get_opcodes():
