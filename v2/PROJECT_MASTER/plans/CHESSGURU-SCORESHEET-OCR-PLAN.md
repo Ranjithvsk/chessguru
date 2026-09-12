@@ -258,3 +258,18 @@ chess-side levers are exhausted at this reader quality.
   interactive use; a GPU or an int8/ONNX export is the next infrastructure step.
 - **Held-out average** (24 sheets): 89.6 % move-level single copy, 90.7 % with both copies (final merge rule); the demo
   sheet is a cleanly written one, which is what the spread (20–98 % per sheet) predicts.
+
+## 13. M2 shipped — "Scan scoresheet" in the product (2026-09-12)
+
+- Vision service (`/opt/chessguru-vision`, systemd `chessguru-ultra-vision`, runs as `ubuntu`):
+  `POST /scoresheet/start` {image_base64, image2_base64?} → job id; `GET /scoresheet/status/{id}` →
+  {state: queued|splitting|reading|done|error, pgn, cells[], summary, seconds}. Work runs in a thread
+  that shells out to `.venv-ocr/bin/python read_scoresheet.py --fast` (the live venv has no torch).
+  Job dirs under `scoresheet-jobs/` (must be owned by `ubuntu` — the first smoke test 500'd on that).
+  Model via symlink `models/scoresheet-trocr-current` → v1; a `RECIPE.txt` with `TIGHT=1` switches the crop.
+- API: `POST /api/vision/scoresheet/start`, `GET /api/vision/scoresheet/status/:jobId` (coach/owner).
+- Web: `/coach-board/scoresheet` (linked from the coach board): one or both players' photos, client-side
+  downscale to 2200 px, 4-second polling, move table coloured by status, cells editable, PGN copy.
+- Not yet: saving the game against a student, and rectifying a raw phone photo (the page expects the
+  grid flat and fully in frame; `/warp-with-corners` + the CornerAdjuster exist for boards and can be
+  reused). CPU read time ≈ 7 min per 60-move sheet.
