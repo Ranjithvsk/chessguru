@@ -220,7 +220,7 @@ points are a choosing problem. Three choosers were tried, all scored on the same
 | Legality beam allowed to OVERRIDE the ink (with resync bridges after unreadable cells) | 88.6 % | −0.9 | a legal alternative on an uncertain board is fiction more often than the reader is wrong |
 | Legality beam **annotate-only** (ink stays, beam gives a status) | **89.3 %** | −0.2 | ships: 3 false "verified" in 1,675 cells |
 | Three-reader vote (run4 1.2, run3 1.0, Qwen 0.8) | 87.9 % | −1.6 | weaker readers outvote the best one |
-| Two-sheet merge (both players' copies, 4 games / 225 agreed cells) | 86.7 → **90.2 %** | **+3.5** | ships; the only chooser that pays |
+| Two-sheet merge (both players' copies, 4 games / 225 agreed cells), content-aligned, ink kept unless the cell is doubtful | 86.7 → **90.7 %** | **+4.0** | ships; the only chooser that pays (1 false verified) |
 
 Status calibration (run4, 8 sheets): verified 4.6 % of cells at **100 %** precision, agreed 61 % at
 93 %, unknown 30 % at 80 % (mostly cells after the board was lost — the ink is usually still right),
@@ -256,5 +256,5 @@ chess-side levers are exhausted at this reader quality.
   what the player actually wrote. Per status: agreed 40/40, guess 6/6, verified 5/6, unknown 60/64.
   CPU time 471 s for 120 cells (≈3.5 s/cell incl. model load) — fine for a coach's upload, too slow for
   interactive use; a GPU or an int8/ONNX export is the next infrastructure step.
-- **Held-out average** (24 sheets): 89.5 % move-level single copy, 90.2 % with both copies; the demo
+- **Held-out average** (24 sheets): 89.6 % move-level single copy, 90.7 % with both copies (final merge rule); the demo
   sheet is a cleanly written one, which is what the spread (20–98 % per sheet) predicts.
