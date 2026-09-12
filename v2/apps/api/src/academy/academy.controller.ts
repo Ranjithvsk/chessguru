@@ -291,6 +291,13 @@ export class AcademyController {
     return this.svc.getAttendanceDashboard(req.session, Number(days) || 30);
   }
 
+  /** Monthly attendance analytics — calendar months rather than a rolling
+   *  window, with a per-student grid. ?months=1..24 (default 6). */
+  @Get("attendance/monthly")
+  attendanceMonthly(@Req() req: any, @Query("months") months: string) {
+    return this.svc.getAttendanceMonthly(req.session, Number(months) || 6);
+  }
+
   /** Presence heartbeat — any signed-in user pings this every ~60s (and on
    *  route change). Body: { path }. Updates users.lastSeen + currentPath so
    *  coaches see who is online right now on the /academy dashboard. */

@@ -4432,4 +4432,193 @@ Thank you!`;
       at: r.at,
     }));
   }
+
+  /** Monthly attendance analytics — calendar months, not a rolling window.
+   *
+   *  The existing dashboard answers "how are we doing lately" over the last N
+   *  days. This answers "how did each month go", which is the shape a coach
+   *  actually reports in and compares against.
+   *
+   *  Rates are computed over days a student was actually MARKED, never over
+   *  every class day. Since 2026-09-12 an untouched student is "unmarked"
+   *  rather than assumed present, so dividing by class days would show
+   *  attendance collapsing in any month where the register was not finished.
+   *  Unmarked is reported separately instead, so an incomplete month is
+   *  visible as incomplete rather than silently deflating the number.
+   *
+   *  Excused absences are excluded from `absent` (same rule the dashboard
+   *  uses) and surfaced on their own. */
+  async getAttendanceMonthly(session: any, monthsRaw?: number) {
+    const g = this.ensureCoachOrOwner(session);
+    const months = Math.max(1, Math.min(24, Math.round(Number(monthsRaw) || 6)));
+
+    // Window starts at the first day of the earliest month we report on.
+    const now = new Date();
+    const startMonth = new Date(now.getFullYear(), now.getMonth() - (months - 1), 1);
+    const monthKeys: string[] = [];
+    for (let i = 0; i < months; i++) {
+      const d = new Date(startMonth.getFullYear(), startMonth.getMonth() + i, 1);
+      monthKeys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    }
+    const monthLabel = (key: string) => {
+      const [y, m] = key.split("-").map(Number);
+      return new Date(y!, (m! - 1), 1).toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+    };
+
+    const studentFilter: any = { academyId: g.academyId, role: "student" };
+    if (g.role === "coach") studentFilter.coachId = g.userId;
+    const students: any[] = await this.users()
+      .find(studentFilter, { projection: { _id: 1, name: 1, username: 1, coachId: 1 } })
+      .toArray();
+    const empty = {
+      ok: true,
+      months: monthKeys.map((m) => ({
+        month: m, label: monthLabel(m), classDays: 0,
+        present: 0, late: 0, absent: 0, excused: 0, unmarked: 0, marked: 0, rate: null as number | null,
+      })),
+      students: [] as any[],
+    };
+    if (!students.length) return empty;
+
+    const ids = students.map((s: any) => String(s._id));
+    const coachIds = [...new Set(students.map((s: any) => s.coachId).filter(Boolean).map(String))];
+    const coaches: any[] = coachIds.length
+      ? await this.users().find({ _id: { $in: coachIds as any } }, { projection: { _id: 1, name: 1, username: 1 } }).toArray()
+      : [];
+    const coachById = new Map(coaches.map((c: any) => [String(c._id), c]));
+
+    const batchFilter: any = { academyId: g.academyId };
+    if (g.role === "coach") batchFilter.coachUserId = g.userId;
+    const batches: any[] = await this.batches()
+      .find(batchFilter, { projection: { _id: 1, name: 1, studentIds: 1 } })
+      .toArray();
+    const batchNamesByStudent = new Map<string, string[]>();
+    for (const b of batches) for (const sid of (b.studentIds || []).map(String)) {
+      const arr = batchNamesByStudent.get(sid) || [];
+      arr.push(String(b.name || ""));
+      batchNamesByStudent.set(sid, arr);
+    }
+
+    const rows: any[] = await this.conn.db!.collection("classAttendance").aggregate([
+      { $match: { key: { $in: ids as any }, joinedAt: { $gte: startMonth } } },
+      { $project: {
+          u: "$key",
+          day: { $dateToString: { format: "%Y-%m-%d", date: "$joinedAt", timezone: "Asia/Kolkata" } },
+          status: { $ifNull: ["$status", "present"] },
+          excused: { $ifNull: ["$excused", false] },
+          classId: 1, lastSeenAt: 1,
+      } },
+      { $sort: { lastSeenAt: 1 } as any },
+    ]).toArray();
+
+    // Winning row per (student, day): a manual mark beats a QR check-in beats
+    // a live-class auto-join — the same priority the sheet itself applies.
+    const perStudentDay = new Map<string, Map<string, { manual: any; qr: any; auto: any }>>();
+    for (const r of rows) {
+      const sid = String(r.u), day = String(r.day);
+      let dayMap = perStudentDay.get(sid);
+      if (!dayMap) { dayMap = new Map(); perStudentDay.set(sid, dayMap); }
+      const rec = dayMap.get(day) || { manual: null, qr: null, auto: null };
+      const cid = String(r.classId || "");
+      if (cid.startsWith("qrcheckin-")) rec.qr = r;
+      else if (cid.startsWith("manual-")) rec.manual = r;
+      else rec.auto = r;
+      dayMap.set(day, rec);
+    }
+
+    // A class day is any day the academy recorded attendance activity at all.
+    const classDaysByMonth = new Map<string, Set<string>>();
+    for (const dayMap of perStudentDay.values()) {
+      for (const day of dayMap.keys()) {
+        const m = day.slice(0, 7);
+        if (!monthKeys.includes(m)) continue;
+        const set = classDaysByMonth.get(m) || new Set<string>();
+        set.add(day);
+        classDaysByMonth.set(m, set);
+      }
+    }
+
+    type Counts = { present: number; late: number; absent: number; excused: number };
+    const blank = (): Counts => ({ present: 0, late: 0, absent: 0, excused: 0 });
+    const perStudentMonth = new Map<string, Map<string, Counts>>();
+    for (const [sid, dayMap] of perStudentDay.entries()) {
+      const byMonth = new Map<string, Counts>();
+      for (const [day, rec] of dayMap.entries()) {
+        const m = day.slice(0, 7);
+        if (!monthKeys.includes(m)) continue;
+        const mark = rec.manual || rec.qr || rec.auto;
+        if (!mark) continue;
+        const c = byMonth.get(m) || blank();
+        const anyExcused = !!(rec.manual?.excused || rec.qr?.excused || rec.auto?.excused);
+        if (mark.status === "absent" && anyExcused) c.excused++;
+        else if (mark.status === "absent") c.absent++;
+        else if (mark.status === "late") c.late++;
+        else c.present++;
+        byMonth.set(m, c);
+      }
+      perStudentMonth.set(sid, byMonth);
+    }
+
+    const pct = (hit: number, of: number) => (of > 0 ? Math.round((hit / of) * 100) : null);
+
+    const monthsOut = monthKeys.map((m) => {
+      const classDays = classDaysByMonth.get(m)?.size ?? 0;
+      let present = 0, late = 0, absent = 0, excused = 0;
+      for (const byMonth of perStudentMonth.values()) {
+        const c = byMonth.get(m);
+        if (!c) continue;
+        present += c.present; late += c.late; absent += c.absent; excused += c.excused;
+      }
+      const marked = present + late + absent + excused;
+      // Days a student could have been marked on but was not — the register gap.
+      const unmarked = Math.max(0, classDays * students.length - marked);
+      return {
+        month: m, label: monthLabel(m), classDays,
+        present, late, absent, excused, unmarked, marked,
+        rate: pct(present + late, present + late + absent),
+      };
+    });
+
+    const studentsOut = students.map((s: any) => {
+      const sid = String(s._id);
+      const byMonth = perStudentMonth.get(sid) || new Map<string, Counts>();
+      const perMonth: Record<string, any> = {};
+      let tp = 0, tl = 0, ta = 0, te = 0;
+      for (const m of monthKeys) {
+        const c = byMonth.get(m) || blank();
+        const classDays = classDaysByMonth.get(m)?.size ?? 0;
+        const marked = c.present + c.late + c.absent + c.excused;
+        perMonth[m] = {
+          ...c, marked, classDays,
+          missedRegister: Math.max(0, classDays - marked),
+          rate: pct(c.present + c.late, c.present + c.late + c.absent),
+        };
+        tp += c.present; tl += c.late; ta += c.absent; te += c.excused;
+      }
+      const coach = s.coachId ? coachById.get(String(s.coachId)) : null;
+      return {
+        studentId: sid,
+        name: s.name || s.username,
+        username: s.username,
+        coachName: coach ? (coach.name || coach.username) : null,
+        batchNames: batchNamesByStudent.get(sid) || [],
+        perMonth,
+        overall: {
+          present: tp, late: tl, absent: ta, excused: te,
+          marked: tp + tl + ta + te,
+          rate: pct(tp + tl, tp + tl + ta),
+        },
+      };
+    }).sort((a, b) => {
+      // Worst attendance first — this view exists to find who is slipping.
+      const ra = a.overall.rate, rb = b.overall.rate;
+      if (ra == null && rb == null) return a.name.localeCompare(b.name);
+      if (ra == null) return 1;
+      if (rb == null) return -1;
+      return ra - rb || a.name.localeCompare(b.name);
+    });
+
+    return { ok: true, months: monthsOut, students: studentsOut };
+  }
+
 }

@@ -256,6 +256,151 @@ export default function AttendanceDashboardPage() {
           )}
         </>
       )}
+      <MonthlyAttendance />
+    </div>
+  );
+}
+
+
+/* ─── Monthly attendance ──────────────────────────────────────────────────
+ * Calendar months rather than the rolling window above, because a month is
+ * what a coach actually reports in and compares against.
+ *
+ * Every rate here is out of days a student was MARKED, never out of class
+ * days. Since an untouched student is "unmarked" rather than assumed present,
+ * dividing by class days would show attendance collapsing in any month where
+ * the register simply was not finished. The register gap is shown on its own
+ * instead, so an incomplete month reads as incomplete.
+ */
+type MonthRow = {
+  month: string; label: string; classDays: number;
+  present: number; late: number; absent: number; excused: number;
+  unmarked: number; marked: number; rate: number | null;
+};
+type StudentMonth = { present: number; late: number; absent: number; excused: number; marked: number; classDays: number; missedRegister: number; rate: number | null };
+type StudentRow = {
+  studentId: string; name: string; username: string;
+  coachName: string | null; batchNames: string[];
+  perMonth: Record<string, StudentMonth>;
+  overall: { present: number; late: number; absent: number; excused: number; marked: number; rate: number | null };
+};
+type MonthlyResp = { ok: boolean; months: MonthRow[]; students: StudentRow[] };
+
+function rateTone(r: number | null): string {
+  if (r == null) return "text-ink-600";
+  if (r >= 90) return "text-emerald-300";
+  if (r >= 75) return "text-amber-300";
+  return "text-rose-300";
+}
+
+function MonthlyAttendance() {
+  const [months, setMonths] = useState<number>(6);
+  const [query, setQuery] = useState("");
+  const q = useQuery({
+    queryKey: ["attendance-monthly", months],
+    queryFn: () => get<MonthlyResp>(`/api/academy/attendance/monthly?months=${months}`),
+    staleTime: 60_000,
+  });
+  const d = q.data;
+  const shown = (d?.students ?? []).filter((s) =>
+    !query.trim() || s.name.toLowerCase().includes(query.trim().toLowerCase()));
+
+  return (
+    <div className="mt-8">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <h2 className="text-lg font-bold text-white">📅 Monthly attendance</h2>
+        <div className="ml-auto flex items-center gap-1.5">
+          {[3, 6, 12].map((m) => (
+            <button key={m} onClick={() => setMonths(m)}
+              className={`rounded-full px-2.5 py-1 text-xs font-semibold ${months === m ? "bg-brand-500/30 text-brand-100" : "bg-ink-800 text-ink-300 hover:bg-ink-700"}`}>
+              {m} months
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {q.isLoading && <div className="text-sm text-ink-400">Loading…</div>}
+      {q.error && <div className="rounded border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200">{String((q.error as any)?.message || q.error)}</div>}
+
+      {d && (
+        <>
+          {/* Month strip — one card per calendar month. */}
+          <div className="mb-4 grid gap-2" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(120px, 1fr))` }}>
+            {d.months.map((m) => (
+              <div key={m.month} className="rounded-xl border border-ink-700 bg-ink-900 p-3">
+                <div className="text-[11px] uppercase tracking-wider text-ink-500">{m.label}</div>
+                <div className={`mt-1 text-2xl font-bold tabular-nums ${rateTone(m.rate)}`}>
+                  {m.rate == null ? "—" : `${m.rate}%`}
+                </div>
+                <div className="mt-1 text-[11px] text-ink-400 tabular-nums">
+                  {m.classDays} class day{m.classDays === 1 ? "" : "s"}
+                </div>
+                <div className="mt-1 flex flex-wrap gap-1 text-[10px] tabular-nums">
+                  <span className="text-emerald-300">✅ {m.present}</span>
+                  {m.late > 0 && <span className="text-amber-300">⏰ {m.late}</span>}
+                  {m.absent > 0 && <span className="text-rose-300">❌ {m.absent}</span>}
+                  {m.excused > 0 && <span className="text-purple-300">📎 {m.excused}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Per-student grid, worst first — this view exists to find who is slipping. */}
+          <div className="mb-2 flex items-center gap-2">
+            <input value={query} onChange={(e) => setQuery(e.target.value)}
+              placeholder="Find a student…"
+              className="w-full max-w-xs rounded-lg border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
+            <span className="text-[11px] text-ink-500">{shown.length} student{shown.length === 1 ? "" : "s"} · lowest first</span>
+          </div>
+
+          <div className="overflow-x-auto rounded-xl border border-ink-700">
+            <table className="w-full min-w-[620px] text-sm">
+              <thead>
+                <tr className="bg-ink-900/80 text-left text-[11px] uppercase tracking-wider text-ink-500">
+                  <th className="px-3 py-2 font-semibold">Student</th>
+                  {d.months.map((m) => <th key={m.month} className="px-2 py-2 text-center font-semibold">{m.label.split(" ")[0]}</th>)}
+                  <th className="px-3 py-2 text-center font-semibold">Overall</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((s) => (
+                  <tr key={s.studentId} className="border-t border-ink-800 hover:bg-ink-900/60">
+                    <td className="px-3 py-2">
+                      <div className="truncate font-semibold text-white">{s.name}</div>
+                      <div className="truncate text-[11px] text-ink-500">
+                        {[s.coachName, ...s.batchNames].filter(Boolean).join(" · ") || "—"}
+                      </div>
+                    </td>
+                    {d.months.map((m) => {
+                      const c = s.perMonth[m.month];
+                      return (
+                        <td key={m.month} className="px-2 py-2 text-center tabular-nums"
+                          title={c ? `${c.present} present · ${c.late} late · ${c.absent} absent${c.excused ? ` · ${c.excused} excused` : ""}${c.missedRegister ? ` · ${c.missedRegister} not marked` : ""}` : "no data"}>
+                          <span className={rateTone(c?.rate ?? null)}>{c?.rate == null ? "·" : `${c.rate}%`}</span>
+                          {c && c.missedRegister > 0 && (
+                            <span className="ml-1 text-[10px] text-ink-600" title={`${c.missedRegister} class day(s) never marked`}>○</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                    <td className="px-3 py-2 text-center">
+                      <span className={`font-bold tabular-nums ${rateTone(s.overall.rate)}`}>
+                        {s.overall.rate == null ? "—" : `${s.overall.rate}%`}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {shown.length === 0 && (
+                  <tr><td colSpan={d.months.length + 2} className="px-3 py-6 text-center text-sm text-ink-500">No students match.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-2 text-[11px] text-ink-500">
+            Rates count only days a student was marked. ○ marks class days where no attendance was taken for them.
+          </div>
+        </>
+      )}
     </div>
   );
 }
