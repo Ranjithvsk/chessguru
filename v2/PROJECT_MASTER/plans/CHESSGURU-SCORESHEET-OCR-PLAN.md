@@ -259,6 +259,17 @@ tight crop 84.1 %, large-with-frozen-encoder 81.7 %, base run4 89.6 %. With 12k 
 move is in the top-3 for 95 % of cells; label noise caps at ~95 %) needs **more and closer handwriting**
 — Indian sheets and harvested coach corrections through the shipped review page — not a different model.
 
+### Why the HCS paper's 95 % is not comparable to our 89.6 % (checked 2026-09-12)
+
+The dataset's official `testing_tags.txt` (1,062 moves from 17 games) has **1,060 of its 1,062 moves
+also present in `train_data.txt`** — the same (game, move, colour) cells, both copies included, are in
+the training file. Only 20 test-key images on disk are absent from train/val. So the published 95 %
+was measured on cells the model had trained on (or their twin copy on the other player's sheet); it is a
+fit number, not a generalisation number. Our equivalent fit number is the final model's 95.9 % on a
+random cell split. Our 89.6 % is measured on 20 whole games whose writers the model never saw, which is
+what a coach reading a new student's sheet will actually get. No new training run was needed to
+establish this — the split files themselves say it.
+
 ## 12. Shipped (2026-09-12)
 
 - **Model**: `/opt/chessguru-vision/models/scoresheet-trocr-v1` on France (1.3 GB, TrOCR-base fine-tuned;
