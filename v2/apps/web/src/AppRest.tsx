@@ -68,6 +68,7 @@ import BatchPerformancePage from "./pages/BatchPerformance";
 import AcademyPerformancePage from "./pages/AcademyPerformance";
 import AcademyFairnessPage from "./pages/AcademyFairness";
 import LeaderboardPage from "./pages/Leaderboard";
+import AcademyGameAwardsPage from "./pages/AcademyGameAwards";
 import AttendancePage from "./pages/Attendance";
 import AttendanceDashboardPage from "./pages/AttendanceDashboard";
 import CheckinPage from "./pages/Checkin";
@@ -269,6 +270,7 @@ export default function AppRest() {
         <Route path="academy/performance" element={<ErrorBoundary label="Student performance"><AcademyPerformancePage /></ErrorBoundary>} />
         <Route path="academy/fairness" element={<ErrorBoundary label="Fairness report"><AcademyFairnessPage /></ErrorBoundary>} />
         <Route path="academy/leaderboard" element={<ErrorBoundary label="Academy leaderboard"><LeaderboardPage /></ErrorBoundary>} />
+        <Route path="academy/game-awards" element={<ErrorBoundary label="Game awards"><AcademyGameAwardsPage /></ErrorBoundary>} />
         <Route path="academy/attendance" element={<ErrorBoundary label="Academy attendance"><AttendancePage /></ErrorBoundary>} />
         <Route path="academy/attendance/dashboard" element={<ErrorBoundary label="Attendance dashboard"><AttendanceDashboardPage /></ErrorBoundary>} />
         <Route path="checkin/:token" element={<ErrorBoundary label="QR Check-in"><CheckinPage /></ErrorBoundary>} />

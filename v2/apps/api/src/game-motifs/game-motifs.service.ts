@@ -1,0 +1,317 @@
+// Academy "game awards" — every finished live game of an academy member is walked with Stockfish;
+// at each of the member's moves the engine's best line is tagged with the puzzle motif tagger
+// (engine-battle/cook.js: fork, pin, skewer, mate patterns, deflection…). Playing the best move (or
+// one as good) = the motif was FOUND (+points); playing something ≥ 1 pawn worse while a tactic was
+// on the board = MISSED (−points). Points per motif live in MOTIF_POINTS. Feeds the academy
+// leaderboard at /academy/game-awards. Owner 2026-09-12: "award them for finding good moves, like
+// fork, pin, mate, all the motifs, and a negative score for the missed ones".
+import { Injectable, OnModuleInit, OnModuleDestroy, ForbiddenException, UnauthorizedException, NotFoundException } from "@nestjs/common";
+import { InjectConnection } from "@nestjs/mongoose";
+import { Connection } from "mongoose";
+import { Chess } from "chess.js";
+import { createRequire } from "module";
+import { Stockfish, toWhiteCp, type PositionEval } from "../my-games/stockfish";
+
+const require_ = createRequire(__filename);
+const COOK_PATH = `${process.env.HOME || "/home/ubuntu"}/chessguru/engine-battle/cook.js`;
+type CookFn = (fen: string, moves: string[], pov: "white" | "black") => Set<string> | string[];
+let cookFn: CookFn | null = null;
+function cook(fen: string, moves: string[], pov: "white" | "black"): string[] {
+  try {
+    if (!cookFn) cookFn = (require_(COOK_PATH) as { cook: CookFn }).cook;
+    const r = cookFn(fen, moves, pov);
+    return Array.from(r instanceof Set ? r : r ?? []);
+  } catch { return []; }
+}
+
+const DEPTH = 12;                 // per position; ~0.2 s on the box, a 60-ply game ≈ 15 s
+const POLL_MS = 90_000;
+const LOOKBACK_DAYS = 45;
+const TACTIC_MIN_GAIN_CP = 150;   // best line must be worth this much more than the played move to count as a missed tactic
+const FOUND_TOLERANCE_CP = 30;    // played move within this of the best = found
+// A "found" only counts when a tactic actually APPEARED: the position swung at least this much in
+// the student's favour on the opponent's last move (they blundered, and the student had to see it),
+// or the best line mates. Without this, every routine best move in the opening scored as a fork.
+const OPPORTUNITY_MIN_CP = 120;
+const PV_PLIES_FOR_TAGS = 5;      // tag the tactic from the first plies of the best line, not the whole PV
+// Only real tactical motifs score. Style/plan tags from the tagger (quiet move, kingside attack,
+// castling, advanced pawn…) describe a line, not a tactic the student found or missed.
+const SCORING_TAGS = new Set(["fork", "pin", "skewer", "discoveredAttack", "discoveredCheck", "doubleCheck", "xRayAttack", "hangingPiece", "capturingDefender", "trappedPiece", "deflection", "attraction", "sacrifice", "interference", "clearance", "zugzwang", "promotion", "underPromotion", "enPassant", "intermezzo"]);
+const isMateTag = (t: string) => t === "mate" || /Mate$/.test(t) || /^mateIn\d$/.test(t);
+
+// Points for finding a motif; a miss costs half (rounded up). Mates weigh most.
+export const MOTIF_POINTS: Record<string, number> = {
+  mate: 6, mateIn1: 6, mateIn2: 7, mateIn3: 8, mateIn4: 8, mateIn5: 8,
+  backRankMate: 6, smotheredMate: 8, anastasiaMate: 8, arabianMate: 8, bodenMate: 8, doubleBishopMate: 8, dovetailMate: 8, hookMate: 8,
+  vukovicMate: 8, killBoxMate: 8, morphysMate: 8, operaMate: 8, pillsburysMate: 8, balestraMate: 8, blindSwineMate: 8, cornerMate: 6,
+  epauletteMate: 8, swallowstailMate: 8, triangleMate: 8,
+  fork: 3, pin: 3, skewer: 3, discoveredAttack: 3, discoveredCheck: 3, doubleCheck: 4, xRayAttack: 3,
+  hangingPiece: 2, capturingDefender: 3, trappedPiece: 3, deflection: 4, attraction: 4, sacrifice: 4, interference: 4, clearance: 4,
+  intermezzo: 4, zugzwang: 5, quietMove: 3, promotion: 3, underPromotion: 5, defensiveMove: 2, exposedKing: 2, kingsideAttack: 2,
+  queensideAttack: 2, attackingF2F7: 2, advancedPawn: 2, enPassant: 2, castling: 1,
+};
+// Tags that describe a line's SHAPE, not a tactic — never award or penalise these on their own.
+const SHAPE_TAGS = new Set(["oneMove", "short", "long", "veryLong", "checkFirst", "collinearMove", "equality", "advantage", "crushing", "opening", "middlegame", "endgame", "master", "superGM", "rookEndgame", "bishopEndgame", "knightEndgame", "queenEndgame", "pawnEndgame", "queenRookEndgame"]);
+export const MOTIF_LABEL: Record<string, string> = {
+  fork: "Fork", pin: "Pin", skewer: "Skewer", discoveredAttack: "Discovered attack", discoveredCheck: "Discovered check", doubleCheck: "Double check",
+  xRayAttack: "X-ray", hangingPiece: "Hanging piece", capturingDefender: "Capturing the defender", trappedPiece: "Trapped piece", deflection: "Deflection",
+  attraction: "Attraction", sacrifice: "Sacrifice", interference: "Interference", clearance: "Clearance", intermezzo: "Intermezzo", zugzwang: "Zugzwang",
+  quietMove: "Quiet move", promotion: "Promotion", underPromotion: "Under-promotion", defensiveMove: "Defence", exposedKing: "Exposed king",
+  kingsideAttack: "Kingside attack", queensideAttack: "Queenside attack", attackingF2F7: "f2/f7 attack", advancedPawn: "Advanced pawn", enPassant: "En passant",
+  castling: "Castling", mate: "Mate", mateIn1: "Mate in 1", mateIn2: "Mate in 2", mateIn3: "Mate in 3", mateIn4: "Mate in 4", mateIn5: "Mate in 5",
+  backRankMate: "Back-rank mate", smotheredMate: "Smothered mate", anastasiaMate: "Anastasia's mate", arabianMate: "Arabian mate", bodenMate: "Boden's mate",
+  doubleBishopMate: "Double-bishop mate", dovetailMate: "Dovetail mate", hookMate: "Hook mate", vukovicMate: "Vukovic mate", killBoxMate: "Kill-box mate",
+  morphysMate: "Morphy's mate", operaMate: "Opera mate", pillsburysMate: "Pillsbury's mate", balestraMate: "Balestra mate", blindSwineMate: "Blind-swine mate",
+  cornerMate: "Corner mate", epauletteMate: "Epaulette mate", swallowstailMate: "Swallow's-tail mate", triangleMate: "Triangle mate",
+};
+const pointsFor = (motifs: string[]) => motifs.reduce((m, t) => Math.max(m, MOTIF_POINTS[t] ?? 0), 0);
+
+type LiveGame = { _id: string; players: { white: string; black: string }; moves: string[]; startedAt: Date; finishedAt?: Date; status: string; result?: string; speed?: string };
+// One shape for every source: live arena games, PGNs imported under My Games, and the games pulled
+// from a linked Lichess / Chess.com account (owner: "even games played in lichess or chess.com").
+type GameSource = "live" | "my" | "lichess" | "chesscom";
+type GameToScore = { key: string; source: GameSource; url: string | null; moves: string[]; white: string | null; black: string | null; at: Date; label: string };
+type MotifEvent = {
+  _id: string; gameId: string; ply: number; userId: string; academyId: string; color: "white" | "black";
+  fen: string; bestUci: string; bestSan: string | null; playedUci: string; playedSan: string | null;
+  found: boolean; motifs: string[]; points: number; lossCp: number; mateIn: number | null; at: Date;
+  source: GameSource; url: string | null; label: string;
+};
+
+@Injectable()
+export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
+  private timer: NodeJS.Timeout | null = null;
+  private ticking = false;
+  private shuttingDown = false;
+  private engine: Stockfish | null = null;
+
+  constructor(@InjectConnection() private readonly conn: Connection) {}
+
+  private col<T extends Record<string, any> = any>(name: string) { return this.conn.db!.collection<T>(name); }
+  private events() { return this.col<MotifEvent>("gameMotifEvents"); }
+  private done() { return this.col<{ _id: string; academyIds: string[]; analyzedAt: Date; plies: number; events: number; error?: string }>("gameMotifGames"); }
+
+  onModuleInit() {
+    this.timer = setInterval(() => this.tick().catch((e) => console.error("[game-motifs] tick:", e?.message || e)), POLL_MS);
+    setTimeout(() => this.tick().catch(() => null), 20_000);
+  }
+  async onModuleDestroy() {
+    this.shuttingDown = true;
+    if (this.timer) clearInterval(this.timer);
+    if (this.engine) { try { await this.engine.stop(); } catch { /* */ } }
+  }
+
+  // ── which users belong to which academy ─────────────────────────────────────
+  private async academyOf(userIds: string[]): Promise<Map<string, string>> {
+    const rows = await this.col("users").find({ _id: { $in: userIds as never[] }, academyId: { $exists: true, $ne: null } }, { projection: { academyId: 1 } }).toArray();
+    return new Map(rows.map((r: any) => [String(r._id), String(r.academyId)]));
+  }
+  private static uid(p: string | undefined): string | null { return p && p.startsWith("u:") ? p.slice(2) : null; }
+  private static pgnToUci(pgn: string): string[] {
+    try {
+      const c = new Chess(); c.loadPgn(pgn);
+      return c.history({ verbose: true }).map((m) => m.from + m.to + (m.promotion ?? ""));
+    } catch { return []; }
+  }
+  /** Which side a user played in an external game: the linked handle, case-insensitively. */
+  private static colourFor(handle: string | null | undefined, white: string, black: string): "white" | "black" | null {
+    const h = (handle ?? "").trim().toLowerCase(); if (!h) return null;
+    if (h === String(white ?? "").trim().toLowerCase()) return "white";
+    if (h === String(black ?? "").trim().toLowerCase()) return "black";
+    return null;
+  }
+  private static externalUrl(source: string, id: string): string | null {
+    if (source === "lichess") return `https://lichess.org/${id}`;
+    if (source === "chesscom") return id.startsWith("http") ? id : null;
+    return null;
+  }
+
+  /** Load one game from any source in the common shape (players as user ids, moves as UCI). */
+  private async loadGame(key: string): Promise<GameToScore | null> {
+    const [source, ...rest] = key.split(":"); const id = rest.join(":");
+    if (source === "live") {
+      const g = await this.col<LiveGame>("live_games").findOne({ _id: id as never });
+      if (!g) return null;
+      return { key, source: "live", url: `/play/games/${id}`, moves: g.moves ?? [], white: GameMotifsService.uid(g.players?.white), black: GameMotifsService.uid(g.players?.black), at: g.finishedAt ?? g.startedAt, label: `${(g.players?.white ?? "?").replace(/^u:/, "")} vs ${(g.players?.black ?? "?").replace(/^u:/, "")}` };
+    }
+    if (source === "my") {
+      const g: any = await this.col("myGames").findOne({ _id: id as never });
+      if (!g?.pgn) return null;
+      const moves = GameMotifsService.pgnToUci(g.pgn);
+      const our: "white" | "black" | null = g.ourColor === "white" || g.ourColor === "black" ? g.ourColor : null;
+      const url = g.externalId && String(g.externalId).includes("http") ? String(g.externalId).replace(/^[a-z]+:/, "") : null;
+      return { key, source: "my", url, moves, white: our === "white" ? String(g.ownerId) : null, black: our === "black" ? String(g.ownerId) : null, at: g.createdAt ?? new Date(), label: `${g.white ?? "?"} vs ${g.black ?? "?"}` };
+    }
+    if (source === "ext") {
+      const g: any = await this.col("externalGames").findOne({ _id: id as never });
+      if (!g?.pgn) return null;
+      const u: any = await this.col("users").findOne({ _id: g.userId as never }, { projection: { linkedAccounts: 1 } });
+      const handle = g.source === "lichess" ? u?.linkedAccounts?.lichess?.username : u?.linkedAccounts?.chesscom?.username;
+      const our = GameMotifsService.colourFor(handle, g.white, g.black);
+      const moves = GameMotifsService.pgnToUci(g.pgn);
+      return { key, source: g.source === "chesscom" ? "chesscom" : "lichess", url: g.url ?? GameMotifsService.externalUrl(g.source, g.gameId), moves, white: our === "white" ? String(g.userId) : null, black: our === "black" ? String(g.userId) : null, at: g.played ? new Date(g.played) : (g.importedAt ?? new Date()), label: `${g.white ?? "?"} vs ${g.black ?? "?"}` };
+    }
+    return null;
+  }
+
+  /** Unscored games of academy members, newest first, across every source. */
+  private async candidates(academyId: string | null, limit: number): Promise<Array<{ key: string; users: string[] }>> {
+    const since = new Date(Date.now() - LOOKBACK_DAYS * 864e5);
+    const memberQ: Record<string, unknown> = { academyId: { $exists: true, $ne: null } };
+    if (academyId) memberQ.academyId = academyId;
+    const members = await this.col("users").find(memberQ, { projection: { _id: 1 } }).toArray();
+    const ids = members.map((m: any) => String(m._id)); if (!ids.length) return [];
+    const uIds = ids.map((i) => `u:${i}`);
+    const out: Array<{ key: string; users: string[]; at: Date }> = [];
+    const live = await this.col<LiveGame>("live_games").find({ startedAt: { $gte: since }, status: { $nin: ["started", "aborted"] }, "moves.10": { $exists: true }, $or: [{ "players.white": { $in: uIds } }, { "players.black": { $in: uIds } }] }, { projection: { players: 1, startedAt: 1 } }).sort({ startedAt: -1 }).limit(limit).toArray();
+    for (const g of live) out.push({ key: `live:${g._id}`, users: [GameMotifsService.uid(g.players?.white), GameMotifsService.uid(g.players?.black)].filter((x): x is string => !!x && ids.includes(x)), at: g.startedAt });
+    const my = await this.col("myGames").find({ ownerId: { $in: ids }, createdAt: { $gte: since }, pgn: { $exists: true } }, { projection: { ownerId: 1, createdAt: 1 } }).sort({ createdAt: -1 }).limit(limit).toArray();
+    for (const g of my as any[]) out.push({ key: `my:${g._id}`, users: [String(g.ownerId)], at: g.createdAt ?? new Date() });
+    const ext = await this.col("externalGames").find({ userId: { $in: ids }, $or: [{ played: { $gte: since } }, { played: { $gte: since.toISOString() } }] }, { projection: { userId: 1, played: 1 } }).sort({ played: -1 }).limit(limit).toArray();
+    for (const g of ext as any[]) out.push({ key: `ext:${g._id}`, users: [String(g.userId)], at: g.played ? new Date(g.played) : new Date() });
+    const doneIds = new Set((await this.done().find({ _id: { $in: out.map((o) => o.key) as never[] } }, { projection: { _id: 1 } }).toArray()).map((d) => d._id));
+    return out.filter((o) => !doneIds.has(o.key)).sort((a, b) => b.at.getTime() - a.at.getTime()).slice(0, limit);
+  }
+
+  // ── worker ──────────────────────────────────────────────────────────────────
+  private async tick() {
+    if (this.ticking || this.shuttingDown) return;
+    this.ticking = true;
+    try {
+      const next = (await this.candidates(null, 1))[0];
+      if (!next) return;
+      const acad = await this.academyOf(next.users);
+      if (!acad.size) { await this.done().updateOne({ _id: next.key }, { $set: { academyIds: [], analyzedAt: new Date(), plies: 0, events: 0 } }, { upsert: true }); return; }
+      try { await this.analyzeGame(next.key, acad); }
+      catch (e: any) { await this.done().updateOne({ _id: next.key }, { $set: { academyIds: [], analyzedAt: new Date(), plies: 0, events: 0, error: String(e?.message || e).slice(0, 200) } }, { upsert: true }); throw e; }
+      // one game per tick — the engine shares the CPU with the other analyzer
+    } finally { this.ticking = false; }
+  }
+
+  private async getEngine(): Promise<Stockfish> {
+    if (!this.engine) { this.engine = new Stockfish(); await this.engine.start(); }
+    return this.engine;
+  }
+
+  /** Analyze one game for the tracked users (userId → academyId). Idempotent: replaces the game's events. */
+  async analyzeGame(gameId: string, tracked: Map<string, string>): Promise<{ events: number; plies: number }> {
+    const g = await this.loadGame(gameId);
+    if (!g) throw new NotFoundException("game not found");
+    const engine = await this.getEngine();
+    const board = new Chess();
+    const events: MotifEvent[] = [];
+    let cur: PositionEval;
+    try { cur = await engine.analyze(board.fen(), DEPTH); } catch (e) { await this.engine?.stop().catch(() => null); this.engine = null; throw e; }
+    const moves = g.moves ?? [];
+    let prevWhiteCp: number | null = null; // eval (white POV) BEFORE the opponent's last move — the baseline for "did a tactic appear?"
+    for (let i = 0; i < moves.length; i++) {
+      const sideToMove: "white" | "black" = board.turn() === "w" ? "white" : "black";
+      const playerId = sideToMove === "white" ? g.white : g.black;
+      const academyId = playerId ? tracked.get(playerId) : undefined;
+      const fenBefore = board.fen();
+      const bestUci = cur.bestMoveUci;
+      const pv = cur.pv ?? [];
+      const mateIn = cur.mate !== undefined && cur.mate > 0 ? cur.mate : null;
+      const playedUci = moves[i];
+      if (!playedUci) break;
+      const mv = board.move({ from: playedUci.slice(0, 2), to: playedUci.slice(2, 4), promotion: playedUci.slice(4) || undefined } as never);
+      if (!mv) break; // corrupt game record — stop here
+      let next: PositionEval;
+      try { next = await engine.analyze(board.fen(), DEPTH); } catch (e) { await this.engine?.stop().catch(() => null); this.engine = null; throw e; }
+      const whiteBefore = toWhiteCp(cur, sideToMove);
+      if (playerId && academyId && bestUci) {
+        // Both from the mover's point of view: what the position was worth, and what it is worth now.
+        const sign = sideToMove === "white" ? 1 : -1;
+        const beforeMover = whiteBefore * sign;
+        const afterMover = toWhiteCp(next, sideToMove === "white" ? "black" : "white") * sign;
+        const lossCp = Math.max(0, beforeMover - afterMover);
+        const opportunity = prevWhiteCp === null ? 0 : (whiteBefore - prevWhiteCp) * sign; // how much the opponent's last move handed over
+        const mating = cur.mate !== undefined && cur.mate > 0;
+        const tags = cook(fenBefore, mating ? pv : pv.slice(0, PV_PLIES_FOR_TAGS), sideToMove);
+        const motifs = tags.filter((t) => !SHAPE_TAGS.has(t) && (SCORING_TAGS.has(t) || isMateTag(t)) && (MOTIF_POINTS[t] ?? 0) > 0);
+        if (motifs.length && (mating || opportunity >= OPPORTUNITY_MIN_CP || lossCp >= TACTIC_MIN_GAIN_CP)) {
+          const found = (playedUci === bestUci || lossCp <= FOUND_TOLERANCE_CP) && (mating || opportunity >= OPPORTUNITY_MIN_CP);
+          const missed = !found && lossCp >= TACTIC_MIN_GAIN_CP;
+          if (found || missed) {
+            const base = pointsFor(motifs);
+            let bestSan: string | null = null, playedSan: string | null = mv.san;
+            try { const b = new Chess(fenBefore); const bm = b.move({ from: bestUci.slice(0, 2), to: bestUci.slice(2, 4), promotion: bestUci.slice(4) || undefined } as never); bestSan = bm?.san ?? null; } catch { /* */ }
+            events.push({
+              _id: `${gameId}:${i + 1}`, gameId, ply: i + 1, userId: playerId, academyId, color: sideToMove,
+              fen: fenBefore, bestUci, bestSan, playedUci, playedSan, found, motifs,
+              points: found ? base : -Math.ceil(base / 2), lossCp: Math.round(lossCp), mateIn, at: g.at,
+              source: g.source, url: g.url, label: g.label,
+            });
+          }
+        }
+      }
+      prevWhiteCp = whiteBefore;
+      cur = next;
+    }
+    await this.events().deleteMany({ gameId });
+    if (events.length) await this.events().insertMany(events);
+    await this.done().updateOne({ _id: gameId }, { $set: { academyIds: Array.from(new Set(tracked.values())), analyzedAt: new Date(), plies: moves.length, events: events.length } }, { upsert: true });
+    return { events: events.length, plies: moves.length };
+  }
+
+  // ── API ─────────────────────────────────────────────────────────────────────
+  private member(session: any): { userId: string; academyId: string; role: string } {
+    const userId = session?.userId; if (!userId) throw new UnauthorizedException("sign in first");
+    const academyId = session?.academyId; if (!academyId) throw new ForbiddenException("not in an academy");
+    return { userId: String(userId), academyId: String(academyId), role: String(session?.role ?? "") };
+  }
+  private static sinceFor(period: string): Date | null {
+    const days = period === "7d" ? 7 : period === "30d" ? 30 : period === "90d" ? 90 : null;
+    return days ? new Date(Date.now() - days * 864e5) : null;
+  }
+
+  async leaderboard(session: any, period = "30d") {
+    const { academyId } = this.member(session);
+    const since = GameMotifsService.sinceFor(period);
+    const match: Record<string, unknown> = { academyId };
+    if (since) match.at = { $gte: since };
+    const rows = await this.events().aggregate([
+      { $match: match },
+      { $group: { _id: "$userId", score: { $sum: "$points" }, found: { $sum: { $cond: ["$found", 1, 0] } }, missed: { $sum: { $cond: ["$found", 0, 1] } },
+        games: { $addToSet: "$gameId" }, lastAt: { $max: "$at" }, motifs: { $push: { m: "$motifs", f: "$found" } }, sources: { $addToSet: "$source" } } },
+      { $sort: { score: -1, found: -1 } },
+    ]).toArray();
+    const users = await this.col("users").find({ _id: { $in: rows.map((r) => r._id) as never[] } }, { projection: { username: 1, name: 1, coachId: 1 } }).toArray();
+    const byId = new Map(users.map((u: any) => [String(u._id), u]));
+    const out = rows.map((r, i) => {
+      const byMotif: Record<string, { found: number; missed: number }> = {};
+      for (const e of r.motifs as Array<{ m: string[]; f: boolean }>) for (const m of e.m) { const b = (byMotif[m] ??= { found: 0, missed: 0 }); if (e.f) b.found++; else b.missed++; }
+      const u = byId.get(String(r._id)) as any;
+      return { rank: i + 1, studentId: String(r._id), username: u?.username ?? String(r._id), name: u?.name ?? null, coachId: u?.coachId ?? null,
+        score: r.score, found: r.found, missed: r.missed, games: (r.games as string[]).length, lastAt: r.lastAt, byMotif, sources: r.sources as string[] };
+    });
+    const pending = await this.pendingCount(academyId);
+    return { period, rows: out, labels: MOTIF_LABEL, points: MOTIF_POINTS, pending };
+  }
+
+  async studentEvents(session: any, studentId: string, period = "30d") {
+    const { academyId } = this.member(session);
+    const since = GameMotifsService.sinceFor(period);
+    const match: Record<string, unknown> = { academyId, userId: studentId };
+    if (since) match.at = { $gte: since };
+    const rows = await this.events().find(match, { projection: { _id: 0 } }).sort({ at: -1, ply: 1 }).limit(400).toArray();
+    return { studentId, period, events: rows, labels: MOTIF_LABEL };
+  }
+
+  private async pendingCount(academyId: string): Promise<number> {
+    return (await this.candidates(academyId, 500)).length;
+  }
+
+  /** Coach/owner: analyse (or re-analyse) one game now. */
+  async analyzeNow(session: any, gameId: string) {
+    const { academyId, role } = this.member(session);
+    if (!["academy_owner", "coach", "admin"].includes(role)) throw new ForbiddenException("coach or owner only");
+    const g = await this.loadGame(gameId);
+    if (!g) throw new NotFoundException("game not found");
+    const ids = [g.white, g.black].filter((x): x is string => !!x);
+    const acad = await this.academyOf(ids);
+    for (const [u, a] of acad) if (a !== academyId) acad.delete(u);
+    if (!acad.size) throw new ForbiddenException("no player of this game is in your academy");
+    return this.analyzeGame(gameId, acad);
+  }
+}
