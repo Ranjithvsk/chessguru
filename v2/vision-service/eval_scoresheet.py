@@ -95,8 +95,12 @@ def main(reads_path: str = str(ROOT / "reads.json")):
             txt = reads[it["id"]][0][0] if reads[it["id"]] else ""
             toks.append(d.Token(text=txt, confidence=float(reads[it["id"]][0][1]) if reads[it["id"]] else 0.0))
         raw_texts = [t.text for t in toks]
-        out = d.apply_chess_constraints([t.copy() for t in toks], START, beam=10)
-        cells = sb.read_sheet([sb.Cell(it["id"], [(str(c[0]), float(c[1])) for c in reads[it["id"]]]) for it in items])
+        if os.environ.get("NO_BEAM") == "1":          # quick raw numbers for automated recipe decisions
+            out = [t.copy() for t in toks]
+            cells = [sb.Cell(it["id"], [(str(c[0]), float(c[1])) for c in reads[it["id"]]], sb.clean(str(reads[it["id"]][0][0])), "unknown", 0.0, str(reads[it["id"]][0][0])) for it in items]
+        else:
+          out = d.apply_chess_constraints([t.copy() for t in toks], START, beam=10)
+          cells = sb.read_sheet([sb.Cell(it["id"], [(str(c[0]), float(c[1])) for c in reads[it["id"]]]) for it in items])
         sheet_cells[sheet] = (items, cells)
         if _PRIOR is not None:
             chosen = prior_rerank([[sb.clean(str(c[0])) for c in reads[it["id"]]] for it in items], _PRIOR)
