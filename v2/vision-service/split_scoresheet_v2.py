@@ -121,23 +121,42 @@ def block_rules(mask: np.ndarray, nx0: int, nx1: int, bx1: int, rows_per_block: 
     straight line between its two anchors, which follows a fold or a tilt
     without any global angle."""
     h = mask.shape[0]; min_gap = int(h * 0.022)
-    left = strip_rows(mask, nx0 + 3, nx1 - 3, min_gap)
+    # the printed move numbers are magenta too and sit in the middle of their
+    # column; their strokes pulled the anchors half a row off. Read the rules in
+    # the blank margin between the digits and the column's right rule.
+    nw = nx1 - nx0
+    left = strip_rows(mask, int(nx1 - 0.30 * nw), int(nx1 - 0.08 * nw), min_gap)
     # right anchor: the NEXT block's number column when there is one (same rules,
     # never written on); the block's own right margin is a fallback, and a long
     # black move (Nxd3, Qb6) running into it was mis-anchoring rows.
-    ra, rb = right_strip if right_strip else (max(nx1, bx1 - 45), bx1 - 3)
+    if right_strip:
+        rw = right_strip[1] - right_strip[0]
+        ra, rb = int(right_strip[0] + 0.08 * rw), int(right_strip[0] + 0.30 * rw)      # left margin of the next number column
+    else:
+        ra, rb = max(nx1, bx1 - 45), bx1 - 3
     right = strip_rows(mask, ra, rb, min_gap)
     if len(left) < 3: return []
     left, period = _fill(left)
     if len(right) >= 3: right, _ = _fill(right)
-    # pair each left anchor with the nearest right anchor; otherwise assume flat
+    # Pair left and right anchors through the sheet's tilt, not by nearest y:
+    # across ~700 px a 3° tilt moves a rule half a row, and nearest-match
+    # then grabbed the neighbouring rule on one side (cells came out as
+    # diagonals holding two rows). The tilt is the median offset over all
+    # nearest pairs; each left anchor then takes the right anchor closest to
+    # y + tilt, or y + tilt itself when none is near.
     pairs = []
-    for y in left:
-        cand = [r for r in right if abs(r - y) < 0.45 * period] if right else []
-        pairs.append((y, min(cand, key=lambda r: abs(r - y)) if cand else y))
+    if right:
+        offs = [min(right, key=lambda r: abs(r - y)) - y for y in left]
+        offs = [o for o in offs if abs(o) < 0.6 * period]
+        tilt = float(np.median(offs)) if offs else 0.0
+        for y in left:
+            cand = [r for r in right if abs(r - (y + tilt)) < 0.3 * period]
+            pairs.append((y, min(cand, key=lambda r: abs(r - (y + tilt))) if cand else y + tilt))
+    else:
+        pairs = [(y, y) for y in left]
     rows = [(pairs[i], pairs[i + 1]) for i in range(len(pairs) - 1) if abs((pairs[i + 1][0] - pairs[i][0]) - period) < 0.3 * period]
     if len(rows) >= rows_per_block + 1: rows = rows[1:rows_per_block + 1]     # header row first
-    return rows[:rows_per_block], (nx0 + nx1) / 2, (ra + rb) / 2
+    return rows[:rows_per_block], (nx0 + nx1) / 2, (ra + rb) / 2, period
 
 
 def split(photo: str, out_dir: str, rows_per_block: int = 20) -> dict:
@@ -175,14 +194,58 @@ def split(photo: str, out_dir: str, rows_per_block: int = 20) -> dict:
         rs = (int(nxt[0]) + 3, int(nxt[1]) - 3) if nxt and int(nxt[1]) - int(nxt[0]) > 20 else None
         res = block_rules(tm, int(nc[0]), int(nc[1]), bx1, rows_per_block, rs)
         if not res: nrows.append(0); continue
-        rows, xl, xr = res; nrows.append(len(rows))
-        for (top, bot) in rows:
+        rows, xl, xr, period = res; nrows.append(len(rows))
+        # Three clean vertical strips per block give three independent row
+        # lists: the number-column margin, the white cell's right margin and
+        # the black cell's right margin (moves are written from the left, so
+        # the last 30 px of a cell are almost always blank). Rows are matched
+        # ACROSS strips by order after gap-filling, not by height — the paper
+        # bows and the global warp can be a whole row off at one side.
+        def strip_list(xa, xb):
+            ys = strip_rows(tm, int(xa), int(xb), int(H * 0.022))
+            if len(ys) < 3: return None
+            ys, _ = _fill(ys); return ys
+        def aligned(base, other):
+            """Pair each base row with `other` by order, anchored on the row whose
+            heights agree best (handles a list that starts one rule earlier)."""
+            if not other: return None
+            best, best_err = 0, 1e18
+            for shift in range(-2, 3):
+                err = n = 0
+                for i, y in enumerate(base):
+                    j = i + shift
+                    if 0 <= j < len(other): err += abs(other[j] - y); n += 1
+                if n >= 3 and err / n < best_err: best_err, best = err / n, shift
+            return [other[i + best] if 0 <= i + best < len(other) else None for i in range(len(base))]
+        # The number column sits on the sheet's curled edge and its rules land
+        # half a row off the move cells after the warp. Anchor every cell on ITS
+        # OWN margins: the first and last ~20 px inside the cell, which the
+        # handwriting almost never reaches. The number column only supplies the
+        # row count / period and the header offset.
+        wx0, wx1 = int(wc[0]), int(wc[1]); kx0, kx1 = int(bc[0]), int(bc[1])
+        base_n = len(rows) + 1
+        wl = strip_list(wx0 + 8, wx0 + 26); wr = strip_list(wx1 - 30, wx1 - 10)
+        kl = strip_list(kx0 + 8, kx0 + 26); kr = strip_list(kx1 - 30, kx1 - 10)
+        ref = wl or wr or kl or kr
+        if ref is None:
+            continue
+        # header: drop leading rules until the run has base_n entries
+        if len(ref) > base_n: ref = ref[len(ref) - base_n:] if len(ref) - base_n <= 2 else ref[1:base_n + 1]
+        wl_a, wr_a, kl_a, kr_a = (aligned(ref, x) for x in (wl, wr, kl, kr))
+        def at(lst, i, fallback):
+            return lst[i] if lst and i < len(lst) and lst[i] is not None and abs(lst[i] - fallback) < 0.6 * period else fallback
+        nrows[-1] = len(ref) - 1
+        for ri in range(len(ref) - 1):
             move += 1
-            for colour, (x0, x1) in (("white", wc), ("black", bc)):
-                x0, x1 = int(x0), int(x1)
-                yt = lambda x: top[0] + (top[1] - top[0]) * (x - xl) / max(1, xr - xl)
-                yb = lambda x: bot[0] + (bot[1] - bot[0]) * (x - xl) / max(1, xr - xl)
-                src = np.array([[x0 + pad, yt(x0) + pad], [x1 - pad, yt(x1) + pad], [x1 - pad, yb(x1) - pad], [x0 + pad, yb(x0) - pad]], dtype=np.float32)
+            r_t, r_b = ref[ri], ref[ri + 1]
+            wlt, wlb = at(wl_a, ri, r_t), at(wl_a, ri + 1, r_b)
+            wrt, wrb = at(wr_a, ri, wlt), at(wr_a, ri + 1, wlb)
+            klt, klb = at(kl_a, ri, wrt), at(kl_a, ri + 1, wrb)
+            krt, krb = at(kr_a, ri, klt), at(kr_a, ri + 1, klb)
+            for colour, (x0, x1, a_t, a_b, b_t, b_b) in (("white", (wx0, wx1, wlt, wlb, wrt, wrb)), ("black", (kx0, kx1, klt, klb, krt, krb))):
+                src = np.array([[x0 + pad, a_t + pad], [x1 - pad, b_t + pad], [x1 - pad, b_b - pad], [x0 + pad, a_b - pad]], dtype=np.float32)
+                yt = lambda x, a=a_t, b=b_t: a + (b - a) * (x - x0) / max(1, x1 - x0)
+                yb = lambda x, a=a_b, b=b_b: a + (b - a) * (x - x0) / max(1, x1 - x0)
                 cw = x1 - x0 - 2 * pad; ch = int(max(8, (yb(x0) + yb(x1) - yt(x0) - yt(x1)) / 2 - 2 * pad))
                 M = cv2.getPerspectiveTransform(src, np.array([[0, 0], [cw - 1, 0], [cw - 1, ch - 1], [0, ch - 1]], dtype=np.float32))
                 crop = cv2.warpPerspective(tab, M, (cw, ch))

@@ -95,7 +95,7 @@ def _cell_key(q: Path):
 def list_cells(arg: str) -> list[Path]:
     p = Path(arg)
     if p.is_dir():
-        return sorted((q for q in p.iterdir() if q.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")), key=_cell_key)
+        return sorted((q for q in p.iterdir() if q.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp") and not q.name.startswith("_")), key=_cell_key)   # _table.jpg/_debug.jpg are not cells
     return [Path(l.strip()) for l in open(p) if l.strip()]
 
 
