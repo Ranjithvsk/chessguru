@@ -339,7 +339,7 @@ export class CoachStarredDigestService implements OnModuleInit {
             by.set(e.userId, b);
           }
           const nameOf = (id: string) => { const u: any = students.find((x: any) => String(x._id) === id); return u?.name || u?.username || id; };
-          const editor = (e: any) => { const shapes = [{ orig: e.bestUci.slice(0, 2), dest: e.bestUci.slice(2, 4), brush: "green" }]; const b64 = Buffer.from(JSON.stringify(shapes)).toString("base64url"); return `${PUBLIC_ORIGIN}/board-editor?fen=${encodeURIComponent(e.fen)}&orientation=${e.color}&shapes=${b64}`; };
+          const editor = (e: any) => `${PUBLIC_ORIGIN}/api/game-motifs/open/${encodeURIComponent(e.gameId)}/${e.ply}`; // → My Studies board with the arrows drawn
           const label = (m: string) => String(m).replace(/([A-Z])/g, " $1").toLowerCase();
           const rows = [...by.entries()].sort((a, b) => b[1].score - a[1].score);
           awardsHtml = `<h3 style="color:#111;margin:18px 0 4px">🎯 Game awards ${esc(windowLabel)}</h3><ul style="line-height:1.6;padding-left:20px;color:#333;font-size:13px">` +

@@ -68,3 +68,10 @@ Deployed: API rebuilt + restarted; play-lobby / play-gateway / play-bot restarte
 
 ## Student moments view reorganised (owner: "when opened a user, it looks clumsy")
 `StudentMoments` in `Leaderboard.tsx`: summary strip (Score / Found / Missed / Games), "Best at" and "Missing" motif chips, opening accuracy + favourite, style; All / Found / Missed toggle; then one card per game (players · date · source · game total · "source ↗") with a table: Move (opens the ChessGuru board) · What · Result (best move on a miss) · Pts · Clock (⏱ on time trouble) · ♟ board / ☆ star.
+
+## Moments open on the My Studies board (owner: "I clearly said I need the board which is in notebook / my studies")
+- `GET /api/game-motifs/open/:gameId/:ply` (`openMoment`): finds or creates the viewer's private study "🎯 Game awards" (`studies`), adds a chapter (`studyChapters`: startingFen = the position, `startShapes` green best / red played, title "<student> · found/missed <motif> · 23… Qxf2 (best …) · <game>", tags ["game-awards", motif], `source {kind:"game-awards", gameId, ply, userId}`) and 302-redirects to `/studies/:sid/edit/:cid` — the real Dream Meet board. Same moment twice → same chapter.
+- Leaderboard: move text and "📓 My Studies" are plain links to that GET; the coach digest links use it too. `/board-editor` is no longer used for moments.
+- Akshay "vanishing": the shared period tab defaulted to 7 days and his chess.com games are older → page default is now 1 month.
+- Worker: candidates are round-robin across live / my / ext (newest first within each) so imported PGNs don't starve external games.
+- Time trouble confirmed on chess.com games: 29 tagged moments in the first 7 external games (e.g. l-n1234 missed a mate with 1 s on the clock, −2 instead of −4).

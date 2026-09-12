@@ -6,6 +6,7 @@
 // leaderboard at /academy/game-awards. Owner 2026-09-12: "award them for finding good moves, like
 // fork, pin, mate, all the motifs, and a negative score for the missed ones".
 import { Injectable, OnModuleInit, OnModuleDestroy, ForbiddenException, UnauthorizedException, NotFoundException } from "@nestjs/common";
+import { randomBytes } from "node:crypto";
 import { inRatingBucket, periodDays, puzzleRatings } from "../opening-trainer/opening-trainer.controller";
 import { clocksFromPgn, parseTimeControl } from "../integrations/games-fetch.service";
 import { InjectConnection } from "@nestjs/mongoose";
@@ -104,6 +105,7 @@ type MotifEvent = {
   source: GameSource; url: string | null; label: string;
   clockMs?: number | null; thinkMs?: number | null; timeTrouble?: boolean; // arena only: what the clock said at this move
 };
+const GAME_AWARDS_STUDY_TITLE = "🎯 Game awards";
 const TIME_TROUBLE_MS = 10_000;   // under ten seconds on the clock, or a move made in under 1.5 s while short
 const PANIC_THINK_MS = 1_500;
 
@@ -177,6 +179,34 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
     for (const [b, a] of Object.entries(acc)) bands[b] = { players: a.players, scorePerGame: Math.round(mean(a.spg) * 10) / 10, foundRate: Math.round(mean(a.fr) * 100), openingAccuracy: a.oa.length ? Math.round(mean(a.oa)) : null };
     this.bandsCache = { at: Date.now(), bands };
     return bands;
+  }
+  /** Owner 2026-09-12: "I need the board which is in Notebook / My Studies". Opening a moment puts the
+   *  position into the viewer's own "🎯 Game awards" study as a chapter (arrows: green = best, red = played)
+   *  and returns the My Studies board URL. Same moment opened twice → the same chapter. */
+  async openMoment(session: any, gameId: string, ply: number): Promise<{ studyId: string; chapterId: string; url: string }> {
+    const { userId, academyId } = this.member(session);
+    const ev = await this.events().findOne({ gameId, ply, academyId } as never);
+    if (!ev) throw new NotFoundException("moment not found");
+    const studies = this.col("studies"), chapters = this.col("studyChapters");
+    const existing: any = await chapters.findOne({ "source.kind": "game-awards", "source.gameId": gameId, "source.ply": ply, "source.userId": userId } as never);
+    if (existing) {
+      const st: any = await studies.findOne({ _id: existing.studyId, deletedAt: { $exists: false } } as never);
+      if (st) return { studyId: st._id, chapterId: existing._id, url: `/studies/${st._id}/edit/${existing._id}` };
+    }
+    const now = new Date();
+    let study: any = await studies.findOne({ ownerId: userId, title: GAME_AWARDS_STUDY_TITLE, deletedAt: { $exists: false } } as never);
+    if (!study) {
+      study = { _id: randomBytes(8).toString("base64url").replace(/[^A-Za-z0-9]/g, "a").slice(0, 10), ownerId: userId, academyId: academyId ?? null, title: GAME_AWARDS_STUDY_TITLE, intent: "game", visibility: "private", sharedWithUserIds: [], chapterCount: 0, createdAt: now, updatedAt: now };
+      await studies.insertOne(study as never);
+    }
+    const label = MOTIF_LABEL[ev.primary] ?? ev.primary;
+    const moveNo = `${Math.ceil(ev.ply / 2)}${ev.color === "black" ? "…" : "."}`;
+    const title = `${ev.userId} · ${ev.found ? "found" : "missed"} ${label} · ${moveNo} ${ev.playedSan ?? ""}${ev.found ? "" : ` (best ${ev.bestSan ?? ev.bestUci})`} · ${ev.label}`.slice(0, 120);
+    const startShapes = [{ orig: ev.bestUci.slice(0, 2), dest: ev.bestUci.slice(2, 4), brush: "green" }, ...(!ev.found && ev.playedUci !== ev.bestUci ? [{ orig: ev.playedUci.slice(0, 2), dest: ev.playedUci.slice(2, 4), brush: "red" }] : [])];
+    const chapterId = randomBytes(8).toString("base64url").replace(/[^A-Za-z0-9]/g, "a").slice(0, 10);
+    await chapters.insertOne({ _id: chapterId, studyId: study._id, order: study.chapterCount ?? 0, title, startingFen: ev.fen, moves: [], tags: ["game-awards", label], previewFen: ev.fen, startShapes, source: { kind: "game-awards", gameId, ply, userId, studentId: ev.userId }, createdAt: now, updatedAt: now } as never);
+    await studies.updateOne({ _id: study._id } as never, { $inc: { chapterCount: 1 }, $set: { updatedAt: now } } as never);
+    return { studyId: study._id, chapterId, url: `/studies/${study._id}/edit/${chapterId}` };
   }
   /** Coach/owner: star a scored moment into their class-board shortlist (shows on the Sunday digest). */
   async starMoment(session: any, gameId: string, ply: number, note?: string) {

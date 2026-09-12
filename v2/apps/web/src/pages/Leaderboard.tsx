@@ -372,7 +372,9 @@ export default function LeaderboardPage() {
   const { data: auth } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
   const { data: myRating } = useQuery({ queryKey: ["me-rating"], queryFn: api.myRating });
   const qc = useQueryClient();
-  const [period, setPeriod] = useState<Period>("7d");
+  // Default 1 month (was 7 days): the period tabs now also drive the openings and game-awards boards,
+  // and a week hides students whose imported Lichess/chess.com games are older (Akshay vanished, 2026-09-12).
+  const [period, setPeriod] = useState<Period>("30d");
   const [bucket, setBucket] = useState<Bucket>("all");
   const [sortBy, setSortBy] = useState<"score" | "consistency">("score");
   const [showBoost, setShowBoost] = useState(false);
@@ -896,6 +898,8 @@ type GameAwardEvent = { gameId: string; ply: number; color: "white" | "black"; f
 // Open a moment on OUR board editor (owner 2026-09-12: "why does it open Lichess? our board is good").
 // Arrows: green = the engine's move, red = what was played when it differs. Same ?fen=&shapes= deep
 // link the coach board uses.
+/** Owner 2026-09-12: moments open on the My Studies board (a chapter in the viewer's "🎯 Game awards" study). */
+function momentStudyUrl(e: GameAwardEvent): string { return `/api/game-motifs/open/${encodeURIComponent(e.gameId)}/${e.ply}`; }
 function momentEditorUrl(e: GameAwardEvent): string {
   const shapes: Array<{ orig: string; dest: string; brush: string }> = [];
   if (e.bestUci?.length >= 4) shapes.push({ orig: e.bestUci.slice(0, 2), dest: e.bestUci.slice(2, 4), brush: "green" });
@@ -960,13 +964,13 @@ function StudentMoments({ events, label, canStar, onStar, starPending, row }: {
                 <tbody>
                   {evs.sort((a, b) => a.ply - b.ply).map((e) => (
                     <tr key={`${e.gameId}:${e.ply}`} className="border-t border-ink-800/70">
-                      <td className="px-3 py-1.5 font-mono text-ink-100"><Link to={momentEditorUrl(e)} className="hover:text-white" title="Open this position on the ChessGuru board">{Math.ceil(e.ply / 2)}{e.color === "black" ? "…" : "."} {e.playedSan}</Link></td>
+                      <td className="px-3 py-1.5 font-mono text-ink-100"><a href={momentStudyUrl(e)} className="hover:text-white" title="Open this position on your My Studies board">{Math.ceil(e.ply / 2)}{e.color === "black" ? "…" : "."} {e.playedSan}</a></td>
                       <td className="px-2 py-1.5"><span className="rounded-full bg-white/10 px-2 py-0.5 font-semibold text-white">{label(e.primary)}</span></td>
                       <td className="px-2 py-1.5">{e.found ? <span className="text-emerald-300">✅ found</span> : <span className="text-rose-300">❌ missed <span className="text-ink-400">— best {e.bestSan}{e.mateIn ? `, mate in ${e.mateIn}` : ""}</span></span>}</td>
                       <td className={`px-2 py-1.5 text-right font-extrabold tabular-nums ${e.found ? "text-emerald-300" : "text-rose-300"}`}>{e.points > 0 ? "+" : ""}{e.points}</td>
                       <td className="hidden px-2 py-1.5 text-right tabular-nums sm:table-cell">{e.timeTrouble ? <span className="rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] text-amber-200" title="Time trouble — the penalty is halved">⏱ {e.clockMs != null ? Math.round(e.clockMs / 1000) + "s" : ""}</span> : e.clockMs != null ? <span className="text-ink-500">{Math.round(e.clockMs / 1000)}s</span> : <span className="text-ink-700">—</span>}</td>
                       <td className="whitespace-nowrap px-2 py-1.5 text-right">
-                        <Link to={momentEditorUrl(e)} className="rounded-md bg-brand-500/20 px-2 py-0.5 text-[10px] font-semibold text-brand-200" title="Open on the ChessGuru board with the engine's move drawn">♟ board</Link>
+                        <a href={momentStudyUrl(e)} className="rounded-md bg-brand-500/20 px-2 py-0.5 text-[10px] font-semibold text-brand-200" title="Open on your My Studies board with the engine's move drawn (green = best, red = played)">📓 My Studies</a>
                         {canStar && (e.starredBy
                           ? <span className="ml-1 text-[10px] text-amber-300" title="On your class-board shortlist and in Sunday's digest">★</span>
                           : <button onClick={() => onStar(e)} disabled={starPending} className="ml-1 rounded-md bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold text-amber-200" title="Star for class — class-board shortlist + Sunday digest">☆ star</button>)}
