@@ -9,7 +9,7 @@ import { Link } from "react-router-dom";
 import { get, post } from "../lib/api";
 
 type Cell = { id: string; ink: string; san: string; status: "verified" | "agreed" | "guess" | "inferred" | "unknown"; confidence: number; inferred?: string };
-type Status = { state: string; pgn?: string; cells?: Cell[]; summary?: Record<string, number>; seconds?: number; error?: string; cells2?: number };
+type Status = { state: string; pgn?: string; cells?: Cell[] | number; summary?: Record<string, number>; seconds?: number; error?: string; cells2?: number };
 
 const COLOUR: Record<Cell["status"], string> = {
   verified: "bg-emerald-500/20 text-emerald-200 border-emerald-500/40",
@@ -37,7 +37,10 @@ export default function ScanScoresheetPage() {
   const [status, setStatus] = useState<Status | null>(null);
   const [cells, setCells] = useState<Cell[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [, setNow] = useState(0);
   const timer = useRef<number | null>(null);
+  useEffect(() => { const t = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(t); }, []);
 
   useEffect(() => {
     if (!jobId) return;
@@ -45,13 +48,16 @@ export default function ScanScoresheetPage() {
       try {
         const s = await get<Status>(`/api/vision/scoresheet/status/${jobId}`);
         setStatus(s);
-        if (s.state === "done") { setCells(s.cells || []); return; }
+        if (s.state === "done") { setCells(Array.isArray(s.cells) ? s.cells : []); return; }
         if (s.state === "error") return;
         timer.current = window.setTimeout(tick, 4000);
       } catch (e) { setErr((e as Error).message); }
     };
     tick();
-    return () => { if (timer.current) window.clearTimeout(timer.current); };
+    // iPhone Safari pauses timers in the background: poll again the moment the tab is back
+    const onVis = () => { if (document.visibilityState === "visible") { if (timer.current) window.clearTimeout(timer.current); tick(); } };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { if (timer.current) window.clearTimeout(timer.current); document.removeEventListener("visibilitychange", onVis); };
   }, [jobId]);
 
   async function start() {
@@ -59,7 +65,7 @@ export default function ScanScoresheetPage() {
     setErr(null); setStatus(null); setCells([]);
     try {
       const r = await post<{ ok: boolean; job_id: string }>("/api/vision/scoresheet/start", { imagePngBase64: sheet, image2PngBase64: sheet2 || undefined });
-      setJobId(r.job_id);
+      setJobId(r.job_id); setStartedAt(Date.now());
     } catch (e) { setErr((e as Error).message); }
   }
 
@@ -80,7 +86,7 @@ export default function ScanScoresheetPage() {
         <Link to="/coach-board" className="text-sm text-brand-300 hover:underline">← Coach board</Link>
       </div>
       <p className="text-sm text-ink-300">
-        Photograph the sheet flat with the whole move grid in frame. Reading takes a few minutes. Green moves are proven by
+        Photograph the whole move grid, as straight-on as you can, nothing lying on the sheet. Reading takes 2–5 minutes. Green moves are proven by
         the position; amber and red ones need your eye; grey ones are read as written but the position could not confirm them.
         Upload the opponent's copy too and the two are cross-checked.
       </p>
@@ -100,7 +106,13 @@ export default function ScanScoresheetPage() {
       <div className="flex items-center gap-3">
         <button onClick={start} disabled={!sheet || busy}
           className="rounded-lg bg-brand-600 px-5 py-2.5 font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
-          {busy ? `Reading… (${status?.state || "queued"})` : "Read the sheet"}
+          {busy ? (() => {
+            const n = typeof status?.cells === "number" ? status.cells + (status.cells2 || 0) : 0;
+            const est = n ? Math.max(60, Math.round(n * 2.6)) : 240;       // ≈2.6 s per cell on the server CPU
+            const gone = startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0;
+            const left = Math.max(0, est - gone);
+            return `Reading… ${status?.state || "queued"} · ${gone}s elapsed · about ${left >= 60 ? `${Math.ceil(left / 60)} min` : `${left}s`} left`;
+          })() : "Read the sheet"}
         </button>
         {status?.state === "done" && <span className="text-sm text-ink-300">{cells.length} cells in {status.seconds}s ·
           {" "}verified {status.summary?.verified ?? 0}, check {(status.summary?.guess ?? 0) + (status.summary?.inferred ?? 0)}, unconfirmed {status.summary?.unknown ?? 0}</span>}

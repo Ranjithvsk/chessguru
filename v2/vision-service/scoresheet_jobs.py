@@ -44,15 +44,29 @@ def _write(job_id: str, **kw) -> None:
     os.replace(tmp, p)
 
 
+def _split_any(photo: str, out_dir: str) -> int:
+    """Phone photo of a printed sheet (coloured grid, perspective, folds) →
+    split_scoresheet_v2; a flat pre-cropped page with a black grid → the
+    original splitter. v2 refuses cleanly when it finds no coloured grid."""
+    try:
+        import split_scoresheet_v2 as v2
+        info = v2.split(photo, out_dir)
+        if len(info["cells"]) >= 2:
+            return len(info["cells"])
+    except SystemExit:
+        pass
+    except Exception as e:  # noqa: BLE001
+        print("split v2 failed:", e)
+    import split_scoresheet as sp
+    return len(sp.split(photo, out_dir))
+
+
 def _run(job_id: str, paired: bool) -> None:
     d = _dir(job_id)
     try:
         _write(job_id, state="splitting")
-        import split_scoresheet as sp
-        n1 = len(sp.split(os.path.join(d, "sheet.png"), os.path.join(d, "cells")))
-        n2 = 0
-        if paired:
-            n2 = len(sp.split(os.path.join(d, "sheet2.png"), os.path.join(d, "cells2")))
+        n1 = _split_any(os.path.join(d, "sheet.png"), os.path.join(d, "cells"))
+        n2 = _split_any(os.path.join(d, "sheet2.png"), os.path.join(d, "cells2")) if paired else 0
         if n1 < 2:
             _write(job_id, state="error", error="no move grid found on the sheet — is the photo rectified and the whole grid in frame?")
             return
