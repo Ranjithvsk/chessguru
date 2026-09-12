@@ -243,6 +243,14 @@ label set whose own error rate caps any reader in the mid-90s. Reaching the publ
 (b) a larger/longer-trained reader (TrOCR-large or the tight-crop model on a full schedule); the
 chess-side levers are exhausted at this reader quality.
 
+
+### Full-schedule candidates (2026-09-12, daytime)
+
+| Candidate | val best | held-out move-level raw | outcome |
+|---|---|---|---|
+| run7 — ink-tight crop from the base checkpoint, 10 ep, lr 4e-5 | 84.6 % (ep 8) | **84.1 %** | 5.5 points under run4; the crop removes the row rules/context the pretrained encoder uses and 12k cells cannot relearn it. Dropped; stage 2 skipped. |
+| run8 — TrOCR-large, batch 6, encoder embeddings + 18/24 blocks frozen (full Adam state for 558M params OOMs the 10 GB card) | running | — | auto-promoted to v2 only if > 89.6 % |
+
 ## 12. Shipped (2026-09-12)
 
 - **Model**: `/opt/chessguru-vision/models/scoresheet-trocr-v1` on France (1.3 GB, TrOCR-base fine-tuned;

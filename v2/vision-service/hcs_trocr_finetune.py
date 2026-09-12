@@ -77,6 +77,19 @@ def main(data_dir: str, out_dir: str, epochs: int = 8):
     mdl.config.pad_token_id = tok.pad_token_id
     mdl.config.eos_token_id = tok.sep_token_id
     mdl.generation_config.max_new_tokens = MAXLEN
+    # TrOCR-large (558M params) does not fit a 10 GB card with full Adam state:
+    # measured "CUDA driver error: out of memory" in the optimizer step. Freeze
+    # the embeddings and the bottom FREEZE_ENCODER_LAYERS encoder blocks; the
+    # decoder and the top blocks are where the notation is learned.
+    n_freeze = int(os.environ.get("FREEZE_ENCODER_LAYERS", "0"))
+    if n_freeze > 0:
+        enc = mdl.encoder
+        for prm in enc.embeddings.parameters(): prm.requires_grad = False
+        layers = getattr(enc, "layers", None) or enc.encoder.layer     # transformers 5 vs 4 naming
+        for i, blk in enumerate(layers):
+            if i < n_freeze:
+                for prm in blk.parameters(): prm.requires_grad = False
+        say(f"frozen encoder embeddings + {n_freeze}/{len(layers)} blocks; trainable params {sum(p.numel() for p in mdl.parameters() if p.requires_grad)/1e6:.0f}M of {sum(p.numel() for p in mdl.parameters())/1e6:.0f}M")
     dev = torch.device("cuda"); mdl.to(dev)
     dl = DataLoader(Cells(train, data_dir, True), batch_size=BATCH, shuffle=True, num_workers=6,
                     persistent_workers=True, pin_memory=True, collate_fn=collate)
@@ -88,7 +101,7 @@ def main(data_dir: str, out_dir: str, epochs: int = 8):
         ids = tok(sans, max_length=MAXLEN, padding="max_length", truncation=True, return_tensors="pt").input_ids
         ids[ids == tok.pad_token_id] = -100
         return ids
-    opt = torch.optim.AdamW(mdl.parameters(), lr=LR, weight_decay=0.01)
+    opt = torch.optim.AdamW([p for p in mdl.parameters() if p.requires_grad], lr=LR, weight_decay=0.01)
     steps = epochs * len(dl); warm = int(0.05 * steps)
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / max(1, warm)) * max(0.0, (steps - s) / max(1, steps - warm)))
     scaler = torch.amp.GradScaler("cuda")
