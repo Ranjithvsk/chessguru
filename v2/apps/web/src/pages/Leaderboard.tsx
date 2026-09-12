@@ -720,6 +720,13 @@ export default function LeaderboardPage() {
           two feeds read as one page. */}
       <OpeningsLeaderboardSection />
 
+      {/* Game awards — tactics found and missed in the students' own games (arena, My Games,
+          linked Lichess / Chess.com). Same card as the boards above; owner 2026-09-12: "I need it
+          in the academy leaderboard, with the same UI". */}
+      <div id="game-awards" className="mt-6">
+        <GameAwardsSection />
+      </div>
+
       <StartBoostModal
         open={showBoost}
         onClose={() => setShowBoost(false)}
@@ -868,3 +875,170 @@ function OpeningsLeaderboardSection() {
   );
 }
 
+
+
+// ─────────────────────────────────────────────────────────────────────
+// Game awards section — every finished game of an academy member (arena, My
+// Games import, linked Lichess / Chess.com) is walked by the engine; each
+// critical moment is tagged with its motif (fork, pin, mate pattern…).
+// Found = the motif's points, missed = minus half. Server: /api/game-motifs.
+// ─────────────────────────────────────────────────────────────────────
+type GameAwardRow = { rank: number; studentId: string; username: string; name: string | null; score: number; found: number; missed: number; games: number; lastAt: string; byMotif: Record<string, { found: number; missed: number }>; sources: string[] };
+type GameAwardBoard = { period: string; rows: GameAwardRow[]; labels: Record<string, string>; points: Record<string, number>; pending: number };
+type GameAwardEvent = { gameId: string; ply: number; color: "white" | "black"; fen: string; bestSan: string | null; playedSan: string | null; found: boolean; motifs: string[]; primary: string; points: number; lossCp: number; mateIn: number | null; at: string; source: string; url: string | null; label: string };
+const GAME_SRC: Record<string, string> = { live: "Arena", my: "My Games", lichess: "Lichess", chesscom: "Chess.com" };
+
+function GameAwardsSection() {
+  const [period, setPeriod] = useState<"7d" | "30d" | "90d" | "all">("30d");
+  const [open, setOpen] = useState<string | null>(null);
+  const q = useQuery({
+    queryKey: ["academy-game-awards", period],
+    queryFn: () => get<GameAwardBoard>(`/api/game-motifs/leaderboard?period=${period}`),
+    staleTime: 30_000, refetchInterval: 60_000,
+  });
+  const ev = useQuery({
+    queryKey: ["academy-game-awards-student", open, period],
+    queryFn: () => get<{ events: GameAwardEvent[] }>(`/api/game-motifs/student/${encodeURIComponent(open!)}?period=${period}`),
+    enabled: !!open,
+  });
+  const rows = q.data?.rows ?? [];
+  const labels = q.data?.labels ?? {};
+  const label = (m: string) => labels[m] ?? m;
+  const top10 = rows.slice(0, 10);
+  const podium = top10.slice(0, 3);
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-950/40 via-brand-950/40 to-amber-950/20 p-5">
+      <div className="pointer-events-none absolute -right-20 -top-20 h-52 w-52 rounded-full bg-emerald-500/15 blur-3xl" />
+      <div className="pointer-events-none absolute -left-20 bottom-0 h-52 w-52 rounded-full bg-amber-500/10 blur-3xl" />
+      <div className="relative">
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-300">Games · tactics found</div>
+            <h2 className="bg-gradient-to-r from-amber-300 via-emerald-300 to-brand-300 bg-clip-text font-display text-2xl font-bold text-transparent">
+              🎯 Game Awards
+            </h2>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex gap-1 rounded-full bg-ink-900/70 p-1 text-[11px] font-semibold">
+              {(["7d", "30d", "90d", "all"] as const).map((p) => (
+                <button key={p} onClick={() => setPeriod(p)} className={`rounded-full px-2.5 py-1 ${period === p ? "bg-emerald-500/30 text-emerald-100" : "text-ink-400 hover:text-ink-200"}`}>{p === "all" ? "All" : p}</button>
+              ))}
+            </div>
+            <div className="hidden text-[11px] text-ink-300 sm:block">Found = motif points · missed = −half</div>
+          </div>
+        </div>
+
+        {q.data && q.data.pending > 0 && (
+          <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-200">
+            {q.data.pending} game{q.data.pending === 1 ? "" : "s"} still queued for the engine — the board fills in as they finish.
+          </div>
+        )}
+        {q.isLoading && <div className="text-sm text-ink-400">Loading game awards…</div>}
+        {q.error && (
+          <div className="rounded border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200">{String((q.error as any)?.message || "Could not load game awards.")}</div>
+        )}
+        {!q.isLoading && rows.length === 0 && (
+          <div className="rounded-xl border border-dashed border-emerald-500/30 bg-ink-950/40 p-6 text-center text-sm text-ink-300">
+            No scored games in this period yet. Play in the arena, import a PGN under My Games, or link a Lichess / Chess.com account — the engine picks games up on its own.
+          </div>
+        )}
+
+        {podium.length > 0 && (
+          <div className="mb-3 grid grid-cols-3 gap-2 sm:gap-3">
+            {podium.map((r) => {
+              const cls =
+                r.rank === 1 ? "from-amber-300 via-yellow-400 to-yellow-600 text-amber-950 ring-2 ring-amber-300/60 shadow-[0_0_20px_rgba(251,191,36,0.35)]" :
+                r.rank === 2 ? "from-slate-100 via-slate-300 to-slate-500 text-slate-900 ring-2 ring-slate-300/60 shadow-lg" :
+                               "from-orange-300 via-orange-500 to-orange-700 text-orange-950 ring-2 ring-orange-400/60 shadow-lg";
+              const height = r.rank === 1 ? "h-32 sm:h-36" : "h-24 sm:h-28";
+              const best = Object.entries(r.byMotif).sort((a, b) => b[1].found - a[1].found)[0];
+              return (
+                <div key={r.studentId} className={`flex flex-col items-center justify-end rounded-t-2xl bg-gradient-to-b ${cls} ${height} px-2 py-3`}>
+                  <div className="text-lg font-bold">#{r.rank}</div>
+                  <div className="line-clamp-1 text-center text-xs font-semibold">{r.name || r.username}</div>
+                  <div className="mt-1 tabular-nums text-xl font-black drop-shadow">{r.score > 0 ? "+" : ""}{r.score}</div>
+                  <div className="line-clamp-1 text-[10px] font-semibold opacity-80">✅ {r.found} · ❌ {r.missed}{best ? ` · ${label(best[0])}` : ""}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {top10.length > 0 && (
+          <div className="overflow-x-auto rounded-xl border border-ink-800/60 bg-ink-950/50">
+            <table className="min-w-full text-xs sm:text-sm">
+              <thead className="bg-ink-800/80 text-[10px] uppercase tracking-wide text-ink-400">
+                <tr>
+                  <th className="px-2 py-2 text-left sm:px-3">#</th>
+                  <th className="px-2 py-2 text-left sm:px-3">Student</th>
+                  <th className="px-2 py-2 text-right sm:px-3">Score</th>
+                  <th className="px-2 py-2 text-right sm:px-3" title="Tactics found">✅ Found</th>
+                  <th className="px-2 py-2 text-right sm:px-3" title="Tactics missed">❌ Missed</th>
+                  <th className="hidden px-2 py-2 text-right sm:table-cell sm:px-3">Games</th>
+                  <th className="hidden px-2 py-2 text-left md:table-cell sm:px-3">Best at</th>
+                  <th className="hidden px-2 py-2 text-left lg:table-cell sm:px-3">Where</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-800/60">
+                {top10.map((r) => {
+                  const rowBg =
+                    r.rank === 1 ? "bg-gradient-to-r from-amber-500/10 to-transparent" :
+                    r.rank === 2 ? "bg-gradient-to-r from-slate-400/10 to-transparent" :
+                    r.rank === 3 ? "bg-gradient-to-r from-orange-500/10 to-transparent" : "";
+                  const top = Object.entries(r.byMotif).sort((a, b) => (b[1].found - b[1].missed) - (a[1].found - a[1].missed)).slice(0, 3);
+                  const isOpen = open === r.studentId;
+                  return [
+                    <tr key={r.studentId} onClick={() => setOpen(isOpen ? null : r.studentId)} className={`${rowBg} cursor-pointer hover:bg-ink-800/40 ${isOpen ? "bg-emerald-500/10" : ""}`} title="Click for every scored moment">
+                      <td className="px-2 py-2 text-left tabular-nums sm:px-3">
+                        <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold ${
+                          r.rank === 1 ? "bg-amber-400 text-amber-950" : r.rank === 2 ? "bg-slate-200 text-slate-900" : r.rank === 3 ? "bg-orange-400 text-orange-950" : "bg-ink-800 text-ink-300"
+                        }`}>{r.rank}</span>
+                      </td>
+                      <td className="px-2 py-2 text-left sm:px-3">
+                        <div className="line-clamp-1 font-semibold text-white">{r.name || r.username}</div>
+                        <div className="text-[10px] text-ink-500">@{r.username}</div>
+                      </td>
+                      <td className="px-2 py-2 text-right tabular-nums sm:px-3"><span className={`text-lg font-bold ${r.score >= 0 ? "text-emerald-200" : "text-rose-300"}`}>{r.score > 0 ? "+" : ""}{r.score}</span></td>
+                      <td className="px-2 py-2 text-right tabular-nums text-emerald-300 sm:px-3">{r.found}</td>
+                      <td className="px-2 py-2 text-right tabular-nums text-rose-300 sm:px-3">{r.missed}</td>
+                      <td className="hidden px-2 py-2 text-right tabular-nums text-ink-300 sm:table-cell sm:px-3">{r.games}</td>
+                      <td className="hidden px-2 py-2 text-left md:table-cell sm:px-3">
+                        <div className="flex flex-wrap gap-1">{top.map(([m, v]) => <span key={m} className={`rounded-full px-2 py-0.5 text-[10px] ${v.found >= v.missed ? "bg-emerald-500/20 text-emerald-200" : "bg-rose-500/20 text-rose-200"}`}>{label(m)} {v.found}/{v.missed}</span>)}</div>
+                      </td>
+                      <td className="hidden px-2 py-2 text-left text-[11px] text-ink-400 lg:table-cell sm:px-3">{r.sources.map((x) => GAME_SRC[x] ?? x).join(", ")}</td>
+                    </tr>,
+                    isOpen && (
+                      <tr key={r.studentId + ":moments"} className="bg-ink-950/60">
+                        <td colSpan={8} className="px-2 py-2 sm:px-3">
+                          {ev.isLoading && <div className="text-xs text-ink-400">Loading moments…</div>}
+                          {ev.data && (
+                            <div className="grid gap-1">
+                              {ev.data.events.length === 0 && <div className="text-xs text-ink-400">No scored moments in this period.</div>}
+                              {ev.data.events.map((e) => (
+                                <div key={`${e.gameId}:${e.ply}`} className="flex flex-wrap items-center gap-2 rounded-lg bg-ink-900/60 px-2 py-1.5 text-xs">
+                                  <span className={`w-10 text-center font-extrabold tabular-nums ${e.found ? "text-emerald-300" : "text-rose-300"}`}>{e.points > 0 ? "+" : ""}{e.points}</span>
+                                  <span className="rounded-full bg-white/10 px-2 py-0.5 font-semibold text-white">{label(e.primary)}</span>
+                                  <span className="text-ink-200">{Math.ceil(e.ply / 2)}{e.color === "black" ? "…" : "."} {e.playedSan}{!e.found && <span className="text-ink-500"> (best {e.bestSan}{e.mateIn ? `, mate in ${e.mateIn}` : ""})</span>}</span>
+                                  <span className="ml-auto text-[10px] text-ink-500">{GAME_SRC[e.source] ?? e.source} · {e.label} · {new Date(e.at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</span>
+                                  {e.url && (e.url.startsWith("http") ? <a href={e.url} target="_blank" rel="noreferrer" className="text-[10px] font-semibold text-brand-300">game ↗</a> : <Link to={e.url} className="text-[10px] font-semibold text-brand-300">replay</Link>)}
+                                  <a href={`https://lichess.org/analysis/${e.fen.replace(/ /g, "_")}`} target="_blank" rel="noreferrer" className="text-[10px] text-ink-400">position ↗</a>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ),
+                  ];
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="mt-2 text-[10px] text-ink-500">
+          One main motif per moment, the most specific. A tactic counts only when it actually appeared (the opponent just gave up ≥1.2 pawns, or a mate is on). Mate patterns 6–8 · deflection / attraction / sacrifice 4 · fork / pin / skewer / discovered attack 3 · hanging piece 2. Missed = −half. Click a row for every moment.
+        </p>
+      </div>
+    </div>
+  );
+}

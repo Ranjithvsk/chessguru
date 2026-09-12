@@ -46,8 +46,7 @@ const GROUPS: Group[] = [
     label: "Academy", accent: "amber", icon: "🏛️",
     items: [
       { to: "/academy", label: "🏛️ My Academy", desc: "Coaches, students, invites, batches" },
-      { to: "/academy/leaderboard", label: "🏆 Leaderboard", desc: "Academy ranking, Overall Score, champions, boost weeks" },
-      { to: "/academy/game-awards", label: "🎯 Game awards", desc: "Tactics found and missed in real games — arena, Lichess, Chess.com" },
+      { to: "/academy/leaderboard", label: "🏆 Leaderboard", desc: "Academy ranking, Overall Score, champions, boost weeks, game awards" },
       { to: "/academy/attendance", label: "📋 Attendance", desc: "Mark today · fleet dashboard · watchlist — all inside" },
       { to: "/academy/performance", label: "📊 Student performance", desc: "Rating, tier, attendance dashboard per student" },
       { to: "/academy/fairness", label: "🛡 Fairness report", desc: "Fair play: incidents, how each was detected, what the engine did" },
