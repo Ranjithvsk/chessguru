@@ -2621,6 +2621,28 @@ Thank you!`;
       const uid = String(e?.studentId || "");
       const target = allowed.get(uid);
       if (!target) { skipped++; continue; }
+
+      // "unmarked" = take the mark back off. The tap cycle ends here:
+      // present -> absent -> late -> not marked.
+      //
+      // Deletes EVERY manual row for this student on this date, not just the
+      // one this caller wrote. The read side accepts a manual mark from anyone
+      // (it matches any classId starting "manual-"), so deleting only our own
+      // would leave a coach's mark standing while the owner was told it had
+      // been cleared.
+      //
+      // QR check-ins and live-class auto-joins are left alone on purpose —
+      // those are evidence the student was actually there, and clearing a
+      // coach's manual override should reveal them again, not erase them.
+      if (e?.status === "unmarked") {
+        const r = await col.deleteMany({
+          key: target._id,
+          classId: { $regex: new RegExp(`^manual-.*-${yyyymmdd}$`) },
+        } as any);
+        if (r.deletedCount) marked++; else skipped++;
+        continue;
+      }
+
       const status: "present" | "late" | "absent" =
         e?.status === "late" ? "late"
         : e?.status === "absent" ? "absent"

@@ -54,16 +54,19 @@ const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart
 // Owner directive 2026-09-12, replacing the 2026-08-23 "default everyone
 // present" one: a sheet starts EMPTY and taps walk it round.
 //
-//   (empty) -> present -> absent -> late -> present -> ...
+//   (empty) -> present -> absent -> late -> (empty) -> ...
+//
+// The fourth tap genuinely removes the mark rather than parking it on a
+// status, so a mis-tap can be undone without leaving a record behind.
 //
 // Nobody is counted as having attended a class the coach never took the
 // register for. Late keeps its minutes: tapping into it uses whatever was set
 // before, or 5, and the long-press panel is still where you change that.
-function nextStatus(s: RowStatus): Status {
+function nextStatus(s: RowStatus): RowStatus {
   if (s === "unmarked") return "present";
   if (s === "present") return "absent";
   if (s === "absent") return "late";
-  return "present";           // late, tap comes back round to present
+  return "unmarked";          // late, tap clears it back to not marked
 }
 
 function statusStyle(s: RowStatus, excused = false): { ring: string; bg: string; text: string; label: string; emoji: string } {
@@ -147,7 +150,7 @@ export default function AttendancePage() {
 
   const sheetKey = ["attendance-sheet", date, coachId, batchId];
   const markMut = useMutation({
-    mutationFn: (entries: Array<{ studentId: string; status: Status; lateMinutes?: number | null; reason?: string | null }>) =>
+    mutationFn: (entries: Array<{ studentId: string; status: RowStatus; lateMinutes?: number | null; reason?: string | null }>) =>
       post<{ ok: boolean; marked: number; skipped: number }>(`/api/academy/attendance/mark`, { date, entries }),
     // Optimistic UI (owner ask 2026-08-23 "click should be instant"):
     // patch the cached sheet BEFORE the server responds so the card flips
@@ -167,8 +170,14 @@ export default function AttendancePage() {
               ...r,
               status: e.status,
               lateMinutes: e.status === "late" ? (e.lateMinutes ?? r.lateMinutes ?? 5) : null,
-              reason: e.reason ?? r.reason,
-              source: "manual",
+              // A clear drops the reason outright. `e.reason ?? r.reason` keeps the
+              // old one, because ?? only falls through on null — and null is exactly
+              // what a clear sends.
+              reason: e.status === "unmarked" ? null : (e.reason ?? r.reason),
+              // Clearing removes the manual row, so the card is no longer manually
+              // sourced. Saying "manual" would flash a badge for a mark that has
+              // just been deleted.
+              source: e.status === "unmarked" ? "default" : "manual",
             };
           }),
         };
@@ -232,7 +241,10 @@ export default function AttendancePage() {
   function toggleOne(row: Row) {
     const s = nextStatus(row.status);
     const lateMinutes = s === "late" ? (row.lateMinutes || 5) : null;
-    markMut.mutate([{ studentId: row.studentId, status: s, lateMinutes, reason: row.reason }]);
+    // Clearing drops the reason too — it described an absence that no longer
+    // exists.
+    const reason = s === "unmarked" ? null : row.reason;
+    markMut.mutate([{ studentId: row.studentId, status: s, lateMinutes, reason }]);
   }
 
   function bulkPresent() {
