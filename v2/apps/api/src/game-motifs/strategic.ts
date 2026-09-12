@@ -141,8 +141,11 @@ export function strategicTags(inp: StrategicInput): StrategicTag[] {
   if (inp.threatBefore != null && inp.threatAfter != null) {
     const swingBefore = inp.beforeMover - inp.threatBefore;   // how much passing would have cost
     const swingAfter = inp.afterMover - inp.threatAfter;
-    if (swingBefore >= 150 && swingAfter <= 40) tags.add("goodDefence");
-    else if (swingBefore >= 60 && swingAfter <= 25 && quiet && Math.abs(inp.afterMover - inp.beforeMover) <= 40) tags.add("prophylaxis");
+    // (first pass tagged 1.e4 as prophylaxis: passing the first move "costs" the move advantage.
+    //  A threat must be worth a real pawn and the position must not already be decided.)
+    const balanced = Math.abs(inp.beforeMover) <= 300;
+    if (swingBefore >= 150 && swingAfter <= 40 && balanced) tags.add("goodDefence");
+    else if (swingBefore >= 90 && swingAfter <= 25 && quiet && piece !== "p" && balanced && Math.abs(inp.afterMover - inp.beforeMover) <= 40) tags.add("prophylaxis");
   }
   // Zugzwang created: after our move the opponent would rather pass than play their best move.
   if (inp.oppBestAfter != null && inp.oppPassAfter != null && inp.oppPassAfter - inp.oppBestAfter >= 100 && endgame) tags.add("zugzwangCreated");

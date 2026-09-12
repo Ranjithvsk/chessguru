@@ -299,12 +299,15 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
           const afterMover = toWhiteCp(next, sideToMove === "white" ? "black" : "white") * sign;
           const loss = Math.max(0, beforeMover - afterMover);
           const inBook = await book.isBook(fenBefore, playedUci);
+          const playedBestHere = playedUci === bestUci || board.isCheckmate();
           ot.plies++;
           if (inBook === true) ot.book++;
-          else if (loss <= 30) ot.engineOk++;
+          else if (loss <= 30 || playedBestHere) ot.engineOk++;
           if (inBook === false && ot.deviationPly === null) ot.deviationPly = i + 1;
           const nm = await book.name(board.fen()); if (nm) { ot.eco = nm.eco; ot.name = nm.name; }
-          if (inBook !== true && loss >= OPENING_MISTAKE_CP) {
+          // (the engine's own move, or a mate, is never a "wrong opening move" — the eval after a
+          // checkmate reads 0 and looked like a 999-pawn loss on the first pass)
+          if (inBook !== true && loss >= OPENING_MISTAKE_CP && !playedBestHere) {
             const trap = loss >= OPENING_TRAP_CP;
             if (trap) ot.trapsFell++; else ot.mistakes++;
             let bestSan: string | null = null;
@@ -361,7 +364,7 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
           }
         }
         // ── Positional layer: only when no tactic was scored at this moment ──
-        if (!events.some((e) => e.gameId === gameId && e.ply === i + 1)) {
+        if (i >= OPENING_PLIES && !board.isCheckmate() && !events.some((e) => e.gameId === gameId && e.ply === i + 1)) {
           const sign = sideToMove === "white" ? 1 : -1;
           const beforeMover = whiteBefore * sign;
           const afterMover = toWhiteCp(next, sideToMove === "white" ? "black" : "white") * sign;
