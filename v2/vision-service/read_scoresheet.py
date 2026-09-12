@@ -12,7 +12,7 @@ The model is the fine-tuned TrOCR from hcs_trocr_finetune.py. CPU is fine:
 ~0.3 s per cell greedy, so a 60-move sheet reads in under a minute.
 """
 from __future__ import annotations
-import argparse, json, math, sys
+import argparse, json, math, re, sys
 from pathlib import Path
 import torch
 from PIL import Image
@@ -61,7 +61,8 @@ def read_cells(paths: list[Path], ip, tok, mdl, device: str, batch: int = 16, fa
             gen = mdl.generate(pv, num_beams=1 if fast else 4, num_return_sequences=k, max_new_tokens=12,
                                output_scores=True, return_dict_in_generate=True)
         texts = tok.batch_decode(gen.sequences, skip_special_tokens=True)
-        scores = gen.sequences_scores.tolist() if gen.sequences_scores is not None else [0.0] * len(texts)
+        ss = getattr(gen, "sequences_scores", None)          # greedy decoding has none
+        scores = ss.tolist() if ss is not None else [0.0] * len(texts)
         for i, p in enumerate(chunk):
             cands = []
             for j in range(k):
@@ -81,10 +82,20 @@ def to_pgn(cells: list[sb.Cell]) -> str:
     return " ".join(out)
 
 
+def _cell_key(q: Path):
+    """Move order, not alphabetical: 001_white before 001_black (plain sort put
+    'black' first and shifted the whole game by one ply)."""
+    m = re.match(r"(\d+)[_-]?(white|black|w|b)?", q.stem, re.I)
+    if not m:
+        return (10**9, q.name)
+    colour = (m.group(2) or "w").lower()[0]
+    return (int(m.group(1)), 0 if colour == "w" else 1, q.name)
+
+
 def list_cells(arg: str) -> list[Path]:
     p = Path(arg)
     if p.is_dir():
-        return sorted(q for q in p.iterdir() if q.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"))
+        return sorted((q for q in p.iterdir() if q.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")), key=_cell_key)
     return [Path(l.strip()) for l in open(p) if l.strip()]
 
 
