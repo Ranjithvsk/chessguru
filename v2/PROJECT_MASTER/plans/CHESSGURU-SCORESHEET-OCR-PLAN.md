@@ -242,3 +242,19 @@ label set whose own error rate caps any reader in the mid-90s. Reaching the publ
 (a) more handwriting — our own Indian sheets, and every coach correction harvested — and
 (b) a larger/longer-trained reader (TrOCR-large or the tight-crop model on a full schedule); the
 chess-side levers are exhausted at this reader quality.
+
+## 12. Shipped (2026-09-12)
+
+- **Model**: `/opt/chessguru-vision/models/scoresheet-trocr-v1` on France (1.3 GB, TrOCR-base fine-tuned;
+  `final/best` on Vinayaka = run4 recipe continued on all 13,751 HCS cells, val 95.9 %).
+- **CLI**: `read_scoresheet.py <model_dir> <cells_dir> [--pair a b] [--fast] --json --pgn` — cells in
+  move order (white before black), blank-tail trimmed, greedy on CPU by default.
+- **Splitter**: `split_scoresheet.py sheet.png out/` for rectified pages.
+- **End-to-end on held-out sheet 103_0** (splitter → reader → annotate-only beam, CPU): **111/116 moves
+  right at move level = 95.7 %**; of the 5 misses one is the HCS label error (label "Bc7", game and
+  our read "Bg7", flagged verified) and one is "h1Q" vs "h1=Q" (same move), so **113/116 = 97.4 %** on
+  what the player actually wrote. Per status: agreed 40/40, guess 6/6, verified 5/6, unknown 60/64.
+  CPU time 471 s for 120 cells (≈3.5 s/cell incl. model load) — fine for a coach's upload, too slow for
+  interactive use; a GPU or an int8/ONNX export is the next infrastructure step.
+- **Held-out average** (24 sheets): 89.5 % move-level single copy, 90.2 % with both copies; the demo
+  sheet is a cleanly written one, which is what the spread (20–98 % per sheet) predicts.

@@ -49,6 +49,7 @@ def norm(s: str) -> str:
     if re.fullmatch(r"[0O]-[0O](-[0O])?[+#!?]*", s):
         s = s.replace("0", "O")
     s = re.sub(r"[+#!?]+$", "", s)
+    s = re.sub(r"([a-h][18])([QRBN])$", r"\1=\2", s)      # "h1Q" is a promotion written without the =
     # a lower-case k/q/r/n can only be a piece letter (no such file), so fold it;
     # b/B is left alone because b-file vs bishop is a real ambiguity.
     return re.sub(r"^[kqrn](?=[a-h1-8x])", lambda m: m.group(0).upper(), s)
