@@ -249,7 +249,15 @@ chess-side levers are exhausted at this reader quality.
 | Candidate | val best | held-out move-level raw | outcome |
 |---|---|---|---|
 | run7 — ink-tight crop from the base checkpoint, 10 ep, lr 4e-5 | 84.6 % (ep 8) | **84.1 %** | 5.5 points under run4; the crop removes the row rules/context the pretrained encoder uses and 12k cells cannot relearn it. Dropped; stage 2 skipped. |
-| run8 — TrOCR-large, batch 6, encoder embeddings + 18/24 blocks frozen (full Adam state for 558M params OOMs the 10 GB card) | running | — | auto-promoted to v2 only if > 89.6 % |
+| run8 — TrOCR-large, batch 6, encoder embeddings + 18/24 blocks frozen (full Adam state for 558M params OOMs the 10 GB card) | 81.4 % (ep 6–7, plateau) | **81.7 %** | 8 points under run4: a frozen encoder cannot adapt its features to pen strokes, and the card cannot afford to unfreeze it. Dropped; v1 stays. |
+
+### Model-side conclusion (2026-09-12)
+
+Both full-schedule alternatives lost to the plain fine-tuned base model on the same held-out sheets:
+tight crop 84.1 %, large-with-frozen-encoder 81.7 %, base run4 89.6 %. With 12k training cells and a
+10 GB card the base recipe is the ceiling of the model-side levers. The remaining headroom (the right
+move is in the top-3 for 95 % of cells; label noise caps at ~95 %) needs **more and closer handwriting**
+— Indian sheets and harvested coach corrections through the shipped review page — not a different model.
 
 ## 12. Shipped (2026-09-12)
 
