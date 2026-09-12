@@ -987,6 +987,33 @@ def book_ingest(body: BookIngestIn) -> dict[str, Any]:
     return {"ok": True, "started": True}
 
 
+class ScoresheetIn(BaseModel):
+    image_base64: str
+    image2_base64: str | None = None     # the other player's copy of the same game
+    owner: str = ""
+
+
+@app.post("/scoresheet/start")
+def scoresheet_start(body: ScoresheetIn) -> dict[str, Any]:
+    """Read a handwritten scoresheet in the background; poll /scoresheet/status.
+    The image must already be rectified (whole grid in frame, no perspective)."""
+    import scoresheet_jobs as sj
+    img = base64.b64decode(body.image_base64.split(",")[-1])
+    img2 = base64.b64decode(body.image2_base64.split(",")[-1]) if body.image2_base64 else None
+    if len(img) < 1000:
+        raise HTTPException(status_code=400, detail="image too small")
+    job_id = sj.start(img, img2, owner=body.owner)
+    return {"ok": True, "job_id": job_id}
+
+
+@app.get("/scoresheet/status/{job_id}")
+def scoresheet_status(job_id: str) -> dict[str, Any]:
+    import scoresheet_jobs as sj
+    if not job_id.replace("-", "").isalnum():
+        raise HTTPException(status_code=400, detail="bad job id")
+    return sj.read_status(job_id)
+
+
 @app.get("/book/status/{book_id}")
 def book_status(book_id: str) -> dict[str, Any]:
     import book_ingest as bi

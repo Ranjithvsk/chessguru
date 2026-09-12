@@ -51,9 +51,17 @@ export default function CoachBoardPage() {
             {d.studentCount} student{d.studentCount === 1 ? "" : "s"} · {red} needs attention · {amber} watch
           </p>
         </div>
-        <Link to="/coach-board/reports" className="rounded-lg border border-ink-700 px-3 py-2 text-xs text-ink-300 hover:bg-ink-800 hover:text-white">
-          📄 All reports
-        </Link>
+        <div className="flex gap-2">
+          <Link to="/coach-board/chessdb" className="rounded-lg bg-gradient-to-r from-teal-500 to-cyan-500 px-3 py-2 text-xs font-semibold text-white shadow hover:opacity-90">
+            ♞ Master Games
+          </Link>
+          <Link to="/coach-board/scoresheet" className="rounded-lg border border-ink-700 px-3 py-2 text-xs text-ink-300 hover:bg-ink-800 hover:text-white">
+            📝 Scan scoresheet
+          </Link>
+          <Link to="/coach-board/reports" className="rounded-lg border border-ink-700 px-3 py-2 text-xs text-ink-300 hover:bg-ink-800 hover:text-white">
+            📄 All reports
+          </Link>
+        </div>
       </div>
 
       {/* Class-wide weaknesses */}

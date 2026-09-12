@@ -159,6 +159,35 @@ export class VisionController {
     }
   }
 
+  /** Handwritten scoresheet reader. Coaches and owners only: the result is a
+   *  game to be filed against a student, not a puzzle scan. Start returns a
+   *  job id; status returns {state, pgn, cells[]} when done. */
+  @Post("scoresheet/start")
+  async scoresheetStart(
+    @Req() req: any,
+    @Body() body: { imagePngBase64: string; image2PngBase64?: string },
+  ) {
+    if (!req.session?.userId) throw new UnauthorizedException("login required");
+    if (!["academy_owner", "coach"].includes(String(req.session?.role || ""))) throw new UnauthorizedException("coach or owner only");
+    if (!body?.imagePngBase64) throw new BadRequestException("imagePngBase64 required");
+    try {
+      return await this.svc.scoresheetStart(body.imagePngBase64, body.image2PngBase64, String(req.session.userId));
+    } catch (e) {
+      throw new BadRequestException((e as Error).message);
+    }
+  }
+
+  @Get("scoresheet/status/:jobId")
+  async scoresheetStatus(@Req() req: any, @Param("jobId") jobId: string) {
+    if (!req.session?.userId) throw new UnauthorizedException("login required");
+    if (!/^[A-Za-z0-9-]{8,40}$/.test(jobId)) throw new BadRequestException("bad job id");
+    try {
+      return await this.svc.scoresheetStatus(jobId);
+    } catch (e) {
+      throw new BadRequestException((e as Error).message);
+    }
+  }
+
   /** Server-side warp with user-drawn corners. Client sends raw image +
    *  4 corner coords (from CornerAdjuster); we proxy to the Python vision
    *  service which does the perspective warp via cv2 and returns a 512x512

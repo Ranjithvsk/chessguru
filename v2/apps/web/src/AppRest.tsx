@@ -107,6 +107,7 @@ import MyGamesImportPage from "./pages/MyGamesImport";
 import MyGameViewPage from "./pages/MyGameView";
 import MyInsightsPage, { StudentInsightsPage } from "./pages/MyInsights";
 import CoachBoardPage from "./pages/CoachBoard";
+import ScanScoresheetPage from "./pages/ScanScoresheet";
 import CoachClassPlanPage from "./pages/CoachClassPlan";
 import CoachChessdbPage from "./pages/CoachChessdb";
 import { StudentGameplayReviseListPage, StudentGameplayRevisePlayPage } from "./pages/StudentGameplayRevise";
@@ -237,6 +238,7 @@ export default function AppRest() {
         <Route path="insights/students/:userId" element={<StudentInsightsPage />} />
         <Route path="coach-board" element={<CoachBoardPage />} />
         <Route path="coach-board/chessdb" element={<CoachChessdbPage />} />
+        <Route path="coach-board/scoresheet" element={<ScanScoresheetPage />} />
         <Route path="revise/games" element={<StudentGameplayReviseListPage />} />
         <Route path="revise/games/:id" element={<StudentGameplayRevisePlayPage />} />
         <Route path="coach-board/plan/:tag" element={<CoachClassPlanPage />} />

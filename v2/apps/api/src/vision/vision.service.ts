@@ -623,6 +623,27 @@ export class VisionService {
    *  which does cv2.getPerspectiveTransform + warpPerspective. Client uses this
    *  INSTEAD of downloading the 10 MB opencv.js WASM (which was killing mobile
    *  users on cellular after they tapped Adjust Corners → wait 50s → freeze). */
+  /** Handwritten scoresheet → moves. The Python service reads it in the
+   *  background (minutes on CPU), so this only starts the job; poll
+   *  scoresheetStatus. Images must be rectified pages (whole grid in frame). */
+  async scoresheetStart(imageB64: string, image2B64: string | undefined, owner: string) {
+    const clean = (b: string) => b.replace(/^data:image\/[a-z]+;base64,/, "");
+    const body: { image_base64: string; image2_base64?: string; owner: string } = { image_base64: clean(imageB64), owner };
+    if (body.image_base64.length < 1000 || body.image_base64.length > 30_000_000) throw new Error("image out of range");
+    if (image2B64) body.image2_base64 = clean(image2B64);
+    const r = await fetch("http://127.0.0.1:5100/scoresheet/start", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(`scoresheet service ${r.status}: ${(await r.text().catch(() => r.statusText)).slice(0, 200)}`);
+    return r.json() as Promise<{ ok: boolean; job_id: string }>;
+  }
+
+  async scoresheetStatus(jobId: string) {
+    const r = await fetch(`http://127.0.0.1:5100/scoresheet/status/${encodeURIComponent(jobId)}`);
+    if (!r.ok) throw new Error(`scoresheet service ${r.status}`);
+    return r.json();
+  }
+
   async warpWithCorners(rawImagePngBase64: string, corners: Array<{ x: number; y: number }>) {
     const rawB64 = rawImagePngBase64.replace(/^data:image\/[a-z]+;base64,/, "");
     if (rawB64.length < 500 || rawB64.length > 20_000_000) {
