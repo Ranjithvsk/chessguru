@@ -78,17 +78,19 @@ export default function StudyCreatePage() {
   // Attaching a library book creates its row here on first use, chapters and
   // all, instead of importing three thousand rows nobody asked for.
   const adopt = useMutation({
-    mutationFn: (hostId: string) => booksApi.adoptLibrary(hostId),
+    mutationFn: (b: { id: string; title: string }) => booksApi.adoptLibrary(b.id).then((r) => ({ ...r, title: b.title })),
     onSuccess: async (r) => {
       await qc.invalidateQueries({ queryKey: ["books"] });
       setBookId(r.bookId);
+      setTitle((t) => t.trim() || r.title);   // the study names itself after the book
     },
   });
   const addBook = useMutation({
-    mutationFn: (name: string) => booksApi.create({ title: name, chapters: [] }),
+    mutationFn: (name: string) => booksApi.create({ title: name, chapters: [] }).then((r) => ({ ...r, title: name })),
     onSuccess: async (r) => {
       await qc.invalidateQueries({ queryKey: ["books"] });
       setBookId(r.bookId);
+      setTitle((t) => t.trim() || r.title);
     },
   });
 
@@ -179,6 +181,9 @@ export default function StudyCreatePage() {
           </div>
 
           <div className="space-y-3">
+            {/* For "From a book" the book box below IS the name field — one box, not
+                two saying nearly the same thing. The study takes the book's name. */}
+            {!tile.needs.includes("book") && (
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-400">Title</label>
               <input value={title} onChange={(e) => setTitle(e.target.value)}
@@ -186,6 +191,7 @@ export default function StudyCreatePage() {
                 maxLength={140}
                 className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
             </div>
+            )}
 
             {tile.needs.includes("fen") && (
               <div>
@@ -220,11 +226,22 @@ export default function StudyCreatePage() {
             {tile.needs.includes("book") && (
               <div className="space-y-3">
                 <div>
-                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-400">Book</label>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-400">
+                    Book <span className="ml-1 font-normal normal-case tracking-normal text-ink-500">— the study takes this name</span>
+                  </label>
                   {!bookId ? (
                     <>
                       <input value={bookSearch} onChange={(e) => setBookSearch(e.target.value)}
-                        placeholder="Search title or author…"
+                        onKeyDown={(e) => {
+                          // Enter on a search with no matches saves what was typed. Typing in a
+                          // book nobody has entered yet is the whole reason this box takes free text.
+                          if (e.key !== "Enter") return;
+                          e.preventDefault();
+                          const name = bookSearch.trim();
+                          if (!name || addBook.isPending || adopt.isPending) return;
+                          if (filteredBooks.length === 0 && libRows.length === 0 && !libQ.isFetching) addBook.mutate(name);
+                        }}
+                        placeholder="Type a book name — searches your library"
                         className="mb-2 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
                       <div className="max-h-80 overflow-y-auto rounded-lg border border-ink-700 bg-ink-800/50">
                         {booksQ.isLoading && <div className="p-3 text-xs text-ink-400">Loading…</div>}
@@ -252,7 +269,7 @@ export default function StudyCreatePage() {
                           </div>
                         )}
                         {filteredBooks.map((b) => (
-                          <button key={b._id} type="button" onClick={() => setBookId(b._id)}
+                          <button key={b._id} type="button" onClick={() => { setBookId(b._id); setTitle((t) => t.trim() || b.title); }}
                             className="flex w-full items-center gap-2 border-b border-ink-800 px-3 py-2 text-left last:border-0 hover:bg-ink-800">
                             <span className="text-lg">📚</span>
                             <div className="flex-1">
@@ -276,7 +293,7 @@ export default function StudyCreatePage() {
                           </div>
                         )}
                         {libRows.map((b) => (
-                          <button key={b.id} type="button" onClick={() => adopt.mutate(b.id)} disabled={adopt.isPending}
+                          <button key={b.id} type="button" onClick={() => adopt.mutate({ id: b.id, title: b.title })} disabled={adopt.isPending}
                             className="flex w-full items-center gap-2 border-b border-ink-800 px-3 py-2 text-left last:border-0 hover:bg-ink-800 disabled:opacity-50">
                             <span className="text-lg">📖</span>
                             <div className="min-w-0 flex-1">
