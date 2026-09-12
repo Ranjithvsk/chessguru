@@ -31,6 +31,7 @@ export interface GameLog {
 
 /** One bot appearance: connect, seek, play a single game, disconnect. */
 export class BotSession {
+  private engineFails = 0; // consecutive think failures in this game
   private ws: WebSocket | null = null;
   private board = new Chess();
   private uciMoves: string[] = [];
@@ -214,6 +215,7 @@ export class BotSession {
         return;
       }
       const think = await this.engine.think({ moves: this.uciMoves, opponentRating: this.opponentRating });
+      this.engineFails = 0;
       if (this.done || this.ply !== atPly) return; // the position moved on under us
 
       if (this.shouldResign()) {
@@ -232,6 +234,14 @@ export class BotSession {
       this.send({ v: 1, t: "move", g: this.game, d: { uci: think.uci, ply: atPly } });
     } catch (e) {
       console.error(`[bot ${this.name}] think failed:`, (e as Error).message);
+      // One failure can be a hiccup — play on. A second in a row means the engine is gone;
+      // resign rather than keep feeding the student random moves as if they were chess.
+      this.engineFails += 1;
+      if (this.engineFails >= 2 && this.game) {
+        console.error(`[bot ${this.name}] engine down twice in a row — resigning ${this.game}`);
+        this.send({ v: 1, t: "resign", g: this.game });
+        return;
+      }
       this.playFallback(atPly);
     } finally {
       this.busy = false;

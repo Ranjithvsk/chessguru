@@ -19,6 +19,34 @@ const cmd = new Redis(REDIS_URL, { maxRetriesPerRequest: null });
 cmd.on("error", (e) => console.error("[bot] redis:", e.message));
 const mongo = new MongoClient(MONGO);
 const engines = new EnginePool(() => new Maia3Engine());
+
+// Weights guard (owner 2026-09-12: "add the guard"). On 2026-09-12 the Maia-1 nets had been deleted
+// from disk; lc0 still handshook, every `go` failed, and the bots played RANDOM moves for days
+// without anyone noticing. Now: if a net or the lc0 binary is unreadable, the bot logs it loudly and
+// refuses to join any seek until the files are back — no bot is better than a silent random mover.
+import { accessSync, constants as fsConstants } from "node:fs";
+const MAIA1_LEVELS_REQUIRED = [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900];
+const LC0_BIN_PATH = process.env.LC0_BIN ?? "/home/dreamworld/opt/engines/src/lc0/build/lc0";
+const MAIA1_DIR_PATH = process.env.MAIA1_WEIGHTS ?? "/home/dreamworld/opt/engines/weights/maia1";
+let lastGuardLog = 0;
+function missingEngineFiles(): string[] {
+  const missing: string[] = [];
+  try { accessSync(LC0_BIN_PATH, fsConstants.X_OK); } catch { missing.push(LC0_BIN_PATH); }
+  for (const lvl of MAIA1_LEVELS_REQUIRED) {
+    const f = `${MAIA1_DIR_PATH}/maia-${lvl}.pb.gz`;
+    try { accessSync(f, fsConstants.R_OK); } catch { missing.push(f); }
+  }
+  return missing;
+}
+function enginesHealthy(): boolean {
+  const missing = missingEngineFiles();
+  if (!missing.length) return true;
+  if (Date.now() - lastGuardLog > 60_000) {
+    lastGuardLog = Date.now();
+    console.error(`[bot] REFUSING TO PLAY — ${missing.length} engine file(s) missing or unreadable: ${missing.join(", ")}`);
+  }
+  return false;
+}
 // pm2 restarts us with SIGINT; never leave an engine behind (see EnginePool.killAll).
 process.on("exit", () => engines.killAll());
 for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => process.exit(0));
@@ -81,6 +109,7 @@ async function waitingSeeks(): Promise<SeekMeta[]> {
 }
 
 async function tick(): Promise<void> {
+  if (!enginesHealthy()) return;
   if (seeking || live >= MAX_CONCURRENT) return;
   const threshold = WAIT_MIN_MS + Math.random() * (WAIT_MAX_MS - WAIT_MIN_MS);
   const now = Date.now();
@@ -160,6 +189,8 @@ async function main(): Promise<void> {
   await mongo.connect();
   botKey = await loadBotKey();
   namePool = await buildNamePool(mongo.db());
+  const missingAtBoot = missingEngineFiles();
+  console.log(missingAtBoot.length ? `[bot] engine files MISSING at boot (${missingAtBoot.length}) — bots will not seek until fixed` : `[bot] engine files ok: lc0 + ${MAIA1_LEVELS_REQUIRED.length} Maia-1 nets`);
   // Load the weights now: the first think otherwise costs seconds, which would show up as
   // an implausibly long stare at move one of the first game after a restart.
   await engines
