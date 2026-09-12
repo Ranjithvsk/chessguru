@@ -113,6 +113,7 @@ const GROUPS: Group[] = [
     label: "Tools", accent: "slate", icon: "🛠️",
     items: [
       { to: "/board-editor", label: "📷 Scan position", desc: "Upload/paste/camera → auto-detect FEN (Server AI)" },
+      { to: "/coach-board/scoresheet", label: "📝 Scan scoresheet", desc: "Photo of a handwritten scoresheet → the game as PGN (coach/owner)" },
       { to: "/board-editor", label: "✏️ Board editor", desc: "Set up any position" },
       { to: "/books/read", label: "📖 Book reader", desc: "Read a book, tap any diagram to play it" },
     ],

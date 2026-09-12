@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Chess } from "chess.js";
 import Board from "../components/Board";
 import type { Key } from "chessground/types";
@@ -78,6 +78,10 @@ const PRESETS: { label: string; fen: string }[] = [
 
 export default function BoardEditorPage() {
   const [sp] = useSearchParams();
+  const navigate = useNavigate();
+  // ?returnTo=/studies/<sid>/edit/<cid>: opened from a study to scan a
+  // notebook diagram; "Use in study" carries the FEN back as ?fen=.
+  const returnTo = sp.get("returnTo");
   // Optional deep-link: /board-editor?fen=<encoded>&orientation=black
   // Used by the External-game viewer ("Analyze in board editor") so a user
   // can pick up an imported game at any ply and start exploring lines.
@@ -757,6 +761,13 @@ export default function BoardEditorPage() {
           <button onClick={fp.flip} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">⇅ Flip</button>
           <button onClick={rotate180} title="Rotate the position 180° — fixes upside-down scans (tablet in landscape, book at wrong angle, etc.)" className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">🔄 Rotate 180°</button>
           <button onClick={copyFen} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">Copy FEN</button>
+          {returnTo && returnTo.startsWith("/") && (
+            <button onClick={() => navigate(`${returnTo}${returnTo.includes("?") ? "&" : "?"}fen=${encodeURIComponent(editorFen ?? fp.fen)}`)}
+              className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-500"
+              title="Set this position as the chapter's starting position">
+              📓 Use in study →
+            </button>
+          )}
           {uncertainShapes.length > 0 && (
             <button onClick={() => setUncertainShapes([])}
               className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100 hover:bg-amber-500/20"

@@ -11,7 +11,7 @@
 // the board's nested tree on load and back on save (lib/studyTree), so chapters
 // written by the old editor open here unchanged.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { studiesApi, type Chapter } from "../lib/studies-api";
 import SharedClassBoard, {
@@ -44,6 +44,8 @@ function nodeAt(tree: LocalTreeNode[], path: number[]): LocalTreeNode | null {
 
 export default function StudyBoardPage() {
   const { sid = "", cid = "" } = useParams<{ sid: string; cid: string }>();
+  const [sp, setSp] = useSearchParams();
+  const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["chapter", sid, cid],
     queryFn: () => studiesApi.getChapter(sid, cid),
@@ -63,9 +65,23 @@ export default function StudyBoardPage() {
       </div>
     );
   }
+  // Came back from /board-editor?returnTo=… with a scanned notebook position:
+  // make it the chapter's starting position (fresh move tree), then drop the
+  // param so a reload does not re-apply it.
+  const scannedFen = sp.get("fen");
+  const applying = useRef(false);
+  useEffect(() => {
+    if (!scannedFen || !q.data || applying.current) return;
+    if (!/^([pnbrqkPNBRQK1-8]+\/){7}[pnbrqkPNBRQK1-8]+ [wb] /.test(scannedFen)) { setSp({}, { replace: true }); return; }
+    applying.current = true;
+    studiesApi.saveChapter(sid, cid, { startingFen: scannedFen, moves: [] } as any)
+      .then(() => qc.invalidateQueries({ queryKey: ["chapter", sid, cid] }))
+      .finally(() => { applying.current = false; setSp({}, { replace: true }); });
+  }, [scannedFen, q.data, sid, cid]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   // Keyed on the chapter id so switching chapters rebuilds the board (and its
   // loopback socket) from the new starting state instead of reusing the old.
-  return <Editor key={cid} sid={sid} cid={cid} chapter={q.data} />;
+  return <Editor key={`${cid}:${q.data.startingFen}`} sid={sid} cid={cid} chapter={q.data} />;
 }
 
 function Editor({ sid, cid, chapter }: { sid: string; cid: string; chapter: Chapter }) {
@@ -208,6 +224,8 @@ function SavePill({ status, onClick }: { status: SaveStatus; onClick: () => void
 /** Board controls that sit under the board — the same actions the class footer
  *  drives, minus everything that needs a second person in the room. */
 function BoardChrome() {
+  const { sid = "", cid = "" } = useParams<{ sid: string; cid: string }>();
+  const navigate = useNavigate();
   const { cursorIdx, historyLen } = useClassCursorInfo();
   const { tree, cursorPath } = useClassMoveList();
   const node = nodeAt(tree as any, cursorPath);
@@ -223,6 +241,8 @@ function BoardChrome() {
       <button className={btn} title="Next move" onClick={() => triggerClassBoardAction("stepForward")}>▶</button>
       <span className="mx-1 h-5 w-px bg-ink-700" aria-hidden />
       <button className={btn} title="Flip board" onClick={() => triggerClassFlipOrientation()}>🔄 Flip</button>
+      <button className={btn} title="Photograph a diagram from your notebook; the scanned position becomes this chapter's start"
+        onClick={() => navigate(`/board-editor?returnTo=${encodeURIComponent(`/studies/${sid}/edit/${cid}`)}`)}>📷 Scan notebook</button>
       <button className={btn} title="Set up a position" onClick={() => setClassSetupOpen(true)}>📋 Setup</button>
       <button
         className={`${btn} ${isRevise ? "border-amber-400/60 text-amber-300" : ""}`}
