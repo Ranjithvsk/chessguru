@@ -218,7 +218,7 @@ function StudentClassNotesCard() {
               </div>
               <div>
                 <label className="mb-1 block text-xs uppercase text-ink-400">Photo of your paper notes</label>
-                <input type="file" accept="image/*" capture="environment"
+                <input type="file" accept="image/*"
                   onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                   className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-300 file:mr-3 file:rounded file:border-0 file:bg-teal-500/25 file:px-3 file:py-1 file:text-teal-100" />
                 {file && <div className="mt-1 text-[10px] text-ink-500">{Math.round(file.size / 1024)} KB · {file.type}</div>}
