@@ -52,16 +52,18 @@ type Batch = { _id: string; name: string; coachUserId: string; studentIds: strin
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 // Owner directive 2026-09-12, replacing the 2026-08-23 "default everyone
-// present" one: a sheet starts EMPTY, the first tap marks present, the next
-// marks absent. Nobody is counted as having attended a class the coach never
-// took the register for.
+// present" one: a sheet starts EMPTY and taps walk it round.
 //
-// "Late" left the tap cycle so two taps cannot overshoot into it. It is still
-// set from the long-press detail panel, together with its minutes.
+//   (empty) -> present -> absent -> late -> present -> ...
+//
+// Nobody is counted as having attended a class the coach never took the
+// register for. Late keeps its minutes: tapping into it uses whatever was set
+// before, or 5, and the long-press panel is still where you change that.
 function nextStatus(s: RowStatus): Status {
   if (s === "unmarked") return "present";
   if (s === "present") return "absent";
-  return "present";           // absent or late, tap returns to present
+  if (s === "absent") return "late";
+  return "present";           // late, tap comes back round to present
 }
 
 function statusStyle(s: RowStatus, excused = false): { ring: string; bg: string; text: string; label: string; emoji: string } {
