@@ -379,7 +379,17 @@ export class BooksService implements OnModuleInit {
    *  Drive path, never the full 3,032. */
   async searchLibrary(session: any, q: string, limit = 25) {
     this.ensureUser(session);
-    const rows = await this.libraryRows();
+    let rows: Array<{ id: string; title: string; author: string; shelf: string }>;
+    try {
+      rows = await this.libraryRows();
+    } catch (e: any) {
+      // Loud on purpose. This reaches another machine over a tunnel, and when
+      // it fails the picker can only show an empty list — which is
+      // indistinguishable from "no such book". Without this line there is
+      // nothing to look at afterwards.
+      console.error("[books] library search FAILED for %j: %s", q, e?.message || e);
+      throw new BadRequestException("library unavailable: " + (e?.message || "unknown"));
+    }
     const needle = String(q || "").trim().toLowerCase();
     if (!needle) return { items: rows.slice(0, limit), total: rows.length };
     const terms = needle.split(/\s+/).filter(Boolean);
@@ -392,6 +402,7 @@ export class BooksService implements OnModuleInit {
       scored.push({ r, s: (idx === 0 ? 0 : idx < 0 ? 500 : 100 + idx) + r.title.length / 100 });
     }
     scored.sort((a, b) => a.s - b.s);
+    console.log("[books] library search %j -> %d hits of %d books", q, scored.length, rows.length);
     return { items: scored.slice(0, limit).map((x) => x.r), total: scored.length };
   }
 

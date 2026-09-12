@@ -3,7 +3,7 @@
 
 import { useMemo, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { booksApi, type BookSummary } from "../lib/books-api";
 
@@ -16,6 +16,22 @@ export default function BooksListPage() {
   });
 
   const [q, setQ] = useState("");
+  const qc = useQueryClient();
+
+  // This page used to list ONLY the books already added here — a few dozen —
+  // while the owner's real library is thousands of books on the Vinayaka host.
+  // Searching for a book you own and getting "No books match" was the whole
+  // complaint. Now the same search also asks the library.
+  const libQ = useQuery({
+    queryKey: ["book-library", q.trim()],
+    queryFn: () => booksApi.librarySearch(q.trim(), 30),
+    enabled: q.trim().length >= 2,
+    staleTime: 60_000,
+  });
+  const adopt = useMutation({
+    mutationFn: (hostId: string) => booksApi.adoptLibrary(hostId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["books"] }),
+  });
   const [tab, setTab] = useState<"all" | "seeded" | "mine">("all");
 
   const items = list.data?.items ?? [];
@@ -29,6 +45,13 @@ export default function BooksListPage() {
     }
     return arr;
   }, [items, tab, q]);
+
+  // Library hits, minus anything already added here — adopting is idempotent,
+  // so a duplicate row would just be two doors to the same book.
+  const libRows = useMemo(() => {
+    const have = new Set((list.data?.items ?? []).map((b) => String(b.title || "").toLowerCase()));
+    return (libQ.data?.items ?? []).filter((b) => !have.has(String(b.title || "").toLowerCase()));
+  }, [libQ.data, list.data]);
 
   if (auth && !auth.loggedIn) return <Navigate to="/login?back=/books" replace />;
 
@@ -62,15 +85,61 @@ export default function BooksListPage() {
       {list.isLoading && <div className="text-sm text-ink-400">Loading…</div>}
       {list.error && <div className="rounded border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200">{String((list.error as any)?.message || list.error)}</div>}
 
-      {!list.isLoading && filtered.length === 0 && (
+      {!list.isLoading && filtered.length === 0 && libRows.length === 0 && !libQ.isFetching && (
         <div className="rounded-xl2 border border-dashed border-ink-700 bg-ink-900/50 p-8 text-center text-sm text-ink-400">
-          No books match.
+          {q.trim().length >= 2
+            ? <>Nothing matches “{q.trim()}” — not in your books, and not in the library.</>
+            : <>No books match.</>}
         </div>
       )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {filtered.map((b) => <BookCard key={b._id} b={b} />)}
       </div>
+
+      {/* The library itself — searched only once there is something to search
+          for, because the catalogue is thousands of books and lives on another
+          machine. Adding one here pulls its chapters across with it. */}
+      {q.trim().length >= 2 && (
+        <div className="mt-6">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-brand-300">From the library</span>
+            {libQ.data && <span className="text-[11px] text-ink-500">{libQ.data.total} match{libQ.data.total === 1 ? "" : "es"}</span>}
+            {libQ.isFetching && <span className="text-[11px] text-ink-500">searching…</span>}
+            <span className="h-px flex-1 bg-ink-800" />
+          </div>
+          {libQ.error && (
+            <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-200">
+              The library is unavailable right now — {String((libQ.error as any)?.message || libQ.error)}
+            </div>
+          )}
+          {!libQ.isFetching && !libQ.error && libRows.length === 0 && (
+            <div className="rounded-lg border border-dashed border-ink-700 p-4 text-center text-xs text-ink-500">
+              No library book matches that.
+            </div>
+          )}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {libRows.map((b) => (
+              <div key={b.id} className="flex items-center gap-3 rounded-xl border border-ink-700 bg-ink-900 p-3">
+                <span className="text-2xl">📖</span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold text-white">{b.title}</div>
+                  <div className="truncate text-[11px] text-ink-400">{[b.author, b.shelf].filter(Boolean).join(" · ")}</div>
+                </div>
+                <button
+                  onClick={() => adopt.mutate(b.id)}
+                  disabled={adopt.isPending}
+                  className="flex-shrink-0 rounded-lg border border-brand-500/50 bg-brand-500/10 px-3 py-1.5 text-xs font-semibold text-brand-100 hover:bg-brand-500/20 disabled:opacity-50">
+                  {adopt.isPending ? "Adding…" : "+ Add"}
+                </button>
+              </div>
+            ))}
+          </div>
+          {adopt.error && (
+            <div className="mt-2 text-[11px] text-rose-300">Could not add it — {String((adopt.error as any)?.message || adopt.error)}</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
