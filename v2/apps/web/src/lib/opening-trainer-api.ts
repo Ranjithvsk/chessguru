@@ -52,6 +52,7 @@ export interface AcademyOpeningLeaderboardRow {
   userId: string;
   name: string;
   username: string;
+  rating?: number | null;
   sessions7: number;
   sessions30: number;
   successPct7: number;
@@ -64,7 +65,7 @@ export interface AcademyOpeningLeaderboardRow {
   rank: number;
 }
 
-export function getAcademyOpeningLeaderboard(): Promise<{ rows: AcademyOpeningLeaderboardRow[]; academyStudentCount: number }> {
-  return jf("/api/opening-trainer/academy-leaderboard");
+export function getAcademyOpeningLeaderboard(period = "30d", bucket = "all"): Promise<{ rows: AcademyOpeningLeaderboardRow[]; academyStudentCount: number; windowDays?: number }> {
+  return jf(`/api/opening-trainer/academy-leaderboard?period=${encodeURIComponent(period)}&bucket=${encodeURIComponent(bucket)}`);
 }
 

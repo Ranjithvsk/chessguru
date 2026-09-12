@@ -9,7 +9,7 @@
 // and reports its outcome here. We record the raw session for later
 // analytics rebuilds; the /rollup endpoints re-aggregate on demand.
 
-import { BadRequestException, Body, Controller, Get, Param, Post, Req } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Param, Post, Query, Req } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import type { Connection } from "mongoose";
 
@@ -175,20 +175,25 @@ export class OpeningTrainerController {
    *  student in the caller's academy by Opening-Trainer discipline score.
    *  Any academy member can view (matches the puzzles leaderboard). */
   @Get("academy-leaderboard")
-  async academyLeaderboard(@Req() req: any) {
+  async academyLeaderboard(@Req() req: any, @Query("period") period?: string, @Query("bucket") bucket?: string) {
     const me = this.requireLogin(req);
     if (!me.academyId) return { rows: [], academyStudentCount: 0 };
-    const students = await this.users()
+    let students = await this.users()
       .find(
         { academyId: me.academyId, role: "student" },
         { projection: { _id: 1, name: 1, username: 1 } },
       )
       .toArray();
     if (students.length === 0) return { rows: [], academyStudentCount: 0 };
+    // Owner 2026-09-12: the same level (rating bucket) and days filters as the puzzle board.
+    const ratingOf = await puzzleRatings(this.conn, students.map((u: any) => String(u._id)));
+    if (bucket && bucket !== "all") students = students.filter((u: any) => inRatingBucket(bucket, ratingOf.get(String(u._id))));
+    if (students.length === 0) return { rows: [], academyStudentCount: 0, period, bucket };
 
     const now = new Date();
     const dayMs = 24 * 60 * 60 * 1000;
-    const since30 = new Date(now.getTime() - 30 * dayMs);
+    const windowDays = periodDays(period) ?? 30;
+    const since30 = new Date(now.getTime() - windowDays * dayMs); // "30" fields = the chosen window (30 days by default)
     const since7  = new Date(now.getTime() - 7 * dayMs);
     const userIds = students.map((u: any) => String(u._id));
 
@@ -308,6 +313,7 @@ export class OpeningTrainerController {
         userId: uid,
         name: s.name || s.username,
         username: s.username,
+        rating: ratingOf.get(uid) ?? null,
         sessions7: r7?.sessions ?? 0,
         sessions30: r30?.sessions ?? 0,
         successPct7,
@@ -322,7 +328,7 @@ export class OpeningTrainerController {
 
     rows.sort((a: any, b: any) => b.disciplineScore - a.disciplineScore);
     for (let i = 0; i < rows.length; i++) (rows as any)[i].rank = i + 1;
-    return { rows, academyStudentCount: students.length };
+    return { rows, academyStudentCount: students.length, period: period ?? "30d", bucket: bucket ?? "all", windowDays };
   }
 
   /** Coach-compliance percentage: of force-assigned openings this user is
@@ -348,4 +354,35 @@ export class OpeningTrainerController {
     const done = drilled.length;
     return { assigned: assignedSlugs.length, done, pct: Math.round((done / assignedSlugs.length) * 100) };
   }
+}
+
+// ── Shared leaderboard filters (puzzle board, opening board, game awards use the same keys) ──
+/** "today" | "7d" | "30d" | "180d" | "365d" | "lifetime" | "90d" → days (null = no limit / lifetime). */
+export function periodDays(period?: string | null): number | null {
+  if (!period) return 30;
+  if (period === "today") return 1;
+  if (period === "lifetime" || period === "all") return null;
+  const m = /^(\d+)d$/.exec(period);
+  return m ? Number(m[1]) : 30;
+}
+/** Same uniform 200-point buckets as the puzzle leaderboard (u800, r800 … r2000). */
+export function inRatingBucket(bucket: string, r: number | null | undefined): boolean {
+  if (!bucket || bucket === "all") return true;
+  if (r == null) return false;
+  return bucket === "u800" ? r < 800 :
+    bucket === "r800" ? r >= 800 && r < 1000 :
+    bucket === "r1000" ? r >= 1000 && r < 1200 :
+    bucket === "r1200" ? r >= 1200 && r < 1400 :
+    bucket === "r1400" ? r >= 1400 && r < 1600 :
+    bucket === "r1600" ? r >= 1600 && r < 1800 :
+    bucket === "r1800" ? r >= 1800 && r < 2000 :
+    bucket === "r2000" ? r >= 2000 : true;
+}
+/** Puzzle Glicko rating per user (the rating the puzzle board buckets by). */
+export async function puzzleRatings(conn: Connection, userIds: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const rows: any[] = await conn.db!.collection("userperfs").find({ _id: { $in: userIds as any } }, { projection: { "puzzle.gl.r": 1 } }).toArray();
+  for (const r of rows) if (typeof r?.puzzle?.gl?.r === "number") out.set(String(r._id), Math.round(r.puzzle.gl.r));
+  for (const id of userIds) if (!out.has(id)) out.set(id, 1500); // unrated students sit at 1500, exactly like the puzzle board
+  return out;
 }

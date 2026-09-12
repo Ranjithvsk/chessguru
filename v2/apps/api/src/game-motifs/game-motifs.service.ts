@@ -6,6 +6,7 @@
 // leaderboard at /academy/game-awards. Owner 2026-09-12: "award them for finding good moves, like
 // fork, pin, mate, all the motifs, and a negative score for the missed ones".
 import { Injectable, OnModuleInit, OnModuleDestroy, ForbiddenException, UnauthorizedException, NotFoundException } from "@nestjs/common";
+import { inRatingBucket, periodDays, puzzleRatings } from "../opening-trainer/opening-trainer.controller";
 import { clocksFromPgn, parseTimeControl } from "../integrations/games-fetch.service";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
@@ -548,11 +549,11 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
     return { userId: String(userId), academyId: String(academyId), role: String(session?.role ?? "") };
   }
   private static sinceFor(period: string): Date | null {
-    const days = period === "7d" ? 7 : period === "30d" ? 30 : period === "90d" ? 90 : null;
+    const days = periodDays(period); // shared keys: today / 7d / 30d / 90d / 180d / 365d / lifetime|all
     return days ? new Date(Date.now() - days * 864e5) : null;
   }
 
-  async leaderboard(session: any, period = "30d") {
+  async leaderboard(session: any, period = "30d", bucket = "all") {
     const { academyId } = this.member(session);
     const since = GameMotifsService.sinceFor(period);
     const match: Record<string, unknown> = { academyId };
@@ -587,6 +588,13 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
       }
     }
     const bands = await this.ratingBands();
+    // Level filter (owner 2026-09-12): the same puzzle-rating buckets as the puzzle board.
+    if (bucket && bucket !== "all") {
+      const pr = await puzzleRatings(this.conn, out.map((r) => r.studentId));
+      const keep = new Set(out.filter((r) => inRatingBucket(bucket, pr.get(r.studentId))).map((r) => r.studentId));
+      for (let i = out.length - 1; i >= 0; i--) if (!keep.has(out[i]!.studentId)) out.splice(i, 1);
+      out.forEach((r, i) => { (r as any).rank = i + 1; });
+    }
     for (const r of out) {
       (r as any).character = character[r.studentId] ?? {};
       const rating = await this.ratingOf(r.studentId);
@@ -595,7 +603,7 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
       const a = openingAgg[r.studentId];
       (r as any).opening = a ? { accuracy: a.accN ? Math.round(a.accSum / a.accN) : null, mistakes: a.mistakes, trapsFell: a.trapsFell, trapsSprung: a.trapsSprung, favourite: Object.entries(a.names).sort((x, y) => y[1] - x[1])[0]?.[0] ?? null } : null;
     }
-    return { period, rows: out, labels: MOTIF_LABEL, points: MOTIF_POINTS, pending, strategic: STRATEGIC_ORDER, bands };
+    return { period, bucket, rows: out, labels: MOTIF_LABEL, points: MOTIF_POINTS, pending, strategic: STRATEGIC_ORDER, bands };
   }
 
   async studentEvents(session: any, studentId: string, period = "30d") {

@@ -718,13 +718,13 @@ export default function LeaderboardPage() {
       {/* Openings leaderboard — rollout step 4 of the Openings Dashboard
           plan. Same visual language as the puzzles section above so the
           two feeds read as one page. */}
-      <OpeningsLeaderboardSection />
+      <OpeningsLeaderboardSection period={period} bucket={bucket} />
 
       {/* Game awards — tactics found and missed in the students' own games (arena, My Games,
           linked Lichess / Chess.com). Same card as the boards above; owner 2026-09-12: "I need it
           in the academy leaderboard, with the same UI". */}
       <div id="game-awards" className="mt-6">
-        <GameAwardsSection />
+        <GameAwardsSection period={period} bucket={bucket} />
       </div>
 
       <StartBoostModal
@@ -743,12 +743,16 @@ export default function LeaderboardPage() {
 // activity, coach-compliance). Server aggregates in one shot; we just
 // render.
 // ─────────────────────────────────────────────────────────────────────
-function OpeningsLeaderboardSection() {
+// Owner 2026-09-12: "add level category for opening, games like in puzzle, also that days filter —
+// make those common for all": both sections follow the page-level period + level (bucket) tabs.
+function OpeningsLeaderboardSection({ period, bucket }: { period: Period; bucket: Bucket }) {
   const q = useQuery({
-    queryKey: ["academy-openings-leaderboard"],
-    queryFn: getAcademyOpeningLeaderboard,
+    queryKey: ["academy-openings-leaderboard", period, bucket],
+    queryFn: () => getAcademyOpeningLeaderboard(period, bucket),
     staleTime: 60_000,
   });
+  const periodLabel = PERIODS.find((p) => p.key === period)?.label ?? period;
+  const bucketLabel = BUCKETS.find((b) => b.key === bucket)?.label ?? bucket;
   const rows = q.data?.rows ?? [];
   const top10 = rows.slice(0, 10);
   const podium = top10.slice(0, 3);
@@ -814,7 +818,7 @@ function OpeningsLeaderboardSection() {
                   <th className="hidden px-2 py-2 text-right sm:table-cell sm:px-3" title="Consecutive days with ≥1 drill">🔥 Streak</th>
                   <th className="px-2 py-2 text-right sm:px-3" title="First-try correct % (last 7 days)">🎯 7d</th>
                   <th className="hidden px-2 py-2 text-right sm:table-cell sm:px-3" title="Drill sessions in last 7 days">🎲 Sessions</th>
-                  <th className="hidden px-2 py-2 text-right md:table-cell sm:px-3" title="Distinct openings scored ≥90% in last 30 days">🏆 Strong</th>
+                  <th className="hidden px-2 py-2 text-right md:table-cell sm:px-3" title={`Distinct openings scored ≥90% in the selected period (${periodLabel})`}>🏆 Strong</th>
                   <th className="px-2 py-2 text-right sm:px-3" title="Coach-assigned openings drilled this week">🎓 Assigned</th>
                 </tr>
               </thead>
@@ -867,7 +871,7 @@ function OpeningsLeaderboardSection() {
           </div>
         )}
         <p className="mt-2 text-[10px] text-ink-500">
-          🏆 Strong = openings scored ≥90% first-try in the last 30 days.
+          Showing {periodLabel} · {bucketLabel} (the tabs at the top of the page). 🏆 Strong = openings scored ≥90% first-try in the period.
           🎓 Assigned counts coach force-added openings drilled at least once in the last 7 days.
         </p>
       </div>
@@ -901,12 +905,13 @@ function momentEditorUrl(e: GameAwardEvent): string {
 }
 const GAME_SRC: Record<string, string> = { live: "Arena", my: "My Games", lichess: "Lichess", chesscom: "Chess.com" };
 
-function GameAwardsSection() {
-  const [period, setPeriod] = useState<"7d" | "30d" | "90d" | "all">("30d");
+function GameAwardsSection({ period, bucket }: { period: Period; bucket: Bucket }) {
   const [open, setOpen] = useState<string | null>(null);
+  const periodLabel = PERIODS.find((p) => p.key === period)?.label ?? period;
+  const bucketLabel = BUCKETS.find((b) => b.key === bucket)?.label ?? bucket;
   const q = useQuery({
-    queryKey: ["academy-game-awards", period],
-    queryFn: () => get<GameAwardBoard>(`/api/game-motifs/leaderboard?period=${period}`),
+    queryKey: ["academy-game-awards", period, bucket],
+    queryFn: () => get<GameAwardBoard>(`/api/game-motifs/leaderboard?period=${period}&bucket=${bucket}`),
     staleTime: 30_000, refetchInterval: 60_000,
   });
   const me = useQuery({ queryKey: ["me-role"], queryFn: () => get<{ role?: string; user?: { role?: string } }>("/api/me").catch(() => ({} as any)), staleTime: 300_000 });
@@ -939,11 +944,7 @@ function GameAwardsSection() {
             </h2>
           </div>
           <div className="flex items-center gap-2">
-            <div className="flex gap-1 rounded-full bg-ink-900/70 p-1 text-[11px] font-semibold">
-              {(["7d", "30d", "90d", "all"] as const).map((p) => (
-                <button key={p} onClick={() => setPeriod(p)} className={`rounded-full px-2.5 py-1 ${period === p ? "bg-emerald-500/30 text-emerald-100" : "text-ink-400 hover:text-ink-200"}`}>{p === "all" ? "All" : p}</button>
-              ))}
-            </div>
+            <span className="rounded-full bg-emerald-500/20 px-2.5 py-1 text-[11px] font-semibold text-emerald-100" title="Follows the period and level tabs at the top of the page">{periodLabel} · {bucketLabel}</span>
             <div className="hidden text-[11px] text-ink-300 sm:block">Found = motif points · missed = −half</div>
           </div>
         </div>
@@ -1061,13 +1062,13 @@ function GameAwardsSection() {
                                   <span className={`w-10 text-center font-extrabold tabular-nums ${e.found ? "text-emerald-300" : "text-rose-300"}`}>{e.points > 0 ? "+" : ""}{e.points}</span>
                                   {e.timeTrouble && <span className="rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] text-amber-200" title={`Time trouble: ${e.clockMs != null ? Math.round(e.clockMs / 1000) + " s" : "seconds"} on the clock — the penalty is halved`}>⏱ {e.clockMs != null ? Math.round(e.clockMs / 1000) + "s" : "clock"}</span>}
                                   <span className="rounded-full bg-white/10 px-2 py-0.5 font-semibold text-white">{label(e.primary)}</span>
-                                  <span className="text-ink-200">{Math.ceil(e.ply / 2)}{e.color === "black" ? "…" : "."} {e.playedSan}{!e.found && <span className="text-ink-500"> (best {e.bestSan}{e.mateIn ? `, mate in ${e.mateIn}` : ""})</span>}</span>
+                                  <Link to={momentEditorUrl(e)} className="text-ink-200 hover:text-white" title="Open this position on the ChessGuru board">{Math.ceil(e.ply / 2)}{e.color === "black" ? "…" : "."} {e.playedSan}{!e.found && <span className="text-ink-500"> (best {e.bestSan}{e.mateIn ? `, mate in ${e.mateIn}` : ""})</span>}</Link>
                                   <span className="ml-auto text-[10px] text-ink-500">{GAME_SRC[e.source] ?? e.source} · {e.label} · {new Date(e.at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</span>
                                   <Link to={momentEditorUrl(e)} className="rounded-md bg-brand-500/20 px-2 py-0.5 text-[10px] font-semibold text-brand-200" title="Open this position on the ChessGuru board with the engine's move drawn">♟ open position</Link>
                                   {canStar && (e.starredBy
                                     ? <span className="text-[10px] text-amber-300" title="On your class-board shortlist and in Sunday's digest">★ starred</span>
                                     : <button onClick={() => star.mutate(e)} disabled={star.isPending} className="rounded-md bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold text-amber-200" title="Star for class — goes to your class-board shortlist and Sunday's digest">☆ star for class</button>)}
-                                  {e.url && (e.url.startsWith("http") ? <a href={e.url} target="_blank" rel="noreferrer" className="text-[10px] text-ink-400">{GAME_SRC[e.source] ?? "game"} ↗</a> : <Link to={e.url} className="text-[10px] text-ink-400">replay</Link>)}
+                                  {e.url && (e.url.startsWith("http") ? <a href={e.url} target="_blank" rel="noreferrer" className="text-[10px] text-ink-500" title={`Open the original game on ${GAME_SRC[e.source] ?? "the source site"} (leaves ChessGuru)`}>source: {GAME_SRC[e.source] ?? "game"} ↗</a> : <Link to={e.url} className="text-[10px] text-ink-400">replay</Link>)}
                                 </div>
                               ))}
                             </div>

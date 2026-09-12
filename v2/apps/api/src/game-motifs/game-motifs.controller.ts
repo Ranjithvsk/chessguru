@@ -7,7 +7,7 @@ import { GameMotifsService } from "./game-motifs.service";
 @Controller("game-motifs")
 export class GameMotifsController {
   constructor(private readonly svc: GameMotifsService) {}
-  @Get("leaderboard") leaderboard(@Req() req: any, @Query("period") period?: string) { return this.svc.leaderboard(req.session, period || "30d"); }
+  @Get("leaderboard") leaderboard(@Req() req: any, @Query("period") period?: string, @Query("bucket") bucket?: string) { return this.svc.leaderboard(req.session, period || "30d", bucket || "all"); }
   @Get("student/:id") student(@Req() req: any, @Param("id") id: string, @Query("period") period?: string) { return this.svc.studentEvents(req.session, id, period || "30d"); }
   @Post("analyze/:gameId") analyze(@Req() req: any, @Param("gameId") gameId: string) { return this.svc.analyzeNow(req.session, gameId); }
   // POST /api/game-motifs/star { gameId, ply, note? } — coach/owner: put this moment on the class-board shortlist (+ Sunday digest)
