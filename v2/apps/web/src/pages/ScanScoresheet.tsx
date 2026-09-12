@@ -89,7 +89,8 @@ export default function ScanScoresheetPage() {
         {[["This player's sheet", sheet, setSheet], ["Opponent's sheet (optional)", sheet2, setSheet2]].map(([label, val, set]: any) => (
           <label key={label} className="block rounded-xl border border-ink-700 bg-ink-900/40 p-4">
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-400">{label}</div>
-            <input type="file" accept="image/*" capture="environment" disabled={busy}
+            {/* no `capture`: on iPhone it forces the camera and hides the photo library */}
+            <input type="file" accept="image/*" disabled={busy}
               onChange={async (e) => { const f = e.target.files?.[0]; if (f) set(await fileToPng(f)); }} className="text-sm text-ink-300" />
             {val && <img src={val} alt="" className="mt-3 max-h-64 rounded-lg border border-ink-700" />}
           </label>
