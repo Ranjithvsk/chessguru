@@ -173,11 +173,15 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
     const ids = members.map((m: any) => String(m._id)); if (!ids.length) return [];
     const uIds = ids.map((i) => `u:${i}`);
     const out: Array<{ key: string; users: string[]; at: Date }> = [];
-    const live = await this.col<LiveGame>("live_games").find({ startedAt: { $gte: since }, status: { $nin: ["started", "aborted"] }, "moves.10": { $exists: true }, $or: [{ "players.white": { $in: uIds } }, { "players.black": { $in: uIds } }] }, { projection: { players: 1, startedAt: 1 } }).sort({ startedAt: -1 }).limit(limit).toArray();
+    // Fetch a wide window per source and drop the scored ones AFTER — limiting each query to
+    // `limit` first meant the two newest (already scored) games came back every tick and the
+    // worker reported "nothing to score" while 350 games waited (2026-09-12 17:45).
+    const scan = Math.max(limit, 400);
+    const live = await this.col<LiveGame>("live_games").find({ startedAt: { $gte: since }, status: { $nin: ["started", "aborted"] }, "moves.10": { $exists: true }, $or: [{ "players.white": { $in: uIds } }, { "players.black": { $in: uIds } }] }, { projection: { players: 1, startedAt: 1 } }).sort({ startedAt: -1 }).limit(scan).toArray();
     for (const g of live) out.push({ key: `live:${g._id}`, users: [GameMotifsService.uid(g.players?.white), GameMotifsService.uid(g.players?.black)].filter((x): x is string => !!x && ids.includes(x)), at: g.startedAt });
-    const my = await this.col("myGames").find({ ownerId: { $in: ids }, createdAt: { $gte: since }, pgn: { $exists: true } }, { projection: { ownerId: 1, createdAt: 1 } }).sort({ createdAt: -1 }).limit(limit).toArray();
-    for (const g of my as any[]) out.push({ key: `my:${g._id}`, users: [String(g.ownerId)], at: g.createdAt ?? new Date() });
-    const ext = await this.col("externalGames").find({ userId: { $in: ids }, $or: [{ played: { $gte: since } }, { played: { $gte: since.toISOString() } }] }, { projection: { userId: 1, played: 1 } }).sort({ played: -1 }).limit(limit).toArray();
+    const my = await this.col("myGames").find({ ownerId: { $in: ids }, createdAt: { $gte: since }, pgn: { $exists: true } }, { projection: { ownerId: 1, createdAt: 1 } }).sort({ createdAt: -1 }).limit(scan).toArray();
+    for (const g of my as any[]) out.push({ key: `my:${g._id}`, users: [String(g.ownerId)], at: g.createdAt ? new Date(g.createdAt) : new Date() });
+    const ext = await this.col("externalGames").find({ userId: { $in: ids }, $or: [{ played: { $gte: since } }, { played: { $gte: since.toISOString() } }] }, { projection: { userId: 1, played: 1 } }).sort({ played: -1 }).limit(scan).toArray();
     for (const g of ext as any[]) out.push({ key: `ext:${g._id}`, users: [String(g.userId)], at: g.played ? new Date(g.played) : new Date() });
     const retryBefore = new Date(Date.now() - 3600_000);
     const doneIds = new Set((await this.done().find({ _id: { $in: out.map((o) => o.key) as never[] }, $or: [{ error: { $exists: false } }, { analyzedAt: { $gte: retryBefore } }] }, { projection: { _id: 1 } }).toArray()).map((d) => d._id));
