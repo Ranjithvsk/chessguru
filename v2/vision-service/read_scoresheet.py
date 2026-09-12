@@ -45,9 +45,12 @@ def trim_blank_tail(paths: list[Path]) -> list[Path]:
     return paths[: last + 1]
 
 
-def read_cells(paths: list[Path], ip, tok, mdl, device: str, batch: int = 16) -> list[sb.Cell]:
+def read_cells(paths: list[Path], ip, tok, mdl, device: str, batch: int = 16, fast: bool = False) -> list[sb.Cell]:
+    """fast=True decodes greedily with one candidate: ~8× quicker on CPU. The
+    beam is annotate-only, so the extra candidates buy little in production."""
     paths = trim_blank_tail(paths)
     cells = []
+    k = 1 if fast else K
     for s in range(0, len(paths), batch):
         chunk = paths[s:s + batch]
         ims = [Image.open(p).convert("RGB") for p in chunk]
@@ -55,16 +58,16 @@ def read_cells(paths: list[Path], ip, tok, mdl, device: str, batch: int = 16) ->
         if TIGHT: ims = [tight_crop(im) for im in ims]
         pv = ip(images=ims, return_tensors="pt").pixel_values.to(device)
         with torch.inference_mode():
-            gen = mdl.generate(pv, num_beams=4, num_return_sequences=K, max_new_tokens=12,
+            gen = mdl.generate(pv, num_beams=1 if fast else 4, num_return_sequences=k, max_new_tokens=12,
                                output_scores=True, return_dict_in_generate=True)
         texts = tok.batch_decode(gen.sequences, skip_special_tokens=True)
-        scores = gen.sequences_scores.tolist()
+        scores = gen.sequences_scores.tolist() if gen.sequences_scores is not None else [0.0] * len(texts)
         for i, p in enumerate(chunk):
             cands = []
-            for j in range(K):
-                t = texts[i * K + j].strip().replace(" ", "")
+            for j in range(k):
+                t = texts[i * k + j].strip().replace(" ", "")
                 if t and t not in [c[0] for c in cands]:
-                    cands.append((t, math.exp(scores[i * K + j])))
+                    cands.append((t, math.exp(scores[i * k + j]) if scores[i * k + j] else 0.9))
             cells.append(sb.Cell(p.name, [("", 0.0)] if blank[i] else (cands or [("", 0.0)])))
     return cells
 
@@ -90,14 +93,16 @@ def main():
     ap.add_argument("model_dir"); ap.add_argument("cells", nargs="?")
     ap.add_argument("--pair", nargs=2, metavar=("COPY_A", "COPY_B"))
     ap.add_argument("--json"); ap.add_argument("--pgn"); ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    ap.add_argument("--fast", action="store_true", help="greedy decoding, one candidate (CPU default)")
     a = ap.parse_args()
     ip, tok, mdl = load(a.model_dir, a.device)
+    fast = a.fast or a.device == "cpu"
     if a.pair:
-        ca = sb.read_sheet(read_cells(list_cells(a.pair[0]), ip, tok, mdl, a.device))
-        cb = sb.read_sheet(read_cells(list_cells(a.pair[1]), ip, tok, mdl, a.device))
+        ca = sb.read_sheet(read_cells(list_cells(a.pair[0]), ip, tok, mdl, a.device, fast=fast))
+        cb = sb.read_sheet(read_cells(list_cells(a.pair[1]), ip, tok, mdl, a.device, fast=fast))
         cells = sb.merge_two_sheets(ca, cb)
     else:
-        cells = sb.read_sheet(read_cells(list_cells(a.cells), ip, tok, mdl, a.device))
+        cells = sb.read_sheet(read_cells(list_cells(a.cells), ip, tok, mdl, a.device, fast=fast))
     pgn = to_pgn(cells)
     summary = {s: sum(c.status == s for c in cells) for s in ("verified", "agreed", "guess", "inferred", "unknown")}
     print(pgn); print(json.dumps(summary), file=sys.stderr)
