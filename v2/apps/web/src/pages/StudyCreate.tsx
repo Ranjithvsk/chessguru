@@ -101,9 +101,13 @@ export default function StudyCreatePage() {
 
   const filteredBooks = useMemo(() => {
     const arr = booksQ.data?.items ?? [];
+    // While searching, show only a few of the already-attached books. They render
+    // ABOVE the library section, and a long list of them pushed the library out
+    // of a 224px scroll box entirely — which looked exactly like "the library
+    // search is not working".
     if (!bookSearch.trim()) return arr.slice(0, 30);
     const n = bookSearch.trim().toLowerCase();
-    return arr.filter((b) => b.title.toLowerCase().includes(n) || b.author.toLowerCase().includes(n)).slice(0, 30);
+    return arr.filter((b) => b.title.toLowerCase().includes(n) || b.author.toLowerCase().includes(n)).slice(0, 5);
   }, [booksQ.data, bookSearch]);
 
   const mut = useMutation({
@@ -222,13 +226,15 @@ export default function StudyCreatePage() {
                       <input value={bookSearch} onChange={(e) => setBookSearch(e.target.value)}
                         placeholder="Search title or author…"
                         className="mb-2 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
-                      <div className="max-h-56 overflow-y-auto rounded-lg border border-ink-700 bg-ink-800/50">
+                      <div className="max-h-80 overflow-y-auto rounded-lg border border-ink-700 bg-ink-800/50">
                         {booksQ.isLoading && <div className="p-3 text-xs text-ink-400">Loading…</div>}
                         {filteredBooks.length === 0 && libRows.length === 0 && !booksQ.isLoading && !libQ.isFetching && (
                           <div className="p-3">
                             {bookSearch.trim() ? (
                               <>
-                                <div className="mb-2 text-xs text-ink-500">Nothing matches “{bookSearch.trim()}”.</div>
+                                <div className="mb-2 text-xs text-ink-500">
+                                  Nothing matches “{bookSearch.trim()}” — not in your books, and not in the library.
+                                </div>
                                 <button type="button"
                                   onClick={() => addBook.mutate(bookSearch.trim())}
                                   disabled={addBook.isPending}
@@ -255,12 +261,18 @@ export default function StudyCreatePage() {
                             </div>
                           </button>
                         ))}
+                        {libQ.error && (
+                          <div className="border-t border-ink-800 px-3 py-2 text-[11px] text-rose-300">
+                            The library search is unavailable right now — {String((libQ.error as any)?.message || libQ.error)}.
+                            Your own books above still work.
+                          </div>
+                        )}
                         {libQ.isFetching && (
                           <div className="border-t border-ink-800 px-3 py-2 text-[11px] text-ink-500">Searching the library…</div>
                         )}
                         {libRows.length > 0 && (
                           <div className="border-t border-ink-800 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-500">
-                            From the library{libQ.data && libQ.data.total > libRows.length ? ` · ${libQ.data.total} matches` : ""}
+                            From the library{libQ.data ? ` · ${libQ.data.total} match${libQ.data.total === 1 ? "" : "es"}` : ""}
                           </div>
                         )}
                         {libRows.map((b) => (
