@@ -11,6 +11,8 @@ import { Connection } from "mongoose";
 import { Chess } from "chess.js";
 import { createRequire } from "module";
 import { Stockfish, toWhiteCp, type PositionEval } from "../my-games/stockfish";
+import { strategicTags, nullMoveFen, gameCharacter, STRATEGIC_POINTS, STRATEGIC_LABEL, STRATEGIC_ORDER, isEndgame } from "./strategic";
+import { OpeningBook, OpeningTally, OPENING_PLIES, OPENING_POINTS, OPENING_LABEL } from "./opening";
 
 const require_ = createRequire(__filename);
 const COOK_PATH = `${process.env.HOME || "/home/ubuntu"}/chessguru/engine-battle/cook.js`;
@@ -73,6 +75,15 @@ export const MOTIF_LABEL: Record<string, string> = {
   cornerMate: "Corner mate", epauletteMate: "Epaulette mate", swallowstailMate: "Swallow's-tail mate", triangleMate: "Triangle mate",
 };
 const pointsFor = (motifs: string[]) => motifs.reduce((m, t) => Math.max(m, MOTIF_POINTS[t] ?? 0), 0);
+// Positional layer (owner 2026-09-12): the engine-confirmed strategic ideas from strategic.ts. Extra
+// null-move engine calls are spent only on players rated ≥ STRATEGIC_MIN_RATING (their games are
+// where prophylaxis and zugzwang mean something); everyone gets the cheap board heuristics.
+const STRATEGIC_MIN_RATING = 1400;
+const STRATEGIC_LOSS_CP = 80;      // a positional miss is a smaller error than a tactical one
+Object.assign(MOTIF_POINTS, STRATEGIC_POINTS, OPENING_POINTS);
+Object.assign(MOTIF_LABEL, STRATEGIC_LABEL, OPENING_LABEL);
+const OPENING_MISTAKE_CP = 80;     // out of book AND this much worse than the engine's move = wrong opening move
+const OPENING_TRAP_CP = 250;       // a swing this large inside the opening = a trap (sprung or fallen into)
 
 type LiveGame = { _id: string; players: { white: string; black: string }; moves: string[]; startedAt: Date; finishedAt?: Date; status: string; result?: string; speed?: string };
 // One shape for every source: live arena games, PGNs imported under My Games, and the games pulled
@@ -93,6 +104,8 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
   private tickStartedAt = 0;
   private shuttingDown = false;
   private engines: Array<Stockfish | null> = [];
+  private bookInst: OpeningBook | null = null;
+  private book(): OpeningBook { return (this.bookInst ??= new OpeningBook(this.col("openingpositions"), this.col("openingnames"))); }
 
   constructor(@InjectConnection() private readonly conn: Connection) {}
 
@@ -117,6 +130,17 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
     return new Map(rows.map((r: any) => [String(r._id), String(r.academyId)]));
   }
   private static uid(p: string | undefined): string | null { return p && p.startsWith("u:") ? p.slice(2) : null; }
+  /** Best known rating for a user: arena (any speed), else puzzle Glicko, else 1500. */
+  private async ratingOf(userId: string): Promise<number> {
+    try {
+      const lp: any = await this.col("live_perfs").findOne({ _id: `u:${userId}` as never });
+      const rs = lp ? ["rapid", "blitz", "bullet", "classical"].map((k) => lp[k]?.gl?.r).filter((x) => typeof x === "number") : [];
+      if (rs.length) return Math.max(...rs);
+      const up: any = await this.col("userperfs").findOne({ _id: userId as never });
+      const r = up?.puzzle?.gl?.r; if (typeof r === "number") return r;
+    } catch { /* */ }
+    return 1500;
+  }
   private static pgnToUci(pgn: string): string[] {
     try {
       const c = new Chess(); c.loadPgn(pgn);
@@ -244,6 +268,11 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
     cur = await this.evalAt(engine, slot, board.fen());
     const moves = g.moves ?? [];
     let prevWhiteCp: number | null = null; // eval (white POV) BEFORE the opponent's last move — the baseline for "did a tactic appear?"
+    const deep = new Map<string, boolean>(); // userId → run the null-move (prophylaxis / zugzwang) evals for them
+    for (const uid of new Set([g.white, g.black].filter((x): x is string => !!x && tracked.has(x)))) deep.set(uid, (await this.ratingOf(uid)) >= STRATEGIC_MIN_RATING);
+    const charStats: Record<string, { sacrifices: number; captures: number; plies: number; attackMoments: number; quietBest: number }> = {};
+    const opening: Record<string, OpeningTally> = {};
+    const book = this.book();
     for (let i = 0; i < moves.length; i++) {
       const sideToMove: "white" | "black" = board.turn() === "w" ? "white" : "black";
       const playerId = sideToMove === "white" ? g.white : g.black;
@@ -260,6 +289,47 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
       next = await this.evalAt(engine, slot, board.fen());
       const whiteBefore = toWhiteCp(cur, sideToMove);
       if (playerId && academyId && bestUci) {
+        const cs = (charStats[playerId] ??= { sacrifices: 0, captures: 0, plies: 0, attackMoments: 0, quietBest: 0 });
+        cs.plies++; if (mv.captured) cs.captures++;
+        // ── Opening layer: the first 12 moves each, judged by the masters book + the engine ──
+        if (i < OPENING_PLIES) {
+          const ot = (opening[playerId] ??= new OpeningTally());
+          const sign = sideToMove === "white" ? 1 : -1;
+          const beforeMover = whiteBefore * sign;
+          const afterMover = toWhiteCp(next, sideToMove === "white" ? "black" : "white") * sign;
+          const loss = Math.max(0, beforeMover - afterMover);
+          const inBook = await book.isBook(fenBefore, playedUci);
+          ot.plies++;
+          if (inBook === true) ot.book++;
+          else if (loss <= 30) ot.engineOk++;
+          if (inBook === false && ot.deviationPly === null) ot.deviationPly = i + 1;
+          const nm = await book.name(board.fen()); if (nm) { ot.eco = nm.eco; ot.name = nm.name; }
+          if (inBook !== true && loss >= OPENING_MISTAKE_CP) {
+            const trap = loss >= OPENING_TRAP_CP;
+            if (trap) ot.trapsFell++; else ot.mistakes++;
+            let bestSan: string | null = null;
+            try { const b = new Chess(fenBefore); const bm = b.move({ from: bestUci.slice(0, 2), to: bestUci.slice(2, 4), promotion: bestUci.slice(4) || undefined } as never); bestSan = bm?.san ?? null; } catch { /* */ }
+            const primary = trap ? "fellIntoTrap" : "openingMistake";
+            events.push({
+              _id: `${gameId}:${i + 1}`, gameId, ply: i + 1, userId: playerId, academyId, color: sideToMove,
+              fen: fenBefore, bestUci, bestSan, playedUci, playedSan: mv.san, found: false, motifs: [primary], primary,
+              points: -(OPENING_POINTS as Record<string, number>)[primary]!, lossCp: Math.round(Math.min(loss, 9999)), mateIn: null, at: g.at,
+              source: g.source, url: g.url, label: g.label,
+            });
+          }
+          // A trap SPRUNG: the opponent's last opening move handed over a lot and the student took it with the best move.
+          const opportunity = prevWhiteCp === null ? 0 : (whiteBefore - prevWhiteCp) * sign;
+          if (opportunity >= OPENING_TRAP_CP && playedUci === bestUci && i >= 2) {
+            ot.trapsSprung++;
+            const already = events.find((e) => e.ply === i + 1);
+            if (already) { if (!already.motifs.includes("openingTrap")) already.motifs.push("openingTrap"); }
+            else events.push({
+              _id: `${gameId}:${i + 1}`, gameId, ply: i + 1, userId: playerId, academyId, color: sideToMove,
+              fen: fenBefore, bestUci, bestSan: mv.san, playedUci, playedSan: mv.san, found: true, motifs: ["openingTrap"], primary: "openingTrap",
+              points: OPENING_POINTS.openingTrap, lossCp: 0, mateIn: null, at: g.at, source: g.source, url: g.url, label: g.label,
+            });
+          }
+        }
         // Both from the mover's point of view: what the position was worth, and what it is worth now.
         const sign = sideToMove === "white" ? 1 : -1;
         const beforeMover = whiteBefore * sign;
@@ -276,8 +346,9 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
           const stillMating = mating && next.mate !== undefined && next.mate < 0 && Math.abs(next.mate) <= (cur.mate ?? 0);
           const found = (playedUci === bestUci || stillMating) && (mating || opportunity >= OPPORTUNITY_MIN_CP);
           const missed = !found && lossCp >= TACTIC_MIN_GAIN_CP;
-          if (found || missed) {
+          if ((found || missed) && !events.some((e) => e.ply === i + 1)) {
             const primary = motifs[0]!;
+            if (found && (primary === "sacrifice" || primary === "attraction" || primary === "deflection")) cs.sacrifices++;
             const base = MOTIF_POINTS[primary] ?? pointsFor(motifs);
             let bestSan: string | null = null, playedSan: string | null = mv.san;
             try { const b = new Chess(fenBefore); const bm = b.move({ from: bestUci.slice(0, 2), to: bestUci.slice(2, 4), promotion: bestUci.slice(4) || undefined } as never); bestSan = bm?.san ?? null; } catch { /* */ }
@@ -289,14 +360,69 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
             });
           }
         }
+        // ── Positional layer: only when no tactic was scored at this moment ──
+        if (!events.some((e) => e.gameId === gameId && e.ply === i + 1)) {
+          const sign = sideToMove === "white" ? 1 : -1;
+          const beforeMover = whiteBefore * sign;
+          const afterMover = toWhiteCp(next, sideToMove === "white" ? "black" : "white") * sign;
+          const lossCp = Math.max(0, beforeMover - afterMover);
+          const playedBest = playedUci === bestUci;
+          const missedCandidate = !playedBest && lossCp >= STRATEGIC_LOSS_CP;
+          if (playedBest || missedCandidate) {
+            // Null-move evals (what if the mover passed?) — the expensive part, rated players only.
+            let threatBefore: number | null = null, threatAfter: number | null = null, oppBestAfter: number | null = null, oppPassAfter: number | null = null;
+            if (deep.get(playerId)) {
+              try {
+                const nf = nullMoveFen(fenBefore);
+                if (nf) { const ev = await this.evalAt(engine, slot, nf); threatBefore = toWhiteCp(ev, sideToMove === "white" ? "black" : "white") * sign; }
+                const fenAfterMove = playedBest ? board.fen() : (() => { const b2 = new Chess(fenBefore); b2.move({ from: bestUci.slice(0, 2), to: bestUci.slice(2, 4), promotion: bestUci.slice(4) || undefined } as never); return b2.fen(); })();
+                const nfAfter = nullMoveFen(fenAfterMove);
+                if (nfAfter) { const ev = await this.evalAt(engine, slot, nfAfter); threatAfter = toWhiteCp(ev, sideToMove) * sign; }
+                // zugzwang: opponent to move after our move — their best (next / a fresh eval) vs passing
+                if (isEndgame(new Chess(fenAfterMove))) {
+                  const evBest = playedBest ? next : await this.evalAt(engine, slot, fenAfterMove);
+                  oppBestAfter = toWhiteCp(evBest, sideToMove === "white" ? "black" : "white") * -sign;
+                  if (nfAfter) { const evPass = await this.evalAt(engine, slot, nfAfter); oppPassAfter = toWhiteCp(evPass, sideToMove) * -sign; }
+                }
+              } catch { /* engine hiccup: score without the null-move ideas */ }
+            }
+            const uci = playedBest ? playedUci : bestUci;
+            const afterForTags = playedBest ? afterMover : beforeMover; // for a missed idea, judge the BEST move's effect: it keeps the eval
+            const stags = strategicTags({ fenBefore, uci, color: sideToMove === "white" ? "w" : "b", beforeMover, afterMover: afterForTags, threatBefore, threatAfter, oppBestAfter, oppPassAfter });
+            // A "positional" award needs the engine to agree the move mattered: best move AND (the eval held or improved,
+            // or a null-move idea fired). A miss needs a real strategic tag on the best move.
+            const ideaTags = stags.filter((t) => t !== "positional");
+            if (ideaTags.length) {
+              const found = playedBest && afterMover >= beforeMover - 30;
+              if (found || missedCandidate) {
+                const primary = ideaTags[0]!;
+                if (found && primary === "goodAttack") cs.attackMoments++;
+                if (found) cs.quietBest++;
+                const base = STRATEGIC_POINTS[primary as keyof typeof STRATEGIC_POINTS] ?? 1;
+                let bestSan: string | null = null;
+                try { const b = new Chess(fenBefore); const bm = b.move({ from: bestUci.slice(0, 2), to: bestUci.slice(2, 4), promotion: bestUci.slice(4) || undefined } as never); bestSan = bm?.san ?? null; } catch { /* */ }
+                events.push({
+                  _id: `${gameId}:${i + 1}`, gameId, ply: i + 1, userId: playerId, academyId, color: sideToMove,
+                  fen: fenBefore, bestUci, bestSan, playedUci, playedSan: mv.san, found, motifs: ideaTags, primary,
+                  points: found ? base : -Math.max(1, Math.ceil(base / 2)), lossCp: found ? 0 : Math.round(Math.min(lossCp, 9999)), mateIn: null, at: g.at,
+                  source: g.source, url: g.url, label: g.label,
+                });
+              }
+            }
+          }
+        }
       }
       prevWhiteCp = whiteBefore;
       cur = next;
     }
+    const character: Record<string, string[]> = {};
+    for (const [uid, st] of Object.entries(charStats)) character[uid] = gameCharacter(st);
+    const openingSummary: Record<string, ReturnType<OpeningTally["toJSON"]>> = {};
+    for (const [uid, t] of Object.entries(opening)) openingSummary[uid] = t.toJSON();
     await this.events().deleteMany({ gameId });
     if (events.length) await this.events().insertMany(events);
-    await this.done().updateOne({ _id: gameId }, { $set: { academyIds: Array.from(new Set(tracked.values())), analyzedAt: new Date(), plies: moves.length, events: events.length } }, { upsert: true });
-    console.log(`[game-motifs] ${gameId}: ${moves.length} plies, ${events.length} moments`);
+    await this.done().updateOne({ _id: gameId }, { $set: { academyIds: Array.from(new Set(tracked.values())), analyzedAt: new Date(), plies: moves.length, events: events.length, character, opening: openingSummary } }, { upsert: true });
+    console.log(`[game-motifs] ${gameId}: ${moves.length} plies, ${events.length} moments${Object.values(character).some((c) => c.length) ? " · " + JSON.stringify(character) : ""}`);
     return { events: events.length, plies: moves.length };
   }
 
@@ -332,7 +458,25 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
         score: r.score, found: r.found, missed: r.missed, games: (r.games as string[]).length, lastAt: r.lastAt, byMotif, sources: r.sources as string[] };
     });
     const pending = await this.pendingCount(academyId);
-    return { period, rows: out, labels: MOTIF_LABEL, points: MOTIF_POINTS, pending };
+    // Game character per student (aggressive / dynamic / positional) from the scored-game ledger.
+    const charRows = await this.done().find({ academyIds: academyId, $or: [{ character: { $exists: true } }, { opening: { $exists: true } }] }, { projection: { character: 1, opening: 1, analyzedAt: 1 } }).toArray();
+    const character: Record<string, Record<string, number>> = {};
+    const openingAgg: Record<string, { games: number; accSum: number; accN: number; mistakes: number; trapsFell: number; trapsSprung: number; names: Record<string, number> }> = {};
+    for (const r of charRows as any[]) {
+      for (const [uid, tags] of Object.entries(r.character ?? {})) for (const t of tags as string[]) { const c = (character[uid] ??= {}); c[t] = (c[t] ?? 0) + 1; }
+      for (const [uid, o] of Object.entries((r.opening ?? {}) as Record<string, any>)) {
+        const a = (openingAgg[uid] ??= { games: 0, accSum: 0, accN: 0, mistakes: 0, trapsFell: 0, trapsSprung: 0, names: {} });
+        a.games++; if (typeof o.accuracy === "number") { a.accSum += o.accuracy; a.accN++; }
+        a.mistakes += o.mistakes ?? 0; a.trapsFell += o.trapsFell ?? 0; a.trapsSprung += o.trapsSprung ?? 0;
+        if (o.name) a.names[o.name] = (a.names[o.name] ?? 0) + 1;
+      }
+    }
+    for (const r of out) {
+      (r as any).character = character[r.studentId] ?? {};
+      const a = openingAgg[r.studentId];
+      (r as any).opening = a ? { accuracy: a.accN ? Math.round(a.accSum / a.accN) : null, mistakes: a.mistakes, trapsFell: a.trapsFell, trapsSprung: a.trapsSprung, favourite: Object.entries(a.names).sort((x, y) => y[1] - x[1])[0]?.[0] ?? null } : null;
+    }
+    return { period, rows: out, labels: MOTIF_LABEL, points: MOTIF_POINTS, pending, strategic: STRATEGIC_ORDER };
   }
 
   async studentEvents(session: any, studentId: string, period = "30d") {

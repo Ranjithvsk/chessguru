@@ -883,7 +883,8 @@ function OpeningsLeaderboardSection() {
 // critical moment is tagged with its motif (fork, pin, mate pattern…).
 // Found = the motif's points, missed = minus half. Server: /api/game-motifs.
 // ─────────────────────────────────────────────────────────────────────
-type GameAwardRow = { rank: number; studentId: string; username: string; name: string | null; score: number; found: number; missed: number; games: number; lastAt: string; byMotif: Record<string, { found: number; missed: number }>; sources: string[] };
+type GameAwardRow = { rank: number; studentId: string; username: string; name: string | null; score: number; found: number; missed: number; games: number; lastAt: string; byMotif: Record<string, { found: number; missed: number }>; sources: string[];
+  character?: Record<string, number>; opening?: { accuracy: number | null; mistakes: number; trapsFell: number; trapsSprung: number; favourite: string | null } | null };
 type GameAwardBoard = { period: string; rows: GameAwardRow[]; labels: Record<string, string>; points: Record<string, number>; pending: number };
 type GameAwardEvent = { gameId: string; ply: number; color: "white" | "black"; fen: string; bestSan: string | null; playedSan: string | null; found: boolean; motifs: string[]; primary: string; points: number; lossCp: number; mateIn: number | null; at: string; source: string; url: string | null; label: string };
 const GAME_SRC: Record<string, string> = { live: "Arena", my: "My Games", lichess: "Lichess", chesscom: "Chess.com" };
@@ -976,6 +977,8 @@ function GameAwardsSection() {
                   <th className="px-2 py-2 text-right sm:px-3" title="Tactics missed">❌ Missed</th>
                   <th className="hidden px-2 py-2 text-right sm:table-cell sm:px-3">Games</th>
                   <th className="hidden px-2 py-2 text-left md:table-cell sm:px-3">Best at</th>
+                  <th className="px-2 py-2 text-right sm:px-3" title="Opening accuracy: share of the first 12 moves that were master-book moves or engine-approved">📖 Opening</th>
+                  <th className="hidden px-2 py-2 text-left lg:table-cell sm:px-3" title="How they play, from their scored games">Style</th>
                   <th className="hidden px-2 py-2 text-left lg:table-cell sm:px-3">Where</th>
                 </tr>
               </thead>
@@ -1005,11 +1008,24 @@ function GameAwardsSection() {
                       <td className="hidden px-2 py-2 text-left md:table-cell sm:px-3">
                         <div className="flex flex-wrap gap-1">{top.map(([m, v]) => <span key={m} className={`rounded-full px-2 py-0.5 text-[10px] ${v.found >= v.missed ? "bg-emerald-500/20 text-emerald-200" : "bg-rose-500/20 text-rose-200"}`}>{label(m)} {v.found}/{v.missed}</span>)}</div>
                       </td>
+                      <td className="px-2 py-2 text-right tabular-nums sm:px-3" title={r.opening?.favourite ? `Most played: ${r.opening.favourite}` : undefined}>
+                        {r.opening && r.opening.accuracy != null ? (
+                          <span>
+                            <span className={r.opening.accuracy >= 80 ? "text-emerald-300" : r.opening.accuracy >= 60 ? "text-amber-300" : "text-rose-300"}>{r.opening.accuracy}%</span>
+                            {r.opening.mistakes > 0 && <span className="ml-1 text-[10px] text-rose-300" title="Wrong opening moves">✗{r.opening.mistakes}</span>}
+                            {r.opening.trapsFell > 0 && <span className="ml-1 text-[10px] text-rose-400" title="Fell into a trap">🪤{r.opening.trapsFell}</span>}
+                            {r.opening.trapsSprung > 0 && <span className="ml-1 text-[10px] text-emerald-300" title="Traps sprung">🎣{r.opening.trapsSprung}</span>}
+                          </span>
+                        ) : <span className="text-ink-600">—</span>}
+                      </td>
+                      <td className="hidden px-2 py-2 text-left lg:table-cell sm:px-3">
+                        <div className="flex flex-wrap gap-1">{Object.entries(r.character ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([t, n]) => <span key={t} className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-ink-200">{t} ×{n}</span>)}</div>
+                      </td>
                       <td className="hidden px-2 py-2 text-left text-[11px] text-ink-400 lg:table-cell sm:px-3">{r.sources.map((x) => GAME_SRC[x] ?? x).join(", ")}</td>
                     </tr>,
                     isOpen && (
                       <tr key={r.studentId + ":moments"} className="bg-ink-950/60">
-                        <td colSpan={8} className="px-2 py-2 sm:px-3">
+                        <td colSpan={10} className="px-2 py-2 sm:px-3">
                           {ev.isLoading && <div className="text-xs text-ink-400">Loading moments…</div>}
                           {ev.data && (
                             <div className="grid gap-1">
@@ -1036,7 +1052,7 @@ function GameAwardsSection() {
           </div>
         )}
         <p className="mt-2 text-[10px] text-ink-500">
-          One main motif per moment, the most specific. A tactic counts only when it actually appeared (the opponent just gave up ≥1.2 pawns, or a mate is on). Mate patterns 6–8 · deflection / attraction / sacrifice 4 · fork / pin / skewer / discovered attack 3 · hanging piece 2. Missed = −half. Click a row for every moment.
+          Three layers, one main label per moment. <b>Tactics</b> (mates 6–8 · deflection / attraction / sacrifice 4 · fork / pin / skewer / discovered attack 3 · hanging piece 2; a tactic counts only when it actually appeared). <b>Positional</b> — engine-confirmed ideas: zugzwang 4 · prophylaxis / good defence 3 · knight outpost, weak square, pawn weakness, good-for-bad exchange, passed pawn, rook on the 7th, king activity, attack build-up 2 · space 1 (prophylaxis and zugzwang are checked for players rated 1400+). <b>Opening</b> — the first 12 moves against the masters book: trap sprung +3, wrong move −1, fell into a trap −3; 📖 is the share of book / engine-approved opening moves. Missed = −half. Click a row for every moment.
         </p>
       </div>
     </div>
