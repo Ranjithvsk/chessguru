@@ -81,7 +81,8 @@ const pointsFor = (motifs: string[]) => motifs.reduce((m, t) => Math.max(m, MOTI
 const STRATEGIC_MIN_RATING = 1400;
 const STRATEGIC_LOSS_CP = 80;      // a positional miss is a smaller error than a tactical one
 Object.assign(MOTIF_POINTS, STRATEGIC_POINTS, OPENING_POINTS);
-Object.assign(MOTIF_LABEL, STRATEGIC_LABEL, OPENING_LABEL);
+Object.assign(MOTIF_LABEL, STRATEGIC_LABEL, OPENING_LABEL, { repertoireDeviation: "Off repertoire" });
+Object.assign(MOTIF_POINTS, { repertoireDeviation: 1 });
 const OPENING_MISTAKE_CP = 80;     // out of book AND this much worse than the engine's move = wrong opening move
 const OPENING_TRAP_CP = 250;       // a swing this large inside the opening = a trap (sprung or fallen into)
 
@@ -89,13 +90,18 @@ type LiveGame = { _id: string; players: { white: string; black: string }; moves:
 // One shape for every source: live arena games, PGNs imported under My Games, and the games pulled
 // from a linked Lichess / Chess.com account (owner: "even games played in lichess or chess.com").
 type GameSource = "live" | "my" | "lichess" | "chesscom";
-type GameToScore = { key: string; source: GameSource; url: string | null; moves: string[]; white: string | null; black: string | null; at: Date; label: string };
+type GameToScore = { key: string; source: GameSource; url: string | null; moves: string[]; white: string | null; black: string | null; at: Date; label: string;
+  // arena games carry the clock: per-ply think time (ms) and the time control, for time-trouble tagging
+  moveTimes?: number[]; timeControl?: { initial: number; increment: number } | null };
 type MotifEvent = {
   _id: string; gameId: string; ply: number; userId: string; academyId: string; color: "white" | "black";
   fen: string; bestUci: string; bestSan: string | null; playedUci: string; playedSan: string | null;
   found: boolean; motifs: string[]; primary: string; points: number; lossCp: number; mateIn: number | null; at: Date;
   source: GameSource; url: string | null; label: string;
+  clockMs?: number | null; thinkMs?: number | null; timeTrouble?: boolean; // arena only: what the clock said at this move
 };
+const TIME_TROUBLE_MS = 10_000;   // under ten seconds on the clock, or a move made in under 1.5 s while short
+const PANIC_THINK_MS = 1_500;
 
 @Injectable()
 export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
@@ -130,6 +136,52 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
     return new Map(rows.map((r: any) => [String(r._id), String(r.academyId)]));
   }
   private static uid(p: string | undefined): string | null { return p && p.startsWith("u:") ? p.slice(2) : null; }
+  /** The student's repertoire lines (their own + their coach's), as SAN arrays. */
+  private async repertoireFor(userId: string): Promise<Array<{ name: string; sans: string[] }>> {
+    try {
+      const u: any = await this.col("users").findOne({ _id: userId as never }, { projection: { coachId: 1 } });
+      const owners = [userId, ...(u?.coachId ? [String(u.coachId)] : [])];
+      const rows = await this.col("myRepertoire").find({ ownerId: { $in: owners }, kind: "line", sans: { $exists: true } }, { projection: { name: 1, sans: 1 } }).limit(100).toArray();
+      return (rows as any[]).filter((r) => Array.isArray(r.sans) && r.sans.length >= 2).map((r) => ({ name: String(r.name ?? "line"), sans: r.sans.map(String) }));
+    } catch { return []; }
+  }
+  /** Platform-wide norms per 200-point rating band, for "how do I compare with my level". Cached 10 min. */
+  private bandsCache: { at: number; bands: Record<string, { players: number; scorePerGame: number; foundRate: number; openingAccuracy: number | null }> } | null = null;
+  private async ratingBands() {
+    if (this.bandsCache && Date.now() - this.bandsCache.at < 600_000) return this.bandsCache.bands;
+    const since = new Date(Date.now() - 90 * 864e5);
+    const per = await this.events().aggregate([{ $match: { at: { $gte: since } } }, { $group: { _id: "$userId", score: { $sum: "$points" }, found: { $sum: { $cond: ["$found", 1, 0] } }, n: { $sum: 1 }, games: { $addToSet: "$gameId" } } }]).toArray();
+    const openings = await this.done().find({ opening: { $exists: true }, analyzedAt: { $gte: since } }, { projection: { opening: 1 } }).toArray();
+    const accByUser: Record<string, number[]> = {};
+    for (const r of openings as any[]) for (const [uid, o] of Object.entries((r.opening ?? {}) as Record<string, any>)) if (typeof o.accuracy === "number") (accByUser[uid] ??= []).push(o.accuracy);
+    const bands: Record<string, { players: number; scorePerGame: number; foundRate: number; openingAccuracy: number | null }> = {};
+    const acc: Record<string, { players: number; spg: number[]; fr: number[]; oa: number[] }> = {};
+    for (const r of per) {
+      const rating = await this.ratingOf(String(r._id));
+      const band = `${Math.floor(rating / 200) * 200}`;
+      const a = (acc[band] ??= { players: 0, spg: [], fr: [], oa: [] });
+      a.players++; a.spg.push(r.score / Math.max(1, (r.games as string[]).length)); a.fr.push(r.found / Math.max(1, r.n));
+      const oa = accByUser[String(r._id)]; if (oa?.length) a.oa.push(oa.reduce((x, y) => x + y, 0) / oa.length);
+    }
+    const mean = (xs: number[]) => (xs.length ? xs.reduce((x, y) => x + y, 0) / xs.length : 0);
+    for (const [b, a] of Object.entries(acc)) bands[b] = { players: a.players, scorePerGame: Math.round(mean(a.spg) * 10) / 10, foundRate: Math.round(mean(a.fr) * 100), openingAccuracy: a.oa.length ? Math.round(mean(a.oa)) : null };
+    this.bandsCache = { at: Date.now(), bands };
+    return bands;
+  }
+  /** Coach/owner: star a scored moment into their class-board shortlist (shows on the Sunday digest). */
+  async starMoment(session: any, gameId: string, ply: number, note?: string) {
+    const { userId, academyId, role } = this.member(session);
+    if (!["academy_owner", "coach", "admin"].includes(role)) throw new ForbiddenException("coach or owner only");
+    const ev = await this.events().findOne({ gameId, ply, academyId } as never);
+    if (!ev) throw new NotFoundException("moment not found");
+    const shapes = [{ orig: ev.bestUci.slice(0, 2), dest: ev.bestUci.slice(2, 4), brush: "green" }, ...(!ev.found && ev.playedUci !== ev.bestUci ? [{ orig: ev.playedUci.slice(0, 2), dest: ev.playedUci.slice(2, 4), brush: "red" }] : [])];
+    const label = MOTIF_LABEL[ev.primary] ?? ev.primary;
+    const autoNote = `${ev.found ? "Found" : "Missed"}: ${label} — ${ev.userId}, move ${Math.ceil(ev.ply / 2)}${ev.color === "black" ? "…" : "."} ${ev.playedSan ?? ""}${ev.found ? "" : ` (best ${ev.bestSan ?? ev.bestUci})`} · ${ev.label}`;
+    const doc = { _id: "sn_" + Math.random().toString(36).slice(2, 12), classId: "game-awards", fen: ev.fen, note: (note?.trim() ? `${note.trim()} — ` : "") + autoNote.slice(0, 400), shapes, byUserId: userId, byName: session?.username ?? userId, at: new Date(), starred: true, studentId: ev.userId, source: "game-awards", gameId, ply };
+    await this.col("classSnaps").insertOne(doc as never);
+    await this.events().updateOne({ _id: ev._id } as never, { $set: { starredBy: userId, starredAt: new Date() } } as never);
+    return { ok: true, id: doc._id };
+  }
   /** Best known rating for a user: arena (any speed), else puzzle Glicko, else 1500. */
   private async ratingOf(userId: string): Promise<number> {
     try {
@@ -166,7 +218,8 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
     if (source === "live") {
       const g = await this.col<LiveGame>("live_games").findOne({ _id: id as never });
       if (!g) return null;
-      return { key, source: "live", url: `/play/games/${id}`, moves: g.moves ?? [], white: GameMotifsService.uid(g.players?.white), black: GameMotifsService.uid(g.players?.black), at: g.finishedAt ?? g.startedAt, label: `${(g.players?.white ?? "?").replace(/^u:/, "")} vs ${(g.players?.black ?? "?").replace(/^u:/, "")}` };
+      const lg = g as LiveGame & { moveTimes?: number[]; timeControl?: { initial: number; increment: number } };
+      return { key, source: "live", url: `/play/games/${id}`, moves: g.moves ?? [], white: GameMotifsService.uid(g.players?.white), black: GameMotifsService.uid(g.players?.black), at: g.finishedAt ?? g.startedAt, label: `${(g.players?.white ?? "?").replace(/^u:/, "")} vs ${(g.players?.black ?? "?").replace(/^u:/, "")}`, moveTimes: lg.moveTimes, timeControl: lg.timeControl ?? null };
     }
     if (source === "my") {
       const g: any = await this.col("myGames").findOne({ _id: id as never });
@@ -273,6 +326,18 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
     const charStats: Record<string, { sacrifices: number; captures: number; plies: number; attackMoments: number; quietBest: number }> = {};
     const opening: Record<string, OpeningTally> = {};
     const book = this.book();
+    // Clock per side (arena games): initial − own think times + increment per own move, so a miss made
+    // with seconds left is tagged as time trouble and costs less.
+    const clock: Record<"white" | "black", number | null> = { white: g.timeControl?.initial ?? null, black: g.timeControl?.initial ?? null };
+    const clockAt = (side: "white" | "black", ply: number): { clockMs: number | null; thinkMs: number | null } => {
+      const t = g.moveTimes?.[ply]; const before = clock[side];
+      if (before == null || typeof t !== "number") return { clockMs: null, thinkMs: typeof t === "number" ? t : null };
+      clock[side] = Math.max(0, before - t + (g.timeControl?.increment ?? 0));
+      return { clockMs: before, thinkMs: t };
+    };
+    // Repertoire (owner: "repertoire check"): the student's own lines plus their coach's, as move trees.
+    const repertoire = new Map<string, Array<{ name: string; sans: string[] }>>();
+    for (const uid of new Set([g.white, g.black].filter((x): x is string => !!x && tracked.has(x)))) repertoire.set(uid, await this.repertoireFor(uid));
     for (let i = 0; i < moves.length; i++) {
       const sideToMove: "white" | "black" = board.turn() === "w" ? "white" : "black";
       const playerId = sideToMove === "white" ? g.white : g.black;
@@ -288,6 +353,9 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
       let next: PositionEval;
       next = await this.evalAt(engine, slot, board.fen());
       const whiteBefore = toWhiteCp(cur, sideToMove);
+      // Both clocks advance on every ply (tracked player or not) so the student's clock is right.
+      const ck = clockAt(sideToMove, i);
+      const inTimeTrouble = ck.clockMs != null && (ck.clockMs < TIME_TROUBLE_MS || (ck.clockMs < 30_000 && ck.thinkMs != null && ck.thinkMs < PANIC_THINK_MS));
       if (playerId && academyId && bestUci) {
         const cs = (charStats[playerId] ??= { sacrifices: 0, captures: 0, plies: 0, attackMoments: 0, quietBest: 0 });
         cs.plies++; if (mv.captured) cs.captures++;
@@ -305,6 +373,22 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
           else if (loss <= 30 || playedBestHere) ot.engineOk++;
           if (inBook === false && ot.deviationPly === null) ot.deviationPly = i + 1;
           const nm = await book.name(board.fen()); if (nm) { ot.eco = nm.eco; ot.name = nm.name; }
+          // Repertoire: does the game follow one of the student's / coach's lines? Off it = −1 once.
+          const lines = repertoire.get(playerId) ?? [];
+          if (lines.length && ot.repertoireDeviation === null && ot.repertoireOff !== true) {
+            const sansSoFar = board.history(); // SAN so far, this move included
+            const prefix = sansSoFar.slice(0, -1), played = sansSoFar[sansSoFar.length - 1]!;
+            const live = lines.filter((l) => l.sans.length > prefix.length && prefix.every((m, k) => l.sans[k] === m));
+            if (live.length) {
+              ot.repertoireLine ??= live[0]!.name;
+              if (!live.some((l) => l.sans[prefix.length] === played)) {
+                ot.repertoireDeviation = i + 1; ot.repertoireOff = true;
+                events.push({ _id: `${gameId}:${i + 1}:rep`, gameId, ply: i + 1, userId: playerId, academyId, color: sideToMove, fen: fenBefore, bestUci, bestSan: live.find((l) => l.sans[prefix.length])?.sans[prefix.length] ?? null, playedUci, playedSan: mv.san, found: false, motifs: ["repertoireDeviation"], primary: "repertoireDeviation", points: -1, lossCp: Math.round(Math.min(loss, 9999)), mateIn: null, at: g.at, source: g.source, url: g.url, label: g.label });
+              } else ot.repertoirePlies = (ot.repertoirePlies ?? 0) + 1;
+            } else if (prefix.length === 0 || (prefix.length <= 2 && !lines.some((l) => l.sans[0] === prefix[0]))) {
+              ot.repertoireOff = prefix.length >= 2 ? true : ot.repertoireOff; // opponent (or the student) left every line at once — nothing to judge
+            }
+          }
           // (the engine's own move, or a mate, is never a "wrong opening move" — the eval after a
           // checkmate reads 0 and looked like a 999-pawn loss on the first pass)
           if (inBook !== true && loss >= OPENING_MISTAKE_CP && !playedBestHere) {
@@ -419,6 +503,12 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
           }
         }
       }
+      if (playerId && academyId) {
+        for (const e of events) if (e.ply === i + 1 && e.clockMs === undefined) {
+          e.clockMs = ck.clockMs; e.thinkMs = ck.thinkMs; e.timeTrouble = inTimeTrouble;
+          if (inTimeTrouble && e.points < 0) e.points = Math.min(-1, Math.ceil(e.points / 2)); // a slip on the clock costs half
+        }
+      }
       prevWhiteCp = whiteBefore;
       cur = next;
     }
@@ -478,12 +568,16 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
         if (o.name) a.names[o.name] = (a.names[o.name] ?? 0) + 1;
       }
     }
+    const bands = await this.ratingBands();
     for (const r of out) {
       (r as any).character = character[r.studentId] ?? {};
+      const rating = await this.ratingOf(r.studentId);
+      const band = `${Math.floor(rating / 200) * 200}`;
+      (r as any).rating = Math.round(rating); (r as any).band = band; (r as any).bandNorm = bands[band] ?? null;
       const a = openingAgg[r.studentId];
       (r as any).opening = a ? { accuracy: a.accN ? Math.round(a.accSum / a.accN) : null, mistakes: a.mistakes, trapsFell: a.trapsFell, trapsSprung: a.trapsSprung, favourite: Object.entries(a.names).sort((x, y) => y[1] - x[1])[0]?.[0] ?? null } : null;
     }
-    return { period, rows: out, labels: MOTIF_LABEL, points: MOTIF_POINTS, pending, strategic: STRATEGIC_ORDER };
+    return { period, rows: out, labels: MOTIF_LABEL, points: MOTIF_POINTS, pending, strategic: STRATEGIC_ORDER, bands };
   }
 
   async studentEvents(session: any, studentId: string, period = "30d") {

@@ -97,6 +97,9 @@ export default function PlayPage() {
   // Rated by default (owner call 2026-09-07). Guests are always casual server-side;
   // the switch is hidden for them so it cannot promise a rating they do not have.
   const [wantRated, setWantRated] = useState(true);
+  // Classmates only (owner 2026-09-12: academy nights): the seek waits in the academy's own pool —
+  // no outside players and no bots — until a classmate seeks the same clock.
+  const [classmatesOnly, setClassmatesOnly] = useState(false);
   const signedIn = !!ctx?.userId;
   const rated = signedIn && wantRated;
   // Bump once per finished game so the strip picks up the new result.
@@ -300,6 +303,11 @@ export default function PlayPage() {
                 <div className="inline-flex rounded-lg border border-ink-700 p-0.5 text-xs" data-testid="rated-toggle">
                   <button onClick={() => setWantRated(true)} className={`rounded-md px-2 py-0.5 ${wantRated ? "bg-brand-600 text-white" : "text-ink-300 hover:text-white"}`}>Rated</button>
                   <button onClick={() => setWantRated(false)} className={`rounded-md px-2 py-0.5 ${!wantRated ? "bg-brand-600 text-white" : "text-ink-300 hover:text-white"}`}>Casual</button>
+                  {signedIn && (
+                    <label className="ml-2 inline-flex cursor-pointer items-center gap-1 text-[11px] text-ink-300" title="Only players from your academy — no outsiders, no bots. Waits until a classmate seeks the same clock.">
+                      <input type="checkbox" checked={classmatesOnly} onChange={(e) => setClassmatesOnly(e.target.checked)} className="accent-brand-500" /> classmates only
+                    </label>
+                  )}
                 </div>
               ) : (
                 <span className="text-xs text-ink-500">Sign in for rated games</span>
@@ -310,7 +318,7 @@ export default function PlayPage() {
                 <button
                   key={tc.label}
                   data-testid={`seek-${tc.initial}`}
-                  onClick={() => p.seek({ initial: tc.initial, increment: tc.increment }, rated)}
+                  onClick={() => p.seek({ initial: tc.initial, increment: tc.increment }, rated, classmatesOnly && signedIn)}
                   className="rounded-lg bg-ink-800 px-3 py-2 text-sm font-medium text-white hover:bg-ink-700"
                 >
                   {tc.label}

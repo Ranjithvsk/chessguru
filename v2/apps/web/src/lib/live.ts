@@ -101,8 +101,8 @@ export class LiveClient {
   hello(guest?: string): void {
     this.send({ v: 1, t: "hello", d: guest ? { guest } : {} });
   }
-  seek(clock: TimeControl, rated = false): void {
-    this.send({ v: 1, t: "seek", d: { clock, rated } });
+  seek(clock: TimeControl, rated = false, academyOnly = false): void {
+    this.send({ v: 1, t: "seek", d: { clock, rated, ...(academyOnly ? { academyOnly: true } : {}) } });
   }
   unseek(): void {
     this.send({ v: 1, t: "unseek" });

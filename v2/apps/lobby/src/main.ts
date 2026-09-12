@@ -123,7 +123,13 @@ const canRate = (by: string): boolean => by.startsWith("u:");
 async function onSeek(raw: LobbySeek): Promise<void> {
   const e: LobbySeek = { ...raw, rated: raw.rated && canRate(raw.by) };
   const speed = speedOf(e.clock);
-  const pool = tcKey(e.clock);
+  // Classmates-only seeks (owner 2026-09-12: academy nights) live in their own pool per academy, so
+  // they only ever meet each other — and the bot player leaves "|acad:" pools alone.
+  let pool = tcKey(e.clock);
+  if (e.academyOnly && canRate(e.by)) {
+    const u = (await mongo.db().collection("users").findOne({ _id: e.by.slice(2) as never }, { projection: { academyId: 1 } })) as { academyId?: string } | null;
+    if (u?.academyId) pool = `${pool}|acad:${u.academyId}`;
+  }
   const { rating, skill } = await ratingOf(e.by, speed);
 
   // one live seek per user

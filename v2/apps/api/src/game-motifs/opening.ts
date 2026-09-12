@@ -54,7 +54,8 @@ export class OpeningBook {
 export class OpeningTally {
   plies = 0; book = 0; engineOk = 0; deviationPly: number | null = null; mistakes = 0; trapsFell = 0; trapsSprung = 0;
   eco: string | null = null; name: string | null = null;
+  repertoireLine: string | null = null; repertoirePlies: number | null = null; repertoireDeviation: number | null = null; repertoireOff: boolean | null = null;
   /** accuracy = share of opening moves that were book, or engine-approved when the book runs out. */
   get accuracy(): number | null { return this.plies ? Math.round(((this.book + this.engineOk) / this.plies) * 100) : null; }
-  toJSON() { return { plies: this.plies, book: this.book, engineOk: this.engineOk, accuracy: this.accuracy, deviationPly: this.deviationPly, mistakes: this.mistakes, trapsFell: this.trapsFell, trapsSprung: this.trapsSprung, eco: this.eco, name: this.name }; }
+  toJSON() { return { plies: this.plies, book: this.book, engineOk: this.engineOk, accuracy: this.accuracy, deviationPly: this.deviationPly, mistakes: this.mistakes, trapsFell: this.trapsFell, trapsSprung: this.trapsSprung, eco: this.eco, name: this.name, repertoireLine: this.repertoireLine, repertoirePlies: this.repertoirePlies, repertoireDeviation: this.repertoireDeviation }; }
 }

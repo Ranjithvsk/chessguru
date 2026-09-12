@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, get } from "../lib/api";
+import { api, get, post } from "../lib/api";
 import { getAcademyOpeningLeaderboard, type AcademyOpeningLeaderboardRow } from "../lib/opening-trainer-api";
 
 const BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
@@ -884,9 +884,11 @@ function OpeningsLeaderboardSection() {
 // Found = the motif's points, missed = minus half. Server: /api/game-motifs.
 // ─────────────────────────────────────────────────────────────────────
 type GameAwardRow = { rank: number; studentId: string; username: string; name: string | null; score: number; found: number; missed: number; games: number; lastAt: string; byMotif: Record<string, { found: number; missed: number }>; sources: string[];
-  character?: Record<string, number>; opening?: { accuracy: number | null; mistakes: number; trapsFell: number; trapsSprung: number; favourite: string | null } | null };
+  character?: Record<string, number>; opening?: { accuracy: number | null; mistakes: number; trapsFell: number; trapsSprung: number; favourite: string | null } | null;
+  rating?: number; band?: string; bandNorm?: { players: number; scorePerGame: number; foundRate: number; openingAccuracy: number | null } | null };
 type GameAwardBoard = { period: string; rows: GameAwardRow[]; labels: Record<string, string>; points: Record<string, number>; pending: number };
-type GameAwardEvent = { gameId: string; ply: number; color: "white" | "black"; fen: string; bestUci: string; playedUci: string; bestSan: string | null; playedSan: string | null; found: boolean; motifs: string[]; primary: string; points: number; lossCp: number; mateIn: number | null; at: string; source: string; url: string | null; label: string };
+type GameAwardEvent = { gameId: string; ply: number; color: "white" | "black"; fen: string; bestUci: string; playedUci: string; bestSan: string | null; playedSan: string | null; found: boolean; motifs: string[]; primary: string; points: number; lossCp: number; mateIn: number | null; at: string; source: string; url: string | null; label: string;
+  clockMs?: number | null; timeTrouble?: boolean; starredBy?: string | null };
 // Open a moment on OUR board editor (owner 2026-09-12: "why does it open Lichess? our board is good").
 // Arrows: green = the engine's move, red = what was played when it differs. Same ?fen=&shapes= deep
 // link the coach board uses.
@@ -906,6 +908,13 @@ function GameAwardsSection() {
     queryKey: ["academy-game-awards", period],
     queryFn: () => get<GameAwardBoard>(`/api/game-motifs/leaderboard?period=${period}`),
     staleTime: 30_000, refetchInterval: 60_000,
+  });
+  const me = useQuery({ queryKey: ["me-role"], queryFn: () => get<{ role?: string; user?: { role?: string } }>("/api/me").catch(() => ({} as any)), staleTime: 300_000 });
+  const myRole: string = (me.data as any)?.role ?? (me.data as any)?.user?.role ?? "";
+  const canStar = ["academy_owner", "coach", "admin"].includes(myRole);
+  const star = useMutation({
+    mutationFn: (e: GameAwardEvent) => post<{ ok: boolean }>("/api/game-motifs/star", { gameId: e.gameId, ply: e.ply }),
+    onSuccess: () => { void ev.refetch(); },
   });
   const ev = useQuery({
     queryKey: ["academy-game-awards-student", open, period],
@@ -1011,7 +1020,14 @@ function GameAwardsSection() {
                         <div className="line-clamp-1 font-semibold text-white">{r.name || r.username}</div>
                         <div className="text-[10px] text-ink-500">@{r.username}</div>
                       </td>
-                      <td className="px-2 py-2 text-right tabular-nums sm:px-3"><span className={`text-lg font-bold ${r.score >= 0 ? "text-emerald-200" : "text-rose-300"}`}>{r.score > 0 ? "+" : ""}{r.score}</span></td>
+                      <td className="px-2 py-2 text-right tabular-nums sm:px-3">
+                        <span className={`text-lg font-bold ${r.score >= 0 ? "text-emerald-200" : "text-rose-300"}`}>{r.score > 0 ? "+" : ""}{r.score}</span>
+                        {r.bandNorm && r.bandNorm.players >= 3 && (
+                          <div className="text-[10px] text-ink-500" title={`Players rated ${r.band}–${Number(r.band) + 199} across the platform average ${r.bandNorm.scorePerGame} per game, find ${r.bandNorm.foundRate}% of their tactics`}>
+                            {r.band}s avg {r.bandNorm.scorePerGame}/game · {r.bandNorm.foundRate}% found
+                          </div>
+                        )}
+                      </td>
                       <td className="px-2 py-2 text-right tabular-nums text-emerald-300 sm:px-3">{r.found}</td>
                       <td className="px-2 py-2 text-right tabular-nums text-rose-300 sm:px-3">{r.missed}</td>
                       <td className="hidden px-2 py-2 text-right tabular-nums text-ink-300 sm:table-cell sm:px-3">{r.games}</td>
@@ -1043,10 +1059,14 @@ function GameAwardsSection() {
                               {ev.data.events.map((e) => (
                                 <div key={`${e.gameId}:${e.ply}`} className="flex flex-wrap items-center gap-2 rounded-lg bg-ink-900/60 px-2 py-1.5 text-xs">
                                   <span className={`w-10 text-center font-extrabold tabular-nums ${e.found ? "text-emerald-300" : "text-rose-300"}`}>{e.points > 0 ? "+" : ""}{e.points}</span>
+                                  {e.timeTrouble && <span className="rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] text-amber-200" title={`Time trouble: ${e.clockMs != null ? Math.round(e.clockMs / 1000) + " s" : "seconds"} on the clock — the penalty is halved`}>⏱ {e.clockMs != null ? Math.round(e.clockMs / 1000) + "s" : "clock"}</span>}
                                   <span className="rounded-full bg-white/10 px-2 py-0.5 font-semibold text-white">{label(e.primary)}</span>
                                   <span className="text-ink-200">{Math.ceil(e.ply / 2)}{e.color === "black" ? "…" : "."} {e.playedSan}{!e.found && <span className="text-ink-500"> (best {e.bestSan}{e.mateIn ? `, mate in ${e.mateIn}` : ""})</span>}</span>
                                   <span className="ml-auto text-[10px] text-ink-500">{GAME_SRC[e.source] ?? e.source} · {e.label} · {new Date(e.at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</span>
                                   <Link to={momentEditorUrl(e)} className="rounded-md bg-brand-500/20 px-2 py-0.5 text-[10px] font-semibold text-brand-200" title="Open this position on the ChessGuru board with the engine's move drawn">♟ open position</Link>
+                                  {canStar && (e.starredBy
+                                    ? <span className="text-[10px] text-amber-300" title="On your class-board shortlist and in Sunday's digest">★ starred</span>
+                                    : <button onClick={() => star.mutate(e)} disabled={star.isPending} className="rounded-md bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold text-amber-200" title="Star for class — goes to your class-board shortlist and Sunday's digest">☆ star for class</button>)}
                                   {e.url && (e.url.startsWith("http") ? <a href={e.url} target="_blank" rel="noreferrer" className="text-[10px] text-ink-400">{GAME_SRC[e.source] ?? "game"} ↗</a> : <Link to={e.url} className="text-[10px] text-ink-400">replay</Link>)}
                                 </div>
                               ))}
@@ -1062,7 +1082,7 @@ function GameAwardsSection() {
           </div>
         )}
         <p className="mt-2 text-[10px] text-ink-500">
-          Three layers, one main label per moment. <b>Tactics</b> (mates 6–8 · deflection / attraction / sacrifice 4 · fork / pin / skewer / discovered attack 3 · hanging piece 2; a tactic counts only when it actually appeared). <b>Positional</b> — engine-confirmed ideas: zugzwang 4 · prophylaxis / good defence 3 · knight outpost, weak square, pawn weakness, good-for-bad exchange, passed pawn, rook on the 7th, king activity, attack build-up 2 · space 1 (prophylaxis and zugzwang are checked for players rated 1400+). <b>Opening</b> — the first 12 moves against the masters book: trap sprung +3, wrong move −1, fell into a trap −3; 📖 is the share of book / engine-approved opening moves. Missed = −half. Click a row for every moment.
+          Three layers, one main label per moment. <b>Tactics</b> (mates 6–8 · deflection / attraction / sacrifice 4 · fork / pin / skewer / discovered attack 3 · hanging piece 2; a tactic counts only when it actually appeared). <b>Positional</b> — engine-confirmed ideas: zugzwang 4 · prophylaxis / good defence 3 · knight outpost, weak square, pawn weakness, good-for-bad exchange, passed pawn, rook on the 7th, king activity, attack build-up 2 · space 1 (prophylaxis and zugzwang are checked for players rated 1400+). <b>Opening</b> — the first 12 moves against the masters book: trap sprung +3, wrong move −1, fell into a trap −3, off the student's or coach's repertoire −1; 📖 is the share of book / engine-approved opening moves. ⏱ a slip made in time trouble (under 10 s) costs half. Under each score: what players in the same 200-point band average across the platform. Coaches: ☆ puts a moment on the class-board shortlist and into Sunday's digest. Click a row for every moment.
         </p>
       </div>
     </div>

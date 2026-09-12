@@ -321,6 +321,35 @@ export class CoachStarredDigestService implements OnModuleInit {
       return `${i + 1}. ${snapLink(s)}${s.note ? ` — ${String(s.note)}` : ""}${transPreview ? `\n   "${transPreview}"` : ""}`;
     }).join("\n");
     const windowLabel = days === 7 ? "this week" : days === 14 ? "the last 2 weeks" : days === 28 ? "this month" : `the last ${days} days`;
+    // 🎯 Game awards (2026-09-12): the coach's students' scored games in the same window —
+    // score, found/missed, best and worst moment, each a board-editor link with the arrow drawn.
+    let awardsHtml = "", awardsText = "";
+    try {
+      const students = await this.conn.db!.collection("users").find({ coachId: userId }, { projection: { _id: 1, name: 1, username: 1 } }).toArray();
+      const sids = students.map((x: any) => String(x._id));
+      if (sids.length) {
+        const evs: any[] = await this.conn.db!.collection("gameMotifEvents").find({ userId: { $in: sids }, at: { $gte: since } }).toArray();
+        if (evs.length) {
+          const by = new Map<string, { score: number; found: number; missed: number; best: any; worst: any }>();
+          for (const e of evs) {
+            const b = by.get(e.userId) ?? { score: 0, found: 0, missed: 0, best: null, worst: null };
+            b.score += e.points; if (e.found) b.found++; else b.missed++;
+            if (e.found && (!b.best || e.points > b.best.points)) b.best = e;
+            if (!e.found && (!b.worst || e.points < b.worst.points)) b.worst = e;
+            by.set(e.userId, b);
+          }
+          const nameOf = (id: string) => { const u: any = students.find((x: any) => String(x._id) === id); return u?.name || u?.username || id; };
+          const editor = (e: any) => { const shapes = [{ orig: e.bestUci.slice(0, 2), dest: e.bestUci.slice(2, 4), brush: "green" }]; const b64 = Buffer.from(JSON.stringify(shapes)).toString("base64url"); return `${PUBLIC_ORIGIN}/board-editor?fen=${encodeURIComponent(e.fen)}&orientation=${e.color}&shapes=${b64}`; };
+          const label = (m: string) => String(m).replace(/([A-Z])/g, " $1").toLowerCase();
+          const rows = [...by.entries()].sort((a, b) => b[1].score - a[1].score);
+          awardsHtml = `<h3 style="color:#111;margin:18px 0 4px">🎯 Game awards ${esc(windowLabel)}</h3><ul style="line-height:1.6;padding-left:20px;color:#333;font-size:13px">` +
+            rows.map(([id, b]) => `<li><b>${esc(nameOf(id))}</b> ${b.score > 0 ? "+" : ""}${b.score} (✅ ${b.found} · ❌ ${b.missed})` +
+              (b.best ? ` — best: <a href="${editor(b.best)}">${esc(label(b.best.primary))}</a>` : "") +
+              (b.worst ? ` · missed: <a href="${editor(b.worst)}">${esc(label(b.worst.primary))}</a>` : "") + `</li>`).join("") + `</ul>`;
+          awardsText = `\n🎯 Game awards ${windowLabel}:\n` + rows.map(([id, b]) => `- ${nameOf(id)} ${b.score > 0 ? "+" : ""}${b.score} (found ${b.found}, missed ${b.missed})${b.best ? ` — best: ${label(b.best.primary)} ${editor(b.best)}` : ""}`).join("\n") + "\n";
+        }
+      }
+    } catch { /* the digest must never fail on the awards block */ }
     const subject = `Your starred positions ${windowLabel} (${snaps.length})`;
     const unsubUrl = `${PUBLIC_ORIGIN}/v2api/api/me/email/unsubscribe?u=${encodeURIComponent(userId)}&c=coachStarred&t=${emailOptOutToken(userId, "coachStarred")}`;
     const html = `
@@ -333,6 +362,7 @@ export class CoachStarredDigestService implements OnModuleInit {
         ${showStuckNudge ? `<div style="margin:12px 0;padding:10px 12px;border-left:3px solid #f59e0b;background:#fffbeb;color:#78350f;font-size:13px">💤 It's been a while — <b>${pendingBacklog}</b> starred position${pendingBacklog === 1 ? "" : "s"} ${pendingBacklog === 1 ? "is" : "are"} still waiting for review. Even one Sunday morning session can move the needle.</div>` : ""}
         ${staleCount > 0 ? `<p style="margin:8px 0;color:#9a3412;font-size:12px">⏰ <b>${staleCount}</b> starred position${staleCount === 1 ? "" : "s"} ${staleCount === 1 ? "is" : "are"} over 30 days old and still unreviewed — worth revisiting or clearing.</p>` : ""}
         <ol style="line-height:1.6;padding-left:20px;color:#333">${rows}</ol>
+        ${awardsHtml}
         <p style="color:#666;font-size:13px">Every link opens the board editor with your arrows preserved. Pick a few for next week's lessons.</p>
         <p style="color:#9ca3af;font-size:11px;margin-top:24px">
           Manage on <a href="${PUBLIC_ORIGIN}/academy" style="color:#9ca3af">Academy dashboard</a> ·
@@ -348,6 +378,7 @@ export class CoachStarredDigestService implements OnModuleInit {
       showStuckNudge ? `\n💤 It's been a while — ${pendingBacklog} starred position${pendingBacklog === 1 ? "" : "s"} still waiting for review.\n` : "",
       staleCount > 0 ? `⏰ ${staleCount} starred position(s) over 30 days old and still unreviewed.\n` : "",
       rowsText, "",
+      awardsText,
       `Manage on ${PUBLIC_ORIGIN}/academy`,
       `Stop these emails: ${unsubUrl}`,
     ].join("\n");

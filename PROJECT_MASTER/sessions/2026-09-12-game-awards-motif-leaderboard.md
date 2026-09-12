@@ -46,3 +46,12 @@ user played a named bot.
   starved itself).
 - Bot player: Maia-1 weights had been deleted → every think timed out → random moves; restored the
   nine nets, added the weights guard + resign-after-two-failures, and the ±150 human-like band.
+
+## Evening 2 — the six suggestions (owner: "add your suggestions also, as you planned")
+1. **Time trouble** (`game-motifs.service.ts`): arena games carry `moveTimes`/`timeControl`; both clocks are replayed per ply. An event made under 10 s (or a <1.5 s move under 30 s) gets `timeTrouble:true`, `clockMs`, `thinkMs`, and a negative score is halved (min −1). Leaderboard shows ⏱ 7s on the moment.
+2. **Rating-band norms**: `ratingBands()` (90 days, 200-pt bands, cached 10 min) → each row carries `rating`, `band`, `bandNorm {players, scorePerGame, foundRate, openingAccuracy}`; the UI prints "1400s avg 1.2/game · 61% found" under the score once a band has ≥3 players.
+3. **Star for class**: `POST /api/game-motifs/star {gameId, ply, note?}` (coach/owner/admin) inserts a `classSnaps` row (`classId:"game-awards"`, `starred:true`, `studentId`, green best / red played arrows, auto note) and stamps `starredBy` on the event. ☆ button on every moment for coaches.
+4. **Repertoire check**: `repertoireFor(uid)` = the student's `myRepertoire` lines + their coach's (`users.coachId`). During the opening plies the game is matched against the lines; first departure = `repertoireDeviation` event (−1, once) and `opening.repertoireLine/repertoirePlies/repertoireDeviation` on the summary.
+5. **Coach digest**: `coach-starred-digest.service.ts` adds "🎯 Game awards this week" (score, ✅/❌, best and worst moment as board-editor links) for the coach's students, html + text. Never fails the digest.
+6. **Classmates-only seek**: protocol `LobbySeek.academyOnly` (client `seek.d.academyOnly`), ws router passes it, lobby puts the seek in pool `tc|acad:<academyId>` (looked up from `users.academyId`), bot-player skips `|acad:` pools, Play.tsx "classmates only" checkbox (signed-in only) → `usePlay.seek(clock, rated, academyOnly)` → `live.ts`.
+Deployed: API rebuilt + restarted; play-lobby / play-gateway / play-bot restarted (sources synced into the ubuntu clone by tee — lobby/ws/protocol/bot are NOT symlinked); web deployed.

@@ -49,7 +49,7 @@ export interface PlayState {
   gameId: string | null;
   /** Our rating change once a rated game ends. */
   ratingDiff: number | null;
-  seek: (clock: TimeControl, rated?: boolean) => void;
+  seek: (clock: TimeControl, rated?: boolean, academyOnly?: boolean) => void;
   cancelSeek: () => void;
   abort: () => void;
   claim: () => void;
@@ -323,8 +323,8 @@ export function usePlay(guest: string | null): PlayState {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const seek = useCallback((clock: TimeControl, rated = false) => {
-    client.current?.seek(clock, rated);
+  const seek = useCallback((clock: TimeControl, rated = false, academyOnly = false) => {
+    client.current?.seek(clock, rated, academyOnly);
     setStatus("seeking");
   }, []);
 

@@ -68,7 +68,7 @@ export interface ClaimMsg       { v: 1; t: "claim";   g: string }
 export interface ResyncMsg      { v: 1; t: "resync"; g: string; d: { havePly: number } }
 export interface PingMsg        { v: 1; t: "ping";   d: { ts: number } }
 // lobby
-export interface SeekMsg            { v: 1; t: "seek";   d: { clock: TimeControl; rated?: boolean; ratingRange?: number } }
+export interface SeekMsg            { v: 1; t: "seek";   d: { clock: TimeControl; rated?: boolean; ratingRange?: number; academyOnly?: boolean } }
 export interface UnseekMsg          { v: 1; t: "unseek" }
 export interface ChallengeMsg       { v: 1; t: "challenge"; d: { clock: TimeControl; rated?: boolean } }
 export interface ChallengeAcceptMsg { v: 1; t: "challenge-accept"; d: { id: string } }
@@ -143,7 +143,7 @@ export type EngineInbound =
 
 // ── internal: gateway → lobby (over lobby:in) ────────────────────────────────
 export interface LobbyAddr { gw: string; conn: string; by: string }
-export interface LobbySeek      extends LobbyAddr { kind: "seek"; clock: TimeControl; rated: boolean; ratingRange?: number }
+export interface LobbySeek      extends LobbyAddr { kind: "seek"; clock: TimeControl; rated: boolean; academyOnly?: boolean; ratingRange?: number }
 export interface LobbyUnseek    extends LobbyAddr { kind: "unseek" }
 export interface LobbyChallenge extends LobbyAddr { kind: "challenge"; clock: TimeControl; rated: boolean }
 export interface LobbyAccept    extends LobbyAddr { kind: "challenge-accept"; id: string }

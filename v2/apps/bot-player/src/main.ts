@@ -90,7 +90,7 @@ function pickName(): string | null {
 }
 
 async function waitingSeeks(): Promise<SeekMeta[]> {
-  const poolKeys = await cmd.keys("seek:pool:*");
+  const poolKeys = (await cmd.keys("seek:pool:*")).filter((k) => !k.includes("|acad:")); // classmates-only pools: humans only
   if (!poolKeys.length) return [];
   const ids: string[] = [];
   for (const key of poolKeys) ids.push(...(await cmd.zrange(key, 0, -1)));

@@ -202,7 +202,7 @@ export class Router {
         return;
 
       case "seek":
-        void this.cmd.publish(ch.lobbyIn, encode({ kind: "seek", gw: this.gwId, conn: s.id, by: conn.userId, clock: msg.d.clock, rated: msg.d.rated ?? true, ratingRange: msg.d.ratingRange }));
+        void this.cmd.publish(ch.lobbyIn, encode({ kind: "seek", gw: this.gwId, conn: s.id, by: conn.userId, clock: msg.d.clock, rated: msg.d.rated ?? true, ratingRange: msg.d.ratingRange, academyOnly: msg.d.academyOnly === true }));
         return;
 
       case "unseek":
