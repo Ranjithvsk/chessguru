@@ -36,6 +36,15 @@ interface SeekMeta {
 }
 
 const skillOf = (m: SeekMeta): number => m.skill ?? m.rating;
+// A human opponent is never at your exact rating. Owner 2026-09-12: "human-like opponent, not the
+// same exact rating, but the rating level of the player". Each bot game is drawn from a ±150 band
+// around the student's strength (in 25-point steps), clamped to the levels the nets cover, so a
+// 1400 student meets 1275 one game and 1525 the next — and the stamped rating follows.
+const BAND = 150, STEP = 25, MIN_LEVEL = 1000, MAX_LEVEL = 2100;
+const humanLike = (skill: number): number => {
+  const offset = (Math.floor(Math.random() * (2 * BAND / STEP + 1)) - BAND / STEP) * STEP;
+  return Math.max(MIN_LEVEL, Math.min(MAX_LEVEL, Math.round((skill + offset) / STEP) * STEP));
+};
 
 let namePool: string[] = [];
 let botKey = "";
@@ -94,7 +103,7 @@ async function tick(): Promise<void> {
   seeking = true;
   inUse.add(name);
   live++;
-  const skill = skillOf(target);
+  const skill = humanLike(skillOf(target));
   const engine = engines.acquire(pickEngine(skill));
   console.log(
     `[bot] ${name} entering ${target.pool} for ${target.by} (waited ${Math.round((now - target.ts) / 1000)}s, rating ${target.rating}, skill ${skill}, engine ${engine.id})`,
