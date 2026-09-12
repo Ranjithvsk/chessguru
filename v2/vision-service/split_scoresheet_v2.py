@@ -112,7 +112,7 @@ def _fill(ys: list[int]) -> tuple[list[int], float]:
     return out, period
 
 
-def block_rules(mask: np.ndarray, nx0: int, nx1: int, bx1: int, rows_per_block: int):
+def block_rules(mask: np.ndarray, nx0: int, nx1: int, bx1: int, rows_per_block: int, right_strip: tuple[int, int] | None = None):
     """Rules of one block as (y_at_left, y_at_right) pairs, top→bottom.
 
     Handwriting breaks the rules inside the move cells, so the rule positions
@@ -122,7 +122,11 @@ def block_rules(mask: np.ndarray, nx0: int, nx1: int, bx1: int, rows_per_block: 
     without any global angle."""
     h = mask.shape[0]; min_gap = int(h * 0.022)
     left = strip_rows(mask, nx0 + 3, nx1 - 3, min_gap)
-    right = strip_rows(mask, max(nx1, bx1 - 45), bx1 - 3, min_gap)
+    # right anchor: the NEXT block's number column when there is one (same rules,
+    # never written on); the block's own right margin is a fallback, and a long
+    # black move (Nxd3, Qb6) running into it was mis-anchoring rows.
+    ra, rb = right_strip if right_strip else (max(nx1, bx1 - 45), bx1 - 3)
+    right = strip_rows(mask, ra, rb, min_gap)
     if len(left) < 3: return []
     left, period = _fill(left)
     if len(right) >= 3: right, _ = _fill(right)
@@ -133,7 +137,7 @@ def block_rules(mask: np.ndarray, nx0: int, nx1: int, bx1: int, rows_per_block: 
         pairs.append((y, min(cand, key=lambda r: abs(r - y)) if cand else y))
     rows = [(pairs[i], pairs[i + 1]) for i in range(len(pairs) - 1) if abs((pairs[i + 1][0] - pairs[i][0]) - period) < 0.3 * period]
     if len(rows) >= rows_per_block + 1: rows = rows[1:rows_per_block + 1]     # header row first
-    return rows[:rows_per_block], (nx0 + nx1) / 2, bx1 - 24
+    return rows[:rows_per_block], (nx0 + nx1) / 2, (ra + rb) / 2
 
 
 def split(photo: str, out_dir: str, rows_per_block: int = 20) -> dict:
@@ -167,7 +171,9 @@ def split(photo: str, out_dir: str, rows_per_block: int = 20) -> dict:
     cells = []; move = 0; pad = 3; debug = tab.copy(); nrows = []
     for bi, (wc, bc, nc) in enumerate(blocks):
         bx1 = int(bc[1])
-        res = block_rules(tm, int(nc[0]), int(nc[1]), bx1, rows_per_block)
+        nxt = blocks[bi + 1][2] if bi + 1 < len(blocks) else None
+        rs = (int(nxt[0]) + 3, int(nxt[1]) - 3) if nxt and int(nxt[1]) - int(nxt[0]) > 20 else None
+        res = block_rules(tm, int(nc[0]), int(nc[1]), bx1, rows_per_block, rs)
         if not res: nrows.append(0); continue
         rows, xl, xr = res; nrows.append(len(rows))
         for (top, bot) in rows:
