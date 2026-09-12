@@ -101,6 +101,7 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
   private done() { return this.col<{ _id: string; academyIds: string[]; analyzedAt: Date; plies: number; events: number; error?: string }>("gameMotifGames"); }
 
   onModuleInit() {
+    console.log(`[game-motifs] worker armed: every ${POLL_MS / 1000}s, ${PARALLEL} engines, depth ${DEPTH} / ${MOVETIME_MS} ms`);
     this.timer = setInterval(() => this.tick().catch((e) => console.error("[game-motifs] tick:", e?.message || e)), POLL_MS);
     setTimeout(() => this.tick().catch(() => null), 20_000);
   }
@@ -198,7 +199,8 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
     this.ticking = true; this.tickStartedAt = Date.now();
     try {
       const batch = await this.candidates(null, PARALLEL);
-      if (!batch.length) return;
+      if (!batch.length) { console.log("[game-motifs] tick: nothing to score"); return; }
+      console.log(`[game-motifs] tick: ${batch.map((b) => b.key).join(", ")}`);
       await Promise.all(batch.map(async (next, slot) => {
         const acad = await this.academyOf(next.users);
         if (!acad.size) { await this.done().updateOne({ _id: next.key }, { $set: { academyIds: [], analyzedAt: new Date(), plies: 0, events: 0 } }, { upsert: true }); return; }
