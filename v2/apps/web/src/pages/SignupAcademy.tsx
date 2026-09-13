@@ -261,7 +261,7 @@ export default function SignupAcademyPage() {
             </div>
             <div className="flex flex-wrap items-center gap-6 text-xs opacity-70">
               <span>✓ Unlimited coaches</span>
-              <span>✓ Unlimited students</span>
+              <span>✓ Every feature on every plan</span>
               <span>✓ Cancel anytime</span>
             </div>
           </div>
@@ -592,7 +592,7 @@ export default function SignupAcademyPage() {
       {/* ── WhatsApp (owner's number, always one tap away) ─────────────── */}
       <a href={WHATSAPP_URL("Hi Ranjith, I'm interested in ChessGuru for my academy.")} target="_blank" rel="noreferrer"
          aria-label={`Chat on WhatsApp ${WHATSAPP_DISPLAY}`} title={`Chat on WhatsApp · ${WHATSAPP_DISPLAY}`}
-         className="fixed bottom-5 right-5 z-50 flex items-center gap-2 rounded-full pl-3 pr-4 py-3 font-bold text-white shadow-2xl shadow-black/40 hover:scale-105 transition"
+         className="fixed bottom-5 left-5 z-50 flex items-center gap-2 rounded-full pl-3 pr-4 py-3 font-bold text-white shadow-2xl shadow-black/40 hover:scale-105 transition"
          style={{ background: "#25D366" }}>
         <WhatsAppIcon size={22} /> <span className="text-sm">WhatsApp us</span>
       </a>
