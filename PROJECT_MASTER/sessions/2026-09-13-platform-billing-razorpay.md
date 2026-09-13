@@ -32,3 +32,6 @@ No real payment was made. Order creation and the subscription flow run against t
 
 ## Yearly auto-renew (owner)
 `POST /subscribe {period: "monthly"|"yearly"}`: yearly plan = `amountForMonths(monthly, 12)` (10 months), Razorpay plan period "yearly", total_count 10; `academySubscriptions.monthsPerCharge` = 12 so every `subscription.charged` extends a year. Billing page: Monthly / Yearly toggle on the Subscribe card.
+
+## Subscribe-only (owner, later 2026-09-13)
+Billing page shows only the Subscribe card (monthly / yearly auto-renew). `status.paymentFailed` = subscription status pending (charge failed, Razorpay retrying) or halted (retries exhausted; webhook stamps `lastChargeFailedAt`). Only then the "Pay once" card appears, and `POST /order` refuses otherwise.

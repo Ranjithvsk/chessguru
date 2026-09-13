@@ -10,7 +10,8 @@ type Billing = {
   students: number; monthlyPricePaise: number | null; yearlyPricePaise: number | null; quotation: boolean; customPrice?: boolean;
   trialEndsAt: string | null; paidUntil: string | null; periodEndsAt: string | null; daysLeft: number | null; graceEndsAt: string | null;
   razorpayConfigured: boolean; keyId: string | null;
-  subscription: { id: string; status: string; amountPaise: number; period: "monthly" | "yearly"; nextChargeAt: string | null; cancelling: boolean } | null;
+  subscription: { id: string; status: string; amountPaise: number; period: "monthly" | "yearly"; nextChargeAt: string | null; cancelling: boolean; lastChargeFailedAt: string | null } | null;
+  paymentFailed: boolean;
   payments: Array<{ id: string; at: string; amountPaise: number; months: number | null; method: string; status: string; paidUntil: string | null; note?: string }>;
   whatsapp: string;
 };
@@ -127,10 +128,12 @@ export default function AcademyBillingPage() {
               You have more than 500 students — that is quotation territory. <a href={WA(`Hi Ranjith, ${b.academyName} has ${b.students} students — please send a ChessGuru quotation.`)} target="_blank" rel="noreferrer" className="underline">Ask for a quotation on WhatsApp</a>.
             </div>
           ) : (
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className={`grid gap-4 ${b.paymentFailed ? "md:grid-cols-2" : ""}`}>
+              {b.paymentFailed && (
               <div className="rounded-2xl border border-amber-400/30 bg-gradient-to-br from-amber-500/10 to-transparent p-5">
                 <div className="text-xs font-semibold uppercase tracking-widest text-amber-200">Pay once</div>
-                <h2 className="mt-1 font-display text-xl font-bold text-white">Choose how many months</h2>
+                <div className="mt-2 rounded-lg border border-rose-400/30 bg-rose-500/10 p-2 text-xs text-rose-100">Your auto-renew charge failed{b.subscription?.lastChargeFailedAt ? ` on ${fmt(b.subscription.lastChargeFailedAt)}` : ""}. Razorpay keeps retrying; pay once here to stay active meanwhile.</div>
+                <h2 className="mt-3 font-display text-xl font-bold text-white">Choose how many months</h2>
                 <div className="mt-3 flex gap-2">
                   {([1, 3, 6, 12] as const).map((m) => (
                     <button key={m} onClick={() => setMonths(m)} className={`relative rounded-full px-3 py-1.5 text-sm font-semibold ${months === m ? "bg-amber-400 text-black" : "bg-ink-800 text-ink-200 hover:bg-ink-700"}`}>{m === 12 ? "1 year" : `${m} mo`}{m === 12 && <span className="absolute -top-2 -right-2 rounded-full bg-emerald-400 px-1.5 py-0.5 text-[9px] font-bold text-black">2 free</span>}</button>
@@ -141,6 +144,7 @@ export default function AcademyBillingPage() {
                 <button onClick={payOnce} disabled={!!busy || !b.razorpayConfigured} className="mt-4 w-full rounded-full bg-gradient-to-r from-amber-400 to-amber-500 py-3 text-sm font-bold text-black disabled:opacity-50">{busy === "order" ? "Opening Razorpay…" : `Pay ${inr(amountFor(b.monthlyPricePaise!, months))} with Razorpay`}</button>
                 <div className="mt-2 text-[11px] text-ink-500">UPI · cards · net banking · wallets. Razorpay secured.</div>
               </div>
+              )}
               <div className="rounded-2xl border border-brand-400/30 bg-gradient-to-br from-brand-500/10 to-transparent p-5">
                 <div className="text-xs font-semibold uppercase tracking-widest text-brand-200">Subscribe</div>
                 <h2 className="mt-1 font-display text-xl font-bold text-white">Auto-renew</h2>
@@ -151,7 +155,8 @@ export default function AcademyBillingPage() {
                   </div>
                 )}
                 <div className="mt-4 font-display text-3xl font-bold text-white tabular-nums">{subPeriod === "yearly" ? inr(amountFor(b.monthlyPricePaise!, 12)) : inr(b.monthlyPricePaise!)}<span className="text-sm font-normal text-ink-400"> / {subPeriod === "yearly" ? "year" : "month"}</span></div>
-                <div className="text-xs text-ink-400">{subPeriod === "yearly" ? "12 months for the price of 10, charged now and then automatically each year." : "First month charged now, then automatically each month."} Cancel any time — what is paid stays paid.</div>
+                <div className="text-xs text-ink-400">{subPeriod === "yearly" ? "12 months for the price of 10, charged now and then automatically each year." : "First month charged now, then automatically each month."} Cancel any time — what is paid stays paid. UPI autopay · cards · net banking, secured by Razorpay.</div>
+                {b.paymentFailed && b.subscription && <div className="mt-3 rounded-lg border border-rose-400/30 bg-rose-500/10 p-2 text-xs text-rose-100">Auto-renew is {b.subscription.status === "halted" ? "halted — Razorpay gave up retrying" : "pending — the last charge failed and Razorpay is retrying"}. {b.subscription.status === "halted" ? "Stop it and subscribe again with a working payment method." : "Fix the payment method in the Razorpay email, or pay once on the left."}</div>}
                 {b.subscription && !b.subscription.cancelling ? (
                   <>
                     <div className="mt-4 rounded-xl border border-white/10 bg-ink-900/60 p-3 text-xs text-ink-200">Active · {inr(b.subscription.amountPaise)} / {b.subscription.period === "yearly" ? "year" : "month"}{b.subscription.nextChargeAt ? ` · next charge ${fmt(b.subscription.nextChargeAt)}` : ""}</div>

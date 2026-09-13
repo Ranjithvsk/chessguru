@@ -47,7 +47,10 @@ export interface BillingStatus {
   daysLeft: number | null; graceEndsAt: string | null;
   razorpayConfigured: boolean; keyId: string | null;
   // auto-renew (Razorpay Subscriptions): present once the owner has subscribed
-  subscription: { id: string; status: string; amountPaise: number; period: "monthly" | "yearly"; nextChargeAt: string | null; cancelling: boolean } | null;
+  subscription: { id: string; status: string; amountPaise: number; period: "monthly" | "yearly"; nextChargeAt: string | null; cancelling: boolean; lastChargeFailedAt: string | null } | null;
+  /** Owner 2026-09-13: "only subscribe option; if subscription payment failed then only single pay method" —
+   *  true while Razorpay reports the auto-renew charge as failed (subscription pending / halted). */
+  paymentFailed: boolean;
   payments: Array<{ id: string; at: string; amountPaise: number; months: number; method: string; status: string; paidUntil: string | null; note?: string }>;
   whatsapp: string;
 }
@@ -140,7 +143,8 @@ export class BillingService {
       trialEndsAt: c.trialEndsAt?.toISOString() ?? null, paidUntil: c.paidUntil?.toISOString() ?? null, periodEndsAt: c.periodEndsAt?.toISOString() ?? null,
       daysLeft: c.daysLeft, graceEndsAt: c.graceEndsAt?.toISOString() ?? null,
       razorpayConfigured: !!(creds || (keyId && process.env.RAZORPAY_KEY_SECRET)), keyId,
-      subscription: sub && !["cancelled", "completed", "expired", "created"].includes(sub.status) ? { id: sub._id, status: sub.status, amountPaise: sub.amountPaise, period: sub.period === "yearly" ? "yearly" : "monthly", nextChargeAt: sub.nextChargeAt ? new Date(sub.nextChargeAt).toISOString() : null, cancelling: !!sub.cancelAtCycleEnd } : null,
+      subscription: sub && !["cancelled", "completed", "expired", "created"].includes(sub.status) ? { id: sub._id, status: sub.status, amountPaise: sub.amountPaise, period: sub.period === "yearly" ? "yearly" : "monthly", nextChargeAt: sub.nextChargeAt ? new Date(sub.nextChargeAt).toISOString() : null, cancelling: !!sub.cancelAtCycleEnd, lastChargeFailedAt: sub.lastChargeFailedAt ? new Date(sub.lastChargeFailedAt).toISOString() : null } : null,
+      paymentFailed: !!sub && ["pending", "halted"].includes(sub.status),
       payments: pays.map((p: any) => ({ id: p._id, at: new Date(p.at).toISOString(), amountPaise: p.amountPaise, months: p.months, method: p.method, status: p.status, paidUntil: p.paidUntil ? new Date(p.paidUntil).toISOString() : null, note: p.note })),
       whatsapp: WHATSAPP_DISPLAY,
     };
@@ -167,6 +171,7 @@ export class BillingService {
     const st = await this.statusFor(academyId);
     if (st.quotation || st.monthlyPricePaise == null) throw new BadRequestException(`More than ${QUOTATION_ABOVE} students — WhatsApp ${WHATSAPP_DISPLAY} for a quotation.`);
     if (!st.razorpayConfigured) throw new BadRequestException("Online payment is temporarily unavailable. WhatsApp " + WHATSAPP_DISPLAY + " and we will sort it out.");
+    if (!st.paymentFailed) throw new BadRequestException("Please use Subscribe — a one-time payment is offered only when an auto-renew charge has failed.");
     const amountPaise = amountForMonths(st.monthlyPricePaise, months); // a year is charged as 10 months
     const id = "ap_" + Math.random().toString(36).slice(2, 12);
     const order = await createOrder({ amountPaise, receipt: id, notes: { kind: "platform-subscription", academyId, months: String(months), students: String(st.students) } });
@@ -319,7 +324,8 @@ export class BillingService {
     }
     if (event.startsWith("subscription.") && sub?.id) {
       const status = event.slice("subscription.".length); // activated / authenticated / cancelled / halted / paused / resumed / completed / pending
-      await this.subs().updateOne({ _id: sub.id } as never, { $set: { status: sub.status ?? status, nextChargeAt: sub.charge_at ? new Date(sub.charge_at * 1000) : null } } as never);
+      const failed = ["pending", "halted"].includes(sub.status ?? status); // pending = a charge failed and Razorpay is retrying; halted = retries exhausted
+      await this.subs().updateOne({ _id: sub.id } as never, { $set: { status: sub.status ?? status, nextChargeAt: sub.charge_at ? new Date(sub.charge_at * 1000) : null, ...(failed ? { lastChargeFailedAt: new Date() } : {}) } } as never);
       const rec: any = await this.subs().findOne({ _id: sub.id } as never);
       if (rec && ["cancelled", "halted", "paused", "completed", "expired"].includes(sub.status ?? status)) await this.academies().updateOne({ _id: rec.academyId } as never, { $set: { autoRenew: false } } as never);
       return { ok: true, handled: event };
