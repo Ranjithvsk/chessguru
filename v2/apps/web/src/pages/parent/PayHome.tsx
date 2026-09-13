@@ -294,7 +294,7 @@ function UpiPanel({ upiId, payee, amountPaise, academyName }: { upiId?: string; 
             <button onClick={copy} className="h-8 rounded-lg border border-slate-300 px-2 text-xs font-semibold">{copied ? "Copied ✓" : "Copy"}</button>
           </div>
           <div className="mt-1 text-xs text-slate-500">Payee: {payee}</div>
-          <a href={upiUrl} className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-2xl bg-slate-900 px-5 text-sm font-bold text-white sm:w-auto">Open in GPay / PhonePe / Paytm →</a>
+          <a href={upiUrl} style={{ color: "#fff" }} className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-2xl bg-slate-900 px-5 text-sm font-bold sm:w-auto">📱 Open in GPay / PhonePe / Paytm →</a>
           <p className="mt-2 text-[11px] text-slate-500">On a phone the button opens your UPI app with the amount filled in. On a computer, scan the QR with any UPI app. Then upload the payment screenshot below so the academy can mark it paid.</p>
         </div>
       </div>
