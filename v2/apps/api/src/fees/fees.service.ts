@@ -69,6 +69,7 @@ import {
   UpdateProgramInput,
   UpsertPlanInput,
   FeeBatchPickerRow,
+  FeesStudentRow,
   BulkEnrollFromBatchResponse,
   VALID_CADENCES,
   VALID_KINDS,
@@ -839,6 +840,86 @@ export class FeesService {
       skipped: rawIds.length - enrollmentResponses.length,
       enrollments: enrollmentResponses,
     };
+  }
+
+  // ---- students overview (TKT-224) ------------------------------------------
+
+  /** Every student in the academy with guardian phone + fee summary. Owner
+   *  sees all; a coach sees the students assigned to them. Students with no
+   *  enrolment still appear — the whole point is that the Fees page should
+   *  never look empty when the roster isn't. */
+  async listStudents(session: Session): Promise<FeesStudentRow[]> {
+    const academyId = session.academyId;
+    const role = session.role;
+    if (!academyId || !session.userId) throw new ForbiddenException("Sign in as an academy owner or coach.");
+    if (role !== "academy_owner" && role !== "coach" && role !== "admin") throw new ForbiddenException("Owners and coaches only.");
+    const filter: Record<string, unknown> = { academyId, role: "student" };
+    if (role === "coach") filter.coachId = session.userId;
+
+    const students = await this.users()
+      .find(filter, { projection: { _id: 1, name: 1, username: 1, coachId: 1, parentIds: 1, createdAt: 1 } as never })
+      .sort({ name: 1, username: 1 })
+      .limit(2000)
+      .toArray();
+    if (students.length === 0) return [];
+    const ids = students.map((s) => String(s._id));
+
+    const parentIds = Array.from(new Set(students.flatMap((s: any) => Array.isArray(s.parentIds) && s.parentIds.length ? [String(s.parentIds[0])] : [])));
+    const coachIds = Array.from(new Set(students.map((s: any) => s.coachId).filter((v: unknown): v is string => typeof v === "string" && !!v)));
+
+    const [parents, coaches, batches, enrols, programs, openInvoices, lastPaid] = await Promise.all([
+      parentIds.length ? this.users().find({ _id: { $in: parentIds as any[] } }, { projection: { _id: 1, name: 1, username: 1, mobile: 1 } as never }).toArray() : Promise.resolve([] as any[]),
+      coachIds.length ? this.users().find({ _id: { $in: coachIds as any[] } }, { projection: { _id: 1, name: 1, username: 1 } as never }).toArray() : Promise.resolve([] as any[]),
+      this.batches().find({ academyId }, { projection: { _id: 1, name: 1, studentIds: 1 } as never }).toArray(),
+      this.enrollments().find({ academyId, studentUserId: { $in: ids }, status: "ACTIVE" }, { projection: { studentUserId: 1, programId: 1 } as never }).toArray(),
+      this.programs().find({ academyId }, { projection: { _id: 1, name: 1 } as never }).toArray(),
+      this.invoices().aggregate<{ _id: string; outstanding: number; overdue: number }>([
+        { $match: { academyId, studentUserId: { $in: ids }, status: { $in: ["SENT", "PARTIAL", "OVERDUE"] } } },
+        { $group: { _id: "$studentUserId", outstanding: { $sum: { $subtract: ["$totalPaise", "$paidPaise"] } }, overdue: { $sum: { $cond: [{ $eq: ["$status", "OVERDUE"] }, 1, 0] } } } },
+      ]).toArray(),
+      this.invoices().aggregate<{ _id: string; paidAt: Date }>([
+        { $match: { academyId, studentUserId: { $in: ids }, status: "PAID", paidAt: { $exists: true } } },
+        { $group: { _id: "$studentUserId", paidAt: { $max: "$paidAt" } } },
+      ]).toArray(),
+    ]);
+
+    const parentById = new Map(parents.map((p: any) => [String(p._id), p]));
+    const coachById = new Map(coaches.map((c: any) => [String(c._id), c]));
+    const programName = new Map(programs.map((p: any) => [String(p._id), String(p.name)]));
+    const batchesByStudent = new Map<string, string[]>();
+    for (const b of batches as any[]) for (const sid of (b.studentIds || []) as string[]) {
+      const k = String(sid); if (!batchesByStudent.has(k)) batchesByStudent.set(k, []); batchesByStudent.get(k)!.push(String(b.name));
+    }
+    const programsByStudent = new Map<string, string[]>();
+    for (const e of enrols as any[]) {
+      const k = String(e.studentUserId); if (!programsByStudent.has(k)) programsByStudent.set(k, []);
+      programsByStudent.get(k)!.push(programName.get(String(e.programId)) ?? "Programme");
+    }
+    const openByStudent = new Map(openInvoices.map((r) => [String(r._id), r]));
+    const paidByStudent = new Map(lastPaid.map((r) => [String(r._id), r.paidAt]));
+
+    return students.map((s: any) => {
+      const id = String(s._id);
+      const parent = Array.isArray(s.parentIds) && s.parentIds.length ? parentById.get(String(s.parentIds[0])) : undefined;
+      const coach = s.coachId ? coachById.get(String(s.coachId)) : undefined;
+      const open = openByStudent.get(id);
+      const paidAt = paidByStudent.get(id);
+      return {
+        id,
+        name: String(s.name || s.username || id),
+        username: s.username ? String(s.username) : undefined,
+        coachName: coach ? String(coach.name || coach.username) : undefined,
+        batchNames: batchesByStudent.get(id) ?? [],
+        guardianUserId: parent ? String(parent._id) : undefined,
+        guardianName: parent ? String(parent.name || parent.username) : undefined,
+        guardianPhone: parent?.mobile ? String(parent.mobile) : undefined,
+        programNames: programsByStudent.get(id) ?? [],
+        enrolledActive: (programsByStudent.get(id) ?? []).length,
+        outstandingPaise: Math.max(0, Number(open?.outstanding ?? 0)),
+        overdueCount: Number(open?.overdue ?? 0),
+        lastPaidAt: paidAt ? new Date(paidAt).toISOString() : undefined,
+      };
+    });
   }
 
   async listEnrollments(session: Session, opts: { planId?: string; studentUserId?: string; status?: EnrollmentStatus } = {}): Promise<EnrollmentResponse[]> {

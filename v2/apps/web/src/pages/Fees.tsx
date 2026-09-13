@@ -13,6 +13,7 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { feesApi, fmtRupees, type DashboardResponse, type ReminderTextResponse } from "../lib/fees-api";
+import FeesStudentsTable from "../components/FeesStudentsTable";
 
 const t = (s: string) => s;
 
@@ -28,13 +29,13 @@ export default function FeesDashboardPage() {
     <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-10">
       <header className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="mb-1">
-            <span className="rounded-full bg-brand-500/15 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-brand-300 ring-1 ring-brand-400/30">{t("Beta · W3")}</span>
-          </div>
           <h1 className="font-display text-4xl text-ink-100 sm:text-5xl">{t("Fees")}</h1>
-          <p className="mt-1 max-w-xl text-sm text-ink-300">{t("Today's picture — collected, overdue, expected, and who to nudge next.")}</p>
+          <p className="mt-1 max-w-xl text-sm text-ink-300">{t("Every student, their parent's WhatsApp, what's collected, what's due, and who to nudge next.")}</p>
         </div>
         <div className="flex items-center gap-2">
+          <Link to="/fees/students" className="inline-flex h-10 items-center gap-2 rounded-xl border border-ink-700 bg-ink-900/60 px-4 text-sm font-semibold text-ink-200 hover:border-brand-500/60 hover:text-white">
+            👦 {t("Students")}
+          </Link>
           <Link to="/fees/batches" className="inline-flex h-10 items-center gap-2 rounded-xl border border-ink-700 bg-ink-900/60 px-4 text-sm font-semibold text-ink-200 hover:border-brand-500/60 hover:text-white" title={t("Group students under a coach for one-click enrolment")}>
             👥 {t("Batches")}
           </Link>
@@ -109,6 +110,9 @@ function DashboardBody({ data, onNav }: { data: DashboardResponse; onNav: (url: 
           />
         </div>
       </section>
+
+      {/* TKT-224: every student, with a place for the parent's WhatsApp number */}
+      <div className="mb-6"><FeesStudentsTable /></div>
 
       {/* Top defaulters + recent payments */}
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">

@@ -344,7 +344,37 @@ export const portalApi = {
     ),
 };
 
+/** TKT-224 — one row per student on /fees (guardian WhatsApp = where reminders go). */
+export interface FeesStudentRow {
+  id: string;
+  name: string;
+  username?: string;
+  coachName?: string;
+  batchNames: string[];
+  guardianUserId?: string;
+  guardianName?: string;
+  guardianPhone?: string;
+  programNames: string[];
+  enrolledActive: number;
+  outstandingPaise: number;
+  overdueCount: number;
+  lastPaidAt?: string;
+}
+
 export const feesApi = {
+  /** TKT-224 — every student with guardian WhatsApp + fee summary (owner + coach). */
+  students: () => req<{ students: FeesStudentRow[] }>("/api/fees/students"),
+  /** Adds/links a parent carrying a WhatsApp number to a student — the academy
+   *  link-parent endpoint (owner + coach). Reminders use the parent's mobile. */
+  addStudentWhatsApp: async (studentId: string, mobile: string, displayName?: string) => {
+    const r = await fetch(`${BASE}/api/academy/students/${encodeURIComponent(studentId)}/link-parent`, {
+      method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mobile, displayName: displayName || "" }),
+    });
+    const j = await r.json().catch(() => ({})) as { ok?: boolean; error?: string; parent?: { _id: string; name?: string }; credentials?: { username: string; password: string } | null };
+    if (!r.ok && !j?.error) throw new Error(`POST link-parent ${r.status}`);
+    return j;
+  },
   // ---- programs ------------------------------------------------------------
   listPrograms: (opts: { status?: "ACTIVE" | "ARCHIVED"; q?: string } = {}) => {
     const p = new URLSearchParams();

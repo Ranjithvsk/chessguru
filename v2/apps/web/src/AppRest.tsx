@@ -155,6 +155,7 @@ const FeesInvoicesPage      = lazy(() => import("./pages/FeesInvoices"));
 const FeesSettingsPage      = lazy(() => import("./pages/FeesSettings"));
 const FeesReportsPage       = lazy(() => import("./pages/FeesReports"));
 const FeesBatchesPage       = lazy(() => import("./pages/FeesBatches"));
+const FeesStudentsPage = lazy(() => import("./pages/FeesStudents"));
 const MyChallengesPage       = lazy(() => import("./pages/MyChallenges"));
 const MessagesPage           = lazy(() => import("./pages/Messages"));
 
@@ -291,6 +292,7 @@ export default function AppRest() {
         <Route path="fees/invoices"       element={<ErrorBoundary label="Fee invoices"><Suspense fallback={<LazyFallback />}><FeesInvoicesPage /></Suspense></ErrorBoundary>} />
         <Route path="fees/settings"       element={<ErrorBoundary label="Fee settings"><Suspense fallback={<LazyFallback />}><FeesSettingsPage /></Suspense></ErrorBoundary>} />
         <Route path="fees/reports"        element={<ErrorBoundary label="Fee reports"><Suspense fallback={<LazyFallback />}><FeesReportsPage /></Suspense></ErrorBoundary>} />
+        <Route path="fees/students"       element={<ErrorBoundary label="Fee students"><Suspense fallback={<LazyFallback />}><FeesStudentsPage /></Suspense></ErrorBoundary>} />
         <Route path="fees/batches"        element={<ErrorBoundary label="Fee batches"><Suspense fallback={<LazyFallback />}><FeesBatchesPage /></Suspense></ErrorBoundary>} />
         <Route path="challenges"          element={<ErrorBoundary label="My challenges"><Suspense fallback={<LazyFallback />}><MyChallengesPage /></Suspense></ErrorBoundary>} />
         <Route path="messages"            element={<ErrorBoundary label="Messages"><Suspense fallback={<LazyFallback />}><MessagesPage /></Suspense></ErrorBoundary>} />

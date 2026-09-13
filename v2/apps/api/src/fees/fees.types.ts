@@ -656,3 +656,27 @@ export interface PortalPaymentSummary {
   capturedAt: string;
   invoiceNos: string[];
 }
+
+// ============================================================================
+// Students overview — TKT-224 (owner 2026-09-13): "fees page looks empty,
+// show all students, name, and option to add WhatsApp number".
+// One row per student in the academy (coach → own students), with the first
+// parent's WhatsApp number (that's what reminders use), batches, active fee
+// programmes and the open balance. No fees data needed for the row to exist.
+// ============================================================================
+
+export interface FeesStudentRow {
+  id: string;
+  name: string;
+  username?: string;
+  coachName?: string;
+  batchNames: string[];
+  guardianUserId?: string;
+  guardianName?: string;
+  guardianPhone?: string;              // first parent's `mobile` — reminders go here
+  programNames: string[];              // ACTIVE enrolments' programme names
+  enrolledActive: number;
+  outstandingPaise: number;            // sum(total - paid) over SENT/PARTIAL/OVERDUE invoices
+  overdueCount: number;
+  lastPaidAt?: string;
+}

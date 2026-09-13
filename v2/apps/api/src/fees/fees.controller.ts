@@ -118,6 +118,13 @@ export class FeesController {
     return this.svc.bulkEnroll(req.session, body);
   }
 
+  /** TKT-224 — every student with guardian WhatsApp + fee summary. Owner + coach. */
+  @Get("students")
+  async listStudents(@Req() req: any) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    return { students: await this.svc.listStudents(req.session) };
+  }
+
   @Get("enrollments")
   async listEnrollments(
     @Req() req: any,
