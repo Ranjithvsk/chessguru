@@ -48,3 +48,15 @@ Home gained a feature marquee under the live numbers.
 Fixes from owner feedback: public stats counted a non-existent `students` collection
 (showed 0) → counts `users` with role "student" (`misc.controller.ts`); the word
 "business" removed from all marketing copy ("Running an academy, finally easy").
+
+## TKT-224 — Fees page "looks empty": every student + parent WhatsApp
+
+Owner (via view-as Shriguruchessacademy; screenshot = a CoFee WhatsApp fee-request reel):
+"our fees build is not friendly and looks empty, show all students, name, and option to
+add WhatsApp number". Added `GET /api/fees/students` (`fees.service.listStudents`) and
+`components/FeesStudentsTable.tsx` on `/fees` (under the stats) and `/fees/students`:
+name, batch·coach, parent WhatsApp (inline "Add WhatsApp" → academy link-parent), fee
+programme, dues, "Request on WhatsApp" (reminderTextGuardian → wa.me), filters + search.
+Dropped the "Beta · W3" chip. Commits 4566bd8, 6fed4ef. Ticket resolved on Mumbai
+`platform.support_ticket` with captioned notes, two AFTER shots and a reply. Open: automated
+WhatsApp Business sending (the reel's flow) — today's is one-tap manual via wa.me.
