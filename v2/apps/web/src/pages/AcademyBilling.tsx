@@ -7,7 +7,7 @@ import { get, post } from "../lib/api";
 
 type Billing = {
   academyId: string; academyName: string; state: "trialing" | "active" | "manual" | "grace" | "locked"; plan: string | null;
-  students: number; monthlyPricePaise: number | null; quotation: boolean;
+  students: number; monthlyPricePaise: number | null; yearlyPricePaise: number | null; quotation: boolean;
   trialEndsAt: string | null; paidUntil: string | null; periodEndsAt: string | null; daysLeft: number | null; graceEndsAt: string | null;
   razorpayConfigured: boolean; keyId: string | null;
   subscription: { id: string; status: string; amountPaise: number; nextChargeAt: string | null; cancelling: boolean } | null;
@@ -21,6 +21,7 @@ async function loadRazorpay() {
   await new Promise<void>((res, rej) => { const s = document.createElement("script"); s.src = RZP; s.async = true; s.onload = () => res(); s.onerror = () => rej(new Error("Couldn't load Razorpay — check your connection.")); document.head.appendChild(s); });
 }
 const inr = (p: number) => "₹" + Math.round(p / 100).toLocaleString("en-IN");
+const amountFor = (monthly: number, months: number) => monthly * (months === 12 ? 10 : months); // yearly = 2 months free
 const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 const WA = (t: string) => `https://wa.me/918248353593?text=${encodeURIComponent(t)}`;
 
@@ -112,7 +113,7 @@ export default function AcademyBillingPage() {
                 <div><div className="text-[11px] uppercase tracking-wide text-ink-400">Days left</div><div className={`font-display text-2xl font-bold tabular-nums ${b.daysLeft == null ? "text-white" : b.daysLeft > 7 ? "text-emerald-200" : b.daysLeft > 0 ? "text-amber-200" : "text-rose-200"}`}>{b.daysLeft == null ? "—" : Math.max(0, b.daysLeft)}</div></div>
               </div>
               <p className="mt-4 text-xs text-ink-400">
-                Up to 50 students ₹1,000 / month · up to 100 ₹1,500 · then ₹500 for every extra 50 · coaches unlimited · more than 500 students on quotation.
+                Up to 50 students ₹1,000 / month · up to 100 ₹1,500 · then ₹500 for every extra 50 · coaches unlimited · more than 500 students on quotation. Pay for a year and get 2 months free{b.yearlyPricePaise != null ? ` (${inr(b.yearlyPricePaise)} / year)` : ""}.
                 {b.state === "grace" && ` Your period ended on ${fmt(b.periodEndsAt)}. Pay by ${fmt(b.graceEndsAt)} to keep managing the academy without a pause.`}
                 {b.state === "locked" && ` Academy management is paused since ${fmt(b.graceEndsAt)}. Coaches can still teach and students are not affected — pay below to resume.`}
               </p>
@@ -136,12 +137,12 @@ export default function AcademyBillingPage() {
                 <h2 className="mt-1 font-display text-xl font-bold text-white">Choose how many months</h2>
                 <div className="mt-3 flex gap-2">
                   {([1, 3, 6, 12] as const).map((m) => (
-                    <button key={m} onClick={() => setMonths(m)} className={`rounded-full px-3 py-1.5 text-sm font-semibold ${months === m ? "bg-amber-400 text-black" : "bg-ink-800 text-ink-200 hover:bg-ink-700"}`}>{m} mo</button>
+                    <button key={m} onClick={() => setMonths(m)} className={`relative rounded-full px-3 py-1.5 text-sm font-semibold ${months === m ? "bg-amber-400 text-black" : "bg-ink-800 text-ink-200 hover:bg-ink-700"}`}>{m === 12 ? "1 year" : `${m} mo`}{m === 12 && <span className="absolute -top-2 -right-2 rounded-full bg-emerald-400 px-1.5 py-0.5 text-[9px] font-bold text-black">2 free</span>}</button>
                   ))}
                 </div>
-                <div className="mt-4 font-display text-3xl font-bold text-white tabular-nums">{inr(b.monthlyPricePaise! * months)}</div>
-                <div className="text-xs text-ink-400">{inr(b.monthlyPricePaise!)} × {months} · adds {months} month{months === 1 ? "" : "s"} after {b.state === "trialing" ? "your trial ends" : b.paidUntil && b.state === "active" ? "your current paid period" : "today"}</div>
-                <button onClick={payOnce} disabled={!!busy || !b.razorpayConfigured} className="mt-4 w-full rounded-full bg-gradient-to-r from-amber-400 to-amber-500 py-3 text-sm font-bold text-black disabled:opacity-50">{busy === "order" ? "Opening Razorpay…" : `Pay ${inr(b.monthlyPricePaise! * months)} with Razorpay`}</button>
+                <div className="mt-4 font-display text-3xl font-bold text-white tabular-nums">{inr(amountFor(b.monthlyPricePaise!, months))}{months === 12 && <span className="ml-2 align-middle text-sm font-semibold text-emerald-300 line-through decoration-emerald-300/60">{inr(b.monthlyPricePaise! * 12)}</span>}</div>
+                <div className="text-xs text-ink-400">{months === 12 ? `${inr(b.monthlyPricePaise!)} × 10 — you pay for 10 months and get 12` : `${inr(b.monthlyPricePaise!)} × ${months}`} · adds {months} month{months === 1 ? "" : "s"} after {b.state === "trialing" ? "your trial ends" : b.paidUntil && b.state === "active" ? "your current paid period" : "today"}</div>
+                <button onClick={payOnce} disabled={!!busy || !b.razorpayConfigured} className="mt-4 w-full rounded-full bg-gradient-to-r from-amber-400 to-amber-500 py-3 text-sm font-bold text-black disabled:opacity-50">{busy === "order" ? "Opening Razorpay…" : `Pay ${inr(amountFor(b.monthlyPricePaise!, months))} with Razorpay`}</button>
                 <div className="mt-2 text-[11px] text-ink-500">UPI · cards · net banking · wallets. Razorpay secured.</div>
               </div>
               <div className="rounded-2xl border border-brand-400/30 bg-gradient-to-br from-brand-500/10 to-transparent p-5">

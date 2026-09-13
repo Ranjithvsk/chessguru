@@ -65,9 +65,9 @@ const WHATSAPP_URL = (text: string) => `https://wa.me/${WHATSAPP_NUMBER}?text=${
 function priceFor(n: number): number { return n <= 50 ? 1000 : n <= 100 ? 1500 : 1500 + Math.ceil((n - 100) / 50) * 500; }
 const PRICING: Array<{ name: string; price: number | null; students: string; note: string; bullets: string[]; highlight?: boolean }> = [
   { name: "Starter", price: 1000, students: "Up to 50 students", note: "For a single-branch academy or a coach with a full roster.",
-    bullets: ["Unlimited coaches", "Every feature — live classes, puzzles, fees, attendance", "30 days free, no card"] },
+    bullets: ["Unlimited coaches", "Every feature — live classes, puzzles, fees, attendance", "Pay yearly: ₹10,000 — 2 months free", "30 days free, no card"] },
   { name: "Academy", price: 1500, students: "Up to 100 students", note: "Then ₹500 / month for every additional 50 students.", highlight: true,
-    bullets: ["Unlimited coaches", "Every feature, every branch", "Grows with you: 150 students ₹2,000 · 200 students ₹2,500", "30 days free, no card"] },
+    bullets: ["Unlimited coaches", "Every feature, every branch", "Grows with you: 150 students ₹2,000 · 200 students ₹2,500", "Pay yearly: ₹15,000 — 2 months free", "30 days free, no card"] },
   { name: "Large academy", price: null, students: "More than 500 students", note: "Multi-branch groups and federations — we quote per academy.",
     bullets: ["Unlimited coaches and branches", "Every feature, priority support", "Onboarding help and data migration"] },
 ];
@@ -83,7 +83,7 @@ const FAQ = [
   { q: "Is my card required for the free trial?",
     a: "No. You get 30 days completely free — no card, no risk. After that it's ₹1,000/month for up to 50 students or ₹1,500/month for up to 100, with every feature and unlimited coaches." },
   { q: "How many students and coaches can I add?",
-    a: "Coaches are unlimited on every plan. Students set the price: up to 50 for ₹1,000/month, up to 100 for ₹1,500/month, then ₹500/month for every additional 50. Academies with more than 500 students get a custom quotation — WhatsApp +91 82483 53593." },
+    a: "Coaches are unlimited on every plan. Students set the price: up to 50 for ₹1,000/month, up to 100 for ₹1,500/month, then ₹500/month for every additional 50. Pay for a year and get 2 months free (12 months for the price of 10). Academies with more than 500 students get a custom quotation — WhatsApp +91 82483 53593." },
   { q: "Can we run live classes on ChessGuru?",
     a: "Yes — Dream Meet video is built in, no separate meeting link. The shared chess board syncs live to every student's screen." },
   { q: "Where is the data stored?",
@@ -549,7 +549,7 @@ export default function SignupAcademyPage() {
               <span className="opacity-70">500+ students</span> <span className="font-bold">custom quotation</span>
             </div>
           </div>
-          <div className="text-xs opacity-60 mt-3">Coaches are unlimited on every plan. Prices in INR, billed monthly, cancel anytime. Questions? <a href={WHATSAPP_URL("Hi Ranjith, I have a question about ChessGuru pricing.")} target="_blank" rel="noreferrer" className="underline">WhatsApp {WHATSAPP_DISPLAY}</a>.</div>
+          <div className="text-xs opacity-60 mt-3"><b className="opacity-100 text-emerald-300">Pay for a year and get 2 months free</b> — 12 months for the price of 10, on every plan. Coaches are unlimited on every plan. Prices in INR, monthly or yearly, cancel anytime. Questions? <a href={WHATSAPP_URL("Hi Ranjith, I have a question about ChessGuru pricing.")} target="_blank" rel="noreferrer" className="underline">WhatsApp {WHATSAPP_DISPLAY}</a>.</div>
         </div>
       </section>
 

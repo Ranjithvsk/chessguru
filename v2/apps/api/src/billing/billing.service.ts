@@ -25,6 +25,9 @@ const PUBLIC_ORIGIN = process.env.PUBLIC_ORIGIN ?? "https://chessguru.cc";
 const GRACE_DAYS = 7;
 const DAY = 86_400_000;
 export const QUOTATION_ABOVE = 500;
+/** Owner 2026-09-13: "two months free for yearly payment" — 12 months cost 10. */
+export const YEAR_MONTHS_CHARGED = 10;
+export function amountForMonths(monthlyPaise: number, months: number): number { return monthlyPaise * (months === 12 ? YEAR_MONTHS_CHARGED : months); }
 export const WHATSAPP_DISPLAY = "+91 82483 53593";
 
 /** Monthly price in paise for an academy of n students; null above the quotation line. */
@@ -39,7 +42,7 @@ export type BillingState = "trialing" | "active" | "manual" | "grace" | "locked"
 export interface BillingStatus {
   academyId: string; academyName: string;
   state: BillingState; plan: string | null;
-  students: number; monthlyPricePaise: number | null; quotation: boolean;
+  students: number; monthlyPricePaise: number | null; yearlyPricePaise: number | null; quotation: boolean;
   trialEndsAt: string | null; paidUntil: string | null; periodEndsAt: string | null;
   daysLeft: number | null; graceEndsAt: string | null;
   razorpayConfigured: boolean; keyId: string | null;
@@ -127,7 +130,7 @@ export class BillingService {
     const sub: any = acad.subscriptionId ? await this.subs().findOne({ _id: acad.subscriptionId } as never) : null;
     return {
       academyId, academyName: acad.name || academyId, state: c.state, plan: acad.plan ?? null,
-      students, monthlyPricePaise: c.price, quotation: c.price === null,
+      students, monthlyPricePaise: c.price, yearlyPricePaise: c.price == null ? null : amountForMonths(c.price, 12), quotation: c.price === null,
       trialEndsAt: c.trialEndsAt?.toISOString() ?? null, paidUntil: c.paidUntil?.toISOString() ?? null, periodEndsAt: c.periodEndsAt?.toISOString() ?? null,
       daysLeft: c.daysLeft, graceEndsAt: c.graceEndsAt?.toISOString() ?? null,
       razorpayConfigured: !!(creds || (keyId && process.env.RAZORPAY_KEY_SECRET)), keyId,
@@ -158,7 +161,7 @@ export class BillingService {
     const st = await this.statusFor(academyId);
     if (st.quotation || st.monthlyPricePaise == null) throw new BadRequestException(`More than ${QUOTATION_ABOVE} students — WhatsApp ${WHATSAPP_DISPLAY} for a quotation.`);
     if (!st.razorpayConfigured) throw new BadRequestException("Online payment is not available right now. WhatsApp " + WHATSAPP_DISPLAY + " to pay by bank transfer / UPI.");
-    const amountPaise = st.monthlyPricePaise * months;
+    const amountPaise = amountForMonths(st.monthlyPricePaise, months); // a year is charged as 10 months
     const id = "ap_" + Math.random().toString(36).slice(2, 12);
     const order = await createOrder({ amountPaise, receipt: id, notes: { kind: "platform-subscription", academyId, months: String(months), students: String(st.students) } });
     await this.payments().insertOne({ _id: id, academyId, at: new Date(), amountPaise, months, students: st.students, method: "razorpay", status: "created", razorpayOrderId: order.id, byUserId: session.userId } as never);
