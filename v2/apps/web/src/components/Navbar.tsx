@@ -334,7 +334,7 @@ function useTenantBrand(): { brand: Brand | null; slug: string | null } {
 
 // ── Superadmin "view as academy" (owner 2026-09-13): pick an academy and the whole app behaves as that
 // academy's owner; a banner stays on every page until Exit. Server: POST /api/admin/view-as.
-function ViewAsAcademy({ compact = false }: { compact?: boolean }) {
+function ViewAsAcademy({ inDrawer = false }: { inDrawer?: boolean }) {
   const qc = useQueryClient();
   const me = useQuery({ queryKey: ["auth-me"], queryFn: api.me, staleTime: 30_000 });
   const list = useQuery({
@@ -342,11 +342,19 @@ function ViewAsAcademy({ compact = false }: { compact?: boolean }) {
     queryFn: () => fetch("/v2api/api/admin/academies?slim=1", { credentials: "include" }).then((r) => r.json() as Promise<Array<{ id: string; name: string; studentCount: number }>>),
     enabled: !!me.data?.admin, staleTime: 300_000,
   });
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState("");
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", close); return () => document.removeEventListener("mousedown", close);
+  }, [open]);
   if (!me.data?.admin) return null;
   const viewing = me.data.viewingAs ?? null;
   async function choose(academyId: string) {
-    if (!academyId) return; setBusy(true);
+    setBusy(true);
     try { await fetch("/v2api/api/admin/view-as", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ academyId }) }); qc.clear(); window.location.assign("/academy"); }
     finally { setBusy(false); }
   }
@@ -355,14 +363,41 @@ function ViewAsAcademy({ compact = false }: { compact?: boolean }) {
     try { await fetch("/v2api/api/admin/view-as/stop", { method: "POST", credentials: "include" }); qc.clear(); window.location.assign("/admin"); }
     finally { setBusy(false); }
   }
+  const items = (list.data ?? []).filter((a) => !filter || a.name.toLowerCase().includes(filter.toLowerCase()) || a.id.includes(filter.toLowerCase()));
+  // Drawer version: a plain list, always visible.
+  if (inDrawer) return (
+    <div className="mt-2 rounded-xl border border-fuchsia-400/30 bg-fuchsia-500/10 p-3">
+      <div className="text-xs font-semibold uppercase tracking-wider text-fuchsia-200">👁 View as academy</div>
+      {viewing && <div className="mt-1 text-xs text-fuchsia-100">Now viewing <b>{viewing.name}</b> · <button onClick={exit} disabled={busy} className="underline">Exit</button></div>}
+      <div className="mt-2 grid gap-1">
+        {(list.data ?? []).map((a) => (
+          <button key={a.id} onClick={() => choose(a.id)} disabled={busy} className={`rounded-lg px-2 py-1.5 text-left text-sm ${viewing?.academyId === a.id ? "bg-fuchsia-600 text-white" : "text-ink-100 hover:bg-fuchsia-500/20"}`}>{a.name} <span className="text-xs text-ink-400">({a.studentCount})</span></button>
+        ))}
+      </div>
+    </div>
+  );
+  // Navbar version: a dark popover — native <select> options rendered light-on-light (owner: "not visible properly").
   return (
-    <div className={`flex items-center gap-2 ${compact ? "" : "hidden lg:flex"}`}>
-      <select value={viewing?.academyId ?? ""} onChange={(e) => choose(e.target.value)} disabled={busy}
-        className="max-w-[220px] rounded-lg border border-fuchsia-400/40 bg-fuchsia-500/10 px-2 py-1 text-xs font-semibold text-fuchsia-100 outline-none" title="Superadmin: view the app as this academy's owner">
-        <option value="">👁 View as academy…</option>
-        {(list.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name} ({a.studentCount})</option>)}
-      </select>
-      {viewing && <button onClick={exit} disabled={busy} className="rounded-lg bg-fuchsia-600 px-2 py-1 text-xs font-bold text-white hover:bg-fuchsia-500">Exit</button>}
+    <div ref={boxRef} className="relative">
+      <button onClick={() => setOpen((v) => !v)} disabled={busy} title="Superadmin: view the app as an academy's owner"
+        className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-semibold ${viewing ? "border-fuchsia-400/60 bg-fuchsia-600 text-white" : "border-fuchsia-400/40 bg-fuchsia-500/15 text-fuchsia-100 hover:bg-fuchsia-500/25"}`}>
+        <span>👁</span><span className="hidden max-w-[160px] truncate md:inline">{viewing ? viewing.name : "View as academy"}</span><span className="text-xs opacity-70">▾</span>
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-[60] mt-1 w-72 rounded-xl border border-fuchsia-400/30 bg-ink-900 p-2 shadow-2xl">
+          <input autoFocus value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search academies…" className="mb-2 w-full rounded-lg border border-ink-700 bg-ink-950 px-2 py-1.5 text-sm text-white outline-none placeholder:text-ink-500" />
+          {viewing && <button onClick={exit} disabled={busy} className="mb-1 w-full rounded-lg bg-fuchsia-600 px-2 py-1.5 text-left text-sm font-bold text-white hover:bg-fuchsia-500">⏏ Exit — back to my admin view</button>}
+          <div className="max-h-72 overflow-y-auto">
+            {list.isLoading && <div className="px-2 py-1.5 text-xs text-ink-400">Loading academies…</div>}
+            {items.map((a) => (
+              <button key={a.id} onClick={() => choose(a.id)} disabled={busy} className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-sm ${viewing?.academyId === a.id ? "bg-fuchsia-600/40 text-white" : "text-ink-100 hover:bg-ink-800"}`}>
+                <span className="truncate">{a.name}</span><span className="ml-2 shrink-0 text-xs text-ink-400">{a.studentCount} students</span>
+              </button>
+            ))}
+            {!list.isLoading && items.length === 0 && <div className="px-2 py-1.5 text-xs text-ink-400">No academy matches.</div>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -421,7 +456,6 @@ export default function Navbar({ rating, ratingProvisional, username, admin, onL
     <header className="sticky top-0 z-50 border-b border-ink-700/70 bg-ink-900/80 backdrop-blur">
       {admin && <ViewAsBanner />}
       <nav className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4">
-        {admin && <ViewAsAcademy />}
         {/* Hamburger — toggles the left drawer. Icon flips to ✕ when open so
             a second tap on the same spot clearly closes. */}
         <button
@@ -445,6 +479,7 @@ export default function Navbar({ rating, ratingProvisional, username, admin, onL
         </NavLink>
 
         <div className="ml-auto flex items-center gap-3 pl-2">
+          {admin && <ViewAsAcademy />}
           <ThemeToggle />
           <InstallButton />
           {rating != null && (
@@ -492,6 +527,7 @@ export default function Navbar({ rating, ratingProvisional, username, admin, onL
                     <>
                       <div className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-amber-400">Admin</div>
                       <div className="flex flex-col gap-0.5">
+                        <ViewAsAcademy inDrawer />
                         {adminLink("/admin/users", "Admin — Users")}
                         {adminLink("/admin/academies", "Admin — Academies")}
                         {adminLink("/admin/mail-log", "Admin — Mail log")}
