@@ -87,6 +87,7 @@ import AdminVisionPage from "./pages/AdminVision";
 import AdminWhitelabelPage from "./pages/AdminWhitelabel";
 import AdminDomainsPage from "./pages/AdminDomains";
 import AcademyBrandingPage from "./pages/AcademyBranding";
+import AcademyBillingPage from "./pages/AcademyBilling";
 import TenantHomePage from "./pages/TenantHome";
 import StudiesListPage from "./pages/StudiesList";
 import StudiesTrashPage from "./pages/StudiesTrash";
@@ -212,6 +213,7 @@ export default function AppRest() {
         <Route path="admin/whitelabel" element={<AdminWhitelabelPage />} />
         <Route path="admin/domains" element={<AdminDomainsPage />} />
         <Route path="academy/branding" element={<AcademyBrandingPage />} />
+        <Route path="academy/billing" element={<ErrorBoundary label="Billing"><AcademyBillingPage /></ErrorBoundary>} />
         <Route path="a/:slug" element={<TenantHomePage />} />
         <Route path="daily" element={<DailyPage />} />
         <Route path="studies" element={<StudiesListPage />} />

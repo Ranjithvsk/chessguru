@@ -10,6 +10,7 @@
 // point is that possession of the URL = right to become that role.
 
 import { BadRequestException, ForbiddenException, Injectable } from "@nestjs/common";
+import { billingSummaryFor } from "../billing/billing.service";
 import { FairplayService } from "../fairplay/fairplay.service";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
@@ -174,6 +175,7 @@ export class AcademyService {
     const g = this.ensureCoachOrOwner(session);
     const acad: any = await this.academies().findOne({ _id: g.academyId as any });
     if (!acad) return { name: g.academyId };
+    const billing = await billingSummaryFor(this.conn, g.academyId).catch(() => null);
     return {
       _id: acad._id,
       name: acad.name || acad._id,
@@ -181,7 +183,10 @@ export class AcademyService {
       subscriptionStatus: acad.subscriptionStatus || null,
       trialStartsAt: acad.trialStartsAt || null,
       trialEndsAt: acad.trialEndsAt || null,
+      paidUntil: acad.paidUntil || null,
       monthlyPricePaise: acad.monthlyPricePaise ?? null,
+      // 2026-09-13: what the dashboard needs for the trial box / grace banner / billing wall
+      billing: billing ? { state: billing.state, daysLeft: billing.daysLeft, periodEndsAt: billing.periodEndsAt, graceEndsAt: billing.graceEndsAt, students: billing.students, monthlyPricePaise: billing.monthlyPricePaise, quotation: billing.quotation } : null,
     };
   }
 

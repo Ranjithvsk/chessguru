@@ -56,7 +56,15 @@ async function bootstrap() {
     limit: "256kb",
     verify: (req: any, _res: any, buf: Buffer) => { req.rawBody = buf; },
   }));
+  // 2026-09-13: same for the platform-billing webhook (subscription.charged etc.)
+  app.use("/api/billing/webhook/razorpay", expressLib.json({
+    limit: "256kb",
+    verify: (req: any, _res: any, buf: Buffer) => { req.rawBody = buf; },
+  }));
   app.use("/api/class/:id/recording", expressLib.raw({ type: "application/octet-stream", limit: "500mb" }));
+  // A coach uploading their own book. Raw body, not multipart: a PDF is
+  // tens of megabytes of binary and the multipart round-trip buys nothing.
+  app.use("/api/user-books/upload", expressLib.raw({ type: "application/pdf", limit: "400mb" }));
   // Snap audio clip is a short (<=30s) coach mic recording uploaded alongside
   // the snap FEN. 5MB cap comfortably covers webm/opus at 128kbps for 30s.
   app.use("/api/class/:id/snap/:snapId/audio", expressLib.raw({ type: "application/octet-stream", limit: "5mb" }));

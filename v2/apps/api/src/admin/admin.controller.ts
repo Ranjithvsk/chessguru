@@ -1,4 +1,5 @@
-import { Controller, Get, Param, Post, Query, Req, UnauthorizedException, ForbiddenException } from "@nestjs/common";
+import { Controller, Get, Param, Post, Query, Req, UnauthorizedException, ForbiddenException, Body } from "@nestjs/common";
+import { BillingService } from "../billing/billing.service";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { isAdmin } from "./admins";
@@ -8,6 +9,7 @@ import { AdminAcademiesService } from "./admin-academies.service";
 @Controller()
 export class AdminController {
   constructor(
+    private readonly billing: BillingService,
     private readonly admin: AdminService,
     private readonly academies_: AdminAcademiesService,
     @InjectConnection() private readonly conn: Connection,
@@ -20,6 +22,13 @@ export class AdminController {
   private requireAdmin(req: any) {
     if (!isAdmin(req.session?.userId)) throw new ForbiddenException("admin only");
   }
+
+  /** Superadmin billing (2026-09-13): status of one academy, and mark N months / a date paid by hand
+   *  (bank transfer, UPI, goodwill). Body: { months?: 1|3|6|12, paidUntil?: ISO, amountPaise?, note? } */
+  @Get("admin/academies/:id/billing")
+  academyBilling(@Req() req: any, @Param("id") id: string) { this.requireAdmin(req); return this.billing.statusFor(id); }
+  @Post("admin/academies/:id/billing/mark-paid")
+  academyMarkPaid(@Req() req: any, @Param("id") id: string, @Body() body: any) { this.requireAdmin(req); return this.billing.adminMarkPaid(id, body ?? {}, String(req.session.userId)); }
 
   @Get("admin/overview")
   overviewDash(@Req() req: any) { this.requireAdmin(req); return this.admin.overviewDash(); }

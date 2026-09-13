@@ -755,10 +755,15 @@ function fmtAgo(d?: string|null) {
 // panels; do not replace them. All owner+coach-only.
 // ─────────────────────────────────────────────────────────────────────
 
-function AcademyHero({ name, roleLabel, username, trialEndsAt }: {
-  name: string; roleLabel: string; username: string; trialEndsAt?: string;
+type BillingSummary = { state: "trialing" | "active" | "manual" | "grace" | "locked"; daysLeft: number | null; periodEndsAt: string | null; graceEndsAt: string | null; students: number; monthlyPricePaise: number | null; quotation: boolean };
+function AcademyHero({ name, roleLabel, username, trialEndsAt, billing }: {
+  name: string; roleLabel: string; username: string; trialEndsAt?: string; billing?: BillingSummary | null;
 }) {
-  const daysLeft = trialEndsAt ? Math.max(0, Math.ceil((new Date(trialEndsAt).getTime() - Date.now()) / 86_400_000)) : null;
+  // 2026-09-13: the box is the billing state (trial / paid / grace / paused) and links to Academy → Billing.
+  const daysLeft = billing?.daysLeft ?? (trialEndsAt ? Math.max(0, Math.ceil((new Date(trialEndsAt).getTime() - Date.now()) / 86_400_000)) : null);
+  const state = billing?.state ?? (trialEndsAt ? "trialing" : null);
+  const tone = state === "locked" ? "rose" : state === "grace" ? "rose" : daysLeft != null && daysLeft <= 3 ? "rose" : daysLeft != null && daysLeft <= 14 ? "amber" : "emerald";
+  const label = state === "trialing" ? "Free trial" : state === "active" ? "Subscription" : state === "grace" ? "Payment due" : state === "locked" ? "Paused" : state === "manual" ? "Subscription" : null;
   return (
     <header className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-brand-600/25 via-purple-600/15 to-amber-500/10 p-7 shadow-2xl backdrop-blur">
       <div className="absolute -top-10 -right-10 h-40 w-40 rounded-full bg-brand-500/30 blur-3xl" />
@@ -768,13 +773,14 @@ function AcademyHero({ name, roleLabel, username, trialEndsAt }: {
           <h1 className="mt-2 font-display text-4xl font-bold text-white">{name}</h1>
           <p className="mt-1 text-sm text-ink-200">Welcome back, <b className="text-white">{username}</b>.</p>
         </div>
-        {daysLeft != null && (
-          <div className={`rounded-2xl border px-4 py-3 text-right ${daysLeft > 14 ? "border-emerald-400/40 bg-emerald-500/10" : daysLeft > 3 ? "border-amber-400/40 bg-amber-500/10" : "border-rose-400/40 bg-rose-500/10"}`}>
-            <div className="text-xs uppercase tracking-wide text-ink-300">Free trial</div>
-            <div className={`font-display text-2xl font-bold ${daysLeft > 14 ? "text-emerald-200" : daysLeft > 3 ? "text-amber-200" : "text-rose-200"}`}>
-              {daysLeft} <span className="text-sm font-normal">days left</span>
+        {label && (
+          <Link to="/academy/billing" title="Academy → Billing" className={`rounded-2xl border px-4 py-3 text-right transition hover:brightness-110 ${tone === "emerald" ? "border-emerald-400/40 bg-emerald-500/10" : tone === "amber" ? "border-amber-400/40 bg-amber-500/10" : "border-rose-400/40 bg-rose-500/10"}`}>
+            <div className="text-xs uppercase tracking-wide text-ink-300">{label}</div>
+            <div className={`font-display text-2xl font-bold ${tone === "emerald" ? "text-emerald-200" : tone === "amber" ? "text-amber-200" : "text-rose-200"}`}>
+              {state === "manual" ? "Active" : state === "locked" ? "Pay to resume" : state === "grace" ? `${Math.max(0, Math.ceil((new Date(billing!.graceEndsAt!).getTime() - Date.now()) / 86_400_000))} grace days` : <>{Math.max(0, daysLeft ?? 0)} <span className="text-sm font-normal">days left</span></>}
             </div>
-          </div>
+            <div className="text-[11px] text-ink-300">{state === "trialing" ? "then " : ""}{billing?.quotation ? "quotation" : billing?.monthlyPricePaise != null ? `₹${Math.round(billing.monthlyPricePaise / 100).toLocaleString("en-IN")}/month · ${billing.students} students` : ""} · Billing →</div>
+          </Link>
         )}
       </div>
     </header>
@@ -2167,7 +2173,18 @@ export default function AcademyDashboardPage() {
         <div className="absolute top-20 -right-20 h-96 w-96 rounded-full bg-amber-500/10 blur-[120px]" />
       </div>
 
-      <AcademyHero name={academyMeta?.name || me.academyId} roleLabel={roleLabel} username={me.username || ""} trialEndsAt={academyMeta?.trialEndsAt} />
+      <AcademyHero name={academyMeta?.name || me.academyId} roleLabel={roleLabel} username={me.username || ""} trialEndsAt={academyMeta?.trialEndsAt} billing={(academyMeta as any)?.billing ?? null} />
+      {(academyMeta as any)?.billing?.state === "locked" && (
+        <div className="rounded-2xl border border-rose-400/40 bg-rose-500/10 p-5 text-sm text-rose-100">
+          <b>Academy management is paused</b> — the subscription for {academyMeta?.name} is unpaid past the grace period. Coaches can still run classes and students are not affected.
+          {" "}<Link to="/academy/billing" className="font-semibold underline">Open Billing to pay and resume →</Link>
+        </div>
+      )}
+      {(academyMeta as any)?.billing?.state === "grace" && (
+        <div className="rounded-2xl border border-amber-400/40 bg-amber-500/10 p-4 text-sm text-amber-100">
+          Your {academyMeta?.plan === "trial" ? "trial" : "paid period"} has ended. Everything keeps working during the grace period — <Link to="/academy/billing" className="font-semibold underline">pay in Billing</Link> to avoid a pause.
+        </div>
+      )}
 
       {/* Absent-of-week alert — shown to coaches/owners only, appears at the
           top so the first thing they see is "these kids need attention". */}
