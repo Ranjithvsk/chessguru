@@ -57,6 +57,10 @@ import EngineBattlePage from "./pages/EngineBattle";
 import BoardEditorPage from "./pages/BoardEditor";
 import ResetPasswordPage from "./pages/ResetPassword";
 import SignupAcademyPage from "./pages/SignupAcademy";
+import BuiltForPage from "./pages/marketing/BuiltFor";
+import WhyChessGuruPage from "./pages/marketing/WhyChessGuru";
+import ComparePage from "./pages/marketing/Compare";
+import FeaturePage from "./pages/marketing/FeaturePage";
 import ArbiterPage from "./pages/Arbiter";
 import { PublicResultsHome, PublicResultsDetail } from "./pages/PublicResults";
 import PublicPlayer from "./pages/PublicPlayer";
@@ -250,6 +254,13 @@ export default function AppRest() {
         <Route path="coach-board/reports/:id" element={<ParentReportViewPage />} />
         <Route path="reset-password" element={<ResetPasswordPage />} />
         <Route path="signup-academy" element={<SignupAcademyPage />} />
+        {/* academy marketing set (owner 2026-09-13: "pages like chessplay.io, multiple pages") */}
+        <Route path="for-academies" element={<BuiltForPage audience="academies" />} />
+        <Route path="for-coaches" element={<BuiltForPage audience="coaches" />} />
+        <Route path="for-schools" element={<BuiltForPage audience="schools" />} />
+        <Route path="why-chessguru" element={<WhyChessGuruPage />} />
+        <Route path="compare" element={<ComparePage />} />
+        <Route path="features/:category" element={<FeaturePage />} />
         <Route path="arbiter" element={<ArbiterPage />} />
         <Route path="arbiter/:id" element={<ArbiterPage />} />
         <Route path="results" element={<PublicResultsHome />} />
