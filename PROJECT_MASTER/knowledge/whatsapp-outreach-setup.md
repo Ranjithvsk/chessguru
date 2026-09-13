@@ -15,6 +15,13 @@ The integration is built and deployed. It stays OFF until the WABA credentials a
 4. **App secret** — App → Settings → Basic → App secret.
 5. **Verify token** — invent any random string (e.g. a UUID); you paste the same value in step 7.
 
+## Intended sender number
+The owner intends to use **+91 8248353593** as the WhatsApp sender. Note: this is NOT any of the
+env values — Meta assigns a numeric **Phone Number ID** once the number is registered on the WABA,
+and that ID goes in `WA_PHONE_NUMBER_ID`. The number must NOT already be active on a normal
+WhatsApp or WhatsApp Business app (delete that account first, or use a fresh number), or Meta
+refuses to register it for the Cloud API.
+
 ## What to put in the API .env, then restart
 `WA_PHONE_NUMBER_ID`, `WA_BUSINESS_ACCOUNT_ID`, `WA_ACCESS_TOKEN`, `WA_APP_SECRET`, `WA_VERIFY_TOKEN`
 (WA_GRAPH_VERSION defaults to v21.0). Then:

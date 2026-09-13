@@ -33,6 +33,15 @@ export async function patch<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export async function put<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    credentials: "include", body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`PATCH ${path} → ${res.status}`);
+  return res.json() as Promise<T>;
+}
+
 // Best-effort: tell the API the coach just entered a class room, so it can push
 // the academy's OFFLINE students a "class is live" notification deep-linking to
 // this exact room. Server is session-authenticated + coach-gated + idempotent,
@@ -420,4 +429,22 @@ export const adminWaStatus = () => get<WaStatus>("/api/admin/whatsapp/status");
 export const adminWaSyncTemplates = () => post<{ ok: boolean; results?: { name: string; ok: boolean; status?: string; error?: string }[]; error?: string }>("/api/admin/whatsapp/templates/sync", {});
 export const adminWaSend = (id: string, template: string, values?: string[]) =>
   post<{ ok: boolean; wamid?: string; error?: string }>(`/api/admin/whatsapp/leads/${encodeURIComponent(id)}/send`, { template, values });
+
+// --- Academy finance / accounting (/academy/finance/*) — owner only ---------
+export const EXPENSE_CATEGORIES = ["rent", "coach_salary", "utilities", "materials", "marketing", "software", "travel", "maintenance", "misc"] as const;
+export const INCOME_CATEGORIES = ["fees_manual", "coaching_camp", "tournament", "merchandise", "other"] as const;
+export type LedgerDirection = "expense" | "income";
+export type LedgerEntry = {
+  id: string; direction: LedgerDirection; category: string; amountPaise: number; date: string; note: string;
+  payeeType: "coach" | "vendor" | "other" | null; coachUserId: string | null; payeeName: string; recurring: "monthly" | null; createdAt: string;
+};
+export type FinanceCatRow = { category: string; label: string; amountPaise: number };
+export type FinanceSummary = { month: string; feesCollected: number; incomeByCategory: FinanceCatRow[]; expensesByCategory: FinanceCatRow[]; totalIncome: number; totalExpense: number; netPaise: number };
+export type FinanceCoach = { userId: string; name: string; isOwner: boolean };
+export const financeEntries = (month?: string) => get<LedgerEntry[]>(`/api/academy/finance/entries${month ? `?month=${month}` : ""}`);
+export const financeSummary = (month?: string) => get<FinanceSummary>(`/api/academy/finance/summary${month ? `?month=${month}` : ""}`);
+export const financeCoaches = () => get<FinanceCoach[]>("/api/academy/finance/coaches");
+export const financeCreate = (body: Partial<LedgerEntry>) => post<LedgerEntry>("/api/academy/finance/entries", body);
+export const financeUpdate = (id: string, body: Partial<LedgerEntry>) => put<LedgerEntry>(`/api/academy/finance/entries/${encodeURIComponent(id)}`, body);
+export const financeDelete = (id: string) => deleteJson<{ ok: boolean }>(`/api/academy/finance/entries/${encodeURIComponent(id)}`);
 
