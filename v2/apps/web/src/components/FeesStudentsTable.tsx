@@ -125,10 +125,44 @@ function StudentRow({ r }: { r: FeesStudentRow }) {
       </td>
       <td className="py-3 pr-3 text-right tabular-nums">
         {r.outstandingPaise > 0
-          ? <div><div className={`font-semibold ${r.overdueCount > 0 ? "text-red-300" : "text-gold-400"}`}>{fmtRupees(r.outstandingPaise)}</div>{r.overdueCount > 0 && <div className="text-[11px] text-red-300/80">{r.overdueCount} {t("overdue")}</div>}</div>
+          ? <div>
+              <div className={`font-semibold ${r.overdueCount > 0 ? "text-red-300" : "text-gold-400"}`}>{fmtRupees(r.outstandingPaise)}</div>
+              {r.overdueCount > 0 && <div className="text-[11px] text-red-300/80">{r.overdueCount} {t("overdue")}</div>}
+              <RequestOnWhatsApp r={r} />
+            </div>
           : <span className="text-[12px] text-emerald-300/80">{r.enrolledActive > 0 ? t("Paid up") : "—"}</span>}
       </td>
     </tr>
+  );
+}
+
+/** "Request on WhatsApp" — the CoFee-style fee request from the ticket's
+ *  screenshot: opens WhatsApp to the parent with the server-composed text
+ *  (student, amount, academy, UPI pay link). Needs a parent with a number. */
+function RequestOnWhatsApp({ r }: { r: FeesStudentRow }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  if (!r.guardianUserId || !r.guardianPhone) return <div className="text-[11px] text-ink-500">{t("add WhatsApp to request")}</div>;
+  async function onClick(e: React.MouseEvent<HTMLAnchorElement>) {
+    e.preventDefault(); setBusy(true); setErr(null);
+    try {
+      const x = await feesApi.reminderTextGuardian(r.guardianUserId!, "WHATSAPP");
+      if (!x.waLink) { setErr(t("No phone on file.")); return; }
+      void feesApi.logReminder({ guardianUserId: r.guardianUserId!, channel: "WHATSAPP", template: x.template }).catch(() => { /* best-effort */ });
+      qc.invalidateQueries({ queryKey: ["fees.dashboard"] });
+      window.open(x.waLink, "_blank", "noopener,noreferrer");
+    } catch (e2) { setErr(e2 instanceof Error ? e2.message : t("Couldn't build the request.")); }
+    finally { setBusy(false); }
+  }
+  return (
+    <>
+      <a href="#" onClick={onClick} aria-disabled={busy} title={t("Open WhatsApp with the fee request + UPI pay link")}
+         className="mt-1 inline-flex h-7 items-center gap-1 rounded-lg border border-accent-500/50 bg-accent-500/10 px-2 text-[11px] font-semibold text-accent-300 hover:bg-accent-500/20">
+        💬 {busy ? t("Opening…") : t("Request on WhatsApp")}
+      </a>
+      {err && <div role="alert" className="text-[10px] text-red-300">{err}</div>}
+    </>
   );
 }
 
