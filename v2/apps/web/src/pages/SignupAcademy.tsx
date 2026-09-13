@@ -56,20 +56,14 @@ const PERSONAS = [
     ] },
 ];
 
-// Owner 2026-09-13: "50 students ₹1000/month, 100 students ₹1500, ₹500 per additional 50, unlimited coaches,
-// more than 500 students → quotation". WhatsApp 8248353593 on the page.
+// Owner 2026-09-13 (afternoon, replacing the morning's student tiers): "unlimited students pricing for 1000".
+// One price, everything included. WhatsApp 8248353593 on the page for questions.
 const WHATSAPP_NUMBER = "918248353593";
 const WHATSAPP_DISPLAY = "+91 82483 53593";
 const WHATSAPP_URL = (text: string) => `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(text)}`;
-/** Monthly price for an academy of n students (null = quotation). */
-function priceFor(n: number): number { return n <= 50 ? 1000 : n <= 100 ? 1500 : 1500 + Math.ceil((n - 100) / 50) * 500; }
 const PRICING: Array<{ name: string; price: number | null; students: string; note: string; bullets: string[]; highlight?: boolean }> = [
-  { name: "Starter", price: 1000, students: "Up to 50 students", note: "For a single-branch academy or a coach with a full roster.",
-    bullets: ["Unlimited coaches", "Every feature — live classes, puzzles, fees, attendance", "Pay yearly: ₹10,000 — 2 months free", "30 days free, no card"] },
-  { name: "Academy", price: 1500, students: "Up to 100 students", note: "Then ₹500 / month for every additional 50 students.", highlight: true,
-    bullets: ["Unlimited coaches", "Every feature, every branch", "Grows with you: 150 students ₹2,000 · 200 students ₹2,500", "Pay yearly: ₹15,000 — 2 months free", "30 days free, no card"] },
-  { name: "Large academy", price: null, students: "More than 500 students", note: "Multi-branch groups and federations — we quote per academy.",
-    bullets: ["Unlimited coaches and branches", "Every feature, priority support", "Onboarding help and data migration"] },
+  { name: "Academy", price: 1000, students: "Unlimited students · unlimited coaches", note: "One price for every academy, whatever its size. Every feature, every branch.", highlight: true,
+    bullets: ["Unlimited students and coaches", "Live classes with Dream Meet, puzzles, studies, homework", "Fees, attendance, parent reports, scoresheet scanning", "Pay yearly: ₹10,000 — 2 months free", "30 days free, no card"] },
 ];
 function WhatsAppIcon({ size = 18 }: { size?: number }) {
   return (
@@ -81,9 +75,9 @@ function WhatsAppIcon({ size = 18 }: { size?: number }) {
 
 const FAQ = [
   { q: "Is my card required for the free trial?",
-    a: "No. You get 30 days completely free — no card, no risk. After that it's ₹1,000/month for up to 50 students or ₹1,500/month for up to 100, with every feature and unlimited coaches." },
+    a: "No. You get 30 days completely free — no card, no risk. After that it's ₹1,000/month, with every feature, unlimited students and unlimited coaches." },
   { q: "How many students and coaches can I add?",
-    a: "Coaches are unlimited on every plan. Students set the price: up to 50 for ₹1,000/month, up to 100 for ₹1,500/month, then ₹500/month for every additional 50. Pay for a year and get 2 months free (12 months for the price of 10). Academies with more than 500 students get a custom quotation — WhatsApp +91 82483 53593." },
+    a: "Unlimited, both. ₹1,000/month covers every student and every coach you add, at every branch. Pay for a year and get 2 months free (12 months for the price of 10). Questions? WhatsApp +91 82483 53593." },
   { q: "Can we run live classes on ChessGuru?",
     a: "Yes — Dream Meet video is built in, no separate meeting link. The shared chess board syncs live to every student's screen." },
   { q: "Where is the data stored?",
@@ -495,10 +489,10 @@ export default function SignupAcademyPage() {
       <section id="pricing" className="max-w-6xl mx-auto px-6 py-20">
         <div className="text-center mb-10">
           <div className="text-xs font-semibold tracking-widest uppercase opacity-70" style={{ color: "#2dd4bf" }}>Simple pricing</div>
-          <h2 className="text-3xl md:text-5xl font-black mt-3">Priced by students. Coaches are free.</h2>
-          <p className="text-sm opacity-70 mt-3 max-w-2xl mx-auto">Every plan has every feature and unlimited coaches. You only pay for the size of your academy — and the first 30 days are free on all of them.</p>
+          <h2 className="text-3xl md:text-5xl font-black mt-3">One price. Everything included.</h2>
+          <p className="text-sm opacity-70 mt-3 max-w-2xl mx-auto">₹1,000 a month, unlimited students, unlimited coaches, every feature. The first 30 days are free, no card needed.</p>
         </div>
-        <div className="grid md:grid-cols-3 gap-5">
+        <div className="grid gap-5 max-w-xl mx-auto">
           {PRICING.map((t) => (
             <div key={t.name} className={`relative rounded-3xl p-7 border shadow-2xl ${t.highlight ? "border-amber-400/50 shadow-amber-500/10" : "border-white/10 shadow-black/30"}`}
                  style={{ background: t.highlight ? "linear-gradient(180deg, rgba(251,191,36,0.07), rgba(0,0,0,0.4))" : "rgba(255,255,255,0.03)" }}>
@@ -535,21 +529,6 @@ export default function SignupAcademyPage() {
               )}
             </div>
           ))}
-        </div>
-        {/* growth ladder: every extra 50 students is +₹500 */}
-        <div className="mt-8 rounded-2xl border border-white/10 p-5" style={{ background: "rgba(255,255,255,0.02)" }}>
-          <div className="text-xs font-semibold tracking-widest uppercase opacity-70 mb-3">Growing past 100 students? Add ₹500 for every extra 50.</div>
-          <div className="flex flex-wrap gap-2">
-            {[100, 150, 200, 250, 300, 400, 500].map((n) => (
-              <div key={n} className="rounded-xl px-3 py-2 text-sm border border-white/10" style={{ background: "rgba(0,0,0,0.3)" }}>
-                <span className="opacity-70">{n} students</span> <span className="font-bold">₹{priceFor(n).toLocaleString("en-IN")}</span><span className="opacity-50 text-xs">/mo</span>
-              </div>
-            ))}
-            <div className="rounded-xl px-3 py-2 text-sm border border-teal-400/30" style={{ background: "rgba(45,212,191,0.06)" }}>
-              <span className="opacity-70">500+ students</span> <span className="font-bold">custom quotation</span>
-            </div>
-          </div>
-          <div className="text-xs opacity-60 mt-3"><b className="opacity-100 text-emerald-300">Pay for a year and get 2 months free</b> — 12 months for the price of 10, on every plan. Coaches are unlimited on every plan. Prices in INR, monthly or yearly, cancel anytime. Questions? <a href={WHATSAPP_URL("Hi Ranjith, I have a question about ChessGuru pricing.")} target="_blank" rel="noreferrer" className="underline">WhatsApp {WHATSAPP_DISPLAY}</a>.</div>
         </div>
       </section>
 

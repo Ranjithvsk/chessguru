@@ -115,7 +115,7 @@ export default function AcademyBillingPage() {
                 <div><div className="text-[11px] uppercase tracking-wide text-ink-400">Days left</div><div className={`font-display text-2xl font-bold tabular-nums ${b.daysLeft == null ? "text-white" : b.daysLeft > 7 ? "text-emerald-200" : b.daysLeft > 0 ? "text-amber-200" : "text-rose-200"}`}>{b.daysLeft == null ? "—" : Math.max(0, b.daysLeft)}</div></div>
               </div>
               <p className="mt-4 text-xs text-ink-400">
-                {b.customPrice ? `Your academy has a special price of ${inr(b.monthlyPricePaise!)} / month agreed with ChessGuru, whatever your student count. ` : "Up to 50 students ₹1,000 / month · up to 100 ₹1,500 · then ₹500 for every extra 50 · coaches unlimited · more than 500 students on quotation. "}Pay for a year and get 2 months free{b.yearlyPricePaise != null ? ` (${inr(b.yearlyPricePaise)} / year)` : ""}.
+                {b.customPrice ? `Your academy has a special price of ${inr(b.monthlyPricePaise!)} / month agreed with ChessGuru, whatever your student count. ` : "₹1,000 / month, whatever your size — unlimited students, unlimited coaches. "}Pay for a year and get 2 months free{b.yearlyPricePaise != null ? ` (${inr(b.yearlyPricePaise)} / year)` : ""}.
                 {b.state === "grace" && ` Your period ended on ${fmt(b.periodEndsAt)}. Pay by ${fmt(b.graceEndsAt)} to keep managing the academy without a pause.`}
                 {b.state === "locked" && ` Academy management is paused since ${fmt(b.graceEndsAt)}. Coaches can still teach and students are not affected — pay below to resume.`}
               </p>

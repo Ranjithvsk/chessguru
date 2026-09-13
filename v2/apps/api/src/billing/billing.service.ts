@@ -1,7 +1,7 @@
 // ChessGuru platform billing (owner 2026-09-13: "is there payment integration after trial?" → build it).
 //
-// Pricing (owner): up to 50 students ₹1,000/mo · up to 100 ₹1,500/mo · +₹500/mo per extra 50 · coaches
-// unlimited · more than 500 students = quotation. 30-day trial from sign-up (auth.service signupAcademy).
+// Pricing (owner, 2026-09-13 afternoon, replacing the morning's student tiers): ₹1,000/mo flat —
+// unlimited students, unlimited coaches. No quotation line. 30-day trial from sign-up (auth.service signupAcademy).
 //
 // Money flow: owner opens /academy/billing → POST order (Razorpay order via fees.pg createOrder with the
 // platform env keys) → Razorpay Checkout in the browser → POST confirm with the handshake fields → we verify
@@ -30,11 +30,12 @@ export const YEAR_MONTHS_CHARGED = 10;
 export function amountForMonths(monthlyPaise: number, months: number): number { return monthlyPaise * (months === 12 ? YEAR_MONTHS_CHARGED : months); }
 export const WHATSAPP_DISPLAY = "+91 82483 53593";
 
-/** Monthly price in paise for an academy of n students; null above the quotation line. */
-export function monthlyPricePaise(students: number): number | null {
-  if (students > QUOTATION_ABOVE) return null;
-  const rupees = students <= 50 ? 1000 : students <= 100 ? 1500 : 1500 + Math.ceil((students - 100) / 50) * 500;
-  return rupees * 100;
+/** Monthly price in paise. Flat ₹1,000 whatever the student count (owner 2026-09-13:
+ *  "unlimited students pricing for 1000"). The signature keeps `students` and the
+ *  nullable return so callers and the quotation guard stay valid; it never returns null now. */
+export const FLAT_MONTHLY_PAISE = 100000;
+export function monthlyPricePaise(_students: number): number | null {
+  return FLAT_MONTHLY_PAISE;
 }
 
 export type BillingState = "trialing" | "active" | "manual" | "grace" | "locked";
