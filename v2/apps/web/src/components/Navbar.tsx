@@ -366,12 +366,12 @@ function ViewAsAcademy({ inDrawer = false }: { inDrawer?: boolean }) {
   const items = (list.data ?? []).filter((a) => !filter || a.name.toLowerCase().includes(filter.toLowerCase()) || a.id.includes(filter.toLowerCase()));
   // Drawer version: a plain list, always visible.
   if (inDrawer) return (
-    <div className="mt-2 rounded-xl border border-fuchsia-400/30 bg-fuchsia-500/10 p-3">
-      <div className="text-xs font-semibold uppercase tracking-wider text-fuchsia-200">👁 View as academy</div>
-      {viewing && <div className="mt-1 text-xs text-fuchsia-100">Now viewing <b>{viewing.name}</b> · <button onClick={exit} disabled={busy} className="underline">Exit</button></div>}
+    <div className="mt-2 rounded-xl border p-3" style={{ background: "#1a1030", borderColor: "#a855f7", color: "#fff" }}>
+      <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: "#e9d5ff" }}>👁 View as academy</div>
+      {viewing && <div className="mt-1 text-xs">Now viewing <b>{viewing.name}</b> · <button onClick={exit} disabled={busy} className="underline">Exit</button></div>}
       <div className="mt-2 grid gap-1">
         {(list.data ?? []).map((a) => (
-          <button key={a.id} onClick={() => choose(a.id)} disabled={busy} className={`rounded-lg px-2 py-1.5 text-left text-sm ${viewing?.academyId === a.id ? "bg-fuchsia-600 text-white" : "text-ink-100 hover:bg-fuchsia-500/20"}`}>{a.name} <span className="text-xs text-ink-400">({a.studentCount})</span></button>
+          <button key={a.id} onClick={() => choose(a.id)} disabled={busy} className="rounded-lg px-2 py-1.5 text-left text-sm hover:brightness-125" style={{ background: viewing?.academyId === a.id ? "#7e22ce" : "#2a1a4a", color: "#fff" }}>{a.name} <span className="text-xs" style={{ color: "#d8b4fe" }}>({a.studentCount})</span></button>
         ))}
       </div>
     </div>
@@ -380,21 +380,22 @@ function ViewAsAcademy({ inDrawer = false }: { inDrawer?: boolean }) {
   return (
     <div ref={boxRef} className="relative">
       <button onClick={() => setOpen((v) => !v)} disabled={busy} title="Superadmin: view the app as an academy's owner"
-        className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-semibold ${viewing ? "border-fuchsia-400/60 bg-fuchsia-600 text-white" : "border-fuchsia-400/40 bg-fuchsia-500/15 text-fuchsia-100 hover:bg-fuchsia-500/25"}`}>
+        style={{ background: viewing ? "#a21caf" : "#7e22ce", color: "#fff", borderColor: "#d946ef" }}
+        className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-semibold shadow hover:brightness-110">
         <span>👁</span><span className="hidden max-w-[160px] truncate md:inline">{viewing ? viewing.name : "View as academy"}</span><span className="text-xs opacity-70">▾</span>
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-[60] mt-1 w-72 rounded-xl border border-fuchsia-400/30 bg-ink-900 p-2 shadow-2xl">
-          <input autoFocus value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search academies…" className="mb-2 w-full rounded-lg border border-ink-700 bg-ink-950 px-2 py-1.5 text-sm text-white outline-none placeholder:text-ink-500" />
-          {viewing && <button onClick={exit} disabled={busy} className="mb-1 w-full rounded-lg bg-fuchsia-600 px-2 py-1.5 text-left text-sm font-bold text-white hover:bg-fuchsia-500">⏏ Exit — back to my admin view</button>}
+        <div className="absolute right-0 top-full z-[60] mt-1 w-72 rounded-xl border p-2 shadow-2xl" style={{ background: "#1a1030", borderColor: "#a855f7", color: "#fff" }}>
+          <input autoFocus value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search academies…" className="mb-2 w-full rounded-lg border px-2 py-1.5 text-sm outline-none" style={{ background: "#0f0a1f", borderColor: "#6b21a8", color: "#fff" }} />
+          {viewing && <button onClick={exit} disabled={busy} className="mb-1 w-full rounded-lg px-2 py-1.5 text-left text-sm font-bold" style={{ background: "#a21caf", color: "#fff" }}>⏏ Exit — back to my admin view</button>}
           <div className="max-h-72 overflow-y-auto">
-            {list.isLoading && <div className="px-2 py-1.5 text-xs text-ink-400">Loading academies…</div>}
+            {list.isLoading && <div className="px-2 py-1.5 text-xs" style={{ color: "#c4b5fd" }}>Loading academies…</div>}
             {items.map((a) => (
-              <button key={a.id} onClick={() => choose(a.id)} disabled={busy} className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-sm ${viewing?.academyId === a.id ? "bg-fuchsia-600/40 text-white" : "text-ink-100 hover:bg-ink-800"}`}>
-                <span className="truncate">{a.name}</span><span className="ml-2 shrink-0 text-xs text-ink-400">{a.studentCount} students</span>
+              <button key={a.id} onClick={() => choose(a.id)} disabled={busy} className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-sm hover:brightness-125" style={{ background: viewing?.academyId === a.id ? "#7e22ce" : "#2a1a4a", color: "#fff", marginBottom: 2 }}>
+                <span className="truncate">{a.name}</span><span className="ml-2 shrink-0 text-xs" style={{ color: "#d8b4fe" }}>{a.studentCount} students</span>
               </button>
             ))}
-            {!list.isLoading && items.length === 0 && <div className="px-2 py-1.5 text-xs text-ink-400">No academy matches.</div>}
+            {!list.isLoading && items.length === 0 && <div className="px-2 py-1.5 text-xs" style={{ color: "#c4b5fd" }}>No academy matches.</div>}
           </div>
         </div>
       )}
@@ -406,9 +407,9 @@ function ViewAsBanner() {
   const qc = useQueryClient();
   const v = me.data?.viewingAs; if (!v) return null;
   return (
-    <div className="border-b border-fuchsia-400/30 bg-fuchsia-600/20 px-4 py-1.5 text-center text-xs text-fuchsia-100">
+    <div className="border-b px-4 py-1.5 text-center text-xs" style={{ background: "#7e22ce", color: "#fff", borderColor: "#d946ef" }}>
       👁 Superadmin — you are viewing <b>{v.name}</b> as its academy owner. Everything under Academy, Fees, Attendance and Billing is that academy's.
-      <button onClick={async () => { await fetch("/v2api/api/admin/view-as/stop", { method: "POST", credentials: "include" }); qc.clear(); window.location.assign("/admin"); }} className="ml-3 rounded bg-fuchsia-600 px-2 py-0.5 font-bold text-white hover:bg-fuchsia-500">Exit</button>
+      <button onClick={async () => { await fetch("/v2api/api/admin/view-as/stop", { method: "POST", credentials: "include" }); qc.clear(); window.location.assign("/admin"); }} className="ml-3 rounded px-2 py-0.5 font-bold" style={{ background: "#fff", color: "#7e22ce" }}>Exit</button>
     </div>
   );
 }
