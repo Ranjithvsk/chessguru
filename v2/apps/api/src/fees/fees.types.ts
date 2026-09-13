@@ -24,6 +24,7 @@ export const COL = {
   settings: "fees_settings",
   wallets: "fees_wallets",
   walletTxns: "fees_wallet_txns",
+  proofs: "fees_payment_proofs",   // parent-uploaded UPI screenshots awaiting owner verification
 } as const;
 
 export type ProgramStatus = "ACTIVE" | "ARCHIVED";
@@ -535,6 +536,8 @@ export interface FeeSettingsDoc {
   // Receipts
   receiptPrefix?: string;              // overrides slug-derived default
   bankAccountLast4?: string;           // display-only; adds trust to receipts
+  upiId?: string;                      // academy VPA, e.g. gunachess@okaxis — QR + text on the pay page and in WhatsApp requests
+  upiPayeeName?: string;               // name shown in the UPI app (defaults to academy name)
   // Audit
   updatedAt: Date;
   updatedBy: string;                   // userId of the last saver
@@ -552,6 +555,8 @@ export interface FeeSettingsResponse {
   panNo?: string;
   receiptPrefix?: string;
   bankAccountLast4?: string;
+  upiId?: string;
+  upiPayeeName?: string;
   updatedAt?: string;
   webhookUrl: string;                  // computed — Razorpay dashboard config helper
 }
@@ -565,6 +570,8 @@ export interface UpdateFeeSettingsInput {
   panNo?: string | null;
   receiptPrefix?: string | null;
   bankAccountLast4?: string | null;
+  upiId?: string | null;
+  upiPayeeName?: string | null;
 }
 
 // ============================================================================
@@ -631,6 +638,9 @@ export interface PortalResponse {
   currency: "INR";
   totalOutstandingPaise: number;
   razorpayAvailable: boolean;          // false when keys not configured
+  upiId?: string;                      // academy VPA for the QR / copy button (owner 2026-09-13)
+  upiPayeeName?: string;
+  proofs: PortalProofSummary[];        // this guardian's uploaded payment screenshots + verification status
 }
 
 export interface CreateCheckoutOrderInput {
@@ -679,4 +689,65 @@ export interface FeesStudentRow {
   outstandingPaise: number;            // sum(total - paid) over SENT/PARTIAL/OVERDUE invoices
   overdueCount: number;
   lastPaidAt?: string;
+  openInvoiceIds: string[];            // SENT/PARTIAL/OVERDUE invoice ids, oldest first — for "Mark paid"
 }
+
+// ============================================================================
+// Payment proofs — owner 2026-09-13: "in WhatsApp while asking for fees, send
+// QR and UPI id and link to upload the screenshot; verify the screenshot →
+// fees marked as paid". Parent pays by UPI, uploads the screenshot on the pay
+// page; owner sees it on /fees, taps Accept → a manual UPI payment is recorded
+// against the invoices (same path as cash) and the proof is marked ACCEPTED.
+// ============================================================================
+
+export type ProofStatus = "PENDING" | "ACCEPTED" | "REJECTED";
+
+export interface PaymentProofDoc {
+  _id: ObjectId;
+  academyId: string;
+  guardianUserId: string;
+  invoiceIds: string[];
+  amountPaise: number;                 // what the parent says they paid
+  utr?: string;                        // UPI reference, optional
+  note?: string;
+  imageDataUrl: string;                // data:image/jpeg;base64,… (client downsized, ≤ ~1 MB)
+  status: ProofStatus;
+  createdAt: Date;
+  reviewedAt?: Date;
+  reviewedBy?: string;
+  rejectReason?: string;
+  paymentId?: string;                  // fees_payments._id once accepted
+}
+
+export interface PortalProofSummary {
+  id: string;
+  amountPaise: number;
+  utr?: string;
+  status: ProofStatus;
+  createdAt: string;
+  rejectReason?: string;
+  invoiceNos: string[];
+}
+
+export interface CreateProofInput {
+  invoiceIds: string[];
+  amountPaise: number;
+  utr?: string;
+  note?: string;
+  imageDataUrl: string;
+}
+
+export interface PaymentProofResponse extends PortalProofSummary {
+  guardianUserId: string;
+  guardianName?: string;
+  guardianPhone?: string;
+  studentNames: string[];
+  invoiceIds: string[];
+  outstandingPaise: number;            // current open balance across those invoices
+  imageDataUrl: string;
+  reviewedAt?: string;
+  paymentId?: string;
+}
+
+export const MAX_PROOF_IMAGE_CHARS = 1_600_000;   // ~1.2 MB of base64
+export const MAX_PENDING_PROOFS_PER_GUARDIAN = 5;

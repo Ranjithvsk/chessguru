@@ -60,3 +60,23 @@ programme, dues, "Request on WhatsApp" (reminderTextGuardian → wa.me), filters
 Dropped the "Beta · W3" chip. Commits 4566bd8, 6fed4ef. Ticket resolved on Mumbai
 `platform.support_ticket` with captioned notes, two AFTER shots and a reply. Open: automated
 WhatsApp Business sending (the reel's flow) — today's is one-tap manual via wa.me.
+
+## Fees: manual mark-paid, UPI QR + ID in WhatsApp requests, screenshot verification
+
+Owner: "option for owner to manually mark that fees is paid; in WhatsApp while asking for
+fees send QR and UPI id and link to upload the screenshot; verify the screenshot → fees
+marked as paid".
+- Settings: `upiId` + `upiPayeeName` on `fees_settings` (Fees → Settings).
+- WhatsApp text (both reminder builders) ends with `Pay by UPI: <id> (<payee>)` and the
+  pay-page link (`payLines()` in fees.service).
+- Pay page `/pay/:token`: `UpiPanel` (QR of `upi://pay?pa=&pn=&am=&cu=INR&tn=` via
+  `qrcode`, copy button, open-in-app link) + `ProofUpload` (client downsizes to 1280px
+  JPEG, amount + UTR, `POST /api/fees/portal/:token/proof`, list of own proofs with
+  status). `fees_payment_proofs` {academyId, guardianUserId, invoiceIds, amountPaise,
+  utr, imageDataUrl, status PENDING|ACCEPTED|REJECTED}. JSON limit 2 MB on
+  `/api/fees/portal` (main.ts).
+- Owner: `FeesProofsPanel` on /fees (pending only) → Accept = `recordManualPayment`
+  (UPI, note with UTR + proof id) + proof ACCEPTED; Reject with a reason the parent sees.
+  `Mark paid` on each student row with dues (amount/method/note → same manual-payment
+  endpoint; `openInvoiceIds` added to `FeesStudentRow`).
+Open: automated WhatsApp Business sending; proofs kept as base64 in Mongo (cap 1.2 MB).

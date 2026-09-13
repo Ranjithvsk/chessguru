@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { fmtRupees, portalApi, type CheckoutOrderResponse, type PortalInvoiceLine, type PortalResponse } from "../../lib/fees-api";
+import QRCode from "qrcode";
 
 // The Razorpay Checkout SDK loads globally as `window.Razorpay`. We hydrate
 // it lazily so first paint doesn't wait for a 200 KB script that many
@@ -123,6 +124,15 @@ export default function ParentPortalPage() {
             {data.invoices.map((i) => <InvoiceRow key={i.id} inv={i} checked={picked.has(i.id)} onToggle={() => toggle(i.id)} />)}
           </ul>
         )}
+
+        {/* Owner 2026-09-13: QR + UPI ID on the pay page, and a place to upload
+            the payment screenshot; the academy verifies it and marks the fee paid. */}
+        {totals.allBalance > 0 && (
+          <UpiPanel upiId={data.upiId} payee={data.upiPayeeName ?? data.academyName} amountPaise={totals.picked > 0 ? totals.picked : totals.allBalance} academyName={data.academyName} />
+        )}
+        {(totals.allBalance > 0 || data.proofs.length > 0) && (
+          <ProofUpload token={token} g={g} a={a} invoices={data.invoices.filter((i) => i.balancePaise > 0)} picked={picked} defaultAmountPaise={totals.picked > 0 ? totals.picked : totals.allBalance} proofs={data.proofs} onDone={() => { void refresh(); }} />
+        )}
       </main>
 
       {data.invoices.some((i) => i.balancePaise > 0) && (
@@ -141,7 +151,7 @@ export default function ParentPortalPage() {
                 {payBusy ? "Opening…" : "Pay now →"}
               </button>
             ) : (
-              <div className="text-xs text-slate-500 text-right">Online payment isn't set up yet.<br/>Please pay the academy directly.</div>
+              <div className="text-xs text-slate-500 text-right">{data.upiId ? <>Pay by UPI above, then<br/>upload your screenshot.</> : <>Online payment isn't set up yet.<br/>Please pay the academy directly.</>}</div>
             )}
           </div>
         </div>
@@ -254,4 +264,123 @@ function openRzpCheckout(order: CheckoutOrderResponse, cb: { onSuccess: (r: { ra
   });
   rzp.on("payment.failed", (resp: { error?: { description?: string } }) => cb.onFail(resp?.error?.description || "Payment failed. Please try again."));
   rzp.open();
+}
+
+// ---- UPI: QR + ID + open-in-app ------------------------------------------
+
+function UpiPanel({ upiId, payee, amountPaise, academyName }: { upiId?: string; payee: string; amountPaise: number; academyName: string }) {
+  const [qr, setQr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const rupees = (amountPaise / 100).toFixed(2);
+  const upiUrl = upiId ? `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(payee)}&am=${rupees}&cu=INR&tn=${encodeURIComponent(`Fees ${academyName}`.slice(0, 40))}` : "";
+  useEffect(() => {
+    if (!upiUrl) { setQr(null); return; }
+    QRCode.toDataURL(upiUrl, { width: 260, margin: 1, errorCorrectionLevel: "M" }).then(setQr).catch(() => setQr(null));
+  }, [upiUrl]);
+  if (!upiId) return null;
+  async function copy() {
+    try { await navigator.clipboard.writeText(upiId!); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* ignore */ }
+  }
+  return (
+    <section className="mt-5 rounded-3xl bg-white p-5 shadow-md ring-1 ring-slate-200">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Pay by UPI</div>
+      <h2 className="mt-1 font-display text-xl text-slate-900">Scan or tap to pay {fmtRupees(amountPaise)}</h2>
+      <div className="mt-3 flex flex-col items-center gap-3 sm:flex-row sm:items-start">
+        {qr ? <img src={qr} alt="UPI QR code" className="h-44 w-44 rounded-xl ring-1 ring-slate-200" /> : <div className="h-44 w-44 animate-pulse rounded-xl bg-slate-100" />}
+        <div className="min-w-0 flex-1 text-sm text-slate-700">
+          <div className="text-[11px] uppercase tracking-wider text-slate-500">UPI ID</div>
+          <div className="mt-0.5 flex items-center gap-2">
+            <code className="rounded-lg bg-slate-100 px-2 py-1 text-base font-semibold text-slate-900">{upiId}</code>
+            <button onClick={copy} className="h-8 rounded-lg border border-slate-300 px-2 text-xs font-semibold">{copied ? "Copied ✓" : "Copy"}</button>
+          </div>
+          <div className="mt-1 text-xs text-slate-500">Payee: {payee}</div>
+          <a href={upiUrl} className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-2xl bg-slate-900 px-5 text-sm font-bold text-white sm:w-auto">Open in GPay / PhonePe / Paytm →</a>
+          <p className="mt-2 text-[11px] text-slate-500">On a phone the button opens your UPI app with the amount filled in. On a computer, scan the QR with any UPI app. Then upload the payment screenshot below so the academy can mark it paid.</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ---- Upload a payment screenshot for verification -------------------------
+
+async function fileToJpegDataUrl(file: File, maxSide = 1280, quality = 0.8): Promise<string> {
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+  const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  c.getContext("2d")!.drawImage(bmp, 0, 0, w, h);
+  return c.toDataURL("image/jpeg", quality);
+}
+
+function ProofUpload({ token, g, a, invoices, picked, defaultAmountPaise, proofs, onDone }: {
+  token: string; g: string; a: string; invoices: PortalInvoiceLine[]; picked: Set<string>; defaultAmountPaise: number;
+  proofs: PortalResponse["proofs"]; onDone: () => void;
+}) {
+  const [img, setImg] = useState<string | null>(null);
+  const [rupees, setRupees] = useState(String(Math.round(defaultAmountPaise / 100)));
+  const [utr, setUtr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => { setRupees(String(Math.round(defaultAmountPaise / 100))); }, [defaultAmountPaise]);
+  const pending = proofs.filter((p) => p.status === "PENDING");
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]; if (!f) return;
+    setMsg(null);
+    try { setImg(await fileToJpegDataUrl(f)); } catch { setMsg({ ok: false, text: "Couldn't read that image — try a JPG or PNG screenshot." }); }
+  }
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!img) { setMsg({ ok: false, text: "Attach the payment screenshot first." }); return; }
+    const ids = invoices.filter((i) => picked.has(i.id)).map((i) => i.id);
+    const invoiceIds = ids.length ? ids : invoices.map((i) => i.id);
+    setBusy(true); setMsg(null);
+    try {
+      await portalApi.submitProof(token, g, a, { invoiceIds, amountPaise: Math.round(Number(rupees) * 100), utr: utr.trim() || undefined, imageDataUrl: img });
+      setImg(null); setUtr("");
+      setMsg({ ok: true, text: "Screenshot sent. The academy will verify it and your fee will show as paid — usually the same day." });
+      onDone();
+    } catch (e2) { setMsg({ ok: false, text: e2 instanceof Error ? e2.message : "Couldn't upload. Please try again." }); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <section className="mt-5 rounded-3xl bg-white p-5 shadow-md ring-1 ring-slate-200">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-brand-600">Already paid?</div>
+      <h2 className="mt-1 font-display text-xl text-slate-900">Upload the payment screenshot</h2>
+      <p className="mt-1 text-sm text-slate-500">Paid by UPI, cash or bank transfer? Send the screenshot here and the academy will mark your fee as paid after checking it.</p>
+      {invoices.length > 0 && (
+        <form onSubmit={submit} className="mt-4 space-y-3">
+          <label className="block">
+            <span className="text-xs font-semibold text-slate-600">Screenshot</span>
+            <input type="file" accept="image/*" onChange={onFile} className="mt-1 block w-full text-sm text-slate-600 file:mr-3 file:rounded-xl file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white" />
+          </label>
+          {img && <img src={img} alt="Payment screenshot preview" className="max-h-56 rounded-xl ring-1 ring-slate-200" />}
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block"><span className="text-xs font-semibold text-slate-600">Amount paid (₹)</span>
+              <input type="number" min={1} step={1} value={rupees} onChange={(e) => setRupees(e.target.value)} className="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3 text-sm tabular-nums" /></label>
+            <label className="block"><span className="text-xs font-semibold text-slate-600">UPI reference / UTR (optional)</span>
+              <input value={utr} onChange={(e) => setUtr(e.target.value)} placeholder="12-digit number" className="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3 text-sm" /></label>
+          </div>
+          {msg && <div role="alert" className={`rounded-2xl px-4 py-3 text-sm ${msg.ok ? "border border-emerald-200 bg-emerald-50 text-emerald-800" : "border border-red-200 bg-red-50 text-red-700"}`}>{msg.text}</div>}
+          <button type="submit" disabled={busy || !img} className="inline-flex h-12 w-full items-center justify-center rounded-2xl bg-gradient-to-r from-brand-600 to-brand-500 text-sm font-bold text-white shadow-lg disabled:opacity-50">{busy ? "Uploading…" : "Send screenshot for verification →"}</button>
+        </form>
+      )}
+      {proofs.length > 0 && (
+        <ul className="mt-4 space-y-2">
+          {proofs.map((p) => (
+            <li key={p.id} className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 px-3 py-2 text-sm">
+              <div className="min-w-0">
+                <div className="font-semibold text-slate-900">{fmtRupees(p.amountPaise)} <span className="font-normal text-slate-500">· {new Date(p.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}{p.utr ? ` · UTR ${p.utr}` : ""}</span></div>
+                {p.status === "REJECTED" && p.rejectReason && <div className="text-xs text-red-600">{p.rejectReason}</div>}
+              </div>
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${p.status === "ACCEPTED" ? "bg-emerald-100 text-emerald-800" : p.status === "REJECTED" ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"}`}>{p.status === "PENDING" ? "checking" : p.status === "ACCEPTED" ? "paid ✓" : "rejected"}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {pending.length > 0 && invoices.length > 0 && <p className="mt-2 text-[11px] text-slate-500">{pending.length} screenshot{pending.length === 1 ? "" : "s"} waiting for the academy to verify.</p>}
+    </section>
+  );
 }

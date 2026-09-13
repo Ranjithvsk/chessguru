@@ -52,6 +52,9 @@ async function bootstrap() {
   // BEFORE JSON is parsed, so req.body still works normally for the handler.
   // Per-tenant secret lookup happens in fees.portal.service — the URL carries
   // the tenant identifier (…/webhook/razorpay/<academyId>).
+  // Parent pay page uploads a UPI payment screenshot as a data URL (owner
+  // 2026-09-13) — client downsizes to ~1 MB; allow 2 MB on this path only.
+  app.use("/api/fees/portal", expressLib.json({ limit: "2mb" }));
   app.use("/api/fees/webhook/razorpay", expressLib.json({
     limit: "256kb",
     verify: (req: any, _res: any, buf: Buffer) => { req.rawBody = buf; },

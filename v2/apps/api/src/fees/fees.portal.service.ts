@@ -32,7 +32,8 @@ import {
   verifyPortalToken,
   verifyWebhookSignature,
 } from "./fees.pg";
-import type { FeeSettingsDoc } from "./fees.types";
+import type { FeeSettingsDoc, PaymentProofDoc, PortalProofSummary, CreateProofInput } from "./fees.types";
+import { MAX_PROOF_IMAGE_CHARS, MAX_PENDING_PROOFS_PER_GUARDIAN } from "./fees.types";
 import { sendMail } from "../lib/mail";
 
 @Injectable()
@@ -48,6 +49,7 @@ export class FeesPortalService {
   private counters()    { return this.conn.db!.collection("fees_counters"); }
   private programs()    { return this.conn.db!.collection("fees_programs"); }
   private settings()    { return this.conn.db!.collection<FeeSettingsDoc>(COL.settings); }
+  private proofs()      { return this.conn.db!.collection<PaymentProofDoc>(COL.proofs); }
 
   /** Per-tenant Razorpay creds — DB (fees_settings) first, env fallback for
    *  single-tenant / dev boxes. Returns null if neither has been configured. */
@@ -132,6 +134,15 @@ export class FeesPortalService {
     const academyName = (brand?.brandName as string) || (academy?.name as string) || "Chess Academy";
     const academyTagline = (brand?.tagline as string) || (academy?.tagline as string) || undefined;
 
+    const [settings, proofRows] = await Promise.all([
+      this.settings().findOne({ academyId }, { projection: { upiId: 1, upiPayeeName: 1 } as never }),
+      this.proofs().find({ academyId, guardianUserId }).sort({ createdAt: -1 }).limit(10).toArray(),
+    ]);
+    const invNo = new Map(invoicesRaw.map((i) => [String(i._id), i.invoiceNo]));
+    const proofs: PortalProofSummary[] = proofRows.map((r) => ({
+      id: String(r._id), amountPaise: r.amountPaise, utr: r.utr, status: r.status, createdAt: r.createdAt.toISOString(),
+      rejectReason: r.rejectReason, invoiceNos: r.invoiceIds.map((x) => invNo.get(x)).filter((v): v is string => !!v),
+    }));
     return {
       guardianName: (guardian.name as string) ?? (guardian.username as string) ?? "there",
       guardianPhone: (guardian.mobile as string) ?? undefined,
@@ -141,10 +152,41 @@ export class FeesPortalService {
       currency: "INR",
       totalOutstandingPaise: totalOutstanding,
       razorpayAvailable: await this.rzpAvailableForTenant(academyId),
+      upiId: settings?.upiId,
+      upiPayeeName: settings?.upiPayeeName || academyName,
+      proofs,
     };
   }
 
   // ---- create checkout order ------------------------------------------
+
+  // ---- payment proof upload (owner 2026-09-13) -------------------------------
+
+  /** Parent paid by UPI outside Razorpay and uploads the screenshot. Stored
+   *  PENDING; the owner verifies on /fees and accepts → manual UPI payment. */
+  async submitProof(token: string, academyId: string, guardianUserId: string, input: CreateProofInput): Promise<{ ok: true; proofId: string }> {
+    this.resolveToken(token, academyId, guardianUserId);
+    const invoiceIds = Array.isArray(input?.invoiceIds) ? input.invoiceIds.map(String).filter(Boolean) : [];
+    if (invoiceIds.length === 0) throw new BadRequestException("Pick at least one invoice.");
+    const oids = invoiceIds.map((x) => this.tryOid(x)).filter((v): v is ObjectId => !!v);
+    const invoices = await this.invoices().find({ _id: { $in: oids }, academyId, guardianUserId, status: { $in: ["SENT", "PARTIAL", "OVERDUE"] } }).toArray();
+    if (invoices.length !== invoiceIds.length) throw new BadRequestException("One or more invoices aren't open for you.");
+    const amount = Number(input?.amountPaise);
+    if (!Number.isInteger(amount) || amount < 100) throw new BadRequestException("Amount must be at least ₹1.");
+    const img = String(input?.imageDataUrl ?? "");
+    if (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(img.slice(0, 64) + img.slice(64).replace(/[^A-Za-z0-9+/=]/g, "!"))) {
+      if (!img.startsWith("data:image/")) throw new BadRequestException("Upload a JPEG or PNG screenshot.");
+    }
+    if (img.length > MAX_PROOF_IMAGE_CHARS) throw new BadRequestException("Screenshot is too large — please pick a smaller image (under 1 MB).");
+    const utr = String(input?.utr ?? "").trim().replace(/\s+/g, "").slice(0, 40) || undefined;
+    const note = String(input?.note ?? "").trim().slice(0, 200) || undefined;
+    const pending = await this.proofs().countDocuments({ academyId, guardianUserId, status: "PENDING" });
+    if (pending >= MAX_PENDING_PROOFS_PER_GUARDIAN) throw new BadRequestException("You already have screenshots waiting for verification — please wait for the academy to check them.");
+    const res = await this.proofs().insertOne({
+      academyId, guardianUserId, invoiceIds, amountPaise: amount, utr, note, imageDataUrl: img, status: "PENDING", createdAt: new Date(),
+    } as PaymentProofDoc);
+    return { ok: true, proofId: String(res.insertedId) };
+  }
 
   async createCheckoutOrder(token: string, academyId: string, guardianUserId: string, invoiceIds: string[]): Promise<CreateCheckoutOrderResponse> {
     this.resolveToken(token, academyId, guardianUserId);

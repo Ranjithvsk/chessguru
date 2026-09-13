@@ -14,6 +14,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { feesApi, fmtRupees, type DashboardResponse, type ReminderTextResponse } from "../lib/fees-api";
 import FeesStudentsTable from "../components/FeesStudentsTable";
+import FeesProofsPanel from "../components/FeesProofsPanel";
 
 const t = (s: string) => s;
 
@@ -112,6 +113,7 @@ function DashboardBody({ data, onNav }: { data: DashboardResponse; onNav: (url: 
       </section>
 
       {/* TKT-224: every student, with a place for the parent's WhatsApp number */}
+      <div className="mb-6"><FeesProofsPanel /></div>
       <div className="mb-6"><FeesStudentsTable /></div>
 
       {/* Top defaulters + recent payments */}

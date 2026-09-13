@@ -277,6 +277,8 @@ export interface FeeSettingsResponse {
   bankAccountLast4?: string;
   updatedAt?: string;
   webhookUrl: string;
+  upiId?: string;
+  upiPayeeName?: string;
 }
 
 export interface UpdateFeeSettingsInput {
@@ -288,6 +290,8 @@ export interface UpdateFeeSettingsInput {
   panNo?: string | null;
   receiptPrefix?: string | null;
   bankAccountLast4?: string | null;
+  upiId?: string | null;
+  upiPayeeName?: string | null;
 }
 
 // ---- W4b: parent portal + Razorpay ----------------------------------------
@@ -315,6 +319,9 @@ export interface PortalResponse {
   currency: "INR";
   totalOutstandingPaise: number;
   razorpayAvailable: boolean;
+  upiId?: string;
+  upiPayeeName?: string;
+  proofs: PortalProofSummary[];
 }
 
 export interface CheckoutOrderResponse {
@@ -328,7 +335,21 @@ export interface CheckoutOrderResponse {
   academyName: string;
 }
 
+export type ProofStatus = "PENDING" | "ACCEPTED" | "REJECTED";
+export interface PortalProofSummary { id: string; amountPaise: number; utr?: string; status: ProofStatus; createdAt: string; rejectReason?: string; invoiceNos: string[] }
+export interface PaymentProofResponse extends PortalProofSummary {
+  guardianUserId: string; guardianName?: string; guardianPhone?: string; studentNames: string[]; invoiceIds: string[];
+  outstandingPaise: number; imageDataUrl: string; reviewedAt?: string; paymentId?: string;
+}
+export interface CreateProofInput { invoiceIds: string[]; amountPaise: number; utr?: string; note?: string; imageDataUrl: string }
+
 export const portalApi = {
+  /** Parent uploads a UPI payment screenshot for the academy to verify. */
+  submitProof: (token: string, guardianUserId: string, academyId: string, input: CreateProofInput) =>
+    req<{ ok: true; proofId: string }>(
+      `/api/fees/portal/${encodeURIComponent(token)}/proof?g=${encodeURIComponent(guardianUserId)}&a=${encodeURIComponent(academyId)}`,
+      { method: "POST", body: JSON.stringify(input) },
+    ),
   view: (token: string, guardianUserId: string, academyId: string) =>
     req<PortalResponse>(`/api/fees/portal/${encodeURIComponent(token)}?g=${encodeURIComponent(guardianUserId)}&a=${encodeURIComponent(academyId)}`),
 
@@ -359,9 +380,16 @@ export interface FeesStudentRow {
   outstandingPaise: number;
   overdueCount: number;
   lastPaidAt?: string;
+  openInvoiceIds: string[];
 }
 
 export const feesApi = {
+  /** Parent-uploaded UPI screenshots awaiting verification (owner). */
+  proofs: (status: ProofStatus | "ALL" = "PENDING") => req<{ proofs: PaymentProofResponse[] }>(`/api/fees/proofs?status=${status}`),
+  acceptProof: (id: string, amountPaise?: number) =>
+    req<{ ok: true; paymentId: string; leftoverPaise: number }>(`/api/fees/proofs/${encodeURIComponent(id)}/accept`, { method: "POST", body: JSON.stringify(amountPaise ? { amountPaise } : {}) }),
+  rejectProof: (id: string, reason: string) =>
+    req<{ ok: true }>(`/api/fees/proofs/${encodeURIComponent(id)}/reject`, { method: "POST", body: JSON.stringify({ reason }) }),
   /** TKT-224 — every student with guardian WhatsApp + fee summary (owner + coach). */
   students: () => req<{ students: FeesStudentRow[] }>("/api/fees/students"),
   /** Adds/links a parent carrying a WhatsApp number to a student — the academy

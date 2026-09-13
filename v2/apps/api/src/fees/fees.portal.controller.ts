@@ -6,7 +6,7 @@
 import { Body, Controller, ForbiddenException, Get, Param, Post, Query, Req, Res } from "@nestjs/common";
 // Param is used by both controllers below; keep it in the top import.
 import { FeesPortalService } from "./fees.portal.service";
-import { CreateCheckoutOrderInput } from "./fees.types";
+import { CreateCheckoutOrderInput, CreateProofInput } from "./fees.types";
 
 // Portal path scheme: /api/fees/portal/:token?g=<guardianUserId>&a=<academyId>
 // (The token is deterministic HMAC of academyId+guardianUserId — we accept
@@ -31,6 +31,13 @@ export class FeesPortalController {
     if (!g || !a) throw new ForbiddenException("Missing portal parameters.");
     const invoiceIds = Array.isArray(body?.invoiceIds) ? body.invoiceIds : [];
     return this.svc.createCheckoutOrder(token, a, g, invoiceIds);
+  }
+
+  /** Parent uploads a UPI payment screenshot for verification (owner 2026-09-13). */
+  @Post(":token/proof")
+  async submitProof(@Param("token") token: string, @Query("g") g: string, @Query("a") a: string, @Body() body: CreateProofInput) {
+    if (!g || !a) throw new ForbiddenException("Missing portal parameters.");
+    return this.svc.submitProof(token, a, g, body);
   }
 
   @Get(":token/payments")

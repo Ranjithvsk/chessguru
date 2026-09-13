@@ -125,6 +125,27 @@ export class FeesController {
     return { students: await this.svc.listStudents(req.session) };
   }
 
+  // ---- payment proofs (UPI screenshots uploaded by parents) ----------------
+
+  @Get("proofs")
+  async listProofs(@Req() req: any, @Query("status") status?: string) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    const st = (status === "PENDING" || status === "ACCEPTED" || status === "REJECTED" || status === "ALL") ? status : "PENDING";
+    return { proofs: await this.svc.listProofs(req.session, st as any) };
+  }
+
+  @Post("proofs/:id/accept")
+  async acceptProof(@Req() req: any, @Param("id") id: string, @Body() body: { amountPaise?: number }) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    return this.svc.acceptProof(req.session, id, { amountPaise: typeof body?.amountPaise === "number" ? body.amountPaise : undefined });
+  }
+
+  @Post("proofs/:id/reject")
+  async rejectProof(@Req() req: any, @Param("id") id: string, @Body() body: { reason?: string }) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    return this.svc.rejectProof(req.session, id, String(body?.reason ?? ""));
+  }
+
   @Get("enrollments")
   async listEnrollments(
     @Req() req: any,

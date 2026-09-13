@@ -62,6 +62,8 @@ function SettingsForm({ data, onSaved }: { data: FeeSettingsResponse; onSaved: (
   const [panNo, setPanNo] = useState(data.panNo ?? "");
   const [receiptPrefix, setReceiptPrefix] = useState(data.receiptPrefix ?? "");
   const [bankLast4, setBankLast4] = useState(data.bankAccountLast4 ?? "");
+  const [upiId, setUpiId] = useState(data.upiId ?? "");
+  const [upiPayee, setUpiPayee] = useState(data.upiPayeeName ?? "");
   const [toast, setToast] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -74,6 +76,8 @@ function SettingsForm({ data, onSaved }: { data: FeeSettingsResponse; onSaved: (
     setPanNo(data.panNo ?? "");
     setReceiptPrefix(data.receiptPrefix ?? "");
     setBankLast4(data.bankAccountLast4 ?? "");
+    setUpiId(data.upiId ?? "");
+    setUpiPayee(data.upiPayeeName ?? "");
   }, [data]);
 
   const save = useMutation({
@@ -102,6 +106,8 @@ function SettingsForm({ data, onSaved }: { data: FeeSettingsResponse; onSaved: (
     if (panNo.trim().toUpperCase() !== (data.panNo ?? "")) patch.panNo = panNo.trim() ? panNo.trim().toUpperCase() : null;
     if (receiptPrefix.trim().toUpperCase() !== (data.receiptPrefix ?? "")) patch.receiptPrefix = receiptPrefix.trim() ? receiptPrefix.trim().toUpperCase() : null;
     if (bankLast4 !== (data.bankAccountLast4 ?? "")) patch.bankAccountLast4 = bankLast4 || null;
+    if (upiId.trim() !== (data.upiId ?? "")) patch.upiId = upiId.trim() || null;
+    if (upiPayee.trim() !== (data.upiPayeeName ?? "")) patch.upiPayeeName = upiPayee.trim() || null;
     if (Object.keys(patch).length === 0) { setToast(t("Nothing to save.")); setTimeout(() => setToast(null), 1200); return; }
     save.mutate(patch);
   }
@@ -160,6 +166,12 @@ function SettingsForm({ data, onSaved }: { data: FeeSettingsResponse; onSaved: (
       <Section title={t("Receipts")} icon="🧾" subtitle={t("How your invoice + receipt numbers look. Defaults to your academy slug.")}>
         <Field label={t("Receipt prefix")} muted={t("2–12 uppercase letters/digits. Invoices become PREFIX/2026-27/000001.")}>
           <input value={receiptPrefix} onChange={(e) => setReceiptPrefix(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))} placeholder="GUNA" maxLength={12} className="input font-mono" />
+        </Field>
+        <Field label={t("UPI ID for fee payments")} muted={t("Shown as a QR code + copy button on the parent's pay page and in every WhatsApp fee request. Parents pay from any UPI app and upload the screenshot; you verify it on the Fees page.")}>
+          <input value={upiId} onChange={(e) => setUpiId(e.target.value.replace(/\s+/g, ""))} placeholder="gunachess@okaxis" className="input" />
+        </Field>
+        <Field label={t("UPI payee name")} muted={t("What the parent sees in their UPI app. Defaults to the academy name.")}>
+          <input value={upiPayee} onChange={(e) => setUpiPayee(e.target.value)} placeholder="Guna Chess Academy" className="input" />
         </Field>
         <Field label={t("Bank account last 4")} muted={t("Shown on receipts so parents recognise which account they paid.")}>
           <input value={bankLast4} onChange={(e) => setBankLast4(e.target.value.replace(/\D+/g, "").slice(0, 4))} placeholder="1234" maxLength={4} className="input font-mono w-24" />

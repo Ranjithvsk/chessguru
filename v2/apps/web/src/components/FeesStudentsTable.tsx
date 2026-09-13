@@ -128,11 +128,52 @@ function StudentRow({ r }: { r: FeesStudentRow }) {
           ? <div>
               <div className={`font-semibold ${r.overdueCount > 0 ? "text-red-300" : "text-gold-400"}`}>{fmtRupees(r.outstandingPaise)}</div>
               {r.overdueCount > 0 && <div className="text-[11px] text-red-300/80">{r.overdueCount} {t("overdue")}</div>}
-              <RequestOnWhatsApp r={r} />
+              <div className="mt-1 flex flex-wrap justify-end gap-1"><RequestOnWhatsApp r={r} /><MarkPaid r={r} /></div>
             </div>
           : <span className="text-[12px] text-emerald-300/80">{r.enrolledActive > 0 ? t("Paid up") : "—"}</span>}
       </td>
     </tr>
+  );
+}
+
+/** "Mark paid" — owner records a cash / UPI / bank payment by hand for this
+ *  student's open invoices (owner 2026-09-13). Same endpoint the Invoices page
+ *  uses; FIFO allocation, receipt number, invoice → PAID. */
+function MarkPaid({ r }: { r: FeesStudentRow }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [rupees, setRupees] = useState(String(Math.round(r.outstandingPaise / 100)));
+  const [method, setMethod] = useState<"CASH" | "UPI" | "BANK">("UPI");
+  const [note, setNote] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const m = useMutation({
+    mutationFn: () => feesApi.recordManualPayment({ invoiceIds: r.openInvoiceIds, amountPaise: Math.round(Number(rupees) * 100), method, note: note.trim() || undefined }),
+    onSuccess: () => { setOpen(false); setErr(null); qc.invalidateQueries({ queryKey: ["fees.students"] }); qc.invalidateQueries({ queryKey: ["fees.dashboard"] }); },
+    onError: (e) => setErr(e instanceof Error ? e.message : t("Couldn't record the payment.")),
+  });
+  if (!r.openInvoiceIds.length) return null;
+  if (!open) {
+    return <button onClick={() => setOpen(true)} className="inline-flex h-7 items-center gap-1 rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-2 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/20" title={t("Record a payment received in cash, UPI or bank transfer")}>✓ {t("Mark paid")}</button>;
+  }
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); if (Number(rupees) > 0) m.mutate(); }} onClick={(e) => e.stopPropagation()} className="mt-1 w-56 rounded-xl border border-ink-700 bg-ink-950/80 p-2 text-left">
+      <div className="text-[10px] uppercase tracking-wider text-ink-500">{t("Payment received")}</div>
+      <div className="mt-1 flex items-center gap-1">
+        <span className="text-sm text-ink-300">₹</span>
+        <input type="number" min={1} step={1} value={rupees} onChange={(e) => setRupees(e.target.value)} className="h-8 w-full rounded-lg border border-ink-700 bg-ink-900 px-2 text-sm text-ink-100 tabular-nums" />
+      </div>
+      <div className="mt-1.5 flex gap-1">
+        {(["UPI", "CASH", "BANK"] as const).map((k) => (
+          <button key={k} type="button" onClick={() => setMethod(k)} className={`h-7 flex-1 rounded-lg text-[11px] font-semibold ${method === k ? "bg-brand-500 text-white" : "border border-ink-700 text-ink-300"}`}>{k === "UPI" ? "📱" : k === "CASH" ? "💵" : "🏦"} {k}</button>
+        ))}
+      </div>
+      <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("Note / UTR (optional)")} className="mt-1.5 h-8 w-full rounded-lg border border-ink-700 bg-ink-900 px-2 text-[12px] text-ink-100 placeholder:text-ink-500" />
+      <div className="mt-1.5 flex items-center gap-1.5">
+        <button type="submit" disabled={m.isPending || !(Number(rupees) > 0)} className="h-8 flex-1 rounded-lg bg-emerald-600 text-[12px] font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">{m.isPending ? t("Saving…") : t("Save · mark paid")}</button>
+        <button type="button" onClick={() => { setOpen(false); setErr(null); }} className="h-8 px-2 text-[12px] text-ink-400 hover:text-white">{t("Cancel")}</button>
+      </div>
+      {err && <div role="alert" className="mt-1 text-[11px] text-red-300">{err}</div>}
+    </form>
   );
 }
 

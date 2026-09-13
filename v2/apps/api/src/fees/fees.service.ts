@@ -70,6 +70,9 @@ import {
   UpsertPlanInput,
   FeeBatchPickerRow,
   FeesStudentRow,
+  PaymentProofDoc,
+  PaymentProofResponse,
+  ProofStatus,
   BulkEnrollFromBatchResponse,
   VALID_CADENCES,
   VALID_KINDS,
@@ -105,6 +108,7 @@ export class FeesService {
   // "all students from batch X". Never write here — batches are edited via
   // the academy admin surface.
   private batches()     { return this.conn.db!.collection("academyBatches"); }
+  private proofs()      { return this.conn.db!.collection<PaymentProofDoc>(COL.proofs); }
 
   // Called on module init to make sure the indices we count on for tenant scoping
   // and lookup are present. Idempotent — createIndex is a no-op on second run.
@@ -119,6 +123,8 @@ export class FeesService {
     await this.invoices().createIndex({ academyId: 1, enrollmentId: 1, periodStart: 1 }, { unique: true });
     await this.invoices().createIndex({ academyId: 1, status: 1, dueOn: 1 });
     await this.invoices().createIndex({ academyId: 1, guardianUserId: 1, createdAt: -1 });
+    await this.proofs().createIndex({ academyId: 1, status: 1, createdAt: -1 });
+    await this.proofs().createIndex({ academyId: 1, guardianUserId: 1, createdAt: -1 });
     await this.payments().createIndex({ academyId: 1, createdAt: -1 });
     await this.allocs().createIndex({ academyId: 1, invoiceId: 1 });
     await this.allocs().createIndex({ academyId: 1, paymentId: 1 });
@@ -873,9 +879,10 @@ export class FeesService {
       this.batches().find({ academyId }, { projection: { _id: 1, name: 1, studentIds: 1 } as never }).toArray(),
       this.enrollments().find({ academyId, studentUserId: { $in: ids }, status: "ACTIVE" }, { projection: { studentUserId: 1, programId: 1 } as never }).toArray(),
       this.programs().find({ academyId }, { projection: { _id: 1, name: 1 } as never }).toArray(),
-      this.invoices().aggregate<{ _id: string; outstanding: number; overdue: number }>([
+      this.invoices().aggregate<{ _id: string; outstanding: number; overdue: number; ids: ObjectId[] }>([
         { $match: { academyId, studentUserId: { $in: ids }, status: { $in: ["SENT", "PARTIAL", "OVERDUE"] } } },
-        { $group: { _id: "$studentUserId", outstanding: { $sum: { $subtract: ["$totalPaise", "$paidPaise"] } }, overdue: { $sum: { $cond: [{ $eq: ["$status", "OVERDUE"] }, 1, 0] } } } },
+        { $sort: { dueOn: 1 } },
+        { $group: { _id: "$studentUserId", outstanding: { $sum: { $subtract: ["$totalPaise", "$paidPaise"] } }, overdue: { $sum: { $cond: [{ $eq: ["$status", "OVERDUE"] }, 1, 0] } }, ids: { $push: "$_id" } } },
       ]).toArray(),
       this.invoices().aggregate<{ _id: string; paidAt: Date }>([
         { $match: { academyId, studentUserId: { $in: ids }, status: "PAID", paidAt: { $exists: true } } },
@@ -918,8 +925,78 @@ export class FeesService {
         outstandingPaise: Math.max(0, Number(open?.outstanding ?? 0)),
         overdueCount: Number(open?.overdue ?? 0),
         lastPaidAt: paidAt ? new Date(paidAt).toISOString() : undefined,
+        openInvoiceIds: (open?.ids ?? []).map((x) => String(x)),
       };
     });
+  }
+
+  // ---- payment proofs (parent-uploaded UPI screenshots) ----------------------
+
+  async listProofs(session: Session, status: ProofStatus | "ALL" = "PENDING", limit = 100): Promise<PaymentProofResponse[]> {
+    const { academyId } = this.requireOwner(session);
+    const filter: Record<string, unknown> = { academyId };
+    if (status !== "ALL") filter.status = status;
+    const rows = await this.proofs().find(filter).sort({ createdAt: -1 }).limit(Math.min(500, limit)).toArray();
+    if (rows.length === 0) return [];
+    const guardianIds = Array.from(new Set(rows.map((r) => r.guardianUserId)));
+    const invIds = Array.from(new Set(rows.flatMap((r) => r.invoiceIds))).map((x) => this.tryOid(x)).filter((v): v is ObjectId => !!v);
+    const [guardians, invoices] = await Promise.all([
+      this.users().find({ _id: { $in: guardianIds as any[] } }, { projection: { _id: 1, name: 1, username: 1, mobile: 1 } as never }).toArray(),
+      invIds.length ? this.invoices().find({ _id: { $in: invIds }, academyId }, { projection: { _id: 1, invoiceNo: 1, studentUserId: 1, totalPaise: 1, paidPaise: 1 } as never }).toArray() : Promise.resolve([] as InvoiceDoc[]),
+    ]);
+    const stuIds = Array.from(new Set(invoices.map((i) => i.studentUserId)));
+    const students = stuIds.length ? await this.users().find({ _id: { $in: stuIds as any[] } }, { projection: { _id: 1, name: 1, username: 1 } as never }).toArray() : [];
+    const gById = new Map(guardians.map((g: any) => [String(g._id), g]));
+    const iById = new Map(invoices.map((i) => [String(i._id), i]));
+    const sById = new Map(students.map((x: any) => [String(x._id), x]));
+    return rows.map((r) => {
+      const invs = r.invoiceIds.map((id) => iById.get(id)).filter((v): v is InvoiceDoc => !!v);
+      const g = gById.get(r.guardianUserId);
+      return {
+        id: String(r._id),
+        guardianUserId: r.guardianUserId,
+        guardianName: g ? String(g.name || g.username) : undefined,
+        guardianPhone: g?.mobile ? String(g.mobile) : undefined,
+        studentNames: Array.from(new Set(invs.map((i) => { const st = sById.get(i.studentUserId); return st ? String(st.name || st.username) : i.studentUserId; }))),
+        invoiceIds: r.invoiceIds,
+        invoiceNos: invs.map((i) => i.invoiceNo),
+        outstandingPaise: invs.reduce((sum, i) => sum + Math.max(0, i.totalPaise - i.paidPaise), 0),
+        amountPaise: r.amountPaise,
+        utr: r.utr,
+        status: r.status,
+        createdAt: r.createdAt.toISOString(),
+        reviewedAt: r.reviewedAt?.toISOString(),
+        rejectReason: r.rejectReason,
+        paymentId: r.paymentId,
+        imageDataUrl: r.imageDataUrl,
+      };
+    });
+  }
+
+  /** Accept = record a manual UPI payment for the proof's invoices (FIFO
+   *  allocation, receipt number, invoice → PAID/PARTIAL) and mark the proof. */
+  async acceptProof(session: Session, id: string, override?: { amountPaise?: number }): Promise<{ ok: true; paymentId: string; leftoverPaise: number }> {
+    const { userId, academyId } = this.requireOwner(session);
+    const _id = this.oid(id);
+    const proof = await this.proofs().findOne({ _id, academyId });
+    if (!proof) throw new NotFoundException("Proof not found.");
+    if (proof.status !== "PENDING") throw new BadRequestException(`Already ${proof.status.toLowerCase()}.`);
+    const amount = override?.amountPaise ?? proof.amountPaise;
+    const note = `UPI screenshot verified${proof.utr ? ` · UTR ${proof.utr}` : ""} · proof ${String(proof._id)}`;
+    const res = await this.recordManualPayment(session, { invoiceIds: proof.invoiceIds, amountPaise: amount, method: "UPI", note });
+    await this.proofs().updateOne({ _id }, { $set: { status: "ACCEPTED", reviewedAt: new Date(), reviewedBy: userId, paymentId: res.payment.id } });
+    return { ok: true, paymentId: res.payment.id, leftoverPaise: res.leftoverPaise };
+  }
+
+  async rejectProof(session: Session, id: string, reason: string): Promise<{ ok: true }> {
+    const { userId, academyId } = this.requireOwner(session);
+    const _id = this.oid(id);
+    const proof = await this.proofs().findOne({ _id, academyId });
+    if (!proof) throw new NotFoundException("Proof not found.");
+    if (proof.status !== "PENDING") throw new BadRequestException(`Already ${proof.status.toLowerCase()}.`);
+    const r = String(reason ?? "").trim().slice(0, 200) || "Couldn't match this screenshot to a payment.";
+    await this.proofs().updateOne({ _id }, { $set: { status: "REJECTED", reviewedAt: new Date(), reviewedBy: userId, rejectReason: r } });
+    return { ok: true };
   }
 
   async listEnrollments(session: Session, opts: { planId?: string; studentUserId?: string; status?: EnrollmentStatus } = {}): Promise<EnrollmentResponse[]> {
@@ -1775,7 +1852,7 @@ export class FeesService {
     // taps (WhatsApp → tap link → tap Pay). Silently omit if PORTAL_TOKEN_SALT
     // isn't set (dev / half-configured prod); the text still reads sensibly.
     const portalLine = inv.guardianUserId ? this.safePortalUrl(academyId, inv.guardianUserId) : "";
-    const payLine = portalLine ? `\nPay here: ${portalLine}` : "";
+    const payLine = await this.payLines(academyId, portalLine);
     const text = isOverdue
       ? `Hi ${guardianName}, gentle reminder — ${studentName}'s fee (${inv.invoiceNo}, ${balanceStr}) was due on ${dueStr}.${payLine}\nThank you — ${academyName}`
       : `Hi ${guardianName}, friendly reminder — ${studentName}'s fee (${inv.invoiceNo}, ${balanceStr}) is due on ${dueStr}.${payLine}\nThank you — ${academyName}`;
@@ -1822,7 +1899,7 @@ export class FeesService {
     const oldestDue = openInvoices[0]?.dueOn ? openInvoices[0].dueOn.toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "";
 
     const portalLine = this.safePortalUrl(academyId, guardianUserId);
-    const payLine = portalLine ? `\nPay here: ${portalLine}` : "";
+    const payLine = await this.payLines(academyId, portalLine);
     const invoiceWord = count === 1 ? "invoice" : "invoices";
     const text = count === 0
       ? `Hi ${guardianName}, all fees are up to date. Thank you! — ${academyName}`
@@ -1844,6 +1921,17 @@ export class FeesService {
       guardianPhone: phoneRaw || undefined,
       guardianName: (guardian?.name as string) ?? (guardian?.username as string) ?? undefined,
     };
+  }
+
+  /** The "how to pay" tail of every WhatsApp request (owner 2026-09-13): the
+   *  academy's UPI ID + payee, then the pay-page link where the parent finds
+   *  the QR, Razorpay (if set up) and the "upload payment screenshot" form. */
+  private async payLines(academyId: string, portalLine: string): Promise<string> {
+    const st = await this.settings().findOne({ academyId }, { projection: { upiId: 1, upiPayeeName: 1 } as never });
+    const lines: string[] = [];
+    if (st?.upiId) lines.push(`Pay by UPI: ${st.upiId}${st.upiPayeeName ? ` (${st.upiPayeeName})` : ""}`);
+    if (portalLine) lines.push(`${st?.upiId ? "QR code, online payment & upload your payment screenshot" : "Pay here"}: ${portalLine}`);
+    return lines.length ? "\n" + lines.join("\n") : "";
   }
 
   /** Best-effort portal URL — swallows the "PORTAL_TOKEN_SALT unset" throw so
@@ -1934,6 +2022,8 @@ export class FeesService {
       panNo: doc?.panNo,
       receiptPrefix: doc?.receiptPrefix,
       bankAccountLast4: doc?.bankAccountLast4,
+      upiId: doc?.upiId,
+      upiPayeeName: doc?.upiPayeeName,
       updatedAt: doc?.updatedAt?.toISOString(),
       webhookUrl: this.webhookUrlFor(academyId),
     };
@@ -1973,6 +2063,11 @@ export class FeesService {
     strField("panNo", "panNo", { max: 15, upper: true });
     strField("receiptPrefix", "receiptPrefix", { max: 12, upper: true });
     strField("bankAccountLast4", "bankAccountLast4", { max: 4, digitsOnly: true });
+    strField("upiId", "upiId", { max: 80 });
+    strField("upiPayeeName", "upiPayeeName", { max: 60 });
+    if (typeof set.upiId === "string" && !/^[a-zA-Z0-9.\-_]{2,}@[a-zA-Z][a-zA-Z0-9]{1,}$/.test(set.upiId as string)) {
+      throw new BadRequestException("UPI ID must look like name@bank (e.g. gunachess@okaxis).");
+    }
 
     // GSTIN sanity — 15 chars, alphanumeric. Only validate when caller provided one.
     if (typeof set.gstin === "string" && !/^[0-9A-Z]{15}$/.test(set.gstin as string)) {
