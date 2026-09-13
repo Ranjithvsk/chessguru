@@ -30,7 +30,9 @@ export class MiscController {
     const weekAgo = new Date(now - 7 * 86_400_000);
     const [academies, students, coaches, puzzlesSolvedWeek] = await Promise.all([
       db.collection("academies").countDocuments({}),
-      db.collection("students").countDocuments({}).catch(() => 0),
+      // students are users with role "student" (there is no "students" collection —
+      // this counted 0 on the landing page; owner 2026-09-13: "why it shows 0 students?")
+      db.collection("users").countDocuments({ role: "student" }).catch(() => 0),
       db.collection("users").countDocuments({ role: "coach" }).catch(() => 0),
       db.collection("rounds").countDocuments({ d: { $gte: weekAgo } }).catch(() => 0),
     ]);

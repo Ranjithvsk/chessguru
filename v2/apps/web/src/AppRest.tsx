@@ -61,6 +61,12 @@ import BuiltForPage from "./pages/marketing/BuiltFor";
 import WhyChessGuruPage from "./pages/marketing/WhyChessGuru";
 import ComparePage from "./pages/marketing/Compare";
 import FeaturePage from "./pages/marketing/FeaturePage";
+import AboutPage from "./pages/marketing/About";
+import ContactPage from "./pages/marketing/Contact";
+import ChangelogPage from "./pages/marketing/Changelog";
+import { BlogIndexPage, BlogPostPage } from "./pages/marketing/Blog";
+import HelpPage from "./pages/marketing/Help";
+import LegalPage from "./pages/marketing/Legal";
 import ArbiterPage from "./pages/Arbiter";
 import { PublicResultsHome, PublicResultsDetail } from "./pages/PublicResults";
 import PublicPlayer from "./pages/PublicPlayer";
@@ -261,6 +267,14 @@ export default function AppRest() {
         <Route path="why-chessguru" element={<WhyChessGuruPage />} />
         <Route path="compare" element={<ComparePage />} />
         <Route path="features/:category" element={<FeaturePage />} />
+        <Route path="about" element={<AboutPage />} />
+        <Route path="contact" element={<ContactPage />} />
+        <Route path="changelog" element={<ChangelogPage />} />
+        <Route path="blog" element={<BlogIndexPage />} />
+        <Route path="blog/:slug" element={<BlogPostPage />} />
+        <Route path="help" element={<HelpPage />} />
+        <Route path="terms" element={<LegalPage kind="terms" />} />
+        <Route path="privacy" element={<LegalPage kind="privacy" />} />
         <Route path="arbiter" element={<ArbiterPage />} />
         <Route path="arbiter/:id" element={<ArbiterPage />} />
         <Route path="results" element={<PublicResultsHome />} />

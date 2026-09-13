@@ -53,7 +53,7 @@ export const AUDIENCES: Record<AudienceKey, {
     ],
     big: [
       { t: "Built for multi-batch, multi-branch operations", d: "Compare batches side by side: attendance trends, dues per batch, top-performing students, coach load. The first time you'll see the whole academy in one screen." },
-      { t: "Built for the chess business", d: "Tournament arbiter with Swiss pairings and public results, scoresheet scanning that turns paper games into PGN, engine analysis of every student game. The workflows a chess academy actually has." },
+      { t: "Built for how academies really work", d: "Tournament arbiter with Swiss pairings and public results, scoresheet scanning that turns paper games into PGN, engine analysis of every student game. The workflows a chess academy actually has." },
       { t: "Priced like an Indian academy, not a Silicon Valley SaaS", d: "₹1,000 a month, flat. Unlimited students, unlimited coaches, every feature. No per-student fees, no add-ons, no surprises when you grow." },
     ],
     quote: { text: "We moved from three apps and two WhatsApp groups to one login. The trial gave us time to migrate at our own pace.", who: "Early ChessGuru academy", meta: "Owner · Tamil Nadu · quote to be attributed with permission" },
@@ -126,7 +126,7 @@ export const DIY_STACK: Array<{ tool: string; inr: number }> = [
   { tool: "Swiss-Manager / pairing software", inr: 500 },
   { tool: "Google Workspace (Sheets, Forms, attendance)", inr: 300 },
   { tool: "Payment links + invoicing", inr: 400 },
-  { tool: "WhatsApp Business + report templates", inr: 0 },
+  { tool: "WhatsApp groups + report templates", inr: 0 },
 ];
 export const DIY_ADMIN_HOURS_PER_WEEK = 10;
 export const DIY_ADMIN_HOUR_INR = 300;

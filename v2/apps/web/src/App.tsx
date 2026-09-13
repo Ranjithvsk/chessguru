@@ -73,7 +73,7 @@ export default function App() {
   // stacked on top of it as a double header (owner ask 2026-09-10: hide it).
   // 2026-09-13: the landing grew into a marketing set (/for-*, /why-chessguru,
   // /compare, /features/*) that shares its own nav + footer via MarketingShell.
-  const isMarketing = /^\/(signup-academy|for-(academies|coaches|schools)|why-chessguru|compare|features\/[a-z-]+)$/.test(loc.pathname);
+  const isMarketing = /^\/(signup-academy|for-(academies|coaches|schools)|why-chessguru|compare|features\/[a-z-]+|about|contact|changelog|blog(\/[a-z0-9-]+)?|help|terms|privacy)$/.test(loc.pathname);
   const showGuestWarn = !!auth && !auth.loggedIn && !isMarketing && !["/login", "/register"].includes(loc.pathname);
 
   return (

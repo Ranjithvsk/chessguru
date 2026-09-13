@@ -128,6 +128,17 @@ export default function SignupAcademyPage() {
         </div>
       </div>
 
+      {/* ── Marquee: everything included (ChessPlay's logo strip slot) ── */}
+      <div className="overflow-hidden py-5 border-b" style={{ borderColor: M.line }}>
+        <div className="text-center text-[11px] font-bold tracking-widest uppercase mb-3" style={{ color: M.ink3 }}>Everything below is on the single ₹{PRICE_MONTHLY.toLocaleString("en-IN")}/month plan</div>
+        <div className="flex gap-3 whitespace-nowrap cg-marquee">
+          {[...FEATURES, ...FEATURES].map((f, i) => (
+            <span key={i} className="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-bold" style={{ borderColor: M.line, background: M.card, color: M.ink2 }}>{f.emoji} {f.title}</span>
+          ))}
+        </div>
+        <style>{`@keyframes cg-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } } .cg-marquee { width: max-content; animation: cg-marquee 90s linear infinite; } .cg-marquee:hover { animation-play-state: paused; }`}</style>
+      </div>
+
       {/* ── What is ChessGuru ───────────────────────────────────────── */}
       <Section>
         <Eyebrow>What is ChessGuru?</Eyebrow>
@@ -232,7 +243,7 @@ export default function SignupAcademyPage() {
       {/* ── Why ─────────────────────────────────────────────────────── */}
       <Section tone="peach">
         <Eyebrow>Why ChessGuru</Eyebrow>
-        <div className="mt-4"><H2>The business of chess, <Accent>finally easy</Accent></H2></div>
+        <div className="mt-4"><H2>Running an academy, <Accent>finally easy</Accent></H2></div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {WHY.map((w, i) => (
             <Card key={w.t}>

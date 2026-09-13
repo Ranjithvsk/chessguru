@@ -132,8 +132,10 @@ const NAV_FEATURES: FeatureCategory[] = ["classes", "academy", "puzzles", "study
 const NAV_LINKS = [
   { to: "/signup-academy", label: "Home" },
   { to: "/why-chessguru", label: "Why ChessGuru" },
-  { to: "/compare", label: "Compare" },
   { to: "/signup-academy#pricing", label: "Pricing" },
+  { to: "/blog", label: "Blog" },
+  { to: "/about", label: "About" },
+  { to: "/contact", label: "Contact" },
 ];
 
 function Nav() {
@@ -151,11 +153,11 @@ function Nav() {
       </div>
       <nav className="border-b backdrop-blur-md" style={{ background: "rgba(255,247,237,0.92)", borderColor: M.line }}>
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between gap-4">
-          <Link to="/signup-academy" className="flex items-center gap-2 font-black text-xl tracking-tight">
+          <Link to="/signup-academy" className="flex items-center gap-2 font-black text-xl tracking-tight whitespace-nowrap">
             <span style={{ color: M.orange }}>♟</span> ChessGuru
-            <span className="hidden sm:inline text-[10px] font-bold tracking-widest uppercase rounded-full px-2 py-0.5 ml-1" style={{ background: M.orangeSoft, color: M.orange2 }}>for academies</span>
+            <span className="hidden xl:inline text-[10px] font-bold tracking-widest uppercase rounded-full px-2 py-0.5 ml-1 whitespace-nowrap" style={{ background: M.orangeSoft, color: M.orange2 }}>for academies</span>
           </Link>
-          <div className="hidden lg:flex items-center gap-7 text-[15px] font-semibold" style={{ color: M.ink2 }}>
+          <div className="hidden lg:flex items-center gap-5 text-[14px] font-semibold whitespace-nowrap" style={{ color: M.ink2 }}>
             <Link to="/signup-academy" className="hover:text-black" style={active("/signup-academy") ? { color: M.orange2 } : {}}>Home</Link>
             <div className="relative" onMouseEnter={() => setFeat(true)} onMouseLeave={() => setFeat(false)}>
               <button className="hover:text-black flex items-center gap-1" style={loc.pathname.startsWith("/features/") ? { color: M.orange2 } : {}} onClick={() => setFeat((v) => !v)}>Features <span className="text-xs">▾</span></button>
@@ -168,6 +170,10 @@ function Nav() {
                         <div className="text-xs" style={{ color: M.ink3 }}>{CATEGORY_META[c].blurb}</div>
                       </Link>
                     ))}
+                    <div className="mt-1 pt-1 border-t flex gap-1" style={{ borderColor: M.line }}>
+                      <Link to="/compare" className="flex-1 rounded-xl px-3 py-2 text-sm font-bold hover:bg-orange-50" style={{ color: M.orange2 }}>Compare →</Link>
+                      <Link to="/changelog" className="flex-1 rounded-xl px-3 py-2 text-sm font-bold hover:bg-orange-50" style={{ color: M.orange2 }}>Changelog →</Link>
+                    </div>
                   </div>
                 </div>
               )}
@@ -176,7 +182,7 @@ function Nav() {
               <Link key={l.to} to={l.to} className="hover:text-black" style={active(l.to) && !l.to.includes("#") ? { color: M.orange2 } : {}}>{l.label}</Link>
             ))}
             <Link to="/login" className="hover:text-black">Sign in</Link>
-            <Link to={TRIAL_HREF} className="rounded-full px-5 py-2.5 font-bold text-sm" style={CTA_STYLE}>Start free trial</Link>
+            <Link to={TRIAL_HREF} className="rounded-full px-4 py-2.5 font-bold text-sm whitespace-nowrap" style={CTA_STYLE}>Start free trial</Link>
           </div>
           <button className="lg:hidden rounded-full px-4 py-2 text-sm font-bold" style={CTA_STYLE} onClick={() => setOpen((v) => !v)} aria-label="Menu">{open ? "Close" : "Menu"}</button>
         </div>
@@ -199,11 +205,12 @@ function Footer() {
   const cols: Array<{ h: string; links: Array<{ to: string; label: string; ext?: boolean }> }> = [
     { h: "Features", links: NAV_FEATURES.slice(0, 6).map((c) => ({ to: `/features/${c}`, label: CATEGORY_META[c].label })) },
     { h: "Built for", links: [{ to: "/for-academies", label: "Chess academies" }, { to: "/for-coaches", label: "Chess coaches" }, { to: "/for-schools", label: "Schools & clubs" }, { to: "/why-chessguru", label: "Why ChessGuru" }, { to: "/compare", label: "Compare" }] },
-    { h: "Company", links: [{ to: "/signup-academy#pricing", label: "Pricing" }, { to: "/signup-academy#faq", label: "FAQ" }, { to: "/help", label: "Help" }, { to: "/terms", label: "Terms" }, { to: "/privacy", label: "Privacy" }, { to: "/login", label: "Sign in" }] },
+    { h: "Company", links: [{ to: "/about", label: "About us" }, { to: "/blog", label: "Blog" }, { to: "/changelog", label: "Changelog" }, { to: "/contact", label: "Contact" }, { to: "/signup-academy#pricing", label: "Pricing" }] },
+    { h: "Support", links: [{ to: "/help", label: "Help centre" }, { to: "/signup-academy#faq", label: "FAQ" }, { to: "/terms", label: "Terms of service" }, { to: "/privacy", label: "Privacy policy" }, { to: "/login", label: "Sign in" }] },
   ];
   return (
     <footer className="border-t" style={{ borderColor: M.line, background: M.bg2 }}>
-      <div className="max-w-6xl mx-auto px-6 py-14 grid md:grid-cols-[1.4fr_1fr_1fr_1fr] gap-10">
+      <div className="max-w-6xl mx-auto px-6 py-14 grid sm:grid-cols-2 md:grid-cols-[1.4fr_1fr_1fr_1fr_1fr] gap-10">
         <div>
           <div className="flex items-center gap-2 font-black text-xl"><span style={{ color: M.orange }}>♟</span> ChessGuru</div>
           <p className="mt-3 text-sm leading-relaxed max-w-xs" style={{ color: M.ink2 }}>
