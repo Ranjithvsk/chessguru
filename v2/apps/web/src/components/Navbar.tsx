@@ -530,6 +530,7 @@ export default function Navbar({ rating, ratingProvisional, username, admin, onL
                         <ViewAsAcademy inDrawer />
                         {adminLink("/admin/users", "Admin — Users")}
                         {adminLink("/admin/academies", "Admin — Academies")}
+                        {adminLink("/admin/leads", "Admin — Leads")}
                         {adminLink("/admin/mail-log", "Admin — Mail log")}
                         {adminLink("/admin/errors", "Admin — Errors")}
                         {adminLink("/admin/vision", "Admin — Vision")}

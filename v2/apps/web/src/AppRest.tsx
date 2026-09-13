@@ -91,6 +91,7 @@ import ExternalGamePage from "./pages/ExternalGame";
 import AdminPage from "./pages/Admin";
 import AdminUsersPage from "./pages/AdminUsers";
 import AdminAcademiesPage from "./pages/AdminAcademies";
+import AdminLeadsPage from "./pages/AdminLeads";
 import AdminMailLogPage from "./pages/AdminMailLog";
 import AdminErrorsPage from "./pages/AdminErrors";
 import AdminVisionPage from "./pages/AdminVision";
@@ -217,6 +218,7 @@ export default function AppRest() {
         <Route path="admin" element={<AdminPage />} />
         <Route path="admin/users" element={<AdminUsersPage />} />
         <Route path="admin/academies" element={<AdminAcademiesPage />} />
+        <Route path="admin/leads" element={<AdminLeadsPage />} />
         <Route path="admin/mail-log" element={<AdminMailLogPage />} />
         <Route path="admin/errors" element={<AdminErrorsPage />} />
         <Route path="admin/vision" element={<AdminVisionPage />} />

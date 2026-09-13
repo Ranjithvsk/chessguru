@@ -387,3 +387,24 @@ export const broadcastFacets = () =>
   get<{ events: { event: string; n: number }[]; players: { name: string; n: number }[] }>("/api/broadcasts/facets");
 export const broadcastOne = (id: string) =>
   get<BroadcastGame | { found: false }>(`/api/broadcasts/${encodeURIComponent(id)}`);
+
+// --- Admin: sales leads (/admin/leads) — mirrors AdminLeadsService (apps/api/src/admin/admin-leads.service.ts) ---
+export type LeadStatus = "new" | "contacted" | "interested" | "demo" | "trial" | "converted" | "lost";
+export const LEAD_STATUSES: LeadStatus[] = ["new", "contacted", "interested", "demo", "trial", "converted", "lost"];
+export type LeadActivity = { at: string; by: string; kind: "note" | "call" | "status" | "email" | "whatsapp" | "visit"; text: string };
+export type Lead = {
+  id: string; name: string; city: string; locality: string; address: string; phones: string; email: string; website: string; coaches: string;
+  estStudents: string; estCoaches: string; estimateBasis: string; notes: string; sources: string;
+  status: LeadStatus; assignee: string; nextFollowUpAt: string | null; lastContactAt: string | null; academyId: string | null;
+  activity: LeadActivity[]; createdAt: string | null; updatedAt: string | null;
+};
+export type LeadSummary = { total: number; byStatus: Record<LeadStatus, number>; followUpsDue: number; converted: number; conversionPct: number };
+export const adminLeads = (q: { status?: string; q?: string } = {}) => {
+  const qs = new URLSearchParams(Object.entries(q).filter(([, v]) => !!v) as [string, string][]).toString();
+  return get<Lead[]>(`/api/admin/leads${qs ? `?${qs}` : ""}`);
+};
+export const adminLeadsSummary = () => get<LeadSummary>("/api/admin/leads/summary");
+export const adminLeadUpdate = (id: string, body: Partial<Lead>) => patch<Lead>(`/api/admin/leads/${encodeURIComponent(id)}`, body);
+export const adminLeadActivity = (id: string, body: { kind: LeadActivity["kind"]; text: string }) => post<Lead>(`/api/admin/leads/${encodeURIComponent(id)}/activity`, body);
+export const adminLeadCreate = (body: Partial<Lead>) => post<Lead>("/api/admin/leads", body);
+
