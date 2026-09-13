@@ -29,3 +29,6 @@ No real payment was made. Order creation and the subscription flow run against t
 
 ## Yearly = 2 months free (owner, later 2026-09-13)
 `amountForMonths(monthly, months)` in billing.service: 12 months are charged as 10 (`YEAR_MONTHS_CHARGED`). Status carries `yearlyPricePaise`; Billing page shows "1 year · 2 free" with the struck-through 12× price; sign-up cards and FAQ mention ₹10,000 / ₹15,000 per year. Monthly auto-renew is unchanged.
+
+## Yearly auto-renew (owner)
+`POST /subscribe {period: "monthly"|"yearly"}`: yearly plan = `amountForMonths(monthly, 12)` (10 months), Razorpay plan period "yearly", total_count 10; `academySubscriptions.monthsPerCharge` = 12 so every `subscription.charged` extends a year. Billing page: Monthly / Yearly toggle on the Subscribe card.

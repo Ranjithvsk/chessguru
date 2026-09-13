@@ -47,7 +47,7 @@ export interface BillingStatus {
   daysLeft: number | null; graceEndsAt: string | null;
   razorpayConfigured: boolean; keyId: string | null;
   // auto-renew (Razorpay Subscriptions): present once the owner has subscribed
-  subscription: { id: string; status: string; amountPaise: number; nextChargeAt: string | null; cancelling: boolean } | null;
+  subscription: { id: string; status: string; amountPaise: number; period: "monthly" | "yearly"; nextChargeAt: string | null; cancelling: boolean } | null;
   payments: Array<{ id: string; at: string; amountPaise: number; months: number; method: string; status: string; paidUntil: string | null; note?: string }>;
   whatsapp: string;
 }
@@ -134,7 +134,7 @@ export class BillingService {
       trialEndsAt: c.trialEndsAt?.toISOString() ?? null, paidUntil: c.paidUntil?.toISOString() ?? null, periodEndsAt: c.periodEndsAt?.toISOString() ?? null,
       daysLeft: c.daysLeft, graceEndsAt: c.graceEndsAt?.toISOString() ?? null,
       razorpayConfigured: !!(creds || (keyId && process.env.RAZORPAY_KEY_SECRET)), keyId,
-      subscription: sub && !["cancelled", "completed", "expired", "created"].includes(sub.status) ? { id: sub._id, status: sub.status, amountPaise: sub.amountPaise, nextChargeAt: sub.nextChargeAt ? new Date(sub.nextChargeAt).toISOString() : null, cancelling: !!sub.cancelAtCycleEnd } : null,
+      subscription: sub && !["cancelled", "completed", "expired", "created"].includes(sub.status) ? { id: sub._id, status: sub.status, amountPaise: sub.amountPaise, period: sub.period === "yearly" ? "yearly" : "monthly", nextChargeAt: sub.nextChargeAt ? new Date(sub.nextChargeAt).toISOString() : null, cancelling: !!sub.cancelAtCycleEnd } : null,
       payments: pays.map((p: any) => ({ id: p._id, at: new Date(p.at).toISOString(), amountPaise: p.amountPaise, months: p.months, method: p.method, status: p.status, paidUntil: p.paidUntil ? new Date(p.paidUntil).toISOString() : null, note: p.note })),
       whatsapp: WHATSAPP_DISPLAY,
     };
@@ -221,26 +221,30 @@ export class BillingService {
   }
 
   // ── auto-renew (Razorpay Subscriptions) ───────────────────────────────────
-  /** One Razorpay plan per monthly amount, created lazily and cached in billingPlans. */
-  private async ensurePlan(amountPaise: number): Promise<string> {
-    const cached: any = await this.plans().findOne({ amountPaise } as never);
+  /** One Razorpay plan per (amount, period), created lazily and cached in billingPlans. */
+  private async ensurePlan(amountPaise: number, period: "monthly" | "yearly"): Promise<string> {
+    const cached: any = await this.plans().findOne({ amountPaise, period } as never);
     if (cached) return cached.planId;
-    const plan = await this.rzp("/plans", { method: "POST", body: { period: "monthly", interval: 1, item: { name: `ChessGuru academy · ₹${amountPaise / 100}/month`, amount: amountPaise, currency: "INR", description: "ChessGuru platform subscription (unlimited coaches; priced by students)" } } });
-    await this.plans().insertOne({ _id: plan.id, planId: plan.id, amountPaise, createdAt: new Date() } as never);
+    const plan = await this.rzp("/plans", { method: "POST", body: { period, interval: 1, item: { name: `ChessGuru academy · ₹${amountPaise / 100}/${period === "yearly" ? "year" : "month"}`, amount: amountPaise, currency: "INR", description: period === "yearly" ? "ChessGuru platform subscription — yearly (12 months for the price of 10)" : "ChessGuru platform subscription (unlimited coaches; priced by students)" } } });
+    await this.plans().insertOne({ _id: plan.id, planId: plan.id, amountPaise, period, createdAt: new Date() } as never);
     return plan.id;
   }
-  /** Owner: start a monthly auto-renewing subscription. The first month is charged at authorisation. */
-  async createSubscription(session: any) {
+  /** Owner: start an auto-renewing subscription — monthly, or yearly at the 10-month price (owner: "yearly
+   *  subscription also with auto renew"). The first period is charged at authorisation. */
+  async createSubscription(session: any, periodIn: unknown) {
     const { academyId, role, userId } = this.member(session);
     if (role !== "academy_owner") throw new ForbiddenException("academy owner only");
+    const period: "monthly" | "yearly" = periodIn === "yearly" ? "yearly" : "monthly";
     const st = await this.statusFor(academyId);
     if (st.quotation || st.monthlyPricePaise == null) throw new BadRequestException(`More than ${QUOTATION_ABOVE} students — WhatsApp ${WHATSAPP_DISPLAY} for a quotation.`);
     if (st.subscription && ["active", "authenticated", "pending"].includes(st.subscription.status) && !st.subscription.cancelling) throw new BadRequestException("You already have an active subscription.");
-    const planId = await this.ensurePlan(st.monthlyPricePaise);
-    const sub = await this.rzp("/subscriptions", { method: "POST", body: { plan_id: planId, total_count: 120, quantity: 1, customer_notify: 1, notes: { kind: "platform-subscription", academyId, students: String(st.students) } } });
-    await this.subs().insertOne({ _id: sub.id, academyId, planId, amountPaise: st.monthlyPricePaise, status: sub.status ?? "created", at: new Date(), byUserId: userId, charges: [] } as never);
+    const monthsPerCharge = period === "yearly" ? 12 : 1;
+    const amountPaise = amountForMonths(st.monthlyPricePaise, monthsPerCharge);
+    const planId = await this.ensurePlan(amountPaise, period);
+    const sub = await this.rzp("/subscriptions", { method: "POST", body: { plan_id: planId, total_count: period === "yearly" ? 10 : 120, quantity: 1, customer_notify: 1, notes: { kind: "platform-subscription", academyId, students: String(st.students), period } } });
+    await this.subs().insertOne({ _id: sub.id, academyId, planId, amountPaise, period, monthsPerCharge, status: sub.status ?? "created", at: new Date(), byUserId: userId, charges: [] } as never);
     const owner: any = await this.users().findOne({ _id: userId } as never, { projection: { name: 1, email: 1, mobile: 1, phone: 1 } });
-    return { subscriptionId: sub.id, amountPaise: st.monthlyPricePaise, keyId: st.keyId, academyName: st.academyName, prefill: { name: owner?.name ?? "", email: owner?.email ?? "", contact: owner?.mobile ?? owner?.phone ?? "" } };
+    return { subscriptionId: sub.id, amountPaise, period, keyId: st.keyId, academyName: st.academyName, prefill: { name: owner?.name ?? "", email: owner?.email ?? "", contact: owner?.mobile ?? owner?.phone ?? "" } };
   }
   /** After Checkout: verify HMAC(secret, paymentId|subscriptionId), confirm with Razorpay, activate + extend one month. */
   async confirmSubscription(session: any, body: { subscriptionId?: string; paymentId?: string; signature?: string }) {
@@ -263,12 +267,13 @@ export class BillingService {
   private async applySubscriptionCharge(subscriptionId: string, paymentId: string, amountPaise: number, via: string): Promise<boolean> {
     const rec: any = await this.subs().findOne({ _id: subscriptionId } as never); if (!rec) return false;
     if (await this.payments().findOne({ razorpayPaymentId: paymentId } as never)) return false;
-    const paidUntil = await this.extend(rec.academyId, 1, amountPaise);
-    await this.payments().insertOne({ _id: "ap_" + Math.random().toString(36).slice(2, 12), academyId: rec.academyId, at: new Date(), amountPaise, months: 1, method: "razorpay-subscription", status: "paid", razorpayPaymentId: paymentId, subscriptionId, paidUntil, via } as never);
+    const months = rec.monthsPerCharge === 12 ? 12 : 1; // yearly plan renews a year at a time
+    const paidUntil = await this.extend(rec.academyId, months, amountPaise);
+    await this.payments().insertOne({ _id: "ap_" + Math.random().toString(36).slice(2, 12), academyId: rec.academyId, at: new Date(), amountPaise, months, method: "razorpay-subscription", status: "paid", razorpayPaymentId: paymentId, subscriptionId, paidUntil, via } as never);
     await this.academies().updateOne({ _id: rec.academyId } as never, { $set: { subscriptionId, autoRenew: true } } as never);
     await this.subs().updateOne({ _id: subscriptionId } as never, { $push: { charges: { paymentId, amountPaise, at: new Date(), via } }, $set: { status: "active" } } as never);
     this.lockCache.delete(rec.academyId);
-    await this.receipt(rec.academyId, amountPaise, 1, paidUntil, "Razorpay auto-renew");
+    await this.receipt(rec.academyId, amountPaise, months, paidUntil, `Razorpay auto-renew (${rec.period === "yearly" ? "yearly" : "monthly"})`);
     return true;
   }
   /** Owner: stop auto-renew at the end of the paid cycle (what is paid stays paid). */

@@ -10,7 +10,7 @@ type Billing = {
   students: number; monthlyPricePaise: number | null; yearlyPricePaise: number | null; quotation: boolean;
   trialEndsAt: string | null; paidUntil: string | null; periodEndsAt: string | null; daysLeft: number | null; graceEndsAt: string | null;
   razorpayConfigured: boolean; keyId: string | null;
-  subscription: { id: string; status: string; amountPaise: number; nextChargeAt: string | null; cancelling: boolean } | null;
+  subscription: { id: string; status: string; amountPaise: number; period: "monthly" | "yearly"; nextChargeAt: string | null; cancelling: boolean } | null;
   payments: Array<{ id: string; at: string; amountPaise: number; months: number | null; method: string; status: string; paidUntil: string | null; note?: string }>;
   whatsapp: string;
 };
@@ -29,6 +29,7 @@ export default function AcademyBillingPage() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["academy-billing"], queryFn: () => get<Billing>("/api/academy/billing"), staleTime: 30_000 });
   const [months, setMonths] = useState<1 | 3 | 6 | 12>(1);
+  const [subPeriod, setSubPeriod] = useState<"monthly" | "yearly">("monthly");
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   useEffect(() => { document.title = "Billing · ChessGuru"; }, []);
@@ -57,11 +58,11 @@ export default function AcademyBillingPage() {
     if (!b) return; setBusy("sub"); setMsg(null);
     try {
       await loadRazorpay();
-      const s = await post<{ subscriptionId: string; amountPaise: number; keyId: string; academyName: string; prefill: any }>("/api/academy/billing/subscribe", {});
+      const s = await post<{ subscriptionId: string; amountPaise: number; period: "monthly" | "yearly"; keyId: string; academyName: string; prefill: any }>("/api/academy/billing/subscribe", { period: subPeriod });
       const rzp = new window.Razorpay({
-        key: s.keyId, subscription_id: s.subscriptionId, name: "ChessGuru", description: `${s.academyName} · ${inr(s.amountPaise)} every month`, prefill: s.prefill, theme: { color: "#f59e0b" },
+        key: s.keyId, subscription_id: s.subscriptionId, name: "ChessGuru", description: `${s.academyName} · ${inr(s.amountPaise)} every ${s.period === "yearly" ? "year" : "month"}`, prefill: s.prefill, theme: { color: "#f59e0b" },
         handler: async (r: any) => {
-          try { await post("/api/academy/billing/subscribe/confirm", { subscriptionId: r.razorpay_subscription_id, paymentId: r.razorpay_payment_id, signature: r.razorpay_signature }); setMsg({ kind: "ok", text: "Auto-renew is on. The first month is paid and each month renews on its own." }); }
+          try { await post("/api/academy/billing/subscribe/confirm", { subscriptionId: r.razorpay_subscription_id, paymentId: r.razorpay_payment_id, signature: r.razorpay_signature }); setMsg({ kind: "ok", text: s.period === "yearly" ? "Auto-renew is on. This year is paid (12 months for the price of 10) and it renews each year on its own." : "Auto-renew is on. The first month is paid and each month renews on its own." }); }
           catch (e: any) { setMsg({ kind: "err", text: e?.message || "Could not confirm the subscription." }); }
           qc.invalidateQueries({ queryKey: ["academy-billing"] }); qc.invalidateQueries({ queryKey: ["academy-meta"] }); setBusy(null);
         },
@@ -147,13 +148,19 @@ export default function AcademyBillingPage() {
               </div>
               <div className="rounded-2xl border border-brand-400/30 bg-gradient-to-br from-brand-500/10 to-transparent p-5">
                 <div className="text-xs font-semibold uppercase tracking-widest text-brand-200">Subscribe</div>
-                <h2 className="mt-1 font-display text-xl font-bold text-white">Auto-renew every month</h2>
-                <div className="mt-4 font-display text-3xl font-bold text-white tabular-nums">{inr(b.monthlyPricePaise!)}<span className="text-sm font-normal text-ink-400"> / month</span></div>
-                <div className="text-xs text-ink-400">First month charged now, then automatically each month. Cancel any time — the paid month stays.</div>
+                <h2 className="mt-1 font-display text-xl font-bold text-white">Auto-renew</h2>
+                {!(b.subscription && !b.subscription.cancelling) && (
+                  <div className="mt-3 flex gap-2">
+                    <button onClick={() => setSubPeriod("monthly")} className={`rounded-full px-3 py-1.5 text-sm font-semibold ${subPeriod === "monthly" ? "bg-brand-400 text-black" : "bg-ink-800 text-ink-200 hover:bg-ink-700"}`}>Monthly</button>
+                    <button onClick={() => setSubPeriod("yearly")} className={`relative rounded-full px-3 py-1.5 text-sm font-semibold ${subPeriod === "yearly" ? "bg-brand-400 text-black" : "bg-ink-800 text-ink-200 hover:bg-ink-700"}`}>Yearly<span className="absolute -top-2 -right-2 rounded-full bg-emerald-400 px-1.5 py-0.5 text-[9px] font-bold text-black">2 free</span></button>
+                  </div>
+                )}
+                <div className="mt-4 font-display text-3xl font-bold text-white tabular-nums">{subPeriod === "yearly" ? inr(amountFor(b.monthlyPricePaise!, 12)) : inr(b.monthlyPricePaise!)}<span className="text-sm font-normal text-ink-400"> / {subPeriod === "yearly" ? "year" : "month"}</span></div>
+                <div className="text-xs text-ink-400">{subPeriod === "yearly" ? "12 months for the price of 10, charged now and then automatically each year." : "First month charged now, then automatically each month."} Cancel any time — what is paid stays paid.</div>
                 {b.subscription && !b.subscription.cancelling ? (
                   <>
-                    <div className="mt-4 rounded-xl border border-white/10 bg-ink-900/60 p-3 text-xs text-ink-200">Active · {inr(b.subscription.amountPaise)} / month{b.subscription.nextChargeAt ? ` · next charge ${fmt(b.subscription.nextChargeAt)}` : ""}</div>
-                    <button onClick={() => { if (confirm("Stop auto-renew at the end of the paid month?")) cancel.mutate(); }} disabled={cancel.isPending} className="mt-3 w-full rounded-full border border-rose-400/40 py-2.5 text-sm font-semibold text-rose-200 hover:bg-rose-500/10">Stop auto-renew</button>
+                    <div className="mt-4 rounded-xl border border-white/10 bg-ink-900/60 p-3 text-xs text-ink-200">Active · {inr(b.subscription.amountPaise)} / {b.subscription.period === "yearly" ? "year" : "month"}{b.subscription.nextChargeAt ? ` · next charge ${fmt(b.subscription.nextChargeAt)}` : ""}</div>
+                    <button onClick={() => { if (confirm(`Stop auto-renew at the end of the paid ${b.subscription!.period === "yearly" ? "year" : "month"}?`)) cancel.mutate(); }} disabled={cancel.isPending} className="mt-3 w-full rounded-full border border-rose-400/40 py-2.5 text-sm font-semibold text-rose-200 hover:bg-rose-500/10">Stop auto-renew</button>
                   </>
                 ) : (
                   <button onClick={subscribe} disabled={!!busy || !b.razorpayConfigured} className="mt-4 w-full rounded-full bg-gradient-to-r from-brand-500 to-purple-500 py-3 text-sm font-bold text-white disabled:opacity-50">{busy === "sub" ? "Opening Razorpay…" : "Subscribe with Razorpay"}</button>
