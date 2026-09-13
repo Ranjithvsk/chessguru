@@ -25,6 +25,12 @@ export class AdminController {
 
   /** Superadmin billing (2026-09-13): status of one academy, and mark N months / a date paid by hand
    *  (bank transfer, UPI, goodwill). Body: { months?: 1|3|6|12, paidUntil?: ISO, amountPaise?, note? } */
+  /** Superadmin: see the app as an academy's owner. POST {academyId} → session switches; POST stop → back. */
+  @Post("admin/view-as")
+  viewAs(@Req() req: any, @Body() body: { academyId?: string }) { this.requireAdmin(req); return this.academies_.viewAs(req.session, String(body?.academyId ?? "")); }
+  @Post("admin/view-as/stop")
+  stopViewAs(@Req() req: any) { this.requireAdmin(req); return this.academies_.stopViewAs(req.session); }
+
   @Get("admin/academies/:id/billing")
   academyBilling(@Req() req: any, @Param("id") id: string) { this.requireAdmin(req); return this.billing.statusFor(id); }
   @Post("admin/academies/:id/billing/price")

@@ -67,4 +67,6 @@ export interface AuthMe {
   // Multi-tenant SaaS additions — set for members of any academy.
   academyId?: string | null;   // academy slug (e.g. "stephens-chess-academy")
   role?: "academy_owner" | "coach" | "student" | "parent" | null;
+  /** Superadmin viewing the app as an academy's owner (2026-09-13). */
+  viewingAs?: { academyId: string; name: string } | null;
 }

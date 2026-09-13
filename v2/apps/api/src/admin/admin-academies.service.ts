@@ -1522,6 +1522,24 @@ export class AdminAcademiesService {
    *  academyProfiles display name, so the label the owner already recognises
    *  stays put; the adoption page is free to show richer branding.
    */
+  /** Superadmin "view as academy" (owner 2026-09-13): the session takes on that academy's owner role so every
+   *  academy page shows that academy. The admin's real identity stays on session.userId; `viewAs` records what
+   *  we overrode so /auth/me can show the banner and stopViewAs can restore. */
+  async viewAs(session: any, academyId: string): Promise<{ ok: true; academyId: string; name: string }> {
+    const acad: any = await this.db().collection("academies").findOne({ _id: academyId } as never, { projection: { name: 1 } });
+    if (!acad) throw new NotFoundException("academy not found");
+    if (!session.viewAs) session.viewAs = { origAcademyId: session.academyId ?? null, origRole: session.role ?? null };
+    session.viewAs = { ...session.viewAs, academyId, name: acad.name || academyId, since: new Date().toISOString() };
+    session.academyId = academyId;
+    session.role = "academy_owner";
+    return { ok: true, academyId, name: acad.name || academyId };
+  }
+  async stopViewAs(session: any): Promise<{ ok: true }> {
+    const v = session.viewAs;
+    if (v) { session.academyId = v.origAcademyId ?? null; session.role = v.origRole ?? null; delete session.viewAs; }
+    return { ok: true };
+  }
+
   async pickerList(): Promise<Array<{ id: string; name: string; studentCount: number }>> {
     const users = this.db().collection("users");
     const [academies, perAcademy, standalone] = await Promise.all([

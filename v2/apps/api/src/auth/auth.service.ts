@@ -139,6 +139,8 @@ export class AuthService {
       admin: isAdmin(session.userId),
       academyId,
       role,
+      // superadmin "view as academy" (2026-09-13) — the Navbar shows a banner + exit while this is set
+      viewingAs: session.viewAs?.academyId ? { academyId: session.viewAs.academyId, name: session.viewAs.name ?? session.viewAs.academyId } : null,
     };
   }
 

@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { api } from "../lib/api";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { NavLink, useLocation } from "react-router-dom";
 import InstallButton from "./InstallButton";
@@ -330,6 +332,52 @@ function useTenantBrand(): { brand: Brand | null; slug: string | null } {
   return { brand, slug };
 }
 
+// ── Superadmin "view as academy" (owner 2026-09-13): pick an academy and the whole app behaves as that
+// academy's owner; a banner stays on every page until Exit. Server: POST /api/admin/view-as.
+function ViewAsAcademy({ compact = false }: { compact?: boolean }) {
+  const qc = useQueryClient();
+  const me = useQuery({ queryKey: ["auth-me"], queryFn: api.me, staleTime: 30_000 });
+  const list = useQuery({
+    queryKey: ["admin-academies-picker"],
+    queryFn: () => fetch("/v2api/api/admin/academies?slim=1", { credentials: "include" }).then((r) => r.json() as Promise<Array<{ id: string; name: string; studentCount: number }>>),
+    enabled: !!me.data?.admin, staleTime: 300_000,
+  });
+  const [busy, setBusy] = useState(false);
+  if (!me.data?.admin) return null;
+  const viewing = me.data.viewingAs ?? null;
+  async function choose(academyId: string) {
+    if (!academyId) return; setBusy(true);
+    try { await fetch("/v2api/api/admin/view-as", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ academyId }) }); qc.clear(); window.location.assign("/academy"); }
+    finally { setBusy(false); }
+  }
+  async function exit() {
+    setBusy(true);
+    try { await fetch("/v2api/api/admin/view-as/stop", { method: "POST", credentials: "include" }); qc.clear(); window.location.assign("/admin"); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className={`flex items-center gap-2 ${compact ? "" : "hidden lg:flex"}`}>
+      <select value={viewing?.academyId ?? ""} onChange={(e) => choose(e.target.value)} disabled={busy}
+        className="max-w-[220px] rounded-lg border border-fuchsia-400/40 bg-fuchsia-500/10 px-2 py-1 text-xs font-semibold text-fuchsia-100 outline-none" title="Superadmin: view the app as this academy's owner">
+        <option value="">👁 View as academy…</option>
+        {(list.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name} ({a.studentCount})</option>)}
+      </select>
+      {viewing && <button onClick={exit} disabled={busy} className="rounded-lg bg-fuchsia-600 px-2 py-1 text-xs font-bold text-white hover:bg-fuchsia-500">Exit</button>}
+    </div>
+  );
+}
+function ViewAsBanner() {
+  const me = useQuery({ queryKey: ["auth-me"], queryFn: api.me, staleTime: 30_000 });
+  const qc = useQueryClient();
+  const v = me.data?.viewingAs; if (!v) return null;
+  return (
+    <div className="border-b border-fuchsia-400/30 bg-fuchsia-600/20 px-4 py-1.5 text-center text-xs text-fuchsia-100">
+      👁 Superadmin — you are viewing <b>{v.name}</b> as its academy owner. Everything under Academy, Fees, Attendance and Billing is that academy's.
+      <button onClick={async () => { await fetch("/v2api/api/admin/view-as/stop", { method: "POST", credentials: "include" }); qc.clear(); window.location.assign("/admin"); }} className="ml-3 rounded bg-fuchsia-600 px-2 py-0.5 font-bold text-white hover:bg-fuchsia-500">Exit</button>
+    </div>
+  );
+}
+
 export default function Navbar({ rating, ratingProvisional, username, admin, onLogout }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const { pathname } = useLocation();
@@ -371,7 +419,9 @@ export default function Navbar({ rating, ratingProvisional, username, admin, onL
 
   return (
     <header className="sticky top-0 z-50 border-b border-ink-700/70 bg-ink-900/80 backdrop-blur">
+      {admin && <ViewAsBanner />}
       <nav className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4">
+        {admin && <ViewAsAcademy />}
         {/* Hamburger — toggles the left drawer. Icon flips to ✕ when open so
             a second tap on the same spot clearly closes. */}
         <button
