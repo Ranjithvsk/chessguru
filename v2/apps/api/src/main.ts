@@ -61,6 +61,11 @@ async function bootstrap() {
     limit: "256kb",
     verify: (req: any, _res: any, buf: Buffer) => { req.rawBody = buf; },
   }));
+  // WhatsApp webhook: keep the raw bytes so we can verify Meta's X-Hub-Signature-256.
+  app.use("/api/whatsapp/webhook", expressLib.json({
+    limit: "512kb",
+    verify: (req: any, _res: any, buf: Buffer) => { req.rawBody = buf; },
+  }));
   app.use("/api/class/:id/recording", expressLib.raw({ type: "application/octet-stream", limit: "500mb" }));
   // A coach uploading their own book. Raw body, not multipart: a PDF is
   // tens of megabytes of binary and the multipart round-trip buys nothing.

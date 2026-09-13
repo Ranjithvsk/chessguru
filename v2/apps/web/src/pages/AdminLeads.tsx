@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { adminLeadActivity, adminLeadCreate, adminLeads, adminLeadsSummary, adminLeadUpdate, LEAD_STATUSES } from "../lib/api";
-import type { Lead, LeadActivity, LeadStatus } from "../lib/api";
+import { adminLeadActivity, adminLeadCreate, adminLeads, adminLeadsSummary, adminLeadUpdate, adminWaSend, adminWaStatus, adminWaSyncTemplates, LEAD_STATUSES } from "../lib/api";
+import type { Lead, LeadActivity, LeadStatus, WaStatus } from "../lib/api";
+import { PITCH_POINTS } from "./adminLeadsPitch";
 
 /* ── Superadmin sales pipeline (2026-09-13) ─────────────────────────────────────
  * One row per academy we want on ChessGuru, seeded from the mined Chennai list.
@@ -39,12 +40,15 @@ export default function AdminLeadsPage() {
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
+  const [showPitch, setShowPitch] = useState(false);
   const summary = useQuery({ queryKey: ["admin-leads-summary"], queryFn: adminLeadsSummary });
+  const wa = useQuery({ queryKey: ["admin-wa-status"], queryFn: adminWaStatus, retry: false });
   const leads = useQuery({ queryKey: ["admin-leads", status, q], queryFn: () => adminLeads({ status, q }), retry: false });
   const invalidate = () => { qc.invalidateQueries({ queryKey: ["admin-leads"] }); qc.invalidateQueries({ queryKey: ["admin-leads-summary"] }); };
   const update = useMutation({ mutationFn: ({ id, body }: { id: string; body: Partial<Lead> }) => adminLeadUpdate(id, body), onSuccess: invalidate });
   const activity = useMutation({ mutationFn: ({ id, kind, text }: { id: string; kind: LeadActivity["kind"]; text: string }) => adminLeadActivity(id, { kind, text }), onSuccess: invalidate });
   const create = useMutation({ mutationFn: (body: Partial<Lead>) => adminLeadCreate(body), onSuccess: () => { setAdding(false); invalidate(); } });
+  const syncTpl = useMutation({ mutationFn: adminWaSyncTemplates, onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-wa-status"] }) });
 
   const rows = useMemo(() => {
     let all = leads.data ?? [];
@@ -68,6 +72,7 @@ export default function AdminLeadsPage() {
           <p className="text-sm text-ink-400">Chennai chess academies mined on 13 Sep 2026. Call, note, set the next follow-up, move the status. Only <b className="text-ink-300">Converted</b> counts as a conversion.</p>
         </div>
         <div className="flex gap-2">
+          <button className="rounded-lg border border-ink-600 px-3 py-1.5 text-sm text-ink-300 hover:bg-ink-800" onClick={() => setShowPitch((v) => !v)}>{showPitch ? "Hide pitch" : "Pitch"}</button>
           <a className="rounded-lg border border-ink-600 px-3 py-1.5 text-sm text-ink-300 hover:bg-ink-800" href="/v2api/api/admin/leads/export.csv">Export CSV</a>
           <button className="rounded-lg bg-accent-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-accent-500" onClick={() => setAdding(true)}>+ Add academy</button>
         </div>
@@ -96,6 +101,38 @@ export default function AdminLeadsPage() {
         <b className="text-ink-300">Opt-in</b> = the academy agreed to receive WhatsApp/marketing. It is required before any automated WhatsApp (Meta Cloud API) template send, and it is your consent proof under the DPDP Act. Until a lead is opted in, message them only one-to-one from your own phone (the WhatsApp button opens a normal chat).
       </div>
 
+      {showPitch && (
+        <div className="mb-3 rounded-xl border border-ink-700 bg-ink-900 p-3">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-400">What to tell the academy</div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {PITCH_POINTS.map((pt) => (
+              <div key={pt.title} className="rounded-lg border border-ink-800 bg-ink-950 p-2">
+                <div className="flex items-center gap-2 text-sm font-semibold text-ink-200">{pt.title}
+                  {pt.live ? <span className="rounded bg-emerald-700 px-1.5 text-[10px] font-semibold text-white">live</span> : <span className="rounded bg-amber-600 px-1.5 text-[10px] font-semibold text-white">coming</span>}</div>
+                <div className="text-[12px] text-ink-400">{pt.detail}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {wa.data && (
+        <div className={`mb-3 rounded-lg border px-3 py-2 text-[12px] ${wa.data.configured ? "border-emerald-700 bg-emerald-950/40 text-ink-300" : "border-amber-700 bg-amber-950/30 text-ink-300"}`}>
+          {wa.data.configured ? (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <b className="text-emerald-400">WhatsApp API connected.</b>
+              <span>Templates: {wa.data.liveTemplates.length ? wa.data.liveTemplates.map((t) => `${t.name} (${t.status})`).join(", ") : "none yet"}.</span>
+              <button className="rounded border border-ink-600 px-2 py-0.5 hover:bg-ink-800" disabled={syncTpl.isPending} onClick={() => syncTpl.mutate()}>{syncTpl.isPending ? "Submitting…" : "Submit templates for approval"}</button>
+              {wa.data.templatesError && <span className="text-rose-400">({wa.data.templatesError})</span>}
+            </div>
+          ) : (
+            <div>
+              <b className="text-amber-400">WhatsApp API not set up yet.</b> One-to-one WhatsApp still works (the button on each lead). To enable template sending, add these to the API .env and restart: <span className="text-ink-200">{wa.data.missing.join(", ")}</span>. Webhook URL for Meta: <span className="text-ink-200">{wa.data.webhookUrl}</span>.
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="overflow-x-auto rounded-xl border border-ink-700">
         <table className="w-full text-sm">
           <thead className="bg-ink-900 text-left text-[11px] uppercase tracking-wide text-ink-400">
@@ -107,6 +144,7 @@ export default function AdminLeadsPage() {
           <tbody>
             {rows.map((l) => (
               <LeadRow key={l.id} lead={l} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)}
+                wa={wa.data}
                 onStatus={(st) => update.mutate({ id: l.id, body: { status: st } })}
                 onOptIn={(optIn, source) => update.mutate({ id: l.id, body: { optIn, ...(source ? { optInSource: source } : {}) } as Partial<Lead> })}
                 onFollowUp={(d) => update.mutate({ id: l.id, body: { nextFollowUpAt: d ? new Date(d + "T09:00:00+05:30").toISOString() : null } as Partial<Lead> })}
@@ -133,8 +171,8 @@ function Stat({ label, value, sub, onClick, active, tone }: { label: string; val
   );
 }
 
-function LeadRow({ lead: l, open, onToggle, onStatus, onOptIn, onFollowUp, onSave, onActivity }: {
-  lead: Lead; open: boolean; onToggle: () => void; onStatus: (s: LeadStatus) => void; onOptIn: (optIn: boolean, source?: string) => void;
+function LeadRow({ lead: l, open, onToggle, wa, onStatus, onOptIn, onFollowUp, onSave, onActivity }: {
+  lead: Lead; open: boolean; onToggle: () => void; wa?: WaStatus; onStatus: (s: LeadStatus) => void; onOptIn: (optIn: boolean, source?: string) => void;
   onFollowUp: (d: string) => void; onSave: (b: Partial<Lead>) => void; onActivity: (kind: LeadActivity["kind"], text: string) => void;
 }) {
   const [kind, setKind] = useState<LeadActivity["kind"]>("call");
@@ -220,6 +258,12 @@ function LeadRow({ lead: l, open, onToggle, onStatus, onOptIn, onFollowUp, onSav
                 )}
               </div>
               <div className="lg:col-span-2">
+                {wa?.configured && (
+                  <div className="mb-3 rounded-lg border border-ink-800 bg-ink-950 p-2">
+                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-400">Send WhatsApp template</div>
+                    <WaSend lead={l} wa={wa} />
+                  </div>
+                )}
                 <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-400">Follow-up log</div>
                 <div className="mb-2 flex gap-2">
                   <select value={kind} onChange={(e) => setKind(e.target.value as LeadActivity["kind"])} className={INPUT}>
@@ -240,6 +284,47 @@ function LeadRow({ lead: l, open, onToggle, onStatus, onOptIn, onFollowUp, onSav
         </tr>
       )}
     </>
+  );
+}
+
+function WaSend({ lead: l, wa }: { lead: Lead; wa: WaStatus }) {
+  const qc = useQueryClient();
+  const [tpl, setTpl] = useState(wa.definedTemplates[0]?.name ?? "");
+  const [result, setResult] = useState<string | null>(null);
+  const def = wa.definedTemplates.find((t) => t.name === tpl);
+  const live = wa.liveTemplates.find((t) => t.name === tpl);
+  const approved = live?.status === "APPROVED";
+  const marketingBlocked = def?.category === "MARKETING" && !l.optIn;
+  // Default variable values from the lead (academy name first, blank for the rest).
+  const [values, setValues] = useState<string[]>([]);
+  const vals = def ? def.vars.map((_, i) => values[i] ?? (i === 0 ? l.name : "")) : [];
+  const send = useMutation({
+    mutationFn: () => adminWaSend(l.id, tpl, vals),
+    onSuccess: (r) => { setResult(r.ok ? "Sent ✓" : `Failed: ${r.error}`); qc.invalidateQueries({ queryKey: ["admin-leads"] }); },
+    onError: (e) => setResult(`Failed: ${(e as Error).message}`),
+  });
+  return (
+    <div className="text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <select value={tpl} onChange={(e) => { setTpl(e.target.value); setValues([]); setResult(null); }} className={INPUT}>
+          {wa.definedTemplates.map((t) => <option key={t.name} value={t.name} className="bg-ink-900 text-ink-100">{t.name} · {t.category.toLowerCase()}{wa.liveTemplates.find((x) => x.name === t.name)?.status ? ` · ${wa.liveTemplates.find((x) => x.name === t.name)!.status.toLowerCase()}` : " · not submitted"}</option>)}
+        </select>
+        <button disabled={!approved || marketingBlocked || send.isPending || !l.phones} onClick={() => send.mutate()}
+          className="rounded bg-emerald-700 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-600 disabled:opacity-50">{send.isPending ? "Sending…" : "Send"}</button>
+        {result && <span className={result.startsWith("Sent") ? "text-emerald-400" : "text-rose-400"}>{result}</span>}
+      </div>
+      {def && def.vars.length > 0 && (
+        <div className="mt-2 grid gap-1">
+          {def.vars.map((label, i) => (
+            <label key={i} className="grid grid-cols-[120px_1fr] items-center gap-2 text-xs"><span className="text-ink-400">{label}</span>
+              <input value={vals[i]} onChange={(e) => { const nv = [...vals]; nv[i] = e.target.value; setValues(nv); }} className={INPUT} /></label>
+          ))}
+        </div>
+      )}
+      <div className="mt-1 text-[11px] text-ink-500">
+        {!l.phones ? "No phone on this lead." : marketingBlocked ? "This is a marketing template and the lead has not opted in — record opt-in first, or use the one-to-one WhatsApp button." : !live ? "Not submitted to Meta yet — click ‘Submit templates for approval’ above." : !approved ? `Template status: ${live.status}. It can be sent once Meta approves it.` : "Ready to send."}
+      </div>
+    </div>
   );
 }
 

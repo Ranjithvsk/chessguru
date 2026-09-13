@@ -409,3 +409,15 @@ export const adminLeadUpdate = (id: string, body: Partial<Lead>) => patch<Lead>(
 export const adminLeadActivity = (id: string, body: { kind: LeadActivity["kind"]; text: string }) => post<Lead>(`/api/admin/leads/${encodeURIComponent(id)}/activity`, body);
 export const adminLeadCreate = (body: Partial<Lead>) => post<Lead>("/api/admin/leads", body);
 
+// --- Admin: WhatsApp outreach (/admin/whatsapp/*) ---------------------------
+export type WaStatus = {
+  configured: boolean; missing: string[]; webhookUrl: string;
+  definedTemplates: { name: string; category: "MARKETING" | "UTILITY"; language: string; vars: string[] }[];
+  liveTemplates: { name: string; status: string; category?: string; language?: string }[];
+  templatesError: string | null;
+};
+export const adminWaStatus = () => get<WaStatus>("/api/admin/whatsapp/status");
+export const adminWaSyncTemplates = () => post<{ ok: boolean; results?: { name: string; ok: boolean; status?: string; error?: string }[]; error?: string }>("/api/admin/whatsapp/templates/sync", {});
+export const adminWaSend = (id: string, template: string, values?: string[]) =>
+  post<{ ok: boolean; wamid?: string; error?: string }>(`/api/admin/whatsapp/leads/${encodeURIComponent(id)}/send`, { template, values });
+
