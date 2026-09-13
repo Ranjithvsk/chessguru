@@ -53,6 +53,7 @@ const GROUPS: Group[] = [
       { to: "/coach-board", label: "🧑‍🏫 Class Board", desc: "Student watchlist + class-plan generator" },
       { to: "/coach-board/reports", label: "📄 Parent reports", desc: "Monthly per-student progress reports" },
       { to: "/fees", label: "💰 Fees", desc: "Collect tuition · WhatsApp reminders · receipts · reports" },
+      { to: "/academy/billing", label: "💳 ChessGuru subscription", desc: "Your plan, trial / paid-until, pay once or auto-renew, payment history" },
       { to: "/parent", label: "👪 Family portal", desc: "For parents — child's progress + billing (sign in with the parent account you were linked to)" },
     ],
   },
