@@ -19,5 +19,7 @@ status, nextFollowUpAt). Seed: scratch script inserted the mined rows directly (
 `chessguru-v2-api` at 16:32 IST with 0 live classes; `/api/admin/leads/summary` answers 401 anonymously
 (route mounted); web deployed via `scripts/deploy.sh`.
 
+**Update (same day):** added a per-lead **opt-in** field (optIn/optInAt/optInSource) — required before any Meta Cloud API template send and the DPDP consent record; toggled from the row (records how they consented), filterable, in the CSV. Also converted the page from raw slate colours to the theme `ink-*` tokens so text is legible in light mode (was near-white on white).
+
 **Open:** WhatsApp outreach from the page (Meta Cloud API) needs a WABA, approved templates and an opt-in
 record per lead — not built; the page links to wa.me for manual 1:1 messages.

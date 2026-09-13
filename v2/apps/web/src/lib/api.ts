@@ -396,6 +396,7 @@ export type Lead = {
   id: string; name: string; city: string; locality: string; address: string; phones: string; email: string; website: string; coaches: string;
   estStudents: string; estCoaches: string; estimateBasis: string; notes: string; sources: string;
   status: LeadStatus; assignee: string; nextFollowUpAt: string | null; lastContactAt: string | null; academyId: string | null;
+  optIn: boolean; optInAt: string | null; optInSource: string;
   activity: LeadActivity[]; createdAt: string | null; updatedAt: string | null;
 };
 export type LeadSummary = { total: number; byStatus: Record<LeadStatus, number>; followUpsDue: number; converted: number; conversionPct: number };

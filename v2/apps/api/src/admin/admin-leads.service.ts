@@ -19,11 +19,14 @@ export type LeadDoc = {
   notes: string; sources: string;
   status: LeadStatus; assignee: string; nextFollowUpAt: Date | null; lastContactAt: Date | null;
   academyId: string | null;                 // set when the academy signs up — the conversion
+  optIn: boolean;                            // the academy agreed to receive WhatsApp/marketing — REQUIRED before any Meta API template send
+  optInAt: Date | null;                      // when they agreed (proof for consent + DPDP)
+  optInSource: string;                       // how: 'said yes on call', 'web form', 'reply on WhatsApp'…
   activity: LeadActivity[];
   createdAt: Date; updatedAt: Date;
 };
 
-const EDITABLE = ["name", "city", "locality", "address", "phones", "email", "website", "coaches", "estStudents", "estCoaches", "estimateBasis", "notes", "sources", "assignee", "academyId"] as const;
+const EDITABLE = ["name", "city", "locality", "address", "phones", "email", "website", "coaches", "estStudents", "estCoaches", "estimateBasis", "notes", "sources", "assignee", "academyId", "optInSource"] as const;
 
 @Injectable()
 export class AdminLeadsService {
@@ -77,7 +80,7 @@ export class AdminLeadsService {
       } else {
         await this.col().insertOne({
           _id: new ObjectId(), name, city, ...mined, notes: str(r.notes), status: "new", assignee: "", nextFollowUpAt: null, lastContactAt: null,
-          academyId: null, activity: [{ at: now, by, kind: "note", text: "Imported from the mined list" }], createdAt: now, updatedAt: now,
+          academyId: null, optIn: false, optInAt: null, optInSource: "", activity: [{ at: now, by, kind: "note", text: "Imported from the mined list" }], createdAt: now, updatedAt: now,
         });
         inserted += 1;
       }
@@ -93,7 +96,7 @@ export class AdminLeadsService {
       _id: new ObjectId(), name, city: str(body.city) || "Chennai", locality: str(body.locality), address: str(body.address), phones: str(body.phones),
       email: str(body.email), website: str(body.website), coaches: str(body.coaches), estStudents: str(body.estStudents), estCoaches: str(body.estCoaches),
       estimateBasis: str(body.estimateBasis), notes: str(body.notes), sources: str(body.sources) || "added by hand", status: "new", assignee: "",
-      nextFollowUpAt: null, lastContactAt: null, academyId: null, activity: [{ at: now, by, kind: "note", text: "Added by hand" }], createdAt: now, updatedAt: now,
+      nextFollowUpAt: null, lastContactAt: null, academyId: null, optIn: false, optInAt: null, optInSource: "", activity: [{ at: now, by, kind: "note", text: "Added by hand" }], createdAt: now, updatedAt: now,
     };
     await this.col().insertOne(doc);
     return serialize(doc);
@@ -107,6 +110,16 @@ export class AdminLeadsService {
     const pushes: LeadActivity[] = [];
     for (const k of EDITABLE) if (k in body) set[k] = str(body[k]);
     if ("nextFollowUpAt" in body) set.nextFollowUpAt = body.nextFollowUpAt ? new Date(String(body.nextFollowUpAt)) : null;
+    if ("optIn" in body) {
+      const want = !!body.optIn;
+      if (want !== cur.optIn) {
+        set.optIn = want;
+        set.optInAt = want ? new Date() : null;
+        if (want && typeof body.optInSource === "string") set.optInSource = str(body.optInSource);
+        if (!want) set.optInSource = "";
+        pushes.push({ at: new Date(), by, kind: "note", text: want ? `Opted IN to WhatsApp${body.optInSource ? ` (${str(body.optInSource)})` : ""}` : "Opt-in withdrawn" });
+      }
+    }
     if ("status" in body) {
       const s = String(body.status) as LeadStatus;
       if (!LEAD_STATUSES.includes(s)) throw new Error("bad status");
@@ -132,7 +145,7 @@ export class AdminLeadsService {
 
   async exportCsv() {
     const rows = await this.col().find({}).sort({ name: 1 }).toArray();
-    const cols = ["name", "city", "locality", "address", "phones", "email", "website", "coaches", "estStudents", "estCoaches", "estimateBasis", "status", "assignee", "nextFollowUpAt", "lastContactAt", "notes", "sources"];
+    const cols = ["name", "city", "locality", "address", "phones", "email", "website", "coaches", "estStudents", "estCoaches", "estimateBasis", "status", "assignee", "optIn", "optInAt", "optInSource", "nextFollowUpAt", "lastContactAt", "notes", "sources"];
     const esc = (v: unknown) => { const s = v instanceof Date ? v.toISOString() : String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     return [cols.join(","), ...rows.map((r) => cols.map((c) => esc((r as unknown as Record<string, unknown>)[c])).join(","))].join("\n");
   }
@@ -142,6 +155,7 @@ const str = (v: unknown) => (v == null ? "" : String(v).trim());
 function serialize(d: LeadDoc) {
   return { ...d, id: String(d._id), _id: undefined,
     nextFollowUpAt: d.nextFollowUpAt ? d.nextFollowUpAt.toISOString() : null, lastContactAt: d.lastContactAt ? d.lastContactAt.toISOString() : null,
+    optInAt: d.optInAt ? d.optInAt.toISOString() : null,
     createdAt: d.createdAt?.toISOString?.() ?? null, updatedAt: d.updatedAt?.toISOString?.() ?? null,
     activity: (d.activity ?? []).map((a) => ({ ...a, at: a.at instanceof Date ? a.at.toISOString() : a.at })) };
 }
