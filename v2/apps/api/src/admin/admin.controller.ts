@@ -27,6 +27,8 @@ export class AdminController {
    *  (bank transfer, UPI, goodwill). Body: { months?: 1|3|6|12, paidUntil?: ISO, amountPaise?, note? } */
   @Get("admin/academies/:id/billing")
   academyBilling(@Req() req: any, @Param("id") id: string) { this.requireAdmin(req); return this.billing.statusFor(id); }
+  @Post("admin/academies/:id/billing/price")
+  academySetPrice(@Req() req: any, @Param("id") id: string, @Body() body: any) { this.requireAdmin(req); return this.billing.adminSetPrice(id, body ?? {}, String(req.session.userId)); }
   @Post("admin/academies/:id/billing/mark-paid")
   academyMarkPaid(@Req() req: any, @Param("id") id: string, @Body() body: any) { this.requireAdmin(req); return this.billing.adminMarkPaid(id, body ?? {}, String(req.session.userId)); }
 

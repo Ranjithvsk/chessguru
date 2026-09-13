@@ -42,7 +42,7 @@ export type BillingState = "trialing" | "active" | "manual" | "grace" | "locked"
 export interface BillingStatus {
   academyId: string; academyName: string;
   state: BillingState; plan: string | null;
-  students: number; monthlyPricePaise: number | null; yearlyPricePaise: number | null; quotation: boolean;
+  students: number; monthlyPricePaise: number | null; yearlyPricePaise: number | null; quotation: boolean; customPrice: boolean;
   trialEndsAt: string | null; paidUntil: string | null; periodEndsAt: string | null;
   daysLeft: number | null; graceEndsAt: string | null;
   razorpayConfigured: boolean; keyId: string | null;
@@ -61,10 +61,16 @@ export async function billingSummaryFor(conn: Connection, academyId: string) {
   const c = computeBilling(acad, students);
   return { state: c.state, daysLeft: c.daysLeft, periodEndsAt: c.periodEndsAt?.toISOString() ?? null, graceEndsAt: c.graceEndsAt?.toISOString() ?? null, students, monthlyPricePaise: c.price, quotation: c.price === null };
 }
+/** Per-academy deal (owner 2026-09-13: "for gunachess.com ₹1,000 per month"): `academies.customMonthlyPricePaise`
+ *  overrides the student-count tiers and never falls into quotation. */
+export function priceForAcademy(acad: any, students: number): number | null {
+  const custom = acad?.customMonthlyPricePaise;
+  return typeof custom === "number" && custom > 0 ? Math.round(custom) : monthlyPricePaise(students);
+}
 function computeBilling(acad: any, students: number, now = new Date()) {
   const trialEndsAt: Date | null = acad.trialEndsAt ? new Date(acad.trialEndsAt) : null;
   const paidUntil: Date | null = acad.paidUntil ? new Date(acad.paidUntil) : null;
-  const price = monthlyPricePaise(students);
+  const price = priceForAcademy(acad, students);
   let state: BillingState; let periodEndsAt: Date | null = null;
   if (paidUntil && paidUntil > now) { state = "active"; periodEndsAt = paidUntil; }
   else if (!paidUntil && (acad.plan === "active" || acad.plan === "manual" || acad.subscriptionStatus === "active") && !trialEndsAt) { state = "manual"; }
@@ -91,7 +97,7 @@ export class BillingService {
   private subs() { return this.conn.db!.collection("academySubscriptions"); }
   private rzp(path: string, init?: { method?: string; body?: unknown }) {
     const keyId = process.env.RAZORPAY_KEY_ID?.trim() ?? "", secret = process.env.RAZORPAY_KEY_SECRET?.trim() ?? "";
-    if (!keyId || !secret) throw new BadRequestException("Online payment is not available right now. WhatsApp " + WHATSAPP_DISPLAY + " to pay by bank transfer / UPI.");
+    if (!keyId || !secret) throw new BadRequestException("Online payment is temporarily unavailable. WhatsApp " + WHATSAPP_DISPLAY + " and we will sort it out.");
     return fetch(`https://api.razorpay.com/v1${path}`, { method: init?.method ?? "GET", headers: { "Content-Type": "application/json", Authorization: `Basic ${Buffer.from(`${keyId}:${secret}`).toString("base64")}` }, body: init?.body ? JSON.stringify(init.body) : undefined })
       .then(async (r) => { const j: any = await r.json().catch(() => null); if (!r.ok) throw new BadRequestException(`Razorpay: ${JSON.stringify(j?.error ?? r.status).slice(0, 300)}`); return j; });
   }
@@ -130,7 +136,7 @@ export class BillingService {
     const sub: any = acad.subscriptionId ? await this.subs().findOne({ _id: acad.subscriptionId } as never) : null;
     return {
       academyId, academyName: acad.name || academyId, state: c.state, plan: acad.plan ?? null,
-      students, monthlyPricePaise: c.price, yearlyPricePaise: c.price == null ? null : amountForMonths(c.price, 12), quotation: c.price === null,
+      students, monthlyPricePaise: c.price, yearlyPricePaise: c.price == null ? null : amountForMonths(c.price, 12), quotation: c.price === null, customPrice: typeof acad.customMonthlyPricePaise === "number" && acad.customMonthlyPricePaise > 0,
       trialEndsAt: c.trialEndsAt?.toISOString() ?? null, paidUntil: c.paidUntil?.toISOString() ?? null, periodEndsAt: c.periodEndsAt?.toISOString() ?? null,
       daysLeft: c.daysLeft, graceEndsAt: c.graceEndsAt?.toISOString() ?? null,
       razorpayConfigured: !!(creds || (keyId && process.env.RAZORPAY_KEY_SECRET)), keyId,
@@ -160,7 +166,7 @@ export class BillingService {
     const months = [1, 3, 6, 12].includes(Number(monthsIn)) ? Number(monthsIn) : 1;
     const st = await this.statusFor(academyId);
     if (st.quotation || st.monthlyPricePaise == null) throw new BadRequestException(`More than ${QUOTATION_ABOVE} students — WhatsApp ${WHATSAPP_DISPLAY} for a quotation.`);
-    if (!st.razorpayConfigured) throw new BadRequestException("Online payment is not available right now. WhatsApp " + WHATSAPP_DISPLAY + " to pay by bank transfer / UPI.");
+    if (!st.razorpayConfigured) throw new BadRequestException("Online payment is temporarily unavailable. WhatsApp " + WHATSAPP_DISPLAY + " and we will sort it out.");
     const amountPaise = amountForMonths(st.monthlyPricePaise, months); // a year is charged as 10 months
     const id = "ap_" + Math.random().toString(36).slice(2, 12);
     const order = await createOrder({ amountPaise, receipt: id, notes: { kind: "platform-subscription", academyId, months: String(months), students: String(st.students) } });
@@ -202,13 +208,23 @@ export class BillingService {
     return paidUntil;
   }
 
+  /** Superadmin: a special monthly price for one academy (null clears it back to the tiers). */
+  async adminSetPrice(academyId: string, body: { monthlyPaise?: number | null; note?: string }, byUserId: string) {
+    const acad: any = await this.academies().findOne({ _id: academyId } as never);
+    if (!acad) throw new NotFoundException("academy not found");
+    const v = body?.monthlyPaise;
+    if (v == null) await this.academies().updateOne({ _id: academyId } as never, { $unset: { customMonthlyPricePaise: "", customPriceNote: "" }, $set: { customPriceBy: byUserId, customPriceAt: new Date() } } as never);
+    else if (Number(v) > 0) await this.academies().updateOne({ _id: academyId } as never, { $set: { customMonthlyPricePaise: Math.round(Number(v)), customPriceNote: String(body?.note ?? "").slice(0, 200), customPriceBy: byUserId, customPriceAt: new Date() } } as never);
+    else throw new BadRequestException("monthlyPaise must be a positive number of paise, or null to clear");
+    return { ok: true, status: await this.statusFor(academyId) };
+  }
   /** Superadmin: bank transfer / UPI / goodwill — mark N months paid (or a date) by hand. */
   async adminMarkPaid(academyId: string, body: { months?: number; paidUntil?: string; amountPaise?: number; note?: string }, byUserId: string) {
     const acad: any = await this.academies().findOne({ _id: academyId } as never);
     if (!acad) throw new NotFoundException("academy not found");
     let paidUntil: Date;
     const months = Number(body?.months) > 0 ? Math.min(36, Number(body.months)) : 0;
-    const amountPaise = Number(body?.amountPaise) > 0 ? Math.round(Number(body.amountPaise)) : (monthlyPricePaise(await this.studentCount(academyId)) ?? 0) * Math.max(1, months);
+    const amountPaise = Number(body?.amountPaise) > 0 ? Math.round(Number(body.amountPaise)) : (priceForAcademy(acad, await this.studentCount(academyId)) ?? 0) * Math.max(1, months);
     if (body?.paidUntil) {
       paidUntil = new Date(body.paidUntil); if (isNaN(paidUntil.getTime())) throw new BadRequestException("bad paidUntil");
       await this.academies().updateOne({ _id: academyId } as never, { $set: { paidUntil, plan: "paid", subscriptionStatus: "active", lastPaymentAt: new Date() } } as never);
@@ -216,7 +232,7 @@ export class BillingService {
     else throw new BadRequestException("months or paidUntil required");
     await this.payments().insertOne({ _id: "ap_" + Math.random().toString(36).slice(2, 12), academyId, at: new Date(), amountPaise, months: months || null, method: "manual", status: "manual", paidUntil, note: String(body?.note ?? "").slice(0, 200), byUserId } as never);
     this.lockCache.delete(academyId);
-    await this.receipt(academyId, amountPaise, months || 0, paidUntil, "bank transfer / UPI");
+    await this.receipt(academyId, amountPaise, months || 0, paidUntil, "recorded by ChessGuru");
     return { ok: true, paidUntil: paidUntil.toISOString(), status: await this.statusFor(academyId) };
   }
 
@@ -352,7 +368,7 @@ export class BillingService {
       if (await this.reminders().findOne({ _id: key } as never)) continue;
       await this.reminders().insertOne({ _id: key, academyId: acad._id, kind, at: now } as never);
       const { email, name } = await this.ownerEmail(acad);
-      const students = await this.studentCount(acad._id); const price = monthlyPricePaise(students);
+      const students = await this.studentCount(acad._id); const price = priceForAcademy(acad, students);
       const priceTxt = price == null ? `a quotation (WhatsApp ${WHATSAPP_DISPLAY})` : `₹${(price / 100).toLocaleString("en-IN")} / month for ${students} students`;
       const when = c.periodEndsAt?.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) ?? "";
       const subject = kind === "7d" ? `ChessGuru · ${acad.name}: ${c.state === "trialing" ? "trial" : "subscription"} ends in 7 days (${when})`
@@ -361,7 +377,7 @@ export class BillingService {
         : `ChessGuru · ${acad.name}: academy management is paused until payment`;
       console.log(`[billing] reminder ${kind} → ${acad._id} (${email ?? "no owner email"})`);
       if (!email) continue;
-      const body = `Hi ${name},\n\n${subject.replace(/^ChessGuru · /, "")}.\n\nYour plan: ${priceTxt}. Coaches stay unlimited; students are never locked out.\n\nPay online (Razorpay, UPI / card / net banking): ${PUBLIC_ORIGIN}/academy/billing\nPrefer bank transfer? WhatsApp ${WHATSAPP_DISPLAY}.\n\n— ChessGuru`;
+      const body = `Hi ${name},\n\n${subject.replace(/^ChessGuru · /, "")}.\n\nYour plan: ${priceTxt}. Coaches stay unlimited; students are never locked out.\n\nPay online (Razorpay — UPI / card / net banking): ${PUBLIC_ORIGIN}/academy/billing\nQuestions? WhatsApp ${WHATSAPP_DISPLAY}.\n\n— ChessGuru`;
       try { await sendMail({ to: email, subject, text: body, html: body.replace(/\n/g, "<br>") }); } catch (e) { console.error("[billing] reminder mail", e); }
     }
   }

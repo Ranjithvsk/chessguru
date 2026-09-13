@@ -7,7 +7,7 @@ import { get, post } from "../lib/api";
 
 type Billing = {
   academyId: string; academyName: string; state: "trialing" | "active" | "manual" | "grace" | "locked"; plan: string | null;
-  students: number; monthlyPricePaise: number | null; yearlyPricePaise: number | null; quotation: boolean;
+  students: number; monthlyPricePaise: number | null; yearlyPricePaise: number | null; quotation: boolean; customPrice?: boolean;
   trialEndsAt: string | null; paidUntil: string | null; periodEndsAt: string | null; daysLeft: number | null; graceEndsAt: string | null;
   razorpayConfigured: boolean; keyId: string | null;
   subscription: { id: string; status: string; amountPaise: number; period: "monthly" | "yearly"; nextChargeAt: string | null; cancelling: boolean } | null;
@@ -101,8 +101,8 @@ export default function AcademyBillingPage() {
       {b && (
         <>
           {/* status */}
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="rounded-2xl border border-white/10 bg-ink-900/60 p-5 md:col-span-2">
+          <div className="grid gap-4">
+            <div className="rounded-2xl border border-white/10 bg-ink-900/60 p-5">
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${stateChip?.[1]}`}>{stateChip?.[0]}</span>
                 {b.subscription && <span className="rounded-full border border-brand-400/30 bg-brand-500/15 px-3 py-1 text-xs font-semibold text-brand-100">🔁 Auto-renew {b.subscription.cancelling ? "stopping at cycle end" : b.subscription.status}</span>}
@@ -114,15 +114,10 @@ export default function AcademyBillingPage() {
                 <div><div className="text-[11px] uppercase tracking-wide text-ink-400">Days left</div><div className={`font-display text-2xl font-bold tabular-nums ${b.daysLeft == null ? "text-white" : b.daysLeft > 7 ? "text-emerald-200" : b.daysLeft > 0 ? "text-amber-200" : "text-rose-200"}`}>{b.daysLeft == null ? "—" : Math.max(0, b.daysLeft)}</div></div>
               </div>
               <p className="mt-4 text-xs text-ink-400">
-                Up to 50 students ₹1,000 / month · up to 100 ₹1,500 · then ₹500 for every extra 50 · coaches unlimited · more than 500 students on quotation. Pay for a year and get 2 months free{b.yearlyPricePaise != null ? ` (${inr(b.yearlyPricePaise)} / year)` : ""}.
+                {b.customPrice ? `Your academy has a special price of ${inr(b.monthlyPricePaise!)} / month agreed with ChessGuru, whatever your student count. ` : "Up to 50 students ₹1,000 / month · up to 100 ₹1,500 · then ₹500 for every extra 50 · coaches unlimited · more than 500 students on quotation. "}Pay for a year and get 2 months free{b.yearlyPricePaise != null ? ` (${inr(b.yearlyPricePaise)} / year)` : ""}.
                 {b.state === "grace" && ` Your period ended on ${fmt(b.periodEndsAt)}. Pay by ${fmt(b.graceEndsAt)} to keep managing the academy without a pause.`}
                 {b.state === "locked" && ` Academy management is paused since ${fmt(b.graceEndsAt)}. Coaches can still teach and students are not affected — pay below to resume.`}
               </p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-ink-900/60 p-5 text-sm">
-              <div className="text-[11px] uppercase tracking-wide text-ink-400">Prefer bank transfer / UPI?</div>
-              <p className="mt-2 text-ink-200">WhatsApp {b.whatsapp} with your academy name — we mark it paid the same day.</p>
-              <a href={WA(`Hi Ranjith, ${b.academyName} would like to pay ChessGuru by bank transfer / UPI.`)} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold text-white" style={{ background: "#25D366" }}>WhatsApp us</a>
             </div>
           </div>
 
@@ -177,7 +172,7 @@ export default function AcademyBillingPage() {
                 <table className="w-full text-sm">
                   <thead className="text-[11px] uppercase tracking-wide text-ink-500"><tr><th className="py-1 text-left">Date</th><th className="py-1 text-right">Amount</th><th className="py-1 text-left pl-4">Months</th><th className="py-1 text-left">Method</th><th className="py-1 text-left">Paid until</th></tr></thead>
                   <tbody>{b.payments.map((p) => (
-                    <tr key={p.id} className="border-t border-ink-800"><td className="py-1.5">{fmt(p.at)}</td><td className="py-1.5 text-right tabular-nums">{inr(p.amountPaise)}</td><td className="py-1.5 pl-4">{p.months ?? "—"}</td><td className="py-1.5">{p.method === "manual" ? `bank / UPI${p.note ? ` · ${p.note}` : ""}` : p.method === "razorpay-subscription" ? "Razorpay auto-renew" : "Razorpay"}</td><td className="py-1.5">{fmt(p.paidUntil)}</td></tr>
+                    <tr key={p.id} className="border-t border-ink-800"><td className="py-1.5">{fmt(p.at)}</td><td className="py-1.5 text-right tabular-nums">{inr(p.amountPaise)}</td><td className="py-1.5 pl-4">{p.months ?? "—"}</td><td className="py-1.5">{p.method === "manual" ? `ChessGuru${p.note ? ` · ${p.note}` : ""}` : p.method === "razorpay-subscription" ? "Razorpay auto-renew" : "Razorpay"}</td><td className="py-1.5">{fmt(p.paidUntil)}</td></tr>
                   ))}</tbody>
                 </table>
               </div>
