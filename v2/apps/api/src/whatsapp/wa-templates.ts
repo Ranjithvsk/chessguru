@@ -37,6 +37,23 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
     buttons: [{ type: "URL", text: "See ChessGuru", url: "https://chessguru.cc/" }],
   },
   {
+    // The full pitch (owner 2026-09-15: "should say about puzzle playing, chess play, live class,
+    // saving openings, tracking students performance, analysing game play … try login
+    // www.chessguru.cc, or ask for demo"). v1 led with the branded app; this one leads with what a
+    // coach and a student actually do every day, and invites them to try it themselves.
+    name: "academy_intro_v2",
+    language: "en",
+    category: "MARKETING",
+    bodyText:
+      "Hello {{1}}, this is {{2}} from ChessGuru \u2014 one platform built only for chess academies, with your own branded app on your own domain.\n\n" +
+      "Students solve rated puzzles every day and play real games against classmates and bots. Coaches run live classes where everyone moves the same board, save opening lines as studies and push them straight to a student's board, and read chess books with click-to-play diagrams. Every game is analysed move by move, so you see exactly where it turned. Each child's performance \u2014 rating, attendance, homework and progress \u2014 is tracked in one place, and fees, expenses and coach payments are handled too.\n\n" +
+      "Try it yourself at www.chessguru.cc, or reply here and I will arrange a 15-minute demo built around your academy.",
+    vars: ["Academy name", "Your name"],
+    sample: ["Madras School of Chess", "Ranjith"],
+    footer: "Reply STOP to opt out",
+    buttons: [{ type: "URL", text: "Try ChessGuru", url: "https://www.chessguru.cc/" }],
+  },
+  {
     name: "academy_demo_followup_v1",
     language: "en",
     category: "MARKETING",
