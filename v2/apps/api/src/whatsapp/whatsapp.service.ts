@@ -94,6 +94,9 @@ export class WhatsappService {
    *  insert messages, move a lead's 24-hour window and flip optIn to false via a forged STOP.
    *  Meta's setup handshake is the GET, which uses WA_VERIFY_TOKEN and is unaffected, so the
    *  only cost is that POSTs are refused until WA_APP_SECRET is filled in — which is correct. */
+  /** True when an app secret is configured, i.e. signatures can actually be checked. */
+  canVerify(): boolean { return !!this.cfg().appSecret; }
+
   verifySignature(rawBody: Buffer | undefined, header?: string): boolean {
     const c = this.cfg();
     if (!c.appSecret) { this.log.warn("webhook POST refused: WA_APP_SECRET is not set"); return false; }
@@ -101,6 +104,27 @@ export class WhatsappService {
     const expected = "sha256=" + createHmac("sha256", c.appSecret).update(rawBody).digest("hex");
     const a = Buffer.from(header); const b = Buffer.from(expected);
     return a.length === b.length && timingSafeEqual(a, b);
+  }
+
+  /** Unsigned webhooks (WA_APP_SECRET not filled in yet): log delivery status and NOTHING else.
+   *  Meta disables a subscription that keeps failing, and without this the reason a send never
+   *  arrived was thrown away — the owner's marketing templates were accepted by Graph and then
+   *  silently dropped (2026-09-15). Read-only on purpose: an unsigned POST still cannot write a
+   *  message, move a lead's 24-hour window, or flip optIn via a forged STOP. */
+  statusesOnly(body: any): void {
+    try {
+      for (const entry of body?.entry ?? []) {
+        for (const ch of entry?.changes ?? []) {
+          for (const st of ch?.value?.statuses ?? []) {
+            const err = st.errors?.[0];
+            this.log.warn(
+              `[unsigned] status ${st.status} to ${st.recipient_id} wamid=${String(st.id).slice(-12)}` +
+              (err ? ` — ${err.code} ${err.title}${err.error_data?.details ? ": " + err.error_data.details : ""}` : ""),
+            );
+          }
+        }
+      }
+    } catch (e) { this.log.error(`webhook(status-only): ${(e as Error).message}`); }
   }
 
   /** Process a webhook payload: update delivery/read status on our sent messages, and record
@@ -111,7 +135,14 @@ export class WhatsappService {
         for (const ch of entry?.changes ?? []) {
           const v = ch?.value ?? {};
           for (const st of v.statuses ?? []) {
-            await this.msgs().updateOne({ wamid: st.id }, { $set: { status: st.status, statusAt: new Date(Number(st.timestamp) * 1000 || Date.now()) } });
+            // Always log a failure, even for a wamid we never stored — a send made from the CRM or
+            // by hand has no row here, and without this its reason is lost (Meta was silently
+            // dropping marketing templates with 131049, 2026-09-15).
+            const e = st.errors?.[0];
+            if (e || st.status === "failed") {
+              this.log.warn(`delivery ${st.status} to ${st.recipient_id}` + (e ? ` — ${e.code} ${e.title}` : ""));
+            }
+            await this.msgs().updateOne({ wamid: st.id }, { $set: { status: st.status, statusAt: new Date(Number(st.timestamp) * 1000 || Date.now()), ...(e ? { error: `${e.code} ${e.title}` } : {}) } });
           }
           for (const m of v.messages ?? []) {
             const from = String(m.from || "");

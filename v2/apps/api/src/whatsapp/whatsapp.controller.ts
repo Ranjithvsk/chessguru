@@ -34,6 +34,12 @@ export class WhatsappController {
 
   @Post("whatsapp/webhook")
   async receive(@Req() req: any, @Res() res: any) {
+    if (!this.wa.canVerify()) {
+      // No app secret yet: ack so Meta keeps the subscription alive, and log delivery status only.
+      res.status(200).send("ok");
+      this.wa.statusesOnly(req.body);
+      return;
+    }
     if (!this.wa.verifySignature(req.rawBody, req.headers["x-hub-signature-256"] as string)) return res.status(401).send("bad signature");
     res.status(200).send("ok"); // ack fast; Meta retries on non-200
     void this.wa.handleWebhook(req.body);
