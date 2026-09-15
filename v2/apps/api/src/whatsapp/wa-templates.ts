@@ -56,6 +56,29 @@ export const WA_TEMPLATES: WaTemplateDef[] = [
     vars: ["Academy name", "Sign-in link"],
     sample: ["Madras School of Chess", "https://chessguru.cc/login"],
   },
+  {
+    // Academy -> its OWN parents. The only template an academy may send (the send route
+    // refuses MARKETING for academies), so it carries the academy's own words in {{3}}.
+    name: "academy_notice_v1",
+    language: "en",
+    category: "UTILITY",
+    bodyText:
+      "Hello {{1}}, this is an update from {{2}} about your child's chess classes.\n\n{{3}}\n\nReply to this message if you have a question, or sign in to your ChessGuru parent account for the full details.",
+    vars: ["Parent name", "Academy name", "The notice"],
+    sample: ["Ranjith", "Guna Chess Academy", "Sunday's class moves to 10:00 AM at the Avadi branch."],
+  },
+  {
+    // Meta's own pre-approved connectivity test. No variables, nothing academy-specific —
+    // it exists so a send can be proved end to end (number registered, token valid, row
+    // written, inbox rendering) without waiting on template review.
+    name: "hello_world",
+    language: "en_US",
+    category: "UTILITY",
+    bodyText:
+      "Welcome and congratulations!! This message demonstrates your ability to send a WhatsApp message notification from the Cloud API. Thank you for taking the time to test with us.",
+    vars: [],
+    sample: [],
+  },
 ];
 
 export const WA_TEMPLATE_BY_NAME: Record<string, WaTemplateDef> = Object.fromEntries(WA_TEMPLATES.map((t) => [t.name, t]));

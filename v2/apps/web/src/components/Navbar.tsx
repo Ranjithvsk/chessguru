@@ -57,6 +57,7 @@ const GROUPS: Group[] = [
       { to: "/fees", label: "💰 Fees", desc: "Collect tuition · WhatsApp reminders · receipts · reports" },
       { to: "/academy/finance", label: "📒 Accounts", desc: "Income, expenses, rent & coach salary — monthly profit/loss" },
       { to: "/academy/billing", label: "💳 Subscription", desc: "Your plan, trial / paid-until, pay once or auto-renew, payment history" },
+      { to: "/academy/whatsapp", label: "💬 WhatsApp", desc: "Messages sent to your parents and their replies" },
       { to: "/parent", label: "👪 Family portal", desc: "For parents — child's progress + billing (sign in with the parent account you were linked to)" },
     ],
   },

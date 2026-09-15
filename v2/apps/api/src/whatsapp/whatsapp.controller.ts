@@ -17,6 +17,13 @@ export class WhatsappController {
     return String(req.session.userId);
   }
 
+  private requireAcademy(req: any): { academyId: string; userId: string } {
+    if (!req.session?.userId) throw new UnauthorizedException("login required");
+    const academyId = req.session?.academyId ? String(req.session.academyId) : "";
+    if (!academyId) throw new ForbiddenException("academy session required");
+    return { academyId, userId: String(req.session.userId) };
+  }
+
   // ---- webhook (PUBLIC — no session) --------------------------------------------------------
   @Get("whatsapp/webhook")
   verify(@Query("hub.mode") mode: string, @Query("hub.verify_token") token: string, @Query("hub.challenge") challenge: string, @Res() res: any) {
@@ -78,5 +85,39 @@ export class WhatsappController {
       $push: { activity: { at: now, by, kind: "whatsapp", text: r.ok ? `Sent template ${def.name}` : `WhatsApp send failed: ${r.error}` } },
     } as any);
     return r;
+  }
+
+  // ---- academy (a paying academy, scoped to ITSELF) -----------------------------------------
+  /** Inbox list: one row per parent number this academy has messaged, newest first. */
+  @Get("academy/whatsapp/threads")
+  async academyThreads(@Req() req: any) {
+    const { academyId } = this.requireAcademy(req);
+    return { ok: true, configured: this.wa.isConfigured(), threads: await this.wa.threadsForAcademy(academyId) };
+  }
+
+  /** Full message history for this academy. Never returns another academy's rows. */
+  @Get("academy/whatsapp/messages")
+  async academyMessages(@Req() req: any, @Query("limit") limit?: string) {
+    const { academyId } = this.requireAcademy(req);
+    const n = Math.min(500, Math.max(1, Number(limit) || 100));
+    return { ok: true, messages: await this.wa.messagesForAcademy(academyId, n) };
+  }
+
+  /** Send a template to one of this academy's own contacts. The academy is stamped on the
+   *  message from the SESSION, never from the body, so a send can only ever be attributed to
+   *  the academy that made the request. */
+  @Post("academy/whatsapp/send")
+  async academySend(@Req() req: any, @Body() body: { to?: string; template?: string; values?: string[] }) {
+    const { academyId, userId } = this.requireAcademy(req);
+    if (!this.wa.isConfigured()) return { ok: false, error: "WhatsApp is not configured yet." };
+    const def = WA_TEMPLATE_BY_NAME[String(body?.template ?? "")];
+    if (!def) return { ok: false, error: "unknown template" };
+    if (def.category === "MARKETING") {
+      return { ok: false, error: "Marketing templates are for ChessGuru outreach. An academy may send service templates to its own contacts only." };
+    }
+    const to = String(body?.to ?? "").trim();
+    if (!WhatsappService.toWaNumber(to)) return { ok: false, error: "no valid phone number" };
+    const values = Array.isArray(body?.values) && body!.values!.length ? body!.values!.map(String) : def.sample;
+    return this.wa.sendTemplate(to, def.name, values, null, { academyId, byUserId: userId });
   }
 }
