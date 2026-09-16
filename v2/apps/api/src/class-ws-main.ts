@@ -30,6 +30,7 @@ try { require("dotenv").config(); } catch { /* dotenv optional in dev */ }
 import { attachClassWs } from "./class/class-ws";
 import { attachVideoSignalWs } from "./video/video-signal";
 import { PushService } from "./push/push.service";
+import { ErrorReporter } from "./errors/error-reporter";
 
 const MONGO_URI = process.env.MONGO_URI ?? "mongodb://localhost:27017/chessguru";
 const PORT = Number(process.env.CLASS_WS_PORT ?? 4100);
@@ -46,6 +47,23 @@ async function main() {
   // no DI container. It reads VAPID keys from env and disables itself if absent.
   const push = new PushService(conn as any);
 
+  // Record + mail realtime failures (board-sync + video-signal). This process
+  // runs OFF the API, so without this its errors were swallowed — the owner
+  // never learned a live class broke. Reuses the API's errorEvents collection +
+  // throttled mailer verbatim via the DI-free ErrorReporter. (Needs
+  // DWOTP_INTERNAL_TOKEN in this process's env for the mail leg.)
+  const reporter = new ErrorReporter(conn as any);
+  await reporter.ensureIndexes();
+  process.on("unhandledRejection", (reason: any) => {
+    try { reporter.report({ kind: "realtime", route: "class-ws:unhandledRejection", message: reason?.message || String(reason), stack: reason?.stack }); } catch { /* */ }
+  });
+  process.on("uncaughtException", (err: any) => {
+    // Do NOT exit — dropping every live class over one stray throw is worse than
+    // continuing. The per-message wraps already contain frame throws with
+    // context; this is the last-resort net for async escapes.
+    try { reporter.report({ kind: "realtime", route: "class-ws:uncaughtException", message: err?.message || String(err), stack: err?.stack }); } catch { /* */ }
+  });
+
   const server = createServer((req, res) => {
     // A health endpoint so pm2/nginx/a human can tell the process is alive
     // without opening a WebSocket. Everything else here is an upgrade.
@@ -58,8 +76,8 @@ async function main() {
     res.end(JSON.stringify({ ok: false }));
   });
 
-  attachClassWs(server, conn as any, push);
-  attachVideoSignalWs(server, conn as any);
+  attachClassWs(server, conn as any, push, reporter);
+  attachVideoSignalWs(server, conn as any, reporter);
 
   server.listen(PORT, () => {
     // eslint-disable-next-line no-console

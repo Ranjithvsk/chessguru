@@ -36,6 +36,11 @@ let dbConn: Connection | null = null;
 // PushService is optional — WS still runs without it (silent no-op for pushes).
 type PushSvcLike = { sendToUser: (userId: string, payload: { title: string; body: string; url?: string; tag?: string }) => Promise<any> };
 let pushSvc: PushSvcLike | null = null;
+// Realtime error sink — set by attachClassWs when the standalone class-ws
+// process passes one in, so board-sync failures get RECORDED + MAILED instead
+// of being silently swallowed (or crashing the whole class). Stays null on the
+// :4000 API unless a reporter is passed there too.
+let realtimeReporter: { report: (ev: any) => void } | null = null;
 
 type Move = { from: string; to: string; promotion?: string };
 // Tree node stored on the room — { move, children }. Root is a virtual
@@ -642,7 +647,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
   const isCoach = () => socketRole.get(ws) === "coach";
 
-  ws.on("message", (raw) => {
+  ws.on("message", (raw) => { try {
     let frame: ClientFrame;
     try { frame = JSON.parse(raw.toString()); } catch { return; }
     if (frame.type === "ping") { send({ type: "pong" }); return; }
@@ -1305,7 +1310,12 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       broadcast(room, { type: "move", move: room.lastMove!, fen: room.fen, startFen: room.startFen, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked });
       syncShapesToPosition(room);
     }
-  });
+  } catch (mErr: any) {
+    // A throw handling one frame must NOT crash the class-ws process — that would
+    // drop EVERY live class at once. Contain it to this message, then record +
+    // mail it (with the classId so it can be attributed to an academy/coach).
+    try { realtimeReporter?.report({ kind: "realtime", route: "class-ws:message", url: roomId, message: mErr?.message || String(mErr), stack: mErr?.stack, userId: socketWho.get(ws)?.userId ?? undefined }); } catch { /* never throw from the error path */ }
+  } });
 
   ws.on("close", () => {
     room.clients.delete(ws);
@@ -1438,9 +1448,10 @@ export function getLiveAttendees(classId: string): Array<{ userId: string | null
 // any other upgrade attempt is destroyed so we don't accidentally answer for another
 // (future) WebSocket path. Conn is Nest's mongoose Connection — used for attendance
 // writes (fire-and-forget so a Mongo hiccup never disrupts the live class).
-export function attachClassWs(server: HttpServer, conn?: Connection, push?: PushSvcLike): void {
+export function attachClassWs(server: HttpServer, conn?: Connection, push?: PushSvcLike, report?: { report: (ev: any) => void }): void {
   if (conn) dbConn = conn;
   if (push) pushSvc = push;
+  if (report) realtimeReporter = report;
   server.on("upgrade", (req, socket, head) => {
     if (parseRoomId(req.url) == null) return; // let another handler (or default) close it
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));

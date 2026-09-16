@@ -185,12 +185,12 @@ async function bootstrap() {
   // the coach's registered devices, not just fire an in-room WS frame.
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const pushSvc = app.get(require("./push/push.service").PushService, { strict: false });
-  attachClassWs(app.getHttpServer(), dbConn as any, pushSvc);
+  attachClassWs(app.getHttpServer(), dbConn as any, pushSvc, errorAlerts);
   // From-scratch video (CHESSGURU-VIDEO-FROM-SCRATCH.md P0/P1): relays WebRTC
   // signaling between exactly 2 peers per room. No SFU. P1 adds session-cookie
   // auth via mongo lookup + writes to classAttendance on join/leave, so the
   // handler needs the mongoose connection.
-  attachVideoSignalWs(app.getHttpServer(), dbConn as any);
+  attachVideoSignalWs(app.getHttpServer(), dbConn as any, errorAlerts);
   // eslint-disable-next-line no-console
   console.log(`ChessGuru v2 API on :${port}`);
 

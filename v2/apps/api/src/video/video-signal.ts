@@ -129,7 +129,7 @@ function forwardToPeer(client: Client, targetId: string, payload: any) {
   send(target.ws, { ...payload, from: client.id });
 }
 
-export function attachVideoSignalWs(httpServer: HttpServer, conn: Connection | null) {
+export function attachVideoSignalWs(httpServer: HttpServer, conn: Connection | null, report?: { report: (ev: any) => void }) {
   const wss = new WebSocketServer({ noServer: true });
   const path = "/api/video-signal/";
 
@@ -155,7 +155,7 @@ export function attachVideoSignalWs(httpServer: HttpServer, conn: Connection | n
       for (const c of room.clients.values()) if (c.id !== client.id) send(c.ws, { type: "peer-join", peer: client.id, name: client.name, userId: client.userId });
       writeJoin(conn, client);
 
-      ws.on("message", (raw) => {
+      ws.on("message", (raw) => { try {
         let msg: any; try { msg = JSON.parse(String(raw)); } catch { return; }
         if (!msg || typeof msg !== "object") return;
         const room = rooms.get(client.roomId);
@@ -195,7 +195,11 @@ export function attachVideoSignalWs(httpServer: HttpServer, conn: Connection | n
             ws.close();
             break;
         }
-      });
+      } catch (mErr: any) {
+        // A throw relaying one signaling frame must not kill the call. Contain +
+        // record + mail it (classId carried for academy/coach attribution).
+        try { report?.report({ kind: "realtime", route: "video-signal:message", url: client.roomId, message: mErr?.message || String(mErr), stack: mErr?.stack, userId: client.userId ?? undefined }); } catch { /* never throw from the error path */ }
+      } });
       const cleanup = () => { leaveRoom(client); writeLeave(conn, client); };
       ws.on("close", cleanup);
       ws.on("error", cleanup);
