@@ -171,6 +171,17 @@ function historyToTree(history: Move[]): PackTreeNode[] {
   for (let i = nodes.length - 1; i > 0; i--) nodes[i - 1]!.children = [nodes[i]!];
   return [nodes[0]!];
 }
+/** Read a pack's variation tree from whichever shape it was stored in.
+ *  New packs store `treeJson` (a JSON string — no nesting limit); packs from
+ *  before this fix stored a nested `tree` object; the oldest have only
+ *  `history`. Covers all three so old notebooks keep rendering. */
+function parseTree(row: any): PackTreeNode[] {
+  if (typeof row?.treeJson === "string" && row.treeJson.length > 0) {
+    try { const t = JSON.parse(row.treeJson); if (Array.isArray(t)) return t as PackTreeNode[]; } catch { /* fall through */ }
+  }
+  if (Array.isArray(row?.tree) && row.tree.length > 0) return row.tree as PackTreeNode[];
+  return historyToTree(Array.isArray(row?.history) ? row.history : []);
+}
 
 @Controller("class")
 export class ClassPositionPacksController {
@@ -290,9 +301,14 @@ export class ClassPositionPacksController {
       sentAt: now,
       title,
       startFen,
-      // Tree + cursorPath — the new canonical shape. history + cursorIdx
-      // still stored as a derived convenience for older clients.
-      tree,
+      // Tree stored as a JSON STRING, not nested BSON. A deep line (~50+ plies)
+      // nests `children` past MongoDB's hard 100-level object-depth limit, and
+      // the insert was rejected with "BSONObj exceeds maximum nested object
+      // depth" — so every send-position taken after exploring a long line 500'd
+      // (the "send position doesn't work in Dream Meet" reports). A string has
+      // no depth limit; the detail endpoint parses it back via parseTree().
+      // history + cursorPath are flat arrays and were never the problem.
+      treeJson: JSON.stringify(tree),
       cursorPath,
       history,
       cursorIdx: capped,
@@ -347,7 +363,7 @@ export class NotebookController {
     };
     if (academyId) filter.academyId = academyId;
     const rows = await this.packs()
-      .find(filter, { projection: { history: 0 } })   // history is heavy — only fetched in detail view
+      .find(filter, { projection: { history: 0, treeJson: 0 } })   // history + treeJson are heavy — only fetched in detail view
       .sort({ sentAt: -1 })
       .limit(500)
       .toArray();
@@ -409,12 +425,11 @@ export class NotebookController {
       sentByMe: row.coachId === userId,
       maiaRating: typeof row.maiaRating === "number" ? row.maiaRating : null,
       maiaBand: typeof row.maiaBand === "string" ? row.maiaBand : null,
-      // Full tree — Notebook detail renders variations. Fall back to a
-      // straight-line tree derived from history for packs from before this
-      // migration.
-      tree: Array.isArray(row.tree) && row.tree.length > 0
-        ? row.tree
-        : historyToTree(Array.isArray(row.history) ? row.history : []),
+      // Full tree — Notebook detail renders variations. New packs store it as
+      // a JSON string (treeJson) to dodge Mongo's 100-level depth limit; older
+      // packs kept a nested `tree`; the oldest have only history. parseTree
+      // covers all three.
+      tree: parseTree(row),
       cursorPath: Array.isArray(row.cursorPath) ? row.cursorPath : (Array.isArray(row.history) ? Array.from({ length: row.history.length }, () => 0) : []),
       startShapes: Array.isArray(row.startShapes) ? row.startShapes : [],
       bestAttempt: bestAttempt ? {
