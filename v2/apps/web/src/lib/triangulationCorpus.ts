@@ -12,10 +12,16 @@
 // warnings: 1.c6+? throws the win (engine: 0.00 after the book's drawing line),
 // and 1.Ke3? in the Neustadtl study draws after 1...Ke5! (engine: 0.00).
 //
-// Two positions Dvoretsky prints in the same chapter are deliberately NOT here:
-// Fahrni-Alapin 1912 and Yudasin-Osnos 1987. Their diagrams are images in the
-// PDF, the prose does not give the full piece placement, and every
-// reconstruction attempted failed engine verification. Better absent than wrong.
+// Fahrni-Alapin 1912 was recovered the hard way. Dvoretsky prints it as a
+// diagram, and the diagram is an image, so the prose alone never says where the
+// pawns are — every reconstruction from the moves evaluated as a draw. It was
+// found instead in Panchenko's "Theory and Practice of Chess Endings", which
+// embeds its diagrams as text in the Informator diagram font; decoded, it gives
+// the missing a5/a6 pawns, and the engine then confirms the win.
+//
+// Yudasin-Osnos 1987, from the same chapter, is still absent for exactly that
+// reason: no readable diagram has turned up, and every reconstruction from the
+// prose evaluates as a draw where the book claims a win. Better absent than wrong.
 
 export type TriangulationPattern =
   | "triangle"
@@ -46,6 +52,10 @@ export interface TriangulationPosition {
   outcome?: string;
   /** Demonstration positions — shown in Study, never served in Practice. */
   studyOnly?: boolean;
+  /** Asked before the answer is shown, so the student thinks first. */
+  think?: string;
+  /** Short discussion of the answer — the idea, not just the move. */
+  discussion?: string;
 }
 
 export const TRIANGULATION_PATTERNS: Array<{ id: TriangulationPattern; label: string; blurb: string }> = [
@@ -70,6 +80,10 @@ export const TRIANGULATION_POSITIONS: TriangulationPosition[] = [
       "d5 and d7 are corresponding squares: whoever stands there needs the OTHER side to move. Black's king is tied down — it must watch the c5-c6 break and must not be pushed to the edge — so it has too few waiting squares. White walks a triangle d5-e5-d4-d5 and arrives back on d5 with Black to move.",
     line: "1.Ke5! Kc6 (1...Ke7 2.c6) 2.Kd4 Kd7 3.Kd5 — same position, Black to move. 3...Kc8 4.Ke6! (diagonal opposition) 4...Kd8 5.Kd6 (now vertical) 5...Kc8 6.Ke7 Kb8 7.Kd7 Ka8 8.c6 wins.",
     engine: "Stockfish: mate in 15. Both 1.Ke5 (the book move) and 1.Kd4 win — they are the same triangle walked in opposite directions.",
+    think:
+      "White is a pawn up and the black king sits right in front of everything. Ask the harder question first: if it were BLACK to move here, what would he have to give up? Then ask how White gets that.",
+    discussion:
+      "The position does not need a new plan — it needs the same position one tempo later. Count the squares each king can waste time on before you touch a piece; that count is the whole game.",
     difficulty: 1500,
     outcome: "White wins.",
   },
@@ -136,6 +150,47 @@ export const TRIANGULATION_POSITIONS: TriangulationPosition[] = [
     outcome: "White wins.",
   },
 
+  // ───────── Fahrni - Alapin, 1912 ─────────
+  {
+    id: "fa-01",
+    name: "Fahrni – Alapin 1912 — the frozen wing",
+    pattern: "correspondence",
+    fen: "2k5/8/p1P5/P2K4/8/8/8/8 w - - 0 1",
+    bestMoveSan: "Kd4",
+    bestMoveUci: "d5d4",
+    altMoveUci: ["d5c4"],
+    source: "Fahrni – Alapin, 1912. The same diagram was recovered twice over: decoded from Panchenko's diagram font, and read by our board-vision service from Alburt's Just the Facts. Both give the identical position. Analysis from Dvoretsky's Endgame Manual.",
+    mechanism:
+      "The a-pawns are the whole point. They are frozen against each other, so Black has no spare pawn move and must answer with his king every time — and White's a5-pawn covers b6, taking a square off that king. Two squares of reciprocal zugzwang decide it: d6 against d8, and c5 against c7. White has two waiting squares beside d5, c4 and d4; Black has only d8. So White steps c4, d4 and back to d5, and arrives with Black to move.",
+    line: "1.Kc4(d4)! Kd8 2.Kd4(c4)! Kc8 3.Kd5! Kd8 (3…Kc7 4.Kc5 and 5.Kb6) 4.Kd6 Kc8 5.c7 and the pawn queens.",
+    engine: "Stockfish: mate in 16, best move Kd4 — the triangle. Kc4 is the same triangle the other way round. The direct 4.Kd6 also wins here, just more slowly; the triangle is the method, and it is what the position was printed to teach.",
+    think:
+      "Black's king has c7, c8 and d8. White's has c4, d4 and d5. Before calculating anything, count those squares against each other — who runs out of waiting moves first?",
+    discussion:
+      "The frozen a-pawns are doing quiet work: they give Black no pawn move at all, so every White wait must be answered with the king. That is why counting spare squares, not calculating variations, decides this position.",
+    difficulty: 1750,
+    outcome: "White wins.",
+  },
+
+  {
+    id: "sei-01",
+    name: "The long way round",
+    pattern: "correspondence",
+    fen: "8/2k5/p1P5/P1K5/8/8/8/8 w - - 0 1",
+    bestMoveSan: "Kd5",
+    bestMoveUci: "c5d5",
+    source: "Seirawan, Winning Chess Endings — diagram read from the book with our own board-vision service, then confirmed by the engine.",
+    think: "Kings on c5 and c7, facing each other. You have the opposition — so why can you not simply walk forward, and what does that tell you about who should be to move?",
+    mechanism:
+      "c5 against c7 is one of the two reciprocal-zugzwang pairs in this ending: the king standing there needs the OTHER side to move. It is White's move, so the opposition is worth nothing yet. The king steps away to d5, and only comes back to c5 once Black has been made to move first.",
+    line: "1.Kd5! Kc8 2.Kc4 Kd8 3.Kd4 Kc8 4.Kd5 Kc7 5.Kc5 — back on c5, and now it is Black to move.",
+    engine: "Stockfish: mate in 17, best move Kd5. The engine's own line is the full manoeuvre, ending with the king home on c5 and Black to move.",
+    discussion:
+      "Notice how long the walk is. A triangle is three moves, but nothing says the shape has to be small — here the king tours d5, c4, d4, d5 and back to c5 before the tempo is won. What matters is not the shape but the arithmetic: White has spare squares and Black, hemmed in by his own frozen a-pawn, does not.",
+    difficulty: 1850,
+    outcome: "White wins.",
+  },
+
   // ───────── H. Neustadtl, 1898 ─────────
   {
     id: "neu-01",
@@ -150,6 +205,10 @@ export const TRIANGULATION_POSITIONS: TriangulationPosition[] = [
       "First map the pairs. With the white king on f4 the g4-g5 break is threatened, and only ...Ke7 parries it (not ...Kf7, because then White takes the key square d5) — so f4 pairs with e7, and e4 pairs with d6. Beside those, White has two spare squares, f3 and e3; Black has only one, d7. One spare square against two is the whole game: White triangulates, Black runs out of waiting moves.",
     line: "1.Kf4 Ke7 2.Kf3 Kd7 3.Ke3! Kd6 4.Ke4! Kc6 5.Kf4 Kd6 6.g5 wins. (1.Kd4, seizing the opposition, is the study's original solution and also wins.)",
     engine: "Stockfish: winning for White after 1.Kf4, 1.Kf3 or 1.Kd4 — but 0.00, a dead draw, after 1.Ke3?.",
+    think:
+      "White threatens g4-g5. Work out which single square parries it, then ask how many OTHER squares each king has to spare. The answer to the study is in that second number.",
+    discussion:
+      "This is triangulation reduced to arithmetic. Two spare squares against one, so White can always wait one move longer than Black can. Note the trap too: playing Ke3 immediately, before Black is committed, hands Black ...Ke5 with tempo and the win evaporates.",
     difficulty: 2050,
     outcome: "White wins.",
   },
