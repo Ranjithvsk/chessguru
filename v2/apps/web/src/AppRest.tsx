@@ -85,6 +85,7 @@ import CheckinPage from "./pages/Checkin";
 import FaceEnrollPage from "./pages/FaceEnroll";
 import ParentPortalPage from "./pages/ParentPortal";
 import ZugzwangStudyPage from "./pages/ZugzwangStudy";
+import TriangulationStudyPage from "./pages/TriangulationStudy";
 import AcceptInvitePage from "./pages/AcceptInvite";
 import AccountLinksPage from "./pages/AccountLinks";
 import ExternalGamePage from "./pages/ExternalGame";
@@ -202,6 +203,7 @@ export default function AppRest() {
         <Route path="study/opposition" element={<OppositionTrainer />} />
         <Route path="study/memory-palace" element={<MemoryPalace />} />
         <Route path="study/zugzwang" element={<ZugzwangStudyPage />} />
+        <Route path="study/triangulation" element={<TriangulationStudyPage />} />
         <Route path="study/opening-memory" element={<OpeningMemory />} />
         <Route path="study/openings" element={<Openings />} />
         <Route path="study/openings/:slug" element={<OpeningDetail />} />

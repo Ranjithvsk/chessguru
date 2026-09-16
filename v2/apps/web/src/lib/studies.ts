@@ -62,6 +62,9 @@ export const STUDIES: StudyDef[] = [
     detail: "Your opponent has passed pawns racing to promote. Pick how many pawns (1, 2, 3 or 4), capture or blockade them with the queen, then checkmate. If a pawn promotes you can still try to win the new queen — only a real draw or getting mated ends it.", mateIn: "1–4 pawns", range: [700, 1200], phase: "end" },
   { id: "rook-stop-pawn", kind: "stopPawn", pieces: ["R"], icon: "♜♟", title: "Rook vs Pawns", blurb: "King + Rook vs King + Pawns (pick 1–4)",
     detail: "Trickier than with a queen — your rook must catch the runners. Pick 1–4 pawns, get behind or in front of each, win them, then mate. If a pawn promotes you can still try to win it.", mateIn: "1–4 pawns", range: [900, 1400], phase: "end" },
+  { id: "triangulation", kind: "pawnEnd", icon: "\u25b3", title: "Triangulation", blurb: "Lose a tempo, win the position",
+    detail: "The king manoeuvre that hands the move back to the opponent: three king moves to reach the square one move away, so the zugzwang lands on them instead of you. Built from Dvoretsky's Endgame Manual \u2014 his model K+2P vs K+P position and Neustadtl's 1898 study, step by step through the triangle, plus the two tempting moves that throw the win. Every position engine-verified.",
+    mateIn: "11 positions \u00b7 study + practice", range: [1300, 2050], phase: "end" },
   { id: "zugzwang", kind: "pawnEnd", icon: "⚔️", title: "Zugzwang", blurb: "The move you don’t want to make",
     detail: "11 canonical zugzwang positions across 6 pattern classes — Hooper KP-vs-K, the classical trébuchet, K+P opposition with wrong-rook-pawn draw, Lucena, Sämisch–Nimzowitsch 1923 (Immortal Zugzwang), Fischer–Rossetto 1959, Réti 1921, Saavedra 1895. Study mode reveals mechanism + source; Practice mode hides the answer and asks you to play the correct move on the board.", mateIn: "6 classes · study + practice", range: [1200, 2000], phase: "end" },
 ];
