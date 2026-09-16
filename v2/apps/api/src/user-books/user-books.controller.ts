@@ -13,14 +13,22 @@
 // Books are private to their uploader. These are copyrighted works a coach
 // owns a copy of — we are giving them a better way to read it, not building a
 // library, so there is no public listing and no cross-user access.
-import { Body, Controller, Get, Param, Post, Query, Req, Res, BadRequestException, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
-import { appendFileSync, createReadStream, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { Body, Controller, ForbiddenException, Get, Param, Post, Query, Req, Res, BadRequestException, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
+import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const STORE = "/var/lib/chessguru/user-books";
 // Whose Drive the book host is pointed at. One library, one owner —
 // these are copyrighted books belonging to a specific person.
 const LIBRARY_OWNER = process.env.CHESSGURU_LIBRARY_OWNER ?? "ranjith_vsk";
+
+// The local vision service (France, always-on) renders a PDF's pages and
+// extracts its diagrams straight into STORE/<id>/, reporting through
+// GET /book/status/<id>. This is what lets a coach's uploaded book live on
+// France and be readable in seconds, instead of depending on the owner's PC
+// (the Vinayaka book host) being awake. Rendering needs no GPU — only the
+// diagram/position pass does, and that streams in as it completes.
+const VISION_URL = process.env.CHESSGURU_VISION_URL ?? "http://127.0.0.1:5100";
 
 type Diagram = { page: number; bbox: number[] | null; fen: string; conf?: number; corrected?: boolean; disputed?: boolean };
 
@@ -444,6 +452,107 @@ export class UserBooksController {
           : `could not save (${e?.code || "unknown error"})`);
     }
     return { ok: true, key, saved: !!(tree && tree.length) };
+  }
+
+  /** A coach uploading their own book.
+   *
+   *  Checks the library FIRST. If we already have the book, the useful answer
+   *  is the one we have already read — with its pages and positions — not a
+   *  second copy of the same PDF sitting in the queue for fifteen minutes.
+   *  Matching is on the cleaned title, so the same book uploaded under a
+   *  dump-site filename still matches.
+   *
+   *  Coaches only: reading a book costs GPU time on a shared machine, and the
+   *  library is one person's copyrighted collection.
+   */
+  @Post("upload")
+  async upload(@Query("title") title: string, @Req() req: any) {
+    const uid = this.requireUser(req);
+    const role = String(req?.session?.role ?? "");
+    if (role !== "coach" && role !== "academy_owner") {
+      throw new ForbiddenException("only coaches can add books");
+    }
+    const name = String(title ?? "").trim();
+    if (!name) throw new BadRequestException("the book needs a title");
+    const body: Buffer | undefined = req?.body;
+    if (!Buffer.isBuffer(body) || body.length === 0) {
+      throw new BadRequestException("no file received");
+    }
+    if (!body.subarray(0, 4).toString("latin1").startsWith("%PDF")) {
+      throw new BadRequestException("that file is not a PDF");
+    }
+
+    // Best-effort dedup against the owner's Drive library on Vinayaka. If the PC
+    // is asleep we simply SKIP it and store locally — an upload must never fail
+    // because a remote box is down. This check used to THROW "the library is not
+    // reachable right now" and blocked every upload the moment Vinayaka went
+    // offline; that outage is the reason for this rewrite.
+    try {
+      const r = await this.bookHost("/library/match", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: name, mb: body.length / 1e6 }),
+      });
+      if (r?.match) return { ok: true, alreadyHave: true, book: r.match };
+    } catch { /* Vinayaka down/slow — fall through to a France-local upload */ }
+
+    // Store + ingest on France (always-on). The PDF lives here; the local vision
+    // service renders its pages and extracts positions straight into the same
+    // store the reader already serves from. The book is readable as soon as its
+    // pages render — no GPU box in the loop for reading.
+    const id = this.freshBookId(name);
+    const dir = bookDir(id);
+    const pdfPath = join(dir, "book.pdf");
+    try {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(pdfPath, body);
+      // meta.json carries OWNERSHIP. The ingest never writes it, and the shelf
+      // hides any book whose meta.owner !== the viewer — so without this the
+      // coach would upload a book they then couldn't see. Written before ingest
+      // so it's ours from the very first status poll.
+      writeFileSync(join(dir, "meta.json"), JSON.stringify({
+        title: name, owner: uid, coverPage: 0,
+        source: "france-upload", uploadedAt: new Date().toISOString(),
+      }));
+    } catch (e: any) {
+      throw new ServiceUnavailableException(
+        `could not save the book (${e?.code || "write failed"})`);
+    }
+
+    // Kick off render + diagram extraction on France. The service starts a
+    // background thread and returns immediately, reporting through status.json
+    // (which the reader polls via GET /:id). If it's momentarily unreachable the
+    // file is safely stored and shows as "queued" — re-uploading re-triggers it.
+    let started = false;
+    try {
+      const r = await fetch(`${VISION_URL}/book/ingest`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ book_id: id, pdf_path: pdfPath }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      started = r.ok;
+    } catch { /* stored anyway; the reader will show it as queued */ }
+    if (!started) {
+      try {
+        writeFileSync(join(dir, "status.json"),
+          JSON.stringify({ state: "queued", pages: 0, done: 0 }));
+      } catch { /* ignore */ }
+    }
+    return {
+      ok: true, alreadyHave: false, local: true,
+      book: { id, title: name, owner: uid, by: uid,
+              state: started ? "rendering" : "queued" },
+    };
+  }
+
+  /** A fresh, traversal-safe book id derived from the title, unique in the
+   *  store. Slug only — the read paths resolve it under STORE and reject any id
+   *  that would escape, so an id is always a single safe path segment. */
+  private freshBookId(title: string): string {
+    const base = title.toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "book";
+    let id = base;
+    for (let n = 2; existsSync(join(STORE, id)); n++) id = `${base}-${n}`;
+    return id;
   }
 
   @Get(":id/page/:n")

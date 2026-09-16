@@ -193,5 +193,46 @@ async function bootstrap() {
   attachVideoSignalWs(app.getHttpServer(), dbConn as any);
   // eslint-disable-next-line no-console
   console.log(`ChessGuru v2 API on :${port}`);
+
+  // ── Zero-downtime reloads — a deploy must NEVER disturb a live class ─────────
+  // Runs under pm2 cluster mode (1 instance). On `pm2 reload` pm2 brings up a
+  // fresh worker (already sharing this port) and only then signals THIS worker
+  // to stop. Two things make that swap invisible to a class in progress:
+  //
+  //   1) Announce readiness. Harmless if wait_ready isn't set (pm2 ignores it),
+  //      correct if it ever is.
+  //   2) DRAIN on the stop signal instead of dying on the spot. pm2 sends
+  //      SIGINT (then SIGKILL after kill_timeout). We stop accepting new
+  //      connections, push idle keep-alive clients over to the fresh worker,
+  //      let the requests already in flight finish, then exit. Before this the
+  //      worker exited the instant it got the signal and dropped every request
+  //      mid-flight on :4000 — a /auth/* login or a POST …/send-position — which
+  //      is precisely what students hit as "couldn't log in / send-position
+  //      failed" when a build reloaded during class. (Board sync + video run on
+  //      the separate :4100 process and were never affected; this closes the
+  //      remaining :4000 gap.)
+  if (process.send) process.send("ready");
+
+  let draining = false;
+  const drain = (sig: string) => {
+    if (draining) return;
+    draining = true;
+    // eslint-disable-next-line no-console
+    console.log(`ChessGuru v2 API draining on ${sig} …`);
+    try {
+      // End idle keep-alive sockets now so those clients reconnect to the fresh
+      // worker immediately; a socket with a request in flight is left to finish.
+      (app.getHttpServer() as any).closeIdleConnections?.();
+    } catch { /* older node — app.close() still drains in-flight requests */ }
+    // Backstop under pm2's default kill_timeout (1600ms): long-lived WS on this
+    // box (class-ws/video-signal are also attached here, though live traffic
+    // uses :4100) would otherwise hold the server open. Sub-second HTTP requests
+    // finish well before this, so login/send-position are never truncated.
+    const backstop = setTimeout(() => process.exit(0), 1400);
+    backstop.unref();
+    void app.close().then(() => process.exit(0), () => process.exit(0));
+  };
+  process.on("SIGINT", () => drain("SIGINT"));
+  process.on("SIGTERM", () => drain("SIGTERM"));
 }
 bootstrap();
