@@ -13,7 +13,7 @@
 
 import {
   BadRequestException, Body, Controller, Delete, ForbiddenException, Get,
-  NotFoundException, Param, Post, Req, UnauthorizedException,
+  NotFoundException, Param, Post, Req, ServiceUnavailableException, UnauthorizedException,
 } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
@@ -291,7 +291,7 @@ export class ClassPositionPacksController {
     // (before any move). Per-node shapes live inside tree already. Both fields
     // are optional; older clients simply omit them.
     const startShapes = cleanShapes(body?.startShapes);
-    await this.packs().insertOne({
+    const pack = {
       _id: packId as any,
       classId: id,
       classTitle: klass?.title || "Class",
@@ -317,7 +317,22 @@ export class ClassPositionPacksController {
       recipientUserIds: recipients,
       maiaRating: null as number | null,
       maiaBand: null as string | null,
-    });
+    };
+    // Deliver the pack. If the write fails for ANY reason, never lose the
+    // coach's work: stash a recoverable copy in `failedPositionSends` (treeJson
+    // is a string, so this insert can't hit the depth limit either) and tell the
+    // coach it's saved so they can resend — instead of the position vanishing,
+    // which is exactly what happened when the depth error 500'd the insert.
+    try {
+      await this.packs().insertOne(pack);
+    } catch (e: any) {
+      try {
+        await this.conn.db!.collection("failedPositionSends").insertOne({
+          ...pack, failedAt: new Date(), error: String(e?.message ?? e).slice(0, 300),
+        });
+      } catch { /* even the fallback failed — surfaced by the global exception filter */ }
+      throw new ServiceUnavailableException("Couldn't deliver the position just now — it's been saved, please send it again.");
+    }
     // Fire-and-forget Maia rating: rate the STARTING position with the
     // first move as the expected solution — that's the "puzzle" the coach
     // was setting up. Runs after the response is sent so a slow engine
