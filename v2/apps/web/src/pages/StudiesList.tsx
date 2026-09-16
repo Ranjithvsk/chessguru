@@ -48,7 +48,6 @@ export default function StudiesListPage() {
     enabled: !!auth?.loggedIn,
   });
 
-  if (auth && !auth.loggedIn) return <Navigate to="/login?back=/studies" replace />;
 
   const items = list.data?.items ?? [];
 
@@ -72,6 +71,9 @@ export default function StudiesListPage() {
     return out;
   }, [items]);
 
+  // Guard AFTER every hook — React renders fewer hooks on the early-return pass otherwise and
+  // throws #300, which blanks the page (owner hit it on /studies, 2026-09-16).
+  if (auth && !auth.loggedIn) return <Navigate to="/login?back=/studies" replace />;
   return (
     <div className="mx-auto max-w-5xl px-3 py-6">
       <div className="mb-5 flex items-center justify-between">

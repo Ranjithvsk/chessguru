@@ -41,15 +41,18 @@ interface Tournament {
 
 export default function ArbiterList() {
   const id = useParams().id;
-  if (id) return <ArbiterDetail id={id} />;
-
   const qc = useQueryClient();
   const nav = useNavigate();
   const { data, isLoading } = useQuery({
     queryKey: ["arbiter", "list"],
     queryFn: () => get<{ rows: TournamentSummary[] }>("/api/pairings/tournaments"),
+    enabled: !id,   // the detail view below does not need the list
   });
   const [newOpen, setNewOpen] = useState(false);
+
+  // Guard AFTER every hook — on an early-return pass React renders fewer hooks and throws #300,
+  // which blanks the whole page (owner hit it on /studies, 2026-09-16).
+  if (id) return <ArbiterDetail id={id} />;
 
   return (
     <div className="mx-auto max-w-6xl space-y-8 py-6">

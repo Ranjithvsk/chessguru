@@ -113,6 +113,19 @@ export default function ParentPortalPage() {
     staleTime: 60_000,
   });
 
+  // Every hook runs before the guards below: on an early-return pass React renders fewer hooks and
+  // throws #300, which blanks the whole page (owner hit it on /studies, 2026-09-16). So this memo
+  // reads q.data directly and tolerates data that has not arrived yet.
+  const invoicesByChild = useMemo(() => {
+    const m = new Map<string, Invoice[]>();
+    for (const inv of q.data?.invoices ?? []) {
+      const list = m.get(inv.studentId) || [];
+      list.push(inv);
+      m.set(inv.studentId, list);
+    }
+    return m;
+  }, [q.data?.invoices]);
+
   if (auth && !auth.loggedIn) return <Navigate to="/login?back=/parent" replace />;
   if (q.isLoading) return <div className="mx-auto max-w-5xl px-3 py-8 text-sm text-ink-400">Loading your family portal…</div>;
   if (q.error || !q.data) {
@@ -124,15 +137,7 @@ export default function ParentPortalPage() {
   }
   const d = q.data;
   const children = d.children;
-  const invoicesByChild = useMemo(() => {
-    const m = new Map<string, Invoice[]>();
-    for (const inv of d.invoices) {
-      const list = m.get(inv.studentId) || [];
-      list.push(inv);
-      m.set(inv.studentId, list);
-    }
-    return m;
-  }, [d.invoices]);
+
 
   if (children.length === 0) {
     return (

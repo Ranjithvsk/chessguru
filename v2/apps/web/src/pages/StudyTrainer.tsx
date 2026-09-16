@@ -242,12 +242,15 @@ export default function StudyTrainer() {
     if (!finished()) setStatus({ kind: "play", msg: "Your move." });
   }, []);
 
-  if (!def) return <Navigate to="/study" replace />;
 
   const over = game.current.isGameOver();
   const myTurn = ready && !thinking && !over && game.current.turn() === "w";
   const dests = useMemo(() => (myTurn ? destsFromChess(game.current as never) : new Map()), [fen, myTurn]);
   const tone = { play: "text-ink-200", think: "text-gold-400", win: "text-accent-400", draw: "text-rose-400" }[status.kind];
+
+  // Guard AFTER every hook — on the early-return pass React renders fewer hooks and throws #300,
+  // which blanks the page (owner hit it on /studies, 2026-09-16).
+  if (!def) return <Navigate to="/study" replace />;
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">

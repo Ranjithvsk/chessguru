@@ -63,6 +63,23 @@ export default function FeesProgramDetailPage() {
     enabled: !!planQ.data?.plan?.id,
   });
 
+
+  // Client-side status filter for the enrolments table. Default = ACTIVE so
+  // "who is being billed right now" is the first read. Ended shows history
+  // (students who left the batch — invoices they haven't paid still owed).
+  const [enrolFilter, setEnrolFilter] = useState<"ACTIVE" | "ENDED" | "PAUSED" | "ALL">("ACTIVE");
+  const enrolCounts = useMemo(() => {
+    const c = { ACTIVE: 0, PAUSED: 0, ENDED: 0 };
+    for (const e of enrolQ.data?.enrollments ?? []) c[e.status] = (c[e.status] ?? 0) + 1;
+    return c;
+  }, [enrolQ.data?.enrollments]);
+  const visibleEnrollments = useMemo(
+    () => { const rows = enrolQ.data?.enrollments ?? []; return enrolFilter === "ALL" ? rows : rows.filter((e) => e.status === enrolFilter); },
+    [enrolQ.data?.enrollments, enrolFilter],
+  );
+
+  // Guards AFTER every hook — on an early-return pass React renders fewer hooks and throws #300,
+  // which blanks the page (owner hit that class of bug on /studies, 2026-09-16).
   if (!id) return null;
   if (programQ.isLoading) return <div className="mx-auto max-w-6xl px-6 py-10"><SkeletonHeader /></div>;
   if (programQ.isError)   return <ErrorBanner message={programQ.error instanceof Error ? programQ.error.message : t("Couldn't load program.")} />;
@@ -71,19 +88,6 @@ export default function FeesProgramDetailPage() {
   const plan = planQ.data?.plan ?? null;
   const enrollments = enrolQ.data?.enrollments ?? [];
 
-  // Client-side status filter for the enrolments table. Default = ACTIVE so
-  // "who is being billed right now" is the first read. Ended shows history
-  // (students who left the batch — invoices they haven't paid still owed).
-  const [enrolFilter, setEnrolFilter] = useState<"ACTIVE" | "ENDED" | "PAUSED" | "ALL">("ACTIVE");
-  const enrolCounts = useMemo(() => {
-    const c = { ACTIVE: 0, PAUSED: 0, ENDED: 0 };
-    for (const e of enrollments) c[e.status] = (c[e.status] ?? 0) + 1;
-    return c;
-  }, [enrollments]);
-  const visibleEnrollments = useMemo(
-    () => enrolFilter === "ALL" ? enrollments : enrollments.filter((e) => e.status === enrolFilter),
-    [enrollments, enrolFilter],
-  );
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-10">
