@@ -54,17 +54,6 @@ export default function StudyBoardPage() {
     refetchOnWindowFocus: false,
   });
 
-  if (q.isLoading) {
-    return <div className="p-8 text-sm text-ink-400">Loading chapter…</div>;
-  }
-  if (q.isError || !q.data) {
-    return (
-      <div className="p-8">
-        <div className="text-sm text-rose-400">Could not open this chapter.</div>
-        <Link to={`/studies/${sid}`} className="mt-3 inline-block text-sm text-brand-300 hover:underline">← Back to study</Link>
-      </div>
-    );
-  }
   // Came back from /board-editor?returnTo=… with a scanned notebook position:
   // make it the chapter's starting position (fresh move tree), then drop the
   // param so a reload does not re-apply it.
@@ -78,6 +67,18 @@ export default function StudyBoardPage() {
       .then(() => qc.invalidateQueries({ queryKey: ["chapter", sid, cid] }))
       .finally(() => { applying.current = false; setSp({}, { replace: true }); });
   }, [scannedFen, q.data, sid, cid]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (q.isLoading) {
+    return <div className="p-8 text-sm text-ink-400">Loading chapter…</div>;
+  }
+  if (q.isError || !q.data) {
+    return (
+      <div className="p-8">
+        <div className="text-sm text-rose-400">Could not open this chapter.</div>
+        <Link to={`/studies/${sid}`} className="mt-3 inline-block text-sm text-brand-300 hover:underline">← Back to study</Link>
+      </div>
+    );
+  }
 
   // Keyed on the chapter id so switching chapters rebuilds the board (and its
   // loopback socket) from the new starting state instead of reusing the old.
