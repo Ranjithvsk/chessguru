@@ -268,14 +268,13 @@ export default function TriangulationStudyPage() {
   // ─── Render ────────────────────────────────────────────────────────────
 
   const header = (
-    <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+    <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
       <div>
         <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-400">Endgame concept</div>
         <h1 className="font-display text-3xl text-white">Triangulation</h1>
-        <p className="mt-1 max-w-2xl text-sm text-ink-400">
-          A king manoeuvre whose whole purpose is to lose a tempo, so the opponent is the one left
-          with the move. Read from the academy library — Dvoretsky, Neustadtl, Panchenko, Alburt,
-          Seirawan — and every position checked against the engine.
+        <p className="mt-0.5 max-w-3xl text-xs text-ink-400">
+          A king manoeuvre whose whole purpose is to lose a tempo, so the opponent is left with the
+          move. From the academy library, every position engine-checked.
         </p>
       </div>
       <div className="flex items-center gap-3">
@@ -298,7 +297,7 @@ export default function TriangulationStudyPage() {
   );
 
   const patternPills = (
-    <div className="mb-4 flex flex-wrap gap-2">
+    <div className="mb-2 flex flex-wrap gap-2">
       <button type="button" onClick={() => setActivePattern("all")}
         className={`rounded-full px-3 py-1 text-xs font-semibold ${activePattern === "all" ? "bg-brand-500/25 text-brand-100" : "bg-ink-800 text-ink-400 hover:bg-ink-700"}`}
       >All ({TRIANGULATION_POSITIONS.length})</button>
@@ -315,25 +314,38 @@ export default function TriangulationStudyPage() {
     </div>
   );
 
-  // The notebook board + its notation panel. Same components as My Studies.
-  const boardBlock = (
-    <div className="grid gap-4 lg:grid-cols-[minmax(320px,1.35fr)_minmax(240px,1fr)]">
-      <div className="min-w-0">
-        <div className="rounded-xl border border-ink-700 bg-ink-900 p-3">
-          <div className="mb-2 flex items-center justify-between gap-2 text-xs">
-            <span className="rounded-full bg-ink-800 px-2 py-1 text-ink-300">
-              {turn === "white" ? "White" : "Black"} to move
-            </span>
-            {mode === "practice" && !verdict && (
-              <span className="text-ink-400">Play the move on the board</span>
-            )}
-            {played && <span className="font-mono text-ink-400">you played {played}</span>}
-          </div>
-          <SharedClassBoard key={room} local room={room} localInitial={localInitial} onLocalChange={onLocalChange} />
-          <BoardChrome />
+  // The notebook board + its notation panel. Same components as My Studies —
+  // and, like My Studies, the board MUST sit inside a sized container: it lays
+  // itself out in container-query units, so without containerType and a real
+  // height it resolves against the viewport and overflows the page.
+  const boardPane = (
+    <div className="flex min-w-0 flex-col">
+      <div className="rounded-xl border border-ink-700 bg-ink-900 p-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <span className="rounded-full bg-ink-800 px-2.5 py-1 font-medium text-ink-200">
+            {turn === "white" ? "⬜ White" : "⬛ Black"} to move
+          </span>
+          <span className="text-ink-500">
+            {mode === "practice"
+              ? (verdict ? "" : "play your move on the board")
+              : "try any line you like — nothing is graded until you submit"}
+          </span>
         </div>
+        <div
+          className="relative flex min-h-0 items-center justify-center overflow-hidden"
+          style={{ containerType: "size", height: "min(66vh, 620px)" } as React.CSSProperties}
+        >
+          <SharedClassBoard key={room} local room={room} localInitial={localInitial} onLocalChange={onLocalChange} />
+        </div>
+        <BoardChrome />
       </div>
-      <div className="min-w-0 overflow-y-auto" style={{ maxHeight: "min(74vh, 680px)" }}>
+    </div>
+  );
+
+  const notationPane = (
+    <div className="min-w-0 rounded-xl border border-ink-700 bg-ink-900/60 p-1">
+      <div className="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-ink-500">Notation</div>
+      <div className="min-w-0 overflow-y-auto" style={{ maxHeight: "min(66vh, 620px)" }}>
         <ClassNotationPanel room={room} role="coach" />
       </div>
     </div>
@@ -345,7 +357,7 @@ export default function TriangulationStudyPage() {
     const accuracy = session.solved + session.wrong === 0 ? 0
       : Math.round((session.solved / (session.solved + session.wrong)) * 100);
     return (
-      <div className="mx-auto max-w-6xl px-4 py-6">
+      <div className="w-full">
         {header}
         {patternPills}
         <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
@@ -380,7 +392,10 @@ export default function TriangulationStudyPage() {
           {!verdict && <>🎯 {turn === "white" ? "White" : "Black"} to move — lose a tempo</>}
         </div>
 
-        {boardBlock}
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+          {boardPane}
+          <div className="min-w-0">{notationPane}</div>
+        </div>
 
         <div className="mt-4 rounded-xl border border-ink-700 bg-ink-900 p-4">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-400">
@@ -414,10 +429,16 @@ export default function TriangulationStudyPage() {
   // ─── Study mode ────────────────────────────────────────────────────────
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6">
+    <div className="w-full">
       {header}
 
-      <div className="mb-5 grid gap-4 rounded-xl border border-ink-700 bg-ink-900 p-4 md:grid-cols-3">
+      <details className="group mb-3 rounded-xl border border-ink-700 bg-ink-900">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+          <span className="text-sm font-semibold text-white">What triangulation is, and when it works</span>
+          <span className="text-xs text-ink-400 group-open:hidden">show</span>
+          <span className="hidden text-xs text-ink-400 group-open:inline">hide</span>
+        </summary>
+        <div className="grid gap-4 border-t border-ink-800 px-4 py-4 md:grid-cols-3">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-400">The idea</div>
           <p className="mt-1 text-sm text-ink-300">
@@ -443,31 +464,35 @@ export default function TriangulationStudyPage() {
             but the king is the piece that does it in the endings where it matters.
           </p>
         </div>
-      </div>
+        </div>
+      </details>
 
       {patternPills}
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(240px,1fr)_minmax(560px,3fr)]">
-        <div className="space-y-2">
-          {pool.map((p) => (
-            <button key={p.id} type="button" onClick={() => selectFromList(p)}
-              className={`block w-full rounded-lg border p-3 text-left transition ${p.id === activeId ? "border-brand-500 bg-brand-500/10" : "border-ink-700 bg-ink-900 hover:border-ink-500"}`}>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-semibold text-white">{p.name}</span>
-                <span className="shrink-0 rounded-full bg-ink-800 px-2 py-0.5 text-[10px] text-ink-400">★ {p.difficulty}</span>
-              </div>
-              <div className="mt-1 flex items-center gap-2 text-[11px] uppercase tracking-wide text-ink-500">
-                {TRIANGULATION_PATTERNS.find((x) => x.id === p.pattern)?.label}
-                {p.studyOnly && <span className="rounded bg-ink-800 px-1.5 py-0.5 text-[9px] normal-case tracking-normal text-ink-400">demo</span>}
-              </div>
-            </button>
-          ))}
-        </div>
+      {/* The chapter's positions, as a strip. A left rail costs the board 260px
+          of width inside a 1152px shell, and the board is the point of the page. */}
+      <div className="-mx-1 mb-3 flex snap-x gap-2 overflow-x-auto px-1 pb-2">
+        {pool.map((p) => (
+          <button key={p.id} type="button" onClick={() => selectFromList(p)}
+            className={`w-52 shrink-0 snap-start rounded-lg border p-2.5 text-left transition ${p.id === activeId ? "border-brand-500 bg-brand-500/10" : "border-ink-700 bg-ink-900 hover:border-ink-500"}`}>
+            <div className="flex items-start justify-between gap-2">
+              <span className="line-clamp-2 text-xs font-semibold leading-snug text-white">{p.name}</span>
+              <span className="shrink-0 rounded-full bg-ink-800 px-1.5 py-0.5 text-[10px] text-ink-400">★ {p.difficulty}</span>
+            </div>
+            <div className="mt-1 flex items-center gap-1.5 truncate text-[10px] uppercase tracking-wide text-ink-500">
+              {TRIANGULATION_PATTERNS.find((x) => x.id === p.pattern)?.label}
+              {p.studyOnly && <span className="rounded bg-ink-800 px-1 py-0.5 text-[9px] normal-case tracking-normal text-ink-400">demo</span>}
+            </div>
+          </button>
+        ))}
+      </div>
 
-        <div className="min-w-0">
-          {boardBlock}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+        {boardPane}
+        <div className="min-w-0">{notationPane}</div>
 
-          <div className="mt-4 rounded-xl border border-ink-700 bg-ink-900 p-4">
+        <div className="min-w-0 xl:col-span-2">
+          <div className="rounded-xl border border-ink-700 bg-ink-900 p-4">
             <h2 className="font-display text-lg text-white">{active.name}</h2>
             <p className="mt-1 text-xs uppercase tracking-wide text-brand-400">
               {TRIANGULATION_PATTERNS.find((x) => x.id === active.pattern)?.label} · ★ {active.difficulty}
