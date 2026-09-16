@@ -191,6 +191,26 @@ export const TRIANGULATION_POSITIONS: TriangulationPosition[] = [
     outcome: "White wins.",
   },
 
+  // ───────── found by searching our own puzzle database ─────────
+  {
+    id: "pz-01",
+    name: "The locked wing — from our puzzles",
+    pattern: "triangle",
+    fen: "8/8/8/1p1P2k1/pPp4p/P3K2P/8/8 b - - 0 1",
+    bestMoveSan: "Kf5",
+    bestMoveUci: "g5f5",
+    source: "Found by searching the academy's own puzzle database with the engine — 157,763 king-and-pawn positions examined, of which this was the single genuine triangulation. Lichess puzzle XUBqd, rated 2376.",
+    think: "Every pawn on the board is frozen. Neither side can touch one without losing it, so the only currency left is the move itself. Who runs out of king moves first, and how do you make sure it is not you?",
+    mechanism:
+      "With the pawns locked, this is a pure tempo fight. Black's king tours f5 and g6 and comes back to g5, and White's king has fewer squares to answer with — it is pinned to the defence of d5 and cannot wander. When the same position reappears with White to move, White has to give ground.",
+    line: "1…Kf5 2.Kd4 Kg6 3.Ke3 Kf5 4.Kd4 Kg6 5.Ke3 Kg5 — the starting position, with White to move.",
+    engine: "Stockfish: +11.2 for Black as it stands, +19.8 with White to move. The engine's own main line is the manoeuvre.",
+    discussion:
+      "This one is worth contrasting with the book positions. There the triangle decides between a win and a draw; here Black is winning either way and the tempo only makes it faster. That is why triangulation is so rare in tactical puzzle sets — a puzzle wants one move that changes the result, and losing a tempo usually changes only the speed.",
+    difficulty: 2100,
+    outcome: "Black wins.",
+  },
+
   // ───────── H. Neustadtl, 1898 ─────────
   {
     id: "neu-01",
