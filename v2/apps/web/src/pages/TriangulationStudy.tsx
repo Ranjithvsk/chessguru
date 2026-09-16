@@ -21,13 +21,13 @@ import SharedClassBoard, {
   useClassCursorInfo,
 } from "../components/SharedClassBoard";
 import { ClassNotationPanel } from "../components/ClassNotationPanel";
-import type { LocalRoomState } from "../lib/localClassRoom";
+import type { LocalRoomState, LocalTreeNode } from "../lib/localClassRoom";
 import { studyComplete, studyMe } from "../lib/api";
 import {
   TRIANGULATION_POSITIONS, TRIANGULATION_PATTERNS, TRIANGULATION_PRACTICE,
   type TriangulationPattern, type TriangulationPosition,
 } from "../lib/triangulationCorpus";
-import { TRIANGULATION_ANSWERS, gradeMove, MARKS, type SideAnswer } from "../lib/triangulationAnswers";
+import { TRIANGULATION_ANSWERS, markMove, MARKS } from "../lib/triangulationAnswers";
 
 type Mode = "study" | "practice";
 type Verdict = null | "correct" | "wrong";
@@ -64,26 +64,36 @@ function BoardChrome() {
 }
 
 
-/** Parse what the student typed — SAN ("Kc4") or plain squares ("d5c4"). */
-function parseMove(fenBoard: string, side: "white" | "black", text: string): string | null {
-  const t = text.trim();
-  if (!t) return null;
-  const fen = `${fenBoard.split(" ")[0]} ${side === "white" ? "w" : "b"} - - 0 1`;
-  let c: Chess;
-  try { c = new Chess(fen); } catch { return null; }
-  const legal = c.moves({ verbose: true });
-  const clean = t.replace(/[+#!?]/g, "").replace(/[\u2013\u2014-]/g, "").toLowerCase();
-  for (const m of legal) {
-    const san = m.san.replace(/[+#!?]/g, "").toLowerCase();
-    const uci = (m.from + m.to + (m.promotion ?? "")).toLowerCase();
-    if (clean === san || clean === uci || clean === uci.slice(0, 4)) return m.from + m.to + (m.promotion ?? "");
+/** The student's answer is the line they played — read it off the notation tree. */
+function mainline(st: LocalRoomState, max = 4): string[] {
+  const out: string[] = [];
+  let nodes: LocalTreeNode[] | undefined = st.tree;
+  while (nodes && nodes.length && out.length < max) {
+    const n: LocalTreeNode | undefined = nodes[0];
+    if (!n) break;
+    out.push(n.move.from + n.move.to + (n.move.promotion ?? ""));
+    nodes = n.children;
   }
-  return null;
+  return out;
+}
+
+/** Same line, in the notation the student reads on the panel. */
+function lineSan(fen: string, ucis: string[]): string[] {
+  const out: string[] = [];
+  let c: Chess;
+  try { c = new Chess(fen); } catch { return out; }
+  for (const u of ucis) {
+    const mv = c.moves({ verbose: true }).find((m) => m.from + m.to + (m.promotion ?? "") === u
+      || (m.from + m.to) === u);
+    if (!mv) break;
+    out.push(mv.san);
+    c.move(mv.san);
+  }
+  return out;
 }
 
 interface Graded {
-  white: { uci: string | null; mark: ReturnType<typeof gradeMove> };
-  black: { uci: string | null; mark: ReturnType<typeof gradeMove> };
+  marks: Array<ReturnType<typeof markMove>>;
   score: number;
   outOf: number;
   verdict: string;
@@ -91,11 +101,11 @@ interface Graded {
 
 function verdictFor(score: number, outOf: number): string {
   const pct = outOf ? score / outOf : 0;
-  if (pct === 1) return "Full marks. You saw it from both sides — which is the only way this concept is ever really understood.";
-  if (pct >= 0.8) return "Almost exactly right. One side is the move; the other keeps the result but misses the point.";
-  if (pct >= 0.6) return "Sound but not sharp. Neither move throws the position away, yet neither is the move the position is asking for.";
-  if (pct >= 0.3) return "Half there. One side holds; the other changes the result. Read the mechanism below and try the board again.";
-  return "Not yet. Both moves change the result. The question to ask is not what is a good move, but who would rather not be the one to move.";
+  if (pct === 1) return "Full marks. You found the move and you read the defence — which is the only way this concept is ever really understood.";
+  if (pct >= 0.8) return "Almost exactly right. One half is the move; the other keeps the result but misses the point.";
+  if (pct >= 0.6) return "Sound but not sharp. Nothing here throws the position away, yet neither move is the one the position is asking for.";
+  if (pct >= 0.3) return "Half there. One move holds; the other changes the result. Read the mechanism below and play it through again.";
+  return "Not yet. The question to ask is not what is a good move, but who would rather not be the one to move.";
 }
 
 const MARK_LABEL: Record<string, string> = {
@@ -119,8 +129,7 @@ export default function TriangulationStudyPage() {
   const [verdict, setVerdict] = useState<Verdict>(null);
   const [played, setPlayed] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
-  const [whiteIn, setWhiteIn] = useState("");
-  const [blackIn, setBlackIn] = useState("");
+  const [lineUci, setLineUci] = useState<string[]>([]);
   const [graded, setGraded] = useState<Graded | null>(null);
   const [rating, setRating] = useState<number | null>(null);
   const [ratingNb, setRatingNb] = useState<number>(0);
@@ -164,7 +173,7 @@ export default function TriangulationStudyPage() {
   }, []);
 
   const clearAnswers = useCallback(() => {
-    setWhiteIn(""); setBlackIn(""); setGraded(null);
+    setLineUci([]); setGraded(null);
   }, []);
 
   const pickNext = useCallback((exclude: Set<string>): TriangulationPosition => {
@@ -223,46 +232,42 @@ export default function TriangulationStudyPage() {
   }, [active, rating, serveNext]);
 
   const answers = TRIANGULATION_ANSWERS[active.id];
+  const answerSan = useMemo(() => lineSan(active.fen, lineUci), [active.fen, lineUci]);
 
   const checkAnswers = useCallback(() => {
-    const a = TRIANGULATION_ANSWERS[active.id];
-    const wUci = a?.white ? parseMove(active.fen, "white", whiteIn) : null;
-    const bUci = a?.black ? parseMove(active.fen, "black", blackIn) : null;
-    // The engine and the book can prefer different moves that both win — the
-    // Dvoretsky triangle can be walked either way round. Whichever the student
-    // gives, the move the chapter teaches counts as the move, not as merely sound.
+    const k = TRIANGULATION_ANSWERS[active.id];
+    const m1 = lineUci[0] ?? null;
+    const m2 = lineUci[1] ?? null;
+    let mark1 = markMove(k?.mover, m1);
+    // The chapter's move and the engine's can differ and both win — the
+    // Dvoretsky triangle can be walked either way round. The move the chapter
+    // teaches counts as the move, not as merely sound.
     const taught = new Set<string>([active.bestMoveUci, ...(active.altMoveUci ?? [])]);
-    const mark = (side: "white" | "black", ans: SideAnswer | null, uci: string | null) => {
-      const m = ans ? gradeMove(ans, uci) : "none";
-      if (m === "sound" && uci && side === turn && taught.has(uci)) return "best" as const;
-      return m;
-    };
-    const wMark = mark("white", a?.white ?? null, wUci);
-    const bMark = mark("black", a?.black ?? null, bUci);
-    const outOf = (a?.white ? 5 : 0) + (a?.black ? 5 : 0);
-    const score = (MARKS[wMark] ?? 0) + (MARKS[bMark] ?? 0);
-    setGraded({ white: { uci: wUci, mark: wMark }, black: { uci: bUci, mark: bMark },
-                score, outOf, verdict: verdictFor(score, outOf) });
+    if (mark1 === "sound" && m1 && taught.has(m1)) mark1 = "best";
+    const mark2 = markMove(m1 ? k?.replies[m1] : undefined, m2);
+    const outOf = 10;
+    const score = (MARKS[mark1] ?? 0) + (MARKS[mark2] ?? 0);
+    setGraded({ marks: [mark1, mark2], score, outOf, verdict: verdictFor(score, outOf) });
     setRevealed(true);
-    // A position is "solved" for the rating when both sides were found exactly.
-    const full = outOf > 0 && score === outOf;
-    studyComplete(active.id, full, rating ?? 1200)
+    studyComplete(active.id, score === outOf, rating ?? 1200)
       .then((res) => {
         if (!res || res.ratingDiff == null) return;
         setLastDelta(res.ratingDiff); setRating(res.rating); setRatingNb((n) => n + 1);
       })
       .catch(() => { /* rating optional */ });
-  }, [active, whiteIn, blackIn, rating, turn]);
+  }, [active, lineUci, rating]);
 
   // The notebook board reports every change; in Exercise mode the first move
   // played on it is the answer.
   const onLocalChange = useCallback((st: LocalRoomState) => {
+    const line = mainline(st);
+    setLineUci(line);
     if (mode !== "practice" || answered.current) return;
-    const first = st.tree?.[0]?.move;
+    const first = line[0];
     if (!first) return;
     answered.current = true;
-    setPlayed(`${first.from}${first.to}`);
-    grade(`${first.from}${first.to}`);
+    setPlayed(first);
+    grade(first);
   }, [mode, grade]);
 
   // ─── Render ────────────────────────────────────────────────────────────
@@ -504,45 +509,41 @@ export default function TriangulationStudyPage() {
               </div>
             )}
 
-            {/* Try as many variations as you like on the board above — the
-                notation panel keeps them all. Then commit to one move a side. */}
+            {/* The answer is whatever you played on the board — the notation
+                panel already has it, so there is nothing to retype. */}
             <div className="mt-4 rounded-lg border border-ink-700 bg-ink-950/40 p-3">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-400">Your answer</div>
               <p className="mt-1 text-xs text-ink-400">
-                Play through as many lines as you like on the board — the notation panel keeps every
-                variation. When you are ready, give one move for each side.
+                Play it on the board: your move, then the reply you expect. Try as many lines as you
+                like — the notation panel keeps them all, and only the main line is marked.
               </p>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <label className="block">
-                  <span className="text-xs text-ink-300">Good move for White</span>
-                  <input
-                    value={whiteIn}
-                    onChange={(e) => setWhiteIn(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter" && !graded) checkAnswers(); }}
-                    disabled={!answers?.white || !!graded}
-                    placeholder={answers?.white ? "e.g. Ke5" : "White has no move here"}
-                    className="mt-1 w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 font-mono text-sm text-white placeholder-ink-600 focus:border-brand-400 focus:outline-none disabled:opacity-50"
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-xs text-ink-300">Good move for Black</span>
-                  <input
-                    value={blackIn}
-                    onChange={(e) => setBlackIn(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter" && !graded) checkAnswers(); }}
-                    disabled={!answers?.black || !!graded}
-                    placeholder={answers?.black ? "e.g. Kd7" : "Black has no move here"}
-                    className="mt-1 w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 font-mono text-sm text-white placeholder-ink-600 focus:border-brand-400 focus:outline-none disabled:opacity-50"
-                  />
-                </label>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-ink-900 px-3 py-2">
+                <span className="text-[11px] uppercase tracking-wide text-ink-500">Main line</span>
+                {answerSan.length === 0 ? (
+                  <span className="text-sm text-ink-500">nothing played yet</span>
+                ) : (
+                  <span className="font-mono text-sm text-white">
+                    {answers?.turn === "black" ? "1… " : "1. "}
+                    {answerSan.slice(0, 2).map((san, i) => (
+                      <span key={i} className={graded ? (graded.marks[i] === "best" ? "text-emerald-200"
+                        : graded.marks[i] === "sound" ? "text-amber-200"
+                        : graded.marks[i] === "wrong" ? "text-rose-200" : "") : ""}>
+                        {san}{i === 0 && answerSan.length > 1 ? " " : ""}
+                      </span>
+                    ))}
+                    {answerSan.length > 2 && <span className="text-ink-500"> (+{answerSan.length - 2} more, not marked)</span>}
+                  </span>
+                )}
               </div>
+
               {!graded ? (
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <button type="button" onClick={checkAnswers}
-                    className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-500">
+                  <button type="button" onClick={checkAnswers} disabled={answerSan.length === 0}
+                    className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-40">
                     Check answer
                   </button>
-                  <button type="button" onClick={() => setNonce((n) => n + 1)}
+                  <button type="button" onClick={() => { setNonce((n) => n + 1); setLineUci([]); }}
                     className="rounded-lg border border-ink-700 bg-ink-900 px-4 py-2 text-sm font-semibold text-ink-300 hover:bg-ink-800">
                     Clear the board
                   </button>
@@ -554,32 +555,37 @@ export default function TriangulationStudyPage() {
                     <span className="text-sm text-ink-300">{graded.verdict}</span>
                   </div>
                   <div className="mt-3 space-y-1.5 text-sm">
-                    {(["white", "black"] as const).map((side) => {
-                      const a: SideAnswer | null = answers?.[side] ?? null;
-                      if (!a) return null;
-                      const g = graded[side];
+                    {([0, 1] as const).map((i) => {
+                      const key = i === 0 ? answers?.mover : (lineUci[0] ? answers?.replies[lineUci[0]] : undefined);
+                      const who = i === 0
+                        ? (answers?.turn === "black" ? "Black" : "White")
+                        : (answers?.turn === "black" ? "White" : "Black");
+                      const mark = graded.marks[i] ?? "none";
+                      const taughtSan = i === 0 ? active.bestMoveSan : key?.bestSan;
                       return (
-                        <div key={side} className="flex flex-wrap items-baseline gap-2">
-                          <span className="w-14 shrink-0 text-xs uppercase tracking-wide text-ink-500">{side}</span>
-                          <span className={`font-mono ${MARK_CLASS[g.mark]}`}>
-                            {g.uci ? g.uci : "—"}
+                        <div key={i} className="flex flex-wrap items-baseline gap-2">
+                          <span className="w-24 shrink-0 text-xs uppercase tracking-wide text-ink-500">
+                            {i === 0 ? `${who} — your move` : `${who} — the reply`}
                           </span>
-                          <span className={`text-xs ${MARK_CLASS[g.mark]}`}>{MARK_LABEL[g.mark]}</span>
-                          <span className="text-xs text-ink-400">
-                            · {side === turn ? "the chapter plays" : "best is"}{" "}
-                            <span className="font-mono text-ink-200">{side === turn ? active.bestMoveSan : a.bestSan}</span>
-                            {a.result === "win" ? ", which wins"
-                              : a.result === "draw" ? ", which holds the draw"
-                              : " — the position is lost whatever Black does, so this is only the most stubborn"}
-                            {a.okUci.length > 0 && <> · {a.okUci.length} other move{a.okUci.length === 1 ? "" : "s"} reach the same result</>}
-                          </span>
+                          <span className={`font-mono ${MARK_CLASS[mark]}`}>{answerSan[i] ?? "—"}</span>
+                          <span className={`text-xs ${MARK_CLASS[mark]}`}>{MARK_LABEL[mark]}</span>
+                          {key && (
+                            <span className="text-xs text-ink-400">
+                              · {i === 0 ? "the chapter plays" : "best is"}{" "}
+                              <span className="font-mono text-ink-200">{taughtSan}</span>
+                              {key.result === "win" ? ", which wins"
+                                : key.result === "draw" ? ", which holds the draw"
+                                : " — the position is lost anyway, so this is only the most stubborn"}
+                              {key.okUci.length > 0 && <> · {key.okUci.length} other move{key.okUci.length === 1 ? "" : "s"} reach the same result</>}
+                            </span>
+                          )}
                         </div>
                       );
                     })}
                   </div>
-                  <button type="button" onClick={() => { setGraded(null); setWhiteIn(""); setBlackIn(""); setRevealed(false); }}
+                  <button type="button" onClick={() => { setGraded(null); setLineUci([]); setNonce((n) => n + 1); setRevealed(false); }}
                     className="mt-3 rounded-lg border border-ink-700 bg-ink-900 px-3 py-1.5 text-xs font-semibold text-ink-300 hover:bg-ink-800">
-                    Try again
+                    Play it again
                   </button>
                 </div>
               )}
