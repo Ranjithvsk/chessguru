@@ -92,7 +92,7 @@ export class DreamMeetStatsController {
     // coach who forgets to press End leaves endedAt unset or wildly late).
     const [attRows, boards, packRows, chRows] = await Promise.all([
       ids.length ? db.collection("classAttendance").find({ classId: { $in: ids } } as any,
-        { projection: { classId: 1, key: 1, joinedAt: 1, lastSeenAt: 1 } }).toArray() : Promise.resolve([] as any[]),
+        { projection: { classId: 1, key: 1, joinedAt: 1, lastSeenAt: 1, name: 1, userId: 1 } }).toArray() : Promise.resolve([] as any[]),
       ids.length ? db.collection("classBoardState").find({ _id: { $in: ids } } as any,
         { projection: { history: 1 } }).toArray() : Promise.resolve([] as any[]),
       ids.length ? db.collection("classPositionPacks").aggregate([
@@ -103,12 +103,24 @@ export class DreamMeetStatsController {
       ]).toArray() : Promise.resolve([] as any[]),
     ]);
 
-    const att = new Map<string, { keys: Set<string>; first: number | null; last: number | null }>();
+    // who joined, and when — the owner reads the names, not just a count (2026-09-17)
+    const att = new Map<string, { keys: Set<string>; first: number | null; last: number | null; people: Map<string, { name: string; joinedAt: Date | null; lastSeenAt: Date | null }> }>();
     for (const r of attRows) {
       const k = String(r.classId);
       let a = att.get(k);
-      if (!a) { a = { keys: new Set(), first: null, last: null }; att.set(k, a); }
+      if (!a) { a = { keys: new Set(), first: null, last: null, people: new Map() }; att.set(k, a); }
       if (r.key) a.keys.add(String(r.key));
+      {
+        const who = String(r.userId || r.key || r.name || "?");
+        const prev = a.people.get(who);
+        const jd = r.joinedAt ? new Date(r.joinedAt) : null;
+        const ls = r.lastSeenAt ? new Date(r.lastSeenAt) : null;
+        if (!prev) a.people.set(who, { name: String(r.name || r.userId || "student"), joinedAt: jd, lastSeenAt: ls });
+        else {
+          if (jd && (!prev.joinedAt || jd < prev.joinedAt)) prev.joinedAt = jd;
+          if (ls && (!prev.lastSeenAt || ls > prev.lastSeenAt)) prev.lastSeenAt = ls;
+        }
+      }
       const j = r.joinedAt ? +new Date(r.joinedAt) : null;
       const s = r.lastSeenAt ? +new Date(r.lastSeenAt) : null;
       if (j != null && (a.first == null || j < a.first)) a.first = j;
@@ -210,6 +222,17 @@ export class DreamMeetStatsController {
         academyId: c.academyId ?? null, coachId: c.createdByUserId ?? null, coachLabel: c.coach ?? null,
         roomKind: c.roomKind ?? null, students, scheduledMin, actualMin, deltaMin, lateMin,
         moves, packs, challenges, conducted, noShow, idle, live, endedAt: c.endedAt ?? null,
+        // What the owner reads to answer "was this class actually taught, and did anything break
+        // while it ran" (2026-09-17): when the first person joined, when the room went quiet or the
+        // coach pressed End, and the errors that happened between those two moments. Booked length
+        // and over/under-run are not the question.
+        firstJoinAt: a?.first != null ? new Date(a.first) : null,
+        lastSeenAt: a?.last != null ? new Date(a.last) : null,
+        attendees: a ? [...a.people.values()]
+          .sort((x, y) => (+(x.joinedAt ?? 0)) - (+(y.joinedAt ?? 0)))
+          .slice(0, 30)
+          .map((x) => ({ name: x.name, joinedAt: x.joinedAt, lastSeenAt: x.lastSeenAt })) : [],
+        errors: 0, errorList: [] as any[],
       });
 
       if (live) {
@@ -310,6 +333,33 @@ export class DreamMeetStatsController {
 
     // The classes that most need a look: biggest shortfall first, then no-shows.
     const worst = [...durSamples].sort((a, b) => a.deltaMin - b.deltaMin).slice(0, 15);
+
+    // Hang each error on the class it happened during. An error that names its class id wins;
+    // otherwise it belongs to whichever class was running at that moment (first join → ended /
+    // last heartbeat), which is how a coach recognises it.
+    {
+      const rowById = new Map<string, any>(classRows.map((r) => [r.classId, r]));
+      const windows = classRows
+        .filter((r) => r.firstJoinAt)
+        .map((r) => ({ row: r, from: +new Date(r.firstJoinAt), to: r.endedAt ? +new Date(r.endedAt) : (r.lastSeenAt ? +new Date(r.lastSeenAt) : +new Date(r.firstJoinAt)) }))
+        .sort((x, y) => x.from - y.from);
+      for (const e of errs) {
+        const n = Number(e.n) || 1;
+        let row = null as any;
+        const cid = classIdOf(e);
+        if (cid && rowById.has(cid)) row = rowById.get(cid);
+        if (!row && e.at) {
+          const t = +new Date(e.at);
+          const hit = windows.find((w) => t >= w.from && t <= w.to + 60_000);
+          if (hit) row = hit.row;
+        }
+        if (!row) continue;
+        row.errors += n;
+        if (row.errorList.length < 8) {
+          row.errorList.push({ at: e.at, kind: e.kind ?? null, message: e.message ?? null, status: e.status ?? null, n });
+        }
+      }
+    }
 
     const errorsByKind: Record<string, number> = {};
     for (const e of errs) errorsByKind[e.kind || "other"] = (errorsByKind[e.kind || "other"] || 0) + (Number(e.n) || 1);
