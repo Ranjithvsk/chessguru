@@ -28,6 +28,8 @@ _Created 2026-05-29 · expanded the same day with a full codebase read. Live: ht
 - ⭐ [18-board-scan-what-actually-fails.md](knowledge/18-board-scan-what-actually-fails.md) — **MEASURED: framing decides scan success, not the classifier**; 3 failure modes; the guard that looks useful and isn't; 3 auto-crop approaches that failed
 - ⭐ [19-vision-training-assets.md](knowledge/19-vision-training-assets.md) — every diagram/photo pile, which have ground truth, and the 405k-image pile no trainer was reading
 - ⭐ [20-dream-ocr.md](knowledge/20-dream-ocr.md) — **MEASURED: chess legality beats a fourth OCR engine**; 89%→99% on book noise; the 4 bugs only measuring found; why false certainty is the number to watch
+- ⭐ [21-book-ingest-pitfalls.md](knowledge/21-book-ingest-pitfalls.md) — **how book diagrams get LOST or misread**: the detector's thumbnail is clipped (crop from `box`), an illegal FEN silently DELETES the diagram, `warped=` skips the margin trim, and `conf` is a mean that hides all of it — use `minConf`
+- ⭐ [22-scan-speed-vs-accuracy.md](knowledge/22-scan-speed-vs-accuracy.md) — **measure before shipping a speed change**: two attempts cost accuracy; the extractor detects at 640 but CROPS FROM FULL RES, and the correction loop was dead for everyone
 
 ## Decisions (ADRs)
 - [ADR-0001](decisions/ADR-0001-server3-is-the-entrypoint.md) — `server3.js` is the only live entrypoint; routes load inside the connect callback

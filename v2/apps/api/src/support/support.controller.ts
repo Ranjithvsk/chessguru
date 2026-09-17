@@ -25,6 +25,25 @@ const UPSTREAM = process.env.SUPPORT_UPSTREAM_URL || "https://pos.dreamcy.com/po
 // shared INTERNAL_API_SECRET so the student's session stays authoritative.
 const UPSTREAM_LIST = process.env.SUPPORT_UPSTREAM_LIST_URL || "https://pos.dreamcy.com/pos/support/my-tickets";
 const INTERNAL_TOKEN = process.env.DREAMCY_INTERNAL_TOKEN || process.env.SUPPORT_INTERNAL_TOKEN || "";
+
+// Say so at BOOT if the token is missing.
+//
+// Without it every support call 502s with "Support upstream returned 401" — and the
+// API starts perfectly happily, so nothing announces the fault. It ran like that for
+// days: ~40 failures a day across ~18 people (2026-09-14..17), which also buried real
+// errors in the log. The token was eventually corrected in .env at 11:00 on 09-17 and
+// the failures stopped at the next restart — but nobody was told either time.
+//
+// Note the trap: dotenv loads .env at STARTUP, so fixing .env does nothing until the
+// API is restarted.
+if (!INTERNAL_TOKEN) {
+  // eslint-disable-next-line no-console
+  console.warn(
+    "[support] DREAMCY_INTERNAL_TOKEN is empty — every support request will fail with " +
+    "'Support upstream returned 401'. Set it in apps/api/.env and RESTART the API " +
+    "(dotenv only reads .env at startup).",
+  );
+}
 const MAX_SHOTS = 4;
 const MAX_MESSAGE = 5000;
 const MAX_CONTACT = 200;

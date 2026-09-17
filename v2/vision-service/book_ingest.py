@@ -198,8 +198,30 @@ def ingest(book_id: str, pdf_path: str, classify_image, detect_boards,
                 if not cb:
                     continue
                 try:
-                    buf = np.frombuffer(__import__("base64").b64decode(cb), dtype=np.uint8)
-                    crop = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+                    # Crop from the PAGE using the detector's box, rather than using
+                    # the 512x512 thumbnail it hands back.
+                    #
+                    # That thumbnail is clipped on this book's diagrams — a whole file
+                    # sliced through the middle — so the classifier read nonsense, the
+                    # position failed _legal() below, and the diagram was DISCARDED
+                    # with no trace. 44% of the Mammoth book's pages ended up with no
+                    # diagram at all while the detector had actually found every board
+                    # at 0.94+. Same two boards, measured 2026-09-17:
+                    #   thumbnail : legal=False  minConf 0.013 / 0.002
+                    #   page+box  : legal=True   minConf 0.999 / 0.999
+                    # The FFT refinement cannot rescue it — it trims margins, it cannot
+                    # give back board that was cropped away.
+                    crop = None
+                    if box and len(box) >= 4:
+                        bx1, by1, bx2, by2 = [int(v) for v in box[:4]]
+                        ph, pw = img.shape[:2]
+                        bx1, by1 = max(0, bx1), max(0, by1)
+                        bx2, by2 = min(pw, bx2), min(ph, by2)
+                        if bx2 - bx1 > 32 and by2 - by1 > 32:
+                            crop = img[by1:by2, bx1:bx2]
+                    if crop is None or crop.size == 0:
+                        buf = np.frombuffer(__import__("base64").b64decode(cb), dtype=np.uint8)
+                        crop = cv2.imdecode(buf, cv2.IMREAD_COLOR)
                     # Read the board in grey. Books print diagrams in colour as
                     # well as black — Dvoretsky's Endgame Manual runs whole
                     # chapters in blue — and on a blue board the classifier calls
