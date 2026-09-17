@@ -13,7 +13,7 @@
 // Books are private to their uploader. These are copyrighted works a coach
 // owns a copy of — we are giving them a better way to read it, not building a
 // library, so there is no public listing and no cross-user access.
-import { Body, Controller, ForbiddenException, Get, Param, Post, Query, Req, Res, BadRequestException, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Get, Logger, Param, Post, Query, Req, Res, BadRequestException, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -104,6 +104,7 @@ function resumePage(uid: string, bookId: string, pages: number): number {
 
 @Controller("user-books")
 export class UserBooksController {
+  private readonly log = new Logger("user-books");
   private requireUser(req: any): string {
     const uid = req?.session?.userId;
     if (!uid) throw new UnauthorizedException("login required");
@@ -525,13 +526,31 @@ export class UserBooksController {
       throw new ForbiddenException("only coaches can add books");
     }
     const name = String(title ?? "").trim();
-    if (!name) throw new BadRequestException("the book needs a title");
+    // Say WHY an upload was refused, in the log as well as to the browser. A
+    // coach reports "it failed" and the reason is gone: a 400 leaves no trace on
+    // this box, so the same guessing starts over every time. Guna Chess hit this
+    // twice in one morning — first nginx capping the body at 20M, then a refusal
+    // here that could not be told apart from it without asking them to read the
+    // screen back.
+    const ctype = String(req?.headers?.["content-type"] ?? "");
+    const clen = String(req?.headers?.["content-length"] ?? "?");
+    const refuse: (why: string) => never = (why) => {
+      this.log.warn(
+        `upload refused for ${uid}: ${why} — title=${JSON.stringify(name)} ` +
+        `content-type=${JSON.stringify(ctype)} content-length=${clen} ` +
+        `bytes=${Buffer.isBuffer(req?.body) ? req.body.length : "not a buffer"}`);
+      throw new BadRequestException(why);
+    };
+    if (!name) refuse("the book needs a title");
     const body: Buffer | undefined = req?.body;
     if (!Buffer.isBuffer(body) || body.length === 0) {
-      throw new BadRequestException("no file received");
+      refuse(ctype.toLowerCase().includes("pdf")
+        ? "no file received — the file may still be downloading from iCloud or Drive; open it once, then try again"
+        : `no file received (the browser sent content-type ${ctype || "none"})`);
     }
     if (!body.subarray(0, 4).toString("latin1").startsWith("%PDF")) {
-      throw new BadRequestException("that file is not a PDF");
+      const head = body.subarray(0, 16).toString("latin1").replace(/[^\x20-\x7e]/g, ".");
+      refuse(`that file is not a PDF — it starts "${head}". Download sites often hand you a web page named like a PDF.`);
     }
 
     // Best-effort dedup against the owner's Drive library on Vinayaka. If the PC
