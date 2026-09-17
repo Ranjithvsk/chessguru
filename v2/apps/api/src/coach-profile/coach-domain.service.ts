@@ -549,6 +549,25 @@ server {
     proxy_read_timeout 3600;
   }
 
+  # A book is a PDF, and the 20M that suits every other request on this vhost
+  # rejects most of them — Guna Chess hit 413 uploading a games collection while
+  # chessguru.cc took the same file, because only the apex vhost had this
+  # exception. Buffering off so a 300MB upload streams to the API instead of
+  # being spooled to disk first.
+  location /v2api/api/user-books/upload {
+    client_max_body_size 400M;
+    proxy_pass http://localhost:4000/api/user-books/upload;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Custom-Domain $host;
+    proxy_read_timeout 600s;
+    proxy_send_timeout 600s;
+    proxy_request_buffering off;
+  }
+
   location /v2api/ {
     proxy_pass http://localhost:4000/;
     proxy_http_version 1.1;
