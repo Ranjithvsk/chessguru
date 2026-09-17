@@ -40,6 +40,25 @@ ingest used the thumbnail.
 **Always crop from the page using `box`**; fall back to the thumbnail only if the box
 is missing.
 
+The same mistake had a second form, one line above the crop: the loop opened with
+
+    for box, cb in page_boards:
+        if not cb:              # <- demands the THUMBNAIL
+            continue
+
+so a board the detector had located but returned without a thumbnail was dropped before
+the box was ever looked at — invisibly, exactly like the clipped-thumbnail case. It was
+firing on zero boards in all three books when found (2026-09-17), which is precisely why
+it survived: a latent loss of this kind shows up as nothing at all. The guard now accepts
+a board with EITHER source, and the thumbnail fallback logs when it has neither.
+
+Verified by re-running the ingest with `boardPngBase64` forced to `None` on every
+detection: 5 boards over 3 pages, box-only reads identical to box+thumbnail and identical
+to the shipped book.
+
+The general rule: **the box is the primary source, the thumbnail is the fallback.** Any
+code that tests `cb` before `box` has the precedence backwards.
+
 ## Pitfall 2 — an illegal FEN DELETES the diagram, silently
 
     fen = (r or {}).get("fen", "")

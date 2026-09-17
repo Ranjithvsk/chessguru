@@ -195,7 +195,13 @@ def ingest(book_id: str, pdf_path: str, classify_image, detect_boards,
 
             page_fens: list[str] = []
             for box, cb in page_boards:
-                if not cb:
+                # A board needs EITHER a thumbnail or a usable box. This used to
+                # demand the thumbnail, which silently dropped any board the
+                # detector had located but handed back without one -- the same
+                # way the clipped-thumbnail bug below dropped 150 diagrams, and
+                # just as invisibly. The box is the better source anyway, so a
+                # missing thumbnail is no longer a reason to lose the diagram.
+                if not cb and not (box and len(box) >= 4):
                     continue
                 try:
                     # Crop from the PAGE using the detector's box, rather than using
@@ -220,6 +226,11 @@ def ingest(book_id: str, pdf_path: str, classify_image, detect_boards,
                         if bx2 - bx1 > 32 and by2 - by1 > 32:
                             crop = img[by1:by2, bx1:bx2]
                     if crop is None or crop.size == 0:
+                        if not cb:
+                            log.warning("book %s page %d: board has neither a "
+                                        "usable box nor a thumbnail, skipped",
+                                        book_id, i)
+                            continue
                         buf = np.frombuffer(__import__("base64").b64decode(cb), dtype=np.uint8)
                         crop = cv2.imdecode(buf, cv2.IMREAD_COLOR)
                     # Read the board in grey. Books print diagrams in colour as
