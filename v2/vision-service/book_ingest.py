@@ -130,6 +130,92 @@ def _read_text(book_id, page_no, img, page_fens, moves, ocr_pages, labels_dir):
             log.warning("book %s page %d label export failed: %s", book_id, page_no, e)
 
 
+def _read_best_crop(classify_image, img, box, cb, book_id, page_no):
+    """Read one board from BOTH available crops and keep the better answer.
+
+    Neither crop wins everywhere, which is only visible once you re-ingest a
+    whole book and compare (2026-09-17):
+
+      Mammoth (thumbnails CLIPPED)   page-box crop: 294 -> 444 diagrams
+      Grandmaster Preparation (fine) page-box crop: +1 diagram, but mean minConf
+                                     0.929 -> 0.916 and low-confidence boards
+                                     87 -> 103
+
+    The box crop rescues a clipped thumbnail; the thumbnail is tighter when the
+    detector's box swept in caption or margin. So try the box first and accept it
+    when it is clearly right, otherwise read the thumbnail too and keep whichever
+    scores better. Ranking is (legal, minConf) - a legal position always beats an
+    illegal one, because an illegal one is DISCARDED further down and the diagram
+    disappears from the book with no trace.
+
+    The second pass only runs on boards the first pass read poorly, so a clean
+    book costs nothing extra.
+    """
+    # cv2 / numpy are DEFERRED imports that live inside ingest() (they are heavy
+    # and the module is imported on every /book/status poll). A module-level
+    # helper cannot see those locals — without these two lines every crop here
+    # fails with "name 'cv2' is not defined", the helper returns None, and the
+    # book ingests ZERO diagrams while logging only a warning.
+    import cv2
+    import numpy as np
+
+    def _grey(c):
+        # Books print diagrams in colour (Dvoretsky runs chapters in blue) and on
+        # a blue board the classifier calls the outline white king a black bishop.
+        return cv2.cvtColor(cv2.cvtColor(c, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
+
+    def _from_box():
+        if not (box and len(box) >= 4):
+            return None
+        bx1, by1, bx2, by2 = [int(v) for v in box[:4]]
+        ph, pw = img.shape[:2]
+        bx1, by1 = max(0, bx1), max(0, by1)
+        bx2, by2 = min(pw, bx2), min(ph, by2)
+        if bx2 - bx1 <= 32 or by2 - by1 <= 32:
+            return None
+        c = img[by1:by2, bx1:bx2]
+        return c if c.size else None
+
+    def _from_thumb():
+        if not cb:
+            return None
+        buf = np.frombuffer(__import__("base64").b64decode(cb), dtype=np.uint8)
+        c = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+        return c if c is not None and c.size else None
+
+    def _score(r):
+        if not r:
+            return None
+        legal = 1 if _legal(r.get("fen", "")) else 0
+        mn = _conf_detail(r).get("minConf")
+        return (legal, float(mn) if isinstance(mn, (int, float)) else 0.0)
+
+    best, best_score = None, None
+    for name, make in (("box", _from_box), ("thumb", _from_thumb)):
+        try:
+            crop = make()
+        except Exception as e:
+            log.warning("book %s page %d %s crop failed: %s", book_id, page_no, name, e)
+            continue
+        if crop is None:
+            continue
+        try:
+            r = classify_image(_grey(crop), warped=_grey(crop))
+        except Exception as e:
+            log.warning("book %s page %d %s classify failed: %s", book_id, page_no, name, e)
+            continue
+        sc = _score(r)
+        if sc is None:
+            continue
+        if best_score is None or sc > best_score:
+            best, best_score = r, sc
+        # Clearly right: legal and every square confident. No second pass.
+        if sc[0] == 1 and sc[1] >= 0.95:
+            break
+    return best
+
+
+
 def ingest(book_id: str, pdf_path: str, classify_image, detect_boards,
            dpi: int = 150, max_pages: int = 400) -> None:
     """Render every page, detect boards, read each one. Blocking; call in a thread.
@@ -198,55 +284,13 @@ def ingest(book_id: str, pdf_path: str, classify_image, detect_boards,
                 # A board needs EITHER a thumbnail or a usable box. This used to
                 # demand the thumbnail, which silently dropped any board the
                 # detector had located but handed back without one -- the same
-                # way the clipped-thumbnail bug below dropped 150 diagrams, and
-                # just as invisibly. The box is the better source anyway, so a
-                # missing thumbnail is no longer a reason to lose the diagram.
+                # way the clipped-thumbnail bug dropped 150 Mammoth diagrams, and
+                # just as invisibly. _read_best_crop() below uses whichever of the
+                # two is present, and the better-scoring one when both are.
                 if not cb and not (box and len(box) >= 4):
                     continue
-                try:
-                    # Crop from the PAGE using the detector's box, rather than using
-                    # the 512x512 thumbnail it hands back.
-                    #
-                    # That thumbnail is clipped on this book's diagrams — a whole file
-                    # sliced through the middle — so the classifier read nonsense, the
-                    # position failed _legal() below, and the diagram was DISCARDED
-                    # with no trace. 44% of the Mammoth book's pages ended up with no
-                    # diagram at all while the detector had actually found every board
-                    # at 0.94+. Same two boards, measured 2026-09-17:
-                    #   thumbnail : legal=False  minConf 0.013 / 0.002
-                    #   page+box  : legal=True   minConf 0.999 / 0.999
-                    # The FFT refinement cannot rescue it — it trims margins, it cannot
-                    # give back board that was cropped away.
-                    crop = None
-                    if box and len(box) >= 4:
-                        bx1, by1, bx2, by2 = [int(v) for v in box[:4]]
-                        ph, pw = img.shape[:2]
-                        bx1, by1 = max(0, bx1), max(0, by1)
-                        bx2, by2 = min(pw, bx2), min(ph, by2)
-                        if bx2 - bx1 > 32 and by2 - by1 > 32:
-                            crop = img[by1:by2, bx1:bx2]
-                    if crop is None or crop.size == 0:
-                        if not cb:
-                            log.warning("book %s page %d: board has neither a "
-                                        "usable box nor a thumbnail, skipped",
-                                        book_id, i)
-                            continue
-                        buf = np.frombuffer(__import__("base64").b64decode(cb), dtype=np.uint8)
-                        crop = cv2.imdecode(buf, cv2.IMREAD_COLOR)
-                    # Read the board in grey. Books print diagrams in colour as
-                    # well as black — Dvoretsky's Endgame Manual runs whole
-                    # chapters in blue — and on a blue board the classifier calls
-                    # the OUTLINE white king a black bishop. The position then has
-                    # no white king, `_legal` rejects it, and the diagram vanishes
-                    # from the book with no trace: the reader shows a page with
-                    # nothing to click. Dropping the colour fixes the read.
-                    # Measured over 45 boards from that book: 44 unchanged,
-                    # 1 fixed, 0 broken.
-                    crop = cv2.cvtColor(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY),
-                                        cv2.COLOR_GRAY2BGR)
-                    r = classify_image(crop, warped=crop)
-                except Exception as e:
-                    log.warning("book %s page %d board classify failed: %s", book_id, i, e)
+                r = _read_best_crop(classify_image, img, box, cb, book_id, i)
+                if r is None:
                     continue
                 fen = (r or {}).get("fen", "")
                 # A page of prose yields boards that cannot be legal positions.
