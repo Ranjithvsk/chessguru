@@ -586,6 +586,18 @@ export default function NotebookPage() {
               )}
             </button>
           ))}
+          {/* Books lives HERE rather than in the sidebar — it is notebook material
+              (chapters read, studies linked to book positions), and the side panel
+              had grown long enough that Notebook and Books read as two unrelated
+              places. A Link, not a tab: /books is its own page. */}
+          <Link
+            to="/books"
+            className="flex w-full items-center gap-3 rounded-lg border border-ink-800 bg-ink-900/50 px-3 py-2.5 text-left text-sm text-ink-300 transition hover:border-ink-700 hover:bg-ink-800/60 hover:text-white"
+          >
+            <span className="text-lg">📚</span>
+            <span className="font-semibold">Books</span>
+            <span className="ml-auto shrink-0 text-[11px] text-ink-500">→</span>
+          </Link>
         </nav>
 
         {/* Main pane */}

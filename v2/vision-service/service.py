@@ -29,6 +29,9 @@ from chessvision.core import ChessVision  # type: ignore
 # tandberg's AGPL weights. Same architectures, retrained on Vinayaka.
 _MIT_EXTRACTOR = "/opt/chessguru-vision/mit-weights/chessguru-board-seg.pt"
 _MIT_CLASSIFIER = "/opt/chessguru-vision/mit-weights/chessguru-cls.pt"
+# 1.0 = the classifier's own opinion. Below 1.0 makes it less willing to call a
+# square empty. Change ONLY with a measured accuracy_check.py --diff.
+_EMPTY_PRIOR_DEFAULT = 1.0
 
 # Class order used by our MIT classifier (Windows-safe folder names,
 # alphabetical order as ultralytics sees them).
@@ -204,7 +207,7 @@ def _encode_b64_jpg(img: np.ndarray, quality: int = 90) -> str:
     return base64.b64encode(buf.tobytes()).decode("ascii")
 
 
-def _classify_via_own(board_bgr: np.ndarray, cv_pipeline, own_yolo):
+def _classify_via_own(board_bgr: np.ndarray, cv_pipeline, own_yolo, empty_prior: float = 1.0):
     """Split the warped board into 64 x 64x64 crops, batch-infer through OUR
     MIT YOLOv8n-cls, then run Tandberg's chess-rules validate_position on the
     resulting (64, 13) probability matrix. Returns a PositionResult that has
@@ -279,6 +282,15 @@ def _classify_via_own(board_bgr: np.ndarray, cv_pipeline, own_yolo):
     # square_names in the order Tandberg's crop iteration uses (a8..h1)
     square_names = list(constants.SQUARE_NAMES_NORMAL)
     # Call Tandberg's downstream builder for uniform output shape
+    # Nudge the empty-vs-piece decision before the chess-rules validator sees it.
+    # Applied here, on Tandberg-ordered probs, so it lands on the real "f" column.
+    if empty_prior != 1.0:
+        f_idx = tandberg_idx_of_char["f"]
+        probs_tandberg = probs_tandberg.copy()
+        probs_tandberg[:, f_idx] *= float(empty_prior)
+        row = probs_tandberg.sum(axis=1, keepdims=True)
+        probs_tandberg = probs_tandberg / np.maximum(row, 1e-9)
+
     return cv_pipeline.process_position_probabilities(
         probabilities=probs_tandberg,
         square_names=square_names,
@@ -632,6 +644,12 @@ class ImageIn(BaseModel):
     # reaches into UI chrome (tablet title bar / menu) and misaligns the
     # 8x8 tile split. Client already computed a tight warp — trust it.
     warped_board_base64: str | None = None
+    # Scales the classifier's "empty square" probability before chess-rules
+    # validation. The model leans toward "empty" on low-contrast squares -- a white
+    # piece on a dark square is read as empty ~10% of the time -- and dropping this
+    # below 1.0 trades missed pieces for invented ones. Tunable so the trade can be
+    # MEASURED (accuracy_check.py) rather than guessed. None = use the server default.
+    empty_prior: float | None = None
 
 
 class WarpCornersIn(BaseModel):
@@ -975,6 +993,29 @@ def book_ingest(body: BookIngestIn) -> dict[str, Any]:
         return {"ok": True, "already": True, **cur}
 
     def _classify(img, warped=None):
+        # Strip coordinate margins from a book crop before classifying.
+        #
+        # Passing `warped` tells /classify to trust the crop and skip its own
+        # extractor — which also skips _refine_crop_to_checker, the pass that cuts
+        # the a-h / 1-8 label strips off. Books that print coordinates INSIDE the
+        # board frame (The Mammoth Book of the World's Greatest Chess Games) then
+        # get an 8x8 split that lands between squares, and EVERY piece shifts a
+        # file: actual r1bq1rk1/... came out rbqqRrk1/..., with per-square
+        # confidence near zero. Measured 2026-09-17: mean minConf 0.069 and 294 of
+        # 294 diagrams flagged, against 0.989 / 1% for a book without inner labels.
+        #
+        # Guarded exactly as the interactive path guards it: keep the refinement
+        # only when it does not shrink the board away AND actually scores better,
+        # so a book that never had label margins is left alone.
+        if warped is not None:
+            try:
+                refined = _refine_crop_to_checker(warped)
+                if (refined is not None and refined.size > 0.20 * warped.size
+                        and _score_warp_quality(refined)["score"]
+                            > _score_warp_quality(warped)["score"] + 0.05):
+                    warped = refined
+            except Exception as e:
+                log.warning("book crop refine failed: %s", e)
         b64 = _encode_b64_png(img)
         payload = ImageIn(image_base64=b64,
                           warped_board_base64=_encode_b64_png(warped) if warped is not None else None)
@@ -1098,6 +1139,9 @@ def classify(body: ImageIn) -> dict[str, Any]:
     # 0.05 * fixes_count) — heavily reward fewer chess-rules repairs.
     # But if OCR gave a confident hint, ONLY try that rotation.
     own_cls = _get_own_classifier()
+    # Server default for the empty-vs-piece prior; a request may override it so the
+    # trade-off can be swept with accuracy_check.py without a restart.
+    _empty_prior = float(body.empty_prior) if body.empty_prior is not None else _EMPTY_PRIOR_DEFAULT
     best = None
     _ALL_ROTATIONS = [
         (0,   None),
@@ -1116,7 +1160,7 @@ def classify(body: ImageIn) -> dict[str, Any]:
                 # OUR classifier path (MIT). We extract 64 crops and batch-
                 # infer via ultralytics YOLO.predict; then hand the (64,13)
                 # probs to Tandberg's validate_position for chess-rules repair.
-                pos_c = _classify_via_own(candidate, cv, own_cls)
+                pos_c = _classify_via_own(candidate, cv, own_cls, empty_prior=_empty_prior)
             else:
                 pos_c = cv.classify_position(candidate)
         except Exception:

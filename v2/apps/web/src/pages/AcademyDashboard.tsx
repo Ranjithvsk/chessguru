@@ -877,6 +877,31 @@ function AddStudentModal({ open, onClose, coaches, isOwner }: {
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [handle, setHandle] = useState("");   // for "existing" mode
+  // Show who is ALREADY here as the coach types.
+  //
+  // The login handle is derived from the name, and there was no way to edit a
+  // student — so "Haritha" then "Haritha R" minted two accounts, and she was
+  // refused from every class her other account was invited to (TKT-247). Eleven
+  // such pairs existed. The server now refuses a near-duplicate, but a refusal
+  // after typing is a poor way to learn it: show the match while they type.
+  const rosterQ = useQuery({
+    queryKey: ["academy-students-lite"],
+    queryFn: () => get<{ students: { userId: string; username: string; name: string }[] }>("/api/academy/students-lite"),
+    enabled: open,
+    staleTime: 60_000,
+  });
+  const nameMatches = useMemo(() => {
+    const q = displayName.trim().toLowerCase();
+    if (q.length < 2) return [];
+    const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const nq = norm(q);
+    return (rosterQ.data?.students ?? [])
+      .filter((st) => {
+        const n = norm(st.name || st.username);
+        return n.includes(nq) || nq.includes(n);
+      })
+      .slice(0, 6);
+  }, [displayName, rosterQ.data]);
   const [coachId, setCoachId] = useState("");
   const [creds, setCreds] = useState<{ username: string; password: string }|null>(null);
   const [attachedName, setAttachedName] = useState<string | null>(null);
@@ -963,6 +988,26 @@ function AddStudentModal({ open, onClose, coaches, isOwner }: {
                   <label className="mb-1 block text-xs uppercase text-ink-400">Student name</label>
                   <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} autoFocus placeholder="Aarav K"
                     className="w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-white placeholder:text-ink-500 focus:border-emerald-500 focus:outline-none" />
+                  {nameMatches.length > 0 && (
+                    <div className="mt-1.5 rounded-lg border border-amber-400/40 bg-amber-500/10 p-2">
+                      <div className="mb-1 text-[11px] font-semibold text-amber-200">
+                        Already in this academy — is it one of these?
+                      </div>
+                      <div className="space-y-1">
+                        {nameMatches.map((st) => (
+                          <div key={st.userId} className="flex items-center justify-between gap-2 rounded px-1.5 py-1 text-xs text-ink-100">
+                            <span className="truncate">{st.name}</span>
+                            <span className="shrink-0 font-mono text-[11px] text-ink-400">{st.username}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-1.5 text-[11px] text-amber-100/80">
+                        Adding again creates a SECOND login — they would be left off the
+                        batches and class invites the first one is on. Rename that student
+                        instead if the name just needs correcting.
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="mb-1 block text-xs uppercase text-ink-400">Email <span className="text-ink-500">(optional)</span></label>

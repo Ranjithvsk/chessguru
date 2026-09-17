@@ -98,7 +98,6 @@ const GROUPS: Group[] = [
     items: [
       { to: "/study", label: "📚 Study", desc: "Endgames, coordinates, memory palace, drills" },
       { to: "/broadcasts", label: "📡 Broadcast games", desc: "Master tournament games" },
-      { to: "/book", label: "📕 Book", desc: "Puzzles from the book games" },
     ],
   },
   {
@@ -107,7 +106,6 @@ const GROUPS: Group[] = [
     items: [
       { to: "/notebook", label: "📚 Online class", desc: "Positions your coach sent from live Dream Meet classes" },
       { to: "/studies", label: "📓 My Studies", desc: "Analyze games, teach concepts, opening notes" },
-      { to: "/books", label: "📚 Books", desc: "Track chapters read, link studies to book positions" },
       { to: "/revise", label: "🎯 Revise", desc: "Daily spaced-repetition drill of your ⭐ positions" },
       { to: "/exams", label: "📝 Exams", desc: "Coach: test students. Student: take assigned exams" },
       { to: "/my-games", label: "🎮 My Games", desc: "Import + Stockfish-analyze your played games" },

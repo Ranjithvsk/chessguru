@@ -55,6 +55,43 @@ def _write_status(book_id: str, **kw) -> None:
     os.replace(tmp, status_path(book_id))
 
 
+_LOW_CONF = 0.70
+
+
+def _conf_detail(r: dict) -> dict:
+    """Per-square confidence, kept instead of averaged away.
+
+    The stored `conf` is the MEAN over all 64 squares, and a mean hides exactly the
+    squares worth looking at: a board with 62 easy empties plus one square scored
+    0.37 still averages 0.98. Measured on Dvoretsky's Endgame Manual 2026-09-17 --
+    169 of 683 diagrams contain a square below 0.70, and their stored average
+    confidence is 0.977. Page 19's three "x" key-square marks scored 0.531, 0.768
+    and 0.368 and were read as a queen, a knight and a queen; the diagram's stored
+    confidence was 0.936.
+
+    This is the GENERAL defence against anything the classifier has never seen --
+    "?" mined-square marks, "x" key squares, arrows, circled squares, printed
+    numbers, a coach's pen. The 13-class softmax has no "not a piece" output, so a
+    novel glyph must come out as one of the twelve pieces or empty. What it cannot
+    do is look confident while doing it -- so keep the doubt, and the reader can
+    flag the diagram without anyone having to anticipate the glyph.
+
+    Costs nothing: the numbers are already in the classify response.
+    """
+    grid = (r or {}).get("squares") or []
+    confs = [
+        c.get("confidence")
+        for row in grid for c in (row or [])
+        if isinstance(c, dict) and isinstance(c.get("confidence"), (int, float))
+    ]
+    if not confs:
+        return {}
+    return {
+        "minConf": round(float(min(confs)), 4),
+        "squaresBelow": int(sum(1 for c in confs if c < _LOW_CONF)),
+    }
+
+
 def _legal(fen: str) -> bool:
     b = (fen or "").split(" ")[0]
     return b.count("K") == 1 and b.count("k") == 1
@@ -149,7 +186,8 @@ def ingest(book_id: str, pdf_path: str, classify_image, detect_boards,
                     if r and _legal(r.get("fen", "")):
                         diagrams.append({"page": i, "bbox": None,
                                          "fen": r["fen"],
-                                         "conf": r.get("meta", {}).get("avgConfidence")})
+                                         "conf": r.get("meta", {}).get("avgConfidence"),
+                                         **_conf_detail(r)})
                 except Exception as e:
                     log.warning("book %s page %d classify failed: %s", book_id, i, e)
                 _write_status(book_id, done=i + 1, diagrams=len(diagrams))
@@ -187,6 +225,7 @@ def ingest(book_id: str, pdf_path: str, classify_image, detect_boards,
                     "bbox": [round(v) for v in box] if box else None,
                     "fen": fen,
                     "conf": (r.get("meta") or {}).get("avgConfidence"),
+                    **_conf_detail(r),
                 })
 
             # Read the page's TEXT too, with the diagrams we just found as the
