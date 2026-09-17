@@ -2377,6 +2377,8 @@ export default function AcademyPublicPage() {
   const joinLabel = primaryContactHref ? "Get in touch" : "Meet the coaches";
   const hasWhatsApp = !!p.socials.whatsapp;
   const loginHref = `/a/${encodeURIComponent(academy.slug)}/login`;
+  // Staff land on the academy dashboard, everyone else on the trainer.
+  const meIsStaff = authQ.data?.role === "academy_owner" || authQ.data?.role === "coach";
 
   const yearsTeaching = coaches.reduce((mx, c) => Math.max(mx, c.coachProfile.yearsTeaching || 0), 0)
     || (p.foundedYear ? new Date().getFullYear() - p.foundedYear : 0);
@@ -2645,15 +2647,19 @@ export default function AcademyPublicPage() {
                 <span className="hidden sm:inline text-xs font-semibold" style={{ color: '#6b7280' }}>
                   Signed in{authQ.data.username ? ` as ${authQ.data.username}` : ""}
                 </span>
+                {/* No product name here. This page is served on the academy's OWN domain
+                    (gunachess.com), where "Go to ChessGuru" is a white-label leak — the
+                    owner reported it the moment it shipped. Keep the label about what the
+                    button does, so it reads correctly on every tenant domain. */}
                 {/* /puzzles, never "/". On a tenant domain the bare root is claimed twice:
                     nginx `location = /` 302s it to the academy page, and the custom-domain
                     shim in App.tsx redirects there too (it fires only on "/", "/v2", "/v2/").
                     Linking to "/" therefore bounced straight back to this page. */}
                 <Link
-                  to={authQ.data.role === "academy_owner" || authQ.data.role === "coach" ? "/academy" : "/puzzles"}
+                  to={meIsStaff ? "/academy" : "/puzzles"}
                   className="cg-civ-btn cg-civ-btn--accent cg-civ-btn--sm"
                 >
-                  <span>Go to ChessGuru</span>
+                  <span>{meIsStaff ? "Academy dashboard" : "Start training"}</span>
                 </Link>
               </>
             ) : (
@@ -2840,7 +2846,7 @@ export default function AcademyPublicPage() {
             ))}
           </div>
           <div style={{ marginTop: '0.75rem', fontSize: '0.8rem', color: '#232323' }}>
-            Powered by <a href="https://harinitharanjith.com/signup-academy" target="_blank" rel="noreferrer" style={{ color: '#14a2b8', fontWeight: 700, textDecoration: 'underline' }}>ChessGuru</a>
+            Powered by <a href="https://chessguru.cc/signup-academy" target="_blank" rel="noreferrer" style={{ color: '#14a2b8', fontWeight: 700, textDecoration: 'underline' }}>ChessGuru</a>
           </div>
         </div>
       </footer>
