@@ -25,7 +25,13 @@ import mongoose from "mongoose";
 // The API reads apps/api/.env the same way; without this the class process
 // would silently fall back to localhost mongo and push-disabled.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-try { require("dotenv").config(); } catch { /* dotenv optional in dev */ }
+// override:true — dotenv does NOT replace a variable pm2 already has, so a
+// value in pm2's saved dump silently wins over .env forever. PUBLIC_URL sat
+// at https://harinitharanjith.com in the dump while .env said chessguru.cc,
+// and every invite and reset link went to the legacy host (found 2026-09-17,
+// same trap as DREAMCY_INTERNAL_TOKEN that morning). .env is the source of
+// truth; it still only reads at STARTUP, so editing it needs a restart.
+try { require("dotenv").config({ override: true }); } catch { /* dotenv optional in dev */ }
 
 import { attachClassWs } from "./class/class-ws";
 import { attachVideoSignalWs } from "./video/video-signal";

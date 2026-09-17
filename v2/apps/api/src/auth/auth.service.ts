@@ -6,6 +6,8 @@ import bcrypt from "bcryptjs";
 import { isProvisional } from "../glicko/glicko";
 import { randomBytes, createHash } from "crypto";
 import { sendMail } from "../lib/mail";
+import { SESSION_MAX_AGE_MS } from "../cookie-domain";
+import { publicBaseForAcademy } from "../public-base";
 import { AcademyService } from "../academy/academy.service";
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -103,7 +105,16 @@ export class AuthService {
     // the role gate rejected everything with 403 "owner or coach only").
     session.academyId = user.academyId ?? null;
     session.role = user.role ?? null;
-    if (keep && session.cookie) session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
+    // Sessions do not expire; only POST /auth/logout ends one (owner ask
+    // 2026-09-17). This line used to set the SAME 30 days the global config
+    // already applied, so the "Keep me signed in" box changed nothing in
+    // either position. Now unticking it really does give a browser-session
+    // cookie — which is what a shared academy PC wants — and `noKeep` stops
+    // the upgrade pass in main.ts from quietly overriding that choice.
+    if (session.cookie) {
+      if (keep === false) { session.cookie.maxAge = null; session.noKeep = true; }
+      else { session.cookie.maxAge = SESSION_MAX_AGE_MS; delete session.noKeep; }
+    }
     await col.updateOne({ _id: user._id }, { $set: { lastLogin: new Date() } });
     return { ok: true };
   }
@@ -308,7 +319,10 @@ export class AuthService {
       { $set: { resetTokenHash: sha256(token), resetExpiresAt: expiresAt } },
     );
 
-    const base = process.env.PUBLIC_URL || "https://harinitharanjith.com";
+    // Send them to their OWN academy's host. A gunachess parent who resets
+    // on chessguru.cc signs in on a host their session cannot follow them
+    // back from, and is signed out again the moment they return.
+    const base = await publicBaseForAcademy(this.conn.db, user.academyId);
     const link = `${base}/reset-password?token=${encodeURIComponent(token)}`;
     await sendMail({
       to: email,
@@ -434,7 +448,7 @@ export class AuthService {
     session.username = user.username;
     session.academyId = user.academyId ?? null;   // same multi-tenant fix as signin()
     session.role = user.role ?? null;
-    if (session.cookie) session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000; // OTP flow = keep me signed in
+    if (session.cookie) session.cookie.maxAge = SESSION_MAX_AGE_MS; // OTP flow = keep me signed in
     return { ok: true };
   }
 }

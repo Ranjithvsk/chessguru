@@ -85,6 +85,7 @@ export default function LoginPage() {
               <label className="flex items-center gap-2 text-sm text-ink-400">
                 <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} className="accent-brand-500" />
                 Keep me logged in
+                <span className="text-[11px] text-ink-500">— untick on a shared computer</span>
               </label>
               <div className="flex items-start justify-between gap-3">
                 <span className="text-[11px] leading-snug text-ink-500">Academy student? Your coach can set a new password from the Students page.</span>

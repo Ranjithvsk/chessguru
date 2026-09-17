@@ -4,10 +4,17 @@ import "reflect-metadata";
 // VAPID_* at construction). Falls through silently in dev where the file
 // doesn't exist; pm2 env still wins for anything set both places.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-try { require("dotenv").config(); } catch { /* dotenv optional in dev */ }
+// override:true — dotenv does NOT replace a variable pm2 already has, so a
+// value in pm2's saved dump silently wins over .env forever. PUBLIC_URL sat
+// at https://harinitharanjith.com in the dump while .env said chessguru.cc,
+// and every invite and reset link went to the legacy host (found 2026-09-17,
+// same trap as DREAMCY_INTERNAL_TOKEN that morning). .env is the source of
+// truth; it still only reads at STARTUP, so editing it needs a restart.
+try { require("dotenv").config({ override: true }); } catch { /* dotenv optional in dev */ }
 import { HttpAdapterHost, NestFactory } from "@nestjs/core";
 import { RequestMethod } from "@nestjs/common";
 import session from "express-session";
+import { SESSION_MAX_AGE_MS, cookieDomainForHost } from "./cookie-domain";
 import MongoStore from "connect-mongo";
 // express is loaded via require so we don't need @types/express in the api's deps —
 // we only reach for one static helper (.raw middleware) here.
@@ -125,10 +132,10 @@ async function bootstrap() {
       resave: false,
       saveUninitialized: false,
       rolling: true,   // slide the cookie's lifetime forward on every response so an active user never gets logged out mid-use
-      store: MongoStore.create({ mongoUrl: MONGO_URI, ttl: 30 * 24 * 60 * 60 }),
+      store: MongoStore.create({ mongoUrl: MONGO_URI, ttl: Math.floor(SESSION_MAX_AGE_MS / 1000) }),
       // domain=.harinitharanjith.com => one login shared across harinitharanjith.com + admin.harinitharanjith.com (SSO).
       // Unset (host-only) when COOKIE_DOMAIN is absent, so localhost/dev still works.
-      cookie: { path: "/", httpOnly: true, sameSite: "lax", secure: false, maxAge: 30 * 24 * 60 * 60 * 1000, domain: process.env.COOKIE_DOMAIN || undefined },
+      cookie: { path: "/", httpOnly: true, sameSite: "lax", secure: false, maxAge: SESSION_MAX_AGE_MS, domain: process.env.COOKIE_DOMAIN || undefined },
     }),
   );
   // Per-request cookie-domain override. COOKIE_DOMAIN env is a single value
@@ -140,18 +147,43 @@ async function bootstrap() {
   // on chessguru.cc, got 201 ok, but /auth/me came back loggedIn:false
   // because the Set-Cookie was scoped to .harinitharanjith.com).
   //
-  //   chessguru.cc + subdomains        -> .chessguru.cc         (SSO across brand)
-  //   harinitharanjith.com + subs      -> .harinitharanjith.com (legacy SSO)
-  //   anything else (gunachess.com,
-  //   coach vanity, tenant sub)        -> undefined (host-only)
-  const HH_RX = /(^|\.)harinitharanjith\.com$/;
-  const CC_RX = /(^|\.)chessguru\.cc$/;
+      //   chessguru.cc + subdomains        -> .chessguru.cc               (SSO across brand)
+      //   harinitharanjith.com + subs      -> .harinitharanjith.com       (legacy SSO)
+      //   gunachess.com + www              -> .gunachess.com              (tenant SSO)
+      //   shriguruchessacademy.co.in       -> .shriguruchessacademy.co.in (NOT .co.in)
+      //   an IP, localhost, a bare suffix  -> undefined (host-only)
+      //
+      // 2026-09-17: tenant domains used to land in that last bucket, which is a
+      // large part of why gunachess kept signing in. Host-only also cannot be
+      // shared with www., and it produced the duplicate-cgsid "twin" that
+      // clearHostOnlyTwin() in auth.controller.ts still cleans up. A cookie
+      // still cannot cross gunachess.com <-> chessguru.cc - nothing can - so
+      // links we generate must target the academy's OWN host (see
+      // publicBaseForAcademy in public-base.ts).
   app.use((req: any, _res: any, next: any) => {
     if (!req?.session?.cookie) return next();
-    const host = String(req.hostname || "").toLowerCase();
-    if (CC_RX.test(host))      req.session.cookie.domain = ".chessguru.cc";
-    else if (HH_RX.test(host)) req.session.cookie.domain = ".harinitharanjith.com";
-    else                       req.session.cookie.domain = undefined;
+    // Widest scope this host may legally set. chessguru.cc and
+    // harinitharanjith.com used to be special-cased here; they are just
+    // registrable domains, so they behave exactly as before while every tenant
+    // domain (gunachess.com) now gets a real scope instead of host-only.
+    req.session.cookie.domain = cookieDomainForHost(String(req.hostname || ""));
+    // Lift legacy sessions onto the never-expires policy on their next request,
+    // so existing users are not made to sign in one last time.
+    //
+    // Setting cookie.maxAge alone does NOT persist: resave:false hashes the
+    // session WITHOUT its cookie, so express-session would only touch() the
+    // store's `expires` and leave originalMaxAge at the old 30 days — the very
+    // number the admin panel subtracts from `expires` to get "last request"
+    // (admin-academies.service.ts). Writing one field makes it dirty so both
+    // are re-saved together. Fires once per session, not once per request.
+    // Threshold, not equality: express-session's maxAge setter stores
+    // originalMaxAge as `expires - Date.now()`, so it drifts by a
+    // millisecond or two on every rolling touch. `!== SESSION_MAX_AGE_MS`
+    // would therefore re-save the session on nearly every request.
+    if (!req.session.noKeep && (req.session.cookie.originalMaxAge ?? 0) < SESSION_MAX_AGE_MS / 2) {
+      req.session.cookie.maxAge = SESSION_MAX_AGE_MS;
+      req.session.policy = "never-expire";
+    }
     next();
   });
   // /api/* everywhere except the /auth/* routes (kept at root to match the client)

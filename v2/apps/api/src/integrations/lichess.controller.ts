@@ -19,7 +19,11 @@ import { randomBytes, createHash } from "crypto";
 import { GamesFetchService } from "./games-fetch.service";
 
 const CLIENT_ID   = "chessguru-web";
-const REDIRECT_URI = (process.env.PUBLIC_URL || "https://harinitharanjith.com") + "/v2api/api/link/lichess/callback";
+// PINNED, deliberately not PUBLIC_URL. This exact string is registered with
+// Lichess as the OAuth redirect; if it stops matching, every "link my
+// Lichess account" fails with redirect_uri_mismatch. PUBLIC_URL moved to
+// https://chessguru.cc on 2026-09-17 and must not drag this with it.
+const REDIRECT_URI = (process.env.LICHESS_REDIRECT_BASE || "https://harinitharanjith.com") + "/v2api/api/link/lichess/callback";
 const SCOPES = "email:read preference:read";
 
 function b64url(buf: Buffer) {

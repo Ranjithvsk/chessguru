@@ -19,6 +19,7 @@ import { sendMail } from "../lib/mail";
 import { ACHIEVEMENTS, type Achievement } from "./achievements.catalog";
 import { isAdmin } from "../admin/admins";
 import { FeesService } from "../fees/fees.service";
+import { publicBaseForAcademy } from "../public-base";
 
 const INVITE_TTL_DAYS = 7;
 
@@ -146,7 +147,10 @@ export class AcademyService {
       createdAt: now, expiresAt,
     });
 
-    const publicUrl = (process.env.PUBLIC_URL || "https://harinitharanjith.com").replace(/\/+$/, "");
+    // The invited person must land on THEIR academy's host, not the
+    // platform's — a session created on chessguru.cc cannot follow them to
+    // gunachess.com, so the wrong host here costs them a second sign-in.
+    const publicUrl = await publicBaseForAcademy(this.conn.db, academyId);
     const link = `${publicUrl}/accept-invite?token=${encodeURIComponent(token)}`;
     const roleWord = wantRole === "student" ? "student" : "coach";
     const subject = `You're invited to ${academyName} on ChessGuru`;
@@ -2529,7 +2533,9 @@ Thank you!`;
     // Ensure TTL index (idempotent). expireAfterSeconds: 0 means Mongo respects
     // the exact expiresAt date field.
     try { await this.conn.db!.collection("attendanceQrSessions").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }); } catch {}
-    const base = process.env.PUBLIC_URL || "https://chessguru.cc";
+    // Same reason as the invite link: the QR must open the academy's own
+    // host or the student scans it and is asked to sign in again.
+    const base = await publicBaseForAcademy(this.conn.db, g.academyId);
     return { ok: true, token, expiresAt: expiresAt.toISOString(), checkinUrl: `${base}/checkin/${token}` };
   }
 
