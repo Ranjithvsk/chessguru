@@ -2645,8 +2645,12 @@ export default function AcademyPublicPage() {
                 <span className="hidden sm:inline text-xs font-semibold" style={{ color: '#6b7280' }}>
                   Signed in{authQ.data.username ? ` as ${authQ.data.username}` : ""}
                 </span>
+                {/* /puzzles, never "/". On a tenant domain the bare root is claimed twice:
+                    nginx `location = /` 302s it to the academy page, and the custom-domain
+                    shim in App.tsx redirects there too (it fires only on "/", "/v2", "/v2/").
+                    Linking to "/" therefore bounced straight back to this page. */}
                 <Link
-                  to={authQ.data.role === "academy_owner" || authQ.data.role === "coach" ? "/academy" : "/"}
+                  to={authQ.data.role === "academy_owner" || authQ.data.role === "coach" ? "/academy" : "/puzzles"}
                   className="cg-civ-btn cg-civ-btn--accent cg-civ-btn--sm"
                 >
                   <span>Go to ChessGuru</span>
