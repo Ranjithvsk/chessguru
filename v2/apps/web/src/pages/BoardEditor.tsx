@@ -126,7 +126,7 @@ export default function BoardEditorPage() {
   // Frozen from the last successful vision run so we can compute a diff of
   // (vision-detected type) vs (coach-corrected type) on Apply and upload the
   // deltas as new templates for future detections.
-  const [visionSnapshot, setVisionSnapshot] = useState<{ types: (PieceType | null)[][]; canvas: HTMLCanvasElement; renderMode: "screen" | "print" } | null>(null);
+  const [visionSnapshot, setVisionSnapshot] = useState<{ types: (PieceType | null)[][]; colors?: ("w" | "b" | null)[][]; canvas: HTMLCanvasElement; renderMode: "screen" | "print" } | null>(null);
   // v3 Server AI ("DINOv2 nearest-neighbour"). Sends the cropped board to
   // the backend classifier; ~3-6s per board.
   const [serverBusy, setServerBusy] = useState(false);
@@ -262,7 +262,13 @@ export default function BoardEditorPage() {
             // CASE 1: wrong type at the same square.
             if (!cell88 || !visionType) continue;
             const coachType = cell88.type.toUpperCase() as PieceType;
-            if (coachType === visionType) continue;   // no correction
+            const visionColor = visionSnapshot.colors?.[r]?.[c] ?? null;
+            // Compare TYPE **and** COLOUR. Comparing type alone silently dropped every
+            // colour correction -- and "white piece in shadow read as black" is 18.5% of
+            // all wrong squares on the labelled set (measured 2026-09-17), the single
+            // largest confusable-piece error. Those were exactly the corrections the
+            // retrain needs most, and none of them were ever being sent.
+            if (coachType === visionType && visionColor === cell88.color) continue;
             try {
               void fetch(`${API_BASE}/api/vision/feedback`, {
                 method: "POST", credentials: "include",
@@ -306,17 +312,22 @@ export default function BoardEditorPage() {
       }
       setRawUploadDataUrl(rawDataUrl);
       const b64 = rawDataUrl.replace(/^data:image\/[a-z]+;base64,/, "");
-      // Guarantee the raw uncropped upload lands on the server, even if
-      // Ultra AI doesn't fire. Await so the request completes before any
-      // subsequent navigation. NOTE: cannot use `keepalive: true` — browsers
-      // cap keepalive-fetch bodies at 64 KB, and raw phone photos are >1 MB.
-      try {
-        await fetch(`${API_BASE}/api/vision/log-scan`, {
-          method: "POST", credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ boardPngBase64: b64, source: "board-editor-upload" }),
-        });
-      } catch { /* silent — best-effort */ }
+      // Best-effort archive of the raw upload. This used to be AWAITED, which put a
+      // full-size upload on the critical path BEFORE the classifier was even asked —
+      // the scan could not start until the archive finished. Fire it and move on: a
+      // lost log line costs nothing, a delayed scan costs the user seconds.
+      // (keepalive: true is still not an option — browsers cap those bodies at 64 KB
+      // and a raw phone photo is >1 MB.)
+      // NOTE: the bytes sent are deliberately unchanged. Shrinking or re-encoding the
+      // image here cost real accuracy when tried on 2026-09-17 — the board extractor
+      // detects at imgsz=640 but CROPS FROM THE FULL-RESOLUTION IMAGE, and that crop
+      // is what the classifier reads. Do not "optimise" this without running
+      // accuracy_check.py on the labelled set first.
+      void fetch(`${API_BASE}/api/vision/log-scan`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ boardPngBase64: b64, source: "board-editor-upload" }),
+      }).catch(() => { /* silent — best-effort */ });
     } catch { /* silent */ }
     // Fire Ultra AI IMMEDIATELY on the raw image. This is the reliable
     // path — server runs its own YOLOv8n-seg extractor + YOLOv8n-cls
@@ -507,6 +518,34 @@ export default function BoardEditorPage() {
       const fullFen = normalizeScanFen(j.fen);
       const placed = fp.loadPermissive(fullFen);
       const legal = fp.load(fullFen);
+      // Corrections loop (2026-09-17). Everything the correction UI needs was being set
+      // ONLY in runServerClassifyOnCanvas -- the retired v2 path, which is unreachable
+      // (it requires visionSnapshot, which nothing ever set) and is therefore stripped
+      // from the bundle as dead code. On the live Ultra path lastScanIdRef and
+      // visionSnapshot both stayed null, so the correction panel never rendered and
+      // every scan recorded corrections: 0. finetune_from_corrections.py consequently
+      // had nothing to learn from -- which is why the classifier never improved on the
+      // low-contrast squares it keeps misreading (a white piece on a dark square is read
+      // as empty ~10% of the time, measured on the labelled set 2026-09-17).
+      //
+      // The warped board and the per-square grid both come back from /classify, so the
+      // snapshot is rebuilt from the response rather than by re-running a detector.
+      lastScanIdRef.current = typeof j.scanId === "string" ? j.scanId : null;
+      setScanConfirmed(false);
+      if (typeof j.boardPngBase64 === "string" && Array.isArray(j.squares)) {
+        try {
+          const boardCanvas = await dataUrlToCanvas(`data:image/png;base64,${j.boardPngBase64}`);
+          const types = (j.squares as Array<Array<{ piece?: string | null }>>).map((row) =>
+            row.map((sq) => (sq?.piece ? (String(sq.piece).toUpperCase() as PieceType) : null)));
+          // Colour is carried separately because the commonest confusable error is a
+          // SHADOWED WHITE piece read as black -- right shape, wrong side. Keeping only
+          // the type would make that correction invisible to applyEditor.
+          const colors = (j.squares as Array<Array<{ color?: string | null }>>).map((row) =>
+            row.map((sq) => (sq?.color === "w" || sq?.color === "b" ? sq.color : null)));
+          setVisionSnapshot({ types, colors, canvas: boardCanvas, renderMode: "screen" });
+          setVisionPreview(`data:image/png;base64,${j.boardPngBase64}`);
+        } catch { /* silent -- the scan itself already succeeded */ }
+      }
       const avgConf = (j.squares.flat().reduce((s: number, sq: any) => s + sq.confidence, 0) / 64 * 100).toFixed(0);
       const pieceCount = j.fen.split(" ")[0].replace(/[^KQRBNPkqrbnp]/g, "").length;
       const timing = `extract ${j.extractLatencyMs}ms + classify ${j.meta.latencyMs}ms`;

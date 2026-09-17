@@ -66,6 +66,42 @@ function readJson<T>(p: string, fallback: T): T {
   try { return JSON.parse(readFileSync(p, "utf8")) as T; } catch { return fallback; }
 }
 
+// Where each reader left off. Kept OUTSIDE the book directories on purpose: a book
+// dir IS the book — pages, diagrams, meta — and is the same for everyone who can
+// open it, while "which page was I on" belongs to one person. Keeping it separate
+// also means it works for remote (Vinayaka-hosted) books, which have no local dir
+// at all, and a re-ingest that rewrites a book dir cannot wipe anyone's place.
+//
+// The listing at GET / fails closed on a missing meta.owner, so this directory
+// never shows up as a book.
+const PROGRESS_DIR = join(STORE, "_progress");
+
+function progressPath(uid: string): string {
+  // A user id reaches us from the session, but it still becomes a FILENAME here.
+  const safe = String(uid).replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 64) || "_";
+  return join(PROGRESS_DIR, `${safe}.json`);
+}
+
+function readProgress(uid: string): Record<string, number> {
+  return readJson<Record<string, number>>(progressPath(uid), {});
+}
+
+function writeProgress(uid: string, bookId: string, page: number): void {
+  mkdirSync(PROGRESS_DIR, { recursive: true });
+  const all = readProgress(uid);
+  all[bookId] = page;
+  writeFileSync(progressPath(uid), JSON.stringify(all));
+}
+
+/** The page to open at: where they left off, clamped in case the book has since
+ *  been re-ingested shorter. 0 for a book never opened. */
+function resumePage(uid: string, bookId: string, pages: number): number {
+  const saved = readProgress(uid)[bookId];
+  if (!Number.isInteger(saved) || saved! < 0) return 0;
+  if (Number.isInteger(pages) && pages > 0) return Math.min(saved!, pages - 1);
+  return saved!;
+}
+
 @Controller("user-books")
 export class UserBooksController {
   private requireUser(req: any): string {
@@ -197,7 +233,21 @@ export class UserBooksController {
       // the way the book labels its problems.
       analysis: readJson<Record<string, any>>(join(dir, "analysis.json"), {}),
       diagrams: diagrams.map((d, i) => ({ n: i + 1, key: diagramKey(d), ...d })),
+      lastPage: resumePage(uid, id, status.pages ?? 0),
     };
+  }
+
+  /** Remember where the reader got to. Reopening a book used to start at page 1
+   *  every time, which on a 400-page endgame manual means finding your place by
+   *  hand on every visit. Best-effort by design: a failed save must never block
+   *  turning a page, so the client fires and forgets. */
+  @Post(":id/progress")
+  async saveProgress(@Param("id") id: string, @Req() req: any, @Body() body: { page?: number }) {
+    const uid = this.requireUser(req);
+    const n = Number(body?.page);
+    if (!Number.isFinite(n) || n < 0) throw new BadRequestException("page must be a non-negative number");
+    writeProgress(uid, id, Math.floor(n));
+    return { ok: true, page: Math.floor(n) };
   }
 
   /** One book, read on Vinayaka and served through here.
@@ -226,6 +276,8 @@ export class UserBooksController {
       done: status?.done ?? 0,
       seconds: status?.seconds ?? null,
       remote: true,
+      // Progress is stored locally for remote books too — they have no dir here.
+      lastPage: resumePage(uid, id, status?.pages ?? 0),
       analysis: analysis ?? {},
       diagrams: (diagrams ?? []).map((d: any, i: number) => ({
         n: i + 1, key: diagramKey(d), ...d,

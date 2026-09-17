@@ -23,10 +23,12 @@ import MoveTree from "../components/MoveTree";
 
 const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
 
-type Diagram = { n: number; key?: string; page: number; bbox: number[] | null; fen: string; conf?: number; modelConf?: number; warnings?: string[] };
+type Diagram = { n: number; key?: string; page: number; bbox: number[] | null; fen: string; conf?: number; modelConf?: number; minConf?: number; squaresBelow?: number; warnings?: string[] };
 type BookDetail = {
   id: string; title: string; pages: number; state: string; done: number;
   seconds: number | null; diagrams: Diagram[];
+  /** Where this reader left off last time. 0 for a book never opened. */
+  lastPage?: number;
   /** Lines saved on a position, keyed by the diagram's stable key. */
   analysis?: Record<string, { tree: any[]; startFen?: string }>;
 };
@@ -362,6 +364,68 @@ export default function BookReaderPage() {
     pageRefs.current[p]?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
+  // ── Remember the reader's place ───────────────────────────────────────────
+  // Reopening a book started at page 1 every time. On a 400-page endgame manual
+  // that means hunting for your spot on every visit.
+  const resumedRef = useRef(false);
+  const saveTimer = useRef<number | null>(null);
+
+  // Restore once, as soon as the page boxes exist. Instant, NOT smooth: a smooth
+  // scroll across 300 pages is a long animation, and the observer below would
+  // record every page it flies past before settling.
+  useEffect(() => {
+    if (!book || resumedRef.current) return;
+    resumedRef.current = true;
+    const want = Number.isInteger(book.lastPage) ? book.lastPage! : 0;
+    const target = Math.max(0, Math.min(want, Math.max(0, (book.pages || 1) - 1)));
+    if (target <= 0) return;
+    setPage(target);
+    requestAnimationFrame(() => {
+      pageRefs.current[target]?.scrollIntoView({ behavior: "auto", block: "start" });
+    });
+  }, [book]);
+
+  // Track the page actually ON SCREEN. Without this, `page` only moved when you
+  // clicked a diagram or a contents entry, so someone who simply scrolled would
+  // still be sent back to where they last clicked.
+  useEffect(() => {
+    if (!book?.pages) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        let best = -1;
+        let bestRatio = 0;
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          const n = Number((e.target as HTMLElement).dataset.page);
+          if (Number.isInteger(n) && e.intersectionRatio > bestRatio) {
+            bestRatio = e.intersectionRatio;
+            best = n;
+          }
+        }
+        if (best >= 0) setPage(best);
+      },
+      { threshold: [0.25, 0.5, 0.75] },
+    );
+    for (const el of Object.values(pageRefs.current)) if (el) io.observe(el);
+    return () => io.disconnect();
+  }, [book?.id, book?.pages]);
+
+  // Persist, debounced. Turning a page must never wait on the network, and a
+  // failed save is not worth interrupting reading for.
+  useEffect(() => {
+    if (!book || !resumedRef.current) return;
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      void fetch(`${API_BASE}/api/user-books/${encodeURIComponent(book.id)}/progress`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ page }),
+      }).catch(() => { /* best-effort */ });
+    }, 1200);
+    return () => { if (saveTimer.current) window.clearTimeout(saveTimer.current); };
+  }, [page, book]);
+
   if (err) {
     return (
       <div className="mx-auto max-w-lg p-8 text-center">
@@ -471,6 +535,7 @@ export default function BookReaderPage() {
             <div
               key={p}
               ref={(el) => { pageRefs.current[p] = el; }}
+              data-page={p}
               /* RESERVE the page's height before its image arrives. loading="lazy"
                  was already set and did nothing: an unloaded <img> makes its
                  container zero-high, so all 854 pages sat stacked at the top of
@@ -515,13 +580,27 @@ export default function BookReaderPage() {
                 // pass overwrote the model's own number with a synthetic one and
                 // destroyed the signal the coach wanted to see.
                 const verified = d.conf === 1;
-                const lowConf = !verified && (d.modelConf ?? 1) < 0.9;
+                // The amber fact used to be modelConf — the board AVERAGE — and the note
+                // above records that it caught 0 of 6 wrong diagrams. That is inherent to a
+                // mean: 62 easy empty squares plus one square read at 0.27 still averages
+                // 0.96. The ingest now keeps the WORST square (minConf) and how many fell
+                // below the scanner's own 0.70 piece bar (squaresBelow) — the number that
+                // actually points at a misread. Verified 2026-09-17 on page 29 of the
+                // Dvoretsky manual: stored average 0.961, worst square 0.270, and BOTH of
+                // that page's diagrams are wrong — Dvoretsky's "?" mined-square marks read
+                // as a rook and a pawn. Still a fact in the tooltip, never a verdict.
+                const worst = typeof d.minConf === "number" ? d.minConf : null;
+                const lowConf = !verified && ((d.squaresBelow ?? 0) > 0 || (worst !== null && worst < 0.7));
                 return (
                   <button
                     key={d.n}
                     onClick={() => open(d)}
                     title={`Position ${d.n}${verified ? " — you have checked this one"
-                      : lowConf ? ` — the scanner read this one at ${Math.round((d.modelConf ?? 0) * 100)}% confidence` : ""}`}
+                      : lowConf
+                        ? (worst !== null
+                            ? ` — the scanner's least certain square here scored ${Math.round(worst * 100)}%`
+                            : ` — the scanner read this one at ${Math.round((d.modelConf ?? 0) * 100)}% confidence`)
+                        : ""}`}
                     className={`group absolute rounded-lg transition
                       ${active === d.n
                         ? "ring-4 ring-brand-400 bg-brand-400/10"
