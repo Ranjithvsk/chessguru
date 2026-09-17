@@ -123,6 +123,42 @@ async function bootstrap() {
   // fill in all fields." Regression 2026-08-10, fixed same day.
   app.use(expressLib.json({ limit: "1mb" }));
   app.use(expressLib.urlencoded({ extended: true, limit: "1mb" }));
+  // De-duplicate cgsid BEFORE express-session parses it.
+  //
+  // Giving tenant hosts a real cookie scope means a user who already had a
+  // host-only cgsid now has TWO: the old host-only one and the new
+  // Domain=.gunachess.com one. The browser sends both, and `cookie.parse()`
+  // keeps the FIRST — which by RFC 6265 is the OLDER one, i.e. the stale
+  // host-only cookie. Measured 2026-09-17:
+  //
+  //   cgsid=<valid>                 loggedIn true
+  //   cgsid=<stale>; cgsid=<valid>  loggedIn FALSE   <- the bug
+  //   cgsid=<valid>; cgsid=<stale>  loggedIn true
+  //
+  // So a signed-in user opening gunachess.com was shown the sign-in page once.
+  // clearHostOnlyTwin() in auth.controller.ts expires the host-only twin, but
+  // only AFTER express-session has already read it and decided they were
+  // logged out — and only on /auth/* routes.
+  //
+  // Keep the LAST cgsid: same path, so the browser orders by creation time and
+  // the newest is the domain-scoped one we now issue. Expire the host-only
+  // twin here too, on every route, so the duplicate is gone for good after one
+  // request instead of lingering until the next /auth/* call.
+  app.use((req: any, res: any, next: any) => {
+    const raw: string = req.headers?.cookie || "";
+    if (raw.indexOf("cgsid=") === -1) return next();
+    const parts = raw.split(/;\s*/).filter(Boolean);
+    const twins = parts.filter((p: string) => p.startsWith("cgsid="));
+    const keep = twins.length ? twins[twins.length - 1] : undefined;
+    if (twins.length > 1 && keep) {
+      req.headers.cookie = parts
+        .filter((p: string) => !p.startsWith("cgsid="))
+        .concat([keep])
+        .join("; ");
+      res.cookie("cgsid", "", { path: "/", expires: new Date(0), httpOnly: true });
+    }
+    next();
+  });
   app.use(
     session({
       // Unique name so it can't collide with the v1 app's connect.sid on this domain
