@@ -437,6 +437,27 @@ export class AcademyService {
       ids.add(String(target._id));
       await this.batches().updateOne({ _id: b._id }, { $set: { studentIds: [...ids], updatedAt: now } });
     }
+    // Rewrite CLASS AUDIENCES too. classSchedules.batchStudentIds is a SNAPSHOT
+    // taken when the coach picked the audience — rewriting academyBatches alone
+    // left every already-created class still naming the deleted account, so the
+    // student stayed locked out of exactly the classes this merge was meant to fix
+    // (and a 404 from the LiveKit token is all they would see). Dedup in case a
+    // class listed both accounts.
+    const classesWithDupe = await this.conn.db!.collection("classSchedules")
+      .find({ batchStudentIds: dupe._id }, { projection: { batchStudentIds: 1 } })
+      .toArray();
+    for (const c of classesWithDupe) {
+      const ids = new Set<string>((c.batchStudentIds || []).map((x: any) => String(x)));
+      ids.delete(String(dupe._id));
+      ids.add(String(target._id));
+      await this.conn.db!.collection("classSchedules")
+        .updateOne({ _id: c._id }, { $set: { batchStudentIds: [...ids] } });
+    }
+
+    // Attendance history keeps the student's record intact across the merge.
+    await this.conn.db!.collection("classAttendance")
+      .updateMany({ key: srcId }, { $set: { key: dstId, userId: dstId } });
+
     // Finally remove the source user record.
     await this.users().deleteOne({ _id: dupe._id });
     return {
@@ -581,12 +602,78 @@ export class AcademyService {
       lastLogin: null,
       createdBy: g.userId,
     };
+    // Near-duplicate guard.
+    //
+    // The login is DERIVED FROM THE NAME, and there was no way to edit a student —
+    // so a coach fixing a spelling had only one tool, Add, which minted a second
+    // account: "Haritha" -> haritha, "Haritha R" -> harithar. Same girl, two logins.
+    // Every roster, batch and class audience then points at whichever one existed
+    // when it was built, and she is refused from her own class with a bare 404.
+    // That is exactly TKT-247 (2026-09-17).
+    //
+    // The unique-username loop above cannot see this: the handles really are
+    // different. So compare the NAMES, and make the coach confirm.
+    if (body?.force !== true) {
+      const roster = await this.users()
+        .find({ academyId: g.academyId, role: "student" },
+              { projection: { _id: 1, username: 1, name: 1, coachId: 1, lastLogin: 1 } })
+        .toArray();
+      const near = roster.find((u: any) => {
+        const other = sanitize(String(u.name || u.username || u._id || ""));
+        if (!other || !baseUid) return false;
+        if (other === baseUid) return true;
+        // "haritha" vs "harithar": one is a prefix of the other and barely longer.
+        // Length floor keeps real pairs like "Ram" / "Ramya" out of the net.
+        const [short, long] = other.length <= baseUid.length ? [other, baseUid] : [baseUid, other];
+        return short.length >= 5 && long.startsWith(short) && long.length - short.length <= 2;
+      });
+      if (near) {
+        return {
+          ok: false,
+          duplicate: true,
+          existing: {
+            _id: near._id, username: near.username, name: near.name ?? null,
+            coachId: near.coachId ?? null,
+            lastLogin: near.lastLogin ? new Date(near.lastLogin).toISOString() : null,
+          },
+          error: `"${near.name || near.username}" is already a student here. `
+               + `If this is the same person, rename that account instead of adding a second one — `
+               + `a second login leaves them off the batches and class invites the first one is on.`,
+        };
+      }
+    }
+
     await this.users().insertOne(userDoc);
     return {
       ok: true,
       student: { _id: uid, username: userDoc.username, email: userDoc.email, coachId, createdAt: now },
       credentials: { username: uid, password },
     };
+  }
+
+  /** Rename a student — the DISPLAY name only.
+   *
+   *  The missing piece that caused the duplicates: there was no edit at all, so a
+   *  coach fixing a name had to Add again and got a whole new login. The login
+   *  handle (_id / username) deliberately does NOT change here — batches, class
+   *  audiences, attendance, puzzle history and the student's own password all key
+   *  on it, and Mongo cannot rename an _id in place anyway. */
+  async renameStudent(session: any, studentId: string, body: any): Promise<any> {
+    const g = this.ensureCoachOrOwner(session);
+    const name = String(body?.displayName || body?.name || "").trim().slice(0, 60);
+    if (name.length < 2) return { ok: false, error: "Enter at least 2 letters." };
+    const student: any = await this.users().findOne({ _id: String(studentId) as any });
+    if (!student || student.role !== "student" || student.academyId !== g.academyId) {
+      return { ok: false, error: "That student isn't in this academy." };
+    }
+    if (g.role === "coach" && String(student.coachId || "") !== g.userId) {
+      return { ok: false, error: "That student isn't yours." };
+    }
+    await this.users().updateOne(
+      { _id: student._id },
+      { $set: { name, updatedAt: new Date() } },
+    );
+    return { ok: true, student: { _id: student._id, username: student.username, name } };
   }
 
   // ═══════════ MASTER COACH DIRECTIVES ═══════════

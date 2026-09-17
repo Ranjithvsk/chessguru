@@ -63,7 +63,7 @@ type Orientation = "white" | "black";
 //     saved (reconnect), server verifies + resumes coach role. Otherwise the
 //     first hello with no token claims the coach role for that room.
 type ClientFrame =
-  | { type: "hello"; coachToken?: string; userId?: string; displayName?: string; intendedRole?: "coach" | "student" }
+  | { type: "hello"; coachToken?: string; userId?: string; displayName?: string; intendedRole?: "coach" | "student"; secondScreen?: boolean }
   | { type: "move"; move: Move }
   | { type: "reset" }
   | { type: "loadFen"; fen: string }        // coach only — set the board to an arbitrary position
@@ -82,6 +82,14 @@ type ClientFrame =
   | { type: "pointer-off" }                   // coach only — cursor left the board
   | { type: "orientation"; orientation: Orientation } // coach only — flip board for everyone
   | { type: "ping" }
+  // ── Second-screen handoff (2026-09-17, owner directive):
+  // The coach runs the class on a PC and reads the book on a phone, signed in to
+  // the SAME account. Tapping a position in the book OFFERS it to the PC; the PC
+  // decides. The phone never changes the class board — one authority for board
+  // changes, the tested loadFen path reused, and a mis-tap on a phone can never
+  // overwrite a live lesson mid-sentence.
+  | { type: "offer-position"; fen: string; label?: string; source?: { book?: string; page?: number; n?: number } }
+  | { type: "offer-ack"; offerId: string; action: "loaded" | "queued" | "dismissed" }
   // ── Challenge mode (2026-09-01, owner directive):
   // Coach freezes the class board and asks students to find good moves on
   // their OWN boards. Coach's board stays static. Students explore locally
@@ -106,6 +114,11 @@ type ServerFrame =
   | { type: "orientation"; orientation: Orientation }
   | { type: "participants"; participants: number }
   | { type: "pong" }
+  // Offer frames go ONLY to the offering coach's own sockets — never to students,
+  // who must not see a position that may never be loaded.
+  | { type: "position-offered"; offerId: string; fen: string; label: string; page: number | null; n: number | null; at: number; expiresAt: number }
+  | { type: "offer-delivered"; offerId: string; screens: number }
+  | { type: "offer-resolved"; offerId: string; action: "loaded" | "queued" | "dismissed" }
   // ── Challenge mode broadcast frames.
   | { type: "challenge_start"; positionFen: string; startFen: string; prompt: string; durationSec: number; endsAt: number; startedAt: number }
   | { type: "challenge_progress"; answered: number; total: number; remainingSec: number }   // coach-only detail; students see just remaining
@@ -200,6 +213,14 @@ interface Room {
   orientation: Orientation;     // board POV — coach can flip; students always mirror
   emptyEvictAt: number | null;  // when to drop this room from memory after last client left
   challenge: Challenge | null;  // active "find the good moves" session; null when idle
+  /** Positions sent from a coach's book that no class screen has answered yet.
+   *  Held here, not just relayed, because the two devices are rarely in step: the
+   *  coach taps Send on the phone and only then brings the class screen up, or the
+   *  class page is reloading at that moment. Relaying alone meant the offer went
+   *  nowhere and the coach saw nothing — owner, 2026-09-17: "i sent the position
+   *  but in dream meet didn't see". Delivered on the coach's next hello, dropped
+   *  once answered or expired. */
+  pendingOffers: Array<{ forUserId: string; frame: ServerFrame & { type: "position-offered" } }>;
 }
 
 // Grace before an emptied room is evicted. Owner reported (2026-08-12) that
@@ -235,6 +256,10 @@ function sweepEvicted(): void {
 // role() and lookup helpers use a per-socket WeakMap so the ws frame handler can
 // answer "is this socket the coach?" without stashing state on the socket object.
 const socketRole = new WeakMap<WebSocket, "coach" | "student">();
+// Sockets that are a coach's companion device (phone with the book open) rather
+// than a participant. They join a room only to hand a position to the coach's
+// own main screen, so they are kept out of the attendance register.
+const secondScreens = new WeakSet<WebSocket>();
 // Persistent identity per socket for attendance — captured on hello. userId is
 // null for anonymous joiners; name always has a value (falls back to "Guest").
 const socketWho = new WeakMap<WebSocket, { userId: string | null; name: string; classId: string }>();
@@ -335,7 +360,7 @@ function getRoom(id: string): Room {
     // piece — owner reported 2026-08-12 that "students were controlling
     // moves". Coach can unlock via the footer 🔒 toggle for interactive drills.
     r = { fen: START_FEN, startFen: START_FEN, tree: [], cursorPath: [], lastMove: null, history: [], cursorIdx: 0, clients: new Set(),
-          coachToken: null, coach: null, locked: true, shapes: [], startShapes: [], orientation: "white", emptyEvictAt: null,
+          coachToken: null, coach: null, locked: true, shapes: [], startShapes: [], orientation: "white", emptyEvictAt: null, pendingOffers: [],
           challenge: null };
     rooms.set(id, r);
     // Async restore from DB — a room evicted or a server restart shouldn't
@@ -482,6 +507,40 @@ function extendMainlineOnce(tree: TreeNode[], path: number[]): number[] | null {
 // persistence save. Ephemeral frames (participants, pointer, pong, role,
 // challenge_*) don't touch board state, no need to save.
 const PERSIST_FRAME_TYPES = new Set(["state", "move", "reset", "lock", "annot", "orientation"]);
+/** Hand a coach any offers that arrived while they had no class screen connected.
+ *  Called whenever a socket resolves to the coach role. */
+function flushPendingOffers(room: Room, ws: WebSocket): void {
+  const uid = socketWho.get(ws)?.userId ?? null;
+  if (!uid || !room.pendingOffers.length) return;
+  const now = Date.now();
+  room.pendingOffers = room.pendingOffers.filter((p) => p.frame.expiresAt > now);
+  for (const p of room.pendingOffers) {
+    if (p.forUserId !== uid) continue;
+    try { ws.send(JSON.stringify(p.frame)); } catch { /* ignore */ }
+  }
+}
+
+/** Send to EVERY connected coach socket, not just room.coach.
+ *
+ *  room.coach is ONE socket. A coach on a second device deliberately joins as an
+ *  "extra coach" and room.coach keeps pointing at the first, so anything addressed
+ *  to room.coach alone misses the screen the coach is actually using — and misses
+ *  entirely when room.coach is a stale socket not yet swept. That is how a
+ *  challenge could end (the board unfreezes for everyone via broadcast) while the
+ *  coach never received the answers: from their side it simply hung.
+ *  Owner, 2026-09-17: "find the best move got stuck why".
+ */
+function sendToCoaches(room: Room, frame: ServerFrame): number {
+  const payload = JSON.stringify(frame);
+  let n = 0;
+  for (const c of room.clients) {
+    if (c.readyState !== WebSocket.OPEN) continue;
+    if (socketRole.get(c) !== "coach") continue;
+    try { c.send(payload); n++; } catch { /* ignore */ }
+  }
+  return n;
+}
+
 function broadcast(room: Room, frame: ServerFrame): void {
   const payload = JSON.stringify(frame);
   for (const c of room.clients) {
@@ -581,10 +640,11 @@ function endChallenge(room: Room, classId: string): void {
   const answers = [...ch.answers.values()];
   // Everyone: board is un-frozen. Students snap back to coach's live board.
   broadcast(room, { type: "challenge_end", positionFen: ch.positionFen, startedAt: ch.startedAt });
-  // Coach: sees every answer with the SAN sequence.
-  if (room.coach && room.coach.readyState === WebSocket.OPEN) {
-    try { room.coach.send(JSON.stringify({ type: "challenge_end", positionFen: ch.positionFen, startedAt: ch.startedAt, answers })); } catch { /* */ }
-  }
+  // Every coach SCREEN, not just room.coach — see sendToCoaches. A coach on a
+  // second device is an 'extra coach' and room.coach still points at the first,
+  // so this used to unfreeze the board for everyone while the coach who pressed
+  // End never received the answers.
+  sendToCoaches(room, { type: "challenge_end", positionFen: ch.positionFen, startedAt: ch.startedAt, answers });
   // Persist so coaches can review after class + students can see their own
   // attempt in /history later. Fire-and-forget.
   if (dbConn?.db && answers.length > 0) {
@@ -653,6 +713,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     if (frame.type === "ping") { send({ type: "pong" }); return; }
 
     if (frame.type === "hello") {
+      if (frame.secondScreen === true) secondScreens.add(ws);
       // Coach resolution (owner tightened 2026-08-12 after the "Setup button
       // disappeared after reload" bug — client hadn't been persisting the
       // coachToken between reconnects, so a reload demoted the coach to a
@@ -684,7 +745,19 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         room.coach = null;
       }
       let resolvedSynchronously = false;
-      if (frame.coachToken && room.coachToken && frame.coachToken === room.coachToken) {
+      // A SECOND SCREEN never takes the coach role, whatever the room state. The
+      // branch below hands coach to the FIRST hello in a room with no token — and a
+      // room is recreated tokenless after eviction — so a coach opening the book on
+      // their phone while the PC was briefly disconnected would MINT A NEW COACH
+      // TOKEN and orphan the PC's. The PC would then reconnect as a student, in the
+      // middle of its own class. The phone only ever needs to hand a position over,
+      // and that is gated on identity, not role.
+      const mayClaimCoach = !secondScreens.has(ws);
+      if (!mayClaimCoach) {
+        socketRole.set(ws, "student");
+        send({ type: "role", role: "student" });
+        resolvedSynchronously = true;
+      } else if (frame.coachToken && room.coachToken && frame.coachToken === room.coachToken) {
         socketRole.set(ws, "coach"); room.coach = ws;
         send({ type: "role", role: "coach", coachToken: room.coachToken });
         resolvedSynchronously = true;
@@ -758,6 +831,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
                 if (sameUser) {
                   socketRole.set(ws, "coach");
                   send({ type: "role", role: "coach", coachToken: room.coachToken ?? undefined });
+                  flushPendingOffers(room, ws);
                   try { console.log("[class-ws.hello] async coach join (same user, extra device)", roomId, { uidForCoach: uidForCoach.slice(0, 40) }); } catch { /* */ }
                   return;
                 }
@@ -781,6 +855,10 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       const userId = typeof frame.userId === "string" && frame.userId.length ? frame.userId.slice(0, 64) : null;
       const name = typeof frame.displayName === "string" && frame.displayName.trim() ? frame.displayName.trim().slice(0, 80) : "Guest";
       socketWho.set(ws, { userId, name, classId: roomId });
+      // Must come AFTER socketWho: the flush matches offers by signed-in user, and
+      // calling it during role resolution (before identity is recorded) silently
+      // found nothing — the offer stayed parked and the class screen showed no card.
+      if (socketRole.get(ws) === "coach") flushPendingOffers(room, ws);
       // Persisted kick check — if this user has been removed from THIS
       // class session, drop them straight away with a `kicked` frame.
       // Runs off the hello (rather than in the upgrade handshake) because
@@ -801,15 +879,52 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         // be locked out of their own room, guests because eligibility keys
         // on userId which they don't have. Owner ask 2026-08-25.
         if (dbConn && socketRole.get(ws) !== "coach" && userId) {
+          // A SECOND SCREEN is the coach's own phone, joining only to hand a
+          // position to their PC. It arrives with the student role — the coach is
+          // never on their own class roster — so the audience gate below ejected it
+          // with `not-invited` before it could send anything, and Send to Dream Meet
+          // failed in silence. Owner, 2026-09-17: "i sent the position but in dream
+          // meet didn't see why".
+          //
+          // Allowed ONLY when the signed-in user really is this class's coach. A
+          // student who simply claims secondScreen falls through to the gate, so
+          // this cannot be used to walk into a class you were not invited to.
+          // Exempt the room's own coach by IDENTITY, not by the role label.
+          //
+          // Coach promotion is sometimes asynchronous — a coach opening a SECOND
+          // device while the first still holds room.coach does not resolve
+          // synchronously, so at this point the socket is still labelled "student".
+          // A coach is never on their own class roster, so the gate below ejected
+          // them with `not-invited` … and the client renders ANY onClassEnded reason
+          // under the heading "Class ended". Owner, 2026-09-17: "when coach
+          // reconnects on another device he is shown class is ended".
+          let isOwnCoachDevice = false;
           try {
-            const elig = await resolveEligibility(dbConn as any, roomId, null);
-            if (!isStudentEligible(elig, userId)) {
-              try { ws.send(JSON.stringify({ type: "not-invited" })); } catch { /* ignore */ }
-              try { ws.close(1000, "not-invited"); } catch { /* ignore */ }
-              return;
+            const klass: any = await dbConn.db!.collection("classSchedules")
+              .findOne({ _id: roomId as any }, { projection: { createdByUserId: 1 } });
+            let coachOf = klass ? String(klass.createdByUserId ?? "") : "";
+            if (!coachOf) {
+              const ann: any = await dbConn.db!.collection("classLiveAnnouncements")
+                .findOne({ _id: roomId as any }, { projection: { coachUserId: 1 } });
+              coachOf = ann ? String(ann.coachUserId ?? "") : "";
             }
-          } catch { /* fail-open — a mongo hiccup mustn't lock the class */ }
+            isOwnCoachDevice = !!coachOf && coachOf === userId;
+          } catch { /* fall through to the gate */ }
+          if (!isOwnCoachDevice) {
+            try {
+              const elig = await resolveEligibility(dbConn as any, roomId, null);
+              if (!isStudentEligible(elig, userId)) {
+                try { ws.send(JSON.stringify({ type: "not-invited" })); } catch { /* ignore */ }
+                try { ws.close(1000, "not-invited"); } catch { /* ignore */ }
+                return;
+              }
+            } catch { /* fail-open — a mongo hiccup mustn't lock the class */ }
+          }
         }
+        // A second screen is the coach's own phone holding the book open, not a
+        // person arriving. Recording it would put the coach in their own class
+        // register — and a late-join alert would fire for their own device.
+        if (secondScreens.has(ws)) return;
         const { firstJoin } = await recordAttendance(roomId, userId, name, "join");
         if (firstJoin) await maybeAlertLate(room, roomId, userId, name);
       })();
@@ -1098,6 +1213,86 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       return;
     }
 
+    if (frame.type === "offer-position" || frame.type === "offer-ack") {
+      // Both directions are coach-only and are delivered ONLY to sockets holding
+      // the same signed-in user. A student in the room must never see an offer:
+      // it is a position that may never be loaded, and showing it would give away
+      // the answer to whatever is still on the board.
+      // Gated on IDENTITY, not role. The phone must NOT claim the coach role just
+      // to offer a position: hello's coach resolution would mint a fresh token and
+      // orphan the PC's, demoting the real teaching screen mid-class. So a socket
+      // may offer when it is signed in as the same user as a coach socket already
+      // in this room — you can only ever hand a position to yourself.
+      const me = socketWho.get(ws)?.userId ?? null;
+      if (!me) return;                       // a guest has no other screen to talk to
+
+      const myScreens = (coachOnly: boolean): WebSocket[] => {
+        const out: WebSocket[] = [];
+        for (const c of room.clients) {
+          if (c === ws) continue;                                  // not the screen that sent it
+          if (c.readyState !== WebSocket.OPEN) continue;
+          if ((socketWho.get(c)?.userId ?? null) !== me) continue; // never anyone else
+          if (coachOnly && socketRole.get(c) !== "coach") continue;
+          out.push(c);
+        }
+        return out;
+      };
+
+      const sendTo = (targets: WebSocket[], f: ServerFrame): number => {
+        const payload = JSON.stringify(f);
+        let n = 0;
+        for (const c of targets) { try { c.send(payload); n++; } catch { /* ignore */ } }
+        return n;
+      };
+      const toMyOtherScreens = (f: ServerFrame): number => sendTo(myScreens(false), f);
+
+      if (frame.type === "offer-ack") {
+        // Answered — stop holding it for the next screen that connects.
+        room.pendingOffers = room.pendingOffers.filter((p) => p.frame.offerId !== String(frame.offerId));
+        // The PC tells the phone what happened, so the phone can say "Loaded on
+        // your PC" rather than leaving the coach wondering.
+        toMyOtherScreens({ type: "offer-resolved", offerId: String(frame.offerId).slice(0, 64), action: frame.action });
+        return;
+      }
+
+      // A book diagram carries the BOARD FIELD ONLY ("8/2k5/8/1Pp3p1/..."), which
+      // chess.js rejects outright — the same trap normalizeScanFen exists for on the
+      // scanner side. Without this every offer sent from the book reader would be
+      // dropped in silence, which is exactly how it failed first time.
+      const asFullFen = (raw: string): string | null => {
+        for (const candidate of [raw, `${String(raw).trim().split(/\s+/)[0]} w - - 0 1`]) {
+          try { return new Chess(candidate).fen(); } catch { /* try the next shape */ }
+        }
+        return null;
+      };
+      const cleanFen = asFullFen(String(frame.fen ?? ""));
+      if (!cleanFen) return;
+      const now = Date.now();
+      const offerId = `${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const src = frame.source ?? {};
+      const offerFrame: ServerFrame & { type: "position-offered" } = {
+        type: "position-offered",
+        offerId,
+        fen: cleanFen,
+        label: String(frame.label ?? src.book ?? "Position").slice(0, 80),
+        page: Number.isInteger(src.page) ? src.page! : null,
+        n: Number.isInteger(src.n) ? src.n! : null,
+        at: now,
+        // Offers go stale. Without this, one sent and forgotten this morning
+        // could ambush the next class this afternoon.
+        expiresAt: now + 5 * 60 * 1000,
+      };
+      // Hold it even if a screen is connected: the coach may reload the class page
+      // before answering, and the offer should still be there when it comes back.
+      room.pendingOffers = room.pendingOffers.filter((p) => p.frame.expiresAt > now).slice(-4);
+      room.pendingOffers.push({ forUserId: me, frame: offerFrame });
+      const screens = sendTo(myScreens(true), offerFrame);
+      // Tell the sender whether anything is actually listening, so the phone can
+      // say "no other screen signed in" instead of appearing to succeed.
+      send({ type: "offer-delivered", offerId, screens });
+      return;
+    }
+
     if (frame.type === "lock") {
       if (!isCoach()) return;
       room.locked = !!frame.locked;
@@ -1324,7 +1519,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     if (room.coach === ws) room.coach = null;
     // Attendance leave — stamps lastSeenAt so the coach can see when someone left.
     const who = socketWho.get(ws);
-    if (who) void recordAttendance(who.classId, who.userId, who.name, "leave");
+    if (who && !secondScreens.has(ws)) void recordAttendance(who.classId, who.userId, who.name, "leave");
     if (room.clients.size === 0) {
       // KEEP the room in memory for a grace window. Coach tab reloads, or a
       // simultaneous coach+student hiccup, no longer wipe the board. Actual

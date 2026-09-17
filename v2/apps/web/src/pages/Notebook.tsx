@@ -566,7 +566,12 @@ export default function NotebookPage() {
               onClick={() => setSection(s.id)}
               className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition ${
                 section === s.id
-                  ? "border-brand-500/60 bg-brand-500/15 text-white shadow-inner shadow-brand-500/20"
+                  // NOT text-white. index.css forces pure white onto anything matching
+                  // [class*="bg-brand-"], which assumes a SOLID brand button — but this is a
+                  // 15% tint, pale lavender in light mode, so the active tab's label came out
+                  // white-on-near-white at 4.47:1 and the student could not read which tab
+                  // they were on. An explicit brand colour opts out of that rule.
+                  ? "border-brand-500/60 bg-brand-500/15 text-brand-700 dark:text-white shadow-inner shadow-brand-500/20"
                   : "border-ink-800 bg-ink-900/50 text-ink-300 hover:border-ink-700 hover:bg-ink-800/60 hover:text-white"
               }`}
             >

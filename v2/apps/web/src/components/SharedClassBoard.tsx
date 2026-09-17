@@ -811,6 +811,15 @@ export default function SharedClassBoard(
   const [dests, setDests] = useState<Map<Key, Key[]>>(() => destsFromChess(new Chess()));
   const [connected, setConnected] = useState(false);
   const [shapes, setShapes] = useState<AnnotShape[]>([]);
+  // ── Second-screen handoff (2026-09-17). The coach reads the book on a phone
+  // signed in to the same account; tapping a position there OFFERS it here. The
+  // phone never changes this board — it only asks, and this screen decides.
+  type PendingOffer = { offerId: string; fen: string; label: string; page: number | null; n: number | null; expiresAt: number };
+  const [offer, setOffer] = useState<PendingOffer | null>(null);
+  const [offerQueue, setOfferQueue] = useState<PendingOffer[]>([]);
+  // How much work is on the board right now, so the prompt can say what would be
+  // lost instead of silently discarding a half-taught line.
+  const [moveCount, setMoveCount] = useState(0);
   // Annotation tool state (Phase 1 — owner ask 2026-09-02). Persisted
   // per-user via useAnnotationTool → localStorage. Only used when the
   // board is NOT inside a challenge (challenge students have their own
@@ -961,6 +970,7 @@ export default function SharedClassBoard(
         if (msg.type === "pong") return;   // heartbeat reply, no-op
         if (msg.type === "state") {
           applyFen(msg.fen, msg.lastMove ?? null);
+          setMoveCount(Array.isArray(msg.history) ? msg.history.length : 0);
           // Coach set up a new position (loadFen / reset): server broadcasts
           // state with empty tree + fresh startFen. Clear any lingering
           // challenge residue so a student who just finished the previous
@@ -1007,6 +1017,20 @@ export default function SharedClassBoard(
         else if (msg.type === "orientation") { if (msg.orientation === "white" || msg.orientation === "black") _publishOrientation(msg.orientation); }
         else if (msg.type === "classEnded") { onClassEnded?.(String(msg.reason || "coach_left")); }
         else if (msg.type === "not-invited") { onClassEnded?.("not-invited"); }
+        else if (msg.type === "position-offered") {
+          // Server only sends this to the offering coach's OWN sockets, never to a
+          // student and never to another coach — an offer may never be loaded, and
+          // showing it would give away the answer to what is still on the board.
+          const o: PendingOffer = {
+            offerId: String(msg.offerId ?? ""),
+            fen: String(msg.fen ?? ""),
+            label: String(msg.label ?? "Position"),
+            page: Number.isInteger(msg.page) ? msg.page : null,
+            n: Number.isInteger(msg.n) ? msg.n : null,
+            expiresAt: Number(msg.expiresAt) || (Date.now() + 5 * 60 * 1000),
+          };
+          if (o.offerId && o.fen) setOffer(o);
+        }
         // ── Challenge mode frames ───────────────────────────────────
         else if (msg.type === "challenge_start") {
           // Initialise local challenge game from the position. Students play
@@ -1601,6 +1625,76 @@ export default function SharedClassBoard(
   // vertically (owner 2026-08-28: "board is cut in top and bottom" — my
   // maxHeight was based on VIEWPORT height, not the actual slot). Now uses
   // cqi/cqb which read the parent's real dimensions directly.
+  // ── Offer actions ──────────────────────────────────────────────────────────
+  // Loading goes through the SAME loadFen the setup dialog uses, from THIS screen.
+  // The phone is never an authority over the class board.
+  const resolveOffer = (o: PendingOffer, action: "loaded" | "queued" | "dismissed") => {
+    const ws = wsRef.current;
+    if (action === "loaded" && ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: "loadFen", fen: o.fen })); } catch { /* */ }
+    }
+    if (action === "queued") setOfferQueue((q) => (q.some((x) => x.offerId === o.offerId) ? q : [...q, o]));
+    // Tell the phone what happened, so it can say "Loaded on your PC" instead of
+    // leaving the coach wondering whether the tap did anything.
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: "offer-ack", offerId: o.offerId, action })); } catch { /* */ }
+    }
+    setOffer(null);
+  };
+
+  // Work that a load would discard. "Keep mine" exists precisely so the coach is
+  // never forced to choose between losing the board and losing the offer.
+  const boardHasWork = moveCount > 0 || shapes.length > 0;
+  const workSummary = [
+    moveCount > 0 ? `${moveCount} move${moveCount === 1 ? "" : "s"}` : null,
+    shapes.length > 0 ? `${shapes.length} arrow${shapes.length === 1 ? "" : "s"}` : null,
+  ].filter(Boolean).join(", ");
+
+  const offerCard = (o: PendingOffer, queued: boolean) => (
+    <div
+      key={o.offerId}
+      className="pointer-events-auto w-[19rem] rounded-2xl border border-brand-400/40 bg-ink-900/95 p-3 shadow-2xl shadow-black/50 backdrop-blur"
+    >
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-300">
+        {queued ? "Kept for later" : "Position from your phone"}
+      </div>
+      {/* Just the position. The book title and page number were noise on a live
+          class board — the coach already knows what they sent seconds ago, and the
+          card sits over the board they are teaching from. Owner, 2026-09-17. */}
+      <div className="mt-1 truncate text-sm font-medium text-white">
+        {o.n !== null ? `Position ${o.n}` : "Position"}
+      </div>
+      {!queued && boardHasWork && (
+        <div className="mt-2 rounded-lg border border-amber-400/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-100">
+          Loading replaces what is on the board now ({workSummary}).
+        </div>
+      )}
+      <div className="mt-2.5 flex flex-wrap gap-1.5">
+        <button
+          onClick={() => { if (queued) setOfferQueue((q) => q.filter((x) => x.offerId !== o.offerId)); resolveOffer(o, "loaded"); }}
+          className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-400"
+        >
+          Load
+        </button>
+        {!queued && boardHasWork && (
+          <button
+            onClick={() => resolveOffer(o, "queued")}
+            className="rounded-lg border border-ink-600 px-3 py-1.5 text-xs font-medium text-ink-200 hover:text-white"
+            title="Keep the current board and come back to this at a natural break"
+          >
+            Keep mine
+          </button>
+        )}
+        <button
+          onClick={() => { if (queued) setOfferQueue((q) => q.filter((x) => x.offerId !== o.offerId)); else resolveOffer(o, "dismissed"); }}
+          className="rounded-lg px-3 py-1.5 text-xs font-medium text-ink-400 hover:text-white"
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div
       ref={boardWrapRef}
@@ -1612,6 +1706,15 @@ export default function SharedClassBoard(
       onPointerMove={onBoardPointerMove}
       onPointerLeave={onBoardPointerLeave}
     >
+        {/* Sits INSIDE the board box, not above it: the class layout wraps this
+            in overflow-hidden, so a card positioned above the board was rendered
+            and then clipped away — present in the DOM, invisible on screen. */}
+      {isCoachRole && (offer || offerQueue.length > 0) && (
+        <div className="pointer-events-none absolute left-1/2 top-2 z-30 flex w-[min(19rem,92%)] -translate-x-1/2 flex-col items-stretch gap-2">
+          {offer && offerCard(offer, false)}
+          {offerQueue.map((q) => offerCard(q, true))}
+        </div>
+      )}
       <Board
         fen={displayFen}
         orientation={orientation}

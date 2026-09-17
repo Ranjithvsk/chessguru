@@ -359,6 +359,105 @@ export default function BookReaderPage() {
 
   useEffect(() => { activeDiagramRef.current = active; }, [active]);
 
+  // ── Send to Dream Meet ─────────────────────────────────────────────────────
+  // The coach runs the class on a PC and reads the book here, on a phone signed
+  // in to the same account. This OFFERS the position to the PC; the PC decides
+  // whether to load it. This screen never changes the class board — a mis-tap on
+  // a phone must not be able to overwrite a live lesson mid-sentence.
+  const [sendState, setSendState] = useState<string | null>(null);
+  const sendSockRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => () => { try { sendSockRef.current?.close(); } catch { /* */ } }, []);
+
+  const sendToDreamMeet = useCallback(async () => {
+    // Derived here rather than closing over `activeDiagram`, which is declared
+    // further down the component.
+    const ad = book?.diagrams.find((d) => d.n === active) ?? null;
+    if (!book || !ad) return;
+    setSendState("Looking for your class…");
+    try {
+      const meR = await fetch(`${API_BASE}/auth/me`, { credentials: "include" });
+      const me = await meR.json();
+      if (!me?.loggedIn) { setSendState("Please sign in first."); return; }
+
+      const lnR = await fetch(`${API_BASE}/api/class/live-now`, { credentials: "include" });
+      const ln = await lnR.json();
+      // The endpoint already decides this for us and returns `mine`. It does NOT
+      // return coachUserId — that field exists only in its internal projection —
+      // so matching on it silently found nothing and every send reported "no live
+      // class" while a class was plainly running. Fall back to the username it
+      // does return, then to coachUserId in case the shape changes back.
+      const live: any[] = Array.isArray(ln?.live) ? ln.live : [];
+      const mine = live.find((r) => r?.mine === true)
+        ?? live.find((r) => String(r?.coach ?? "") === String(me.username ?? ""))
+        ?? live.find((r) => String(r?.coachUserId ?? "") === String(me.userId ?? ""));
+      if (!mine) {
+        setSendState(live.length
+          ? "A class is live, but not one of yours."
+          : "No live class right now — start Dream Meet on your PC first.");
+        return;
+      }
+
+      const roomId = String(mine._id ?? mine.id ?? "");
+      if (!roomId) { setSendState("Could not identify the class room."); return; }
+
+      try { sendSockRef.current?.close(); } catch { /* */ }
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${proto}//${location.host}/v2api/class-ws/${encodeURIComponent(roomId)}`);
+      sendSockRef.current = ws;
+      setSendState("Sending…");
+
+      ws.onopen = () => {
+        // secondScreen keeps this device OUT of the class register — it is the
+        // coach's own phone, not someone arriving. intendedRole stays "student":
+        // claiming coach here is both unnecessary and unkind to the PC's session.
+        ws.send(JSON.stringify({
+          type: "hello", userId: me.userId, displayName: me.username || "coach",
+          intendedRole: "student", secondScreen: true,
+        }));
+        ws.send(JSON.stringify({
+          type: "offer-position",
+          fen: fp.fen,
+          label: book.title,
+          source: { book: book.title, page: ad.page + 1, n: ad.n },
+        }));
+      };
+      ws.onmessage = (ev) => {
+        let m: any; try { m = JSON.parse(String(ev.data)); } catch { return; }
+        if (m.type === "offer-delivered") {
+          // screens === 0 is no longer a failure: the server holds the offer for
+          // five minutes and hands it over as soon as a class screen connects, so
+          // sending BEFORE opening the class works. Keep the socket open either
+          // way so the confirmation can still come back.
+          setSendState(m.screens > 0
+            ? `Sent — waiting for your ${m.screens === 1 ? "class screen" : "class screens"}…`
+            : "Sent — it will appear when you open the class.");
+        } else if (m.type === "offer-resolved") {
+          setSendState(m.action === "loaded" ? "✓ Loaded on your class board"
+            : m.action === "queued" ? "Kept on your PC for later"
+            : "Dismissed on your PC");
+          try { ws.close(); } catch { /* */ }
+        }
+      };
+      ws.onerror = () => setSendState("Could not reach the class.");
+      // Do not hold a socket open on a phone indefinitely.
+      window.setTimeout(() => { try { ws.close(); } catch { /* */ } }, 90_000);
+    } catch {
+      setSendState("Could not reach the class.");
+    }
+  }, [book, active, fp.fen]);
+
+  // Only a FINISHED, successful handoff fades. Anything else stays until the next
+  // send or until it is tapped away: the coach taps Send, turns to the class
+  // screen, and looks back seconds later — a six-second toast means every failure
+  // was invisible, which is exactly how "i sent it but nothing happened" kept
+  // happening with no clue on either device.
+  useEffect(() => {
+    if (!sendState || !sendState.startsWith("✓")) return;
+    const t = window.setTimeout(() => setSendState(null), 8000);
+    return () => window.clearTimeout(t);
+  }, [sendState]);
+
   const jumpToPage = (p: number) => {
     setPage(p);
     pageRefs.current[p]?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -657,6 +756,13 @@ export default function BookReaderPage() {
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <span className="text-sm font-semibold text-ink-100">Position {activeDiagram.n}</span>
                   <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => void sendToDreamMeet()}
+                      title="Offer this position to your class board — your PC decides whether to load it"
+                      className="rounded-lg border border-brand-400/40 bg-brand-500/15 px-2 py-1 text-[11px] font-semibold text-brand-200 hover:bg-brand-500/25"
+                    >
+                      ▶ Send to Dream Meet
+                    </button>
                     <span className="text-[11px] text-ink-400">page {activeDiagram.page + 1}</span>
                     {/* Mobile only: the pinned half hides the filmstrip, so
                         without this there is no way back to the book. */}
@@ -669,6 +775,21 @@ export default function BookReaderPage() {
                     </button>
                   </div>
                 </div>
+                {sendState && (
+                  <button
+                    onClick={() => setSendState(null)}
+                    className={`mb-2 block w-full rounded-lg border px-2.5 py-2 text-left text-[12px] ${
+                      sendState.startsWith("✓")
+                        ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-100"
+                        : /Sent/.test(sendState)
+                          ? "border-brand-400/40 bg-brand-500/10 text-brand-100"
+                          : "border-amber-400/40 bg-amber-500/10 text-amber-100"
+                    }`}
+                  >
+                    {sendState}
+                    <span className="block text-[10px] opacity-60">tap to dismiss</span>
+                  </button>
+                )}
                 {/* movableColor is REQUIRED for the board to accept a move —
                     chessground's own default is "nobody", and without it the
                     reader looked playable and silently refused every move.

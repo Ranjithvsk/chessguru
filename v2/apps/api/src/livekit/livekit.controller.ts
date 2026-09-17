@@ -95,7 +95,16 @@ export class LivekitController {
           throw new HttpException("not found", HttpStatus.NOT_FOUND);
         }
       }
-      if (role === "student" && (klass || announce)) {
+      // The class's OWN coach (and an academy owner) is never a "student" here,
+      // whatever role the URL asked for. /class-v2/<room> with no ?role defaults to
+      // student, and a coach is not on their own class roster — so opening your own
+      // room from a plain link 404'd the token, the page died on "Could not join
+      // room", the board never mounted and no class socket was ever opened. Owner
+      // hit this repeatedly on 2026-09-17: signed in on two devices, sitting on
+      // /class-v2/<room>, with nothing connected to the room at all.
+      const isRoomHost = (coachUserId && coachUserId === req.session.userId)
+        || (req.session.role === "academy_owner" && !!academyId && academyId === mineAcademy);
+      if (role === "student" && (klass || announce) && !isRoomHost) {
         const elig = await resolveEligibility(this.conn, roomName, coachUserId);
         if (!isStudentEligible(elig, req.session.userId)) {
           throw new HttpException("not found", HttpStatus.NOT_FOUND);

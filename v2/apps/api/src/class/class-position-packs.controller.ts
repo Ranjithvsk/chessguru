@@ -192,6 +192,84 @@ export class ClassPositionPacksController {
   private ann()     { return this.conn.db!.collection("classLiveAnnouncements"); }
   private users()   { return this.conn.db!.collection("users"); }
 
+  // ── Phone → class screen handoff ───────────────────────────────────────────
+  // The coach reads the book on one device and runs the class on another, signed
+  // in to the SAME account. That is the whole problem, so the whole solution is
+  // one row keyed by the user: "this person has a position waiting".
+  //
+  // This deliberately does NOT go through the class socket. Routing it there meant
+  // the phone had to join the class room, which dragged in the audience gate (a
+  // coach is not on their own student roster, so the phone was ejected), the coach
+  // token (a phone connecting while the class screen was down could steal it), and
+  // a delivery that only worked if both devices happened to be connected at the
+  // same instant. None of that has anything to do with handing yourself a chess
+  // position. Owner, 2026-09-17: "this is just same account right why this
+  // complications".
+  private handoffs() { return this.conn.db!.collection("classPositionHandoff"); }
+
+  /** GET /api/class/:id/my-role — am I this room's coach?
+   *
+   *  The class page decided this from `?role=` in the URL, so a coach opening their
+   *  own room from a bare link was labelled a student, shown Leave instead of End
+   *  class, and hid the coach controls — while class-ws had already (correctly)
+   *  promoted them to coach on the board. Owner, 2026-09-17: "coach should already
+   *  be coach". The answer belongs to the server, not the link someone clicked. */
+  @Get(":id/my-role")
+  async myRole(@Param("id") id: string, @Req() req: any) {
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) throw new UnauthorizedException();
+    if (!ROOM_RE.test(id)) throw new BadRequestException("bad room");
+    const klass: any = await this.classes().findOne({ _id: id as any }, { projection: { createdByUserId: 1, academyId: 1 } });
+    const announce: any = klass ? null : await this.ann().findOne({ _id: id as any }, { projection: { coachUserId: 1, academyId: 1 } });
+    const coachUserId: string | null = klass?.createdByUserId ?? announce?.coachUserId ?? null;
+    const academyId: string | null = klass?.academyId ?? announce?.academyId ?? null;
+    const isOwner = req?.session?.role === "academy_owner" && !!academyId && academyId === (req?.session?.academyId ?? null);
+    return { coach: (!!coachUserId && coachUserId === userId) || isOwner };
+  }
+
+  /** POST /api/class/position-handoff — put a position in my own pocket. */
+  @Post("position-handoff")
+  async putHandoff(@Body() body: any, @Req() req: any) {
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) throw new UnauthorizedException();
+    const fen = String(body?.fen ?? "").trim();
+    if (!fen) throw new BadRequestException("fen required");
+    const now = new Date();
+    await this.handoffs().updateOne(
+      { _id: userId as any },
+      { $set: {
+          fen: fen.slice(0, 120),
+          label: String(body?.label ?? "Position").slice(0, 80),
+          page: Number.isFinite(Number(body?.page)) ? Number(body.page) : null,
+          n: Number.isFinite(Number(body?.n)) ? Number(body.n) : null,
+          at: now,
+          // Stale offers should not ambush a later class.
+          expiresAt: new Date(now.getTime() + 10 * 60 * 1000),
+        } },
+      { upsert: true },
+    );
+    return { ok: true };
+  }
+
+  /** GET /api/class/position-handoff — anything waiting for me? */
+  @Get("position-handoff")
+  async getHandoff(@Req() req: any) {
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) throw new UnauthorizedException();
+    const row: any = await this.handoffs().findOne({ _id: userId as any });
+    if (!row || !row.expiresAt || new Date(row.expiresAt).getTime() < Date.now()) return { offer: null };
+    return { offer: { fen: row.fen, label: row.label, page: row.page, n: row.n, at: row.at } };
+  }
+
+  /** DELETE /api/class/position-handoff — loaded it, or do not want it. */
+  @Delete("position-handoff")
+  async clearHandoff(@Req() req: any) {
+    const userId: string | null = req?.session?.userId ?? null;
+    if (!userId) throw new UnauthorizedException();
+    await this.handoffs().deleteOne({ _id: userId as any });
+    return { ok: true };
+  }
+
   /** POST /api/class/:id/send-position  — coach captures the current board
    *  and pushes it into every listed recipient's Notebook. Body:
    *    { title?: string,

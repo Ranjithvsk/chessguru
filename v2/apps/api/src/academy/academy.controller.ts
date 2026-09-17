@@ -360,6 +360,14 @@ export class AcademyController {
     return this.svc.quickAddStudent(req.session, body);
   }
 
+  /** Rename a student's DISPLAY name in place. The login handle never changes —
+   *  that is the whole point: re-adding under a corrected name is what produced
+   *  duplicate accounts (TKT-247). */
+  @Post("students/:id/rename")
+  renameStudent(@Req() req: any, @Param("id") id: string, @Body() body: any) {
+    return this.svc.renameStudent(req.session, id, body);
+  }
+
   /** Attach an EXISTING platform user as a student — preserves their
    *  puzzle history + rating. Body: { usernameOrEmail, coachId? }. */
   @Post("students/attach-existing")

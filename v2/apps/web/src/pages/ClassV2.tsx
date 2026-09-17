@@ -1374,10 +1374,27 @@ function SendPositionModal({ room, onClose, onSent }: { room: string; onClose: (
 export default function ClassV2Page() {
   const { room = "" } = useParams();
   const [sp] = useSearchParams();
-  const role: "coach"|"student" = sp.get("role") === "coach" ? "coach" : "student";
+  const urlRole: "coach" | "student" = sp.get("role") === "coach" ? "coach" : "student";
   const { data: me, isLoading: authLoading } = useQuery({ queryKey: ["auth-me"], queryFn: api.me });
+  // WHO you are decides this, not the link you happened to open.
+  //
+  // A coach arriving on a bare /class-v2/<room> — or on a SECOND device, where the
+  // invite link they had to hand was the student one — was labelled a student:
+  // "Leave" instead of "End class", coach controls hidden, while class-ws had
+  // already promoted them to coach on the board. Owner, 2026-09-17: "coach should
+  // already be coach" / "coach should not be joined as student in second device".
+  const { data: myRole } = useQuery({
+    queryKey: ["class-my-role", room],
+    queryFn: () => get<{ coach: boolean }>(`/api/class/${encodeURIComponent(room)}/my-role`),
+    enabled: !!room && !!me?.loggedIn,
+    staleTime: 60_000,
+  });
+  const role: "coach" | "student" = (urlRole === "coach" || myRole?.coach === true) ? "coach" : "student";
   const navigate = useNavigate();
   const [endedMsg, setEndedMsg] = useState<string | null>(null);
+  // WHY the room closed, so the heading can stop calling every case "Class ended" —
+  // a person refused entry was being told the class had finished.
+  const [endedKind, setEndedKind] = useState<string | null>(null);
   // Keep phone/tablet screens on for the duration of the class so students
   // don't miss the coach when the OS would normally dim + suspend the tab.
   // Silent no-op on browsers without the Wake Lock API. `needsUserGesture`
@@ -1413,6 +1430,7 @@ export default function ClassV2Page() {
   // auto-redirect after a couple seconds so they know WHY they were kicked
   // (otherwise the sudden nav feels like a bug).
   const onClassEnded = (reason: string) => {
+    setEndedKind(reason);
     setEndedMsg(
       reason === "not-invited"
         ? "You aren't on this class's invite list. Ask your coach to add you."
@@ -1670,8 +1688,10 @@ export default function ClassV2Page() {
               {endedMsg && (
                 <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center bg-ink-950/85 p-6 text-center">
                   <div className="pointer-events-auto space-y-3 rounded-2xl border border-rose-500/50 bg-ink-900 p-6 shadow-2xl">
-                    <div className="text-4xl">🏁</div>
-                    <div className="font-display text-xl text-white">Class ended</div>
+                    <div className="text-4xl">{endedKind === "not-invited" ? "🔒" : "🏁"}</div>
+                    <div className="font-display text-xl text-white">
+                      {endedKind === "not-invited" ? "Can't join this class" : "Class ended"}
+                    </div>
                     <div className="text-sm text-ink-300">{endedMsg}</div>
                     <div className="text-xs text-ink-500">Redirecting to your dashboard…</div>
                   </div>

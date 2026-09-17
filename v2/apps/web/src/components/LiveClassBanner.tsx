@@ -162,10 +162,12 @@ export default function LiveClassBanner() {
           <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-500"></span>
         </span>
         <div>
-          <div className="font-semibold text-emerald-100">
+          <div className="font-semibold text-emerald-900 dark:text-emerald-100">
             🔴 Class live now — {live.title}
           </div>
-          <div className="text-xs text-emerald-200/70">
+          {/* emerald-200/70 is a dark-surface colour. On the light banner it measured
+              1.28:1 against white — the line was there but effectively invisible. */}
+          <div className="text-xs text-emerald-800/80 dark:text-emerald-200/70">
             Coach {live.coach} is live. Join to mark your attendance.
           </div>
         </div>
