@@ -162,6 +162,17 @@ def ingest(book_id: str, pdf_path: str, classify_image, detect_boards,
                 try:
                     buf = np.frombuffer(__import__("base64").b64decode(cb), dtype=np.uint8)
                     crop = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+                    # Read the board in grey. Books print diagrams in colour as
+                    # well as black — Dvoretsky's Endgame Manual runs whole
+                    # chapters in blue — and on a blue board the classifier calls
+                    # the OUTLINE white king a black bishop. The position then has
+                    # no white king, `_legal` rejects it, and the diagram vanishes
+                    # from the book with no trace: the reader shows a page with
+                    # nothing to click. Dropping the colour fixes the read.
+                    # Measured over 45 boards from that book: 44 unchanged,
+                    # 1 fixed, 0 broken.
+                    crop = cv2.cvtColor(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY),
+                                        cv2.COLOR_GRAY2BGR)
                     r = classify_image(crop, warped=crop)
                 except Exception as e:
                     log.warning("book %s page %d board classify failed: %s", book_id, i, e)
