@@ -2240,7 +2240,7 @@ export default function AcademyPublicPage() {
 
   const authQ = useQuery({
     queryKey: ["auth-me"],
-    queryFn: () => get<{ loggedIn: boolean; academyId?: string }>("/auth/me"),
+    queryFn: () => get<{ loggedIn: boolean; academyId?: string; username?: string; role?: string | null }>("/auth/me"),
   });
   const acadQ = useQuery({
     queryKey: ["academy-public-showcase", slug],
@@ -2631,12 +2631,37 @@ export default function AcademyPublicPage() {
                 <span>Edit</span>
               </Link>
             )}
-            <Link to={loginHref} className="cg-civ-btn cg-civ-btn--outlined cg-civ-btn--sm">
-              <span>Log In</span>
-            </Link>
-            <Link to={loginHref} className="cg-civ-btn cg-civ-btn--accent cg-civ-btn--sm">
-              <span>Sign Up</span>
-            </Link>
+            {/* Show who is signed in. gunachess.com/ redirects here, so this page
+                is the FIRST thing a returning student sees — and it offered
+                "Log In / Sign Up" no matter what, which reads as "you are logged
+                out" to someone who just signed in. Reported 2026-09-17: "after
+                login to gunachess.com, in same tab when gunachess.com, it opens a
+                page and says to login again instead of already logged in
+                notification". The session was fine throughout; this header was the
+                only thing saying otherwise. authQ is awaited above (isLoading gate),
+                so there is no logged-out flash. */}
+            {authQ.data?.loggedIn ? (
+              <>
+                <span className="hidden sm:inline text-xs font-semibold" style={{ color: '#6b7280' }}>
+                  Signed in{authQ.data.username ? ` as ${authQ.data.username}` : ""}
+                </span>
+                <Link
+                  to={authQ.data.role === "academy_owner" || authQ.data.role === "coach" ? "/academy" : "/"}
+                  className="cg-civ-btn cg-civ-btn--accent cg-civ-btn--sm"
+                >
+                  <span>Go to ChessGuru</span>
+                </Link>
+              </>
+            ) : (
+              <>
+              <Link to={loginHref} className="cg-civ-btn cg-civ-btn--outlined cg-civ-btn--sm">
+                <span>Log In</span>
+              </Link>
+              <Link to={loginHref} className="cg-civ-btn cg-civ-btn--accent cg-civ-btn--sm">
+                <span>Sign Up</span>
+              </Link>
+              </>
+            )}
           </div>
         </div>
       </header>
