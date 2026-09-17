@@ -87,6 +87,39 @@ guards it (keep only if it does not shrink the board away AND scores better).
 it is not a fix for Pitfall 1. Forcing it on a clipped crop made things worse
 (minConf 0.000); the guard correctly rejects it.
 
+## Pitfall 6 — a stored book is NOT just ingest output, so re-ingest usually loses
+
+Measured 2026-09-17 by re-reading every book into a temp id and comparing before
+swapping. **Not one re-read beat the stored copy:**
+
+    book                        stored                 fresh re-ingest        verdict
+    mammoth                     294 dia / 0.069 mean   444 / 0.998            SWAPPED (the box-crop fix)
+    grandmaster-preparation     877 / 0.929 / 87 low   879 / 0.927 / 89 low   kept old
+    endgame-manual-dvoretsky    697 / 0.989 /  7 low   696 / 0.989 /  6 low   kept old
+    pandolfini-deep-blue         87 / 0.723 / 38 low   103 / 0.592 / 63 low   kept old
+
+Because `diagrams.json` accumulates: the original ingest, then `rescan_book.py`
+(never regresses), `backfill_conf.py`, `corrections.jsonl` and `proven-labels`. A
+fresh ingest starts from zero and cannot reproduce any of that. **Re-ingest only
+when there is a specific, measured defect in the READ ITSELF** — Mammoth's clipped
+thumbnails were exactly that, and nothing else was.
+
+Always re-ingest into a TEMP book id and swap only on a strict improvement in all
+three of count, mean `minConf`, and low-confidence count. Overwriting in place
+would have destroyed four books' worth of accumulated corrections today.
+
+## Pitfall 7 — do not rebuild a missing book.pdf from the rendered pages
+
+`pandolfini-deep-blue` has no `book.pdf` (86 page JPEGs survive). Rebuilding one
+with Pillow and re-ingesting looks reasonable and is a trap: ingest re-renders the
+PDF at 150 dpi, so already-lossy JPEGs take a SECOND lossy pass.
+
+    re-rendered vs the stored page images: PSNR 35.2 dB  (pages 10/30/50)
+
+That degradation alone explains its 0.723 -> 0.592. The rebuilt PDF was deleted so
+a later run cannot silently pick it up and "confirm" the bad numbers. To re-read a
+book whose PDF is gone, read the stored `pages/*.jpg` directly.
+
 ## Pitfall 4 — rescan vs re-ingest
 
 - `rescan_book.py` re-reads diagrams ALREADY in `diagrams.json`. Use it when boards
