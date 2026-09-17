@@ -4,8 +4,9 @@
 // This page existed only as a URL you had to type: the reader at
 // /books/read/:id worked, but nothing listed what was on the shelf, so a book
 // that had been ingested was invisible unless you already knew its id.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { api } from "../lib/api";
 
 const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
 
@@ -17,7 +18,83 @@ type Book = {
 export default function MyBooksPage() {
   const [books, setBooks] = useState<Book[] | null>(null);
   const [q, setQ] = useState("");
+  // Coaches only. Reading a book costs GPU time on a machine shared with live
+  // classes, and the library is one person's copyrighted collection.
+  const [canAdd, setCanAdd] = useState(false);
+  const [adding, setAdding] = useState<"" | "sending" | "storing" | "done" | "failed">("");
+  const [addMsg, setAddMsg] = useState("");
+  // Bytes actually on the wire. A book is tens of megabytes and coaches upload
+  // from phones, where that is a long silence with nothing on screen — long
+  // enough to look like a hang and be cancelled.
+  const [sent, setSent] = useState(0);
+  const [total, setTotal] = useState(0);
+  const upload = useRef<XMLHttpRequest | null>(null);
   const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let dead = false;
+    api.me()
+      .then((m) => { if (!dead) setCanAdd(m.role === "coach" || m.role === "academy_owner"); })
+      .catch(() => { /* not signed in, or role unknown — no upload button */ });
+    return () => { dead = true; };
+  }, []);
+
+  const addBook = (file: File) => {
+    setAdding("sending");
+    setAddMsg("");
+    setSent(0);
+    setTotal(file.size);
+    const title = file.name.replace(/\.pdf$/i, "");
+
+    // XMLHttpRequest, not fetch: fetch cannot report how much of a request body
+    // has gone out, and that number is the whole point here.
+    const xhr = new XMLHttpRequest();
+    upload.current = xhr;
+    xhr.open("POST", `${API_BASE}/api/user-books/upload?title=${encodeURIComponent(title)}`);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader("Content-Type", "application/pdf");
+
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) setSent(e.loaded); };
+    // The last byte is not the end: the server still has to store the file and
+    // hand it to the reader, which takes a moment on a big book.
+    xhr.upload.onload = () => setAdding("storing");
+
+    xhr.onload = () => {
+      upload.current = null;
+      let j: any = {};
+      try { j = JSON.parse(xhr.responseText); } catch { /* fall back to the status */ }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        setAdding("failed");
+        setAddMsg(j?.message || (xhr.status === 413
+          ? "That file is too large — the limit is 200 MB."
+          : `Could not add that book (${xhr.status}).`));
+        return;
+      }
+      setAdding("done");
+      if (j.alreadyHave) {
+        const b = j.book;
+        setAddMsg(b.where === "read"
+          ? `Already in your library: \u201c${b.title}\u201d — ${b.pages} pages, ${b.diagrams} positions.`
+          : `Already in your library: \u201c${b.title}\u201d — not read yet, queue it from the library.`);
+      } else {
+        setAddMsg(`Added \u201c${j.book.title}\u201d. It is queued and will appear here when read.`);
+      }
+    };
+    xhr.onerror = () => {
+      upload.current = null;
+      setAdding("failed");
+      setAddMsg("The upload did not finish — check the connection and try again.");
+    };
+    xhr.onabort = () => {
+      upload.current = null;
+      setAdding("");
+      setAddMsg("Upload cancelled.");
+    };
+    xhr.send(file);
+  };
+
+  const cancelUpload = () => upload.current?.abort();
+
 
   useEffect(() => {
     let dead = false;
@@ -54,11 +131,69 @@ export default function MyBooksPage() {
           <h1 className="font-display text-2xl text-white">My Books</h1>
           <p className="text-sm text-ink-400">Read by the vision pipeline. Open one, then tap any diagram to put it on a board.</p>
         </div>
-        <Link to="/books/library"
-          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-glow hover:bg-brand-500">
-          Browse the library
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          {canAdd && (
+            <label className="cursor-pointer rounded-lg border border-ink-700 px-4 py-2 text-sm font-semibold text-ink-200 hover:bg-ink-800">
+              {adding === "sending" || adding === "storing" ? "Adding…" : "Add a book"}
+              <input
+                type="file"
+                accept="application/pdf,.pdf"
+                className="hidden"
+                disabled={adding === "sending" || adding === "storing"}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.currentTarget.value = "";        // so the same file can be picked twice
+                  if (f) void addBook(f);
+                }}
+              />
+            </label>
+          )}
+          <Link to="/books/library"
+            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-glow hover:bg-brand-500">
+            Browse the library
+          </Link>
+        </div>
       </div>
+
+      {(adding === "sending" || adding === "storing") && (
+        <div className="mb-3 rounded-lg border border-brand-500/40 bg-brand-500/10 p-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
+            <span className="font-semibold text-brand-100">
+              {adding === "storing" ? "Sent — storing the book…" : "Uploading…"}
+            </span>
+            <span className="tabular-nums text-xs text-ink-300">
+              {total > 0 && adding === "sending"
+                ? `${(sent / 1048576).toFixed(1)} of ${(total / 1048576).toFixed(1)} MB · ${Math.round((sent / total) * 100)}%`
+                : "almost there"}
+            </span>
+          </div>
+          <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-ink-800">
+            <div
+              className={`h-full rounded-full bg-brand-500 transition-[width] duration-200 ${adding === "storing" ? "animate-pulse" : ""}`}
+              style={{ width: adding === "storing" || !total ? "100%" : `${Math.max(2, Math.round((sent / total) * 100))}%` }}
+            />
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <span className="text-xs text-ink-400">
+              A big book takes a while on a phone. Keep this page open.
+            </span>
+            {adding === "sending" && (
+              <button type="button" onClick={cancelUpload}
+                className="rounded border border-ink-600 px-2 py-1 text-xs font-semibold text-ink-300 hover:bg-ink-800">
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {addMsg && (
+        <div className={`mb-3 rounded-lg border p-3 text-sm ${
+          adding === "failed" ? "border-rose-500/40 bg-rose-500/10 text-rose-200"
+            : "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"}`}>
+          {addMsg}
+        </div>
+      )}
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <input value={q} onChange={(e) => setQ(e.target.value)}
