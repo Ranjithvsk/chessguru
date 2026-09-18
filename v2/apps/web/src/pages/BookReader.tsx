@@ -463,6 +463,32 @@ export default function BookReaderPage() {
   // magnifies the pages column and nothing else — the board keeps its column.
   const [pageZoom, setPageZoom] = useState(1);
 
+  // Pinch over the PAGE scales the page, not the whole app.
+  //
+  // A browser's own pinch zoom magnifies the composited output — every element,
+  // including the board — and a page cannot opt anything out of it. The owner
+  // pinches to read small print in a diagram and the board grows with it, pushing
+  // its controls off the screen. So we take the gesture: touch-action pan-y lets
+  // the browser keep vertical scrolling while handing us the two-finger pinch,
+  // which we turn into pageZoom. One finger still scrolls exactly as before.
+  const pinchRef = useRef<{ dist: number; zoom: number } | null>(null);
+  const touchDist = (t: React.TouchList) =>
+    Math.hypot(t[0]!.clientX - t[1]!.clientX, t[0]!.clientY - t[1]!.clientY);
+  const onPagesTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 2) pinchRef.current = { dist: touchDist(e.touches), zoom: pageZoom };
+  };
+  const onPagesTouchMove = (e: React.TouchEvent) => {
+    const start = pinchRef.current;
+    if (!start || e.touches.length !== 2) return;
+    const d = touchDist(e.touches);
+    if (!start.dist) return;
+    const next = Math.min(3, Math.max(0.75, start.zoom * (d / start.dist)));
+    setPageZoom(+next.toFixed(2));
+  };
+  const onPagesTouchEnd = (e: React.TouchEvent) => {
+    if (e.touches.length < 2) pinchRef.current = null;
+  };
+
   const jumpToPage = (p: number) => {
     // Already looking at that page? Then do NOT scroll.
     //
@@ -641,7 +667,7 @@ export default function BookReaderPage() {
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
         {/* Pages */}
-        <div className={`min-w-0 ${activeDiagram ? "max-lg:pb-[60vh]" : ""}`}>
+        <div className={`min-w-0 ${activeDiagram ? "max-lg:pb-[60vh]" : ""}`} style={{ touchAction: "pan-y" }} onTouchStart={onPagesTouchStart} onTouchMove={onPagesTouchMove} onTouchEnd={onPagesTouchEnd} onTouchCancel={onPagesTouchEnd}>
           <div className="mb-2 flex items-center gap-1.5">
             <span className="text-[11px] text-ink-500">Page size</span>
             <button onClick={() => setPageZoom((z) => Math.max(0.75, +(z - 0.25).toFixed(2)))} disabled={pageZoom <= 0.75}
