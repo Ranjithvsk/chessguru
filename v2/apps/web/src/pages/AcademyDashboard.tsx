@@ -14,7 +14,7 @@ import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 // qrcode import retired 2026-08-30 with the UPI QR invoice card.
 import Board from "../components/Board";
-import { api, classRoomPath } from "../lib/api";
+import { api, classRoomPath, API_BASE } from "../lib/api";
 import { LiveStudentsPanel } from "../components/LiveStudentsPanel";
 import BatchesPanel from "../components/BatchesPanel";
 import { LeaderboardPanel } from "../components/LeaderboardPanel";
@@ -1742,13 +1742,13 @@ function StudyMaterialsPanel({ students }: { students: any[] }) {
         tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
       };
       if (scope === "specific-students") body.targetStudentIds = [...targetIds];
-      const r = await fetch("/api/academy/materials", {
+      const r = await fetch(`${API_BASE}/api/academy/materials`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       }).then((r) => r.json());
       if (!r.ok) throw new Error(r.error || "Create failed");
-      const upl = await fetch(`/api/academy/materials/${r.materialId}/file`, {
+      const upl = await fetch(`${API_BASE}/api/academy/materials/${r.materialId}/file`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/octet-stream" },
         body: file,

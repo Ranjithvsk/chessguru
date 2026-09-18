@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { get } from "../lib/api";
+import { get, API_BASE } from "../lib/api";
 import { prettify } from "../lib/format";
 import * as push from "../lib/push";
 import { PeriodPerformanceTable } from "../components/PeriodPerformanceTable";
@@ -523,7 +523,7 @@ type Prefs = {
   streakReminderOptedOut: boolean; streakReminderOptedOutAt: string | null; lastStreakReminderAt: string | null;
 };
 async function patchPrefs(body: { weeklyDigestOptedOut?: boolean; streakReminderOptedOut?: boolean }): Promise<{ ok: boolean }> {
-  const res = await fetch("/api/me/prefs", {
+  const res = await fetch(`${API_BASE}/api/me/prefs`, {
     method: "PATCH", headers: { "Content-Type": "application/json" },
     credentials: "include", body: JSON.stringify(body),
   });

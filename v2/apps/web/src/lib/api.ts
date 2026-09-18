@@ -3,6 +3,10 @@ import type {
 } from "@chessguru/types";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
+/** Prefix for hand-written fetches. Production serves the API under /v2api (see .env.production);
+ *  a bare "/api/…" reaches nginx's SPA fallback and gets index.html back — that is how push
+ *  subscribe silently failed for every user until 2026-09-18. */
+export const API_BASE = BASE;
 
 export async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { credentials: "include" });

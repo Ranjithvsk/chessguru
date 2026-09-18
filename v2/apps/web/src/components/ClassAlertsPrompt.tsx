@@ -18,7 +18,9 @@ import { useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import * as push from "../lib/push";
 
-const DONE_KEY = "cg_class_alerts_prompt_v1"; // "on" | "later" | "ios-seen"
+// v2: v1 shipped for ~1 h while push.enable() still called a bare /api path that returned HTML,
+// so every "Turn on" tap failed and marked the device "later". Fresh key = everyone is asked again.
+const DONE_KEY = "cg_class_alerts_prompt_v2"; // "on" | "later" | "ios-seen"
 
 function iosBrowserTab(): boolean {
   if (typeof navigator === "undefined" || typeof window === "undefined") return false;

@@ -28,3 +28,16 @@ confirms a subscription end to end.
 **Open.** Coach-side: when "notified 0", offer a WhatsApp share of the join link; parents on
 WhatsApp as an invite channel; Raagul's 5 students sit in no batch (all 5 Guna batches are
 `gunachess`'s) — "my students" is the pick that reaches them.
+
+## Follow-up (same evening) — why Harinitha's "Turn on" failed, and the real bug
+
+Owner: "harinitha turned on alert, sent test alert" — `pushSubscriptions` still had 0 rows. Cause:
+`lib/push.ts` fetched bare `/api/me/push/vapid-key` (and subscribe/test), but production serves the
+API under `/v2api` (`VITE_API_BASE=/v2api`); a bare `/api/…` hits nginx's SPA fallback and returns
+index.html, so the JSON parse threw and enable() never subscribed — for every user, since the
+`/v2api` base was introduced. Same class of bug in `Dashboard.tsx` (`/api/me/prefs`) and
+`AcademyDashboard.tsx` (materials upload). Fix: `export const API_BASE` from lib/api.ts, all seven
+hand-written fetches prefixed, push.ts now fails loudly on a non-JSON key response, prompt storage
+key bumped to `cg_class_alerts_prompt_v2` so devices that tapped during the broken hour are asked
+again. Deployed: bundle `index-s-DYExPx.js`. Rule: never write `fetch("/api/…")` — use `get/post`
+from lib/api or prefix `API_BASE`.

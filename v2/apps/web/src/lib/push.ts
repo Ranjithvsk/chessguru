@@ -4,6 +4,8 @@
 // Uint8Array `PushManager.subscribe()` wants. Everything else is a thin
 // wrapper over the standard APIs.
 
+import { API_BASE } from "./api";
+
 function urlB64ToUint8(base64: string): Uint8Array {
   const padding = "=".repeat((4 - (base64.length % 4)) % 4);
   const b64 = (base64 + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -45,7 +47,8 @@ export async function enable(): Promise<PushStatus> {
   }
   const r = await reg();
   if (!r) throw new Error("Service worker not registered");
-  const keyRes = await fetch("/api/me/push/vapid-key", { credentials: "include" });
+  const keyRes = await fetch(`${API_BASE}/api/me/push/vapid-key`, { credentials: "include" });
+  if (!keyRes.ok || !/json/.test(keyRes.headers.get("content-type") ?? "")) throw new Error(`push key request failed (${keyRes.status})`);
   const { key, configured } = await keyRes.json();
   if (!configured || !key) throw new Error("Push not configured on server");
   let sub = await r.pushManager.getSubscription();
@@ -56,7 +59,7 @@ export async function enable(): Promise<PushStatus> {
     });
   }
   const j = sub.toJSON();
-  await fetch("/api/me/push/subscribe", {
+  await fetch(`${API_BASE}/api/me/push/subscribe`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -69,7 +72,7 @@ export async function disable(): Promise<PushStatus> {
   const r = await reg();
   const sub = r ? await r.pushManager.getSubscription() : null;
   if (sub) {
-    await fetch("/api/me/push/subscribe", {
+    await fetch(`${API_BASE}/api/me/push/subscribe`, {
       method: "DELETE",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -81,7 +84,7 @@ export async function disable(): Promise<PushStatus> {
 }
 
 export async function sendTest(): Promise<{ sent: number; failed: number; pruned: number }> {
-  const res = await fetch("/api/me/push/test", { method: "POST", credentials: "include" });
+  const res = await fetch(`${API_BASE}/api/me/push/test`, { method: "POST", credentials: "include" });
   if (!res.ok) throw new Error(`test HTTP ${res.status}`);
   return res.json();
 }
