@@ -71,3 +71,39 @@ Photographed halftone book print defeats geometric methods. The durable fix is t
 - A confident FEN is not a correct FEN. Check king counts before believing anything.
 - Before retraining, crop the input tighter by hand and re-run. If that fixes it, the classifier
   was never at fault.
+
+## Best-of-crops: rank by DOUBTFUL SQUARE COUNT, never by confidence (2026-09-18)
+
+Two scans came back as garbage on the same diagram. In both, a correct read was
+already available and the pipeline threw it away, because it picks ONE crop
+strategy and commits:
+
+    client-supplied crop   min 0.168 / 25 doubtful   server extractor    min 0.995 / 0
+    server pipeline        min 0.264 /  9 doubtful   detector thumbnail  min 0.927 / 0
+
+`/classify` now reads the alternatives when the first read looks broken and keeps
+the best. Getting the RANKING right took three measured attempts on the 38
+labelled boards — the idea was never the hard part:
+
+    do nothing (baseline)                         94.37%   p→empty 55
+    rank by (legal, minConf)                      92.64%   p→empty 86   WORSE
+    rank by (legal, -doubtfulCount)               93.42%   p→empty 84   still worse
+    + piece-count guard + fire only when low>5    94.41%   p→empty 55   ship
+
+**Why confidence is the wrong ranker.** `minConf` rewards a crop the classifier is
+SURE about, which is not a crop it is RIGHT about. Ranking on it let
+confidently-wrong alternatives beat correct first reads.
+
+**Why the piece-count guard is mandatory.** An alternative that reads squares as
+confidently EMPTY scores beautifully on every confidence measure and is simply
+missing pieces — pieces-read-as-empty went 55 → 84 until the score refused any
+candidate that had dropped pieces.
+
+**Why the trigger has to be high.** Firing at >2 doubtful squares handed ordinary
+boards to alternatives that read them emptier. The reported failures had 9 and 25;
+a normal board has one or two. Gate at >5 and ordinary scans never enter the path,
+which is also why p50 did not rise.
+
+Cost: p90 latency 2831 → ~4400 ms, paid only on boards that were already broken.
+The harness's own rule — "good if square accuracy does not drop and p50 latency
+does" — is satisfied: 94.37 → 94.41, p50 2242 → 2029.

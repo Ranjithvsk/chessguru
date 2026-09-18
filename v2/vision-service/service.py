@@ -1061,8 +1061,115 @@ def book_status(book_id: str) -> dict[str, Any]:
     return bi.read_status(book_id)
 
 
+
+def _crop_score(r: dict[str, Any] | None) -> tuple[int, float]:
+    """Rank a read: a legal position always beats an illegal one, then worst square.
+
+    minConf, never avgConfidence. The average is a mean over 64 squares and hides
+    exactly the failure we are trying to catch: on the 2026-09-18 report a garbage
+    read still averaged 0.749 while its worst square sat at 0.168 with 25 squares
+    under 0.70.
+    """
+    if not r:
+        return (0, 0.0)
+    sq = [q for row in (r.get("squares") or []) for q in row]
+    cf = [q.get("confidence") for q in sq if isinstance(q.get("confidence"), (int, float))]
+    if not cf:
+        return (0, 0.0)
+    board = str(r.get("fen") or "").split(" ")[0]
+    legal = 1 if (board.count("K") == 1 and board.count("k") == 1) else 0
+    # Rank on HOW MANY squares are doubtful, not on how confident the worst one is.
+    # Ranking by minConf alone measured WORSE than doing nothing on the 38 labelled
+    # boards (92.64% vs 94.37%, pieces-read-as-empty 55 -> 86): confidence rewards a
+    # crop the classifier is sure about, which is not the same as a crop it is right
+    # about, so a confidently-wrong alternative kept beating a correct first read.
+    # Square COUNT is the number that actually separated the two failures reported
+    # on 2026-09-18 — 25 doubtful squares against 0.
+    low = sum(1 for c in cf if c < 0.70)
+    pieces = sum(1 for ch in board if ch.isalpha())
+    return (legal, -low, float(min(cf)), pieces)
+
+
 @app.post("/classify")
 def classify(body: ImageIn) -> dict[str, Any]:
+    """Read the board from every crop we can form, and keep the best answer.
+
+    The pipeline used to pick ONE crop strategy and commit to it. Both scans
+    reported on 2026-09-18 failed that way, and in both cases a correct read was
+    already available and thrown away:
+
+      client-supplied crop  min 0.168 / 25 low   server extractor  min 0.995 / 0 low
+      server pipeline       min 0.264 /  9 low   detector thumbnail min 0.927 / 0 low
+
+    So: try the crop as given; accept it when it is legal and every square is
+    confident; otherwise try the alternatives and rank by (legal, minConf). A
+    clean scan costs nothing extra because the first attempt short-circuits.
+    """
+    first = _classify_once(body)
+    best, best_score = first, _crop_score(first)
+    # Only go looking when the first read is actually doubtful. A clean scan returns
+    # here having cost nothing, which is what keeps p50 latency flat.
+    # Only intervene on a read that is CLEARLY broken. The two reported failures had
+    # 9 and 25 doubtful squares; an ordinary board has one or two and is better left
+    # alone. Gating at -2 measured 93.42% on the 38 labelled boards against 94.37%
+    # for doing nothing, because mildly-doubtful boards were being handed to
+    # alternatives that read them emptier.
+    if best_score[0] == 1 and best_score[1] >= -5:
+        return best
+
+    raw_b64 = body.image_base64
+    alts: list[tuple[str, ImageIn]] = []
+    if body.warped_board_base64 and raw_b64:
+        # The caller's crop read poorly. Let the server find the board itself --
+        # this is the Adjust-corners case, where a selection that includes the
+        # printed a-h / 1-8 strips shifts every square by a file.
+        alts.append(("server-extract", ImageIn(image_base64=raw_b64, empty_prior=body.empty_prior)))
+    if raw_b64:
+        try:
+            _img = _decode_b64_image(raw_b64)
+            for _c in _detect_all_boards(_img, min_boards=1)[:2]:
+                _thumb = _c.get("boardPngBase64")
+                if _thumb:
+                    alts.append(("detector-thumb", ImageIn(image_base64=_thumb,
+                                                           warped_board_base64=_thumb,
+                                                           empty_prior=body.empty_prior)))
+                _box = _c.get("box") or []
+                if len(_box) >= 4:
+                    x1, y1, x2, y2 = [int(v) for v in _box[:4]]
+                    h, w = _img.shape[:2]
+                    x1, y1 = max(0, x1), max(0, y1)
+                    x2, y2 = min(w, x2), min(h, y2)
+                    if x2 - x1 > 32 and y2 - y1 > 32:
+                        _crop = _img[y1:y2, x1:x2]
+                        if _crop.size:
+                            _cb = _encode_b64_png(_crop)
+                            alts.append(("detector-box", ImageIn(image_base64=_cb,
+                                                                 warped_board_base64=_cb,
+                                                                 empty_prior=body.empty_prior)))
+        except Exception as e:
+            log.warning("best-of-crops: alternatives unavailable: %s", e)
+
+    for name, alt in alts:
+        try:
+            r = _classify_once(alt)
+        except Exception:
+            continue                      # a crop that cannot be read is just not a candidate
+        s = _crop_score(r)
+        # Strictly fewer doubtful squares, not merely a better-looking tuple. Without
+        # this bar the alternatives win on noise and drag accuracy down.
+        # Fewer doubtful squares AND no pieces dropped. Without the piece-count bar an
+        # alternative that reads squares as confidently EMPTY scores brilliantly and is
+        # simply wrong: pieces-read-as-empty went 55 -> 84 on the labelled set.
+        if (s[0] >= best_score[0] and s[1] > best_score[1]
+                and s[3] >= best_score[3] - 1):
+            best, best_score = r, s
+            log.info("best-of-crops: %s won (legal=%d minConf=%.3f)", name, s[0], s[1])
+        if best_score[0] == 1 and best_score[1] >= 0:
+            break                          # legal with no doubtful square: done
+    return best
+
+
+def _classify_once(body: ImageIn) -> dict[str, Any]:
     """Full pipeline (own MIT extractor + Tandberg YOLO classifier +
     chess-rules validation). Auto-detects board ORIENTATION by trying
     0/90/180/270 rotations of the warped board and picking the one where
