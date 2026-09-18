@@ -13,9 +13,12 @@
 // Books are private to their uploader. These are copyrighted works a coach
 // owns a copy of — we are giving them a better way to read it, not building a
 // library, so there is no public listing and no cross-user access.
-import { Body, Controller, ForbiddenException, Get, Logger, Param, Post, Query, Req, Res, BadRequestException, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
+import { Body, ConflictException, Controller, ForbiddenException, Get, Logger, Param, Post, Query, Req, Res, BadRequestException, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
+
+const sha256 = (b: Buffer) => createHash("sha256").update(b).digest("hex");
 
 const STORE = "/var/lib/chessguru/user-books";
 // Whose Drive the book host is pointed at. One library, one owner —
@@ -566,6 +569,25 @@ export class UserBooksController {
       if (r?.match) return { ok: true, alreadyHave: true, book: r.match };
     } catch { /* Vinayaka down/slow — fall through to a France-local upload */ }
 
+    // Already have this one? Guna Chess uploaded "The Sharpest Sicilian" twice
+    // six minutes apart on 18 Sep 2026: same 28 MB file, byte for byte. Nothing
+    // objected — freshBookId() just appended "-2" — so the box rendered 260
+    // pages of it TWICE, competing for the same CPU that runs live classes, and
+    // the coach ended up with two copies of one book on the shelf. Warn instead.
+    const dup = this.findDuplicate(uid, body, name);
+    if (dup && String(req?.query?.force ?? "") !== "1") {
+      this.log.warn(`duplicate upload blocked for ${uid}: ${dup.match} of ${dup.book.id} — title=${JSON.stringify(name)}`);
+      throw new ConflictException({
+        error: "duplicate",
+        match: dup.match,
+        message: dup.match === "identical file"
+          ? `You already have this book — “${dup.book.title}”, added ${dup.book.addedAt}. It is the same file, byte for byte.`
+          : `You already have a book with this title — “${dup.book.title}”, added ${dup.book.addedAt}.`,
+        existing: dup.book,
+        hint: "Upload it again only if you meant to replace it.",
+      });
+    }
+
     // Store + ingest on France (always-on). The PDF lives here; the local vision
     // service renders its pages and extracts positions straight into the same
     // store the reader already serves from. The book is readable as soon as its
@@ -583,6 +605,9 @@ export class UserBooksController {
       writeFileSync(join(dir, "meta.json"), JSON.stringify({
         title: name, owner: uid, coverPage: 0,
         source: "france-upload", uploadedAt: new Date().toISOString(),
+        // Content fingerprint so the NEXT upload of this same file is caught
+        // without re-reading every PDF on disk.
+        sha256: sha256(body), bytes: body.length,
       }));
     } catch (e: any) {
       throw new ServiceUnavailableException(
@@ -618,6 +643,47 @@ export class UserBooksController {
   /** A fresh, traversal-safe book id derived from the title, unique in the
    *  store. Slug only — the read paths resolve it under STORE and reject any id
    *  that would escape, so an id is always a single safe path segment. */
+  /** Has this coach already uploaded this book?
+   *
+   *  Matched on the file's sha256 first — that catches a re-upload even when the
+   *  browser renamed it "(1)", which is exactly how the Sharpest Sicilian got in
+   *  twice. Falls back to an exact title match for a different scan of the same
+   *  book. Books uploaded before fingerprinting get hashed once, lazily, and the
+   *  result is written back into their meta.json so this stays cheap. */
+  private findDuplicate(uid: string, body: Buffer, title: string): { match: string; book: any } | null {
+    const hash = sha256(body);
+    const wanted = title.trim().toLowerCase();
+    if (!existsSync(STORE)) return null;
+    for (const id of readdirSync(STORE)) {
+      const dir = join(STORE, id);
+      const metaPath = join(dir, "meta.json");
+      if (!existsSync(metaPath)) continue;
+      const meta = readJson<any>(metaPath, {});
+      if (meta.owner !== uid) continue;
+      let known: string | null = typeof meta.sha256 === "string" ? meta.sha256 : null;
+      if (!known) {
+        // Legacy book: hash it once and remember, so we never pay this twice.
+        const pdf = join(dir, "book.pdf");
+        if (existsSync(pdf)) {
+          try {
+            known = sha256(readFileSync(pdf));
+            writeFileSync(metaPath, JSON.stringify({ ...meta, sha256: known, bytes: statSync(pdf).size }));
+          } catch { /* unreadable — fall back to the title check below */ }
+        }
+      }
+      const status = readJson<any>(join(dir, "status.json"), {});
+      const book = {
+        id, title: meta.title || id,
+        addedAt: (meta.uploadedAt || "").slice(0, 10) || "earlier",
+        state: status.state ?? "unknown", pages: status.pages ?? 0,
+        positions: readJson<any[]>(join(dir, "diagrams.json"), []).length,
+      };
+      if (known && known === hash) return { match: "identical file", book };
+      if (String(meta.title ?? "").trim().toLowerCase() === wanted) return { match: "same title", book };
+    }
+    return null;
+  }
+
   private freshBookId(title: string): string {
     const base = title.toLowerCase()
       .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "book";
