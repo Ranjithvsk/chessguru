@@ -41,3 +41,11 @@ hand-written fetches prefixed, push.ts now fails loudly on a non-JSON key respon
 key bumped to `cg_class_alerts_prompt_v2` so devices that tapped during the broken hour are asked
 again. Deployed: bundle `index-s-DYExPx.js`. Rule: never write `fetch("/api/…")` — use `get/post`
 from lib/api or prefix `API_BASE`.
+
+## Follow-up 2 — sticky class-live notifications
+
+Owner ("sound..?" → "do it"): web push can't choose a sound (Android Chrome plays the site channel's
+default tone; the SW already vibrates + renotifies), so the useful lever is persistence:
+`public/sw.js` now shows any `cg-classlive-*` push (or a payload with `requireInteraction: true`)
+with `requireInteraction`, so "🔴 coach is live now" stays on screen until tapped or swiped.
+SW takes over on the next page load (skipWaiting + clients.claim). Deployed same evening.

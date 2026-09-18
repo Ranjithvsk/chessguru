@@ -25,7 +25,7 @@
 // Dashboard push toggle handles that automatically.
 
 // Bumped on every deploy by scripts/deploy.sh (sed).
-const VERSION = "cg-20260918153309";
+const VERSION = "cg-20260918174555";
 // eslint-disable-next-line no-console
 console.log("[sw] boot", VERSION);
 
@@ -53,7 +53,10 @@ self.addEventListener("activate", (event) => {
 // ── Push handler ─────────────────────────────────────────────────────────
 // Payload contract (server-side: apps/api/src/push/push.service.ts):
 //   { title: string, body: string, url?: string, tag?: string,
-//     icon?: string, badge?: string }
+//     icon?: string, badge?: string, requireInteraction?: boolean }
+// Class-live alerts (tag cg-classlive-*) stay on screen until tapped or swiped
+// (owner ask 2026-09-18: "do it") — a "coach is live" ping must not vanish into
+// the shade with the rest. Any payload can also ask for it explicitly.
 // A missing/malformed payload still surfaces a generic notification so users
 // aren't left staring at a silent phone.
 self.addEventListener("push", (event) => {
@@ -65,9 +68,11 @@ self.addEventListener("push", (event) => {
   const tag   = (data && data.tag)   || undefined;
   const icon  = (data && data.icon)  || "/pwa-192.png";
   const badge = (data && data.badge) || "/pwa-192.png";
+  const sticky = (data && data.requireInteraction === true) || /^cg-classlive-/.test(tag || "");
   event.waitUntil(
     self.registration.showNotification(title, {
       body, tag, icon, badge,
+      requireInteraction: sticky,
       // Vibrate on Android (ignored on iOS). Short two-pulse.
       vibrate: [80, 40, 80],
       // renotify=true so a same-tag update (e.g. 2nd message in same
