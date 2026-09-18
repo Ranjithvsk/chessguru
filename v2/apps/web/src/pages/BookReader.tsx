@@ -459,6 +459,13 @@ export default function BookReaderPage() {
   }, [sendState]);
 
   const jumpToPage = (p: number) => {
+    // Already looking at that page? Then do NOT scroll.
+    //
+    // Most pages carry several diagrams, and picking the second one re-ran
+    // scrollIntoView on the page already on screen — snapping it back to the top
+    // under the coach mid-read. Stepping through three positions on one page
+    // meant three jumps for no movement at all. Changing page still scrolls.
+    if (p === page) return;
     setPage(p);
     pageRefs.current[p]?.scrollIntoView({ behavior: "smooth", block: "start" });
   };

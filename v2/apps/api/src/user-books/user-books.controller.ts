@@ -20,6 +20,86 @@ import { join, resolve } from "node:path";
 
 const sha256 = (b: Buffer) => createHash("sha256").update(b).digest("hex");
 
+/** The book's name as a person would write it, not as a download site left it.
+ *
+ *  A coach's shelf was reading "The Sharpest Sicilian_ A Black Repertoire with
+ *  1.e4 c5 2. Nf3 d6 (The Sharpest Sicilian)   ( PDFDrive ) (1)" — the filename,
+ *  verbatim, including the site stamp and the browser's copy marker. Titles come
+ *  straight from the upload, so this is where to fix it.
+ *
+ *  The underscore rule is the interesting one: "Title_ Subtitle" is a filename
+ *  standing in for "Title: Subtitle", because a colon cannot appear in a filename
+ *  on Windows. Only an underscore FOLLOWED BY A SPACE means that; the rest are
+ *  plain word separators ("Dangerous_Weapons_-_Caro_Kann"). */
+function cleanTitle(raw: string): string {
+  let t = String(raw || "").trim();
+  t = t.replace(/\.pdf$/i, "");
+  t = t.replace(/pdfcoffee\.com[_-]?/gi, "")
+       .replace(/\(\s*(pdfdrive|pdf drive|z-?lib(?:rary)?(?:\.org)?|libgen|annas?-archive|dokumen\.pub|epdf|vdoc\.pub)\s*\)/gi, "")
+       .replace(/\b(z-?lib(?:rary)?\.org|dokumen\.pub|vdoc\.pub)\b/gi, "");
+  // Copy markers only at the very end — "(1)" mid-title can be meaningful.
+  t = t.replace(/\s*\((\d{1,2})\)\s*$/g, "").replace(/\s*-\s*copy\s*$/i, "");
+  t = t.replace(/_\s+/g, ": ").replace(/_/g, " ").replace(/\s{2,}/g, " ").trim();
+  // A trailing bracket that merely repeats the main title.
+  const head = t.split(/[:\-–]/)[0]!.trim().toLowerCase();
+  t = t.replace(/\s*\(([^)]+)\)\s*$/, (m, inner: string) => {
+    const i = inner.trim().toLowerCase();
+    return head && (i === head || i.startsWith(head) || head.startsWith(i)) ? "" : m;
+  });
+  t = t.replace(/\s+:/g, ":").replace(/\s*[-–,;:]\s*$/, "").replace(/\.\s*$/, "")
+       .replace(/\s{2,}/g, " ").trim();
+  return t || String(raw || "").trim();
+}
+
+/** The author, pulled off the title — books arrive as filenames, not metadata.
+ *
+ *  There is no author to read anywhere else: the library catalogue fills that
+ *  field for 78 of 3,032 books (3%, and those are mis-split), and the processed
+ *  metas carry none at all. Filenames do, in two reliable shapes:
+ *
+ *    "Georgiev, Kiril & Kolev, Atanas - The Sharpest Sicilian"   comma = strong
+ *    "1001 Chess Exercises ... by Franco Masetti & Roberto Messa"
+ *
+ *  Measured across all 3,040 library files: 1,881 parsed (62%), 749 distinct
+ *  authors. The other 38% return null and group under "Unknown" on the shelf —
+ *  a wrong author is worse than no author, so anything ambiguous is left alone.
+ *
+ *  "Surname, First" is flipped to "First Surname" so one person is one entry. */
+// \b matters: without it "Aron" matched the leading `a` and every author whose
+// first name begins with a/an/the was silently dropped (Aron Nimzowitsch, Adrian
+// Mikhalchishin...). Cost 5 percentage points of coverage before it was spotted.
+const TITLEY = /^(?:the|a|an|winning|dangerous|fundamental|grandmaster|mastering|your|new|chess|starting|understanding|improve|play|how|complete|modern|practical|secrets?|art|best|first|basic|advanced|opening|endgame|middlegame|attacking)\b|^\d/i;
+function looksLikePerson(s: string): boolean {
+  const t = s.trim();
+  if (!t || t.length > 55 || !/[A-Za-z]/.test(t)) return false;
+  if (t.includes(",")) return true;
+  const w = t.split(/\s+/);
+  if (w.length < 2 || w.length > 4) return false;
+  if (TITLEY.test(t)) return false;
+  return w.every((x) => /^[A-Z][a-zA-Z'’.\-]*$/.test(x));
+}
+function normPerson(p: string): string {
+  return p.split(/\s*&\s*|\s+and\s+/i).map((one) => {
+    const b = one.split(",").map((x) => x.trim()).filter(Boolean);
+    return b.length === 2 ? `${b[1]} ${b[0]}` : one.trim();
+  }).filter(Boolean).join(" & ");
+}
+function parseAuthor(raw: string): string | null {
+  const t = String(raw || "").replace(/\.pdf$/i, "").trim();
+  const by = t.match(/\bby\s+([A-Z][^()\[\]]{2,60})$/);
+  if (by && looksLikePerson(by[1]!)) return normPerson(by[1]!);
+  const seg = t.split(/\s+-\s+/);
+  if (seg.length >= 2) {
+    if (looksLikePerson(seg[0]!)) return normPerson(seg[0]!);
+    // Deliberately NOT guessing the reverse ("Endgame Manual - Dvoretsky Mark").
+    // "Dvoretsky Mark" and "Caro Kann" are the same shape — two capitalised words
+    // after a dash — so that rule labelled an opening as an author. A wrong author
+    // is worse than none; the library filename supplies these correctly anyway
+    // whenever the file is one we already hold.
+  }
+  return null;
+}
+
 /** Who may open this book.
  *
  *  One stored copy can now belong to several coaches. When two of them upload
@@ -220,6 +300,9 @@ export class UserBooksController {
         return {
           id,
           title: meta.title || id,
+          // Stored at upload; null where the filename gave nothing to trust, and
+          // the shelf groups those under "Unknown" rather than guessing.
+          author: meta.author ?? parseAuthor(meta.title || "") ?? null,
           owner: uid,
           coverPage: Number.isInteger(meta.coverPage) ? meta.coverPage : 0,
           pages: status.pages ?? 0,
@@ -649,7 +732,9 @@ export class UserBooksController {
     if (role !== "coach" && role !== "academy_owner") {
       throw new ForbiddenException("only coaches can add books");
     }
-    const name = String(title ?? "").trim();
+    // Clean the title at the door: it comes from the filename, and a coach should
+    // never see "( PDFDrive ) (1)" on their shelf.
+    const name = cleanTitle(String(title ?? ""));
     // Say WHY an upload was refused, in the log as well as to the browser. A
     // coach reports "it failed" and the reason is gone: a 400 leaves no trace on
     // this box, so the same guessing starts over every time. Guna Chess hit this
@@ -733,6 +818,7 @@ export class UserBooksController {
       writeFileSync(join(dir, "meta.json"), JSON.stringify({
         title: name, owner: uid, coverPage: 0,
         source: "france-upload", uploadedAt: new Date().toISOString(),
+        author: parseAuthor(name),
         // Content fingerprint so the NEXT upload of this same file is caught
         // without re-reading every PDF on disk.
         sha256: sha256(body), bytes: body.length,

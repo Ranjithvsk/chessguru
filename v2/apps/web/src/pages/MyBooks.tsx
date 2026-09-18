@@ -13,11 +13,20 @@ const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
 type Book = {
   id: string; title: string; pages: number; diagrams: number;
   state: string; done: number; coverPage?: number;
+  // Parsed from the filename at upload; null when nothing in it could be trusted
+  // (a wrong author is worse than none), and those group under "Unknown".
+  author?: string | null;
+  // Set while a book waits its turn — only one renders at a time across the whole
+  // academy, so a coach can see where they are instead of re-uploading.
+  queuePosition?: number | null; etaSeconds?: number | null;
 };
+
+const UNKNOWN_AUTHOR = "Unknown";
 
 export default function MyBooksPage() {
   const [books, setBooks] = useState<Book[] | null>(null);
   const [q, setQ] = useState("");
+  const [author, setAuthor] = useState("");        // "" = every author
   // Coaches only. Reading a book costs GPU time on a machine shared with live
   // classes, and the library is one person's copyrighted collection.
   const [canAdd, setCanAdd] = useState(false);
@@ -216,9 +225,41 @@ export default function MyBooksPage() {
         </div>
       )}
 
+      {/* Filter by author. Shown only once a shelf holds more than one — a coach
+          with three books does not need a filter. 38% of books yield no author we
+          would trust, so "Unknown" is a real group rather than a failure. */}
+      {(() => {
+        const counts = new Map<string, number>();
+        for (const b of books ?? []) {
+          const a = (b.author || "").trim() || UNKNOWN_AUTHOR;
+          counts.set(a, (counts.get(a) ?? 0) + 1);
+        }
+        if (counts.size < 2) return null;
+        const names = [...counts.entries()].sort((x, y) =>
+          x[0] === UNKNOWN_AUTHOR ? 1 : y[0] === UNKNOWN_AUTHOR ? -1
+            : y[1] - x[1] || x[0].localeCompare(y[0]));
+        return (
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            <button onClick={() => setAuthor("")}
+              className={`rounded-full px-3 py-1 text-xs font-semibold ${author === "" ? "bg-emerald-500 text-black" : "bg-ink-800 text-ink-300 hover:bg-ink-700"}`}>
+              All authors <span className="opacity-60">{(books ?? []).length}</span>
+            </button>
+            {names.map(([a, n]) => (
+              <button key={a} onClick={() => setAuthor(a === author ? "" : a)}
+                className={`rounded-full px-3 py-1 text-xs font-semibold ${author === a ? "bg-emerald-500 text-black" : "bg-ink-800 text-ink-300 hover:bg-ink-700"}`}
+                title={a === UNKNOWN_AUTHOR ? "The filename gave no author we could trust" : a}>
+                {a} <span className="opacity-60">{n}</span>
+              </button>
+            ))}
+          </div>
+        );
+      })()}
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {(books ?? [])
-          .filter((b) => b.title.toLowerCase().includes(q.trim().toLowerCase()))
+          .filter((b) => !author || ((b.author || "").trim() || UNKNOWN_AUTHOR) === author)
+          .filter((b) => b.title.toLowerCase().includes(q.trim().toLowerCase())
+                      || (b.author || "").toLowerCase().includes(q.trim().toLowerCase()))
           .map((b) => (
           <BookCard
             key={b.id}
@@ -291,9 +332,19 @@ function BookCard({ b, onCover }: { b: Book; onCover: (page: number) => void }) 
             )}
           </div>
           <Link to={`/books/read/${encodeURIComponent(b.id)}`}
-            className="line-clamp-3 flex-1 font-semibold text-white group-hover:text-brand-200">
+            className="line-clamp-3 font-semibold text-white group-hover:text-brand-200">
             {b.title}
           </Link>
+          {b.author && <div className="mt-0.5 text-[11px] text-ink-400">{b.author}</div>}
+          {/* Waiting its turn: where in line, and roughly how long — so nobody
+              re-uploads a book that is already on its way. */}
+          {b.state === "queued" && (b.queuePosition ?? 0) > 0 && (
+            <div className="mt-0.5 text-[11px] text-amber-200">
+              #{b.queuePosition} in queue
+              {(b.etaSeconds ?? 0) > 0 && ` · about ${Math.max(1, Math.round((b.etaSeconds as number) / 60))} min`}
+            </div>
+          )}
+          <div className="flex-1" />
           {b.pages > 1 && (
             <button
               onClick={() => setPicking((v) => !v)}
