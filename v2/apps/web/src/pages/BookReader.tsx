@@ -582,7 +582,7 @@ export default function BookReaderPage() {
   const activeDiagram = book.diagrams.find((d) => d.n === active) ?? null;
 
   return (
-    <div className="mx-auto max-w-[1600px] px-3 pb-40 pt-4">
+    <div className="mx-auto max-w-[1600px] px-3 pb-40 pt-4" style={{ touchAction: "pan-y" }} onTouchStart={onPagesTouchStart} onTouchMove={onPagesTouchMove} onTouchEnd={onPagesTouchEnd} onTouchCancel={onPagesTouchEnd}>
       {/* Header */}
       <div className="mb-4 rounded-2xl bg-gradient-to-r from-brand-600/20 via-fuchsia-600/10 to-transparent p-4 ring-1 ring-brand-500/20">
         <h1 className="text-lg font-bold text-ink-50">{book.title}</h1>
@@ -667,7 +667,7 @@ export default function BookReaderPage() {
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
         {/* Pages */}
-        <div className={`min-w-0 ${activeDiagram ? "max-lg:pb-[60vh]" : ""}`} style={{ touchAction: "pan-y" }} onTouchStart={onPagesTouchStart} onTouchMove={onPagesTouchMove} onTouchEnd={onPagesTouchEnd} onTouchCancel={onPagesTouchEnd}>
+        <div className={`min-w-0 ${activeDiagram ? "max-lg:pb-[60vh]" : ""}`}>
           <div className="mb-2 flex items-center gap-1.5">
             <span className="text-[11px] text-ink-500">Page size</span>
             <button onClick={() => setPageZoom((z) => Math.max(0.75, +(z - 0.25).toFixed(2)))} disabled={pageZoom <= 0.75}
@@ -856,7 +856,7 @@ export default function BookReaderPage() {
                     position could be looked at but not used. Capping the width
                     against the available HEIGHT keeps the whole board and its
                     buttons on screen. */}
-                <div className="mx-auto w-full max-lg:max-w-[calc(58vh-190px)]">
+                <div className="mx-auto w-full max-lg:max-w-[calc(58vh-190px)]" style={{ touchAction: "none" }}>
                 <Board
                   fen={fp.fen}
                   orientation={fp.orientation}
