@@ -2644,13 +2644,12 @@ export default function AcademyPublicPage() {
                 so there is no logged-out flash. */}
             {authQ.data?.loggedIn ? (
               <>
-                <span className="hidden sm:inline text-xs font-semibold" style={{ color: '#6b7280' }}>
-                  Signed in{authQ.data.username ? ` as ${authQ.data.username}` : ""}
-                </span>
-                {/* No product name here. This page is served on the academy's OWN domain
-                    (gunachess.com), where "Go to ChessGuru" is a white-label leak — the
-                    owner reported it the moment it shipped. Keep the label about what the
-                    button does, so it reads correctly on every tenant domain. */}
+                {/* Label stays "Log In" for everyone (owner ask 2026-09-18) — the header
+                    reads the same whether or not you are signed in, and no product name
+                    appears, which would be a white-label leak on the academy's own domain.
+                    Only the DESTINATION knows about the session: already signed in goes
+                    straight to the academy dashboard or the trainer rather than showing a
+                    login form to someone who is already logged in. */}
                 {/* /puzzles, never "/". On a tenant domain the bare root is claimed twice:
                     nginx `location = /` 302s it to the academy page, and the custom-domain
                     shim in App.tsx redirects there too (it fires only on "/", "/v2", "/v2/").
@@ -2659,7 +2658,7 @@ export default function AcademyPublicPage() {
                   to={meIsStaff ? "/academy" : "/puzzles"}
                   className="cg-civ-btn cg-civ-btn--accent cg-civ-btn--sm"
                 >
-                  <span>{meIsStaff ? "Academy dashboard" : "Start training"}</span>
+                  <span>Log In</span>
                 </Link>
               </>
             ) : (
