@@ -13,12 +13,29 @@
 // Books are private to their uploader. These are copyrighted works a coach
 // owns a copy of — we are giving them a better way to read it, not building a
 // library, so there is no public listing and no cross-user access.
-import { Body, ConflictException, Controller, ForbiddenException, Get, Logger, Param, Post, Query, Req, Res, BadRequestException, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Get, Logger, Param, Post, Query, Req, Res, BadRequestException, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 
 const sha256 = (b: Buffer) => createHash("sha256").update(b).digest("hex");
+
+/** Who may open this book.
+ *
+ *  One stored copy can now belong to several coaches. When two of them upload
+ *  the same file we keep ONE copy and list them both here, rather than storing
+ *  and re-rendering 28 MB and 260 pages a second time (Guna Chess did exactly
+ *  that with the Sharpest Sicilian, twice in six minutes).
+ *
+ *  This is dedup of STORAGE only — a coach still has to upload a book to get it.
+ *  Nobody gains access to a book they did not bring themselves, which is what
+ *  keeps a private shelf from turning into a shared library of other people's
+ *  copyrighted PDFs.
+ *
+ *  FAILS CLOSED: no owner recorded => nobody owns it => it is not listed or
+ *  served. A missing meta.owner used to make a book visible to everyone. */
+const ownsBook = (meta: any, uid: string): boolean =>
+  !!uid && (meta?.owner === uid || (Array.isArray(meta?.owners) && meta.owners.includes(uid)));
 
 const STORE = "/var/lib/chessguru/user-books";
 // Whose Drive the book host is pointed at. One library, one owner —
@@ -120,6 +137,16 @@ export class UserBooksController {
     if (!existsSync(STORE)) return { books: [] };
     const books = readdirSync(STORE)
       .filter((id) => statSync(join(STORE, id)).isDirectory())
+      // Own books only, and FAIL CLOSED. This used to treat a missing owner as
+      // "shared seed content", which meant every book without one was visible to
+      // any signed-in coach or student — including a coach's own copyrighted
+      // library. These are books someone owns a copy of; we are giving them a
+      // better way to read it, not publishing it.
+      //
+      // Filtered on the META, before mapping: one stored copy can belong to
+      // several coaches now, and the full owners list must never leave this box —
+      // a coach has no business knowing who else uploaded the same book.
+      .filter((id) => ownsBook(readJson<any>(join(STORE, id, "meta.json"), {}), uid))
       .map((id) => {
         const dir = join(STORE, id);
         const meta = readJson<any>(join(dir, "meta.json"), {});
@@ -128,20 +155,14 @@ export class UserBooksController {
         return {
           id,
           title: meta.title || id,
-          owner: meta.owner ?? null,
+          owner: uid,
           coverPage: Number.isInteger(meta.coverPage) ? meta.coverPage : 0,
           pages: status.pages ?? 0,
           diagrams: diagrams.length,
           state: status.state ?? "unknown",
           done: status.done ?? 0,
         };
-      })
-      // Own books only, and FAIL CLOSED. This used to treat a missing owner as
-      // "shared seed content", which meant every book without one was visible to
-      // any signed-in coach or student — including a coach's own copyrighted
-      // library. These are books someone owns a copy of; we are giving them a
-      // better way to read it, not publishing it.
-      .filter((b) => b.owner === uid);
+      });
     // A book read on Vinayaka is as much "my book" as one read here; where it
     // was processed is an implementation detail the shelf should not expose.
     const remote = await this.remoteBooks(uid);
@@ -223,7 +244,7 @@ export class UserBooksController {
     const dir = bookDir(id);
     if (!existsSync(dir)) return this.remoteDetail(id, uid);
     const meta = readJson<any>(join(dir, "meta.json"), {});
-    if (meta.owner !== uid) throw new NotFoundException("book not found");
+    if (!ownsBook(meta, uid)) throw new NotFoundException("book not found");
     const status = readJson<any>(join(dir, "status.json"), {});
     const diagrams = readJson<Diagram[]>(join(dir, "diagrams.json"), []);
     return {
@@ -271,7 +292,7 @@ export class UserBooksController {
     } catch {
       throw new NotFoundException("book not found");
     }
-    if (!meta || meta.owner !== uid) throw new NotFoundException("book not found");
+    if (!meta || !ownsBook(meta, uid)) throw new NotFoundException("book not found");
     return {
       id,
       title: meta.title || id,
@@ -296,7 +317,7 @@ export class UserBooksController {
   private async remoteOwns(id: string, uid: string): Promise<boolean> {
     try {
       const meta = await this.bookHost(`/book/${encodeURIComponent(id)}/meta`);
-      return !!meta && meta.owner === uid;
+      return !!meta && ownsBook(meta, uid);
     } catch {
       return false;
     }
@@ -324,7 +345,7 @@ export class UserBooksController {
     const isRemote = !existsSync(dir);
     if (!isRemote) {
       const meta = readJson<any>(join(dir, "meta.json"), {});
-      if (meta.owner !== uid) throw new NotFoundException("book not found");
+      if (!ownsBook(meta, uid)) throw new NotFoundException("book not found");
     }
 
     const action = body?.action === "reject" ? "reject"
@@ -416,7 +437,7 @@ export class UserBooksController {
     }
     const metaPath = join(dir, "meta.json");
     const meta = readJson<any>(metaPath, {});
-    if (meta.owner !== uid) throw new NotFoundException("book not found");
+    if (!ownsBook(meta, uid)) throw new NotFoundException("book not found");
     try {
       writeFileSync(metaPath, JSON.stringify({ ...meta, coverPage: page }));
     } catch (e: any) {
@@ -455,7 +476,7 @@ export class UserBooksController {
   private async ownsBook(id: string, uid: string): Promise<boolean> {
     const dir = bookDir(id);
     if (existsSync(dir)) {
-      return readJson<any>(join(dir, "meta.json"), {}).owner === uid;
+      return ownsBook(readJson<any>(join(dir, "meta.json"), {}), uid);
     }
     return this.remoteOwns(id, uid);
   }
@@ -490,7 +511,7 @@ export class UserBooksController {
     }
 
     const meta = readJson<any>(join(dir, "meta.json"), {});
-    if (meta.owner !== uid) throw new NotFoundException("book not found");
+    if (!ownsBook(meta, uid)) throw new NotFoundException("book not found");
     const diagrams = readJson<Diagram[]>(join(dir, "diagrams.json"), []);
     const d = diagrams[idx];
     if (!d) throw new NotFoundException("diagram not found");
@@ -569,23 +590,30 @@ export class UserBooksController {
       if (r?.match) return { ok: true, alreadyHave: true, book: r.match };
     } catch { /* Vinayaka down/slow — fall through to a France-local upload */ }
 
-    // Already have this one? Guna Chess uploaded "The Sharpest Sicilian" twice
-    // six minutes apart on 18 Sep 2026: same 28 MB file, byte for byte. Nothing
-    // objected — freshBookId() just appended "-2" — so the box rendered 260
-    // pages of it TWICE, competing for the same CPU that runs live classes, and
-    // the coach ended up with two copies of one book on the shelf. Warn instead.
-    const dup = this.findDuplicate(uid, body, name);
-    if (dup && String(req?.query?.force ?? "") !== "1") {
-      this.log.warn(`duplicate upload blocked for ${uid}: ${dup.match} of ${dup.book.id} — title=${JSON.stringify(name)}`);
-      throw new ConflictException({
-        error: "duplicate",
-        match: dup.match,
-        message: dup.match === "identical file"
-          ? `You already have this book — “${dup.book.title}”, added ${dup.book.addedAt}. It is the same file, byte for byte.`
-          : `You already have a book with this title — “${dup.book.title}”, added ${dup.book.addedAt}.`,
-        existing: dup.book,
-        hint: "Upload it again only if you meant to replace it.",
-      });
+    // Do we already hold this exact file? Then don't store it twice — just put
+    // the coach's name on the copy we have and hand it straight back, already
+    // rendered, already carrying its positions.
+    //
+    // Guna Chess uploaded "The Sharpest Sicilian" twice six minutes apart on
+    // 18 Sep 2026 — the same 28 MB file byte for byte, the browser having named
+    // the second one "(1)". Nothing objected, so the box rendered 260 pages of
+    // it a SECOND time, competing for the CPU that runs live classes.
+    //
+    // Matched on sha256 ONLY. A same-titled but different file is a different
+    // scan and gets its own copy — merging those would give a coach a book they
+    // did not upload. No message is shown either way: from where the coach sits
+    // the book simply appears, which is what they wanted anyway.
+    const existing = this.findStoredCopy(body);
+    if (existing) {
+      const linked = this.addOwner(existing.id, uid);
+      this.log.log(`linked ${uid} to existing copy ${existing.id} instead of a second render — title=${JSON.stringify(name)}`);
+      return {
+        ok: true, alreadyHave: true, local: true, linked: true,
+        book: {
+          id: existing.id, title: existing.meta.title || existing.id, owner: uid, by: uid,
+          state: linked.state, pages: linked.pages, diagrams: linked.diagrams,
+        },
+      };
     }
 
     // Store + ingest on France (always-on). The PDF lives here; the local vision
@@ -643,45 +671,60 @@ export class UserBooksController {
   /** A fresh, traversal-safe book id derived from the title, unique in the
    *  store. Slug only — the read paths resolve it under STORE and reject any id
    *  that would escape, so an id is always a single safe path segment. */
-  /** Has this coach already uploaded this book?
+  /** The stored copy of this exact file, whoever first uploaded it.
    *
-   *  Matched on the file's sha256 first — that catches a re-upload even when the
-   *  browser renamed it "(1)", which is exactly how the Sharpest Sicilian got in
-   *  twice. Falls back to an exact title match for a different scan of the same
-   *  book. Books uploaded before fingerprinting get hashed once, lazily, and the
-   *  result is written back into their meta.json so this stays cheap. */
-  private findDuplicate(uid: string, body: Buffer, title: string): { match: string; book: any } | null {
+   *  sha256 only — a re-upload survives the browser renaming it "(1)", which is
+   *  exactly how the Sharpest Sicilian got in twice. Title is deliberately NOT
+   *  matched: a same-titled but different file is a different scan and deserves
+   *  its own copy, and merging on title would hand a coach a book they never
+   *  uploaded.
+   *
+   *  Books stored before fingerprinting are hashed once, lazily, and the result
+   *  written back into meta.json, so this never re-reads every PDF on disk. */
+  private findStoredCopy(body: Buffer): { id: string; meta: any } | null {
     const hash = sha256(body);
-    const wanted = title.trim().toLowerCase();
     if (!existsSync(STORE)) return null;
     for (const id of readdirSync(STORE)) {
       const dir = join(STORE, id);
       const metaPath = join(dir, "meta.json");
       if (!existsSync(metaPath)) continue;
       const meta = readJson<any>(metaPath, {});
-      if (meta.owner !== uid) continue;
       let known: string | null = typeof meta.sha256 === "string" ? meta.sha256 : null;
       if (!known) {
-        // Legacy book: hash it once and remember, so we never pay this twice.
         const pdf = join(dir, "book.pdf");
-        if (existsSync(pdf)) {
-          try {
-            known = sha256(readFileSync(pdf));
-            writeFileSync(metaPath, JSON.stringify({ ...meta, sha256: known, bytes: statSync(pdf).size }));
-          } catch { /* unreadable — fall back to the title check below */ }
-        }
+        if (!existsSync(pdf)) continue;
+        try {
+          known = sha256(readFileSync(pdf));
+          writeFileSync(metaPath, JSON.stringify({ ...meta, sha256: known, bytes: statSync(pdf).size }));
+        } catch { continue; }
       }
-      const status = readJson<any>(join(dir, "status.json"), {});
-      const book = {
-        id, title: meta.title || id,
-        addedAt: (meta.uploadedAt || "").slice(0, 10) || "earlier",
-        state: status.state ?? "unknown", pages: status.pages ?? 0,
-        positions: readJson<any[]>(join(dir, "diagrams.json"), []).length,
-      };
-      if (known && known === hash) return { match: "identical file", book };
-      if (String(meta.title ?? "").trim().toLowerCase() === wanted) return { match: "same title", book };
+      if (known === hash) return { id, meta };
     }
     return null;
+  }
+
+  /** Add a coach to a stored book's owners, and report what they are getting.
+   *
+   *  `owner` (the original uploader) is left untouched so anything still reading
+   *  that field keeps working; `owners` is the list ownsBook() actually honours. */
+  private addOwner(id: string, uid: string): { state: string; pages: number; diagrams: number } {
+    const dir = bookDir(id);
+    const metaPath = join(dir, "meta.json");
+    const meta = readJson<any>(metaPath, {});
+    const owners: string[] = Array.isArray(meta.owners) ? meta.owners.slice() : [];
+    if (meta.owner && !owners.includes(meta.owner)) owners.push(meta.owner);
+    if (!owners.includes(uid)) owners.push(uid);
+    try {
+      writeFileSync(metaPath, JSON.stringify({ ...meta, owners }));
+    } catch (e: any) {
+      throw new ServiceUnavailableException(`could not add the book to your shelf (${e?.code || "write failed"})`);
+    }
+    const status = readJson<any>(join(dir, "status.json"), {});
+    return {
+      state: status.state ?? "unknown",
+      pages: status.pages ?? 0,
+      diagrams: readJson<Diagram[]>(join(dir, "diagrams.json"), []).length,
+    };
   }
 
   private freshBookId(title: string): string {
@@ -700,7 +743,7 @@ export class UserBooksController {
     if (!Number.isInteger(idx) || idx < 0 || idx > 9999) throw new NotFoundException("page not found");
     if (!existsSync(dir)) return this.remotePage(id, idx, uid, res);
     const meta = readJson<any>(join(dir, "meta.json"), {});
-    if (meta.owner !== uid) throw new NotFoundException("page not found");
+    if (!ownsBook(meta, uid)) throw new NotFoundException("page not found");
     const file = join(dir, "pages", `p${String(idx).padStart(4, "0")}.jpg`);
     if (!existsSync(file)) throw new NotFoundException("page not found");
     // Page images never change once ingested, so let the browser keep them —
