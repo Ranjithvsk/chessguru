@@ -19,6 +19,11 @@ interface Incident {
   peak: { day: string; score: number; band: Band; components: Record<string, number>; hard: { n: number; wins: number; winPct: number | null; medianMs: number | null; fast: number }; atLevel: { n: number; winPct: number | null }; above: { n: number; winPct: number | null }; crowdRatio: number | null; ratingStart: number | null; ratingEnd: number | null; fastest: { pid: string; pr: number; ms: number; mvMs: number[] | null; at: string }[] } | null;
   flagged: { count: number; stored: number; wins: number; reasons: Record<string, number>; samples: { pid: string; pr: number; ms: number | null; mvMs: number[] | null; dubr: string[]; at: string; w: boolean; replayed: boolean }[] };
   held: number; focusLoss: number; solves: number;
+  focusDetail?: {
+    counts: { switched: number; away: number; unclear: number };
+    movedStraightBack: number;
+    items: { at: string; shape: "switched" | "away" | "unclear"; label: string; why: string; hiddenCount: number; hiddenMs: number; totalMs: number | null; puzzleRating: number | null; solved: boolean; firstMoveAfterReturnMs: number | null; movedStraightBack: boolean }[];
+  };
   exams: { examId: string; title: string; at: string; hiddenCount: number; hiddenMs: number; fsExits: number; scorePct: number }[];
   howDetected: string[]; whatEngineDid: string[];
   decision: { kind: string; by: string; byName?: string; note: string; at: string } | null;
@@ -32,7 +37,7 @@ interface Detail {
   decisions: { clear: number; hold: number; reset: number };
   acceptance: { falseAlarms: boolean | null; timeToReview: boolean | null };
   incidents: Incident[];
-  detection: { rules: Rule[]; flaggedSolves: number; heldWins: number; focusLossSolves: number; drillsExcused: number; fastSolves: number };
+  detection: { rules: Rule[]; flaggedSolves: number; heldWins: number; focusLossSolves: number; focusShapes?: { switched: number; away: number; unclear: number }; drillsExcused: number; fastSolves: number };
   exams: { proctoredAttempts: number; clean: number; left: number; incidents: (Person & { title: string; at: string; hiddenCount: number; hiddenMs: number; fsExits: number; scorePct: number })[] };
   homework: (Person & { solves: number; focusLoss: number; hiddenMs: number })[];
   health: { crowd: { puzzlesWithStats: number; monthPuzzles: number; coveredPct: number | null; bands: { band: number; medMs: number }[] }; model: { active: boolean; reason: string; n: { assisted: number; honest: number }; cv: { accuracy: number | null; correct: number; total: number; falseAlarms: number; missed: number } }; disagreements: (Person & { hand: number; model: number })[] };
@@ -90,7 +95,7 @@ function IncidentCard({ inc, ruleLabel }: { inc: Incident; ruleLabel: (r: string
             {inc.ratingNow !== null && <span className="rounded-md bg-ink-800 px-1.5 py-0.5 text-xs text-ink-200">rating {inc.ratingNow}</span>}
             {p && <span className="rounded-md bg-ink-800 px-1.5 py-0.5 text-xs text-ink-300">peak {p.score} on {day(p.day)}</span>}
           </div>
-          <div className="mt-1 text-[11px] text-ink-500">{inc.solves} solves this month · {inc.flagged.count} flagged · {inc.held} held · {inc.focusLoss} left the tab{inc.timeToReviewHours !== null ? ` · Review ${inc.timeToReviewHours} h after the first flag` : ""}</div>
+          <div className="mt-1 text-[11px] text-ink-500">{inc.solves} solves this month · {inc.flagged.count} flagged · {inc.held} held · {inc.focusLoss} left the tab{inc.focusDetail && inc.focusDetail.counts.switched ? ` (${inc.focusDetail.counts.switched} switched away)` : ""}{inc.timeToReviewHours !== null ? ` · Review ${inc.timeToReviewHours} h after the first flag` : ""}</div>
         </div>
         <Spark daily={inc.daily} />
       </header>
@@ -157,6 +162,37 @@ function IncidentCard({ inc, ruleLabel }: { inc: Incident; ruleLabel: (r: string
               </tbody>
             </table>
           </div>
+        </section>
+      )}
+      {inc.focusDetail && inc.focusDetail.items.length > 0 && (
+        <section className="mt-3">
+          <div className="text-xs font-semibold text-ink-400">Each time the trainer lost focus</div>
+          {/* The browser reports only THAT the tab was hidden. The shape of the
+              absence is the only thing separating a screen timeout from a
+              student switching away, so show it per incident. */}
+          <p className="mt-0.5 text-[11px] text-ink-500">
+            A screen that times out does so once and stays off a while. Repeated short absences are someone leaving and coming back.
+            Nothing here shows <em>where</em> they went.
+          </p>
+          <ul className="mt-1.5 space-y-1">
+            {inc.focusDetail.items.map((f, i) => (
+              <li key={i} className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-ink-300">
+                <span className={`rounded px-1.5 py-0.5 font-semibold ${
+                  f.shape === "switched" ? "bg-amber-500/15 text-amber-200"
+                  : f.shape === "away" ? "bg-ink-700 text-ink-300"
+                  : "bg-ink-800 text-ink-400"}`}>{f.label}</span>
+                <span className="text-ink-400">{day(f.at)}</span>
+                <span>hidden {f.hiddenCount}× for {Math.round(f.hiddenMs / 1000)} s{f.totalMs ? ` of a ${Math.round(f.totalMs / 1000)} s solve` : ""}</span>
+                {f.puzzleRating ? <span className="text-ink-500">· {f.puzzleRating}-rated{f.solved ? ", solved" : ", missed"}</span> : null}
+                {f.movedStraightBack
+                  ? <span className="text-amber-200">· moved {f.firstMoveAfterReturnMs} ms after coming back</span>
+                  : f.firstMoveAfterReturnMs === null
+                    ? <span className="text-ink-500">· no move on return</span>
+                    : <span className="text-ink-500">· moved {(f.firstMoveAfterReturnMs / 1000).toFixed(1)} s after returning</span>}
+                <span className="basis-full text-ink-500">{f.why}</span>
+              </li>
+            ))}
+          </ul>
         </section>
       )}
       {inc.exams.length > 0 && (
@@ -235,7 +271,13 @@ export default function AcademyFairnessPage() {
             <div className="grid grid-cols-2 gap-2">
               <Tile label="Fast solves on 2000+" value={String(r.detection.fastSolves)} sub="wins under 4 s" />
               <Tile label="Excused as drills" value={String(r.detection.drillsExcused)} sub="one-move or mate-theme practice — never counted" tone="good" />
-              <Tile label="Left the tab" value={String(r.detection.focusLossSolves)} sub="solves where the trainer lost focus" />
+              <Tile
+                label="Left the tab"
+                value={String(r.detection.focusLossSolves)}
+                sub={r.detection.focusShapes
+                  ? `${r.detection.focusShapes.switched} switched away · ${r.detection.focusShapes.away} screen off / walked away · ${r.detection.focusShapes.unclear} unclear`
+                  : "solves where the trainer lost focus"}
+              />
               <Tile label="Held wins" value={String(r.detection.heldWins)} sub="Review band, no rating" />
             </div>
           </div>

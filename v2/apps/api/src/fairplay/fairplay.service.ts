@@ -22,14 +22,77 @@ export const RULES = [
   { rule: "metronome", label: "Engine rhythm", meaning: "a 2200+ puzzle under 8 s with every gap between moves 0.7–1.7 s — a line read off, not calculated" },
   { rule: "streak", label: "Run of fast hard wins", meaning: "a 2400+ puzzle under 6 s while 4 of the last 10 hard wins were also that fast" },
   { rule: "crowd_fast", label: "Faster than the crowd", meaning: "won in under 15% of the time everyone else needs on that puzzle" },
-  { rule: "focus_loss", label: "Left the tab, moved on return", meaning: "the tab was hidden 3 s+ after the puzzle loaded and the first move came within 2 s of coming back" },
+  { rule: "focus_loss", label: "Left the tab, moved on return", meaning: "the tab was hidden 3 s+ after the puzzle loaded and the first move came within 2 s of coming back — the browser reports that the tab was hidden, never what it was hidden for, so the report splits these by shape: repeated short absences read as switching away, one long absence reads as a screen going off" },
 ];
 const ruleLabel = (r: string) => RULES.find((x) => x.rule === r)?.label ?? r;
 const ruleMeaning = (r: string) => RULES.find((x) => x.rule === r)?.meaning ?? "";
 
+/** What the browser actually told us, and what it did NOT.
+ *
+ *  `fx` comes from `visibilitychange`, which fires the same way whether the
+ *  student switched tab, switched app, or the phone screen simply timed out.
+ *  A coach reading "left the tab" cannot act on it without knowing which — the
+ *  owner asked exactly this about a student's flagged solve. The SHAPE of the
+ *  absence separates them, and the academy's own data says how:
+ *
+ *    64 of 83 focus-loss rounds are a SINGLE hide averaging 151 s, and 26 record
+ *    no move at all on return — a screen going dark, or a child walking off.
+ *    A device screen times out ONCE. It cannot time out four times inside a
+ *    76-second puzzle while the student is actively solving; that is a person
+ *    leaving and coming back.
+ *
+ *  So: many short hides => switching. One long hide => away. Everything else is
+ *  reported as unclear rather than guessed at. */
+export type FocusShape = "switched" | "away" | "unclear";
+export const FOCUS_SHAPES: Record<FocusShape, string> = {
+  switched: "Switched away and back",
+  away: "Screen off or walked away",
+  unclear: "Not clear from the browser",
+};
+export function classifyFocus(fx: { hiddenMs?: number; hiddenCount?: number; firstMoveAfterReturnMs?: number | null } | null | undefined, totalMs?: number | null): { shape: FocusShape; label: string; why: string } {
+  const count = Number(fx?.hiddenCount ?? 0);
+  const hidden = Number(fx?.hiddenMs ?? 0);
+  if (!count) return { shape: "unclear", label: FOCUS_SHAPES.unclear, why: "the trainer never lost focus" };
+  const per = hidden / count;
+  const s = (ms: number) => `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
+  const span = totalMs ? ` of a ${s(totalMs)} solve` : "";
+  if (count >= 3) return { shape: "switched", label: FOCUS_SHAPES.switched, why: `hidden ${count} separate times${span} (${s(per)} each) — a screen that times out does so once, not ${count} times` };
+  if (count === 2 && per <= 45_000) return { shape: "switched", label: FOCUS_SHAPES.switched, why: `hidden twice${span}, ${s(per)} each — too short and too repeated for a screen timeout` };
+  if (count === 1 && hidden >= 60_000) return { shape: "away", label: FOCUS_SHAPES.away, why: `one stretch of ${s(hidden)}${span} — the shape of a screen going off or the student leaving` };
+  if (count === 1 && hidden < 20_000) return { shape: "switched", label: FOCUS_SHAPES.switched, why: `one brief ${s(hidden)} absence${span} — long enough to look somewhere, too short for a screen timeout` };
+  return { shape: "unclear", label: FOCUS_SHAPES.unclear, why: `${count} absence${count === 1 ? "" : "s"} totalling ${s(hidden)}${span} — sits between the two patterns` };
+}
+
+/** Per-incident focus detail for the report, newest first. */
+export function focusBreakdown(rounds: { d: Date; ms?: number | null; w?: boolean; pr?: number; fx?: { hiddenMs?: number; hiddenCount?: number; firstMoveAfterReturnMs?: number | null } | null }[]) {
+  const items = rounds
+    .filter((r) => r.fx && Number(r.fx.hiddenCount ?? 0) > 0)
+    .sort((a, b) => b.d.getTime() - a.d.getTime())
+    .map((r) => {
+      const c = classifyFocus(r.fx, r.ms);
+      const back = r.fx?.firstMoveAfterReturnMs ?? null;
+      return {
+        at: r.d,
+        shape: c.shape, label: c.label, why: c.why,
+        hiddenCount: Number(r.fx?.hiddenCount ?? 0),
+        hiddenMs: Number(r.fx?.hiddenMs ?? 0),
+        totalMs: r.ms ?? null,
+        puzzleRating: r.pr ? Math.round(r.pr) : null,
+        solved: !!r.w,
+        // null means they came back and did NOT move — consistent with having
+        // been away rather than checking something mid-puzzle.
+        firstMoveAfterReturnMs: back,
+        movedStraightBack: back !== null && back < 2000,
+      };
+    });
+  const counts = { switched: 0, away: 0, unclear: 0 } as Record<FocusShape, number>;
+  for (const i of items) counts[i.shape]++;
+  return { items, counts, movedStraightBack: items.filter((i) => i.movedStraightBack).length };
+}
+
 /** Plain-words account of a score: what the engine saw, in the order it
  *  weighed it. Used by the detailed report (and reusable in mail). */
-export function explainDetection(res: ScoreResult, reasons: Record<string, number>, focusLoss: number, peakDay: string | null, flaggedCount?: number): string[] {
+export function explainDetection(res: ScoreResult, reasons: Record<string, number>, focusLoss: number, peakDay: string | null, flaggedCount?: number, focusDetail?: ReturnType<typeof focusBreakdown>): string[] {
   const c = res.components, e = res.evidence, out: string[] = [];
   const fmt = (d: string) => new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
   out.push(`Score ${peakDay ? `peaked at ${res.score} on ${fmt(peakDay)}` : `is ${res.score}`} — ${res.band === "review" ? "Review band (gains are held from here on)" : res.band === "watch" ? "Watch band (listed for a look, nothing withheld)" : "Clear"}.`);
@@ -41,7 +104,23 @@ export function explainDetection(res: ScoreResult, reasons: Record<string, numbe
   if (c.climb) out.push(`Rating climbed from ${e.ratingStart} to ${e.ratingEnd} in the window alongside the flags. Worth ${c.climb} points.`);
   if (c.themeFlat && e.themes) out.push(`Per-theme ratings sit within ±${e.themes.sd} across ${e.themes.n} themes — equally strong at everything, which honest players never are. Worth ${c.themeFlat} points.`);
   if (c.playGap && e.play) out.push(`Puzzle rating is ${e.play.gap} above their best live-game rating (${e.play.speed} ${e.play.r} over ${e.play.nb} games). Worth ${c.playGap} points.`);
-  if (focusLoss) out.push(`On ${focusLoss} solves the tab left the trainer after the puzzle loaded${reasons.focus_loss ? `; ${reasons.focus_loss} of them had the move land within 2 s of coming back` : ""}.`);
+  if (focusLoss) {
+    // "Left the tab" on its own is unactionable — a coach cannot tell a screen
+    // timeout from a student checking an engine. Say which, and say plainly
+    // where the evidence stops.
+    const fd = focusDetail;
+    if (fd && fd.items.length) {
+      const bits: string[] = [];
+      if (fd.counts.switched) bits.push(`${fd.counts.switched} look like switching away and back (repeated short absences — a screen times out once, not several times)`);
+      if (fd.counts.away) bits.push(`${fd.counts.away} look like the screen going off or the student leaving (a single long absence)`);
+      if (fd.counts.unclear) bits.push(`${fd.counts.unclear} sit between the two and are not called either way`);
+      out.push(`On ${focusLoss} solves the trainer lost focus after the puzzle loaded: ${bits.join("; ")}.`);
+      if (fd.movedStraightBack) out.push(`${fd.movedStraightBack} of those had the move land within 2 s of coming back — that is the part that matters, whatever caused the absence.`);
+      out.push(`The browser only reports THAT the tab was hidden, never what it was hidden for, so none of this shows where the student went.`);
+    } else {
+      out.push(`On ${focusLoss} solves the tab left the trainer after the puzzle loaded${reasons.focus_loss ? `; ${reasons.focus_loss} of them had the move land within 2 s of coming back` : ""}.`);
+    }
+  }
   if (out.length === 1) out.push("No single rule fired hard; the listing came from several weak signals adding up.");
   return out;
 }
@@ -414,7 +493,8 @@ export class FairplayService implements OnModuleInit {
         : (fp?.decision ?? null);
       const myAttempts = attempts.filter((a: any) => String(a.userId) === userId && a.proctor && (a.proctor.hiddenCount > 0 || a.proctor.fsExits > 0));
       const peakRes = peak?.res ?? scoreStudent(inMonth, crowd);
-      const howDetected = explainDetection(peakRes, reasons, focusRounds.length, peak?.day ?? null, flaggedRounds.length);
+      const focusDetail = focusBreakdown(focusRounds as any);
+      const howDetected = explainDetection(peakRes, reasons, focusRounds.length, peak?.day ?? null, flaggedRounds.length, focusDetail);
       const whatEngineDid: string[] = [];
       const liveFlaggedWins = flaggedRounds.filter((x) => x.w && !x.replayedFlag).length;
       const replayedWins = flaggedRounds.filter((x) => x.w && x.replayedFlag).length;
@@ -430,6 +510,9 @@ export class FairplayService implements OnModuleInit {
         timeline, daily, peak: peak ? { day: peak.day, score: peak.res.score, band: peak.res.band, components: peak.res.components, hard: peak.res.evidence.hard, atLevel: peak.res.evidence.atLevel, above: peak.res.evidence.above, crowdRatio: peak.res.evidence.crowdRatio, ratingStart: peak.res.evidence.ratingStart, ratingEnd: peak.res.evidence.ratingEnd, fastest: peak.res.evidence.fastest.slice(0, 5) } : null,
         flagged: { count: flaggedRounds.length, stored: storedFlagged, wins: liveFlaggedWins + replayedWins, reasons, samples: flaggedRounds.slice(0, 8).map((x) => ({ pid: x.pid, pr: Math.round(x.pr), ms: x.ms ?? null, mvMs: x.mv_ms ?? null, dubr: x.dubr ?? [], at: x.d, w: x.w, replayed: !!x.replayedFlag })) },
         held: heldRounds.length, focusLoss: focusRounds.length, solves: inMonth.length,
+        // Per-absence detail so a coach can see WHICH shape each one was rather
+        // than a bare "left the tab" count they can't act on.
+        focusDetail: { counts: focusDetail.counts, movedStraightBack: focusDetail.movedStraightBack, items: focusDetail.items.slice(0, 12) },
         exams: myAttempts.map((a: any) => ({ examId: a.examId, title: examTitle.get(String(a.examId))?.title ?? a.examId, at: a.submittedAt, hiddenCount: a.proctor.hiddenCount, hiddenMs: a.proctor.hiddenMs, fsExits: a.proctor.fsExits, scorePct: a.scorePct })),
         howDetected, whatEngineDid, decision, timeToReviewHours: ttr,
       });
@@ -444,10 +527,11 @@ export class FairplayService implements OnModuleInit {
     ]).toArray();
     const ruleSolves: Record<string, { solves: number; users: Set<string> }> = {};
     let flaggedSolves = 0, heldWins = 0, focusLossSolves = 0, drillsExcused = 0, fastSolves = 0;
+    const focusShapes: Record<FocusShape, number> = { switched: 0, away: 0, unclear: 0 };
     for (const r of monthRounds as any[]) {
       if (r.dub) { flaggedSolves++; for (const f of (Array.isArray(r.dubr) && r.dubr.length ? r.dubr : ["fast_above_level"])) { (ruleSolves[f] ||= { solves: 0, users: new Set() }); ruleSolves[f].solves++; ruleSolves[f].users.add(r.uid); } }
       if (r.held) heldWins++;
-      if (r.fx && r.fx.hiddenCount > 0) focusLossSolves++;
+      if (r.fx && r.fx.hiddenCount > 0) { focusLossSolves++; focusShapes[classifyFocus(r.fx, r.ms).shape]++; }
       if (r.w && typeof r.ms === "number" && r.ms < 4000 && r.pr >= 2000) { fastSolves++; if (!r.dub && isDrill(r.th, r.sel)) drillsExcused++; }
     }
     const rules = RULES.map((m) => ({ ...m, solves: ruleSolves[m.rule]?.solves ?? 0, students: ruleSolves[m.rule]?.users.size ?? 0 }));
@@ -476,7 +560,7 @@ export class FairplayService implements OnModuleInit {
     return {
       ...summary, academyName: academy?.name || academyId, scope: roster ? "roster" : "academy", generatedAt: now,
       incidents,
-      detection: { rules, flaggedSolves, heldWins, focusLossSolves, drillsExcused, fastSolves },
+      detection: { rules, flaggedSolves, heldWins, focusLossSolves, focusShapes, drillsExcused, fastSolves },
       exams: { proctoredAttempts: proctoredAttempts.length, clean: proctoredAttempts.length - left.length, left: left.length, incidents: examIncidents },
       homework,
       health: { crowd: { puzzlesWithStats: this.perPuzzle.size, monthPuzzles: pids.length, coveredPct: pids.length ? Math.round((covered / pids.length) * 100) : null, bands }, model: { active: model.active, reason: model.reason, n: model.n, cv: model.cv, trainedAt: model.trainedAt }, disagreements },
