@@ -4,10 +4,13 @@ import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import { useRedirectIfSignedIn } from "../hooks/useRedirectIfSignedIn";
 
 type Mode = "signin" | "register" | "otp" | "forgot";
 
 export default function LoginPage() {
+  // Already signed in? Skip the form. (?switch=1 to sign in as someone else.)
+  useRedirectIfSignedIn();
   const [params] = useSearchParams();
   const initial: Mode = (params.get("tab") as Mode) === "register" ? "register" : "signin";
   const [mode, setMode] = useState<Mode>(initial);

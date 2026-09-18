@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams, Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import { useRedirectIfSignedIn } from "../hooks/useRedirectIfSignedIn";
 const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
 
 type Brand = {
@@ -31,6 +32,8 @@ function slugFromHost(): string {
 }
 
 export default function TenantLoginPage() {
+  // Already signed in? Skip the form. (?switch=1 to sign in as someone else.)
+  useRedirectIfSignedIn();
   const { slug: paramSlug = "" } = useParams<{ slug: string }>();
   const slug = paramSlug || slugFromHost();
   const [params] = useSearchParams();
