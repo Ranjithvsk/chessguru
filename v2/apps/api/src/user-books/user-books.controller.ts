@@ -86,6 +86,71 @@ function readJson<T>(p: string, fallback: T): T {
   try { return JSON.parse(readFileSync(p, "utf8")) as T; } catch { return fallback; }
 }
 
+/** How many DIFFERENT coaches vouch for each position, from corrections.jsonl.
+ *
+ *  One stored copy is now read by several coaches, and their corrections land in
+ *  the same book. That is the point — a position three coaches independently
+ *  agree on is worth more than one the extractor guessed at 0.46 confidence, and
+ *  the reader should be able to say so.
+ *
+ *  Counted by DISTINCT user, latest verdict each. Guna Chess confirmed the same
+ *  diagram twice within four seconds (a double-click on p8 of Mastering
+ *  Checkmates); that is one coach agreeing, not two, and counting the lines
+ *  instead of the people would have read as consensus that does not exist.
+ *
+ *  A coach whose latest verdict differs from the FEN the book currently holds is
+ *  a DISAGREEMENT, which is the signal actually worth surfacing: two people who
+ *  looked at the same board and read it differently. */
+type Verdict = { agree: Set<string>; disagree: Set<string>; rejected: Set<string>; lastBy?: string; lastAt?: string };
+function readConsensus(dir: string): Map<string, Verdict> {
+  const out = new Map<string, Verdict>();
+  const raw = ((): string => { try { return readFileSync(join(dir, "corrections.jsonl"), "utf8"); } catch { return ""; } })();
+  if (!raw) return out;
+  // Latest verdict per (key, user) — a coach may revisit a board and change their mind.
+  const latest = new Map<string, any>();
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    let r: any; try { r = JSON.parse(line); } catch { continue; }
+    if (!r?.key || !r?.by) continue;
+    const prev = latest.get(`${r.key}|${r.by}`);
+    if (!prev || String(r.at ?? "") >= String(prev.at ?? "")) latest.set(`${r.key}|${r.by}`, r);
+  }
+  for (const r of latest.values()) {
+    const v = out.get(r.key) ?? { agree: new Set<string>(), disagree: new Set<string>(), rejected: new Set<string>() };
+    if (r.action === "reject") v.rejected.add(r.by);
+    else v.agree.add(r.by);           // resolved against the live FEN by the caller
+    if (!v.lastAt || String(r.at ?? "") >= v.lastAt) { v.lastAt = r.at; v.lastBy = r.by; }
+    // Remember what each coach actually settled on, so the caller can compare it
+    // with the FEN the book holds now.
+    (v as any).fens = (v as any).fens ?? new Map<string, string>();
+    (v as any).fens.set(r.by, r.action === "reject" ? "" : String(r.now ?? ""));
+    out.set(r.key, v);
+  }
+  return out;
+}
+
+/** The review state of one diagram, as a coach should read it. */
+function reviewOf(v: Verdict | undefined, currentFen: string): {
+  agreeCount: number; disagreeCount: number; rejectedCount: number;
+  reviewers: number; disputed: boolean; lastBy?: string; lastAt?: string;
+} | null {
+  if (!v) return null;
+  const fens: Map<string, string> = (v as any).fens ?? new Map();
+  const agree = new Set<string>(), disagree = new Set<string>();
+  for (const [by, fen] of fens) {
+    if (v.rejected.has(by)) continue;
+    // Compare the board only — side-to-move and clocks are not what a coach fixed.
+    if ((fen || "").split(" ")[0] === (currentFen || "").split(" ")[0]) agree.add(by);
+    else disagree.add(by);
+  }
+  return {
+    agreeCount: agree.size, disagreeCount: disagree.size, rejectedCount: v.rejected.size,
+    reviewers: new Set([...agree, ...disagree, ...v.rejected]).size,
+    disputed: disagree.size > 0 || (v.rejected.size > 0 && agree.size > 0),
+    lastBy: v.lastBy, lastAt: v.lastAt,
+  };
+}
+
 // Where each reader left off. Kept OUTSIDE the book directories on purpose: a book
 // dir IS the book — pages, diagrams, meta — and is the same for everyone who can
 // open it, while "which page was I on" belongs to one person. Keeping it separate
@@ -161,6 +226,13 @@ export class UserBooksController {
           diagrams: diagrams.length,
           state: status.state ?? "unknown",
           done: status.done ?? 0,
+          // Only one book renders at a time across the whole academy, so a queued
+          // book needs to say where it is in line and roughly how long — a coach
+          // who can see "3rd, about 25 minutes" does not re-upload, which is how
+          // the same Sicilian ended up rendering twice.
+          queuePosition: status.queuePosition ?? null,
+          etaSeconds: status.etaSeconds ?? null,
+          etaReadyAt: status.etaReadyAt ?? null,
         };
       });
     // A book read on Vinayaka is as much "my book" as one read here; where it
@@ -254,11 +326,39 @@ export class UserBooksController {
       state: status.state ?? "unknown",
       done: status.done ?? 0,
       seconds: status.seconds ?? null,
+      queuePosition: status.queuePosition ?? null,
+      etaSeconds: status.etaSeconds ?? null,
+      etaReadyAt: status.etaReadyAt ?? null,
       // Numbered in reading order so the reader can label them "position 12"
       // the way the book labels its problems.
       analysis: readJson<Record<string, any>>(join(dir, "analysis.json"), {}),
-      diagrams: diagrams.map((d, i) => ({ n: i + 1, key: diagramKey(d), ...d })),
+      // Each position carries how many DIFFERENT coaches have vouched for it, so
+      // the reader can put the well-reviewed ones forward and flag the ones two
+      // coaches read differently.
+      diagrams: (() => {
+        const consensus = readConsensus(dir);
+        return diagrams.map((d, i) => {
+          const key = diagramKey(d);
+          return { n: i + 1, key, ...d, review: reviewOf(consensus.get(key), String(d.fen ?? "")) };
+        });
+      })(),
       lastPage: resumePage(uid, id, status.pages ?? 0),
+      // Book-level review quality: how much of this book has actually been
+      // looked at by a human, and where coaches disagree with each other.
+      review: (() => {
+        const c = readConsensus(dir);
+        let reviewed = 0, multi = 0, disputed = 0;
+        const people = new Set<string>();
+        for (const d of diagrams) {
+          const r = reviewOf(c.get(diagramKey(d)), String(d.fen ?? ""));
+          if (!r) continue;
+          reviewed++;
+          if (r.reviewers > 1) multi++;
+          if (r.disputed) disputed++;
+        }
+        for (const v of c.values()) for (const by of [...v.agree, ...v.rejected]) people.add(by);
+        return { positions: diagrams.length, reviewed, byTwoOrMore: multi, disputed, coaches: people.size };
+      })(),
     };
   }
 
