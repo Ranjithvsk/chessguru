@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import Navbar from "./components/Navbar";
 import StreakAtRiskBanner from "./components/StreakAtRiskBanner";
 import LiveClassBanner from "./components/LiveClassBanner";
+import ClassAlertsPrompt from "./components/ClassAlertsPrompt";
 import HomeworkPendingBanner from "./components/HomeworkPendingBanner";
 import SupportWidget from "./components/SupportWidget";
 import { api } from "./lib/api";
@@ -92,6 +93,7 @@ export default function App() {
             <Link to="/login" className="shrink-0 rounded-lg bg-amber-500 px-3 py-1.5 font-semibold text-ink-900 hover:bg-amber-400">Sign in</Link>
           </div>
         )}
+        <ClassAlertsPrompt />
         <LiveClassBanner />
         <StreakAtRiskBanner />
         <HomeworkPendingBanner />

@@ -122,15 +122,11 @@ export default function LiveClassBanner() {
       setTimeout(() => { try { ctx.close(); } catch { /* */ } }, 800);
     } catch { /* */ }
   };
-  useEffect(() => {
-    if (!loggedIn) return;
-    if (typeof Notification !== "undefined" && Notification.permission === "default") {
-      // Ask ONCE per tab session for browser notification permission — no-op
-      // if user has already answered. Silent decline is fine (falls back to
-      // the in-app banner only).
-      try { Notification.requestPermission(); } catch { /* */ }
-    }
-  }, [loggedIn]);
+  // The page-load Notification.requestPermission() that used to sit here is gone (2026-09-18):
+  // a permission prompt with no user gesture is shown quietly or not at all by Chrome, and
+  // permission alone never subscribed anyone — 0 push subscriptions across the whole system
+  // when coach Raagul's class reached nobody. ClassAlertsPrompt now asks students from a tap
+  // and completes the subscription (lib/push.enable).
 
   if (!loggedIn) return null;
   // Already in a room / on the class hub / on the student dashboard — the
