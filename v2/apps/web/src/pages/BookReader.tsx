@@ -458,6 +458,11 @@ export default function BookReaderPage() {
     return () => window.clearTimeout(t);
   }, [sendState]);
 
+  // Zoom the PAGE only. Pinch or Ctrl+= scales the whole layout, so the board
+  // grew along with the page and pushed its own controls off screen. This
+  // magnifies the pages column and nothing else — the board keeps its column.
+  const [pageZoom, setPageZoom] = useState(1);
+
   const jumpToPage = (p: number) => {
     // Already looking at that page? Then do NOT scroll.
     //
@@ -636,7 +641,20 @@ export default function BookReaderPage() {
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
         {/* Pages */}
-        <div className={`space-y-6 ${activeDiagram ? "max-lg:pb-[60vh]" : ""}`}>
+        <div className={`min-w-0 ${activeDiagram ? "max-lg:pb-[60vh]" : ""}`}>
+          <div className="mb-2 flex items-center gap-1.5">
+            <span className="text-[11px] text-ink-500">Page size</span>
+            <button onClick={() => setPageZoom((z) => Math.max(0.75, +(z - 0.25).toFixed(2)))} disabled={pageZoom <= 0.75}
+              className="rounded-md bg-ink-800 px-2 py-0.5 text-sm font-bold text-ink-200 disabled:opacity-40">−</button>
+            <span className="w-10 text-center text-[11px] tabular-nums text-ink-400">{Math.round(pageZoom * 100)}%</span>
+            <button onClick={() => setPageZoom((z) => Math.min(3, +(z + 0.25).toFixed(2)))} disabled={pageZoom >= 3}
+              className="rounded-md bg-ink-800 px-2 py-0.5 text-sm font-bold text-ink-200 disabled:opacity-40">+</button>
+            {pageZoom !== 1 && (
+              <button onClick={() => setPageZoom(1)} className="rounded-md px-2 py-0.5 text-[11px] text-ink-400 hover:text-white">reset</button>
+            )}
+          </div>
+          <div className={pageZoom > 1 ? "overflow-x-auto" : ""}>
+          <div className="space-y-6" style={{ width: `${pageZoom * 100}%`, maxWidth: pageZoom > 1 ? "none" : "100%" }}>
           {Array.from({ length: book.pages }, (_, p) => (
             <div
               key={p}
@@ -739,6 +757,8 @@ export default function BookReaderPage() {
               </div>
             </div>
           ))}
+        </div>
+        </div>
         </div>
 
         {/* Board — sticky so it stays with you as the book scrolls.
