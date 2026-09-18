@@ -56,6 +56,16 @@ export default function StudyViewPage() {
     mutationFn: (cid: string) => studiesApi.deleteChapter(sid, cid),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["study", sid] }),
   });
+  // Rename a chapter from the list. The editor has always had a title box, but
+  // a coach browsing her chapters never sees it — she has to open a chapter,
+  // rename, save, come back (TKT-249, Sarika at Guna: "in my studies, chapter
+  // names editing option needed"). Auto-named "Chapter 1/2/3" rows make that
+  // the common case, so the pencil belongs here next to the study's own.
+  const renameChapter = useMutation({
+    mutationFn: ({ cid, title }: { cid: string; title: string }) =>
+      studiesApi.saveChapter(sid, cid, { title }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["study", sid] }),
+  });
   const addToQueue = useMutation({
     mutationFn: () => revisionsApi.addStudy(sid),
   });
@@ -163,6 +173,7 @@ export default function StudyViewPage() {
         sid={sid}
         isOwner={isOwner}
         onDelete={(id, title) => { if (confirm(`Delete chapter "${title}"?`)) deleteChapter.mutate(id); }}
+        onRename={(id, title) => renameChapter.mutate({ cid: id, title })}
       />
 
       {/* Delete study */}
@@ -190,15 +201,18 @@ type ChapterRow = {
  *  grouped mode it appears under each of them — that is the point of tagging
  *  rather than foldering. Clicking any tag filters to it. */
 function ChapterList({
-  chapters, sid, isOwner, onDelete,
+  chapters, sid, isOwner, onDelete, onRename,
 }: {
   chapters: ChapterRow[];
   sid: string;
   isOwner: boolean | undefined;
   onDelete: (id: string, title: string) => void;
+  onRename: (id: string, title: string) => void;
 }) {
   const [grouped, setGrouped] = useState(true);
   const [filter, setFilter] = useState<string | null>(null);
+  // Which chapter is being renamed inline, and the text so far. One at a time.
+  const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
 
   // Original position, so numbering stays stable however the list is sliced.
   const orderOf = useMemo(() => {
@@ -273,26 +287,59 @@ function ChapterList({
         <MiniFenBoard fen={c.previewFen || c.startingFen || "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"} />
       </Link>
       <div className="p-2.5">
-        <div className="flex items-center gap-1.5">
-          <span className="flex h-5 min-w-[1.25rem] flex-shrink-0 items-center justify-center rounded bg-ink-800 px-1 text-[11px] font-semibold text-ink-300">
-            {orderOf.get(c._id)}
-          </span>
-          <Link to={`/studies/${encodeURIComponent(sid)}/edit/${encodeURIComponent(c._id)}`}
-            className="min-w-0 flex-1 truncate text-sm font-semibold text-white hover:text-brand-200"
-            title={c.title}>
-            {c.title || `Chapter ${orderOf.get(c._id)}`}
-          </Link>
-          {isOwner && (
-            <button
-              onClick={() => onDelete(c._id, c.title)}
-              title={`Delete "${c.title}"`}
-              aria-label={`Delete chapter ${c.title}`}
-              className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-xs text-ink-500 hover:bg-rose-600 hover:text-white"
-            >
-              ✕
-            </button>
-          )}
-        </div>
+        {renaming?.id === c._id ? (
+          /* Inline rename. Enter saves, Escape cancels, blur keeps the box open
+             so a mis-click doesn't throw away what was typed. */
+          <form
+            onSubmit={(e) => { e.preventDefault(); const t = renaming.value.trim(); if (t) onRename(c._id, t); setRenaming(null); }}
+            className="flex items-center gap-1.5"
+          >
+            <input
+              autoFocus
+              value={renaming.value}
+              onChange={(e) => setRenaming({ id: c._id, value: e.target.value })}
+              onKeyDown={(e) => { if (e.key === "Escape") setRenaming(null); }}
+              maxLength={140}
+              aria-label="Chapter name"
+              className="min-w-0 flex-1 rounded border border-brand-500 bg-ink-800 px-2 py-1 text-sm font-semibold text-white outline-none"
+            />
+            <button type="submit" title="Save name"
+              className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-brand-600 text-xs text-white hover:bg-brand-500">✓</button>
+            <button type="button" onClick={() => setRenaming(null)} title="Cancel"
+              className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded border border-ink-700 text-xs text-ink-300 hover:bg-ink-800">✕</button>
+          </form>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <span className="flex h-5 min-w-[1.25rem] flex-shrink-0 items-center justify-center rounded bg-ink-800 px-1 text-[11px] font-semibold text-ink-300">
+              {orderOf.get(c._id)}
+            </span>
+            <Link to={`/studies/${encodeURIComponent(sid)}/edit/${encodeURIComponent(c._id)}`}
+              className="min-w-0 flex-1 truncate text-sm font-semibold text-white hover:text-brand-200"
+              title={c.title}>
+              {c.title || `Chapter ${orderOf.get(c._id)}`}
+            </Link>
+            {isOwner && (
+              <button
+                onClick={() => setRenaming({ id: c._id, value: c.title || `Chapter ${orderOf.get(c._id)}` })}
+                title={`Rename "${c.title}"`}
+                aria-label={`Rename chapter ${c.title}`}
+                className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-xs text-ink-500 hover:bg-ink-800 hover:text-ink-200"
+              >
+                ✏️
+              </button>
+            )}
+            {isOwner && (
+              <button
+                onClick={() => onDelete(c._id, c.title)}
+                title={`Delete "${c.title}"`}
+                aria-label={`Delete chapter ${c.title}`}
+                className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-xs text-ink-500 hover:bg-rose-600 hover:text-white"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        )}
         <TagChips tags={c.tags} onClick={(t) => setFilter(t.toLowerCase())} />
       </div>
     </div>
