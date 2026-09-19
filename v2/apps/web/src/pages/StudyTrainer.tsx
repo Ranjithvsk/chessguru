@@ -103,7 +103,14 @@ type Status = { kind: "play" | "think" | "win" | "draw"; msg: string };
 type DefenceLevel = "easy" | "hard" | "best";
 type DefencePick = "auto" | DefenceLevel;
 const DEFENCE_KEY = "cg_study_defence";
-function autoDefence(rating: number): DefenceLevel { return rating < 1000 ? "easy" : rating < 1600 ? "hard" : "best"; }
+// Mate drills exist to learn the technique against PERFECT defence, so Auto uses the exact
+// tablebase from 1000 up (the owner at 1446 landed on Hard and saw the king misplay again);
+// the other drill kinds step Easy → Hard → Best by rating.
+function autoDefence(rating: number, kind: string): DefenceLevel {
+  if (rating < 1000) return "easy";
+  if (kind === "mate") return "best";
+  return rating < 1600 ? "hard" : "best";
+}
 const DEFENCE_LABEL: Record<DefenceLevel, string> = { easy: "Easy", hard: "Hard", best: "Best" };
 
 export default function StudyTrainer() {
@@ -125,7 +132,7 @@ export default function StudyTrainer() {
   const [userRating, setUserRating] = useState<number>(1200);
   const [defencePick, setDefencePick] = useState<DefencePick>(() => { try { const v = localStorage.getItem(DEFENCE_KEY); return v === "easy" || v === "hard" || v === "best" ? v : "auto"; } catch { return "auto"; } });
   const [defenceNote, setDefenceNote] = useState<string | null>(null);   // "tablebase · mate in 9" under the status
-  const defenceLevel: DefenceLevel = defencePick === "auto" ? autoDefence(userRating) : defencePick;
+  const defenceLevel: DefenceLevel = defencePick === "auto" ? autoDefence(userRating, def?.kind ?? "mate") : defencePick;   // def.kind: `kind` is declared further down
   const defenceLevelRef = useRef<DefenceLevel>(defenceLevel); defenceLevelRef.current = defenceLevel;
   const pickDefence = (v: DefencePick) => { setDefencePick(v); try { localStorage.setItem(DEFENCE_KEY, v); } catch { /* */ } };
   const [ratingDiff, setRatingDiff] = useState<number | null>(null);
@@ -344,9 +351,9 @@ export default function StudyTrainer() {
             <span className="mr-1 text-ink-500">Defence</span>
             {(["auto", "easy", "hard", "best"] as DefencePick[]).map((v) => (
               <button key={v} type="button" onClick={() => pickDefence(v)} disabled={thinking}
-                title={v === "auto" ? `Chosen by your rating (${DEFENCE_LABEL[autoDefence(userRating)]} at ${userRating})` : v === "easy" ? "Browser Stockfish, makes small mistakes" : v === "hard" ? "Stockfish 18 on the server, full strength" : "Exact tablebase — never gives a move away"}
+                title={v === "auto" ? `Chosen by your rating (${DEFENCE_LABEL[autoDefence(userRating, kind)]} at ${userRating})` : v === "easy" ? "Browser Stockfish, makes small mistakes" : v === "hard" ? "Stockfish 18 + tablebases, 300 ms — near-perfect" : "Exact tablebase — never gives a move away"}
                 className={`rounded-full px-2.5 py-1 font-semibold ${defencePick === v ? "bg-brand-600 text-white" : "border border-ink-700 text-ink-300 hover:bg-ink-800"}`}>
-                {v === "auto" ? `Auto · ${DEFENCE_LABEL[autoDefence(userRating)]}` : DEFENCE_LABEL[v]}
+                {v === "auto" ? `Auto · ${DEFENCE_LABEL[autoDefence(userRating, kind)]}` : DEFENCE_LABEL[v]}
               </button>
             ))}
           </div>

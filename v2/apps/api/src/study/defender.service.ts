@@ -11,8 +11,8 @@
 // Levels (auto from the student's drill rating, overridable in the UI):
 //   best → tools/tb_oracle.py (Syzygy 3-4-5, exact, ~5 ms) for ≤5 pieces; Stockfish 18 with
 //          tablebases, 400 ms, otherwise.
-//   hard → Stockfish 18, no tablebases, 250 ms, full strength — strong, occasionally a move
-//          short in the longest mates.
+//   hard → Stockfish 18 with tablebases, 300 ms — near-optimal (its root tablebase ranking was
+//          measured a couple of plies short over a whole K+R vs K game; the oracle never is).
 //   easy → handled in the browser (Skill Level 3, 150 ms); never reaches here.
 // One engine process per level, requests serialized per process, 4 s hard timeout → the
 // trainer falls back to its browser engine, so a stall can never freeze a drill.
@@ -26,7 +26,7 @@ export interface DefenceResult { move: string | null; mateIn: number | null; wdl
 const STOCKFISH_PATH = process.env.STOCKFISH_PATH ?? "/home/ubuntu/engines/stockfish";
 const SYZYGY_DIR = process.env.SYZYGY_DIR ?? "/home/ubuntu/engines/syzygy";
 const ORACLE_URL = process.env.TB_ORACLE_URL ?? "http://127.0.0.1:4731";
-const MOVETIME: Record<DefenceLevel, number> = { hard: 250, best: 400 };
+const MOVETIME: Record<DefenceLevel, number> = { hard: 300, best: 400 };
 const HARD_TIMEOUT_MS = 4000;
 
 class Uci {
@@ -75,7 +75,7 @@ export class DefenderService implements OnModuleDestroy {
   constructor() {
     const tb = fs.existsSync(SYZYGY_DIR) && fs.readdirSync(SYZYGY_DIR).some((f) => f.endsWith(".rtbw"));
     this.engines = {
-      hard: new Uci({ Threads: 2, Hash: 64 }),
+      hard: new Uci({ Threads: 2, Hash: 64, ...(tb ? { SyzygyPath: SYZYGY_DIR } : {}) }),
       best: new Uci({ Threads: 2, Hash: 64, ...(tb ? { SyzygyPath: SYZYGY_DIR } : {}) }),
     };
   }
@@ -91,6 +91,12 @@ export class DefenderService implements OnModuleDestroy {
   }
 
   async defend(fen: string, level: DefenceLevel): Promise<DefenceResult> {
+    const r = await this.defendInner(fen, level);
+    // eslint-disable-next-line no-console
+    console.log(`[study-defend] ${level} ${r.source} ${r.move ?? "-"} mateIn=${r.mateIn ?? "-"} ${r.ms}ms fen="${fen}"`);
+    return r;
+  }
+  private async defendInner(fen: string, level: DefenceLevel): Promise<DefenceResult> {
     const t0 = Date.now();
     if (level === "best") {
       const o = await this.oracle(fen);

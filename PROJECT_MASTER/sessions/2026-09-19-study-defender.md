@@ -25,3 +25,10 @@ at 300 ms → 1 move short; direct DTZ probe → exact. Same shallow search fail
 
 **Verified.** `/api/study/defend` best → e4e5, mate in 14, 24 ms; hard → 250 ms warm; oracle
 sim vs SF18 attacker holds the full distance; deployed API (pm2 restart) + web.
+
+## Follow-up — "still it don't play best move"
+Owner's rook-mate rating is 1446 → Auto had picked **Hard** (Stockfish 250 ms, no tables). Mate
+drills now Auto → **Best** (exact tablebase) from rating 1000 up; Hard gained the tablebases
+(300 ms, near-perfect); every defence request is logged (`[study-defend] level source move …`)
+so a report can be replayed. A first cut used `kind` before its declaration (TDZ crash on the
+trainer page for ~10 min, 03:15–03:25 IST) — fixed and redeployed.
