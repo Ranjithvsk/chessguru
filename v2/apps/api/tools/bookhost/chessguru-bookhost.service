@@ -1,0 +1,14 @@
+[Unit]
+Description=ChessGuru book host on France (pages rendered from the local Drive mirror; store on /srv/data)
+After=network.target
+
+[Service]
+User=dreamworld
+WorkingDirectory=/srv/data/bookhost
+Environment=BOOKHOST_ROOT=/srv/data/chess-library BOOKHOST_STORE=/srv/data/chessguru-books BOOKHOST_PORT=8791 BOOKHOST_WORKERS=0
+ExecStart=/opt/chessguru-vision/.venv/bin/python /srv/data/bookhost/bookhost.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
