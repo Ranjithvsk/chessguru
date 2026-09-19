@@ -52,3 +52,13 @@ medium | hard ("best" from older bundles = hard).
 - Advice chips **each move / at the end / off** (`cg_study_advice`, default each move): each-move
   shows the verdict card under the status; at-the-end lists every non-best move with reasons once
   the game finishes. Works in both play modes and for both colours.
+
+## Notation panel with variations (owner: "add the notation panel we already have, with multi-branch")
+The trainer's board is now `SharedClassBoard` in local mode (sized container, `min(66vh, 620px)`)
+with `ClassNotationPanel` beside it — step back, play another move, and a variation branch opens,
+promote/delete/annotate as in class. The engine answers through a new `triggerClassPlayMove`
+(SharedClassBoard) at whatever node the student played from, so variations get replies too.
+`onLocalChange` drives everything: new node = student move → advice + engine reply; the engine's
+own move is recognised by `injectedRef`; navigation (seek/step) changes nothing. Rated results only
+on the mainline; variations are analysis. Headless smoke (playwright-core + local Chromium) on the
+live page: move accepted, engine reply in the notation, "tablebase · mate in N", zero errors.

@@ -157,6 +157,10 @@ export function triggerClassSetRevise(path: number[], revise: boolean) { _revise
 type LoadTreeFn = (args: { startFen?: string; tree: SharedTreeNode[]; cursorPath?: number[] }) => void;
 let _loadTreeFn: LoadTreeFn | null = null;
 export function triggerClassLoadTree(args: { startFen?: string; tree: SharedTreeNode[]; cursorPath?: number[] }) { _loadTreeFn?.(args); }
+// Play a move at the cursor exactly as a drag would (new child or variation) — the study
+// trainer's engine reply (2026-09-19). Local rooms only in practice.
+let _playMoveFn: ((m: SharedMove) => void) | null = null;
+export function triggerClassPlayMove(m: SharedMove) { _playMoveFn?.(m); }
 
 // Room lock state (whether students can move pieces). Default = LOCKED —
 // students can never accidentally scramble the board mid-lesson (owner
@@ -1442,6 +1446,7 @@ export default function SharedClassBoard(
     _mainlineFn = sendMainline;
     _deleteFn = sendDelete;
     _loadTreeFn = sendLoadTree;
+    _playMoveFn = (m) => { const ws = wsRef.current; if (!ws || ws.readyState !== WebSocket.OPEN) return; try { ws.send(JSON.stringify({ type: "move", move: m })); } catch { /* */ } };
     _annotateFn = sendAnnotateMove;
       _reviseFn = sendSetRevise;
     return () => {
@@ -1450,6 +1455,7 @@ export default function SharedClassBoard(
       if (_mainlineFn === sendMainline) _mainlineFn = null;
       if (_deleteFn === sendDelete) _deleteFn = null;
       if (_loadTreeFn === sendLoadTree) _loadTreeFn = null;
+      _playMoveFn = null;
       if (_annotateFn === sendAnnotateMove) _annotateFn = null;
         if (_reviseFn === sendSetRevise) _reviseFn = null;
     };

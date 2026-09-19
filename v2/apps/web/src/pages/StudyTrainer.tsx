@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { Chess } from "chess.js";
-import type { Key } from "chessground/types";
-import Board, { destsFromChess } from "../components/Board";
+import SharedClassBoard, {
+  triggerClassBoardAction, triggerClassFlipOrientation, triggerClassPlayMove, triggerClassSeek, useClassCursorInfo,
+} from "../components/SharedClassBoard";
+import { ClassNotationPanel } from "../components/ClassNotationPanel";
+import type { LocalRoomState, LocalTreeNode } from "../lib/localClassRoom";
 import { createEngine, type Engine } from "../lib/engine";
 import { studyDefend, studyAdvise, type AdviceReply } from "../lib/api";
 import { studyById } from "../lib/studies";
@@ -125,6 +128,38 @@ type AdviceRow = { n: number; side: "w" | "b"; san: string; verdict: NonNullable
 const VERDICT_TONE: Record<AdviceRow["verdict"], string> = { best: "text-emerald-300", inaccuracy: "text-amber-300", mistake: "text-orange-400", blunder: "text-rose-400" };
 const VERDICT_MARK: Record<AdviceRow["verdict"], string> = { best: "✓", inaccuracy: "?!", mistake: "?", blunder: "??" };
 
+// The board is SharedClassBoard in local mode with ClassNotationPanel beside it (owner
+// 2026-09-19: "add the notation panel we already have, with multi-branch") — so a student can
+// step back, try another move and get a variation, exactly as in class. The engine replies
+// through triggerClassPlayMove at whatever node the student played from.
+function nodeAt(tree: LocalTreeNode[], path: number[]): LocalTreeNode | null {
+  let nodes: LocalTreeNode[] = tree; let node: LocalTreeNode | null = null;
+  for (const i of path) { node = nodes[i] ?? null; if (!node) return null; nodes = node.children; }
+  return node;
+}
+function fenAt(startFen: string, tree: LocalTreeNode[], path: number[]): string {
+  const c = new Chess(startFen); let nodes: LocalTreeNode[] = tree;
+  for (const i of path) { const n = nodes[i]; if (!n) break; try { c.move({ from: n.move.from, to: n.move.to, promotion: (n.move.promotion as "q" | "r" | "b" | "n" | undefined) ?? undefined }); } catch { break; } nodes = n.children; }
+  return c.fen();
+}
+const uciOf = (m: { from: string; to: string; promotion?: string }) => `${m.from}${m.to}${m.promotion ?? ""}`;
+
+function BoardChrome() {
+  const { cursorIdx, historyLen } = useClassCursorInfo();
+  const btn = "rounded-lg border border-ink-700 bg-ink-900/60 px-2.5 py-1.5 text-sm text-ink-200 hover:border-ink-500 disabled:opacity-40";
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      <button type="button" className={btn} title="Start position" onClick={() => triggerClassSeek(0)} disabled={cursorIdx === 0}>⏮</button>
+      <button type="button" className={btn} title="Previous move" onClick={() => triggerClassBoardAction("stepBack")} disabled={cursorIdx === 0}>◀</button>
+      <span className="px-1 font-mono text-xs text-ink-400">{cursorIdx} / {historyLen}</span>
+      <button type="button" className={btn} title="Next move" onClick={() => triggerClassBoardAction("stepForward")}>▶</button>
+      <span className="mx-1 h-5 w-px bg-ink-700" aria-hidden />
+      <button type="button" className={btn} title="Flip board" onClick={() => triggerClassFlipOrientation()}>🔄 Flip</button>
+      <span className="ml-auto text-[11px] text-ink-500">Step back and play another move to open a variation.</span>
+    </div>
+  );
+}
+
 export default function StudyTrainer() {
   const { id } = useParams();
   const def = studyById(id);
@@ -133,8 +168,15 @@ export default function StudyTrainer() {
   const game = useRef(new Chess());
   const engine = useRef<Engine | null>(null);
   const [ready, setReady] = useState(false);
-  const [fen, setFen] = useState("8/8/8/8/8/8/8/8 w - - 0 1");
-  const [lastMove, setLastMove] = useState<[Key, Key] | undefined>();
+  const [fen, setFen] = useState("8/8/8/8/8/8/8/8 w - - 0 1");          // position at the cursor (display + finished())
+  const [startFen, setStartFen] = useState<string | null>(null);        // the drill position; the board remounts on change
+  const [boardNonce, setBoardNonce] = useState(0);
+  const roomId = `study-${id ?? "x"}`;
+  const localInitial = useMemo(() => ({ startFen: startFen ?? "8/8/8/8/8/8/8/8 w - - 0 1", tree: [] as never[], startShapes: [] as never[] }), [startFen, boardNonce]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const seenRef = useRef<Set<string>>(new Set());          // nodes already handled (path:uci)
+  const injectedRef = useRef<string | null>(null);          // engine move we just played, so its arrival isn't judged
+  const onMainlineRef = useRef(true);
+  const plyRef = useRef(0);                                  // cursor depth — the mirror game carries no history
   const [status, setStatus] = useState<Status>({ kind: "play", msg: "Loading engine…" });
   const [thinking, setThinking] = useState(false);
   const [pawnCount, setPawnCount] = useState<number>(() => { try { return Number(localStorage.getItem(PAWNS_KEY)) || 1; } catch { return 1; } });
@@ -185,7 +227,7 @@ export default function StudyTrainer() {
         const p = await studyPuzzle(def.id, userRatingRef.current, kind === "stopPawn" ? pawnCount : undefined);
         if (p && p.fen) {
           game.current = new Chess(p.fen);
-          setFen(p.fen); setLastMove(undefined);
+          setFen(p.fen); setStartFen(p.fen); setBoardNonce((n) => n + 1); seenRef.current = new Set(); injectedRef.current = null;
           setRating(p.rating); setVerdict(p.result); verdictRef.current = p.result;
           puzzleIdRef.current = p.id; reportedRef.current = false;
           setStatus({ kind: "play", msg: p.result === "draw" ? "Theoretical DRAW — can you hold it?" : kind === "pawnEnd" ? "Your move — promote a pawn, then checkmate." : "Your move — drive the king to the edge and checkmate." });
@@ -199,7 +241,7 @@ export default function StudyTrainer() {
       : kind === "pawnEnd" ? PAWN_END_FALLBACK[Math.floor(Math.random() * PAWN_END_FALLBACK.length)]!
       : randomMate(pieces);
     game.current = new Chess(f);
-    setFen(f); setLastMove(undefined);
+    setFen(f); setStartFen(f); setBoardNonce((n) => n + 1); seenRef.current = new Set(); injectedRef.current = null;
     setRating(null); setVerdict(null); verdictRef.current = null;
     puzzleIdRef.current = null; reportedRef.current = false;
     setStatus({ kind: "play", msg: kind === "pawnEnd" ? "Your move — promote a pawn, then checkmate." : "Your move — drive the king to the edge and checkmate." });
@@ -217,7 +259,7 @@ export default function StudyTrainer() {
     if (saved) {
       try {
         game.current = new Chess(saved);
-        setFen(saved); setLastMove(undefined); setThinking(false);
+        setFen(saved); setStartFen(saved); setBoardNonce((n) => n + 1); seenRef.current = new Set(); injectedRef.current = null; setThinking(false);
         if (meta) { setRating(meta.rating ?? null); setVerdict(meta.result ?? null); verdictRef.current = meta.result ?? null; puzzleIdRef.current = meta.id ?? null; reportedRef.current = false; }
         setStatus({ kind: "play", msg: "Your move \u2014 pick up where you left off." });
         return;
@@ -265,10 +307,10 @@ export default function StudyTrainer() {
       .catch(() => { /* offline / non-critical */ });
   }, [def]);
 
-  const moveNo = () => Math.ceil(game.current.history().length / 2);
+  const moveNo = () => Math.ceil(plyRef.current / 2);
   const finished = (): boolean => {
     if (game.current.isCheckmate()) {
-      const both = modeRef.current === "both";
+      const both = modeRef.current === "both" || !onMainlineRef.current;   // variations are analysis, not the rated game
       if (game.current.turn() === "w") { setStatus({ kind: both ? "win" : "draw", msg: both ? "Checkmate — Black wins. Tap New position ↻" : "You got checkmated \u{1F62C} Tap New position ↻" }); if (!both) reportResult(false); }
       else { setStatus({ kind: "win", msg: `Checkmate! \u{1F389} Mated in ${moveNo()} moves.` }); if (!both) reportResult(true); }
       return true;
@@ -278,30 +320,42 @@ export default function StudyTrainer() {
       setStatus(held
         ? { kind: "win", msg: "Draw secured! \u{1F389} You held the theoretical draw \u2014 that is the win here." }
         : { kind: "draw", msg: "Draw \u2014 but this one was winnable. Tap New position ↻" });
-      if (modeRef.current !== "both") reportResult(held);
+      if (modeRef.current !== "both" && onMainlineRef.current) reportResult(held);
       return true;
     }
     return false;
   };
 
-  const onMove = useCallback(async (from: Key, to: Key) => {
-    let mv: { san?: string; color?: string } | null = null;
-    const fenBefore = game.current.fen(); const sideBefore = game.current.turn();
-    try { mv = game.current.move({ from, to, promotion: "q" }) as { san?: string; color?: string } | null; } catch { mv = null; }
-    if (!mv) { setFen(game.current.fen()); force((n) => n + 1); return; }
-    setLastMove([from, to]); setFen(game.current.fen());
+  const onLocalChange = useCallback(async (st: LocalRoomState) => {
+    // Mirror the cursor position for finished()/moveNo/status.
+    try { game.current = new Chess(st.fen); } catch { return; }
+    setFen(st.fen); force((n) => n + 1);
+    const path = st.cursorPath; const node = nodeAt(st.tree, path);
+    onMainlineRef.current = path.every((i) => i === 0); plyRef.current = path.length;
+    if (!node) { setAdvice(null); return; }                     // at the start position
+    const key = `${path.join(".")}:${uciOf(node.move)}`;
+    if (seenRef.current.has(key)) return;                       // navigation (seek / step), not a new move
+    seenRef.current.add(key);
+    const uci = uciOf(node.move);
+    if (injectedRef.current === uci) {                          // the engine's own reply just landed
+      injectedRef.current = null; setThinking(false);
+      if (!finished()) setStatus({ kind: "play", msg: "Your move." });
+      return;
+    }
+    // A move the student played (at the live end, or inside a variation).
+    const fenBefore = fenAt(st.startFen, st.tree, path.slice(0, -1));
+    let san = uci; let mover: "w" | "b" = "w";
+    try { const c = new Chess(fenBefore); mover = c.turn(); const m = c.move({ from: node.move.from, to: node.move.to, promotion: (node.move.promotion as "q" | undefined) ?? "q" }); san = m?.san ?? uci; } catch { /* */ }
     setAdvice(null);
-    judge(fenBefore, `${from}${to}${game.current.history({ verbose: true }).slice(-1)[0]?.promotion ?? ""}`, mv.san ?? `${from}${to}`, Math.ceil(game.current.history().length / 2), sideBefore);
+    judge(fenBefore, uci, san, Math.ceil(path.length / 2), mover);
     if (finished()) return;
     if (modeRef.current === "both") {
-      // No engine reply — the student plays the other colour too. Ask the tablebase for the
-      // count so both sides can be checked against best play; never blocks the board.
       const side = game.current.turn() === "w" ? "White" : "Black";
       setStatus({ kind: "play", msg: `${side} to move — you play both sides.` }); setDefenceNote(null);
       const snap = game.current.fen();
       try {
         const r = await Promise.race([studyDefend(snap, "hard"), new Promise<never>((_, rej) => setTimeout(() => rej(new Error("slow")), 2500))]);
-        if (game.current.fen() !== snap) return;   // the student already moved on
+        if (game.current.fen() !== snap) return;
         if (r?.ok && typeof r.mateIn === "number" && typeof r.wdl === "number") {
           const winner = (r.wdl > 0) === (game.current.turn() === "w") ? "White" : "Black";
           setDefenceNote(`tablebase · ${winner} mates in ${r.mateIn} with best play`);
@@ -309,26 +363,27 @@ export default function StudyTrainer() {
       } catch { /* offline: no count */ }
       return;
     }
+    if (game.current.turn() !== "b") return;                    // the student moved for Black — nothing to answer
     const level = defenceLevelRef.current;
     setThinking(true); setStatus({ kind: "think", msg: level === "easy" ? "Defending… (Easy)" : level === "medium" ? "Stockfish 18 is defending… (Medium)" : "Best defence… (Hard)" });
     setDefenceNote(null);
     let best = ""; let note: string | null = null;
+    const replyFen = game.current.fen();
     const local = async (skill: number, ms: number) => {
-      try { engine.current!.setOption("Skill Level", skill); return await engine.current!.bestMove(game.current.fen(), ms); } catch { return ""; }
+      try { engine.current!.setOption("Skill Level", skill); return await engine.current!.bestMove(replyFen, ms); } catch { return ""; }
     };
     if (level === "easy") {
       best = await local(3, 150);
     } else {
       try {
         const r = await Promise.race([
-          studyDefend(game.current.fen(), level),
+          studyDefend(replyFen, level),
           new Promise<never>((_, rej) => setTimeout(() => rej(new Error("slow")), 3000)),
         ]);
         if (r?.ok && r.move) {
           best = r.move;
           if (typeof r.mateIn === "number") {
             note = `${r.source === "oracle" ? "tablebase" : "Stockfish 18"} · mate in ${r.mateIn} with best play`;
-            // Compare with the previous reply: best play shortens the mate by exactly one each move.
             const target = mateTargetRef.current;
             if (target != null && r.source === "oracle") {
               if (r.mateIn <= target - 1) note += " · ✓ best move";
@@ -340,21 +395,19 @@ export default function StudyTrainer() {
       } catch { /* offline / slow → browser engine */ }
       if (!best) { best = await local(20, 600); note = "browser Stockfish"; mateTargetRef.current = null; }
     }
+    if (game.current.fen() !== replyFen) { setThinking(false); return; }   // the student moved on meanwhile
     if (best && best !== "(none)" && best.length >= 4) {
-      try {
-        game.current.move({ from: best.slice(0, 2), to: best.slice(2, 4), promotion: (best[4] as "q" | "r" | "b" | "n") || "q" });
-        setLastMove([best.slice(0, 2) as Key, best.slice(2, 4) as Key]);
-        setFen(game.current.fen());
-      } catch { /* */ }
-    }
-    setThinking(false);
-    if (!finished()) { setStatus({ kind: "play", msg: "Your move." }); setDefenceNote(note); }
+      injectedRef.current = best;
+      setDefenceNote(note);
+      triggerClassPlayMove({ from: best.slice(0, 2), to: best.slice(2, 4), promotion: best[4] || undefined });
+      // onLocalChange sees the reply land and clears `thinking`; a safety net in case it never does.
+      setTimeout(() => { if (injectedRef.current === best) { injectedRef.current = null; setThinking(false); } }, 4000);
+    } else { setThinking(false); if (!finished()) setStatus({ kind: "play", msg: "Your move." }); }
   }, []);
 
 
   const over = game.current.isGameOver();
-  const myTurn = ready && !thinking && !over && (mode === "both" || game.current.turn() === "w");
-  const dests = useMemo(() => (myTurn ? destsFromChess(game.current as never) : new Map()), [fen, myTurn]);
+
   const tone = { play: "text-ink-200", think: "text-gold-400", win: "text-accent-400", draw: "text-rose-400" }[status.kind];
 
   // Guard AFTER every hook — on the early-return pass React renders fewer hooks and throws #300,
@@ -363,12 +416,24 @@ export default function StudyTrainer() {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <section>
-        <Board
-          fen={fen} orientation="white" turnColor={game.current.turn() === "w" ? "white" : "black"}
-          movableColor={myTurn ? (game.current.turn() === "w" ? "white" : "black") : undefined} dests={dests} lastMove={lastMove}
-          check={game.current.isCheck()} onMove={onMove}
-        />
+      <section className="min-w-0">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="min-w-0">
+            <div
+              className="relative flex min-h-0 items-center justify-center overflow-hidden rounded-xl border border-ink-800"
+              style={{ containerType: "size", height: "min(66vh, 620px)" } as React.CSSProperties}
+            >
+              {startFen && <SharedClassBoard key={`${roomId}-${boardNonce}`} local room={roomId} localInitial={localInitial} onLocalChange={onLocalChange} />}
+            </div>
+            <BoardChrome />
+          </div>
+          <div className="min-w-0 rounded-xl border border-ink-700 bg-ink-900/60 p-1">
+            <div className="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-ink-500">Notation</div>
+            <div className="min-w-0 overflow-y-auto" style={{ maxHeight: "min(66vh, 620px)" }}>
+              {startFen && <ClassNotationPanel key={`${roomId}-${boardNonce}`} room={roomId} role="coach" />}
+            </div>
+          </div>
+        </div>
       </section>
       <aside className="flex flex-col gap-4">
         <Link to="/study" className="text-sm text-ink-400 hover:text-white">← All studies</Link>
