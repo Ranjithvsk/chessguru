@@ -118,7 +118,7 @@ type PlayMode = "engine" | "both";
 const MODE_KEY = "cg_study_mode";
 // Advice on the student's moves (owner 2026-09-19: "advise the mistake made — after the end of
 // play or after each move — make it an option; give reason"). Judged by the tablebase (exact,
-// with a rule-based reason) or Stockfish 18 beyond 5 pieces.
+// with a rule-based reason) or Stockfish 18 beyond 5 pieces. Default: at the end.
 type AdviceMode = "move" | "end" | "off";
 const ADVICE_KEY = "cg_study_advice";
 type AdviceRow = { n: number; side: "w" | "b"; san: string; verdict: NonNullable<AdviceReply["verdict"]>; why: string | null; best: string; line: string[] };
@@ -153,7 +153,8 @@ export default function StudyTrainer() {
   // Tempo feedback (engine mode, Hard): the defender's last "mate in N" is the target; after the
   // student's next move the new count must be N−1, otherwise they gave a tempo away.
   const mateTargetRef = useRef<number | null>(null);
-  const [adviceMode, setAdviceMode] = useState<AdviceMode>(() => { try { const v = localStorage.getItem(ADVICE_KEY); return v === "end" || v === "off" ? v : "move"; } catch { return "move"; } });
+  // Default "at the end" (owner 2026-09-19): a verdict popping up after every move interrupts the drill.
+  const [adviceMode, setAdviceMode] = useState<AdviceMode>(() => { try { const v = localStorage.getItem(ADVICE_KEY); return v === "move" || v === "off" ? v : "end"; } catch { return "end"; } });
   const adviceModeRef = useRef<AdviceMode>(adviceMode); adviceModeRef.current = adviceMode;
   const pickAdvice = (v: AdviceMode) => { setAdviceMode(v); try { localStorage.setItem(ADVICE_KEY, v); } catch { /* */ } };
   const [advice, setAdvice] = useState<AdviceRow | null>(null);       // latest verdict (each-move mode)
