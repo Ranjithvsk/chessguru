@@ -15,6 +15,21 @@
 // library, so there is no public listing and no cross-user access.
 import { Body, Controller, ForbiddenException, Get, Logger, Param, Post, Query, Req, Res, BadRequestException, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import sharp from "sharp";
+
+// Sized page variants (owner 2026-09-19: "can we make it super fast"). Pages are rendered at
+// 1240×1755 / ~290 KB; a phone never needs that. The reader asks for the bucket that matches
+// its screen (?w=), the shelf asks for a thumbnail, and each variant is built once with sharp
+// and kept beside the remote-page cache. Progressive JPEG so the page appears before it is
+// fully downloaded; immutable caching because a rendered page never changes.
+const VARIANTS: Record<string, { width: number; quality: number }> = {
+  thumb: { width: 320, quality: 70 }, w800: { width: 800, quality: 78 }, w1200: { width: 1200, quality: 80 }, w1600: { width: 1600, quality: 82 },
+};
+function bucketFor(w: unknown): string | null {
+  const n = Number(w); if (!Number.isFinite(n) || n <= 0) return null;
+  return n <= 800 ? "w800" : n <= 1200 ? "w1200" : "w1600";
+}
+const IMMUTABLE = "private, max-age=31536000, immutable";
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 
@@ -946,48 +961,73 @@ export class UserBooksController {
   }
 
   @Get(":id/page/:n")
-  async page(@Param("id") id: string, @Param("n") n: string, @Req() req: any, @Res() res: any) {
+  async page(@Param("id") id: string, @Param("n") n: string, @Query("w") w: string | undefined, @Req() req: any, @Res() res: any) {
     const uid = this.requireUser(req);
-    const dir = bookDir(id);
     const idx = Number(n);
     if (!Number.isInteger(idx) || idx < 0 || idx > 9999) throw new NotFoundException("page not found");
-    if (!existsSync(dir)) return this.remotePage(id, idx, uid, res);
-    const meta = readJson<any>(join(dir, "meta.json"), {});
-    if (!ownsBook(meta, uid)) throw new NotFoundException("page not found");
-    const file = join(dir, "pages", `p${String(idx).padStart(4, "0")}.jpg`);
-    if (!existsSync(file)) throw new NotFoundException("page not found");
-    // Page images never change once ingested, so let the browser keep them —
-    // this is what makes scrolling a book feel like a book.
-    res.setHeader("Content-Type", "image/jpeg");
-    res.setHeader("Cache-Control", "private, max-age=86400");
-    createReadStream(file).pipe(res);
+    return this.servePage(id, idx, uid, res, bucketFor(w));
   }
 
-  /** A page image held on Vinayaka, passed through with the session checked.
-   *
-   *  The book host answers anything that reaches it, so the ownership check
-   *  here is the ONLY thing standing between a signed-in stranger and someone
-   *  else's copyrighted book. It runs before a single byte is fetched. */
-  private async remotePage(id: string, idx: number, uid: string, res: any) {
-    if (!(await this.remoteOwns(id, uid))) throw new NotFoundException("page not found");
-    const safeId = id.replace(/[^A-Za-z0-9._-]/g, "_");
-    const cached = join(REMOTE_CACHE, safeId, `p${String(idx).padStart(4, "0")}.jpg`);
-    // Once rendered a page never changes: serve it from the France cache when we have it,
-    // and quietly warm the next two pages so turning the page is local too.
-    if (existsSync(cached)) {
-      res.setHeader("Content-Type", "image/jpeg");
-      res.setHeader("Cache-Control", "private, max-age=86400");
-      createReadStream(cached).pipe(res);
-      void this.warmRemotePages(id, idx + 1, 2);
+  /** Shelf cover / any small preview: 320 px wide, ~12 KB instead of ~290 KB. */
+  @Get(":id/thumb/:n")
+  async thumb(@Param("id") id: string, @Param("n") n: string, @Req() req: any, @Res() res: any) {
+    const uid = this.requireUser(req);
+    const idx = Number(n);
+    if (!Number.isInteger(idx) || idx < 0 || idx > 9999) throw new NotFoundException("page not found");
+    return this.servePage(id, idx, uid, res, "thumb");
+  }
+
+  /** One page, local or Vinayaka-hosted, at the requested size (kind = null → original).
+   *  Ownership is checked BEFORE a single byte is read — the book host answers anything. */
+  private async servePage(id: string, idx: number, uid: string, res: any, kind: string | null) {
+    const dir = bookDir(id);
+    const local = existsSync(dir);
+    if (local) {
+      if (!ownsBook(readJson<any>(join(dir, "meta.json"), {}), uid)) throw new NotFoundException("page not found");
+    } else if (!(await this.remoteOwns(id, uid))) throw new NotFoundException("page not found");
+    res.setHeader("Content-Type", "image/jpeg");
+    res.setHeader("Cache-Control", IMMUTABLE);
+    if (!kind) {
+      if (local) {
+        const file = join(dir, "pages", `p${String(idx).padStart(4, "0")}.jpg`);
+        if (!existsSync(file)) throw new NotFoundException("page not found");
+        createReadStream(file).pipe(res);
+        return;
+      }
+      const buf = await this.fetchRemotePage(id, idx);
+      if (!buf) throw new NotFoundException("page not found");
+      res.setHeader("Content-Length", String(buf.length));
+      res.end(buf);
+      void this.warmPages(id, idx + 1, 3, null, local);
       return;
     }
-    const buf = await this.fetchRemotePage(id, idx);
-    if (!buf) throw new NotFoundException("page not found");
-    res.setHeader("Content-Type", "image/jpeg");
-    res.setHeader("Content-Length", String(buf.length));
-    res.setHeader("Cache-Control", "private, max-age=86400");
-    res.end(buf);
-    void this.warmRemotePages(id, idx + 1, 2);
+    const vfile = await this.ensureVariant(id, idx, kind, local);
+    if (!vfile) throw new NotFoundException("page not found");
+    createReadStream(vfile).pipe(res);
+    void this.warmPages(id, idx + 1, kind === "thumb" ? 0 : 3, kind, local);
+  }
+
+  /** The original bytes of a page: the local file, or the France cache / book host. */
+  private async originalPage(id: string, idx: number, local: boolean): Promise<Buffer | null> {
+    if (local) {
+      const file = join(bookDir(id), "pages", `p${String(idx).padStart(4, "0")}.jpg`);
+      try { return existsSync(file) ? readFileSync(file) : null; } catch { return null; }
+    }
+    return this.fetchRemotePage(id, idx);
+  }
+
+  /** Build (once) and return the cached path of a sized variant. */
+  private async ensureVariant(id: string, idx: number, kind: string, local: boolean): Promise<string | null> {
+    const spec = VARIANTS[kind]; if (!spec) return null;
+    const safeId = id.replace(/[^A-Za-z0-9._-]/g, "_");
+    const cdir = join(REMOTE_CACHE, safeId);
+    const vfile = join(cdir, `${kind}-p${String(idx).padStart(4, "0")}.jpg`);
+    if (existsSync(vfile)) return vfile;
+    const src = await this.originalPage(id, idx, local);
+    if (!src) return null;
+    const out = await sharp(src).rotate().resize({ width: spec.width, withoutEnlargement: true }).jpeg({ quality: spec.quality, progressive: true, mozjpeg: true }).toBuffer();
+    try { mkdirSync(cdir, { recursive: true }); const tmp = `${vfile}.${process.pid}.${Math.random().toString(36).slice(2, 7)}.tmp`; writeFileSync(tmp, out); renameSync(tmp, vfile); } catch { return null; }
+    return vfile;
   }
 
   /** Fetch one page from the book host and keep a copy on this box. null = not there / host down. */
@@ -1010,12 +1050,13 @@ export class UserBooksController {
     return buf;
   }
   private warming = new Set<string>();
-  private async warmRemotePages(id: string, from: number, count: number) {
+  /** Quietly prepare the next pages (originals for remote books, plus the sized variant). */
+  private async warmPages(id: string, from: number, count: number, kind: string | null, local: boolean) {
     for (let i = from; i < from + count; i++) {
-      const key = `${id}:${i}`;
+      const key = `${id}:${i}:${kind ?? "orig"}`;
       if (this.warming.has(key)) continue;
       this.warming.add(key);
-      try { await this.fetchRemotePage(id, i); } catch { /* best effort */ } finally { this.warming.delete(key); }
+      try { if (kind) await this.ensureVariant(id, i, kind, local); else if (!local) await this.fetchRemotePage(id, i); } catch { /* best effort */ } finally { this.warming.delete(key); }
     }
   }
 }

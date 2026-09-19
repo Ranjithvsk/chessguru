@@ -363,9 +363,10 @@ function BookCard({ b, onCover }: { b: Book; onCover: (page: number) => void }) 
         <Link to={`/books/read/${encodeURIComponent(b.id)}`} className="flex-shrink-0">
           <div className="grid h-28 w-20 place-items-center overflow-hidden rounded border border-ink-700 bg-ink-800">
             <img
-              src={`${API_BASE}/api/user-books/${encodeURIComponent(b.id)}/page/${cover}`}
+              src={`${API_BASE}/api/user-books/${encodeURIComponent(b.id)}/thumb/${cover}`}
               alt=""
               loading="lazy"
+              decoding="async"
               className="max-h-full max-w-full object-contain"
               onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
             />

@@ -118,6 +118,21 @@ export default function BookReaderPage() {
   const [active, setActive] = useState<number | null>(null);
   const activeDiagramRef = useRef<number | null>(null);
   const [page, setPage] = useState(0);
+  // Page images come in size buckets (800 / 1200 / 1600 px) chosen from the screen, and the
+  // next three pages are fetched ahead so turning a page never waits (owner 2026-09-19).
+  const [imgW, setImgW] = useState<number>(() => { try { return Math.min(1600, Math.ceil(Math.min(window.innerWidth, 900) * (window.devicePixelRatio || 1))); } catch { return 1200; } });
+  useEffect(() => {
+    const onResize = () => { try { setImgW(Math.min(1600, Math.ceil(Math.min(window.innerWidth, 900) * (window.devicePixelRatio || 1)))); } catch { /* */ } };
+    window.addEventListener("resize", onResize); return () => window.removeEventListener("resize", onResize);
+  }, []);
+  useEffect(() => {
+    if (!book?.id || !book?.pages) return;
+    const imgs: HTMLImageElement[] = [];
+    for (let q = page + 1; q <= Math.min(page + 3, book.pages - 1); q++) {
+      const im = new Image(); im.decoding = "async"; im.src = `${API_BASE}/api/user-books/${encodeURIComponent(book.id)}/page/${q}?w=${imgW}`; imgs.push(im);
+    }
+    return () => { for (const im of imgs) im.src = ""; };
+  }, [book?.id, book?.pages, page, imgW]);
   // Dream PDF: the book's own contents, and full-text search across it. Both
   // come from the PDF itself via PyMuPDF — the text is already in there, so a
   // chess book need not be scrolled 854 pages to find an opening by name.
@@ -654,7 +669,7 @@ export default function BookReaderPage() {
               className="relative overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-ink-700/40"
             >
               <img
-                src={`${API_BASE}/api/user-books/${encodeURIComponent(book.id)}/page/${p}`}
+                src={`${API_BASE}/api/user-books/${encodeURIComponent(book.id)}/page/${p}?w=${imgW}`}
                 alt={`Page ${p + 1}`}
                 loading="lazy"
                 decoding="async"
