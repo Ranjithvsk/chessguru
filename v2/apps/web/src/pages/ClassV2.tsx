@@ -1524,7 +1524,21 @@ export default function ClassV2Page() {
             `${import.meta.env.BASE_URL}class-v2/${room}?role=student`,
             { deferNotify: true },
           );
-          if (!cancelled) setAudiencePickerOpen(true);
+          // Only ask WHO when nobody has been chosen yet. The picker used to open on
+          // every coach entry, including rejoining a class whose audience was settled
+          // long ago — which is precisely what teaches a coach to dismiss it on sight.
+          // Dismissing it on a NEW class is what left students unable to see the class
+          // at all. Ask once, when the answer is actually missing.
+          // (owner, 2026-09-19: "when clicked old class banner, audience need not be
+          // selected right")
+          try {
+            const aud = await get<{ audienceKind?: string | null }>(
+              `/api/class/${encodeURIComponent(room)}/audience`);
+            if (!cancelled && !aud?.audienceKind) setAudiencePickerOpen(true);
+          } catch {
+            // Could not read it — ask rather than silently run a class nobody can join.
+            if (!cancelled) setAudiencePickerOpen(true);
+          }
         }
         const t = await get<LKTokenResp>(`/api/livekit/token?room=${encodeURIComponent(room)}&role=${role}`);
         if (!cancelled) setTokenData(t);
@@ -1736,12 +1750,6 @@ export default function ClassV2Page() {
             </div>
             <div className="flex shrink-0 items-center gap-2">
               {role === "coach" && <CoachMicStatus />}
-              {/* Quality picker is desktop-only. Added to this row on 2026-09-19 and it
-                * pushed "End class" off the edge on a phone — the owner could not end a
-                * class at all, which is how students got stranded in an abandoned room
-                * while he started a new one. End class is the most important control in
-                * the header and must never be the thing that gets squeezed out. */}
-              <span className="hidden sm:inline-flex"><VideoQualityPicker /></span>
               <LiveHeaderBits room={room} role={role} />
               {role === "coach" ? (
                 <button
@@ -1862,6 +1870,13 @@ export default function ClassV2Page() {
                 <div className="rounded-xl border border-ink-800 bg-ink-900 shadow">
                   <ControlBar variation="minimal" controls={{ microphone: true, camera: true, screenShare: true, chat: false, leave: false }} />
                 </div>
+                {/* Quality lives with the other media controls rather than the header.
+                  * It was briefly in the header and pushed "End class" off the edge on a
+                  * phone, so the coach could not end a class at all. Hiding it on mobile
+                  * would have solved that by taking the control away from exactly the
+                  * people most likely to need it — someone on a phone on mobile data.
+                  * This row wraps, so nothing gets squeezed out. (owner, 2026-09-19) */}
+                <VideoQualityPicker />
                 <button
                   onClick={() => setHideVideo(v => !v)}
                   title={hideVideo ? "Show video tiles" : "Hide video tiles (audio-only view)"}
@@ -2283,7 +2298,7 @@ function VideoQualityPicker() {
       onChange={(e) => setPref(e.target.value as QualityPref)}
       aria-label="Video quality"
       title="Video quality — Auto follows your connection"
-      className="rounded-lg border border-ink-700 bg-ink-800 px-1.5 py-1 text-[11px] font-semibold text-ink-200 outline-none hover:border-ink-500"
+      className="rounded-full border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm font-semibold text-ink-100 outline-none hover:bg-ink-800"
     >
       <option value="auto">Auto</option>
       <option value="high">High</option>
