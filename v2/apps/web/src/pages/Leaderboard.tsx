@@ -903,7 +903,8 @@ function OpeningsLeaderboardSection({ period, bucket }: { period: Period; bucket
 // critical moment is tagged with its motif (fork, pin, mate pattern…).
 // Found = the motif's points, missed = minus half. Server: /api/game-motifs.
 // ─────────────────────────────────────────────────────────────────────
-type GameAwardRow = { rank: number; studentId: string; username: string; name: string | null; score: number; found: number; missed: number; games: number; lastAt: string; byMotif: Record<string, { found: number; missed: number }>; sources: string[];
+type GameAwardRow = { rank: number; studentId: string; username: string; name: string | null; score: number; found: number; missed: number; games: number; lastAt: string;
+  findRate?: number; blend?: number | null; qualified?: boolean; gamesNeeded?: number; byMotif: Record<string, { found: number; missed: number }>; sources: string[];
   character?: Record<string, number>; opening?: { accuracy: number | null; mistakes: number; trapsFell: number; trapsSprung: number; favourite: string | null } | null;
   rating?: number; band?: string; bandNorm?: { players: number; scorePerGame: number; foundRate: number; openingAccuracy: number | null } | null };
 type GameAwardBoard = { period: string; rows: GameAwardRow[]; labels: Record<string, string>; points: Record<string, number>; pending: number };
@@ -1130,9 +1131,23 @@ function GameAwardsSection({ period, bucket }: { period: Period; bucket: Bucket 
                       <td className="px-2 py-2 text-left sm:px-3">
                         <div className="line-clamp-1 font-semibold text-white">{r.name || r.username}</div>
                         <div className="text-[10px] text-ink-500">@{r.username}</div>
+                        {r.qualified === false && (
+                          <div className="text-[10px] font-semibold text-amber-300/80" title="Ranked once there are enough games to judge fairly — one lucky game should not top the board">
+                            {r.gamesNeeded} more game{r.gamesNeeded === 1 ? "" : "s"} to be ranked
+                          </div>
+                        )}
                       </td>
                       <td className="px-2 py-2 text-right tabular-nums sm:px-3">
                         <span className={`text-lg font-bold ${r.score >= 0 ? "text-emerald-200" : "text-rose-300"}`}>{r.score > 0 ? "+" : ""}{r.score}</span>
+                        {/* Rank comes from the blend, not this number, so the board would
+                          * otherwise show a leader with FEWER points than second place and
+                          * no explanation. Find rate is the heaviest part of the blend, so
+                          * it earns its place next to the total. (owner, 2026-09-19) */}
+                        {typeof r.findRate === "number" && (
+                          <div className="text-[10px] font-semibold text-ink-400" title="Share of scored moments this student actually found — the largest single factor in their rank">
+                            {Math.round(r.findRate * 100)}% found · {r.games} games
+                          </div>
+                        )}
                         {r.bandNorm && r.bandNorm.players >= 3 && (
                           <div className="text-[10px] text-ink-500" title={`Players rated ${r.band}–${Number(r.band) + 199} across the platform average ${r.bandNorm.scorePerGame} per game, find ${r.bandNorm.foundRate}% of their tactics`}>
                             {r.band}s avg {r.bandNorm.scorePerGame}/game · {r.bandNorm.foundRate}% found

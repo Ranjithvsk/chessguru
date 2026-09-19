@@ -600,17 +600,68 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
     const rows = await this.events().aggregate([
       { $match: match },
       { $group: { _id: "$userId", score: { $sum: "$points" }, found: { $sum: { $cond: ["$found", 1, 0] } }, missed: { $sum: { $cond: ["$found", 0, 1] } },
-        games: { $addToSet: "$gameId" }, lastAt: { $max: "$at" }, motifs: { $push: { m: "$primary", f: "$found" } }, sources: { $addToSet: "$source" } } },
+        games: { $addToSet: "$gameId" }, lastAt: { $max: "$at" }, firstAt: { $min: "$at" },
+        // `at` and `p` ride along for the blend below: halves-of-period improvement,
+        // weeks-active consistency, and the difficulty of the moments actually faced.
+        motifs: { $push: { m: "$primary", f: "$found", at: "$at", p: "$points", g: "$gameId" } }, sources: { $addToSet: "$source" } } },
       { $sort: { score: -1, found: -1 } },
     ]).toArray();
     const users = await this.col("users").find({ _id: { $in: rows.map((r) => r._id) as never[] } }, { projection: { username: 1, name: 1, coachId: 1 } }).toArray();
     const byId = new Map(users.map((u: any) => [String(u._id), u]));
     const out = rows.map((r, i) => {
       const byMotif: Record<string, { found: number; missed: number }> = {};
-      for (const e of r.motifs as Array<{ m: string; f: boolean }>) { const b = (byMotif[e.m] ??= { found: 0, missed: 0 }); if (e.f) b.found++; else b.missed++; }
+      const evs = r.motifs as Array<{ m: string; f: boolean; at: Date; p: number; g: string }>;
+      for (const e of evs) { const b = (byMotif[e.m] ??= { found: 0, missed: 0 }); if (e.f) b.found++; else b.missed++; }
       const u = byId.get(String(r._id)) as any;
+      const seen = r.found + r.missed;
+      const findRate = seen > 0 ? r.found / seen : 0;
+      // Improvement: find rate in the LATER half of this student's own span vs the
+      // earlier half. Their own span, not the period's, so a student who started late
+      // is measured against themselves rather than penalised for arriving late.
+      const t0 = new Date(r.firstAt).getTime(), t1 = new Date(r.lastAt).getTime();
+      const mid = t0 + (t1 - t0) / 2;
+      let eF = 0, eS = 0, lF = 0, lS = 0;
+      for (const e of evs) {
+        const late = new Date(e.at).getTime() >= mid;
+        if (late) { lS++; if (e.f) lF++; } else { eS++; if (e.f) eF++; }
+      }
+      const improvement = (eS >= 5 && lS >= 5) ? (lF / lS) - (eF / eS) : 0;
+      // Consistency of IMPROVEMENT, not of attendance (owner 2026-09-19: "consistent in
+      // game improvement, rather than number of games"). Counting weeks played only
+      // measured showing up, which the puzzle board already rewards separately.
+      //
+      // Walk their games in the order played, in chunks of five, and take each chunk's
+      // find rate. Then ask how often the next chunk HELD OR BEAT the one before it. A
+      // student improving or holding in eight transitions out of ten is consistent; one
+      // who spikes once and slides back is not, even when their averages match. This
+      // reads the SHAPE of the trajectory, where `improvement` below only compares first
+      // half to second and cannot tell steady progress from one lucky run.
+      const CHUNK = 5, TOL = 0.02;   // a 2-point dip still counts as holding
+      const order: string[] = [];
+      const perGame = new Map<string, { f: number; n: number; t: number }>();
+      for (const e of evs) {
+        const gid = String(e.g ?? "");
+        let g = perGame.get(gid);
+        if (!g) { g = { f: 0, n: 0, t: new Date(e.at).getTime() }; perGame.set(gid, g); order.push(gid); }
+        g.n++; if (e.f) g.f++;
+        g.t = Math.min(g.t, new Date(e.at).getTime());
+      }
+      order.sort((a, b) => (perGame.get(a)!.t) - (perGame.get(b)!.t));
+      const rates: number[] = [];
+      for (let i = 0; i < order.length; i += CHUNK) {
+        let f = 0, n = 0;
+        for (const gid of order.slice(i, i + CHUNK)) { const g = perGame.get(gid)!; f += g.f; n += g.n; }
+        if (n > 0) rates.push(f / n);
+      }
+      let held = 0, steps = 0;
+      for (let i = 1; i < rates.length; i++) { steps++; if (rates[i]! >= rates[i - 1]! - TOL) held++; }
+      // Under three chunks there is not enough shape to judge — neutral, not punished.
+      const improveConsistency = steps >= 2 ? held / steps : 0.5;
+      // Difficulty: the average worth of the moments they were actually presented with.
+      const difficulty = evs.length ? evs.reduce((a, e) => a + Math.abs(Number(e.p) || 0), 0) / evs.length : 0;
       return { rank: i + 1, studentId: String(r._id), username: u?.username ?? String(r._id), name: u?.name ?? null, coachId: u?.coachId ?? null,
-        score: r.score, found: r.found, missed: r.missed, games: (r.games as string[]).length, lastAt: r.lastAt, byMotif, sources: r.sources as string[] };
+        score: r.score, found: r.found, missed: r.missed, games: (r.games as string[]).length, lastAt: r.lastAt, byMotif, sources: r.sources as string[],
+        findRate, improvement, improveConsistency, chunks: rates.length, difficulty };
     });
     const pending = await this.pendingCount(academyId);
     // Game character per student (aggressive / dynamic / positional) from the scored-game ledger.
@@ -634,6 +685,59 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
       for (let i = out.length - 1; i >= 0; i--) if (!keep.has(out[i]!.studentId)) out.splice(i, 1);
       out.forEach((r, i) => { (r as any).rank = i + 1; });
     }
+    // ── Ranking: percentile blend, not raw points (owner 2026-09-19) ──────────
+    // The board used to sort on total points, which ranks whoever PLAYED MOST. In
+    // Guna the leader had a 46% find rate over 130 games and sat above a student on
+    // 57% over 68 — he missed more tactics than he found and still came first. That is
+    // the opposite of the puzzle board, rebalanced in August to "reward consistent
+    // players". This asks who is playing best and improving, not who played most.
+    //
+    // Percentiles are taken WITHIN the cohort on screen, so the level filter changes
+    // who you are measured against, and one runaway player cannot flatten everyone.
+    const MIN_GAMES = 10;
+    const pct = (vals: number[], v: number) => {
+      if (vals.length <= 1) return 1;
+      const below = vals.filter((x) => x < v).length;
+      const same = vals.filter((x) => x === v).length;
+      return (below + same / 2) / vals.length;   // midrank, so ties share a percentile
+    };
+    // A single game can read 70 points/game and 62% found. Without a floor the board
+    // hands first place to whoever played once and got lucky; the puzzle board does the
+    // same thing by ignoring accuracy under five rounds.
+    const ranked = out.filter((r: any) => r.games >= MIN_GAMES);
+    const unranked = out.filter((r: any) => r.games < MIN_GAMES);
+    if (ranked.length > 0) {
+      const fr = ranked.map((r: any) => r.findRate);
+      const vol = ranked.map((r: any) => Math.log1p(r.games));
+      const imp = ranked.map((r: any) => r.improvement);
+      const con = ranked.map((r: any) => r.improveConsistency);
+      const dif = ranked.map((r: any) => r.difficulty);
+      for (const r of ranked as any[]) {
+        const parts = {
+          findRate:    pct(fr,  r.findRate),
+          volume:      pct(vol, Math.log1p(r.games)),
+          improvement: pct(imp, r.improvement),
+          consistency: pct(con, r.improveConsistency),
+          difficulty:  pct(dif, r.difficulty),
+        };
+        r.scoreParts = parts;
+        // Owner 2026-09-19: consistency of improvement to 30%, "rather than number of
+        // games". Volume and the crude first-half/second-half improvement both come
+        // down to make room — the shape of the trajectory now says more than either the
+        // amount played or a single before/after comparison.
+        r.blend = Math.round(1000 * (
+          0.30 * parts.findRate + 0.30 * parts.consistency + 0.15 * parts.improvement +
+          0.15 * parts.volume + 0.10 * parts.difficulty));
+      }
+      ranked.sort((a: any, b: any) => b.blend - a.blend || b.score - a.score);
+    }
+    // Everyone still appears — being unranked is a "play N more" prompt, not a hiding.
+    unranked.sort((a: any, b: any) => b.score - a.score);
+    for (const r of unranked as any[]) { r.blend = null; r.scoreParts = null; r.gamesNeeded = MIN_GAMES - r.games; }
+    out.length = 0;
+    out.push(...(ranked as any[]), ...(unranked as any[]));
+    out.forEach((r: any, i: number) => { r.rank = i + 1; r.qualified = r.games >= MIN_GAMES; });
+
     for (const r of out) {
       (r as any).character = character[r.studentId] ?? {};
       const rating = await this.ratingOf(r.studentId);
@@ -642,7 +746,11 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
       const a = openingAgg[r.studentId];
       (r as any).opening = a ? { accuracy: a.accN ? Math.round(a.accSum / a.accN) : null, mistakes: a.mistakes, trapsFell: a.trapsFell, trapsSprung: a.trapsSprung, favourite: Object.entries(a.names).sort((x, y) => y[1] - x[1])[0]?.[0] ?? null } : null;
     }
-    return { period, bucket, rows: out, labels: MOTIF_LABEL, points: MOTIF_POINTS, pending, strategic: STRATEGIC_ORDER, bands };
+    return { period, bucket, rows: out, labels: MOTIF_LABEL, points: MOTIF_POINTS, pending, strategic: STRATEGIC_ORDER, bands,
+      // Echoed so the UI can explain the ranking rather than present it as a black box,
+      // the way the puzzle board already does with its own weights.
+      ranking: { minGames: MIN_GAMES, chunkGames: 5,
+        weights: { findRate: 0.30, consistency: 0.30, improvement: 0.15, volume: 0.15, difficulty: 0.10 } } };
   }
 
   async studentEvents(session: any, studentId: string, period = "30d") {

@@ -3616,13 +3616,23 @@ Thank you!`;
 
   /** Academy leaderboard — visible to any academy member (students too, so
    *  they can see themselves ranked). Percentile-based ChessGuru Score keeps
-   *  it fair inside the academy (relative, not absolute). Six dimensions:
-   *    - Rating percentile        25%   long-term skill
-   *    - Puzzles solved (period)  25%   log-scaled recent effort
+   *  it fair inside the academy (relative, not absolute). Six dimensions, and these
+   *  are the weights the code ACTUALLY applies — see WEIGHTS at the top of this file,
+   *  which is the single source of truth and is echoed to the UI:
+   *    - Consistency              30%   composite: practice AND attendance (see WEIGHTS)
+   *    - Rating percentile        20%   long-term skill
+   *    - Puzzles solved (period)  20%   log-scaled recent effort
    *    - Accuracy % (period)      15%   quality
-   *    - Streak                   15%   consistency (sqrt of current, cap 60)
    *    - Theme diversity          10%   breadth (period distinct themes / 20)
-   *    - Attendance (30d)         10%   class engagement
+   *    - Attendance (30d)          5%   class engagement, ON TOP of its share of
+   *                                     consistency — so showing up counts twice
+   *
+   *  This block used to claim rating 25% / streak 15% / attendance 10%, describing the
+   *  scheme from BEFORE the 2026-08-23 rebalance ("reward consistent players"). It went
+   *  stale while the code moved on, and the numbers were used in good faith to explain
+   *  a ranking to the owner on 2026-09-19 — who reasonably asked why a 1333 outranked a
+   *  2537. The answer is that rating is a fifth of the score and consistency is the
+   *  largest single part, which the old comment hid. Corrected 2026-09-19.
    *
    *  Period options: today | 7d | 30d | 180d | 365d | lifetime. Some
    *  columns (current rating, peak rating, streak, longestStreak) are
