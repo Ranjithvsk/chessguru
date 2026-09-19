@@ -20,6 +20,7 @@ export default function LoginPage() {
   const [otp, setOtp] = useState("");
   const [otpSent, setOtpSent] = useState(false);
   const [keep, setKeep] = useState(true);
+  const [showPw, setShowPw] = useState(false);
   const [err, setErr] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -77,14 +78,26 @@ export default function LoginPage() {
         <div className="space-y-3">
           {/* Sign-in with password */}
           {mode === "signin" && (
-            <>
+            /* A real <form>: the autoComplete hints below were already correct, but a
+               password manager only offers to fill and save when the fields sit inside
+               a form, so nothing was ever autofilled. Enter is handled by onSubmit now
+               rather than a keydown on the password field. */
+            <form className="contents" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
               <input value={username} onChange={(e) => setU(e.target.value)} placeholder="Username or email"
-                autoComplete="username"
+                name="username" autoComplete="username"
                 className="w-full rounded-lg border border-ink-600 bg-ink-800 px-3 py-2.5 text-white outline-none focus:border-brand-500" />
-              <input type="password" value={password} onChange={(e) => setP(e.target.value)} placeholder="Password"
-                autoComplete="current-password"
-                onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
-                className="w-full rounded-lg border border-ink-600 bg-ink-800 px-3 py-2.5 text-white outline-none focus:border-brand-500" />
+              <div className="relative">
+                <input type={showPw ? "text" : "password"} value={password} onChange={(e) => setP(e.target.value)} placeholder="Password"
+                  name="password" autoComplete="current-password"
+                  className="w-full rounded-lg border border-ink-600 bg-ink-800 px-3 py-2.5 pr-14 text-white outline-none focus:border-brand-500" />
+                <button type="button" onClick={() => setShowPw((v) => !v)}
+                  aria-label={showPw ? "Hide password" : "Show password"}
+                  title={showPw ? "Hide password" : "Show password"}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-xs font-semibold text-ink-300 hover:bg-ink-700 hover:text-white">
+                  {showPw ? "Hide" : "Show"}
+                </button>
+              </div>
+              <button type="submit" className="hidden" aria-hidden tabIndex={-1} />
               <label className="flex items-center gap-2 text-sm text-ink-400">
                 <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} className="accent-brand-500" />
                 Keep me logged in
@@ -97,7 +110,7 @@ export default function LoginPage() {
                   Forgot password?
                 </button>
               </div>
-            </>
+            </form>
           )}
 
           {/* Register */}

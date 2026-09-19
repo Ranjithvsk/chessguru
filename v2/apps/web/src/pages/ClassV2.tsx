@@ -1744,6 +1744,7 @@ export default function ClassV2Page() {
                 style={{ containerType: 'size' } as any}
               >
               <AudioUnblockPrompt />
+              <MicWakeGuard />
               <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} onClassEnded={onClassEnded} intendedRole={role} />
               {/* Student toast when the coach marks their challenge answer.
                *  Module-level state so this host can live anywhere in the tree. */}
@@ -2204,6 +2205,48 @@ function CoachNoticeHost() {
       ))}
     </div>
   );
+}
+
+// The mirror of the playback problem, and the half the tab-wake fix did not cover.
+// Backgrounding a tab can suspend MICROPHONE CAPTURE as well as playback, especially on
+// phones. The publication stays up and nothing looks wrong, but the underlying capture
+// track has ended or gone browser-muted, so an unmuted student goes silent to the coach
+// with no warning on either screen. Playback resuming does not fix this: the sound is
+// not arriving to begin with.
+//
+// On wake, re-acquire the microphone ONLY if the person meant to be unmuted. A
+// deliberate mute is left strictly alone — silently switching someone's mic back on
+// because they changed tabs would be far worse than the bug. (owner, 2026-09-19)
+function MicWakeGuard() {
+  const { localParticipant } = useLocalParticipant();
+  useEffect(() => {
+    if (!localParticipant) return;
+    const check = () => {
+      if (typeof document === "undefined" || document.visibilityState !== "visible") return;
+      const pub = localParticipant.getTrackPublication(Track.Source.Microphone);
+      if (!pub || pub.isMuted) return;                 // never on; or muted on purpose
+      const mst = pub.track?.mediaStreamTrack;
+      if (!mst) return;
+      if (mst.readyState === "live" && !mst.muted) return;   // capture is healthy
+      // Capture was suspended or ended while hidden — take it again.
+      void (async () => {
+        try {
+          await localParticipant.setMicrophoneEnabled(false);
+          await localParticipant.setMicrophoneEnabled(true);
+        } catch { /* device busy or permission gone — the ControlBar still works */ }
+      })();
+    };
+    // A beat after wake: the browser often restores capture on its own, and racing it
+    // would tear down a track that was about to come back by itself.
+    const wake = () => { setTimeout(check, 1200); };
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("focus", wake);
+    return () => {
+      document.removeEventListener("visibilitychange", wake);
+      window.removeEventListener("focus", wake);
+    };
+  }, [localParticipant]);
+  return null;
 }
 
 // Browsers refuse to play sound until the person has interacted with the page, and

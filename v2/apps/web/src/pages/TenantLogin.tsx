@@ -46,6 +46,7 @@ export default function TenantLoginPage() {
   const [otp, setOtp] = useState("");
   const [otpSent, setOtpSent] = useState(false);
   const [keep, setKeep] = useState(true);
+  const [showPw, setShowPw] = useState(false);
   const [err, setErr] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -162,17 +163,35 @@ export default function TenantLoginPage() {
         </div>
 
         {mode === "signin" && (
-          <div className="flex flex-col gap-3">
+          /* A real <form> on purpose: password managers only offer to fill and save
+             when the username and password sit inside one. Without it the browser
+             never prompted, which is why nothing was ever autofilled here. The submit
+             button lives outside this block, so onSubmit is what makes Enter work. */
+          <form
+            className="flex flex-col gap-3"
+            onSubmit={(e) => { e.preventDefault(); void submit(); }}
+          >
             <input placeholder="Username or email" value={username} onChange={(e) => setU(e.target.value)}
+              name="username" autoComplete="username"
               className="rounded-lg border border-ink-600 bg-ink-800 px-3 py-2 text-white outline-none focus:border-white/30" />
-            <input placeholder="Password" type="password" value={password} onChange={(e) => setP(e.target.value)}
-              className="rounded-lg border border-ink-600 bg-ink-800 px-3 py-2 text-white outline-none focus:border-white/30" />
+            <div className="relative">
+              <input placeholder="Password" type={showPw ? "text" : "password"} value={password} onChange={(e) => setP(e.target.value)}
+                name="password" autoComplete="current-password"
+                className="w-full rounded-lg border border-ink-600 bg-ink-800 px-3 py-2 pr-12 text-white outline-none focus:border-white/30" />
+              <button type="button" onClick={() => setShowPw((v) => !v)}
+                aria-label={showPw ? "Hide password" : "Show password"}
+                title={showPw ? "Hide password" : "Show password"}
+                className="absolute right-1 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-xs font-semibold text-ink-300 hover:bg-ink-700 hover:text-white">
+                {showPw ? "Hide" : "Show"}
+              </button>
+            </div>
             <label className="flex items-center gap-2 text-xs text-ink-400">
               <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} />
               Keep me signed in
             </label>
             <p className="mt-1 text-[11px] leading-snug text-ink-500" data-testid="forgot-hint">Forgot your password? Ask your coach — they can set a new one for you from the Students page.</p>
-          </div>
+            <button type="submit" className="hidden" aria-hidden tabIndex={-1} />
+          </form>
         )}
         {mode === "otp" && (
           <div className="flex flex-col gap-3">
