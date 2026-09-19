@@ -18,7 +18,9 @@ export type AdviceMode = "move" | "end" | "off";
 // Same storage keys as StudyTrainer so a choice carries across every study page.
 const DEFENCE_KEY = "cg_study_defence_v2";
 const MODE_KEY = "cg_study_mode";
-const ADVICE_KEY = "cg_study_advice";
+// Advice keeps its own key on the lesson pages so a "each move" choice made in the trainer does not
+// leak here — lessons default to "at the end" (owner 2026-09-19).
+const ADVICE_KEY = "cg_lesson_advice";
 export const DEFENCE_LABEL: Record<DefenceLevel, string> = { easy: "Easy", medium: "Medium", hard: "Hard" };
 export type AdviceRow = { n: number; side: "w" | "b"; san: string; verdict: NonNullable<AdviceReply["verdict"]>; why: string | null; best: string; line: string[] };
 export const VERDICT_TONE: Record<AdviceRow["verdict"], string> = { best: "text-emerald-300", inaccuracy: "text-amber-300", mistake: "text-orange-400", blunder: "text-rose-400" };
