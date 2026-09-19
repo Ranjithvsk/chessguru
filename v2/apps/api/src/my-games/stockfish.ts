@@ -67,14 +67,38 @@ export class Stockfish {
   private proc: ChildProcess | null = null;
   private buffer = "";
   private lineResolvers: ((line: string) => boolean)[] = [];
+  /** True between `go` and the `bestmove` that answers it. A caller that times
+   *  out abandons its analyze() promise but the engine keeps searching, so this
+   *  is the only way stop() can know it must halt the search before quitting. */
+  private searching = false;
+  /** Last few positions handed to this process, and whether we asked it to go.
+   *  Stockfish dies with SIGSEGV 2-3x/hour on this box and nothing recorded WHAT
+   *  it was looking at, which left the cause unidentified through two wrong
+   *  theories (a malformed FEN — none exist in the data; and `quit` arriving
+   *  mid-search — disproved by a control test, 0/8 crashes). The next crash
+   *  names the position itself. */
+  private lastFens: string[] = [];
+  private stopping = false;
 
   async start(): Promise<void> {
     if (this.proc) return;
     this.proc = spawn(STOCKFISH_PATH, [], { stdio: ["pipe", "pipe", "ignore"] });
     this.proc.stdout?.on("data", (d: Buffer) => this.onData(d.toString()));
+    this.proc.on("exit", (code, signal) => {
+      // A deliberate stop() exits 0 with no signal. Anything else is the engine
+      // dying under us — print the positions it had so the next one is traceable.
+      if (this.stopping || (code === 0 && !signal)) return;
+      console.error(`[stockfish] died unexpectedly: code=${code} signal=${signal} searching=${this.searching}`);
+      this.lastFens.forEach((f, i) => console.error(`[stockfish]   position -${this.lastFens.length - 1 - i}: ${f}`));
+    });
     await this.waitFor((l) => l === "uciok", () => this.send("uci"));
     this.send("setoption name Hash value 256");
-    this.send("setoption name Threads value 2");
+    // One thread per engine. game-motifs runs PARALLEL engines side by side and
+    // every search is capped by movetime, so extra threads buy depth, not speed,
+    // while multiplying contention on a box that already sits near load 8/8.
+    // Thread starvation is what pushed a 120 ms search past the 15 s timeout,
+    // and the abandoned-but-still-running search is what then crashed on quit.
+    this.send(`setoption name Threads value ${Number(process.env.STOCKFISH_THREADS) || 1}`);
     this.send("setoption name MultiPV value 1");
     await this.waitFor((l) => l === "readyok", () => this.send("isready"));
   }
@@ -88,7 +112,10 @@ export class Stockfish {
     // 370 MB core dump. See unsafeFenReason.
     const bad = unsafeFenReason(fen);
     if (bad) throw new UnsafeFenError(fen, bad);
+    this.lastFens.push(fen);
+    if (this.lastFens.length > 3) this.lastFens.shift();
     this.send("position fen " + fen);
+    this.searching = true;
     this.send(movetimeMs ? `go depth ${depth} movetime ${Math.max(20, Math.round(movetimeMs))}` : `go depth ${depth}`);
     let latestCp: number | undefined;
     let latestMate: number | undefined;
@@ -108,6 +135,7 @@ export class Stockfish {
       } else if (line.startsWith("bestmove ")) {
         const m = /bestmove (\S+)/.exec(line);
         bestMove = m && m[1] ? (m[1] === "(none)" ? null : m[1]) : null;
+        this.searching = false;
         return true;
       }
       return false;
@@ -121,10 +149,33 @@ export class Stockfish {
     };
   }
 
+  /** Halt the search BEFORE quitting.
+   *
+   *  `quit` arriving mid-search made Stockfish tear the root position down while
+   *  its own search threads were still reading it. The race surfaced as a
+   *  magic-bitboard lookup on freed memory — SIGSEGV at text offset 0x2aed9,
+   *  2-3 times an hour on this box, each one dumping a ~370 MB core. Every
+   *  instance was preceded by an `evalAt` timeout, i.e. by exactly this path:
+   *  the caller gave up, dropped the engine, and quit it while it still ran.
+   *
+   *  UCI says to send `stop` and wait for the `bestmove` that acknowledges it.
+   *  That is all this does — then quit, then the SIGKILL backstop as before. */
   async stop(): Promise<void> {
     if (!this.proc) return;
-    try { this.send("quit"); } catch { /* ignore */ }
+    this.stopping = true;
     const p = this.proc;
+    if (this.searching) {
+      try { this.send("stop"); } catch { /* ignore */ }
+      await new Promise<void>((resolve) => {
+        const done = () => { clearTimeout(t); this.lineResolvers = this.lineResolvers.filter((r) => r !== onLine); resolve(); };
+        const onLine = (line: string) => { if (line.startsWith("bestmove ")) { done(); return true; } return false; };
+        const t = setTimeout(done, 1000);   // never block a shutdown on a wedged engine
+        this.lineResolvers.push(onLine);
+        p.once("exit", done);
+      });
+      this.searching = false;
+    }
+    try { this.send("quit"); } catch { /* ignore */ }
     this.proc = null;
     await new Promise<void>((resolve) => {
       const t = setTimeout(() => { try { p.kill("SIGKILL"); } catch {} resolve(); }, 500);
