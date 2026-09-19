@@ -32,3 +32,9 @@ drills now Auto → **Best** (exact tablebase) from rating 1000 up; Hard gained 
 (300 ms, near-perfect); every defence request is logged (`[study-defend] level source move …`)
 so a report can be replayed. A first cut used `kind` before its declaration (TDZ crash on the
 trainer page for ~10 min, 03:15–03:25 IST) — fixed and redeployed.
+
+## Levels renamed (owner: "easy medium hard, these 3")
+Easy = browser Stockfish Skill 3 / 150 ms · Medium = Stockfish 18 + tablebases 300 ms (near-perfect)
+· Hard = exact tablebase (was "Best"). No Auto chip: the rating-based default is preselected and
+marked "auto" until the student taps a level (`localStorage cg_study_defence_v2`). API accepts
+medium | hard ("best" from older bundles = hard).

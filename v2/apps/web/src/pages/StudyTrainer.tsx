@@ -92,26 +92,25 @@ function randomVsKP(piece: string, pawns = 1): string {
 
 type Status = { kind: "play" | "think" | "win" | "draw"; msg: string };
 
-// Defence levels (owner 2026-09-19). The old defender was browser Stockfish at 400 ms for every
-// drill — in K+R vs K the mate is 30 plies deep, far past that horizon, and the neural eval has
-// no idea a lone king should stay central, so it ran to the corner. Now:
-//   easy → browser Stockfish, Skill Level 3, 150 ms (beginners: the king cooperates a little)
-//   hard → server Stockfish 18, 250 ms, full strength (strong; may drop a move in the longest mates)
-//   best → exact Syzygy tablebase for ≤5 pieces (never gives a ply away) — else Stockfish 18 + tables
-// "auto" picks by the student's drill rating. Server replies are capped at ~3 s and fall back to
-// the browser engine, so a drill never waits on the network.
-type DefenceLevel = "easy" | "hard" | "best";
-type DefencePick = "auto" | DefenceLevel;
-const DEFENCE_KEY = "cg_study_defence";
-// Mate drills exist to learn the technique against PERFECT defence, so Auto uses the exact
-// tablebase from 1000 up (the owner at 1446 landed on Hard and saw the king misplay again);
-// the other drill kinds step Easy → Hard → Best by rating.
+// Defence levels (owner 2026-09-19: "easy medium hard, these 3"). The old defender was browser
+// Stockfish at 400 ms for every drill — in K+R vs K the mate is 30 plies deep, far past that
+// horizon, and the neural eval has no idea a lone king should stay central, so it ran to the
+// corner. Now:
+//   easy   → browser Stockfish, Skill Level 3, 150 ms (beginners: the king cooperates a little)
+//   medium → server Stockfish 18 + tablebases, 300 ms (near-perfect; a move short at most)
+//   hard   → exact Syzygy tablebase for ≤5 pieces (never gives a ply away) — else Stockfish 18 + tables
+// The chip preselected for a student comes from the drill rating until they tap one; server
+// replies are capped at ~3 s and fall back to the browser engine, so a drill never waits.
+type DefenceLevel = "easy" | "medium" | "hard";
+const DEFENCE_KEY = "cg_study_defence_v2";
+// Mate drills exist to learn the technique against PERFECT defence, so the default is Hard
+// (exact) from 1000 up; the other drill kinds step Easy → Medium → Hard by rating.
 function autoDefence(rating: number, kind: string): DefenceLevel {
   if (rating < 1000) return "easy";
-  if (kind === "mate") return "best";
-  return rating < 1600 ? "hard" : "best";
+  if (kind === "mate") return "hard";
+  return rating < 1600 ? "medium" : "hard";
 }
-const DEFENCE_LABEL: Record<DefenceLevel, string> = { easy: "Easy", hard: "Hard", best: "Best" };
+const DEFENCE_LABEL: Record<DefenceLevel, string> = { easy: "Easy", medium: "Medium", hard: "Hard" };
 
 export default function StudyTrainer() {
   const { id } = useParams();
@@ -130,11 +129,11 @@ export default function StudyTrainer() {
   const [rating, setRating] = useState<number | null>(null);
   const [verdict, setVerdict] = useState<string | null>(null);
   const [userRating, setUserRating] = useState<number>(1200);
-  const [defencePick, setDefencePick] = useState<DefencePick>(() => { try { const v = localStorage.getItem(DEFENCE_KEY); return v === "easy" || v === "hard" || v === "best" ? v : "auto"; } catch { return "auto"; } });
+  const [defencePick, setDefencePick] = useState<DefenceLevel | null>(() => { try { const v = localStorage.getItem(DEFENCE_KEY); return v === "easy" || v === "medium" || v === "hard" ? v : null; } catch { return null; } });
   const [defenceNote, setDefenceNote] = useState<string | null>(null);   // "tablebase · mate in 9" under the status
-  const defenceLevel: DefenceLevel = defencePick === "auto" ? autoDefence(userRating, def?.kind ?? "mate") : defencePick;   // def.kind: `kind` is declared further down
+  const defenceLevel: DefenceLevel = defencePick ?? autoDefence(userRating, def?.kind ?? "mate");   // def.kind: `kind` is declared further down
   const defenceLevelRef = useRef<DefenceLevel>(defenceLevel); defenceLevelRef.current = defenceLevel;
-  const pickDefence = (v: DefencePick) => { setDefencePick(v); try { localStorage.setItem(DEFENCE_KEY, v); } catch { /* */ } };
+  const pickDefence = (v: DefenceLevel) => { setDefencePick(v); try { localStorage.setItem(DEFENCE_KEY, v); } catch { /* */ } };
   const [ratingDiff, setRatingDiff] = useState<number | null>(null);
   const userRatingRef = useRef(1200);
   const puzzleIdRef = useRef<string | null>(null);
@@ -256,7 +255,7 @@ export default function StudyTrainer() {
     setLastMove([from, to]); setFen(game.current.fen());
     if (finished()) return;
     const level = defenceLevelRef.current;
-    setThinking(true); setStatus({ kind: "think", msg: level === "easy" ? "Defending… (Easy)" : level === "hard" ? "Stockfish 18 is defending… (Hard)" : "Best defence…" });
+    setThinking(true); setStatus({ kind: "think", msg: level === "easy" ? "Defending… (Easy)" : level === "medium" ? "Stockfish 18 is defending… (Medium)" : "Best defence… (Hard)" });
     setDefenceNote(null);
     let best = ""; let note: string | null = null;
     const local = async (skill: number, ms: number) => {
@@ -349,13 +348,14 @@ export default function StudyTrainer() {
           <div className="mt-1 text-xs text-ink-500">Move {moveNo()} · {ready ? "engine ready" : "loading engine…"}{defenceNote ? ` · ${defenceNote}` : ""}</div>
           <div className="mt-3 flex items-center gap-1.5 text-xs">
             <span className="mr-1 text-ink-500">Defence</span>
-            {(["auto", "easy", "hard", "best"] as DefencePick[]).map((v) => (
+            {(["easy", "medium", "hard"] as DefenceLevel[]).map((v) => (
               <button key={v} type="button" onClick={() => pickDefence(v)} disabled={thinking}
-                title={v === "auto" ? `Chosen by your rating (${DEFENCE_LABEL[autoDefence(userRating, kind)]} at ${userRating})` : v === "easy" ? "Browser Stockfish, makes small mistakes" : v === "hard" ? "Stockfish 18 + tablebases, 300 ms — near-perfect" : "Exact tablebase — never gives a move away"}
-                className={`rounded-full px-2.5 py-1 font-semibold ${defencePick === v ? "bg-brand-600 text-white" : "border border-ink-700 text-ink-300 hover:bg-ink-800"}`}>
-                {v === "auto" ? `Auto · ${DEFENCE_LABEL[autoDefence(userRating, kind)]}` : DEFENCE_LABEL[v]}
+                title={v === "easy" ? "Browser Stockfish, makes small mistakes" : v === "medium" ? "Stockfish 18 + tablebases — near-perfect" : "Exact tablebase — never gives a move away"}
+                className={`rounded-full px-2.5 py-1 font-semibold ${defenceLevel === v ? "bg-brand-600 text-white" : "border border-ink-700 text-ink-300 hover:bg-ink-800"}`}>
+                {DEFENCE_LABEL[v]}
               </button>
             ))}
+            {defencePick == null && <span className="ml-1 text-ink-500" title="Picked from your drill rating until you choose one">auto</span>}
           </div>
           {(kind === "mate" || kind === "stopPawn" || kind === "pawnEnd") && (
             <div className="mt-2 text-sm text-ink-300">Your rating: <span className="font-semibold text-white">{userRating}</span>{ratingDiff != null && <span className={ratingDiff >= 0 ? "text-emerald-400" : "text-rose-400"}> {ratingDiff >= 0 ? "+" : ""}{ratingDiff}</span>}</div>

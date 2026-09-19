@@ -8,25 +8,26 @@
 // lasts 16. Measured: 250k nodes → mated in 12; 2.5M nodes (3–5 s on a phone) → still 2
 // moves short; Stockfish 18 + Syzygy at 300 ms → 1 move short; a direct DTZ probe → exact.
 //
-// Levels (auto from the student's drill rating, overridable in the UI):
-//   best → tools/tb_oracle.py (Syzygy 3-4-5, exact, ~5 ms) for ≤5 pieces; Stockfish 18 with
-//          tablebases, 400 ms, otherwise.
-//   hard → Stockfish 18 with tablebases, 300 ms — near-optimal (its root tablebase ranking was
-//          measured a couple of plies short over a whole K+R vs K game; the oracle never is).
-//   easy → handled in the browser (Skill Level 3, 150 ms); never reaches here.
+// Levels — owner 2026-09-19: "easy medium hard, these 3":
+//   hard   → tools/tb_oracle.py (Syzygy 3-4-5, exact, ~5 ms) for ≤5 pieces; Stockfish 18 with
+//            tablebases, 400 ms, otherwise. Never gives a ply away where the tables apply.
+//   medium → Stockfish 18 with tablebases, 300 ms — near-optimal (its root tablebase ranking was
+//            measured 4 plies short over a whole K+R vs K game; the oracle never is).
+//   easy   → handled in the browser (Skill Level 3, 150 ms); never reaches here.
+// ("best" from an older bundle is accepted as hard.)
 // One engine process per level, requests serialized per process, 4 s hard timeout → the
 // trainer falls back to its browser engine, so a stall can never freeze a drill.
 import { Injectable, OnModuleDestroy } from "@nestjs/common";
 import { spawn, ChildProcess } from "child_process";
 import * as fs from "fs";
 
-export type DefenceLevel = "hard" | "best";
+export type DefenceLevel = "medium" | "hard";
 export interface DefenceResult { move: string | null; mateIn: number | null; wdl?: number; source: "oracle" | "stockfish"; level: DefenceLevel; ms: number }
 
 const STOCKFISH_PATH = process.env.STOCKFISH_PATH ?? "/home/ubuntu/engines/stockfish";
 const SYZYGY_DIR = process.env.SYZYGY_DIR ?? "/home/ubuntu/engines/syzygy";
 const ORACLE_URL = process.env.TB_ORACLE_URL ?? "http://127.0.0.1:4731";
-const MOVETIME: Record<DefenceLevel, number> = { hard: 300, best: 400 };
+const MOVETIME: Record<DefenceLevel, number> = { medium: 300, hard: 400 };
 const HARD_TIMEOUT_MS = 4000;
 
 class Uci {
@@ -75,8 +76,8 @@ export class DefenderService implements OnModuleDestroy {
   constructor() {
     const tb = fs.existsSync(SYZYGY_DIR) && fs.readdirSync(SYZYGY_DIR).some((f) => f.endsWith(".rtbw"));
     this.engines = {
+      medium: new Uci({ Threads: 2, Hash: 64, ...(tb ? { SyzygyPath: SYZYGY_DIR } : {}) }),
       hard: new Uci({ Threads: 2, Hash: 64, ...(tb ? { SyzygyPath: SYZYGY_DIR } : {}) }),
-      best: new Uci({ Threads: 2, Hash: 64, ...(tb ? { SyzygyPath: SYZYGY_DIR } : {}) }),
     };
   }
   onModuleDestroy() { for (const e of Object.values(this.engines)) e.kill(); }
@@ -98,7 +99,7 @@ export class DefenderService implements OnModuleDestroy {
   }
   private async defendInner(fen: string, level: DefenceLevel): Promise<DefenceResult> {
     const t0 = Date.now();
-    if (level === "best") {
+    if (level === "hard") {
       const o = await this.oracle(fen);
       if (o) return { move: o.move, mateIn: o.mateIn, wdl: o.wdl, source: "oracle", level, ms: Date.now() - t0 };
     }
