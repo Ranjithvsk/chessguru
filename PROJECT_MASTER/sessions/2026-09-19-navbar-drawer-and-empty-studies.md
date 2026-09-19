@@ -13,3 +13,15 @@ Dvoretsky notes, 🎯 Game awards ×6 chapters). Moved to `studies_trash` / `stu
 (`trashedBy: owner-request-2026-09-19`) — reversible; "Fork mastery — Ch1 notes" (15 moves) kept.
 Other users have similar empties (e.g. Harinitha's two "Triangulation"); not touched.
 Root cause to fix next: the book reader / awards create a study before the user adds anything.
+
+## Follow-up — all users cleaned, creation fixed
+- Trashed 21 more truly-blank studies older than 24 h (no moves, standard start position, no
+  headers/tags) across chess-guru (5), Guna (10), Shriguru (6) → `studies_trash` /
+  `studyChapters_trash`, `trashedBy: empty-sweep-2026-09-19`. Position-only puzzle studies
+  (custom FEN, e.g. "Puzzle #DcmTO") were kept — a saved position is content.
+- `studies.service.ts create()`: if the user already owns a blank study with the same title and
+  source (book + chapter, or intent when there is no source) the request lands in it
+  (`reused: true`) instead of creating a twin. Requests carrying a PGN or a custom position
+  always create.
+- `studies/empty-study-sweep.service.ts`: daily (first run 5 min after boot) moves blank studies
+  older than 48 h to the trash collections; logs `[empty-study-sweep] scanned N, trashed M`.

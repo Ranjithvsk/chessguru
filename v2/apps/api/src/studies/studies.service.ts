@@ -18,6 +18,7 @@
 //     "academy-visible" or "public". Owner is the source of truth for edits.
 //   - Slice 1: no real-time collab (single-writer). Slice 2+ adds websockets.
 
+import { chapterIsBlank, START_FEN } from "./empty-study-sweep.service";
 import {
   BadRequestException,
   ForbiddenException,
@@ -268,6 +269,24 @@ export class StudiesService {
     }
 
     const sourceBook = this.sanitizeSourceBook(b.sourceBook);
+
+    // De-duplicate (owner 2026-09-19): opening the same book chapter / puzzle twice used to leave
+    // two identical blank studies. If the user already owns a study with this title and source
+    // whose chapters are all still blank, land in that one instead of creating another. A request
+    // that carries content (pgn or a custom position) always gets a fresh study.
+    if (moves.length === 0 && startingFen === START_FEN) {
+      const sameSource: any = sourceBook
+        ? { "sourceBook.bookId": sourceBook.bookId, "sourceBook.chapterNumber": sourceBook.chapterNumber ?? null }
+        : { sourceBook: null, intent };   // null matches "missing" too in Mongo
+      const twins = await this.studies().find({ ownerId: userId, title, deletedAt: { $exists: false }, ...sameSource } as any).limit(5).toArray();
+      for (const t of twins as any[]) {
+        const chs = await this.chapters().find({ studyId: String(t._id) }).toArray();
+        if (chs.length && chs.every(chapterIsBlank)) {
+          await this.studies().updateOne({ _id: t._id } as any, { $set: { updatedAt: now } });
+          return { studyId: String(t._id), chapterId: String(chs[0]!._id), reused: true };
+        }
+      }
+    }
 
     await this.studies().insertOne({
       _id: studyId,
