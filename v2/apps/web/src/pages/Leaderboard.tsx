@@ -795,7 +795,11 @@ function OpeningsLeaderboardSection({ period, bucket }: { period: Period; bucket
                 r.rank === 1 ? "from-amber-300 via-yellow-400 to-yellow-600 text-amber-950 ring-2 ring-amber-300/60 shadow-[0_0_20px_rgba(251,191,36,0.35)]" :
                 r.rank === 2 ? "from-slate-100 via-slate-300 to-slate-500 text-slate-900 ring-2 ring-slate-300/60 shadow-lg" :
                                "from-orange-300 via-orange-500 to-orange-700 text-orange-950 ring-2 ring-orange-400/60 shadow-lg";
-              const height = r.rank === 1 ? "h-32 sm:h-36" : "h-24 sm:h-28";
+              // Taller on mobile than it was: three podium cards across a phone left the
+              // name clamped to one line inside px-2, so anything longer than a short
+              // first name was cut off and the winners were unreadable — which is the
+              // whole point of a podium. (owner, 2026-09-19)
+              const height = r.rank === 1 ? "h-36 sm:h-36" : "h-28 sm:h-28";
               return (
                 <div key={r.userId} className={`flex flex-col items-center justify-end rounded-t-2xl bg-gradient-to-b ${cls} ${height} px-2 py-3`}>
                   <div className="text-lg font-bold">#{r.rank}</div>
@@ -972,7 +976,15 @@ function StudentMoments({ events, label, canStar, onStar, starPending, row }: {
                       <td className={`px-2 py-1.5 text-right font-extrabold tabular-nums ${e.found ? "text-emerald-300" : "text-rose-300"}`}>{e.points > 0 ? "+" : ""}{e.points}</td>
                       <td className="hidden px-2 py-1.5 text-right tabular-nums sm:table-cell">{e.timeTrouble ? <span className="rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] text-amber-200" title="Time trouble — the penalty is halved">⏱ {e.clockMs != null ? Math.round(e.clockMs / 1000) + "s" : ""}</span> : e.clockMs != null ? <span className="text-ink-500">{Math.round(e.clockMs / 1000)}s</span> : <span className="text-ink-700">—</span>}</td>
                       <td className="whitespace-nowrap px-2 py-1.5 text-right">
-                        <a href={momentStudyUrl(e)} className="rounded-md bg-brand-500/20 px-2 py-0.5 text-[10px] font-semibold text-brand-200" title="Open on your My Studies board with the engine's move drawn (green = best, red = played)">📓 My Studies</a>
+                        {/* Two ways in. My Studies keeps the position as a chapter you can come
+                          * back to; the board opens it straight away with the arrows drawn and
+                          * nothing saved. momentEditorUrl has existed since 2026-09-12 and was
+                          * never linked to anything, so only the studies route was reachable.
+                          * (owner, 2026-09-19: "show view in board also") */}
+                        <span className="inline-flex flex-wrap justify-end gap-1">
+                          <Link to={momentEditorUrl(e)} className="rounded-md bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-ink-100 hover:bg-white/20" title="Open on the board now — green arrow is the engine's move, red is what was played. Nothing is saved.">♟ Board</Link>
+                          <a href={momentStudyUrl(e)} className="rounded-md bg-brand-500/20 px-2 py-0.5 text-[10px] font-semibold text-brand-200" title="Save into your My Studies as a chapter you can return to">📓 My Studies</a>
+                        </span>
                         {canStar && (e.starredBy
                           ? <span className="ml-1 text-[10px] text-amber-300" title="On your class-board shortlist and in Sunday's digest">★</span>
                           : <button onClick={() => onStar(e)} disabled={starPending} className="ml-1 rounded-md bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold text-amber-200" title="Star for class — class-board shortlist + Sunday digest">☆ star</button>)}
@@ -1058,11 +1070,12 @@ function GameAwardsSection({ period, bucket }: { period: Period; bucket: Bucket 
               const height = r.rank === 1 ? "h-32 sm:h-36" : "h-24 sm:h-28";
               const best = Object.entries(r.byMotif).sort((a, b) => b[1].found - a[1].found)[0];
               return (
-                <div key={r.studentId} className={`flex flex-col items-center justify-end rounded-t-2xl bg-gradient-to-b ${cls} ${height} px-2 py-3`}>
-                  <div className="text-lg font-bold">#{r.rank}</div>
-                  <div className="line-clamp-1 text-center text-xs font-semibold">{r.name || r.username}</div>
-                  <div className="mt-1 tabular-nums text-xl font-black drop-shadow">{r.score > 0 ? "+" : ""}{r.score}</div>
-                  <div className="line-clamp-1 text-[10px] font-semibold opacity-80">✅ {r.found} · ❌ {r.missed}{best ? ` · ${label(best[0])}` : ""}</div>
+                <div key={r.studentId} title={r.name || r.username} className={`flex flex-col items-center justify-end rounded-t-2xl bg-gradient-to-b ${cls} ${height} px-1 py-3 sm:px-2`}>
+                  <div className="text-base font-bold sm:text-lg">#{r.rank}</div>
+                  <div className="line-clamp-2 w-full break-words text-center text-[11px] font-semibold leading-tight sm:text-xs">{r.name || r.username}</div>
+                  <div className="mt-1 tabular-nums text-lg font-black drop-shadow sm:text-xl">{r.score > 0 ? "+" : ""}{r.score}</div>
+                  <div className="line-clamp-1 text-[10px] font-semibold opacity-80">✅ {r.found} · ❌ {r.missed}</div>
+                  {best && <div className="line-clamp-1 text-[10px] font-semibold opacity-70">{label(best[0])}</div>}
                 </div>
               );
             })}
