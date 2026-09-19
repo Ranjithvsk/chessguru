@@ -1554,6 +1554,15 @@ export default function SharedClassBoard(
   const inChallenge = !!challengeUI?.active;
   const isCoachRole = role === "coach";
   // Post-challenge review — student is walking through their own answer.
+  // A new challenge must never open in review mode. reviewIdx was only ever cleared
+  // by the student closing the "Show my answer" ribbon, so it survived into the NEXT
+  // challenge. There it stayed harmless until the student's first move, because
+  // inReview also needs studentMoves to be non-empty — and the moment that first move
+  // landed, review mode switched itself on and the board went unmovable. Hence the
+  // report: the first challenge works, every one after it accepts exactly one move.
+  // (owner, 2026-09-19)
+  useEffect(() => { setReviewIdx(null); }, [challengeUI?.startedAt]);
+
   const inReview = !isCoachRole && reviewIdx !== null && !!challengeUI && challengeUI.studentMoves.length > 0;
   // Compute the review FEN by replaying moves[0..reviewIdx] on a fresh
   // chess.js from challenge.positionFen. Rebuilt on every reviewIdx change.

@@ -14,7 +14,7 @@ import {
   GridLayout, ParticipantTile, useTracks, useParticipants,
   useDataChannel, useLocalParticipant, useRoomContext, useIsSpeaking,
 } from "@livekit/components-react";
-import { Track, DataPacket_Kind, DisconnectReason } from "livekit-client";
+import { Track, DataPacket_Kind, DisconnectReason, RoomEvent } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
 import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, useClassStartShapes, triggerClassSeek, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow , useCoachNotices, dismissCoachNotice, useClassPresence } from "../components/SharedClassBoard";
@@ -1743,6 +1743,7 @@ export default function ClassV2Page() {
                 className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-2"
                 style={{ containerType: 'size' } as any}
               >
+              <AudioUnblockPrompt />
               <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} onClassEnded={onClassEnded} intendedRole={role} />
               {/* Student toast when the coach marks their challenge answer.
                *  Module-level state so this host can live anywhere in the tree. */}
@@ -2201,6 +2202,95 @@ function CoachNoticeHost() {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// Browsers refuse to play sound until the person has interacted with the page, and
+// they re-arm that block on EVERY page load. The app never called startAudio(), so a
+// student whose browser had blocked playback simply heard nothing, with no explanation
+// and no control to fix it — and refreshing made it worse, because each reload put the
+// block back. This is the cause of the recurring "can't hear the coach" reports; the
+// coach's microphone was publishing fine every time I checked. (owner, 2026-09-19)
+function AudioUnblockPrompt() {
+  const room = useRoomContext();
+  const [blocked, setBlocked] = useState(false);
+  useEffect(() => {
+    if (!room) return;
+    const sync = () => setBlocked(!room.canPlaybackAudio);
+    sync();
+    room.on(RoomEvent.AudioPlaybackStatusChanged, sync);
+    return () => { room.off(RoomEvent.AudioPlaybackStatusChanged, sync); };
+  }, [room]);
+
+  // The browser re-arms its block on EVERY page load, so this button reappears after
+  // each refresh — which is correct, but it should rarely need a deliberate tap. Any
+  // real interaction counts as the gesture the browser wants, so the first click,
+  // key or touch ANYWHERE releases the sound and the button disappears on its own.
+  // It stays as the visible fallback for someone who has not touched anything yet.
+  // (owner, 2026-09-19: "every time tab refreshed then")
+  useEffect(() => {
+    if (!room || !blocked) return;
+    const release = () => { void room.startAudio().catch(() => {}); };
+    const opts = { capture: true, passive: true } as AddEventListenerOptions;
+    document.addEventListener("pointerdown", release, opts);
+    document.addEventListener("keydown", release, opts);
+    document.addEventListener("touchstart", release, opts);
+    return () => {
+      document.removeEventListener("pointerdown", release, opts);
+      document.removeEventListener("keydown", release, opts);
+      document.removeEventListener("touchstart", release, opts);
+    };
+  }, [room, blocked]);
+
+  // Coming back from another tab left the class dead until a refresh: no video, no
+  // sound, and a board whose pieces had not moved. Browsers suspend a hidden tab's
+  // media, and nothing here ever told it to resume — so the elements stayed paused
+  // while the connection underneath was perfectly healthy. A tap did not help either,
+  // because a tap lifts the browser's autoplay POLICY; it does not restart an element
+  // that is already paused. Only a reload rebuilt them, which is exactly what the
+  // owner found. (owner, 2026-09-19)
+  useEffect(() => {
+    const resume = () => {
+      if (typeof document === "undefined" || document.visibilityState !== "visible") return;
+      // Lifts the policy block AND re-attaches LiveKit's audio elements.
+      void room?.startAudio().catch(() => {});
+      // Then nudge every media element that the browser left paused.
+      document.querySelectorAll<HTMLMediaElement>("video, audio").forEach((el) => {
+        if (el.paused) void el.play().catch(() => {});
+      });
+    };
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("focus", resume);
+    window.addEventListener("pageshow", resume);   // bfcache restore
+    return () => {
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("focus", resume);
+      window.removeEventListener("pageshow", resume);
+    };
+  }, [room]);
+  if (!blocked) return null;
+  return (
+    // Sits directly above the board, where the eye already is. A thin strip in the
+    // header was missable, and a student who cannot hear has no idea why — so this is
+    // deliberately large and unmissable, and disappears the instant sound is allowed.
+    // ABSOLUTELY positioned on purpose. As a normal block above the board it took up
+    // layout space, and because the board sizes itself from its container, the button
+    // appearing or disappearing resized the column and made the board visibly redraw
+    // every time — the browser can flip the audio-blocked state more than once, so the
+    // board kept snapping (owner, 2026-09-19: "every time board refreshed"). Floating
+    // it over the board means showing and hiding it costs the board nothing.
+    <div className="pointer-events-none absolute inset-x-2 top-2 z-30">
+      <button
+        onClick={() => { void room?.startAudio().catch(() => {}); }}
+        className="pointer-events-auto flex w-full items-center justify-center gap-3 rounded-xl bg-brand-600 px-4 py-4 text-base font-bold text-white shadow-2xl ring-2 ring-brand-400/60 hover:bg-brand-500 active:scale-[0.99] sm:text-lg"
+      >
+        <span className="text-2xl">🔊</span>
+        <span>Tap to turn on sound</span>
+      </button>
+      <div className="mt-1 rounded-lg bg-ink-900/80 px-2 py-0.5 text-center text-xs text-ink-200 backdrop-blur">
+        Your browser blocks sound until you tap. One tap and you will hear the class.
+      </div>
     </div>
   );
 }

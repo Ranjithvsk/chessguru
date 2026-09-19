@@ -250,6 +250,36 @@ export default function Board({
     api.current.set({ fen, lastMove });
   }, [fen, lastMove]);
 
+  // Coming back to a backgrounded tab left the PIECES stale while the highlight was
+  // right. Chessground moves pieces with requestAnimationFrame, which browsers suspend
+  // in a hidden tab. So a move arriving while you are away applies its last-move
+  // highlight straight to the DOM — that lands — but the piece animation is queued and
+  // never runs. You return to the highlight on the new squares and the pieces still on
+  // the old ones, and it stays wrong until the next move forces a redraw.
+  // (owner, 2026-09-19: "moved to another tab, board pieces didnt move but the
+  // highlighter move")
+  //
+  // Re-apply the position on wake with animation off, so the pieces snap to the truth
+  // rather than trying to animate a move that is already several moves old.
+  useEffect(() => {
+    const onWake = () => {
+      if (typeof document === "undefined" || document.visibilityState !== "visible") return;
+      const cg = api.current;
+      if (!cg) return;
+      try {
+        cg.set({ animation: { enabled: false } });
+        cg.set({ fen, lastMove });
+        cg.set({ animation: { enabled: true, duration: 200 } });
+      } catch { /* a board mid-teardown must never throw here */ }
+    };
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("focus", onWake);   // some browsers only fire focus
+    return () => {
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("focus", onWake);
+    };
+  }, [fen, lastMove]);
+
   // Effect 2: sync everything BUT the fen. Fires on any of the non-position
   // deps. Never touches fen so the position can't be dragged back by a
   // stale prop.
