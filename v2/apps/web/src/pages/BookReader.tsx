@@ -120,9 +120,9 @@ export default function BookReaderPage() {
   const [page, setPage] = useState(0);
   // Page images come in size buckets (800 / 1200 / 1600 px) chosen from the screen, and the
   // next three pages are fetched ahead so turning a page never waits (owner 2026-09-19).
-  const [imgW, setImgW] = useState<number>(() => { try { return Math.min(1600, Math.ceil(Math.min(window.innerWidth, 900) * (window.devicePixelRatio || 1))); } catch { return 1200; } });
+  const [imgW, setImgW] = useState<number>(() => { try { return Math.min(1600, Math.ceil(Math.min(window.innerWidth, 900) * Math.min(2, window.devicePixelRatio || 1))); } catch { return 1200; } });
   useEffect(() => {
-    const onResize = () => { try { setImgW(Math.min(1600, Math.ceil(Math.min(window.innerWidth, 900) * (window.devicePixelRatio || 1)))); } catch { /* */ } };
+    const onResize = () => { try { setImgW(Math.min(1600, Math.ceil(Math.min(window.innerWidth, 900) * Math.min(2, window.devicePixelRatio || 1)))); } catch { /* */ } };
     window.addEventListener("resize", onResize); return () => window.removeEventListener("resize", onResize);
   }, []);
   useEffect(() => {
