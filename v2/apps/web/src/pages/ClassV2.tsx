@@ -14,7 +14,7 @@ import {
   GridLayout, ParticipantTile, useTracks, useParticipants,
   useDataChannel, useLocalParticipant, useRoomContext, useIsSpeaking,
 } from "@livekit/components-react";
-import { Track, DataPacket_Kind, DisconnectReason, RoomEvent } from "livekit-client";
+import { Track, DataPacket_Kind, DisconnectReason, RoomEvent, VideoQuality } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
 import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, useClassStartShapes, triggerClassSeek, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow , useCoachNotices, dismissCoachNotice, useClassPresence } from "../components/SharedClassBoard";
@@ -1616,7 +1616,22 @@ export default function ClassV2Page() {
            * lands in the same soft-fail path and coach can toggle later.
            * Students stay muted by default — they unmute via the ControlBar. */
           audio={role === "coach"}
-          options={{ logLevel: 'debug' }}
+          /* Quality that follows the viewer's network and screen, rather than one
+           * stream for everybody. The coach was ALREADY publishing several quality
+           * layers (simulcast is on by default), but every subscriber join showed
+           * AdaptiveStream: false — so nobody ever moved between them. A student on a
+           * weak phone connection got the same stream as one on fibre, which is how
+           * video ends up stalling and drifting behind the audio.
+           *
+           * adaptiveStream: each viewer's client picks a layer to match its bandwidth
+           *   AND the size the video is actually drawn at. Class tiles are small, so
+           *   most students should now pull a much lighter stream. It also pauses
+           *   video that is scrolled out of view.
+           * dynacast: the publisher stops sending layers nobody is watching, which
+           *   gives the coach's upload back. Pointless to send 720p to no one.
+           * (owner, 2026-09-19: "video quality auto adjust according to user network")
+           */
+          options={{ logLevel: 'debug', adaptiveStream: true, dynacast: true }}
           onError={(e) => {
             // Verbose error trail so we can catch the ACTUAL cause below
             // "Could not join room" — LiveKit's onError fires for many
@@ -1708,6 +1723,7 @@ export default function ClassV2Page() {
             </div>
             <div className="flex shrink-0 items-center gap-2">
               {role === "coach" && <CoachMicStatus />}
+              <VideoQualityPicker />
               <LiveHeaderBits room={room} role={role} />
               {role === "coach" ? (
                 <button
@@ -2207,6 +2223,58 @@ function CoachNoticeHost() {
   );
 }
 
+// Manual quality override. Auto (adaptiveStream) is right for almost everyone, but it
+// reacts to conditions rather than predicting them, and on a bad day a student would
+// rather pin the picture low and keep the sound than watch it climb and stall. The
+// choice is remembered per device, because the phone that struggles today will
+// struggle tomorrow. (owner, 2026-09-19: "or select quality option")
+const QUALITY_KEY = "cg-video-quality";
+type QualityPref = "auto" | "high" | "medium" | "low";
+
+function VideoQualityPicker() {
+  const room = useRoomContext();
+  const [pref, setPref] = useState<QualityPref>(() => {
+    try { return ((localStorage.getItem(QUALITY_KEY) as QualityPref) || "auto"); } catch { return "auto"; }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem(QUALITY_KEY, pref); } catch { /* private mode */ }
+    if (!room) return;
+    const apply = () => {
+      if (pref === "auto") return;   // leave it to adaptiveStream
+      const q = pref === "high" ? VideoQuality.HIGH : pref === "medium" ? VideoQuality.MEDIUM : VideoQuality.LOW;
+      room.remoteParticipants.forEach((rp) => {
+        rp.videoTrackPublications.forEach((pub) => {
+          try { pub.setVideoQuality(q); } catch { /* not subscribed yet */ }
+        });
+      });
+    };
+    apply();
+    // Re-apply for anyone who joins or republishes after the choice was made.
+    room.on(RoomEvent.TrackSubscribed, apply);
+    room.on(RoomEvent.ParticipantConnected, apply);
+    return () => {
+      room.off(RoomEvent.TrackSubscribed, apply);
+      room.off(RoomEvent.ParticipantConnected, apply);
+    };
+  }, [room, pref]);
+
+  return (
+    <select
+      value={pref}
+      onChange={(e) => setPref(e.target.value as QualityPref)}
+      aria-label="Video quality"
+      title="Video quality — Auto follows your connection"
+      className="rounded-lg border border-ink-700 bg-ink-800 px-1.5 py-1 text-[11px] font-semibold text-ink-200 outline-none hover:border-ink-500"
+    >
+      <option value="auto">Auto</option>
+      <option value="high">High</option>
+      <option value="medium">Medium</option>
+      <option value="low">Low (save data)</option>
+    </select>
+  );
+}
+
 // The mirror of the playback problem, and the half the tab-wake fix did not cover.
 // Backgrounding a tab can suspend MICROPHONE CAPTURE as well as playback, especially on
 // phones. The publication stays up and nothing looks wrong, but the underlying capture
@@ -2296,12 +2364,24 @@ function AudioUnblockPrompt() {
   useEffect(() => {
     const resume = () => {
       if (typeof document === "undefined" || document.visibilityState !== "visible") return;
-      // Lifts the policy block AND re-attaches LiveKit's audio elements.
+      // startAudio() only succeeds inside a real user gesture. A visibility change is
+      // NOT one, so after a long spell in another tab this quietly fails — which is
+      // why the owner found that only "refresh AND tap" recovered the sound.
       void room?.startAudio().catch(() => {});
-      // Then nudge every media element that the browser left paused.
       document.querySelectorAll<HTMLMediaElement>("video, audio").forEach((el) => {
         if (el.paused) void el.play().catch(() => {});
       });
+      // So CHECK afterwards instead of assuming. The room can still report audio as
+      // playable while its elements sit paused, in which case canPlaybackAudio alone
+      // never raises the button and the student is stuck with no way out. If anything
+      // is still silent a moment later, surface the button regardless — one tap is a
+      // gesture, and that is the only thing the browser will accept.
+      window.setTimeout(() => {
+        if (document.visibilityState !== "visible") return;
+        const stuck = Array.from(document.querySelectorAll<HTMLMediaElement>("audio"))
+          .some((el) => el.paused);
+        if (stuck || (room && !room.canPlaybackAudio)) setBlocked(true);
+      }, 700);
     };
     document.addEventListener("visibilitychange", resume);
     window.addEventListener("focus", resume);

@@ -245,8 +245,39 @@ export default function Board({
   // as before → guard returned early → chessground kept the wrong-moved
   // piece on the destination). Chessground handles same-fen no-op
   // internally via anim() diffing, so re-applying is cheap.
+  // Snap, don't animate, when the position JUMPS.
+  //
+  // A challenge ending moves a student's board from their own answer line back to the
+  // shared position — two unrelated positions. Chessground was asked to animate between
+  // them, which is not a move it can express: the animation never resolves and its
+  // internal state drifts from the DOM, so from then on every arriving move painted its
+  // last-move HIGHLIGHT while the pieces stayed put. Exactly what the owner saw after a
+  // challenge, and the same visible symptom as the backgrounded-tab case.
+  //
+  // A real move changes at most four squares (castling, en passant). Anything bigger is
+  // a jump, so apply it with animation off and let the pieces land where they belong.
+  const prevFenRef = useRef<string | null>(null);
   useEffect(() => {
     if (!api.current) return;
+    const placement = (f?: string | null) => (f || "").split(" ")[0] || "";
+    const changedSquares = (a: string, b: string) => {
+      const expand = (pl: string) => pl.split("/").map((row) =>
+        row.replace(/\d/g, (d) => ".".repeat(Number(d)))).join("");
+      const A = expand(a), B = expand(b);
+      if (A.length !== 64 || B.length !== 64) return 99;   // unparseable — treat as a jump
+      let n = 0;
+      for (let i = 0; i < 64; i++) if (A[i] !== B[i]) n++;
+      return n;
+    };
+    const prev = prevFenRef.current;
+    const jumped = !prev || changedSquares(placement(prev), placement(fen)) > 4;
+    prevFenRef.current = fen;
+    if (jumped) {
+      api.current.set({ animation: { enabled: false } });
+      api.current.set({ fen, lastMove });
+      api.current.set({ animation: { enabled: true, duration: 200 } });
+      return;
+    }
     api.current.set({ fen, lastMove });
   }, [fen, lastMove]);
 
