@@ -332,7 +332,7 @@ export default function StudyTrainer() {
             const target = mateTargetRef.current;
             if (target != null && r.source === "oracle") {
               if (r.mateIn <= target - 1) note += " · ✓ best move";
-              else note += ` · you gave away ${r.mateIn - target + 1} tempo${r.mateIn - target + 1 === 1 ? "" : "s"} (mate in ${target - 1} was there)`;
+              else note += ` · you gave away ${r.mateIn - target + 1} ${r.mateIn - target + 1 === 1 ? "tempo" : "tempi"} (mate in ${target - 1} was there)`;
             }
             mateTargetRef.current = r.source === "oracle" ? r.mateIn : null;
           } else { note = r.source === "oracle" ? "tablebase defence" : "Stockfish 18 (server)"; mateTargetRef.current = null; }

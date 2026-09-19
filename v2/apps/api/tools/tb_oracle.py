@@ -108,8 +108,11 @@ def advise(fen, uci):
         b.pop()
     best = max(keys, key=lambda m: keys[m]); kb, kp = keys[best], keys[mv]
     def mate_moves(key): return (abs(key[1]) + 1) // 2 if key[0] == 3 and key[1] != 0 else (0 if key == (3, 0) else None)
-    mate_best, mate_played = mate_moves(kb), mate_moves(kp)
+    mate_best, mate_played = mate_moves(kb), mate_moves(kp)     # moves still needed AFTER the move (0 = the move mates)
     lost = (mate_played - mate_best) if (mate_best is not None and mate_played is not None) else None
+    # In words we count from BEFORE the move, the way players say it: "mate in 1" = this move mates.
+    total_best = mate_best + 1 if mate_best is not None else None
+    total_played = mate_played + 1 if mate_played is not None else None
     if kp == kb or (kp[0] == kb[0] == 3 and lost == 0): verdict = "best"
     elif kp[0] < kb[0]: verdict = "blunder"
     elif lost is not None and lost >= 3: verdict = "mistake"
@@ -131,10 +134,11 @@ def advise(fen, uci):
         elif not pawnless and opposition(pb, us) and not opposition(pp, us): why = f"{san_b} takes the opposition (kings two squares apart, the other side to move); {san_p} gives it up."
         elif not pawnless and b.piece_at(mv.from_square).piece_type == chess.PAWN and b.piece_at(best.from_square).piece_type == chess.KING: why = f"Pushed the pawn too early — the king must lead: {san_b}."
         if why is None:
-            if kp[0] < kb[0]: why = f"{san_p} throws the win away — {san_b} still wins" + (f" (mate in {mate_best})" if mate_best else "") + "."
-            elif lost: why = f"{san_p} gives {lost} tempo{'s' if lost != 1 else ''} away: mate in {mate_best} was there with {san_b}, now it is mate in {mate_played}."
+            if kp[0] < kb[0]: why = f"{san_p} throws the win away — {san_b} still wins" + (f" (mate in {total_best})" if total_best else "") + "."
+            elif lost: why = f"{san_p} gives {lost} {'tempo' if lost == 1 else 'tempi'} away: mate in {total_best} was there with {san_b}, now it is mate in {total_played}."
     return {"ok": True, "verdict": verdict, "move": san_p, "best": san_b, "bestUci": best.uci(), "lostTempi": lost,
-            "mateBefore": (abs(before_dtz) + 1) // 2 if before_wdl > 0 and pawnless else None, "mateAfterBest": mate_best, "mateAfterPlayed": mate_played,
+            "mateBefore": (abs(before_dtz) + 1) // 2 if before_wdl > 0 and pawnless else None,
+            "mateWithBest": total_best, "mateWithPlayed": total_played, "mateAfterBest": mate_best, "mateAfterPlayed": mate_played,
             "resultBefore": "win" if before_wdl > 0 else "draw" if before_wdl == 0 else "loss",
             "resultAfter": "win" if kp[0] == 3 else "draw" if kp[0] == 2 else "loss",
             "why": why, "bestLine": [san_b] + line_from(pb, 2)}
