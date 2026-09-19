@@ -214,6 +214,10 @@ export interface DefenceReply { ok: boolean; move?: string | null; mateIn?: numb
 export const studyDefend = (fen: string, level: "medium" | "hard") =>
   post<DefenceReply>("/api/study/defend", { fen, level });
 
+/** Study trainer: judge the student's move (fen = position before it). */
+export interface AdviceReply { ok: boolean; verdict?: "best" | "inaccuracy" | "mistake" | "blunder"; move?: string; best?: string; bestUci?: string; lostTempi?: number | null; mateBefore?: number | null; mateAfterBest?: number | null; mateAfterPlayed?: number | null; resultBefore?: string; resultAfter?: string; why?: string | null; bestLine?: string[]; source?: string; reason?: string }
+export const studyAdvise = (fen: string, move: string) => post<AdviceReply>("/api/study/advise", { fen, move });
+
 export const studyComplete = (id: string, win: boolean, rating: number) =>
   post<{ win: boolean; rating: number; ratingDiff: number; puzzleRating: number }>(`/api/study/${id}/complete`, { win, rating, deviation: 500 });
 

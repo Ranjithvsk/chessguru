@@ -22,6 +22,11 @@ import { spawn, ChildProcess } from "child_process";
 import * as fs from "fs";
 
 export type DefenceLevel = "medium" | "hard";
+export interface AdviceResult {
+  ok: boolean; verdict?: "best" | "inaccuracy" | "mistake" | "blunder"; move?: string; best?: string; bestUci?: string;
+  lostTempi?: number | null; mateBefore?: number | null; mateAfterBest?: number | null; mateAfterPlayed?: number | null;
+  resultBefore?: string; resultAfter?: string; why?: string | null; bestLine?: string[]; source?: "oracle" | "stockfish"; reason?: string;
+}
 export interface DefenceResult { move: string | null; mateIn: number | null; wdl?: number; source: "oracle" | "stockfish"; level: DefenceLevel; ms: number }
 
 const STOCKFISH_PATH = process.env.STOCKFISH_PATH ?? "/home/ubuntu/engines/stockfish";
@@ -52,21 +57,24 @@ class Uci {
   private cmd(s: string, done: (l: string) => boolean, collect?: (l: string) => void): Promise<void> {
     return new Promise((resolve) => { this.onLine = (l) => { collect?.(l); if (done(l)) { this.onLine = null; resolve(); } }; this.send(s); });
   }
-  /** Serialized: one search at a time per process. */
-  bestMove(fen: string, movetimeMs: number): Promise<{ move: string | null; mate: number | null }> {
+  /** Serialized: one search at a time per process. `fen` may carry a " moves e2e4 …" suffix. */
+  search(fen: string, movetimeMs: number): Promise<{ move: string | null; mate: number | null; cp: number | null; pv: string[] }> {
     const run = async () => {
       if (!this.proc) await this.start();
-      let mate: number | null = null; let move: string | null = null;
+      let mate: number | null = null; let cp: number | null = null; let move: string | null = null; let pv: string[] = [];
       await this.cmd(`position fen ${fen}\ngo movetime ${movetimeMs}`, (l) => l.startsWith("bestmove"), (l) => {
-        const m = / score mate (-?\d+)/.exec(l); if (m) mate = Number(m[1]);
+        const m = / score mate (-?\d+)/.exec(l); if (m) { mate = Number(m[1]); cp = null; }
+        const c = / score cp (-?\d+)/.exec(l); if (c) { cp = Number(c[1]); mate = null; }
+        const v = / pv (.+)$/.exec(l); if (v) pv = (v[1] ?? "").trim().split(/\s+/);
         if (l.startsWith("bestmove")) { const t = l.split(/\s+/)[1]; move = t && t !== "(none)" ? t : null; }
       });
-      return { move, mate };
+      return { move, mate, cp, pv };
     };
     const p = this.chain.then(run, run);
     this.chain = p.catch(() => undefined);
     return p;
   }
+  bestMove(fen: string, movetimeMs: number): Promise<{ move: string | null; mate: number | null }> { return this.search(fen, movetimeMs); }
   kill() { try { this.proc?.kill(); } catch { /* */ } this.proc = null; }
 }
 
@@ -89,6 +97,33 @@ export class DefenderService implements OnModuleDestroy {
       const j: any = await r.json();
       return j?.ok && j.move ? { move: String(j.move), mateIn: typeof j.mateIn === "number" ? j.mateIn : null, wdl: Number(j.wdl) } : null;
     } catch { return null; }
+  }
+
+  /** Judge the student's move. Tablebase (exact, with a rule-based reason) for ≤5 pieces;
+   *  otherwise Stockfish 18 compares the played move with its own best (300 ms each). */
+  async advise(fen: string, move: string): Promise<AdviceResult> {
+    try {
+      const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 2500);
+      const r = await fetch(`${ORACLE_URL}/advise?fen=${encodeURIComponent(fen)}&move=${encodeURIComponent(move)}`, { signal: ctl.signal }).finally(() => clearTimeout(t));
+      const j: any = await r.json();
+      if (j?.ok) return { ...j, source: "oracle" };
+      if (j?.reason && j.reason !== "not-in-tablebase") return { ok: false, reason: String(j.reason) };
+    } catch { /* fall through to the engine */ }
+    const engine = this.engines.medium;
+    const before = await engine.search(fen, 300);                 // best move + score from the mover's side
+    const after = await engine.search(this.applyMove(fen, move), 300);   // score from the opponent's side → negate
+    if (!before.move) return { ok: false, reason: "engine" };
+    const cpB = before.mate != null ? (before.mate > 0 ? 100000 - before.mate : -100000 - before.mate) : before.cp ?? 0;
+    const cpA = after.mate != null ? -(after.mate > 0 ? 100000 - after.mate : -100000 - after.mate) : -(after.cp ?? 0);
+    const drop = cpB - cpA;
+    const verdict = before.move === move || drop < 30 ? "best" : drop < 100 ? "inaccuracy" : drop < 300 ? "mistake" : "blunder";
+    const why = verdict === "best" ? null : `Stockfish preferred ${before.move}${before.mate != null ? ` (mate in ${Math.abs(before.mate)})` : ""}; your move drops the evaluation by ${(drop / 100).toFixed(1)} pawns.`;
+    return { ok: true, verdict, move, best: before.move, bestUci: before.move, lostTempi: null, why, bestLine: before.pv.slice(0, 3), source: "stockfish" };
+  }
+  private applyMove(fen: string, uci: string): string {
+    // Minimal: let the engine compute the position via "position fen … moves uci" — encoded here
+    // as a pseudo-FEN the Uci wrapper understands.
+    return `${fen} moves ${uci}`;
   }
 
   async defend(fen: string, level: DefenceLevel): Promise<DefenceResult> {

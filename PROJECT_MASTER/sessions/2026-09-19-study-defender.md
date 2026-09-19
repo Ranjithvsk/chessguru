@@ -38,3 +38,17 @@ Easy = browser Stockfish Skill 3 / 150 ms · Medium = Stockfish 18 + tablebases 
 · Hard = exact tablebase (was "Best"). No Auto chip: the rating-based default is preselected and
 marked "auto" until the student taps a level (`localStorage cg_study_defence_v2`). API accepts
 medium | hard ("best" from older bundles = hard).
+
+## Play modes + advice (owner: "play both sides or vs engine"; "advise the mistake … after each move or at the end … give reason")
+- Play chips **vs engine / both sides** (`cg_study_mode`): both sides = no engine reply, nothing rated,
+  the tablebase still shows "White/Black mates in N" after every move.
+- Tempo feedback in engine mode: consecutive tablebase counts must fall by one — else "you gave
+  away N tempi (mate in X was there)".
+- `GET /advise?fen=&move=` on the oracle + `POST /api/study/advise {fen, move}`: verdict
+  best / inaccuracy / mistake / blunder, best move, tempi lost, a rule-based reason (stalemate,
+  piece hanging next to the king, box not tightened, king let back to the centre, king route,
+  waiting rook move, opposition lost, pawn pushed before the king) and a 3-ply best line; beyond
+  5 pieces Stockfish 18 compares evals (300 ms ×2) with a generic reason.
+- Advice chips **each move / at the end / off** (`cg_study_advice`, default each move): each-move
+  shows the verdict card under the status; at-the-end lists every non-best move with reasons once
+  the game finishes. Works in both play modes and for both colours.

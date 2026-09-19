@@ -4,7 +4,7 @@ import { Chess } from "chess.js";
 import type { Key } from "chessground/types";
 import Board, { destsFromChess } from "../components/Board";
 import { createEngine, type Engine } from "../lib/engine";
-import { studyDefend } from "../lib/api";
+import { studyDefend, studyAdvise, type AdviceReply } from "../lib/api";
 import { studyById } from "../lib/studies";
 import { studyPuzzle, studyMe, studyComplete } from "../lib/api";
 
@@ -116,6 +116,14 @@ const DEFENCE_LABEL: Record<DefenceLevel, string> = { easy: "Easy", medium: "Med
 // "mate in N" after every move so they can check their own defence as well as their technique.
 type PlayMode = "engine" | "both";
 const MODE_KEY = "cg_study_mode";
+// Advice on the student's moves (owner 2026-09-19: "advise the mistake made — after the end of
+// play or after each move — make it an option; give reason"). Judged by the tablebase (exact,
+// with a rule-based reason) or Stockfish 18 beyond 5 pieces.
+type AdviceMode = "move" | "end" | "off";
+const ADVICE_KEY = "cg_study_advice";
+type AdviceRow = { n: number; side: "w" | "b"; san: string; verdict: NonNullable<AdviceReply["verdict"]>; why: string | null; best: string; line: string[] };
+const VERDICT_TONE: Record<AdviceRow["verdict"], string> = { best: "text-emerald-300", inaccuracy: "text-amber-300", mistake: "text-orange-400", blunder: "text-rose-400" };
+const VERDICT_MARK: Record<AdviceRow["verdict"], string> = { best: "✓", inaccuracy: "?!", mistake: "?", blunder: "??" };
 
 export default function StudyTrainer() {
   const { id } = useParams();
@@ -145,6 +153,21 @@ export default function StudyTrainer() {
   // Tempo feedback (engine mode, Hard): the defender's last "mate in N" is the target; after the
   // student's next move the new count must be N−1, otherwise they gave a tempo away.
   const mateTargetRef = useRef<number | null>(null);
+  const [adviceMode, setAdviceMode] = useState<AdviceMode>(() => { try { const v = localStorage.getItem(ADVICE_KEY); return v === "end" || v === "off" ? v : "move"; } catch { return "move"; } });
+  const adviceModeRef = useRef<AdviceMode>(adviceMode); adviceModeRef.current = adviceMode;
+  const pickAdvice = (v: AdviceMode) => { setAdviceMode(v); try { localStorage.setItem(ADVICE_KEY, v); } catch { /* */ } };
+  const [advice, setAdvice] = useState<AdviceRow | null>(null);       // latest verdict (each-move mode)
+  const [adviceLog, setAdviceLog] = useState<AdviceRow[]>([]);         // whole game (end-of-play summary)
+  const adviceLogRef = useRef<AdviceRow[]>([]);
+  const judge = (fenBefore: string, uci: string, san: string, n: number, side: "w" | "b") => {
+    if (adviceModeRef.current === "off") return;
+    studyAdvise(fenBefore, uci).then((r) => {
+      if (!r?.ok || !r.verdict) return;
+      const row: AdviceRow = { n, side, san, verdict: r.verdict, why: r.why ?? null, best: r.best ?? "", line: r.bestLine ?? [] };
+      adviceLogRef.current = [...adviceLogRef.current, row]; setAdviceLog(adviceLogRef.current);
+      if (adviceModeRef.current === "move") setAdvice(row);
+    }).catch(() => { /* offline: no advice */ });
+  };
   const [ratingDiff, setRatingDiff] = useState<number | null>(null);
   const userRatingRef = useRef(1200);
   const puzzleIdRef = useRef<string | null>(null);
@@ -154,7 +177,7 @@ export default function StudyTrainer() {
   const pieces = def?.pieces ?? ["Q"];
   const kind = def?.kind ?? "mate";
   const newPosition = useCallback(async () => {
-    setThinking(false); setRatingDiff(null); mateTargetRef.current = null; setDefenceNote(null);
+    setThinking(false); setRatingDiff(null); mateTargetRef.current = null; setDefenceNote(null); setAdvice(null); setAdviceLog([]); adviceLogRef.current = [];
     // Prefer a RATED puzzle from the study DB at the player's level (matchmaking); else local generation.
     if (def && (kind === "mate" || kind === "stopPawn" || kind === "pawnEnd")) {
       try {
@@ -261,10 +284,13 @@ export default function StudyTrainer() {
   };
 
   const onMove = useCallback(async (from: Key, to: Key) => {
-    let mv: unknown = null;
-    try { mv = game.current.move({ from, to, promotion: "q" }); } catch { mv = null; }
+    let mv: { san?: string; color?: string } | null = null;
+    const fenBefore = game.current.fen(); const sideBefore = game.current.turn();
+    try { mv = game.current.move({ from, to, promotion: "q" }) as { san?: string; color?: string } | null; } catch { mv = null; }
     if (!mv) { setFen(game.current.fen()); force((n) => n + 1); return; }
     setLastMove([from, to]); setFen(game.current.fen());
+    setAdvice(null);
+    judge(fenBefore, `${from}${to}${game.current.history({ verbose: true }).slice(-1)[0]?.promotion ?? ""}`, mv.san ?? `${from}${to}`, Math.ceil(game.current.history().length / 2), sideBefore);
     if (finished()) return;
     if (modeRef.current === "both") {
       // No engine reply — the student plays the other colour too. Ask the tablebase for the
@@ -392,6 +418,40 @@ export default function StudyTrainer() {
               </button>
             ))}
           </div>
+          <div className="mt-2 flex items-center gap-1.5 text-xs">
+            <span className="mr-1 text-ink-500">Advice</span>
+            {(["move", "end", "off"] as AdviceMode[]).map((v) => (
+              <button key={v} type="button" onClick={() => pickAdvice(v)}
+                title={v === "move" ? "Judge every move as you play, with the reason" : v === "end" ? "Play through, then see every mistake with reasons" : "No advice"}
+                className={`rounded-full px-2.5 py-1 font-semibold ${adviceMode === v ? "bg-brand-600 text-white" : "border border-ink-700 text-ink-300 hover:bg-ink-800"}`}>
+                {v === "move" ? "each move" : v === "end" ? "at the end" : "off"}
+              </button>
+            ))}
+          </div>
+          {adviceMode === "move" && advice && (
+            <div className="mt-3 rounded-lg border border-ink-700 bg-ink-950/60 p-3 text-sm">
+              <div className={`font-semibold ${VERDICT_TONE[advice.verdict]}`}>{advice.san}{VERDICT_MARK[advice.verdict]} — {advice.verdict === "best" ? "best move" : advice.verdict}</div>
+              {advice.why && <div className="mt-1 text-xs text-ink-300">{advice.why}</div>}
+              {advice.verdict !== "best" && advice.line.length > 0 && <div className="mt-1 text-xs text-ink-500">Best: {advice.line.join(" ")}</div>}
+            </div>
+          )}
+          {adviceMode === "end" && (status.kind === "win" || status.kind === "draw") && adviceLog.length > 0 && (
+            <div className="mt-3 rounded-lg border border-ink-700 bg-ink-950/60 p-3 text-sm">
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-400">
+                Your moves · {adviceLog.filter((a) => a.verdict !== "best").length} to look at
+              </div>
+              <div className="max-h-56 space-y-1.5 overflow-y-auto">
+                {adviceLog.filter((a) => a.verdict !== "best").map((a, i) => (
+                  <div key={i} className="text-xs">
+                    <span className={`font-semibold ${VERDICT_TONE[a.verdict]}`}>{a.n}{a.side === "w" ? "." : "…"} {a.san}{VERDICT_MARK[a.verdict]}</span>
+                    {a.why && <span className="text-ink-300"> — {a.why}</span>}
+                    {a.line.length > 0 && <span className="text-ink-500"> Best: {a.line.join(" ")}</span>}
+                  </div>
+                ))}
+                {adviceLog.every((a) => a.verdict === "best") && <div className="text-xs text-emerald-300">Every move was the best move. 🎯</div>}
+              </div>
+            </div>
+          )}
           <div className={`mt-2 flex items-center gap-1.5 text-xs ${mode === "both" ? "opacity-40" : ""}`}>
             <span className="mr-1 text-ink-500">Defence</span>
             {(["easy", "medium", "hard"] as DefenceLevel[]).map((v) => (

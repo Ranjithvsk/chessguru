@@ -31,6 +31,16 @@ export class StudyController {
     return this.defender.defend(fen, level).then((r) => ({ ok: true, ...r })).catch((e) => ({ ok: false, reason: String(e?.message ?? e) }));
   }
 
+  /** POST /study/advise { fen, move } — judge the student's move (fen = position BEFORE it): verdict,
+   *  best move, tempi lost, a reason in plain words, a short best line. */
+  @Post("advise")
+  advise(@Body() body: any) {
+    const fen = typeof body?.fen === "string" ? body.fen.trim() : "";
+    const move = typeof body?.move === "string" ? body.move.trim().toLowerCase() : "";
+    if (!/^([pnbrqkPNBRQK1-8]+\/){7}[pnbrqkPNBRQK1-8]+ [wb] (-|[KQkq]{1,4}) (-|[a-h][36]) \d+ \d+$/.test(fen) || !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(move)) return { ok: false, reason: "bad-input" };
+    return this.defender.advise(fen, move).catch((e) => ({ ok: false, reason: String(e?.message ?? e) }));
+  }
+
   @Post(":id/complete")
   complete(@Param("id") id: string, @Body() body: any, @Req() req: any) {
     return this.study.complete(id, { ...(body ?? {}), userId: req?.session?.userId ?? null });
