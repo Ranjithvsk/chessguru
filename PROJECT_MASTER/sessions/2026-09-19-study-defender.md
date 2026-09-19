@@ -62,3 +62,15 @@ promote/delete/annotate as in class. The engine answers through a new `triggerCl
 own move is recognised by `injectedRef`; navigation (seek/step) changes nothing. Rated results only
 on the mainline; variations are analysis. Headless smoke (playwright-core + local Chromium) on the
 live page: move accepted, engine reply in the notation, "tablebase · mate in N", zero errors.
+
+## Play mode on the lesson pages + hub categories (owner: "add the same to triangulation and zugzwang"; "categorise study properly")
+- `apps/web/src/lib/enginePlay.tsx`: `useEnginePlay(userColor)` (engine reply via triggerClassPlayMove,
+  both-sides count, advice judge, tempo note; same localStorage keys as the trainer) + `EnginePlayControls`
+  (Play / Defence / Advice chips, verdict card, end-of-game review with a "Review N moves" toggle) +
+  shared `BoardChrome`.
+- Triangulation and Zugzwang gained a third header mode **♟ Play** next to Study / Exercise: class board
+  in local mode + notation + the controls; position picker, Restart, Next position. Study/Exercise
+  flows untouched. Headless smoke on both live pages: move accepted, engine reply in the notation.
+- /study hub: end-game section split into **Pawn endings** (courses first, then Pawn Endgames · Rated,
+  Triangulation, Zugzwang), **Basic checkmates** (Q, R, RR, BB, BN), **Piece against pawns** (Q/R vs
+  pawns) via `StudyDef.group`; blurb no longer claims "Stockfish defends at full strength".

@@ -11,13 +11,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Chess } from "chess.js";
 import type { Key } from "chessground/types";
 import Board, { destsFromChess } from "../components/Board";
+import SharedClassBoard from "../components/SharedClassBoard";
+import { ClassNotationPanel } from "../components/ClassNotationPanel";
+import { useEnginePlay, EnginePlayControls, BoardChrome } from "../lib/enginePlay";
 import { studyComplete, studyMe } from "../lib/api";
 import {
   ZUGZWANG_POSITIONS, ZUGZWANG_PATTERNS,
   type ZugzwangPattern, type ZugzwangPosition,
 } from "../lib/zugzwangCorpus";
 
-type Mode = "study" | "practice";
+type Mode = "study" | "practice" | "play";   // play = engine / both sides + advice (2026-09-19)
 type Verdict = null | "correct" | "wrong";
 
 function turnOf(fen: string): "white" | "black" {
@@ -68,6 +71,13 @@ export default function ZugzwangStudyPage() {
 
   const chess = useMemo(() => new Chess(active.fen), [active.fen]);
   const turn = turnOf(active.fen);
+  // Play mode: class board in local mode + notation, engine answers the other side (or both sides), moves judged.
+  const play = useEnginePlay(turn === "white" ? "w" : "b");
+  const playRef = useRef(play); playRef.current = play;
+  const [playNonce, setPlayNonce] = useState(0);
+  const playRoom = `zz-${active.id}-${playNonce}`;
+  const playInitial = useMemo(() => ({ startFen: active.fen, tree: [] as never[], startShapes: [] as never[] }), [active.fen, playNonce]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { playRef.current.reset(); }, [active.id, playNonce]);
 
   const pickNext = useCallback((exclude: Set<string>): ZugzwangPosition => {
     const unseen = pool.filter((p) => !exclude.has(p.id));
@@ -171,6 +181,11 @@ export default function ZugzwangStudyPage() {
             type="button" onClick={startPractice}
             className={`px-3 py-1.5 ${mode === "practice" ? "bg-emerald-500/25 text-emerald-100" : "bg-ink-900 text-ink-400 hover:bg-ink-800"}`}
           >🎯 Practice</button>
+          <button
+            type="button" onClick={() => { if (advanceTimer.current) window.clearTimeout(advanceTimer.current); setMode("play"); setRevealed(false); setVerdict(null); setPlayNonce((n) => n + 1); }}
+            className={`px-3 py-1.5 ${mode === "play" ? "bg-sky-500/25 text-sky-100" : "bg-ink-900 text-ink-400 hover:bg-ink-800"}`}
+            title="Play it out against the engine or both sides, with advice"
+          >♟ Play</button>
         </div>
       </div>
     </div>
@@ -197,6 +212,48 @@ export default function ZugzwangStudyPage() {
   );
 
   // ─── Practice mode ─────────────────────────────────────────────────────
+
+  if (mode === "play") {
+    return (
+      <div className="mx-auto max-w-6xl px-4 py-6">
+        {header}
+        {patternPills}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-ink-700 bg-ink-900 px-4 py-3">
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-400">{turn === "white" ? "⬜ White" : "⬛ Black"} to move</div>
+            <select value={activeId} onChange={(e) => { setActiveId(e.target.value); setPlayNonce((n) => n + 1); }}
+              className="mt-1 max-w-full rounded-lg border border-ink-700 bg-ink-950 px-2 py-1.5 text-sm text-white">
+              {pool.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setPlayNonce((n) => n + 1)} className="rounded-lg border border-ink-600 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">↻ Restart</button>
+            <button type="button" onClick={() => { serveNext(); setPlayNonce((n) => n + 1); }} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-500">Next position →</button>
+          </div>
+        </div>
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="min-w-0 rounded-xl border border-ink-700 bg-ink-900 p-3">
+            <div
+              className="relative flex min-h-0 items-center justify-center overflow-hidden"
+              style={{ containerType: "size", height: "min(66vh, 620px)" } as React.CSSProperties}
+            >
+              <SharedClassBoard key={playRoom} local room={playRoom} localInitial={playInitial} onLocalChange={(st) => { void playRef.current.handleLocalChange(st); }} />
+            </div>
+            <BoardChrome />
+          </div>
+          <div className="min-w-0 space-y-4">
+            <EnginePlayControls play={play} />
+            <div className="min-w-0 rounded-xl border border-ink-700 bg-ink-900/60 p-1">
+              <div className="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-ink-500">Notation</div>
+              <div className="min-w-0 overflow-y-auto" style={{ maxHeight: "min(66vh, 620px)" }}>
+                <ClassNotationPanel key={playRoom} room={playRoom} role="coach" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (mode === "practice") {
     const accuracy = session.solved + session.wrong === 0 ? 0 : Math.round((session.solved / (session.solved + session.wrong)) * 100);

@@ -21,6 +21,7 @@ import SharedClassBoard, {
   useClassCursorInfo,
 } from "../components/SharedClassBoard";
 import { ClassNotationPanel } from "../components/ClassNotationPanel";
+import { useEnginePlay, EnginePlayControls } from "../lib/enginePlay";
 import type { LocalRoomState, LocalTreeNode } from "../lib/localClassRoom";
 import { studyComplete, studyMe } from "../lib/api";
 import {
@@ -29,7 +30,7 @@ import {
 } from "../lib/triangulationCorpus";
 import { TRIANGULATION_ANSWERS, markMove, MARKS } from "../lib/triangulationAnswers";
 
-type Mode = "study" | "practice";
+type Mode = "study" | "practice" | "play";   // play = engine / both sides + advice (2026-09-19)
 type Verdict = null | "correct" | "wrong";
 
 function turnOf(fen: string): "white" | "black" {
@@ -160,6 +161,10 @@ export default function TriangulationStudyPage() {
     [activeId],
   );
   const turn = turnOf(active.fen);
+  // Play mode: the engine answers the other side (or you play both), every move judged.
+  const play = useEnginePlay(turn === "white" ? "w" : "b");
+  const playRef = useRef(play); playRef.current = play;
+  useEffect(() => { playRef.current.reset(); }, [active.id, nonce]);
   const room = `tri-${active.id}-${nonce}`;
   const localInitial = useMemo(
     () => ({ startFen: active.fen, tree: [] as never[], startShapes: [] as never[] }),
@@ -260,6 +265,7 @@ export default function TriangulationStudyPage() {
   // The notebook board reports every change; in Exercise mode the first move
   // played on it is the answer.
   const onLocalChange = useCallback((st: LocalRoomState) => {
+    if (mode === "play") { void playRef.current.handleLocalChange(st); return; }
     const line = mainline(st);
     setLineUci(line);
     if (mode !== "practice" || answered.current) return;
@@ -296,6 +302,11 @@ export default function TriangulationStudyPage() {
           <button type="button" onClick={startPractice}
             className={`px-3 py-1.5 ${mode === "practice" ? "bg-emerald-500/25 text-emerald-100" : "bg-ink-900 text-ink-400 hover:bg-ink-800"}`}
           >🎯 Exercise</button>
+          <button type="button"
+            onClick={() => { if (advanceTimer.current) window.clearTimeout(advanceTimer.current); setMode("play"); setRevealed(false); setVerdict(null); resetBoard(); }}
+            className={`px-3 py-1.5 ${mode === "play" ? "bg-sky-500/25 text-sky-100" : "bg-ink-900 text-ink-400 hover:bg-ink-800"}`}
+            title="Play it out against the engine or both sides, with advice"
+          >♟ Play</button>
         </div>
       </div>
     </div>
@@ -333,6 +344,7 @@ export default function TriangulationStudyPage() {
           <span className="text-ink-500">
             {mode === "practice"
               ? (verdict ? "" : "play your move on the board")
+              : mode === "play" ? (play.mode === "both" ? "you move both sides — nothing is graded" : "play it out — the engine answers")
               : "try any line you like — nothing is graded until you submit"}
           </span>
         </div>
@@ -357,6 +369,35 @@ export default function TriangulationStudyPage() {
   );
 
   // ─── Exercise mode ─────────────────────────────────────────────────────
+
+  if (mode === "play") {
+    return (
+      <div className="mx-auto max-w-6xl px-4 py-6">
+        {header}
+        {patternPills}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-ink-700 bg-ink-900 px-4 py-3">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-400">
+              {TRIANGULATION_PATTERNS.find((x) => x.id === active.pattern)?.label} · ★ {active.difficulty}
+            </div>
+            <h2 className="font-display text-lg text-white">{active.name}</h2>
+            {active.think && <p className="mt-1 text-xs text-ink-400">{active.think}</p>}
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={resetBoard} className="rounded-lg border border-ink-600 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">↻ Restart</button>
+            <button type="button" onClick={serveNext} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-500">Next position →</button>
+          </div>
+        </div>
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+          {boardPane}
+          <div className="min-w-0 space-y-4">
+            <EnginePlayControls play={play} />
+            {notationPane}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (mode === "practice") {
     const accuracy = session.solved + session.wrong === 0 ? 0

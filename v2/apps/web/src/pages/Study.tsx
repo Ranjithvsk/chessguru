@@ -77,6 +77,10 @@ export default function StudyPage() {
   const memoryStudies  = STUDIES.filter((s) => s.phase === "memory"  && matchStudy(s));
   const middleStudies  = STUDIES.filter((s) => s.phase === "middle"  && matchStudy(s));
   const endStudies     = STUDIES.filter((s) => s.phase === "end"     && matchStudy(s));
+  // End-game sub-groups: pawn endings (courses + drills), basic checkmates, piece against pawns.
+  const pawnStudies    = endStudies.filter((s) => !s.group || s.group === "pawn");
+  const mateStudies    = endStudies.filter((s) => s.group === "mates");
+  const vsPawnStudies  = endStudies.filter((s) => s.group === "vsPawns");
   const otherStudies   = STUDIES.filter((s) => !s.phase && matchStudy(s));
   const anyHardcoded = matchHardcoded("promote-one-pawn") || matchHardcoded("opposition") || matchHardcoded("rule-of-square") || matchHardcoded("key-squares");
   const totalMatches = memoryStudies.length + middleStudies.length + endStudies.length + otherStudies.length + (needle ? [matchHardcoded("promote-one-pawn"), matchHardcoded("opposition"), matchHardcoded("rule-of-square"), matchHardcoded("key-squares")].filter(Boolean).length : 4);
@@ -138,8 +142,9 @@ export default function StudyPage() {
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-400">End game 🏁</div>
           <h2 className="font-display text-xl text-white">Endgame technique &amp; mates</h2>
-          <p className="text-sm text-ink-400">Guided lessons + rated drills. You play the winning side, Stockfish defends at full strength.</p>
+          <p className="text-sm text-ink-400">Guided lessons + rated drills. Play against exact tablebase defence or both sides, with advice on every move.</p>
         </div>
+        <h3 className="font-display text-base text-ink-200">♙ Pawn endings <span className="ml-2 text-xs font-normal text-ink-500">courses first, then rated drills</span></h3>
         <div className="grid gap-4 sm:grid-cols-2">
           {matchHardcoded("promote-one-pawn") && (
           <Link to="/study/promote"
@@ -221,8 +226,24 @@ export default function StudyPage() {
             </div>
           </Link>
           )}
-          {endStudies.map((s) => <StudyCard key={s.id} s={s} level={levels[s.id]} />)}
+          {pawnStudies.map((s) => <StudyCard key={s.id} s={s} level={levels[s.id]} />)}
         </div>
+        {mateStudies.length > 0 && (
+          <>
+            <h3 className="font-display text-base text-ink-200">♛ Basic checkmates <span className="ml-2 text-xs font-normal text-ink-500">queen · rook · two rooks · two bishops · bishop + knight</span></h3>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {mateStudies.map((s) => <StudyCard key={s.id} s={s} level={levels[s.id]} />)}
+            </div>
+          </>
+        )}
+        {vsPawnStudies.length > 0 && (
+          <>
+            <h3 className="font-display text-base text-ink-200">♜ Piece against pawns <span className="ml-2 text-xs font-normal text-ink-500">stop them before they promote</span></h3>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {vsPawnStudies.map((s) => <StudyCard key={s.id} s={s} level={levels[s.id]} />)}
+            </div>
+          </>
+        )}
         <p className="text-xs text-ink-500">More endgame studies coming — triangulation, corresponding squares…</p>
       </section>
 
