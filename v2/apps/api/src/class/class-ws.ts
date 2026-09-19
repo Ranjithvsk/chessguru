@@ -113,6 +113,14 @@ type ServerFrame =
   | { type: "pointer-off" }                    // coach's cursor left the board (students hide the dot)
   | { type: "orientation"; orientation: Orientation }
   | { type: "participants"; participants: number }
+  // Presence with NAMES and a cause. The bare count above could never answer the
+  // question the coach actually has — who just went, and was it them or us. A
+  // socket that closes with 1000/1001 was a deliberate exit; 1006 and friends are
+  // an abnormal close, which on a class means the far end's device or network went
+  // away. Nothing here is ever the server going away: if it were, this frame could
+  // not be sent. (owner, 2026-09-19)
+  | { type: "presence"; event: "joined" | "left"; who: string; userId: string | null;
+      role: "coach" | "student"; clean: boolean; students: number; participants: number }
   | { type: "pong" }
   // Offer frames go ONLY to the offering coach's own sockets — never to students,
   // who must not see a position that may never be loaded.
@@ -271,7 +279,7 @@ function mintCoachToken(): string {
 // stat; a Mongo hiccup must never disrupt a live class.
 // Returns { firstJoin } so the caller can trigger a one-time late-alert on
 // the very first insert (rejoins don't re-alert).
-async function recordAttendance(classId: string, userId: string | null, name: string, kind: "join" | "leave"): Promise<{ firstJoin: boolean }> {
+async function recordAttendance(classId: string, userId: string | null, name: string, kind: "join" | "leave" | "seen"): Promise<{ firstJoin: boolean }> {
   if (!dbConn?.db) return { firstJoin: false };
   try {
     const col = dbConn.db.collection("classAttendance");
@@ -289,6 +297,27 @@ async function recordAttendance(classId: string, userId: string | null, name: st
       return { firstJoin: false };
     }
   } catch { return { firstJoin: false }; }
+}
+
+// `lastSeenAt` used to move only on a join or a disconnect, which meant it was not a
+// heartbeat at all — it was "time of the last doorway event". On 18 Sep the owner's
+// dashboard therefore froze a coach at 17:44 while he sat in the room for another
+// forty minutes, and the Dream Meet page's end-time fallback inherited the same lie.
+// The client already sends a ping every 20 s to hold the socket open, so the truth
+// was arriving all along and simply being thrown away. Now it lands, throttled to
+// one write a minute per socket so a full class costs a handful of updates.
+const TOUCH_EVERY_MS = 60_000;
+const lastTouch = new WeakMap<WebSocket, number>();
+
+function touchAttendance(ws: WebSocket): void {
+  if (secondScreens.has(ws)) return;          // a second screen is not on the register
+  const who = socketWho.get(ws);
+  if (!who) return;                            // hasn't said hello yet
+  const now = Date.now();
+  const prev = lastTouch.get(ws) ?? 0;
+  if (now - prev < TOUCH_EVERY_MS) return;
+  lastTouch.set(ws, now);
+  void recordAttendance(who.classId, who.userId, who.name, "seen");
 }
 
 const LATE_THRESHOLD_MS = 5 * 60_000;   // 5 min after startAt → "late"
@@ -541,6 +570,19 @@ function sendToCoaches(room: Room, frame: ServerFrame): number {
   return n;
 }
 
+/** Students currently connected — excludes the coach and any second screen, which is
+ *  the number a coach means when they ask "is anyone here". */
+function countStudents(room: Room): number {
+  let n = 0;
+  for (const c of room.clients) {
+    if (c.readyState !== WebSocket.OPEN) continue;
+    if (secondScreens.has(c)) continue;
+    if (socketRole.get(c) === "coach") continue;
+    n++;
+  }
+  return n;
+}
+
 function broadcast(room: Room, frame: ServerFrame): void {
   const payload = JSON.stringify(frame);
   for (const c of room.clients) {
@@ -704,13 +746,22 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     void remaining;
   }
   broadcast(room, { type: "participants", participants: room.clients.size });
+  if (!secondScreens.has(ws)) {
+    const w = socketWho.get(ws);
+    broadcast(room, {
+      type: "presence", event: "joined",
+      who: w?.name || "Someone", userId: w?.userId ?? null,
+      role: socketRole.get(ws) === "coach" ? "coach" : "student",
+      clean: true, students: countStudents(room), participants: room.clients.size,
+    });
+  }
 
   const isCoach = () => socketRole.get(ws) === "coach";
 
   ws.on("message", (raw) => { try {
     let frame: ClientFrame;
     try { frame = JSON.parse(raw.toString()); } catch { return; }
-    if (frame.type === "ping") { send({ type: "pong" }); return; }
+    if (frame.type === "ping") { send({ type: "pong" }); touchAttendance(ws); return; }
 
     if (frame.type === "hello") {
       if (frame.secondScreen === true) secondScreens.add(ws);
@@ -1512,7 +1563,10 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     try { realtimeReporter?.report({ kind: "realtime", route: "class-ws:message", url: roomId, message: mErr?.message || String(mErr), stack: mErr?.stack, userId: socketWho.get(ws)?.userId ?? undefined }); } catch { /* never throw from the error path */ }
   } });
 
-  ws.on("close", () => {
+  ws.on("close", (code?: number) => {
+    const wasCoach = room.coach === ws;
+    const leaver = socketWho.get(ws);
+    const silent = secondScreens.has(ws);
     room.clients.delete(ws);
     // If the coach socket dropped, clear the pointer so a future hello with the token
     // can re-claim. The token itself is NOT reset — coach can reconnect and resume.
@@ -1520,6 +1574,18 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     // Attendance leave — stamps lastSeenAt so the coach can see when someone left.
     const who = socketWho.get(ws);
     if (who && !secondScreens.has(ws)) void recordAttendance(who.classId, who.userId, who.name, "leave");
+    if (!silent) {
+      // 1000 = normal, 1001 = going away (tab closed, navigated). Anything else —
+      // 1006 above all — is an abnormal close: the far end vanished without saying
+      // goodbye, which is a device sleeping, an app backgrounded, or a network gone.
+      broadcast(room, {
+        type: "presence", event: "left",
+        who: leaver?.name || "Someone", userId: leaver?.userId ?? null,
+        role: wasCoach ? "coach" : "student",
+        clean: code === 1000 || code === 1001,
+        students: countStudents(room), participants: room.clients.size,
+      });
+    }
     if (room.clients.size === 0) {
       // KEEP the room in memory for a grace window. Coach tab reloads, or a
       // simultaneous coach+student hiccup, no longer wipe the board. Actual

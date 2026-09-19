@@ -458,37 +458,6 @@ export default function BookReaderPage() {
     return () => window.clearTimeout(t);
   }, [sendState]);
 
-  // Zoom the PAGE only. Pinch or Ctrl+= scales the whole layout, so the board
-  // grew along with the page and pushed its own controls off screen. This
-  // magnifies the pages column and nothing else — the board keeps its column.
-  const [pageZoom, setPageZoom] = useState(1);
-
-  // Pinch over the PAGE scales the page, not the whole app.
-  //
-  // A browser's own pinch zoom magnifies the composited output — every element,
-  // including the board — and a page cannot opt anything out of it. The owner
-  // pinches to read small print in a diagram and the board grows with it, pushing
-  // its controls off the screen. So we take the gesture: touch-action pan-y lets
-  // the browser keep vertical scrolling while handing us the two-finger pinch,
-  // which we turn into pageZoom. One finger still scrolls exactly as before.
-  const pinchRef = useRef<{ dist: number; zoom: number } | null>(null);
-  const touchDist = (t: React.TouchList) =>
-    Math.hypot(t[0]!.clientX - t[1]!.clientX, t[0]!.clientY - t[1]!.clientY);
-  const onPagesTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length === 2) pinchRef.current = { dist: touchDist(e.touches), zoom: pageZoom };
-  };
-  const onPagesTouchMove = (e: React.TouchEvent) => {
-    const start = pinchRef.current;
-    if (!start || e.touches.length !== 2) return;
-    const d = touchDist(e.touches);
-    if (!start.dist) return;
-    const next = Math.min(3, Math.max(0.75, start.zoom * (d / start.dist)));
-    setPageZoom(+next.toFixed(2));
-  };
-  const onPagesTouchEnd = (e: React.TouchEvent) => {
-    if (e.touches.length < 2) pinchRef.current = null;
-  };
-
   const jumpToPage = (p: number) => {
     // Already looking at that page? Then do NOT scroll.
     //
@@ -582,7 +551,7 @@ export default function BookReaderPage() {
   const activeDiagram = book.diagrams.find((d) => d.n === active) ?? null;
 
   return (
-    <div className="mx-auto max-w-[1600px] px-3 pb-40 pt-4" style={{ touchAction: "pan-y" }} onTouchStart={onPagesTouchStart} onTouchMove={onPagesTouchMove} onTouchEnd={onPagesTouchEnd} onTouchCancel={onPagesTouchEnd}>
+    <div className="mx-auto max-w-[1600px] px-3 pb-40 pt-4">
       {/* Header */}
       <div className="mb-4 rounded-2xl bg-gradient-to-r from-brand-600/20 via-fuchsia-600/10 to-transparent p-4 ring-1 ring-brand-500/20">
         <h1 className="text-lg font-bold text-ink-50">{book.title}</h1>
@@ -667,20 +636,7 @@ export default function BookReaderPage() {
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
         {/* Pages */}
-        <div className={`min-w-0 ${activeDiagram ? "max-lg:pb-[60vh]" : ""}`}>
-          <div className="mb-2 flex items-center gap-1.5">
-            <span className="text-[11px] text-ink-500">Page size</span>
-            <button onClick={() => setPageZoom((z) => Math.max(0.75, +(z - 0.25).toFixed(2)))} disabled={pageZoom <= 0.75}
-              className="rounded-md bg-ink-800 px-2 py-0.5 text-sm font-bold text-ink-200 disabled:opacity-40">−</button>
-            <span className="w-10 text-center text-[11px] tabular-nums text-ink-400">{Math.round(pageZoom * 100)}%</span>
-            <button onClick={() => setPageZoom((z) => Math.min(3, +(z + 0.25).toFixed(2)))} disabled={pageZoom >= 3}
-              className="rounded-md bg-ink-800 px-2 py-0.5 text-sm font-bold text-ink-200 disabled:opacity-40">+</button>
-            {pageZoom !== 1 && (
-              <button onClick={() => setPageZoom(1)} className="rounded-md px-2 py-0.5 text-[11px] text-ink-400 hover:text-white">reset</button>
-            )}
-          </div>
-          <div className={pageZoom > 1 ? "overflow-x-auto" : ""}>
-          <div className="space-y-6" style={{ width: `${pageZoom * 100}%`, maxWidth: pageZoom > 1 ? "none" : "100%" }}>
+        <div className={`space-y-6 ${activeDiagram ? "max-lg:pb-[60vh]" : ""}`}>
           {Array.from({ length: book.pages }, (_, p) => (
             <div
               key={p}
@@ -784,8 +740,6 @@ export default function BookReaderPage() {
             </div>
           ))}
         </div>
-        </div>
-        </div>
 
         {/* Board — sticky so it stays with you as the book scrolls.
          *  It must SCROLL WITHIN ITSELF: with the editor palette open the panel
@@ -856,7 +810,7 @@ export default function BookReaderPage() {
                     position could be looked at but not used. Capping the width
                     against the available HEIGHT keeps the whole board and its
                     buttons on screen. */}
-                <div className="mx-auto w-full max-lg:max-w-[calc(58vh-190px)]" style={{ touchAction: "none" }}>
+                <div className="mx-auto w-full max-lg:max-w-[calc(58vh-190px)]">
                 <Board
                   fen={fp.fen}
                   orientation={fp.orientation}

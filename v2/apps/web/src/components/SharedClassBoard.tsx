@@ -320,7 +320,7 @@ export function dismissChallengeMarkToast() { _publishChallengeMarkToast(null); 
 
 // Coach notices — small stacked toasts for "X answered" and "challenge over".
 // Names only, never moves: the coach's screen is often shared with the class.
-export interface CoachNotice { id: number; text: string; tone: "info" | "success"; at: number }
+export interface CoachNotice { id: number; text: string; tone: "info" | "success" | "warn"; at: number }
 let _notices: CoachNotice[] = [];
 const _noticeSubs = new Set<() => void>();
 function _publishNotices(next: CoachNotice[]) { _notices = next; _noticeSubs.forEach((f) => f()); }
@@ -328,6 +328,21 @@ export function pushCoachNotice(text: string, tone: CoachNotice["tone"] = "info"
   _publishNotices([..._notices, { id: Date.now() + Math.random(), text, tone, at: Date.now() }].slice(-4));
 }
 export function dismissCoachNotice(id: number) { _publishNotices(_notices.filter((n) => n.id !== id)); }
+// ---- Who is actually in the room -------------------------------------------
+// The socket only ever broadcast a participant COUNT, so a coach could not tell an
+// empty room from a full one at a glance, and never learned that somebody had
+// dropped. On 18 Sep a coach taught an empty room for half an hour and sent work to
+// eight absent students, with nothing on screen saying so. (owner, 2026-09-19)
+export interface ClassPresence { students: number; knownStudents: boolean }
+let _presence: ClassPresence = { students: 0, knownStudents: false };
+const _presenceSubs = new Set<() => void>();
+function _publishPresence(next: ClassPresence) { _presence = next; _presenceSubs.forEach((f) => f()); }
+export function useClassPresence(): ClassPresence {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((n) => n + 1); _presenceSubs.add(f); return () => { _presenceSubs.delete(f); }; }, []);
+  return _presence;
+}
+
 export function useCoachNotices(): CoachNotice[] {
   const [, force] = useState(0);
   useEffect(() => { const f = () => force((n) => n + 1); _noticeSubs.add(f); return () => { _noticeSubs.delete(f); }; }, []);
@@ -972,6 +987,24 @@ export default function SharedClassBoard(
         let msg: any;
         try { msg = JSON.parse(ev.data); } catch { return; }
         if (msg.type === "pong") return;   // heartbeat reply, no-op
+        if (msg.type === "presence") {
+          _publishPresence({ students: Number(msg.students) || 0, knownStudents: true });
+          const nm = String(msg.who || "Someone");
+          if (msg.role !== "coach") {
+            if (msg.event === "joined") {
+              pushCoachNotice(`${nm} joined`, "success");
+            } else if (msg.clean) {
+              pushCoachNotice(`${nm} left the class`, "info");
+            } else {
+              // Say whose side it was on. An abnormal socket close means the far end
+              // stopped answering — their device slept, their app went to the
+              // background, or their network dropped. This server is plainly fine,
+              // or it could not have sent this message at all.
+              pushCoachNotice(`${nm} dropped out — their device or connection, not yours`, "warn");
+            }
+          }
+          return;
+        }
         if (msg.type === "state") {
           applyFen(msg.fen, msg.lastMove ?? null);
           setMoveCount(Array.isArray(msg.history) ? msg.history.length : 0);

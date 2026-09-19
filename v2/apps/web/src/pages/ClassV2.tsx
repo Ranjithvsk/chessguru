@@ -14,10 +14,10 @@ import {
   GridLayout, ParticipantTile, useTracks, useParticipants,
   useDataChannel, useLocalParticipant, useRoomContext, useIsSpeaking,
 } from "@livekit/components-react";
-import { Track, DataPacket_Kind } from "livekit-client";
+import { Track, DataPacket_Kind, DisconnectReason } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
-import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, useClassStartShapes, triggerClassSeek, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow , useCoachNotices, dismissCoachNotice } from "../components/SharedClassBoard";
+import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, useClassStartShapes, triggerClassSeek, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow , useCoachNotices, dismissCoachNotice, useClassPresence } from "../components/SharedClassBoard";
 import { useScreenWakeLock } from "../hooks/useScreenWakeLock";
 import { OPENINGS, findOpeningForLine, openingBySlug, type Opening } from "../lib/openings";
 import { fetchExplorer, type ExplorerData, type ExplorerMove } from "../lib/explorer";
@@ -1422,6 +1422,7 @@ export default function ClassV2Page() {
   // Then navigate away. On failure we still leave — server might be down and
   // the coach shouldn't be stuck in the tab.
   const endClass = async () => {
+    rejoin.current.leaving = true;   // our own exit — never fight it with a rejoin
     try { await post(`/api/class/${encodeURIComponent(room)}/end`, {}); } catch { /* ignore */ }
     navigate("/class");
   };
@@ -1430,6 +1431,7 @@ export default function ClassV2Page() {
   // auto-redirect after a couple seconds so they know WHY they were kicked
   // (otherwise the sudden nav feels like a bug).
   const onClassEnded = (reason: string) => {
+    rejoin.current.leaving = true;   // the class is over — stop trying to get back in
     setEndedKind(reason);
     setEndedMsg(
       reason === "not-invited"
@@ -1444,6 +1446,31 @@ export default function ClassV2Page() {
   // Kept OUT of errMsg on purpose — see the onError handler below.
   const [mediaWarn, setMediaWarn] = useState<string | null>(null);
   const [tokenData, setTokenData] = useState<LKTokenResp | null>(null);
+  // ---- Connection state, reporting only (owner, 2026-09-19) -------------------
+  // No retry here, deliberately. The record from 18 Sep shows the media SDK
+  // recovering every time it was asked to — once in ~1 s, once in ~17 s — and the
+  // board socket already has a heartbeat and unlimited backoff retries. Nothing in
+  // the evidence shows either giving up. The one connection that never came back
+  // was a device that had gone away, which no retry can reach.
+  //
+  // What DID cause damage was the silence. Both recoveries were invisible, so the
+  // student reloaded the page twice — 42 s after one that had already succeeded —
+  // and a reload is far more disruptive than the drop was: it tears the room down
+  // and rejoins from scratch. So this only reports, and lets the layers underneath
+  // do the work they already do well.
+  const presence = useClassPresence();
+  const [netState, setNetState] = useState<"live" | "reconnecting" | "lost">("live");
+  const rejoin = useRef({ leaving: false });
+
+  // Disconnects that are meant to happen — we left, we were removed, the room is
+  // gone, another tab took this identity. Anything else is worth showing.
+  const DELIBERATE = new Set<unknown>([
+    DisconnectReason.CLIENT_INITIATED,
+    DisconnectReason.PARTICIPANT_REMOVED,
+    DisconnectReason.ROOM_DELETED,
+    DisconnectReason.DUPLICATE_IDENTITY,
+  ]);
+
   // Audience picker — shows on coach entry if no audience has been picked
   // for this class yet (ad-hoc "Start now" rooms + scheduled classes without
   // a batch). Coach can re-open via the footer 🎯 button to change mid-class.
@@ -1625,13 +1652,49 @@ export default function ClassV2Page() {
           onDisconnected={(reason) => {
             // eslint-disable-next-line no-console
             console.warn("[ClassV2] LiveKit disconnected. reason=", reason);
+            if (rejoin.current.leaving) return;
+            if (reason !== undefined && DELIBERATE.has(reason)) return;
+            // Say it is coming back. The SDK is already trying; the student's job is
+            // simply to NOT hit reload while it does.
+            setNetState("reconnecting");
           }}
           onConnected={() => {
             // eslint-disable-next-line no-console
             console.log("[ClassV2] LiveKit connected OK");
+            setNetState("live");
           }}
           className="flex h-full min-h-0 flex-col"
         >
+          {/* Nobody here. A coach cannot see the room from inside it: on 18 Sep one
+            * taught an empty room for half an hour and sent a position pack to eight
+            * students who had all gone. Only shown once the server has actually told
+            * us the count, so an empty room and an unknown one never look alike. */}
+          {role === "coach" && presence.knownStudents && presence.students === 0 && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="flex shrink-0 flex-wrap items-center justify-center gap-x-2 gap-y-0.5 bg-amber-500/15 px-4 py-1.5 text-xs font-semibold text-amber-200"
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+              No students in the room.
+              <span className="font-normal text-amber-200/70">Anything you send now will wait for them to arrive.</span>
+            </div>
+          )}
+          {/* Connection state. Silent while live; the moment the link drops this is
+            * the difference between "my teacher went quiet" and "my internet went",
+            * which on 18 Sep nobody could tell apart. */}
+          {netState !== "live" && (
+            <div
+              role="status"
+              aria-live="polite"
+              className={`flex shrink-0 items-center justify-center gap-2 px-4 py-1.5 text-xs font-semibold ${
+                netState === "reconnecting" ? "bg-amber-500/15 text-amber-200" : "bg-rose-500/15 text-rose-200"
+              }`}
+            >
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+              Connection dropped — reconnecting. No need to reload.
+            </div>
+          )}
           {/* Top bar — shrink-0 so it always owns its full height and never
            *  gets squeezed by the board flex-1 below (was overlapping the
            *  top rank of the board). */}
@@ -2131,7 +2194,7 @@ function CoachNoticeHost() {
   return (
     <div className="pointer-events-none fixed bottom-24 left-3 z-[60] flex w-[min(92vw,22rem)] flex-col gap-2" data-testid="coach-notices">
       {notices.map((n) => (
-        <div key={n.id} className={`pointer-events-auto rounded-xl border px-3 py-2 text-sm shadow-2xl backdrop-blur ${n.tone === "success" ? "border-emerald-400/50 bg-emerald-500/20 text-emerald-100" : "border-purple-400/50 bg-purple-500/20 text-purple-100"}`}>
+        <div key={n.id} className={`pointer-events-auto rounded-xl border px-3 py-2 text-sm shadow-2xl backdrop-blur ${n.tone === "success" ? "border-emerald-400/50 bg-emerald-500/20 text-emerald-100" : n.tone === "warn" ? "border-amber-400/50 bg-amber-500/20 text-amber-100" : "border-purple-400/50 bg-purple-500/20 text-purple-100"}`}>
           <div className="flex items-start justify-between gap-2">
             <span>{n.text}</span>
             <button onClick={() => dismissCoachNotice(n.id)} className="text-xs text-ink-300 hover:text-white">✕</button>
