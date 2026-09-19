@@ -512,11 +512,14 @@ export default function Navbar({ rating, ratingProvisional, username, admin, onL
           descendants. Nested here, the backdrop's top-14/bottom-0 resolved
           against the 56px-tall header and collapsed to zero height — invisible,
           and impossible to click, so tapping outside never closed the drawer. */}
-      {menuOpen && createPortal(
+      {/* Always mounted, slid off-screen when closed (owner 2026-09-19: "opens late" on
+          gunachess.com). Mounting the whole menu on tap plus painting a full-screen
+          backdrop-blur cost ~600 ms on a throttled phone; now opening is one transform. */}
+      {createPortal(
         <>
-          <div className="fixed inset-0 top-14 z-40 bg-black/50 backdrop-blur-sm"
+          <div className={`fixed inset-0 top-14 z-40 bg-black/50 transition-opacity duration-150 ${menuOpen ? "opacity-100" : "pointer-events-none opacity-0"}`}
             onClick={() => setMenuOpen(false)} aria-hidden="true" />
-          <aside className="fixed left-0 top-14 z-50 h-[calc(100dvh-3.5rem)] w-72 max-w-[85vw] overflow-y-auto border-r border-ink-700/70 bg-ink-900 shadow-2xl">
+          <aside aria-hidden={!menuOpen} className={`fixed left-0 top-14 z-50 h-[calc(100dvh-3.5rem)] w-72 max-w-[85vw] overflow-y-auto border-r border-ink-700/70 bg-ink-900 shadow-2xl transition-transform duration-150 will-change-transform ${menuOpen ? "translate-x-0" : "pointer-events-none -translate-x-full"}`}>
             <div className="px-3 py-4">
               {GROUPS.map((g) => (
                 <DrawerGroup key={g.label} group={g} currentPath={pathname} />
