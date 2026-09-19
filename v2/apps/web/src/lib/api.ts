@@ -210,7 +210,7 @@ export const studyMe = (type: string) =>
   get<{ rating: number; nb: number; guest: boolean }>(`/api/study/me?type=${encodeURIComponent(type)}`);
 /** Study trainer: the opponent's reply from the server — exact tablebase play for ≤5 pieces
  *  ("hard") or Stockfish 18 + tables ("medium"). mateIn = full moves until mate with best play, when known. */
-export interface DefenceReply { ok: boolean; move?: string | null; mateIn?: number | null; source?: "oracle" | "stockfish"; level?: string; ms?: number; reason?: string }
+export interface DefenceReply { ok: boolean; move?: string | null; mateIn?: number | null; wdl?: number; source?: "oracle" | "stockfish"; level?: string; ms?: number; reason?: string }
 export const studyDefend = (fen: string, level: "medium" | "hard") =>
   post<DefenceReply>("/api/study/defend", { fen, level });
 

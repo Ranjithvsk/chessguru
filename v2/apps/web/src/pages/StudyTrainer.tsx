@@ -111,6 +111,11 @@ function autoDefence(rating: number, kind: string): DefenceLevel {
   return rating < 1600 ? "medium" : "hard";
 }
 const DEFENCE_LABEL: Record<DefenceLevel, string> = { easy: "Easy", medium: "Medium", hard: "Hard" };
+// Play mode (owner 2026-09-19: "play both sides by user or play against engine"). "both" = the
+// student moves for both colours (no engine reply, nothing rated); the tablebase still reports
+// "mate in N" after every move so they can check their own defence as well as their technique.
+type PlayMode = "engine" | "both";
+const MODE_KEY = "cg_study_mode";
 
 export default function StudyTrainer() {
   const { id } = useParams();
@@ -134,6 +139,12 @@ export default function StudyTrainer() {
   const defenceLevel: DefenceLevel = defencePick ?? autoDefence(userRating, def?.kind ?? "mate");   // def.kind: `kind` is declared further down
   const defenceLevelRef = useRef<DefenceLevel>(defenceLevel); defenceLevelRef.current = defenceLevel;
   const pickDefence = (v: DefenceLevel) => { setDefencePick(v); try { localStorage.setItem(DEFENCE_KEY, v); } catch { /* */ } };
+  const [mode, setMode] = useState<PlayMode>(() => { try { return localStorage.getItem(MODE_KEY) === "both" ? "both" : "engine"; } catch { return "engine"; } });
+  const modeRef = useRef<PlayMode>(mode); modeRef.current = mode;
+  const pickMode = (v: PlayMode) => { setMode(v); try { localStorage.setItem(MODE_KEY, v); } catch { /* */ } };
+  // Tempo feedback (engine mode, Hard): the defender's last "mate in N" is the target; after the
+  // student's next move the new count must be N−1, otherwise they gave a tempo away.
+  const mateTargetRef = useRef<number | null>(null);
   const [ratingDiff, setRatingDiff] = useState<number | null>(null);
   const userRatingRef = useRef(1200);
   const puzzleIdRef = useRef<string | null>(null);
@@ -143,7 +154,7 @@ export default function StudyTrainer() {
   const pieces = def?.pieces ?? ["Q"];
   const kind = def?.kind ?? "mate";
   const newPosition = useCallback(async () => {
-    setThinking(false); setRatingDiff(null);
+    setThinking(false); setRatingDiff(null); mateTargetRef.current = null; setDefenceNote(null);
     // Prefer a RATED puzzle from the study DB at the player's level (matchmaking); else local generation.
     if (def && (kind === "mate" || kind === "stopPawn" || kind === "pawnEnd")) {
       try {
@@ -233,8 +244,9 @@ export default function StudyTrainer() {
   const moveNo = () => Math.ceil(game.current.history().length / 2);
   const finished = (): boolean => {
     if (game.current.isCheckmate()) {
-      if (game.current.turn() === "w") { setStatus({ kind: "draw", msg: "You got checkmated \u{1F62C} Tap New position ↻" }); reportResult(false); }
-      else { setStatus({ kind: "win", msg: `Checkmate! \u{1F389} Mated in ${moveNo()} moves.` }); reportResult(true); }
+      const both = modeRef.current === "both";
+      if (game.current.turn() === "w") { setStatus({ kind: both ? "win" : "draw", msg: both ? "Checkmate — Black wins. Tap New position ↻" : "You got checkmated \u{1F62C} Tap New position ↻" }); if (!both) reportResult(false); }
+      else { setStatus({ kind: "win", msg: `Checkmate! \u{1F389} Mated in ${moveNo()} moves.` }); if (!both) reportResult(true); }
       return true;
     }
     if (game.current.isStalemate() || game.current.isDraw()) {
@@ -242,7 +254,7 @@ export default function StudyTrainer() {
       setStatus(held
         ? { kind: "win", msg: "Draw secured! \u{1F389} You held the theoretical draw \u2014 that is the win here." }
         : { kind: "draw", msg: "Draw \u2014 but this one was winnable. Tap New position ↻" });
-      reportResult(held);
+      if (modeRef.current !== "both") reportResult(held);
       return true;
     }
     return false;
@@ -254,6 +266,22 @@ export default function StudyTrainer() {
     if (!mv) { setFen(game.current.fen()); force((n) => n + 1); return; }
     setLastMove([from, to]); setFen(game.current.fen());
     if (finished()) return;
+    if (modeRef.current === "both") {
+      // No engine reply — the student plays the other colour too. Ask the tablebase for the
+      // count so both sides can be checked against best play; never blocks the board.
+      const side = game.current.turn() === "w" ? "White" : "Black";
+      setStatus({ kind: "play", msg: `${side} to move — you play both sides.` }); setDefenceNote(null);
+      const snap = game.current.fen();
+      try {
+        const r = await Promise.race([studyDefend(snap, "hard"), new Promise<never>((_, rej) => setTimeout(() => rej(new Error("slow")), 2500))]);
+        if (game.current.fen() !== snap) return;   // the student already moved on
+        if (r?.ok && typeof r.mateIn === "number" && typeof r.wdl === "number") {
+          const winner = (r.wdl > 0) === (game.current.turn() === "w") ? "White" : "Black";
+          setDefenceNote(`tablebase · ${winner} mates in ${r.mateIn} with best play`);
+        } else if (r?.ok && r.wdl === 0) setDefenceNote("tablebase · drawn with best play");
+      } catch { /* offline: no count */ }
+      return;
+    }
     const level = defenceLevelRef.current;
     setThinking(true); setStatus({ kind: "think", msg: level === "easy" ? "Defending… (Easy)" : level === "medium" ? "Stockfish 18 is defending… (Medium)" : "Best defence… (Hard)" });
     setDefenceNote(null);
@@ -271,11 +299,19 @@ export default function StudyTrainer() {
         ]);
         if (r?.ok && r.move) {
           best = r.move;
-          if (typeof r.mateIn === "number") note = `${r.source === "oracle" ? "tablebase" : "Stockfish 18"} · mate in ${r.mateIn} with best play`;
-          else note = r.source === "oracle" ? "tablebase defence" : "Stockfish 18 (server)";
+          if (typeof r.mateIn === "number") {
+            note = `${r.source === "oracle" ? "tablebase" : "Stockfish 18"} · mate in ${r.mateIn} with best play`;
+            // Compare with the previous reply: best play shortens the mate by exactly one each move.
+            const target = mateTargetRef.current;
+            if (target != null && r.source === "oracle") {
+              if (r.mateIn <= target - 1) note += " · ✓ best move";
+              else note += ` · you gave away ${r.mateIn - target + 1} tempo${r.mateIn - target + 1 === 1 ? "" : "s"} (mate in ${target - 1} was there)`;
+            }
+            mateTargetRef.current = r.source === "oracle" ? r.mateIn : null;
+          } else { note = r.source === "oracle" ? "tablebase defence" : "Stockfish 18 (server)"; mateTargetRef.current = null; }
         }
       } catch { /* offline / slow → browser engine */ }
-      if (!best) { best = await local(20, 600); note = "browser Stockfish"; }
+      if (!best) { best = await local(20, 600); note = "browser Stockfish"; mateTargetRef.current = null; }
     }
     if (best && best !== "(none)" && best.length >= 4) {
       try {
@@ -290,7 +326,7 @@ export default function StudyTrainer() {
 
 
   const over = game.current.isGameOver();
-  const myTurn = ready && !thinking && !over && game.current.turn() === "w";
+  const myTurn = ready && !thinking && !over && (mode === "both" || game.current.turn() === "w");
   const dests = useMemo(() => (myTurn ? destsFromChess(game.current as never) : new Map()), [fen, myTurn]);
   const tone = { play: "text-ink-200", think: "text-gold-400", win: "text-accent-400", draw: "text-rose-400" }[status.kind];
 
@@ -303,7 +339,7 @@ export default function StudyTrainer() {
       <section>
         <Board
           fen={fen} orientation="white" turnColor={game.current.turn() === "w" ? "white" : "black"}
-          movableColor={myTurn ? "white" : undefined} dests={dests} lastMove={lastMove}
+          movableColor={myTurn ? (game.current.turn() === "w" ? "white" : "black") : undefined} dests={dests} lastMove={lastMove}
           check={game.current.isCheck()} onMove={onMove}
         />
       </section>
@@ -347,9 +383,19 @@ export default function StudyTrainer() {
           <div className={`text-base font-semibold ${tone}`}>{status.msg}</div>
           <div className="mt-1 text-xs text-ink-500">Move {moveNo()} · {ready ? "engine ready" : "loading engine…"}{defenceNote ? ` · ${defenceNote}` : ""}</div>
           <div className="mt-3 flex items-center gap-1.5 text-xs">
+            <span className="mr-1 text-ink-500">Play</span>
+            {(["engine", "both"] as PlayMode[]).map((v) => (
+              <button key={v} type="button" onClick={() => pickMode(v)} disabled={thinking}
+                title={v === "engine" ? "You play White; the engine defends" : "You move both colours; nothing is rated, the tablebase still counts the mate"}
+                className={`rounded-full px-2.5 py-1 font-semibold ${mode === v ? "bg-brand-600 text-white" : "border border-ink-700 text-ink-300 hover:bg-ink-800"}`}>
+                {v === "engine" ? "vs engine" : "both sides"}
+              </button>
+            ))}
+          </div>
+          <div className={`mt-2 flex items-center gap-1.5 text-xs ${mode === "both" ? "opacity-40" : ""}`}>
             <span className="mr-1 text-ink-500">Defence</span>
             {(["easy", "medium", "hard"] as DefenceLevel[]).map((v) => (
-              <button key={v} type="button" onClick={() => pickDefence(v)} disabled={thinking}
+              <button key={v} type="button" onClick={() => pickDefence(v)} disabled={thinking || mode === "both"}
                 title={v === "easy" ? "Browser Stockfish, makes small mistakes" : v === "medium" ? "Stockfish 18 + tablebases — near-perfect" : "Exact tablebase — never gives a move away"}
                 className={`rounded-full px-2.5 py-1 font-semibold ${defenceLevel === v ? "bg-brand-600 text-white" : "border border-ink-700 text-ink-300 hover:bg-ink-800"}`}>
                 {DEFENCE_LABEL[v]}
