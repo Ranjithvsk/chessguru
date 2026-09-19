@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import MoveTree from "../components/MoveTree";
+import { EngineAnalysisPanel } from "../components/EngineAnalysisPanel";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Chess } from "chess.js";
 import Board from "../components/Board";
@@ -875,6 +876,19 @@ export default function BoardEditorPage() {
             <MoveTree tree={fp.tree as any} path={fp.path} onPick={fp.goTo} className="max-h-56 overflow-auto" />
           </div>
         )}
+
+        {/* Engine analysis — the same panel as the puzzles board, so Stockfish behaves
+          * identically wherever you meet it and the on/off choice carries across pages
+          * (it stores its own cg.engine.enabled and starts OFF, so nobody's phone spins
+          * up an engine just for opening the editor). (owner, 2026-09-19)
+          *
+          * Fed fp.fen, the APPLIED position, not the half-built one from edit mode: a
+          * position being assembled piece by piece is usually illegal, and asking an
+          * engine to evaluate an illegal board only produces an error. Finish the edit
+          * and the engine follows. */}
+        <div className="mt-3">
+          <EngineAnalysisPanel fen={fp.fen} />
+        </div>
         {editMode && (
           <div className="mt-3 rounded-xl2 border border-brand-500/40 bg-brand-500/5 p-3">
             <div className="mb-2 flex items-center justify-between gap-2 text-[11px]">
