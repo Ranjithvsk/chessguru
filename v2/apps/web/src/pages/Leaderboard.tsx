@@ -615,9 +615,36 @@ export default function LeaderboardPage() {
           avg-time/blindfold/themes/streak/attend. Long, so it scrolls
           horizontally on mobile — the first two cols freeze via sticky. */}
       <div className="rounded-xl border border-ink-700 bg-ink-900/40">
-        <div className="flex items-baseline justify-between border-b border-ink-800 px-3 py-2 text-[11px] text-ink-500">
+        {/* The weights here MUST match WEIGHTS in academy.service.ts. They drifted
+            once already — this line still read "25% rating + 25% puzzles + 15%
+            streak + 10% attend" long after the server moved to 20/20/30/5 and
+            renamed streak to consistency, so the board was explaining a formula
+            it no longer used. Consistency is the biggest single term and was not
+            named at all, which is the one number a student can actually act on. */}
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-ink-800 px-3 py-2 text-[11px] text-ink-500">
           <span>Showing {Math.min(rows.length, 20)} of {rows.length} students</span>
-          <span>Score = 25% rating + 25% puzzles + 15% accuracy + 15% streak + 10% themes + 10% attend</span>
+          <details className="group">
+            <summary className="cursor-pointer list-none text-ink-400 hover:text-ink-200">
+              Score = 20% rating + 20% puzzles + 15% accuracy + <b className="text-emerald-300">30% consistency</b> + 10% themes + 5% attendance
+              <span className="ml-1 text-ink-600 group-open:hidden">· how is consistency measured?</span>
+            </summary>
+            <div className="mt-2 max-w-xl rounded-lg border border-ink-800 bg-ink-950/60 p-2 leading-relaxed text-ink-400">
+              <b className="text-ink-200">Consistency (30%)</b> is the largest single term, and it rewards
+              turning up rather than grinding. Five parts, all measured over the last 30 days:
+              <ul className="mt-1 space-y-0.5 pl-4">
+                <li className="list-disc"><b className="text-ink-300">35%</b> — days with at least one puzzle, out of 30</li>
+                <li className="list-disc"><b className="text-ink-300">20%</b> — current daily streak, √-capped at 60 days, so day 10 adds far more than day 50</li>
+                <li className="list-disc"><b className="text-ink-300">10%</b> — weekly cadence: weeks with 3+ active days, over the last 8</li>
+                <li className="list-disc"><b className="text-ink-300">20%</b> — days a class was attended, out of 30</li>
+                <li className="list-disc"><b className="text-ink-300">15%</b> — attendance streak, √-capped the same way</li>
+              </ul>
+              <p className="mt-1.5">
+                Half of it is practice and half is showing up to class, so a grinder who never attends
+                and a student who only attends both fall short of one who does both. Attendance also
+                counts on its own at 5%, which is why it appears twice.
+              </p>
+            </div>
+          </details>
         </div>
         <div className="max-h-[880px] overflow-y-auto overflow-x-auto overscroll-contain">
           <table className="min-w-full text-sm">
