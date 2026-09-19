@@ -1,0 +1,13 @@
+[Unit]
+Description=ChessGuru endgame tablebase oracle (Syzygy 3-4-5 via python-chess, loopback :4731)
+After=network.target
+
+[Service]
+User=dreamworld
+Environment=SYZYGY_DIR=/home/ubuntu/engines/syzygy TB_ORACLE_PORT=4731
+ExecStart=/opt/chessguru-vision/.venv/bin/python /home/dreamworld/chessguru/v2/apps/api/tools/tb_oracle.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
