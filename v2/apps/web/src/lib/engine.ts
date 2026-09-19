@@ -23,6 +23,8 @@ export interface Engine {
    *  strength (index 0 = best). Powers the "top 3 lines" panel on the
    *  puzzle trainer (owner ask 2026-08-18). */
   analyseMulti(fen: string, multiPv: number, movetimeMs?: number): Promise<Analysis[]>;
+  /** Raw UCI option, e.g. setOption("Skill Level", 3) for the study trainer's Easy defence. */
+  setOption(name: string, value: string | number): void;
   quit(): void;
 }
 
@@ -131,7 +133,8 @@ export function createEngine(): Engine {
       send("go movetime " + movetimeMs);
     });
 
-  return { ready, bestMove, analyse, analyseMulti, quit: () => w.terminate() };
+  const setOption = (name: string, value: string | number) => send(`setoption name ${name} value ${value}`);
+  return { ready, bestMove, analyse, analyseMulti, setOption, quit: () => w.terminate() };
 }
 
 /** Convert side-to-move CP to white-perspective CP (for display consistency). */
