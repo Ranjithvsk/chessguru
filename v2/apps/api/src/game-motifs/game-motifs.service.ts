@@ -13,7 +13,7 @@ import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { Chess } from "chess.js";
 import { createRequire } from "module";
-import { Stockfish, toWhiteCp, type PositionEval } from "../my-games/stockfish";
+import { Stockfish, toWhiteCp, UnsafeFenError, type PositionEval } from "../my-games/stockfish";
 import { strategicTags, nullMoveFen, gameCharacter, STRATEGIC_POINTS, STRATEGIC_LABEL, STRATEGIC_ORDER, isEndgame } from "./strategic";
 import { OpeningBook, OpeningTally, OPENING_PLIES, OPENING_POINTS, OPENING_LABEL } from "./opening";
 
@@ -357,7 +357,13 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
         engine.analyze(fen, DEPTH, MOVETIME_MS),
         new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error("engine did not answer within 15 s")), EVAL_TIMEOUT_MS); }),
       ]);
-    } catch (e) { await this.dropEngine(slot); throw e; }
+    } catch (e) {
+      // A rejected FEN says nothing about the engine — it never received the
+      // position. Dropping it here would respawn a healthy process for every
+      // bad row in a game. Real engine faults still drop it.
+      if (!(e instanceof UnsafeFenError)) await this.dropEngine(slot);
+      throw e;
+    }
     finally { if (timer) clearTimeout(timer); }
   }
 

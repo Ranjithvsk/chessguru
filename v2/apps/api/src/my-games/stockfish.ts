@@ -17,6 +17,52 @@ export interface PositionEval {
 
 const STOCKFISH_PATH = process.env.STOCKFISH_PATH ?? "/home/ubuntu/engines/stockfish";
 
+/** Thrown instead of handing Stockfish a position that would kill it. Distinct
+ *  from an engine fault so callers can skip the position without tearing down a
+ *  process that is still perfectly healthy. */
+export class UnsafeFenError extends Error {
+  constructor(readonly fen: string, reason: string) {
+    super(`unsafe FEN for engine (${reason}): ${JSON.stringify(String(fen).slice(0, 120))}`);
+    this.name = "UnsafeFenError";
+  }
+}
+
+/** Stockfish assumes it is given a legal position and does not defend against
+ *  one that isn't. A board with a king missing makes `square<KING>()` return an
+ *  invalid square, which then indexes the magic-bitboard `Magics[]` array out of
+ *  range; the sliding-attack lookup dereferences the garbage pointer it finds
+ *  there and the process dies with SIGSEGV. Verified 2026-09-19 against SF 18:
+ *  an empty board, either king missing, both missing, an unparseable string and
+ *  an empty string all crash at the same instruction offset (0x2aed9) as every
+ *  production crash — ~2-3 an hour, each writing a ~370 MB core dump.
+ *
+ *  This checks only what actually crashes it. Positions that are odd but legal —
+ *  nine queens, both kings adjacent, the side to move already giving check —
+ *  are Stockfish's business and pass through untouched. Returns null when safe,
+ *  otherwise the reason it isn't. */
+export function unsafeFenReason(fen: unknown): string | null {
+  if (typeof fen !== "string") return "not a string";
+  const board = fen.trim().split(/\s+/)[0] ?? "";
+  if (!board) return "empty";
+  const ranks = board.split("/");
+  if (ranks.length !== 8) return `${ranks.length} ranks, expected 8`;
+  let whiteKings = 0, blackKings = 0;
+  for (const rank of ranks) {
+    let squares = 0;
+    for (const ch of rank) {
+      if (ch >= "1" && ch <= "8") { squares += Number(ch); continue; }
+      if (!"KQRBNPkqrbnp".includes(ch)) return `bad character ${JSON.stringify(ch)}`;
+      squares += 1;
+      if (ch === "K") whiteKings++;
+      else if (ch === "k") blackKings++;
+    }
+    if (squares !== 8) return `rank ${JSON.stringify(rank)} covers ${squares} squares, expected 8`;
+  }
+  if (whiteKings !== 1) return `${whiteKings} white kings`;
+  if (blackKings !== 1) return `${blackKings} black kings`;
+  return null;
+}
+
 export class Stockfish {
   private proc: ChildProcess | null = null;
   private buffer = "";
@@ -37,6 +83,11 @@ export class Stockfish {
   // game-motifs uses it to keep a 150-ply game under ~20 s; my-games keeps its depth-only search.
   async analyze(fen: string, depth: number = 15, movetimeMs?: number): Promise<PositionEval> {
     if (!this.proc) throw new Error("stockfish not started");
+    // Guard BEFORE the engine ever sees it — a kingless position takes the
+    // process down with it, and the caller loses the whole analysis plus a
+    // 370 MB core dump. See unsafeFenReason.
+    const bad = unsafeFenReason(fen);
+    if (bad) throw new UnsafeFenError(fen, bad);
     this.send("position fen " + fen);
     this.send(movetimeMs ? `go depth ${depth} movetime ${Math.max(20, Math.round(movetimeMs))}` : `go depth ${depth}`);
     let latestCp: number | undefined;
