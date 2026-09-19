@@ -2,7 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { FairplayService } from "../fairplay/fairplay.service";
-import { updatePuzzleRating, isProvisional, DEFAULT_VOLATILITY, DAILY_RATED_LIMIT, assessSuspicion, isCrazyRatingDelta, isDrill } from "../glicko/glicko";
+import { updatePuzzleRating, isProvisional, DEFAULT_VOLATILITY, DAILY_RATED_LIMIT, assessSuspicion, isCrazyRatingDelta, isDrill, UNRATED_THEMES } from "../glicko/glicko";
 import { fmtPuzzle, applyLastMove } from "../lib/puzzle-format";
 import { recordAndCelebrate } from "./milestones";
 import { PushService } from "../push/push.service";
@@ -365,7 +365,8 @@ export class PuzzlesService {
   }
 
   // Tags that describe the puzzle, not a skill — they don't get their own rating.
-  static readonly UNRATED = new Set(["oneMove", "short", "long", "veryLong", "equality", "advantage", "crushing", "mate", "master", "masterVsMaster", "superGM"]);
+  /** @see UNRATED_THEMES — one definition, shared with the fair-play restore. */
+  static readonly UNRATED = UNRATED_THEMES;
 
   async dashboard(userId: string | null) {
     if (!userId) return { loggedIn: false };

@@ -2829,6 +2829,18 @@ Thank you!`;
     return this.fairplay.decide(studentId, g.academyId, { userId: g.userId, role: g.role }, kind, body?.note);
   }
 
+  /** Coach/owner: give back the rating one flagged solve was denied, after the
+   *  coach has reviewed it and judged it genuine. Audited. Body: { note } */
+  async suspiciousRestore(session: any, studentId: string, puzzleId: string, body: any) {
+    const g = this.ensureCoachOrOwner(session);
+    const filter: any = { _id: studentId as any, academyId: g.academyId, role: "student" };
+    if (g.role === "coach") filter.coachId = g.userId;
+    const st: any = await this.users().findOne(filter, { projection: { _id: 1 } });
+    if (!st) return { ok: false, error: "That student isn't in your roster." };
+    if (typeof puzzleId !== "string" || !puzzleId.trim()) return { ok: false, error: "Which solve?" };
+    return this.fairplay.restoreSolve(studentId, g.academyId, { userId: g.userId, role: g.role }, puzzleId.trim(), body?.note);
+  }
+
   /** Everything behind one student's score: each solve in the window (for the
    *  speed chart), per-day sessions, the components, the fastest hard wins. */
   async suspiciousDetail(session: any, studentId: string) {
@@ -2839,7 +2851,7 @@ Thank you!`;
     if (!st) return { ok: false, error: "That student isn't in your roster." };
     const r = await this.fairplay.scoreUser(studentId, g.academyId, { notify: false });
     const { rounds } = await this.fairplay.roundsFor(studentId);
-    const solves = rounds.slice(-1500).map((x) => ({ pid: x.pid, at: x.d, pr: x.pr, r: x.r, w: x.w, ms: x.ms ?? null, mvMs: x.mv_ms ?? null, dub: !!x.dub, dubr: x.dubr ?? null, held: !!x.held, crowdMedMs: this.fairplay.crowdMedianMs(x.pid, x.pr) }));
+    const solves = rounds.slice(-1500).map((x) => ({ pid: x.pid, at: x.d, pr: x.pr, r: x.r, w: x.w, ms: x.ms ?? null, mvMs: x.mv_ms ?? null, dub: !!x.dub, dubr: x.dubr ?? null, held: !!x.held, restored: !!x.restored, crowdMedMs: this.fairplay.crowdMedianMs(x.pid, x.pr) }));
     return { ok: true, userId: studentId, name: st.name || st.username || studentId, score: r.score, band: r.band, hold: r.hold, components: r.components, evidence: r.evidence, windowStart: r.windowStart, lastReset: r.lastReset, solves, decision: r.decision, handScore: r.handScore, modelScore: r.modelScore, modelActive: r.modelActive };
   }
 

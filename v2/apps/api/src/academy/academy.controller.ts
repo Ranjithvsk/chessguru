@@ -132,6 +132,12 @@ export class AcademyController {
     return this.svc.suspiciousDecide(req.session, id, "clear", body);
   }
 
+  /** Coach/owner: credit back the rating one flagged solve was denied. Body: { note } */
+  @Post("suspicious-solves/:id/restore/:pid")
+  suspiciousRestore(@Req() req: any, @Param("id") id: string, @Param("pid") pid: string, @Body() body: any) {
+    return this.svc.suspiciousRestore(req.session, id, pid, body);
+  }
+
   /** Coach/owner: put a student's rated gains on hold. Body: { note } */
   @Post("suspicious-solves/:id/hold")
   suspiciousHold(@Req() req: any, @Param("id") id: string, @Body() body: any) {

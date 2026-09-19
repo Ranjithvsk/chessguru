@@ -21,6 +21,10 @@ import { assessSuspicion, isDrill } from "../glicko/glicko";
 export interface RoundLite {
   pid: string; d: Date; pr: number; r: number; w: boolean;
   ms?: number; mv_ms?: number[]; dub?: boolean; dubr?: string[]; nc?: boolean; held?: boolean;
+  /** A coach reviewed this flagged solve, judged it genuine and credited the
+   *  rating back. It keeps `dub`/`dubr` as a record of why it was caught, but
+   *  stops counting as a flag — see withRetroFlags. */
+  restored?: boolean;
   th?: string[]; sel?: string;
 }
 export type Band = "clear" | "watch" | "review";
@@ -61,7 +65,12 @@ export function withRetroFlags(rs: RoundLite[]): RoundLite[] {
   const hardWins: number[] = [];   // ms of wins on 2400+ in order
   for (const x of rs) {
     let y = x;
-    if (x.dub === undefined && x.d < DETECTOR_LIVE && typeof x.ms === "number") {
+    // A coach has already looked at this exact solve and judged it genuine.
+    // Strip the flag here rather than at the call sites so it is dropped for
+    // retro-replayed rounds too — otherwise the replay below would simply
+    // re-flag an old solve the coach had cleared.
+    if (x.restored) y = { ...x, dub: false, dubr: [] };
+    else if (x.dub === undefined && x.d < DETECTOR_LIVE && typeof x.ms === "number") {
       const recent = hardWins.slice(-10).filter((m) => m < 6000).length;
       const { flags } = assessSuspicion({ userR: x.r, puzzleR: x.pr, ms: x.ms, mvMs: x.mv_ms, win: x.w, recentFastHardWins: recent, themes: x.th, sel: x.sel });
       if (flags.length) y = { ...x, dub: true, dubr: flags };

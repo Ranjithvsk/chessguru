@@ -13,7 +13,7 @@ import { get, post } from "../lib/api";
 interface Fastest { puzzleId: string; pr: number; ms: number; mvMs: number[] | null; at: string }
 interface Components { flags: number; fastHard: number; accuracy: number; crowd: number; climb: number; themeFlat: number; playGap: number }
 interface Decision { kind: "clear" | "hold" | "reset"; by: string; note: string; at: string }
-interface Recent { userId: string; name: string; kind: "clear" | "hold" | "reset" | "review"; by: string | null; byName: string | null; note: string; score: number | null; at: string }
+interface Recent { userId: string; name: string; kind: "clear" | "hold" | "reset" | "review" | "restore"; by: string | null; byName: string | null; note: string; score: number | null; at: string }
 interface ModelStatus { active: boolean; reason: string; n: { assisted: number; honest: number }; cv: { accuracy: number | null; correct: number; total: number; falseAlarms: number; missed: number }; trainedAt: string }
 interface Report {
   month: string; solves: number; flagged: number; activeStudents: number; students: number;
@@ -31,7 +31,7 @@ interface Row {
   reviewSince: string | null; windowStart: string; lastReset: { at: string } | null;
   decision: Decision | null; handScore: number; modelScore: number;
 }
-interface Solve { pid: string; at: string; pr: number; r: number; w: boolean; ms: number | null; mvMs: number[] | null; dub: boolean; dubr: string[] | null; held: boolean; crowdMedMs: number | null }
+interface Solve { pid: string; at: string; pr: number; r: number; w: boolean; ms: number | null; mvMs: number[] | null; dub: boolean; dubr: string[] | null; held: boolean; restored: boolean; crowdMedMs: number | null }
 interface Detail {
   ok: boolean; error?: string; userId: string; name: string; score: number; band: Row["band"]; hold: boolean; components: Components;
   evidence: { solves: number; flagged: number; reasons: Record<string, number>; hard: Row["hard"]; atLevel: { n: number; winPct: number | null }; above: { n: number; winPct: number | null }; crowdRatio: number | null; ratingStart: number | null; ratingEnd: number | null; climb: number; fastest: { pid: string; pr: number; ms: number; mvMs: number[] | null; at: string }[]; sessions: { day: string; solves: number; wins: number }[]; peakHour: { hour: string; solves: number } | null; themes: { n: number; sd: number; min: number; max: number } | null; play: { speed: string; r: number; nb: number; gap: number } | null };
@@ -46,7 +46,7 @@ const REASON_LABEL: Record<string, string> = {
   focus_loss: "left the tab, moved on return",
 };
 const secs = (ms: number) => (ms / 1000).toFixed(1) + "s";
-const KIND_LABEL: Record<Recent["kind"], string> = { clear: "Cleared", hold: "Held", reset: "Reset", review: "Entered review" };
+const KIND_LABEL: Record<Recent["kind"], string> = { clear: "Cleared", hold: "Held", reset: "Reset", review: "Entered review", restore: "Restored a solve" };
 type Actor = { userId: string; name: string; hold: boolean };
 
 function DecisionChip({ d }: { d: Decision | null }) {
@@ -165,6 +165,29 @@ function Scatter({ solves }: { solves: Solve[] }) {
   );
 }
 
+/** Every win in the window that earned no rating — flagged by the detector, or
+ *  held because the student is in Review. This is the only place a coach can act
+ *  on a single solve: Restore credits the points at today's value and drops the
+ *  solve from the student's flag count. One-way and logged, so it asks for a note. */
+function Withheld({ solves, userId, name, busy, onRestore }: { solves: Solve[]; userId: string; name: string; busy: string | null; onRestore: (pid: string, name: string, userId: string) => void }) {
+  const rows = solves.filter((s) => s.w && (s.dub || s.held)).slice().reverse();
+  if (!rows.length) return <div className="text-xs text-ink-500">No withheld solves in this window.</div>;
+  return (
+    <div className="space-y-1" data-testid="withheld-solves">
+      {rows.map((s) => (
+        <div key={s.pid + s.at} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-ink-800 bg-ink-950/50 px-2 py-1.5 text-[11px]">
+          <Link to={`/puzzles?review=${encodeURIComponent(s.pid)}`} className="shrink-0 font-mono text-ink-200 hover:underline">{s.pr}{typeof s.ms === "number" ? ` · ${secs(s.ms)}` : ""}</Link>
+          <span className="shrink-0 text-ink-500">{day(s.at)}</span>
+          <span className="min-w-0 flex-1 text-rose-200" style={{ overflowWrap: "anywhere" }}>{s.dubr?.length ? s.dubr.map((r) => REASON_LABEL[r] ?? r).join(", ") : s.held ? "held — student is in Review" : "flagged"}</span>
+          {s.restored
+            ? <span className="shrink-0 rounded-md bg-emerald-500/15 px-1.5 py-0.5 font-semibold text-emerald-200">restored</span>
+            : <button onClick={() => onRestore(s.pid, name, userId)} disabled={busy === userId} className="shrink-0 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 font-semibold text-emerald-100 hover:bg-emerald-500/20 disabled:opacity-50" data-testid="restore-solve">Restore</button>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** Rhythm: the per-move gaps of the fastest 2400+ wins. Engines are flat. */
 function Rhythm({ fastest }: { fastest: Detail["evidence"]["fastest"] }) {
   const rows = fastest.filter((f) => f.mvMs && f.mvMs.length > 0);
@@ -209,7 +232,7 @@ function Timeline({ sessions, peakHour }: { sessions: Detail["evidence"]["sessio
   );
 }
 
-function Drawer({ userId, isOwner, busy, onClose, onReset, onDecide }: { userId: string; isOwner: boolean; busy: string | null; onClose: () => void; onReset: (r: { userId: string; name: string }) => void; onDecide: (a: Actor, kind: "clear" | "hold") => void }) {
+function Drawer({ userId, isOwner, busy, onClose, onReset, onDecide, onRestore }: { userId: string; isOwner: boolean; busy: string | null; onClose: () => void; onReset: (r: { userId: string; name: string }) => void; onDecide: (a: Actor, kind: "clear" | "hold") => void; onRestore: (pid: string, name: string, userId: string) => void }) {
   const q = useQuery({ queryKey: ["academy-suspicious-detail", userId], queryFn: () => get<Detail>(`/api/academy/suspicious-solves/${encodeURIComponent(userId)}`), staleTime: 60_000 });
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
   const d = q.data;
@@ -265,6 +288,11 @@ function Drawer({ userId, isOwner, busy, onClose, onReset, onDecide }: { userId:
               <Scatter solves={d.solves} />
             </section>
             <section className="mb-4 rounded-xl border border-ink-800 bg-ink-900/60 p-3">
+              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-400">Withheld solves</h4>
+              <p className="mb-2 text-[11px] text-ink-500">Each of these was a win that earned no rating — global or per-theme. If you've looked at one and you're satisfied {d.name.split(" ")[0]} solved it alone, restore it: the points are credited at what the puzzle is worth to them today, and the solve stops counting against this score. Logged, and only possible once per solve.</p>
+              <Withheld solves={d.solves} userId={d.userId} name={d.name} busy={busy} onRestore={onRestore} />
+            </section>
+            <section className="mb-4 rounded-xl border border-ink-800 bg-ink-900/60 p-3">
               <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-400">Rhythm of the fastest 2400+ wins</h4>
               <p className="mb-2 text-[11px] text-ink-500">Blue = time to the first move, teal = gaps between moves. Flat 1–2 s gaps on hard puzzles are the engine's rhythm, not a human's.</p>
               <Rhythm fastest={e!.fastest} />
@@ -312,6 +340,18 @@ export default function AcademySuspiciousPanel({ isOwner, compact = false }: { i
     finally { setBusy(null); setTimeout(() => setToast(null), 5000); }
   };
 
+  const restore = async (pid: string, name: string, userId: string) => {
+    const note = window.prompt(`Restore the rating this solve was denied? Add a note for the record — why you're satisfied ${name} solved it alone. They get what the puzzle is worth to them today, and it stops counting against their fair-play score.`, "Watched them solve it — genuine");
+    if (note === null) return;
+    setBusy(userId);
+    try {
+      const res = await post<{ ok: boolean; error?: string; ratingDiff?: number; before?: number; after?: number }>(`/api/academy/suspicious-solves/${encodeURIComponent(userId)}/restore/${encodeURIComponent(pid)}`, { note });
+      if (res.ok) { setToast(`${name}: ${res.before} → ${res.after} (${(res.ratingDiff ?? 0) >= 0 ? "+" : ""}${res.ratingDiff ?? 0}).`); void qc.invalidateQueries({ queryKey: ["academy-suspicious"] }); void qc.invalidateQueries({ queryKey: ["academy-suspicious-detail"] }); }
+      else setToast(res.error || "Could not restore that solve.");
+    } catch (e: any) { setToast(e?.message || "Could not restore that solve."); }
+    finally { setBusy(null); setTimeout(() => setToast(null), 5000); }
+  };
+
   const reset = async (r: { userId: string; name: string }) => {
     const ratingStr = window.prompt(`Reset ${r.name}'s puzzle rating to:`, "1700");
     if (ratingStr === null) return;
@@ -334,7 +374,7 @@ export default function AcademySuspiciousPanel({ isOwner, compact = false }: { i
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="font-display text-lg text-white">🚩 Suspicious solving</h2>
-          <p className="text-xs text-ink-400">Fair-play score over the last 30 days (or since a reset): flagged solves, wins on 2400+ puzzles under 5 s, an inverted accuracy curve, speed against the crowd, steep climbs. <b className="text-amber-200">Watch</b> from 25, <b className="text-rose-200">Review</b> from 60 — Review holds rated gains until {isOwner ? "you reset or clear" : "the owner resets or clears"}. <b className="text-emerald-200">Clear</b> a student with a note when you're satisfied, or <b className="text-amber-200">Hold</b> their gains yourself. Students are not told.</p>
+          <p className="text-xs text-ink-400">Fair-play score over the last 30 days (or since a reset): flagged solves, wins on 2400+ puzzles under 5 s, an inverted accuracy curve, speed against the crowd, steep climbs. <b className="text-amber-200">Watch</b> from 25, <b className="text-rose-200">Review</b> from 60 — Review holds rated gains until {isOwner ? "you reset or clear" : "the owner resets or clears"}. <b className="text-emerald-200">Clear</b> a student with a note when you're satisfied, or <b className="text-amber-200">Hold</b> their gains yourself. Open a student to <b className="text-emerald-200">restore</b> a single withheld solve you've judged genuine. Students are not told.</p>
         </div>
         {rows.length > 0 && <span className="text-[11px] text-ink-400">{reviewN} in review · {rows.length - reviewN} on watch</span>}
       </div>
@@ -422,7 +462,7 @@ export default function AcademySuspiciousPanel({ isOwner, compact = false }: { i
         {showReport && <FairnessReport />}
       </div>
       {toast && <div className="mt-3 rounded-lg bg-ink-800 px-3 py-2 text-sm text-white">{toast}</div>}
-      {open && <Drawer userId={open} isOwner={isOwner} busy={busy} onClose={() => setOpen(null)} onReset={reset} onDecide={decide} />}
+      {open && <Drawer userId={open} isOwner={isOwner} busy={busy} onClose={() => setOpen(null)} onReset={reset} onDecide={decide} onRestore={restore} />}
     </section>
   );
 }

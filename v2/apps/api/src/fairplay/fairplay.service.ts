@@ -11,7 +11,7 @@ import { Connection } from "mongoose";
 import { sendMail } from "../lib/mail";
 import { scoreStudent, bandOf, withRetroFlags, DETECTOR_LIVE, type RoundLite, type ScoreResult, type ScoreExtras, type Band } from "./score";
 import { train, handModel, modelScore as modelScoreOf, type Model, type LabelledExample } from "./model";
-import { isDrill } from "../glicko/glicko";
+import { isDrill, updatePuzzleRating, DEFAULT_VOLATILITY, UNRATED_THEMES } from "../glicko/glicko";
 
 export interface Decision { kind: "clear" | "hold" | "reset"; by: string; note: string; at: Date }
 
@@ -230,11 +230,11 @@ export class FairplayService implements OnModuleInit {
     const fp: any = await this.conn.db!.collection("fairplay").findOne({ _id: userId as any }, { projection: { clearedAt: 1 } as any });
     if (fp?.clearedAt && new Date(fp.clearedAt) > windowStart) windowStart = new Date(fp.clearedAt);
     const rows = await this.conn.db!.collection("rounds")
-      .find({ _id: { $regex: `^${esc(userId)}:` } as any, k: "puzzle", d: { $gte: windowStart, $lte: now } }, { projection: { d: 1, pr: 1, r: 1, w: 1, ms: 1, mv_ms: 1, dub: 1, dubr: 1, nc: 1, held: 1, th: 1, sel: 1 } as any })
+      .find({ _id: { $regex: `^${esc(userId)}:` } as any, k: "puzzle", d: { $gte: windowStart, $lte: now } }, { projection: { d: 1, pr: 1, r: 1, w: 1, ms: 1, mv_ms: 1, dub: 1, dubr: 1, nc: 1, held: 1, th: 1, sel: 1, restoredAt: 1 } as any })
       .sort({ d: 1 }).toArray();
     const rounds: RoundLite[] = rows
       .filter((x: any) => typeof x.pr === "number" && typeof x.r === "number")
-      .map((x: any) => ({ pid: String(x._id).slice(userId.length + 1), d: new Date(x.d), pr: x.pr, r: x.r, w: !!x.w, ms: x.ms, mv_ms: x.mv_ms, dub: x.dub, dubr: x.dubr, nc: x.nc, held: x.held, th: x.th, sel: x.sel }));
+      .map((x: any) => ({ pid: String(x._id).slice(userId.length + 1), d: new Date(x.d), pr: x.pr, r: x.r, w: !!x.w, ms: x.ms, mv_ms: x.mv_ms, dub: x.dub, dubr: x.dubr, nc: x.nc, held: x.held, th: x.th, sel: x.sel, restored: !!x.restoredAt }));
     return { rounds, windowStart, lastReset };
   }
 
@@ -639,10 +639,92 @@ Model: ${r.model.reason}`;
     return { ok: true };
   }
 
+  /** Coach/owner: credit one flagged solve the coach has judged genuine.
+   *
+   *  A flagged win is recorded but moves no rating — global or per-theme — and
+   *  does not count toward the solve counter. Until now that was final: no code
+   *  path gave the points back, so a false positive cost a student real rating
+   *  permanently, and a coach who reviewed the solve and believed it had no way
+   *  to act on that. This is that action, one solve at a time.
+   *
+   *  The delta is recomputed against the student's CURRENT rating, not the one
+   *  they held at the time. Deviation and volatility are not stored on a round,
+   *  so the original update cannot be replayed exactly — and applying a delta
+   *  derived from a stale rating to today's rating would be incoherent anyway.
+   *  What the student gets is what this puzzle is worth to them now, i.e. the
+   *  same thing they would get by solving it today.
+   *
+   *  Fatigue is NOT reapplied: the 30-minute same-theme window that dampened
+   *  the original solve cannot be reconstructed after the fact. A flagged solve
+   *  is a single fast win rather than a grind, so the difference is small, and
+   *  it errs toward the student — the right direction for a call the coach has
+   *  decided went against them unfairly.
+   *
+   *  The round keeps `dub`/`dubr` as the record of why it was caught, and gains
+   *  `restoredAt`, which both blocks a second credit and drops it from the
+   *  student's flag count (see withRetroFlags). Audited in fairplayEvents as
+   *  kind "restore", label "honest", so the model learns from it like a Clear. */
+  async restoreSolve(userId: string, academyId: string | null, by: { userId: string; role: string }, puzzleId: string, noteRaw: unknown): Promise<{ ok: boolean; error?: string; ratingDiff?: number; before?: number; after?: number; themesMoved?: number }> {
+    const note = typeof noteRaw === "string" ? noteRaw.trim().slice(0, 500) : "";
+    const now = new Date();
+    const roundId = `${userId}:${puzzleId}`;
+    const roundsCol = this.conn.db!.collection("rounds");
+    const round: any = await roundsCol.findOne({ _id: roundId as any });
+    if (!round) return { ok: false, error: "That solve isn't on record." };
+    if (round.restoredAt) return { ok: false, error: "That solve has already been restored." };
+    if (!round.w) return { ok: false, error: "Only a win can be restored — a miss never earned anything to give back." };
+    if (!round.dub && !round.held) return { ok: false, error: "That solve was rated normally — there is nothing withheld to give back." };
+    if (typeof round.rd === "number" && round.rd !== 0) return { ok: false, error: "That solve already moved the rating." };
+
+    // Same split as Clear: a coach can act on a flagged solve, but once the
+    // student's gains are on hold that is the owner's call to unwind.
+    const fp = this.conn.db!.collection("fairplay");
+    const prev: any = await fp.findOne({ _id: userId as any });
+    if (prev?.hold && by.role !== "academy_owner") return { ok: false, error: "This student's gains are on hold — only the owner can restore a solve." };
+
+    const key: "puzzle" | "blindfold" = round.k === "blindfold" ? "blindfold" : "puzzle";
+    const startR = key === "blindfold" ? 800 : 1500;
+    const perfsCol = this.conn.db!.collection("userperfs");
+    const doc: any = (await perfsCol.findOne({ _id: userId as any })) || {};
+    const perf = doc[key] || { gl: { r: startR, d: 500, v: DEFAULT_VOLATILITY }, nb: 0, re: [], la: null };
+    const before = Math.round(perf.gl.r);
+
+    const pz: any = await this.conn.db!.collection("puzzles").findOne({ _id: puzzleId as any }, { projection: { glicko: 1, themes: 1 } as any });
+    // Fall back to the rating stored on the round if the puzzle is gone. d=80
+    // is a settled puzzle's deviation — the stored `pr` is a real rating that
+    // many players have moved, not a fresh 1500/500 guess.
+    const puzzleGlicko = pz?.glicko || { r: typeof round.pr === "number" ? round.pr : 1500, d: 80, v: DEFAULT_VOLATILITY };
+    const upd = updatePuzzleRating(perf, puzzleGlicko, true, round.sel ?? null);
+    const sets: Record<string, any> = { [key]: upd.userPerf };
+
+    // Per-theme tracks, mirroring the solve path exactly: same weighted-average
+    // model, same ±300 clamp against the new global so drift can't accumulate.
+    const themes: string[] = Array.isArray(pz?.themes) ? pz.themes : (Array.isArray(round.th) ? round.th : []);
+    const themeNs = key === "blindfold" ? "themesBf" : "themes";
+    const globalR = upd.userPerf.gl.r;
+    let themesMoved = 0;
+    for (const t of themes) {
+      if (typeof t !== "string" || UNRATED_THEMES.has(t) || !/^[a-zA-Z0-9]+$/.test(t)) continue;
+      const tPerf = doc[themeNs]?.[t] || { gl: { r: startR, d: 500, v: DEFAULT_VOLATILITY }, nb: 0, re: [], la: null };
+      const tOut = updatePuzzleRating(tPerf, puzzleGlicko, true, t).userPerf;
+      const clamped = Math.max(globalR - 300, Math.min(globalR + 300, tOut.gl.r));
+      if (clamped !== tOut.gl.r) tOut.gl.r = clamped;
+      sets[`${themeNs}.${t}`] = tOut;
+      themesMoved++;
+    }
+    await perfsCol.updateOne({ _id: userId as any }, { $set: sets }, { upsert: true });
+
+    const after = Math.round(upd.userPerf.gl.r);
+    const ratingDiff = after - before;
+    await roundsCol.updateOne({ _id: roundId as any }, { $set: { rd: ratingDiff, r: after, restoredAt: now, restoredBy: by.userId, restoredNote: note } });
+    await this.conn.db!.collection("fairplayEvents").insertOne({ userId, academyId, kind: "restore", by: by.userId, note, at: now, label: "honest", score: prev?.score ?? null, components: prev?.components ?? null, puzzleId, ratingDiff, before, after, flags: Array.isArray(round.dubr) ? round.dubr : [] });
+    return { ok: true, ratingDiff, before, after, themesMoved };
+  }
+
   /** Last decisions in an academy (optionally limited to a roster) for the
    *  panel's "Recent decisions" strip. */
   async recentDecisions(academyId: string | null, userIds: string[] | null, limit = 12): Promise<any[]> {
-    const q: any = { academyId, kind: { $in: ["clear", "hold", "reset", "review"] } };
+    const q: any = { academyId, kind: { $in: ["clear", "hold", "reset", "review", "restore"] } };
     if (userIds) q.userId = { $in: userIds };
     const ev = await this.conn.db!.collection("fairplayEvents").find(q).sort({ at: -1 }).limit(limit).toArray();
     const ids = Array.from(new Set(ev.flatMap((e: any) => [String(e.userId), e.by ? String(e.by) : null]).filter(Boolean) as string[]));

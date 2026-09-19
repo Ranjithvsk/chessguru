@@ -302,3 +302,13 @@ export function updatePuzzleRating(userPerf: Perf, puzzleGlicko: Glicko, win: bo
     weight,   // exposed for logging/debugging
   };
 }
+
+/** Themes that describe a puzzle's SHAPE, not its content — length, material
+ *  swing, mate-or-not, source. They carry no skill signal of their own, so they
+ *  get no per-theme rating track. Lives here rather than on PuzzlesService so
+ *  both the solve path and the fair-play restore can read one definition
+ *  without importing each other's service (puzzles already depends on fairplay). */
+export const UNRATED_THEMES = new Set([
+  "oneMove", "short", "long", "veryLong", "equality", "advantage", "crushing",
+  "mate", "master", "masterVsMaster", "superGM",
+]);
