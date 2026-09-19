@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import MoveTree from "../components/MoveTree";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Chess } from "chess.js";
 import Board from "../components/Board";
@@ -101,6 +102,31 @@ export default function BoardEditorPage() {
     } catch { return undefined; }
   })();
   const fp = useFreePlay(initialFen);
+
+  // Jump to the end of the line the cursor is on: follow first children down.
+  const goEnd = () => {
+    const p2 = [...fp.path];
+    let nodes: any[] = fp.tree as any[];
+    for (const i of p2) nodes = nodes[i]?.children ?? [];
+    while (nodes.length > 0) { p2.push(0); nodes = nodes[0].children; }
+    fp.goTo(p2);
+  };
+
+  // Arrow keys step through the moves, as they do on every other board in the app.
+  // Ignored while typing, or the FEN box would swallow them.
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      const t = ev.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      if (ev.key === "ArrowLeft") { ev.preventDefault(); fp.goPrev(); }
+      else if (ev.key === "ArrowRight") { ev.preventDefault(); fp.goNext(); }
+      else if (ev.key === "Home") { ev.preventDefault(); fp.goTo([]); }
+      else if (ev.key === "End") { ev.preventDefault(); goEnd(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
   const loadedOnce = useRef(false);
   useEffect(() => {
     if (loadedOnce.current) return;
@@ -794,7 +820,28 @@ export default function BoardEditorPage() {
           onMove={editMode ? undefined : fp.onMove}
           onSelect={editMode ? onSquareClick : undefined}
           shapes={(uncertainShapes.length > 0 ? uncertainShapes : initialShapes) as any} />
-        <div className="mt-3 flex flex-wrap gap-2">
+        {/* Move navigator + notation. The editor could play moves but never showed
+          * them: no list, no way back except Undo, which DESTROYS the move rather than
+          * stepping back from it. So a position arriving here from a game award — the
+          * whole point of the new Board link on the leaderboard — could be pushed
+          * forward and never rewound. useFreePlay already kept the full tree, cursor
+          * and navigation; nothing was ever rendered. (owner, 2026-09-19)
+          * MoveTree is the same component the study and class boards use, so variations
+          * and annotations render identically wherever you meet them. */}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 rounded-lg border border-ink-700 bg-ink-900/60 p-1">
+            <button onClick={() => fp.goTo([])} disabled={fp.ply === 0} title="Start of the line (Home)"
+              className="rounded-md px-2.5 py-1.5 text-sm text-ink-200 hover:bg-ink-800 disabled:opacity-30">⏮</button>
+            <button onClick={fp.goPrev} disabled={fp.ply === 0} title="Previous move (←)"
+              className="rounded-md px-2.5 py-1.5 text-sm text-ink-200 hover:bg-ink-800 disabled:opacity-30">◀</button>
+            <span className="min-w-[3.5rem] text-center text-xs tabular-nums text-ink-400">
+              {fp.ply === 0 ? "start" : `ply ${fp.ply}`}
+            </span>
+            <button onClick={fp.goNext} disabled={!fp.hasNext} title="Next move (→)"
+              className="rounded-md px-2.5 py-1.5 text-sm text-ink-200 hover:bg-ink-800 disabled:opacity-30">▶</button>
+            <button onClick={goEnd} disabled={!fp.hasNext} title="End of the line (End)"
+              className="rounded-md px-2.5 py-1.5 text-sm text-ink-200 hover:bg-ink-800 disabled:opacity-30">⏭</button>
+          </div>
           <button onClick={fp.undo} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">◀ Undo</button>
           <button onClick={fp.reset} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">Reset</button>
           <button onClick={fp.flip} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">⇅ Flip</button>
@@ -822,6 +869,12 @@ export default function BoardEditorPage() {
             {editMode ? "✕ Exit edit" : "✎ Edit position"}
           </button>
         </div>
+        {fp.tree.length > 0 && (
+          <div className="mt-3 rounded-xl border border-ink-700 bg-ink-900/60 p-2">
+            <div className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wide text-ink-500">Moves</div>
+            <MoveTree tree={fp.tree as any} path={fp.path} onPick={fp.goTo} className="max-h-56 overflow-auto" />
+          </div>
+        )}
         {editMode && (
           <div className="mt-3 rounded-xl2 border border-brand-500/40 bg-brand-500/5 p-3">
             <div className="mb-2 flex items-center justify-between gap-2 text-[11px]">
