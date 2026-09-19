@@ -1385,7 +1385,7 @@ export default function ClassV2Page() {
   // already be coach" / "coach should not be joined as student in second device".
   const { data: myRole } = useQuery({
     queryKey: ["class-my-role", room],
-    queryFn: () => get<{ coach: boolean }>(`/api/class/${encodeURIComponent(room)}/my-role`),
+    queryFn: () => get<{ coach: boolean; ended?: boolean }>(`/api/class/${encodeURIComponent(room)}/my-role`),
     enabled: !!room && !!me?.loggedIn,
     staleTime: 60_000,
   });
@@ -1421,6 +1421,19 @@ export default function ClassV2Page() {
   //   * class-ws broadcasts classEnded to every client BEFORE hard-closing
   // Then navigate away. On failure we still leave — server might be down and
   // the coach shouldn't be stuck in the tab.
+  // A finished class must not be re-enterable. The live classEnded broadcast only
+  // reaches people who are still connected; refresh after it and you load the dead room
+  // fresh, see the position frozen where it stopped, and wait for a coach who has moved
+  // on. Send students back to the dashboard, where the coach's new class appears.
+  // The coach is let through, since reopening one's own finished room is reasonable.
+  useEffect(() => {
+    if (!myRole?.ended || myRole?.coach) return;
+    setEndedKind("ended");
+    setEndedMsg("This class has finished. Taking you back to your dashboard…");
+    const t = setTimeout(() => navigate("/dashboard"), 2200);
+    return () => clearTimeout(t);
+  }, [myRole?.ended, myRole?.coach, navigate]);
+
   const endClass = async () => {
     rejoin.current.leaving = true;   // our own exit — never fight it with a rejoin
     try { await post(`/api/class/${encodeURIComponent(room)}/end`, {}); } catch { /* ignore */ }
@@ -1723,13 +1736,18 @@ export default function ClassV2Page() {
             </div>
             <div className="flex shrink-0 items-center gap-2">
               {role === "coach" && <CoachMicStatus />}
-              <VideoQualityPicker />
+              {/* Quality picker is desktop-only. Added to this row on 2026-09-19 and it
+                * pushed "End class" off the edge on a phone — the owner could not end a
+                * class at all, which is how students got stranded in an abandoned room
+                * while he started a new one. End class is the most important control in
+                * the header and must never be the thing that gets squeezed out. */}
+              <span className="hidden sm:inline-flex"><VideoQualityPicker /></span>
               <LiveHeaderBits room={room} role={role} />
               {role === "coach" ? (
                 <button
                   onClick={endClass}
                   title="End this class for everyone — students will be sent back to their dashboard."
-                  className="rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-rose-500"
+                  className="shrink-0 whitespace-nowrap rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-rose-500"
                 >
                   End class
                 </button>

@@ -62,10 +62,57 @@ export class ClassLiveController {
       { $set: { at: new Date(), academyId, coachUserId: me, joinPath } },
       { upsert: true },
     );
-    // Wipe any OTHER older announcements from THIS coach in THIS academy —
-    // otherwise students see a stale room link at the top of live-now and land
-    // in an abandoned room where the coach isn't (owner-reported 2026-08-12).
-    // One live class per coach at any moment is a safe assumption.
+    // The class must EXIST from the moment it starts. Until now a classSchedules row
+    // was only created when the coach confirmed the audience picker (the upsert in
+    // PATCH /audience). Dismiss that picker and the room ran with no class record at
+    // all: invisible to every student, impossible to end, absent from stats. On
+    // 2026-09-19 a coach sat alone in exactly that room while his student was stranded
+    // in the previous one, and nothing on either screen explained why.
+    //
+    // Created WITHOUT audienceKind on purpose. The student-facing gate still requires
+    // an audience to be picked, so this does not leak a class to anyone — it just means
+    // the class is real, can be ended, and is counted.
+    await this.conn.db!.collection("classSchedules").updateOne(
+      { _id: id as any },
+      {
+        $setOnInsert: {
+          title: "Ad-hoc class", coach: "", startAt: new Date(), durationMin: 60,
+          notes: "", createdAt: new Date(), createdByUserId: me, academyId,
+          roomKind: "meet",
+        },
+      },
+      { upsert: true },
+    ).catch(() => { /* never block going live on this */ });
+
+    // Starting a new class ENDS the coach's previous one, properly.
+    //
+    // Wiping the old announcement was never enough. Students already sitting in the
+    // previous room were not told anything: they stayed put, staring at a position
+    // frozen where it stopped, while the coach taught somewhere else. Refreshing put
+    // them right back in, because nothing marked the class finished. That is the
+    // 2026-09-19 report — "class was abandoned by coach and started dream meet again,
+    // but student is in old class".
+    //
+    // A coach can only run one class at a time, so starting a new one is an unambiguous
+    // statement that the old one is over. Mark it ended, then close the room, which
+    // broadcasts classEnded to everyone still in it. Their page shows the banner and
+    // returns them to the dashboard, where the new class appears as usual.
+    const stale = await this.conn.db!.collection("classLiveAnnouncements")
+      .find({ _id: { $ne: id as any }, academyId, coachUserId: me }, { projection: { _id: 1 } })
+      .toArray()
+      .catch(() => [] as any[]);
+
+    for (const row of stale) {
+      const oldId = String(row._id);
+      // endedAt first: if closing the room throws, the class is still correctly marked
+      // finished, so a student who reloads is sent out rather than back in.
+      await this.conn.db!.collection("classSchedules")
+        .updateOne({ _id: oldId as any, endedAt: { $exists: false } },
+                   { $set: { endedAt: new Date(), endedBy: "coach_started_new_class" } })
+        .catch(() => {});
+      try { closeClassRoom(oldId, "coach_started_new_class"); } catch { /* already gone */ }
+    }
+
     await this.conn.db!.collection("classLiveAnnouncements").deleteMany({
       _id: { $ne: id as any },
       academyId, coachUserId: me,

@@ -56,6 +56,17 @@ export class ClassAbandonedSweepService implements OnModuleInit {
       if (now - at < ABANDONED_MS) continue;
       // Coach gone AND row is stale — close.
       await coll.deleteOne({ _id: row._id }).catch(() => {});
+      // Mark the CLASS finished, not just the room. This sweep tore down the live room
+      // and the banner but never wrote endedAt, so an abandoned class stayed "never
+      // ended" forever: it read that way on the Dream Meet page, and a student who
+      // refreshed walked straight back into the dead room and sat looking at a stale
+      // position while the coach taught somewhere else. Pressing End was the only thing
+      // that ever set it, and on a phone the End button was off the edge of the screen.
+      // (owner, 2026-09-19: "class was abandoned by coach ... but student is in old class")
+      await this.conn.db!.collection("classSchedules")
+        .updateOne({ _id: id as any, endedAt: { $exists: false } },
+                   { $set: { endedAt: new Date(), endedBy: "abandoned-sweep" } })
+        .catch(() => {});
       try { closeClassRoom(id, "coach_abandoned"); } catch { /* */ }
       // eslint-disable-next-line no-console
       console.warn(`[class-abandoned-sweep] closed ${id} (stale ${(Math.round((now - at)/1000))}s, no coach)`);

@@ -219,12 +219,19 @@ export class ClassPositionPacksController {
     const userId: string | null = req?.session?.userId ?? null;
     if (!userId) throw new UnauthorizedException();
     if (!ROOM_RE.test(id)) throw new BadRequestException("bad room");
-    const klass: any = await this.classes().findOne({ _id: id as any }, { projection: { createdByUserId: 1, academyId: 1 } });
+    const klass: any = await this.classes().findOne({ _id: id as any }, { projection: { createdByUserId: 1, academyId: 1, endedAt: 1 } });
     const announce: any = klass ? null : await this.ann().findOne({ _id: id as any }, { projection: { coachUserId: 1, academyId: 1 } });
     const coachUserId: string | null = klass?.createdByUserId ?? announce?.coachUserId ?? null;
     const academyId: string | null = klass?.academyId ?? announce?.academyId ?? null;
     const isOwner = req?.session?.role === "academy_owner" && !!academyId && academyId === (req?.session?.academyId ?? null);
-    return { coach: (!!coachUserId && coachUserId === userId) || isOwner };
+    // Also say whether the class is OVER. A student who refreshed after their coach
+    // ended a class walked straight back into the dead room and sat there looking at a
+    // stale position, while the coach was already teaching somewhere else. Nothing on
+    // this endpoint ever told the page the class had finished. (owner, 2026-09-19)
+    return {
+      coach: (!!coachUserId && coachUserId === userId) || isOwner,
+      ended: !!klass?.endedAt,
+    };
   }
 
   /** POST /api/class/position-handoff — put a position in my own pocket. */
