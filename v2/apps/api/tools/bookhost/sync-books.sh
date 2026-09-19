@@ -7,7 +7,7 @@ STORE=/srv/data/chessguru-books; LIB=/srv/data/chess-library; LOG=/home/dreamwor
 mkdir -p /home/dreamworld/logs
 echo "[$(date -u +%FT%TZ)] store sync from Vinayaka" >> "$LOG"
 rclone sync "pc:F:/chessguru-books" "$STORE" --exclude "*.tmp" --exclude "*.part" --transfers 4 --checkers 8 --tpslimit 8 >> "$LOG" 2>&1
-python3 - "$STORE" /tmp/needed-pdfs.txt <<'PY'
+python3 - "$STORE" /srv/data/bookhost/needed-pdfs.txt <<'PY'
 import json, glob, sys
 store, out = sys.argv[1], sys.argv[2]; need = set()
 for m in glob.glob(store + '/*/meta.json'):
@@ -17,6 +17,9 @@ for m in glob.glob(store + '/*/meta.json'):
     if i >= 0: need.add(p[i + len('My Drive/Chess/'):])
 open(out, 'w').write('\n'.join(sorted(need)) + '\n'); print(len(need), 'pdfs needed')
 PY
+# Link every needed PDF to the flat library copy (Singapore mirror, /srv/data/chess-library-flat) first;
+# only what that does not cover goes to the Drive top-up below.
+python3 /srv/data/bookhost/link-library.py >> "$LOG" 2>&1
 free_gb=$(df --output=avail -BG "$LIB" | tail -1 | tr -dc 0-9)
 if [ "${free_gb:-0}" -lt 8 ]; then echo "[$(date -u +%FT%TZ)] only ${free_gb} GB free on /srv/data — PDF top-up skipped" >> "$LOG"; exit 0; fi
 echo "[$(date -u +%FT%TZ)] PDF top-up from Drive" >> "$LOG"
