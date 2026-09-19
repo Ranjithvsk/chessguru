@@ -6,6 +6,7 @@
 // get analyzed serially.
 
 import { spawn, ChildProcess } from "child_process";
+import { Chess } from "chess.js";
 
 export interface PositionEval {
   cp?: number;          // eval in centipawns, from side-to-move's perspective
@@ -60,6 +61,18 @@ export function unsafeFenReason(fen: unknown): string | null {
   }
   if (whiteKings !== 1) return `${whiteKings} white kings`;
   if (blackKings !== 1) return `${blackKings} black kings`;
+  // The side NOT to move must not have their king capturable. Stockfish dies on
+  // that rather than rejecting it, and it is the crash this box was actually
+  // hitting — nullMoveFen manufactured one every time a game passed through a
+  // check. Fixed at source, but kept here so no future caller can reintroduce
+  // it: a hard segfault is too expensive to guard in only one place.
+  try {
+    const flipped = fen.trim().split(/\s+/);
+    if (flipped.length >= 4) {
+      flipped[1] = flipped[1] === "w" ? "b" : "w";
+      if (new Chess(flipped.join(" ")).isCheck()) return "side not to move has their king capturable";
+    }
+  } catch { /* chess.js refused it; the checks above already cover the shapes that crash */ }
   return null;
 }
 

@@ -186,8 +186,24 @@ export function strategicTags(inp: StrategicInput): StrategicTag[] {
 export function nullMoveFen(fen: string): string | null {
   const parts = fen.split(" ");
   if (parts.length < 4) return null;
-  parts[1] = parts[1] === "w" ? "b" : "w"; parts[3] = "-";
-  try { const c = new Chess(parts.join(" ")); if (c.isCheck()) return null; return c.fen(); } catch { return null; }
+  try {
+    // Passing is only defined when NOBODY is in check, and the two sides need
+    // separate tests. This used to check only the side to move after the flip —
+    // which is the side that just moved, and is almost never in check — so the
+    // guard never fired for the case that matters: if the side to move BEFORE
+    // the flip was in check, flipping the turn leaves their king capturable.
+    //
+    // That is an illegal position, and Stockfish segfaults on those rather than
+    // rejecting them (verified 2026-09-19: 5/5 such positions crash, 0/2 legal
+    // ones do). Because being in check is perfectly ordinary, the analyzer hit
+    // one every time a game passed through a check — 2-3 engine deaths an hour,
+    // each dumping a ~370 MB core, which is what filled / on 18 Sep.
+    if (new Chess(fen).isCheck()) return null;
+    parts[1] = parts[1] === "w" ? "b" : "w"; parts[3] = "-";
+    const c = new Chess(parts.join(" "));
+    if (c.isCheck()) return null;
+    return c.fen();
+  } catch { return null; }
 }
 
 /** Per-game character from the moments: what kind of game the student played. */
