@@ -7,6 +7,20 @@ import { Controller, ForbiddenException, Get, Query, Req } from "@nestjs/common"
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { isAdmin } from "./admins";
+import * as fs from "fs";
+
+/** Last lines of a pm2 error log on this box (the API runs as the pm2 user). */
+function logTail(name: string, lines = 40): string[] {
+  try {
+    const dir = `${process.env.HOME || "/home/ubuntu"}/.pm2/logs`;
+    // pm2 names the file <name>-error.log, or <name>-error-<id>.log for cluster instances
+    const file = fs.readdirSync(dir).filter((f) => f === `${name}-error.log` || new RegExp(`^${name}-error-\\d+\\.log$`).test(f)).sort().pop();
+    if (!file) return [];
+    const p = `${dir}/${file}`; const st = fs.statSync(p); const fd = fs.openSync(p, "r"); const len = Math.min(st.size, 64 * 1024);
+    const buf = Buffer.alloc(len); fs.readSync(fd, buf, 0, len, st.size - len); fs.closeSync(fd);
+    return buf.toString("utf8").split("\n").filter((l) => l.trim()).slice(-lines).map((l) => l.replace(/\x1b\[[0-9;]*m/g, "").slice(0, 400));
+  } catch { return []; }
+}
 
 const STATS_TOKEN = process.env.CHESSGURU_STATS_TOKEN || process.env.DREAMCY_INTERNAL_TOKEN || "";
 
@@ -17,7 +31,7 @@ export class AppReportController {
   constructor(@InjectConnection() private readonly conn: Connection) {}
 
   @Get("admin/app-report")
-  async report(@Req() req: any, @Query("days") daysRaw?: string) {
+  async report(@Req() req: any, @Query("days") daysRaw?: string, @Query("detail") detail?: string, @Query("logs") logsRaw?: string) {
     const presented = String(req?.headers?.["x-internal-token"] || "");
     if (!(!!STATS_TOKEN && presented === STATS_TOKEN) && !isAdmin(req?.session?.userId)) throw new ForbiddenException("admin only");
     const days = Math.min(90, Math.max(1, parseInt(String(daysRaw ?? "7"), 10) || 7));
@@ -70,8 +84,38 @@ export class AppReportController {
     const nameOf = new Map<string, string>((academyDocs as any[]).map((a) => [String(a._id), a.name || String(a._id)]));
     const byAcademy = [...perAcademy.entries()].map(([id, v]) => ({ academyId: id, name: nameOf.get(id) ?? id, ...v })).sort((a, b) => b.activeUsers - a.activeUsers).slice(0, 30);
 
+    // ---- detail=1: per-day series, top users, games, pm2 error-log tails ----
+    let det: Record<string, unknown> | undefined;
+    if (detail === "1") {
+      const dayOf = (d: any) => new Date(d).toISOString().slice(0, 10);
+      const perDay = new Map<string, { day: string; puzzleRounds: number; studyRounds: number; classJoins: number; games: number }>();
+      const bump = (d: any, k: "puzzleRounds" | "studyRounds" | "classJoins" | "games") => { const day = dayOf(d); const cur = perDay.get(day) ?? { day, puzzleRounds: 0, studyRounds: 0, classJoins: 0, games: 0 }; cur[k]++; perDay.set(day, cur); };
+      const [rounds, studies, joins, games] = await Promise.all([
+        col("rounds").find({ d: { $gte: since } }, { projection: { _id: 1, d: 1 } }).toArray(),
+        col("study_rounds").find({ d: { $gte: since } }, { projection: { d: 1, t: 1 } }).toArray(),
+        col("classAttendance").find({ joinedAt: { $gte: since }, manual: { $ne: true } }, { projection: { joinedAt: 1 } }).toArray(),
+        col("live_games").find({ startedAt: { $gte: since } }, { projection: { startedAt: 1, status: 1 } }).toArray(),
+      ]);
+      const perUser = new Map<string, number>(); const perDrill = new Map<string, number>();
+      for (const r of rounds as any[]) { bump(r.d, "puzzleRounds"); const uid = String(r._id).split(":")[0]!; perUser.set(uid, (perUser.get(uid) ?? 0) + 1); }
+      for (const r of studies as any[]) { bump(r.d, "studyRounds"); perDrill.set(String(r.t), (perDrill.get(String(r.t)) ?? 0) + 1); }
+      for (const r of joins as any[]) bump(r.joinedAt, "classJoins");
+      for (const r of games as any[]) bump(r.startedAt, "games");
+      const topIds = [...perUser.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
+      const topDocs = await col("users").find({ _id: { $in: topIds.map(([u]) => u) } as any }, { projection: { name: 1, username: 1, academyId: 1, role: 1 } }).toArray();
+      const uDoc = new Map<string, any>(topDocs.map((u: any) => [String(u._id), u]));
+      const names = String(logsRaw ?? "").split(",").map((x) => x.trim()).filter((x) => /^[\w-]+$/.test(x)).slice(0, 8);
+      const logs: Record<string, string[]> = {}; for (const n of names) logs[n] = logTail(n);
+      det = {
+        perDay: [...perDay.values()].sort((a, b) => a.day.localeCompare(b.day)),
+        topUsers: topIds.map(([u, n]) => ({ userId: u, name: uDoc.get(u)?.name || uDoc.get(u)?.username || u, academyId: uDoc.get(u)?.academyId ?? null, role: uDoc.get(u)?.role ?? null, puzzleRounds: n })),
+        studyByDrill: [...perDrill.entries()].map(([t, n]) => ({ drill: t, n })).sort((a, b) => b.n - a.n),
+        games: { total: games.length, finished: (games as any[]).filter((g) => g.status === "finished" || g.finishedAt).length },
+        logs,
+      };
+    }
     return {
-      at: Date.now(), days,
+      at: Date.now(), days, detail: det,
       usage: { activeUsers, newUsers, puzzleRounds, studyRounds, classes: classIds.length, classJoins, booksAdded, academies: academies.length },
       errors: { total: errs.length, byKind, recent, topSlow },
       byAcademy,
