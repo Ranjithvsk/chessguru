@@ -789,7 +789,12 @@ function OpeningsLeaderboardSection({ period, bucket }: { period: Period; bucket
 
         {/* Podium */}
         {podium.length > 0 && (
-          <div className="mb-3 grid grid-cols-3 gap-2 sm:gap-3">
+          /* items-end keeps the stepped podium look while letting each card be as tall
+             as its own contents need. Fixed heights were the real bug: a two-line name
+             simply overflowed the box, so on a phone the winner's name hung outside the
+             card and the found/missed line was sliced off at the edge. (owner,
+             2026-09-19, seen on a 390px screen) */
+          <div className="mb-3 grid grid-cols-3 items-end gap-2 sm:gap-3">
             {podium.map((r) => {
               const cls =
                 r.rank === 1 ? "from-amber-300 via-yellow-400 to-yellow-600 text-amber-950 ring-2 ring-amber-300/60 shadow-[0_0_20px_rgba(251,191,36,0.35)]" :
@@ -799,7 +804,12 @@ function OpeningsLeaderboardSection({ period, bucket }: { period: Period; bucket
               // name clamped to one line inside px-2, so anything longer than a short
               // first name was cut off and the winners were unreadable — which is the
               // whole point of a podium. (owner, 2026-09-19)
-              const height = r.rank === 1 ? "h-36 sm:h-36" : "h-28 sm:h-28";
+              // MIN height, not fixed: the podium still steps down from 1st to 3rd, but
+              // a long name makes its own room instead of spilling out.
+              // Arbitrary values, NOT min-h-36/min-h-28: those classes do not exist in this
+              // Tailwind build and silently computed to min-height:auto, which is why the
+              // first attempt changed nothing on screen at all.
+              const height = r.rank === 1 ? "min-h-[9.5rem]" : "min-h-[7.5rem]";
               return (
                 <div key={r.userId} className={`flex flex-col items-center justify-end rounded-t-2xl bg-gradient-to-b ${cls} ${height} px-2 py-3`}>
                   <div className="text-lg font-bold">#{r.rank}</div>
@@ -1068,14 +1078,17 @@ function GameAwardsSection({ period, bucket }: { period: Period; bucket: Bucket 
                 r.rank === 2 ? "from-slate-100 via-slate-300 to-slate-500 text-slate-900 ring-2 ring-slate-300/60 shadow-lg" :
                                "from-orange-300 via-orange-500 to-orange-700 text-orange-950 ring-2 ring-orange-400/60 shadow-lg";
               const height = r.rank === 1 ? "h-32 sm:h-36" : "h-24 sm:h-28";
-              const best = Object.entries(r.byMotif).sort((a, b) => b[1].found - a[1].found)[0];
               return (
-                <div key={r.studentId} title={r.name || r.username} className={`flex flex-col items-center justify-end rounded-t-2xl bg-gradient-to-b ${cls} ${height} px-1 py-3 sm:px-2`}>
-                  <div className="text-base font-bold sm:text-lg">#{r.rank}</div>
-                  <div className="line-clamp-2 w-full break-words text-center text-[11px] font-semibold leading-tight sm:text-xs">{r.name || r.username}</div>
-                  <div className="mt-1 tabular-nums text-lg font-black drop-shadow sm:text-xl">{r.score > 0 ? "+" : ""}{r.score}</div>
-                  <div className="line-clamp-1 text-[10px] font-semibold opacity-80">✅ {r.found} · ❌ {r.missed}</div>
-                  {best && <div className="line-clamp-1 text-[10px] font-semibold opacity-70">{label(best[0])}</div>}
+                <div key={r.studentId} title={r.name || r.username} className={`flex w-full min-w-0 flex-col items-center justify-end overflow-hidden rounded-t-2xl bg-gradient-to-b ${cls} ${height} px-1 py-3 sm:px-2`}>
+                  <div className="shrink-0 text-base font-bold sm:text-lg">#{r.rank}</div>
+                  <div className="line-clamp-2 w-full shrink-0 break-all text-center text-[11px] font-semibold leading-tight sm:text-xs" style={{ overflowWrap: "anywhere" }}>{r.name || r.username}</div>
+                  <div className="mt-1 shrink-0 tabular-nums text-lg font-black drop-shadow sm:text-xl">{r.score > 0 ? "+" : ""}{r.score}</div>
+                  <div className="line-clamp-1 shrink-0 text-[10px] font-semibold opacity-80">✅ {r.found} · ❌ {r.missed}</div>
+                  {/* The motif line lived here and was the one line too many: on the #1
+                    * card, whose name wraps to two lines, it pushed "Good defence" past
+                    * the card edge and got sliced in half. It is already in the table
+                    * directly below this podium, so dropping it costs nothing and lets
+                    * all three cards fit. (owner, 2026-09-19, verified on a 390px screen) */}
                 </div>
               );
             })}
