@@ -23,8 +23,31 @@ type Book = {
 
 const UNKNOWN_AUTHOR = "Unknown";
 
+/** A stable colour per author, so the same person is the same colour every visit.
+ *  Hashed from the name rather than assigned by position — a filter that recolours
+ *  itself when a book is added teaches a coach nothing. */
+const AUTHOR_HUES = [
+  "from-emerald-400 to-teal-500", "from-sky-400 to-indigo-500",
+  "from-fuchsia-400 to-purple-500", "from-amber-400 to-orange-500",
+  "from-rose-400 to-pink-500", "from-lime-400 to-green-500",
+  "from-cyan-400 to-blue-500", "from-violet-400 to-fuchsia-500",
+];
+function authorHue(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return AUTHOR_HUES[h % AUTHOR_HUES.length]!;
+}
+/** "Kiril Georgiev & Atanas Kolev" -> "KG", "Aagaard" -> "AA". */
+function authorInitials(name: string): string {
+  const first = name.split("&")[0]!.trim().split(/\s+/).filter(Boolean);
+  if (!first.length) return "?";
+  if (first.length === 1) return first[0]!.slice(0, 2).toUpperCase();
+  return (first[0]![0]! + first[first.length - 1]![0]!).toUpperCase();
+}
+
 export default function MyBooksPage() {
   const [books, setBooks] = useState<Book[] | null>(null);
+  const booksRef = useRef<Book[] | null>([]); useEffect(() => { booksRef.current = books; }, [books]);
   const [q, setQ] = useState("");
   const [author, setAuthor] = useState("");        // "" = every author
   // Coaches only. Reading a book costs GPU time on a machine shared with live
@@ -117,9 +140,17 @@ export default function MyBooksPage() {
       } catch (e) { if (!dead) setErr((e as Error).message); }
     };
     load();
-    // A book being read updates as it goes, so refresh while any is unfinished.
-    const t = setInterval(load, 5000);
-    return () => { dead = true; clearInterval(t); };
+    // A book being rendered updates as it goes, so refresh every 5 s while any is unfinished —
+    // and only every 60 s otherwise. The old unconditional 5-second poll pulled the whole
+    // Vinayaka catalogue through the tunnel forever (owner 2026-09-19: "shelf loads so slowly").
+    let last = Date.now();
+    const t = setInterval(() => {
+      const busy = (booksRef.current ?? []).some((b) => b.state && b.state !== "done" && b.state !== "error" && b.state !== "failed");
+      if (busy || Date.now() - last > 60_000) { last = Date.now(); void load(); }
+    }, 5000);
+    const onFocus = () => { if (Date.now() - last > 15_000) { last = Date.now(); void load(); } };
+    window.addEventListener("focus", onFocus);
+    return () => { dead = true; clearInterval(t); window.removeEventListener("focus", onFocus); };
   }, []);
 
   if (err) {
@@ -225,9 +256,10 @@ export default function MyBooksPage() {
         </div>
       )}
 
-      {/* Filter by author. Shown only once a shelf holds more than one — a coach
-          with three books does not need a filter. 38% of books yield no author we
-          would trust, so "Unknown" is a real group rather than a failure. */}
+      {/* Author filter. Each author keeps one colour, hashed from the name, with
+          their initials on a gradient pill — so the shelf reads as people rather
+          than a row of grey buttons. Shown only once there is more than one author;
+          38% of books yield no author we would trust, so "Unknown" is a real group. */}
       {(() => {
         const counts = new Map<string, number>();
         for (const b of books ?? []) {
@@ -238,19 +270,43 @@ export default function MyBooksPage() {
         const names = [...counts.entries()].sort((x, y) =>
           x[0] === UNKNOWN_AUTHOR ? 1 : y[0] === UNKNOWN_AUTHOR ? -1
             : y[1] - x[1] || x[0].localeCompare(y[0]));
+        const total = (books ?? []).length;
         return (
-          <div className="mb-3 flex flex-wrap gap-1.5">
-            <button onClick={() => setAuthor("")}
-              className={`rounded-full px-3 py-1 text-xs font-semibold ${author === "" ? "bg-emerald-500 text-black" : "bg-ink-800 text-ink-300 hover:bg-ink-700"}`}>
-              All authors <span className="opacity-60">{(books ?? []).length}</span>
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setAuthor("")}
+              className={`group flex items-center gap-2 rounded-full py-1 pl-1 pr-3 text-xs font-semibold transition-all duration-200 ${
+                author === ""
+                  ? "bg-gradient-to-r from-brand-500 to-fuchsia-500 text-white shadow-lg shadow-brand-500/30 scale-105"
+                  : "bg-ink-800/80 text-ink-300 hover:bg-ink-700 hover:text-white hover:scale-105"
+              }`}
+            >
+              <span className="grid h-6 w-6 place-items-center rounded-full bg-white/15 text-[11px]">📚</span>
+              All authors
+              <span className={`rounded-full px-1.5 py-0.5 text-[10px] tabular-nums ${author === "" ? "bg-white/20" : "bg-ink-900/60"}`}>{total}</span>
             </button>
-            {names.map(([a, n]) => (
-              <button key={a} onClick={() => setAuthor(a === author ? "" : a)}
-                className={`rounded-full px-3 py-1 text-xs font-semibold ${author === a ? "bg-emerald-500 text-black" : "bg-ink-800 text-ink-300 hover:bg-ink-700"}`}
-                title={a === UNKNOWN_AUTHOR ? "The filename gave no author we could trust" : a}>
-                {a} <span className="opacity-60">{n}</span>
-              </button>
-            ))}
+            {names.map(([a, n]) => {
+              const on = author === a;
+              const unknown = a === UNKNOWN_AUTHOR;
+              const hue = unknown ? "from-ink-600 to-ink-500" : authorHue(a);
+              return (
+                <button
+                  key={a}
+                  onClick={() => setAuthor(on ? "" : a)}
+                  title={unknown ? "The filename gave no author we could trust" : `Only books by ${a}`}
+                  className={`group flex items-center gap-2 rounded-full py-1 pl-1 pr-3 text-xs font-semibold transition-all duration-200 ${
+                    on ? `bg-gradient-to-r ${hue} text-white shadow-lg scale-105`
+                       : "bg-ink-800/80 text-ink-300 hover:bg-ink-700 hover:text-white hover:scale-105"
+                  }`}
+                >
+                  <span className={`grid h-6 w-6 place-items-center rounded-full bg-gradient-to-br ${hue} text-[10px] font-extrabold text-white ring-1 ring-white/20 ${on ? "" : "opacity-90 group-hover:opacity-100"}`}>
+                    {unknown ? "?" : authorInitials(a)}
+                  </span>
+                  <span className="max-w-[9rem] truncate">{a}</span>
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] tabular-nums ${on ? "bg-white/20" : "bg-ink-900/60"}`}>{n}</span>
+                </button>
+              );
+            })}
           </div>
         );
       })()}
@@ -335,7 +391,14 @@ function BookCard({ b, onCover }: { b: Book; onCover: (page: number) => void }) 
             className="line-clamp-3 font-semibold text-white group-hover:text-brand-200">
             {b.title}
           </Link>
-          {b.author && <div className="mt-0.5 text-[11px] text-ink-400">{b.author}</div>}
+          {b.author && (
+            <div className="mt-1 flex items-center gap-1.5">
+              <span className={`grid h-4 w-4 shrink-0 place-items-center rounded-full bg-gradient-to-br ${authorHue(b.author)} text-[8px] font-extrabold text-white`}>
+                {authorInitials(b.author)}
+              </span>
+              <span className="truncate text-[11px] text-ink-400">{b.author}</span>
+            </div>
+          )}
           {/* Waiting its turn: where in line, and roughly how long — so nobody
               re-uploads a book that is already on its way. */}
           {b.state === "queued" && (b.queuePosition ?? 0) > 0 && (

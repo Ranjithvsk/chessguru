@@ -14,7 +14,7 @@
 // owns a copy of — we are giving them a better way to read it, not building a
 // library, so there is no public listing and no cross-user access.
 import { Body, Controller, ForbiddenException, Get, Logger, Param, Post, Query, Req, Res, BadRequestException, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
-import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 
@@ -118,6 +118,17 @@ const ownsBook = (meta: any, uid: string): boolean =>
   !!uid && (meta?.owner === uid || (Array.isArray(meta?.owners) && meta.owners.includes(uid)));
 
 const STORE = "/var/lib/chessguru/user-books";
+// France-side cache of pages that live on Vinayaka. A page never changes once rendered, so the
+// first reader pays the tunnel round trip (residential uplink, 1–3 s) and everyone after reads it
+// from local disk. Owner 2026-09-19: "why does the book reader / library shelf load so slowly".
+const REMOTE_CACHE = "/var/lib/chessguru/user-books-cache";
+// The book host's whole catalogue (~3k books, 630 KB) used to be pulled through the tunnel on
+// EVERY shelf refresh, and the shelf refreshed every 5 s — up to 24 s per load when Vinayaka's
+// uplink was busy. Now the listing and each book's meta are memoised here for a short while.
+const REMOTE_LIST_TTL_MS = 45_000;
+const REMOTE_META_TTL_MS = 5 * 60_000;
+let remoteListCache: { at: number; p: Promise<any[]> } | null = null;
+const remoteMetaCache = new Map<string, { at: number; p: Promise<any> }>();
 // Whose Drive the book host is pointed at. One library, one owner —
 // these are copyrighted books belonging to a specific person.
 const LIBRARY_OWNER = process.env.CHESSGURU_LIBRARY_OWNER ?? "ranjith_vsk";
@@ -331,8 +342,14 @@ export class UserBooksController {
    *  the shelf with it, because the locally-held books are still readable. */
   private async remoteBooks(uid: string): Promise<any[]> {
     try {
-      const j = await this.bookHost("/books");
-      return (j.books ?? [])
+      const now = Date.now();
+      if (!remoteListCache || now - remoteListCache.at > REMOTE_LIST_TTL_MS) {
+        const p = this.bookHost("/books", { signal: AbortSignal.timeout(12_000) }).then((j) => j.books ?? []);
+        remoteListCache = { at: now, p };
+        p.catch(() => { if (remoteListCache?.p === p) remoteListCache = null; });   // a failure is not cached
+      }
+      const all: any[] = await remoteListCache.p;
+      return all
         // The book's OWN owner decides, exactly as for a local book. Being the
         // library owner grants no access to someone else's book.
         .filter((b: any) => b.owner === uid)
@@ -352,8 +369,8 @@ export class UserBooksController {
    */
   private async bookHost(path: string, init?: any): Promise<any> {
     const r = await fetch(`http://127.0.0.1:8791${path}`, {
-      ...init,
       signal: AbortSignal.timeout(60_000),
+      ...init,
     });
     if (!r.ok) throw new ServiceUnavailableException("book host unavailable");
     return r.json();
@@ -499,7 +516,14 @@ export class UserBooksController {
   /** Is this remote book mine? Checked before every remote page is served. */
   private async remoteOwns(id: string, uid: string): Promise<boolean> {
     try {
-      const meta = await this.bookHost(`/book/${encodeURIComponent(id)}/meta`);
+      const now = Date.now();
+      let entry = remoteMetaCache.get(id);
+      if (!entry || now - entry.at > REMOTE_META_TTL_MS) {
+        const p = this.bookHost(`/book/${encodeURIComponent(id)}/meta`, { signal: AbortSignal.timeout(12_000) });
+        entry = { at: now, p }; remoteMetaCache.set(id, entry);
+        p.catch(() => { if (remoteMetaCache.get(id) === entry) remoteMetaCache.delete(id); });
+      }
+      const meta = await entry.p;
       return !!meta && ownsBook(meta, uid);
     } catch {
       return false;
@@ -946,22 +970,52 @@ export class UserBooksController {
    *  else's copyrighted book. It runs before a single byte is fetched. */
   private async remotePage(id: string, idx: number, uid: string, res: any) {
     if (!(await this.remoteOwns(id, uid))) throw new NotFoundException("page not found");
+    const safeId = id.replace(/[^A-Za-z0-9._-]/g, "_");
+    const cached = join(REMOTE_CACHE, safeId, `p${String(idx).padStart(4, "0")}.jpg`);
+    // Once rendered a page never changes: serve it from the France cache when we have it,
+    // and quietly warm the next two pages so turning the page is local too.
+    if (existsSync(cached)) {
+      res.setHeader("Content-Type", "image/jpeg");
+      res.setHeader("Cache-Control", "private, max-age=86400");
+      createReadStream(cached).pipe(res);
+      void this.warmRemotePages(id, idx + 1, 2);
+      return;
+    }
+    const buf = await this.fetchRemotePage(id, idx);
+    if (!buf) throw new NotFoundException("page not found");
+    res.setHeader("Content-Type", "image/jpeg");
+    res.setHeader("Content-Length", String(buf.length));
+    res.setHeader("Cache-Control", "private, max-age=86400");
+    res.end(buf);
+    void this.warmRemotePages(id, idx + 1, 2);
+  }
+
+  /** Fetch one page from the book host and keep a copy on this box. null = not there / host down. */
+  private async fetchRemotePage(id: string, idx: number): Promise<Buffer | null> {
+    const safeId = id.replace(/[^A-Za-z0-9._-]/g, "_");
+    const dir = join(REMOTE_CACHE, safeId);
+    const file = join(dir, `p${String(idx).padStart(4, "0")}.jpg`);
+    if (existsSync(file)) { try { return readFileSync(file); } catch { /* re-fetch */ } }
     let r: Response;
     try {
-      r = await fetch(
-        `http://127.0.0.1:8791/book/${encodeURIComponent(id)}/page/${idx}`,
-        { signal: AbortSignal.timeout(30_000) },
-      );
+      r = await fetch(`http://127.0.0.1:8791/book/${encodeURIComponent(id)}/page/${idx}`, { signal: AbortSignal.timeout(30_000) });
     } catch {
       throw new ServiceUnavailableException("the book host is not reachable");
     }
-    if (!r.ok) throw new NotFoundException("page not found");
+    if (!r.ok) return null;
     const buf = Buffer.from(await r.arrayBuffer());
-    res.setHeader("Content-Type", "image/jpeg");
-    res.setHeader("Content-Length", String(buf.length));
-    // Same as a local page: once rendered it never changes, and this is what
-    // makes turning a page feel like a book rather than a network round trip.
-    res.setHeader("Cache-Control", "private, max-age=86400");
-    res.end(buf);
+    if (buf.length > 0) {
+      try { mkdirSync(dir, { recursive: true }); const tmp = `${file}.${process.pid}.tmp`; writeFileSync(tmp, buf); renameSync(tmp, file); } catch { /* cache is best-effort */ }
+    }
+    return buf;
+  }
+  private warming = new Set<string>();
+  private async warmRemotePages(id: string, from: number, count: number) {
+    for (let i = from; i < from + count; i++) {
+      const key = `${id}:${i}`;
+      if (this.warming.has(key)) continue;
+      this.warming.add(key);
+      try { await this.fetchRemotePage(id, i); } catch { /* best effort */ } finally { this.warming.delete(key); }
+    }
   }
 }
