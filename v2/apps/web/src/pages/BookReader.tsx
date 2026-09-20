@@ -212,7 +212,15 @@ export default function BookReaderPage() {
   // The height cap scales too (below 1 only), so "smaller" still does something on a
   // sideways phone, where every wide-screen step is above what the height allows.
   const scale = BOARD_SCALE[boardStep]!;
-  const sidePx = Math.round(Math.max(180, Math.min((wide ? 440 : 380) * scale, win[0] * 0.55, (win[1] - 130) * Math.min(1, scale))));
+  // Height budget for the side column: the sticky panel may be 100dvh − 5.5rem tall
+  // (88 px), holds 28 px of padding and a ONE-line header (34 px), and the board is the
+  // column minus its 24 px side padding — so the column can be at most h − 126 before
+  // the last rank drops below the panel edge (owner 2026-09-20: "in landscape ... it
+  // overflows"). The header is kept to one line in narrow columns (see `compact`).
+  const sidePx = Math.round(Math.max(180, Math.min((wide ? 440 : 380) * scale, win[0] * 0.55, (win[1] - 126) * Math.min(1, scale))));
+  // A side column under 300 px (a phone on its side) has no room for the full header:
+  // name + Dream Meet icon + size buttons on one line, nothing else.
+  const compact = !narrow && sidePx < 300;
   const panelTop = PANEL_TOP_DVH[boardStep]!;
   const fp = useFreePlay();
 
@@ -835,16 +843,17 @@ export default function BookReaderPage() {
                     "Send to Dream Meet" on three lines and pushed the size control off the
                     edge. Name and page on the first line, the actions take the next when
                     they need it. */}
-                <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="whitespace-nowrap text-sm font-semibold text-ink-100">Position {activeDiagram.n}</span>
-                  <span className="whitespace-nowrap text-[11px] text-ink-400">page {activeDiagram.page + 1}</span>
-                  <div className="ml-auto flex items-center gap-1.5">
+                <div className={`mb-2 flex items-center gap-x-2 gap-y-1 ${compact ? "flex-nowrap" : "flex-wrap"}`}>
+                  <span className="whitespace-nowrap text-sm font-semibold text-ink-100">{compact ? "Pos." : "Position"} {activeDiagram.n}</span>
+                  {!compact && <span className="whitespace-nowrap text-[11px] text-ink-400">page {activeDiagram.page + 1}</span>}
+                  <div className="ml-auto flex shrink-0 items-center gap-1.5">
                     <button
                       onClick={() => void sendToDreamMeet()}
                       title="Offer this position to your class board — your PC decides whether to load it"
+                      aria-label="Send to Dream Meet"
                       className="whitespace-nowrap rounded-lg border border-brand-400/40 bg-brand-500/15 px-2 py-1 text-[11px] font-semibold text-brand-200 hover:bg-brand-500/25"
                     >
-                      ▶ Dream Meet
+                      {compact ? "▶" : "▶ Dream Meet"}
                     </button>
                     <span className="inline-flex shrink-0 overflow-hidden rounded-lg border border-ink-700" title="Board size">
                       <button
@@ -853,7 +862,7 @@ export default function BookReaderPage() {
                         aria-label="Smaller board"
                         className="px-2 py-1 text-[12px] font-bold leading-none text-ink-200 hover:bg-ink-800 disabled:opacity-30"
                       >−</button>
-                      <span className="border-l border-ink-700 px-1.5 py-1 text-[10px] leading-none text-ink-400" aria-hidden>▦</span>
+                      {!compact && <span className="border-l border-ink-700 px-1.5 py-1 text-[10px] leading-none text-ink-400" aria-hidden>▦</span>}
                       <button
                         onClick={() => setBoardStep((v) => Math.min(4, v + 1))}
                         disabled={boardStep === 4}

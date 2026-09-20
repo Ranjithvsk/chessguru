@@ -57,3 +57,11 @@ desktop 410 px · 900×800 window 394 px · tablet 652 px · phone 390 → 340 p
 - Defaults after: desktop 410 · 900×800 window 350 · tablet 652 · phone 390 → 340 · phone
   360 → 285 · landscape 844×390 → 222 · 915×412 → 244 · 640×360 → 192. `+` reaches 465 in
   the 900 window, 770 on the tablet, full width on phones; `−` works everywhere.
+- **Landscape follow-up** ("in landscape, resize option, and it overflows"): the header in
+  a 260 px side column wrapped to two lines and clipped the size control off the right edge,
+  and the two-line header pushed the last rank under the panel edge. Columns under 300 px
+  now get a one-line header (`Pos. N · ▶ · − +`), and the column height budget is
+  h − 126 (panel 100dvh−5.5rem, 28 px padding, one 34 px header line, 24 px board padding).
+  Measured at 10 shapes incl. 844×340 / 915×350 / 640×300 (browser bar showing): last rank
+  visible everywhere, no header overflow; `+` is already at the height cap in landscape, `−`
+  shrinks to show more page.
