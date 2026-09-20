@@ -10,7 +10,7 @@
 // playable; hotspots glow rather than outline; a filmstrip of every position in
 // the book so it reads like a puzzle set; confidence shown honestly in colour
 // rather than implying every read is perfect.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useParams } from "react-router-dom";
 import Board from "../components/Board";
 import { useFreePlay } from "../hooks/useFreePlay";
@@ -115,6 +115,20 @@ function withSideToMove(fen: string, side: "w" | "b"): string {
   return parts.join(" ");
 }
 
+/** matchMedia as state, so the layout numbers above follow window resizes and rotation. */
+function useMedia(query: string): boolean {
+  const [m, setM] = useState<boolean>(() => { try { return window.matchMedia(query).matches; } catch { return false; } });
+  useEffect(() => {
+    try {
+      const mq = window.matchMedia(query);
+      const on = () => setM(mq.matches);
+      on(); mq.addEventListener("change", on);
+      return () => mq.removeEventListener("change", on);
+    } catch { return; }
+  }, [query]);
+  return m;
+}
+
 export default function BookReaderPage() {
   const { id = "" } = useParams();
   const [book, setBook] = useState<BookDetail | null>(null);
@@ -166,6 +180,40 @@ export default function BookReaderPage() {
   useEffect(() => {
     try { localStorage.setItem("cg.bookStrip", stripOpen ? "1" : "0"); } catch { /* private mode */ }
   }, [stripOpen]);
+  // Board size is the reader's to choose (owner 2026-09-20: "option to resize board also so
+  // user can adjust"). One setting, five steps, remembered per browser. It means two
+  // different things by layout: on a wide screen it is the width of the board column, on a
+  // narrow one it is how much of the screen the pinned panel takes (and so how big the
+  // board inside it can be). Both derive from the same step so the choice carries across.
+  const [boardStep, setBoardStep] = useState<number>(() => {
+    // getItem() is null on a first visit and Number(null) is 0 — the SMALLEST step — so
+    // the missing key has to be checked before the number is (caught by the rig: every
+    // fresh browser opened at step 0).
+    try { const raw = localStorage.getItem("cg.bookBoardStep"); if (raw === null) return 2; const v = Number(raw); return Number.isInteger(v) && v >= 0 && v <= 4 ? v : 2; } catch { return 2; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("cg.bookBoardStep", String(boardStep)); } catch { /* private mode */ }
+  }, [boardStep]);
+  const narrow = useMedia("((max-width: 1023.98px) and (orientation: portrait)), (max-width: 639.98px)");   // = tailwind `stack`
+  const wide = useMedia("(min-width: 1280px)");
+  const [win, setWin] = useState<[number, number]>(() => { try { return [window.innerWidth, window.innerHeight]; } catch { return [1440, 900]; } });
+  useEffect(() => {
+    const on = () => { try { setWin([window.innerWidth, window.innerHeight]); } catch { /* */ } };
+    window.addEventListener("resize", on); window.addEventListener("orientationchange", on);
+    return () => { window.removeEventListener("resize", on); window.removeEventListener("orientationchange", on); };
+  }, []);
+  // Side-by-side: column width = base × scale, never more than 55% of the window so the
+  // page stays readable beside it, and never taller than the window allows — a phone on
+  // its side (844×390) gets a column sized to its HEIGHT, so the whole board is on screen
+  // with the page next to it (owner 2026-09-20: "when mobile landscape is turned, it is
+  // awkward"). Stacked: the panel's top edge in dvh and the board cap that follows from it.
+  const BOARD_SCALE = [0.8, 0.9, 1, 1.2, 1.45];
+  const PANEL_TOP_DVH = [46, 39, 32, 22, 12];
+  // The height cap scales too (below 1 only), so "smaller" still does something on a
+  // sideways phone, where every wide-screen step is above what the height allows.
+  const scale = BOARD_SCALE[boardStep]!;
+  const sidePx = Math.round(Math.max(180, Math.min((wide ? 440 : 380) * scale, win[0] * 0.55, (win[1] - 130) * Math.min(1, scale))));
+  const panelTop = PANEL_TOP_DVH[boardStep]!;
   const fp = useFreePlay();
 
   useEffect(() => {
@@ -653,9 +701,9 @@ export default function BookReaderPage() {
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] xl:grid-cols-[minmax(0,1fr)_440px]">
+      <div className="grid gap-4 side:grid-cols-[minmax(0,1fr)_var(--cg-side)]" style={{ "--cg-side": `${sidePx}px` } as CSSProperties}>
         {/* Pages */}
-        <div className={`space-y-6 ${activeDiagram ? "max-lg:pb-[60vh]" : ""}`}>
+        <div className={`space-y-6 ${activeDiagram ? "stack:pb-[60vh]" : ""}`}>
           {Array.from({ length: book.pages }, (_, p) => (
             <div
               key={p}
@@ -773,32 +821,52 @@ export default function BookReaderPage() {
             looked like nothing happened. Pinned to the lower half instead: the
             page stays visible on top, the board is always where you tapped. */}
         <aside
-          className={`lg:sticky lg:top-20 lg:self-start lg:max-h-[calc(100vh-7.5rem)] lg:overflow-y-auto lg:pr-1 ${
+          className={`side:sticky side:top-20 side:self-start side:max-h-[calc(100dvh-5.5rem)] side:overflow-y-auto side:pr-1 ${
             activeDiagram
-              ? "max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:top-[32%] max-lg:z-30 max-lg:overflow-y-auto max-lg:border-t max-lg:border-ink-700 max-lg:bg-ink-950/98 max-lg:px-3 max-lg:pt-2 max-lg:backdrop-blur"
+              ? "stack:fixed stack:inset-x-0 stack:bottom-0 stack:z-30 stack:overflow-y-auto stack:border-t stack:border-ink-700 stack:bg-ink-950/98 stack:px-3 stack:pt-2 stack:backdrop-blur"
               : ""
           }`}
+          style={narrow && activeDiagram ? { top: `${panelTop}dvh` } : undefined}
         >
           <div className="rounded-2xl border border-ink-700 bg-ink-900 p-3 pb-4">
             {activeDiagram ? (
               <>
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold text-ink-100">Position {activeDiagram.n}</span>
-                  <div className="flex items-center gap-2">
+                {/* Wraps. In a 260 px column (a phone on its side) the old single row put
+                    "Send to Dream Meet" on three lines and pushed the size control off the
+                    edge. Name and page on the first line, the actions take the next when
+                    they need it. */}
+                <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="whitespace-nowrap text-sm font-semibold text-ink-100">Position {activeDiagram.n}</span>
+                  <span className="whitespace-nowrap text-[11px] text-ink-400">page {activeDiagram.page + 1}</span>
+                  <div className="ml-auto flex items-center gap-1.5">
                     <button
                       onClick={() => void sendToDreamMeet()}
                       title="Offer this position to your class board — your PC decides whether to load it"
-                      className="rounded-lg border border-brand-400/40 bg-brand-500/15 px-2 py-1 text-[11px] font-semibold text-brand-200 hover:bg-brand-500/25"
+                      className="whitespace-nowrap rounded-lg border border-brand-400/40 bg-brand-500/15 px-2 py-1 text-[11px] font-semibold text-brand-200 hover:bg-brand-500/25"
                     >
-                      ▶ Send to Dream Meet
+                      ▶ Dream Meet
                     </button>
-                    <span className="text-[11px] text-ink-400">page {activeDiagram.page + 1}</span>
-                    {/* Mobile only: the pinned half hides the filmstrip, so
+                    <span className="inline-flex shrink-0 overflow-hidden rounded-lg border border-ink-700" title="Board size">
+                      <button
+                        onClick={() => setBoardStep((v) => Math.max(0, v - 1))}
+                        disabled={boardStep === 0}
+                        aria-label="Smaller board"
+                        className="px-2 py-1 text-[12px] font-bold leading-none text-ink-200 hover:bg-ink-800 disabled:opacity-30"
+                      >−</button>
+                      <span className="border-l border-ink-700 px-1.5 py-1 text-[10px] leading-none text-ink-400" aria-hidden>▦</span>
+                      <button
+                        onClick={() => setBoardStep((v) => Math.min(4, v + 1))}
+                        disabled={boardStep === 4}
+                        aria-label="Bigger board"
+                        className="border-l border-ink-700 px-2 py-1 text-[12px] font-bold leading-none text-ink-200 hover:bg-ink-800 disabled:opacity-30"
+                      >+</button>
+                    </span>
+                    {/* Stacked layout only: the pinned panel hides the filmstrip, so
                         without this there is no way back to the book. */}
                     <button
                       onClick={() => { setActive(null); setEditing(false); }}
                       aria-label="Close the board"
-                      className="grid h-7 w-7 place-items-center rounded-lg border border-ink-700 text-ink-300 hover:bg-ink-800 lg:hidden"
+                      className="grid h-7 w-7 place-items-center rounded-lg border border-ink-700 text-ink-300 hover:bg-ink-800 side:hidden"
                     >
                       ✕
                     </button>
@@ -839,7 +907,7 @@ export default function BookReaderPage() {
                     capped by the DYNAMIC viewport height minus room for the first row of
                     controls; the rest scrolls inside the panel, which it already could.
                     Same phones now: 285 px and 394 px; a 390 px phone gets the full width. */}
-                <div className="mx-auto w-full max-lg:max-w-[min(100%,calc(68dvh-150px))]">
+                <div className="mx-auto w-full" style={narrow ? { maxWidth: `min(100%, calc(${100 - panelTop}dvh - 150px))` } : undefined}>
                 <Board
                   fen={fp.fen}
                   orientation={fp.orientation}
@@ -1109,7 +1177,7 @@ export default function BookReaderPage() {
         <div className={`fixed inset-x-0 bottom-0 z-20 border-t border-ink-700 bg-ink-950/95 px-3 py-2 backdrop-blur ${
           // The board now owns the bottom half on mobile. Leaving the strip
           // there too would just put one on top of the other.
-          activeDiagram ? "max-lg:hidden" : ""
+          activeDiagram ? "stack:hidden [@media(max-height:520px)]:hidden" : ""
         }`}>
           {/* Collapsible: on a long book this strip is hundreds of buttons
            *  pinned across the bottom of every page, eating screen the reader

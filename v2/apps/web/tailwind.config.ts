@@ -9,6 +9,14 @@ export default {
   darkMode: "class",
   theme: {
     extend: {
+      // Two-column vs stacked is a question of SHAPE, not just width. A phone turned
+      // sideways (844×390) is under the lg breakpoint but has no height to stack a page
+      // above a board — it wants the page beside the board like a desktop does. `side`
+      // and `stack` are exact complements; use them in pairs where lg:/max-lg: were used.
+      screens: {
+        side: { raw: "(min-width: 1024px), ((orientation: landscape) and (min-width: 640px))" },
+        stack: { raw: "((max-width: 1023.98px) and (orientation: portrait)), (max-width: 639.98px)" },
+      },
       colors: {
         // vibrant brand palette
         brand: {
