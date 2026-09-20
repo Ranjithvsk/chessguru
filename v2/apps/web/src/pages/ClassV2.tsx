@@ -17,7 +17,7 @@ import {
 import { Track, DataPacket_Kind, DisconnectReason, RoomEvent, VideoQuality } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
-import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassMoveList, useClassStartShapes, triggerClassSeek, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow , useCoachNotices, dismissCoachNotice, useClassPresence } from "../components/SharedClassBoard";
+import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassNotationHidden, triggerClassNotationToggle, useClassMoveList, useClassStartShapes, triggerClassSeek, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow , useCoachNotices, dismissCoachNotice, useClassPresence } from "../components/SharedClassBoard";
 import { useScreenWakeLock } from "../hooks/useScreenWakeLock";
 import { OPENINGS, findOpeningForLine, openingBySlug, type Opening } from "../lib/openings";
 import { fetchExplorer, type ExplorerData, type ExplorerMove } from "../lib/explorer";
@@ -474,6 +474,48 @@ function ChatToggleButton() {
   );
 }
 
+// Coach-only: hide the move list on the STUDENTS' screens, so they can't read
+// the line ahead (owner ask 2026-09-20). Room-level and persisted server-side,
+// so a student who reconnects or joins late still gets it hidden.
+function CoachStudentNotationToggle() {
+  const hidden = useClassNotationHidden();
+  return (
+    <button
+      onClick={triggerClassNotationToggle}
+      title={hidden ? "Students CAN'T see the move list — click to show it" : "Students CAN see the move list — click to hide it"}
+      className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${hidden ? "border-amber-500/60 bg-amber-500/20 text-amber-100 hover:bg-amber-500/30" : "border-ink-700 bg-ink-900 text-ink-100 hover:bg-ink-800"}`}
+    >
+      {hidden ? "📋 Notation hidden" : "📋 Notation shown"}
+    </button>
+  );
+}
+
+// Anyone: hide the move list on MY OWN screen. Purely local (localStorage, like
+// the video-tiles toggle) — it never touches the room, so a coach hiding their
+// own panel does not hide the students'. On a phone this also hands the whole
+// column back to the board, which is the cheapest way to get a bigger board.
+const SELF_NOTATION_KEY = "cg-hide-notation-self";
+function useSelfNotationHidden(): [boolean, (v: boolean) => void] {
+  const [hidden, setHidden] = useState<boolean>(() => {
+    try { return localStorage.getItem(SELF_NOTATION_KEY) === "1"; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(SELF_NOTATION_KEY, hidden ? "1" : "0"); } catch { /* private mode */ }
+  }, [hidden]);
+  return [hidden, setHidden];
+}
+function SelfNotationToggle({ hidden, onToggle }: { hidden: boolean; onToggle: () => void }) {
+  return (
+    <button
+      onClick={onToggle}
+      title={hidden ? "Show the move list on my screen" : "Hide the move list on my screen (bigger board)"}
+      className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${hidden ? "border-amber-500/60 bg-amber-500/20 text-amber-100 hover:bg-amber-500/30" : "border-ink-700 bg-ink-900 text-ink-100 hover:bg-ink-800"}`}
+    >
+      {hidden ? "🙈 My notation" : "📖 My notation"}
+    </button>
+  );
+}
+
 function ReactionsBar() {
   const { send } = useReactions();
   return (
@@ -492,12 +534,24 @@ function ReactionsBar() {
 // backend from feature-1 (push notifications on new DM). Coach gets the
 // standard chat push and can reply from /messages — this is a one-shot
 // send, not a live chat pane (that's the deferred feature 6).
+// In-class ping for a private message, carried on the LiveKit data channel that
+// is already open for class chat. Web push is the ONLY notification today, and it
+// cannot reach a coach who is looking at Dream Meet: on iPhone it needs the site
+// installed to the Home Screen (a Safari tab is never subscribed at all), and even
+// on desktop an OS banner behind a focused class is easy to miss. The message
+// itself still goes through /api/messages/send + push — this is purely the "you
+// have one" tap on the shoulder, so it carries a PREVIEW, never the thread.
+type DmPing = { from: string; preview: string; ts: number };
+
 function MessageCoachButton({ room }: { room: string }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(null);
   const [sending, setSending] = useState(false);
   const [coach, setCoach] = useState<{ userId: string | null; name: string | null } | null>(null);
+  // `room` above is the CLASS id (a string); this is the LiveKit room object.
+  const lkRoom = useRoomContext();
+  const { localParticipant } = useLocalParticipant();
   useEffect(() => {
     if (!open || coach) return;
     void fetch(`/v2api/api/class/${encodeURIComponent(room)}/coach`, { credentials: "include" })
@@ -519,6 +573,16 @@ function MessageCoachButton({ room }: { room: string }) {
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((j as any)?.message || `HTTP ${r.status}`);
       setStatus({ ok: true, msg: "Sent — coach was notified." });
+      // Tap the coach on the shoulder in-class too. Best-effort and deliberately
+      // AFTER the send succeeded: the message is already stored and pushed, so a
+      // data-channel failure here must never look like a failed send.
+      try {
+        const who = localParticipant?.name || localParticipant?.identity || "A student";
+        lkRoom?.localParticipant.publishData(
+          TX.encode(JSON.stringify({ from: who, preview: body.slice(0, 120), ts: Date.now() } satisfies DmPing)),
+          { reliable: true, topic: "cg-dm" },
+        );
+      } catch { /* toast is a bonus — the message itself already landed */ }
       setText("");
       // Close after 1.2s so the confirmation is visible then dismisses.
       setTimeout(() => { setOpen(false); setStatus(null); }, 1200);
@@ -536,7 +600,14 @@ function MessageCoachButton({ room }: { room: string }) {
       </button>
       {open && (
         <div className="fixed inset-0 z-[70] grid place-items-center bg-black/60 p-4" onClick={() => !sending && setOpen(false)}>
-          <div className="w-full max-w-sm rounded-2xl border border-brand-500/40 bg-slate-950 p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          {/* Themed `ink-*` surfaces, NOT stock Tailwind `slate-*`. In light mode
+           *  `html.light .text-white` is remapped to --text-primary (rgb 15 23 42
+           *  = #0f172a) so white labels don't vanish on white cards — but `slate`
+           *  is not part of the themed palette, so bg-slate-900 stayed #0f172a,
+           *  the SAME value. The student's message box rendered its text in
+           *  exactly its own background colour and they typed blind. index.css's
+           *  exception list (bg-brand/emerald/rose/…) never covered slate. */}
+          <div className="w-full max-w-sm rounded-2xl border border-brand-500/40 bg-ink-950 p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="mb-2 flex items-center justify-between">
               <h3 className="font-display text-base text-white">📩 Message coach{coach?.name ? ` — ${coach.name}` : ""}</h3>
               <button onClick={() => setOpen(false)} className="text-ink-400 hover:text-white">✕</button>
@@ -553,7 +624,7 @@ function MessageCoachButton({ room }: { room: string }) {
                   onChange={(e) => setText(e.target.value)}
                   onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); void send(); } }}
                   placeholder="Type your message — only the coach sees it."
-                  className="w-full rounded-lg border border-ink-700 bg-slate-900 px-3 py-2 text-sm text-white placeholder:text-ink-500 focus:border-brand-500 focus:outline-none disabled:opacity-50" />
+                  className="w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-ink-100 placeholder:text-ink-500 focus:border-brand-500 focus:outline-none disabled:opacity-50" />
                 {status && (
                   <div className={`mt-2 text-xs ${status.ok ? "text-emerald-300" : "text-rose-300"}`}>{status.msg}</div>
                 )}
@@ -574,6 +645,93 @@ function MessageCoachButton({ room }: { room: string }) {
         </div>
       )}
     </>
+  );
+}
+
+// iOS Safari leaves a <video> PAUSED and never repaints it after the element is
+// re-attached — which adaptiveStream does routinely, since it attaches/detaches
+// tiles by visibility and drawn size (added 2026-09-19 for "video quality auto
+// adjust according to user network"). The coach saw their OWN selfie freeze while
+// students still received them perfectly: the track was always healthy, only the
+// local element had stopped painting. Toggling the camera fixed it because that
+// re-attaches and re-plays — and then it froze again.
+//
+// The existing rescue in AudioUnblockPrompt only fires on visibilitychange /
+// focus / pageshow, so a freeze that happens WITHOUT leaving the tab never healed.
+// This watches for it directly: `pause` does not bubble, so we listen in the
+// CAPTURE phase, and a slow sweep catches elements that were paused before we
+// mounted or that never emit the event. play() on an already-playing element is a
+// no-op, so this is cheap and safe to run forever. (owner, 2026-09-20)
+function VideoKeepAlive() {
+  useEffect(() => {
+    const revive = (el: HTMLVideoElement) => {
+      // Only elements that still have a live source — a genuinely ended track
+      // should stay as it is rather than be poked every few seconds.
+      const src = el.srcObject as MediaStream | null;
+      if (!src || !src.getVideoTracks().some((t) => t.readyState === "live")) return;
+      void el.play().catch(() => { /* autoplay policy — the audio prompt covers that */ });
+    };
+    const onPause = (e: Event) => {
+      const el = e.target as HTMLElement | null;
+      if (el instanceof HTMLVideoElement) revive(el);
+    };
+    // capture: `pause` is not a bubbling event
+    document.addEventListener("pause", onPause, true);
+    const sweep = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      document.querySelectorAll<HTMLVideoElement>("video").forEach((el) => { if (el.paused) revive(el); });
+    }, 4000);
+    return () => {
+      document.removeEventListener("pause", onPause, true);
+      window.clearInterval(sweep);
+    };
+  }, []);
+  return null;
+}
+
+// Coach-only: toast when a student sends a private message during the class.
+// Listens on the `cg-dm` topic (see DmPing above). Stacks bottom-right so it
+// never sits over the board or the footer controls, auto-dismisses after 15s,
+// and clicking it opens the thread in a new tab so the class is never left.
+// Themed ink-* surfaces only — never stock slate (see the light-mode note on
+// the message dialog above).
+function CoachDmToastHost({ role }: { role: string }) {
+  const dc = useDataChannel("cg-dm");
+  const [pings, setPings] = useState<Array<DmPing & { id: string }>>([]);
+  useEffect(() => {
+    if (role !== "coach" || !dc.message) return;
+    try {
+      const raw = dc.message.payload instanceof Uint8Array ? RX.decode(dc.message.payload) : String(dc.message.payload);
+      const p = JSON.parse(raw) as DmPing;
+      if (!p || typeof p.preview !== "string") return;
+      const id = `${p.ts}-${Math.random().toString(36).slice(2)}`;
+      setPings((prev) => [...prev.slice(-2), { ...p, id }]);   // at most 3 on screen
+      setTimeout(() => setPings((prev) => prev.filter((x) => x.id !== id)), 15000);
+    } catch { /* ignore a malformed frame */ }
+  }, [dc.message, role]);
+  if (role !== "coach" || pings.length === 0) return null;
+  return (
+    <div className="pointer-events-none fixed bottom-24 right-3 z-[75] flex w-[min(20rem,88vw)] flex-col gap-2">
+      {pings.map((p) => (
+        <div key={p.id}
+          className="pointer-events-auto rounded-xl border border-brand-500/50 bg-ink-900 p-3 shadow-2xl ring-1 ring-brand-500/20">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-xs font-bold text-brand-200">📩 Private message · {p.from}</div>
+              <div className="mt-0.5 break-words text-sm text-ink-100">{p.preview}</div>
+            </div>
+            <button onClick={() => setPings((prev) => prev.filter((x) => x.id !== p.id))}
+              aria-label="Dismiss" className="shrink-0 text-ink-400 hover:text-ink-100">✕</button>
+          </div>
+          {/* New tab on purpose — a coach mid-class must not navigate away from
+           *  Dream Meet to read a message (it would tear down the call). */}
+          <a href="/messages" target="_blank" rel="noopener noreferrer"
+            className="mt-2 inline-block rounded-lg bg-brand-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-brand-400">
+            Open Messages ↗
+          </a>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -1414,6 +1572,13 @@ export default function ClassV2Page() {
   useEffect(() => {
     try { localStorage.setItem("cg-hide-video", hideVideo ? "1" : "0"); } catch {}
   }, [hideVideo]);
+  // My OWN move-list preference — local only, never broadcast. Separate from the
+  // coach's "hide it for the students" switch below.
+  const [selfNotationHidden, setSelfNotationHidden] = useSelfNotationHidden();
+  // Students lose the panel when the COACH hides it for them; the coach's own
+  // panel is governed purely by their local toggle.
+  const classNotationHidden = useClassNotationHidden();
+  const hideNotationHere = selfNotationHidden || (role === "student" && classNotationHidden);
 
   // Coach clicks Leave → tell the server to explicitly END the class:
   //   * wipes the live-now announcement (students don't see a stale link)
@@ -1782,16 +1947,21 @@ export default function ClassV2Page() {
                *  container. container-type:size gives SharedClassBoard's
                *  cqi/cqb-based sizing an actual box to measure against. */}
               <div
-                className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-2"
+                className="relative flex min-h-[55svh] flex-1 items-center justify-center overflow-hidden p-2 lg:min-h-0"
                 style={{ containerType: 'size' } as any}
               >
               <AudioUnblockPrompt />
+              <VideoKeepAlive />
               <MicWakeGuard />
               <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} onClassEnded={onClassEnded} intendedRole={role} />
               {/* Student toast when the coach marks their challenge answer.
                *  Module-level state so this host can live anywhere in the tree. */}
               <ChallengeMarkToastHost />
               <CoachNoticeHost />
+              {/* Coach's in-class alert for a student's private message. Inside
+               *  LiveKitRoom so useDataChannel has its context; renders fixed,
+               *  so its position here in the tree doesn't matter. */}
+              <CoachDmToastHost role={role} />
               {endedMsg && (
                 <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center bg-ink-950/85 p-6 text-center">
                   <div className="pointer-events-auto space-y-3 rounded-2xl border border-rose-500/50 bg-ink-900 p-6 shadow-2xl">
@@ -1858,15 +2028,25 @@ export default function ClassV2Page() {
                *  320px, full body height), stacks under the board on smaller
                *  screens (mobile / tablet) via lg:w-[320px] + w-full. Uses
                *  its own max-h cap on mobile so the board doesn't shrink. */}
-              <div className="shrink-0 border-t border-ink-800 lg:h-auto lg:w-[360px] lg:border-l lg:border-t-0">
-                <ClassNotationPanel room={room} role={role} />
-              </div>
+              {!hideNotationHere && (
+                <div className="shrink-0 border-t border-ink-800 lg:h-auto lg:w-[360px] lg:border-l lg:border-t-0">
+                  <ClassNotationPanel room={room} role={role} />
+                </div>
+              )}
             </div>
 
             {/* Controls footer — mic / cam / screen + hand / chat / reactions,
              *  sits UNDER the board so nothing overlaps pieces. */}
+            {/* The board is sized by the SMALLER of its slot's width and height
+             *  (min(100cqi,100cqb)), so on a phone its height is what limits it —
+             *  and this footer is shrink-0, so every row it wrapped onto came
+             *  straight off the board. With ~10 controls it wrapped 3-4 deep and
+             *  the board kept getting smaller as more appeared. One scrollable
+             *  row on small screens, free to wrap again from lg up where there is
+             *  room. It also keeps 🔒 Locked in a predictable place instead of
+             *  buried mid-wrap. (owner, 2026-09-20) */}
             <div className="shrink-0 border-t border-ink-800 bg-ink-900/70 px-4 py-2">
-              <div className="flex flex-wrap items-center justify-center gap-3">
+              <div className="flex flex-nowrap items-center justify-start gap-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:flex-wrap lg:justify-center lg:overflow-visible">
                 <div className="rounded-xl border border-ink-800 bg-ink-900 shadow">
                   <ControlBar variation="minimal" controls={{ microphone: true, camera: true, screenShare: true, chat: false, leave: false }} />
                 </div>
@@ -1895,6 +2075,10 @@ export default function ClassV2Page() {
                 {role === "student" && <MessageCoachButton room={room} />}
                 {role === "coach" && <CoachFlipToggle />}
                 {role === "coach" && <CoachLockToggle />}
+                {/* Two SEPARATE notation toggles: the first hides it on the
+                 *  students screens (broadcast), the second only on mine (local). */}
+                {role === "coach" && <CoachStudentNotationToggle />}
+                <SelfNotationToggle hidden={selfNotationHidden} onToggle={() => setSelfNotationHidden(!selfNotationHidden)} />
                 {role === "coach" && (
                   <button
                     onClick={() => setAudiencePickerOpen(true)}

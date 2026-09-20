@@ -68,6 +68,11 @@ type ClientFrame =
   | { type: "reset" }
   | { type: "loadFen"; fen: string }        // coach only — set the board to an arbitrary position
   | { type: "lock"; locked: boolean }       // coach only — student moves are dropped when true
+  // Coach hides the move list on the STUDENTS' screens so they can't read the line
+  // ahead (owner ask 2026-09-20). Room-level and persisted, so a student who
+  // reconnects or joins late still gets it hidden. The coach's own panel is a
+  // separate LOCAL preference and never travels over the wire.
+  | { type: "notation"; hidden: boolean }   // coach only
   | { type: "takeback" }                    // coach only — pops the last move (legacy: destructive)
   | { type: "seek"; cursorIdx?: number; path?: number[] }     // coach only — jump cursor to a specific ply (0 = startFen, history.length = live) OR to a tree path
   | { type: "promote-variation"; path: number[] }             // coach only — swap node at path with sibling to its left (one step toward mainline)
@@ -104,10 +109,11 @@ type ClientFrame =
 // is broadcast to the room on state changes.
 type ServerFrame =
   | { type: "role"; role: "coach" | "student"; coachToken?: string }
-  | { type: "state"; fen: string; startFen: string; lastMove: Move | null; history: Move[]; cursorIdx: number; tree: TreeNode[]; cursorPath: number[]; participants: number; locked: boolean; shapes: Shape[]; startShapes: Shape[]; orientation: Orientation }
+  | { type: "state"; fen: string; startFen: string; lastMove: Move | null; history: Move[]; cursorIdx: number; tree: TreeNode[]; cursorPath: number[]; participants: number; locked: boolean; shapes: Shape[]; startShapes: Shape[]; orientation: Orientation; notationHidden?: boolean }
   | { type: "move"; move: Move; fen: string; startFen: string; history: Move[]; cursorIdx: number; tree: TreeNode[]; cursorPath: number[]; participants: number; locked: boolean }
   | { type: "reset"; fen: string; participants: number; locked: boolean }
   | { type: "lock"; locked: boolean; participants: number }
+  | { type: "notation"; hidden: boolean; participants: number }
   | { type: "annot"; shapes: Shape[]; participants: number }
   | { type: "pointer"; x: number; y: number }  // coach's live cursor over the board (normalized 0..1)
   | { type: "pointer-off" }                    // coach's cursor left the board (students hide the dot)
@@ -216,6 +222,7 @@ interface Room {
   coachToken: string | null;    // random shared secret — coach's browser keeps it
   coach: WebSocket | null;      // currently-connected coach socket (may go null between reconnects)
   locked: boolean;              // student-move lock
+  notationHidden: boolean;      // coach hid the move list on STUDENT screens (coach keeps their own)
   shapes: Shape[];              // shapes for the CURRENT cursor position (mirror of tree-node's own shapes; broadcast in state/annot)
   startShapes: Shape[];         // arrows/circles drawn at the starting position (cursorPath = []); tree nodes carry their own .shapes
   orientation: Orientation;     // board POV — coach can flip; students always mirror
@@ -389,7 +396,7 @@ function getRoom(id: string): Room {
     // piece — owner reported 2026-08-12 that "students were controlling
     // moves". Coach can unlock via the footer 🔒 toggle for interactive drills.
     r = { fen: START_FEN, startFen: START_FEN, tree: [], cursorPath: [], lastMove: null, history: [], cursorIdx: 0, clients: new Set(),
-          coachToken: null, coach: null, locked: true, shapes: [], startShapes: [], orientation: "white", emptyEvictAt: null, pendingOffers: [],
+          coachToken: null, coach: null, locked: true, notationHidden: false, shapes: [], startShapes: [], orientation: "white", emptyEvictAt: null, pendingOffers: [],
           challenge: null };
     rooms.set(id, r);
     // Async restore from DB — a room evicted or a server restart shouldn't
@@ -435,6 +442,7 @@ function scheduleRoomSave(classId: string): void {
       history: room.history,
       lastMove: room.lastMove,
       locked: room.locked,
+      notationHidden: room.notationHidden,
       shapes: room.shapes,
       startShapes: room.startShapes,     // per-position shapes are also stored inside tree nodes; startShapes covers the pre-first-move root position
       orientation: room.orientation,
@@ -464,6 +472,7 @@ async function restoreRoomFromDb(classId: string, room: Room): Promise<void> {
     if (typeof doc.cursorIdx === "number") room.cursorIdx = doc.cursorIdx;
     if (doc.lastMove && typeof doc.lastMove === "object") room.lastMove = doc.lastMove;
     if (typeof doc.locked === "boolean") room.locked = doc.locked;
+    if (typeof doc.notationHidden === "boolean") room.notationHidden = doc.notationHidden;
     if (Array.isArray(doc.shapes)) room.shapes = doc.shapes;
     if (Array.isArray(doc.startShapes)) room.startShapes = doc.startShapes;
     if (doc.orientation === "white" || doc.orientation === "black") room.orientation = doc.orientation;
@@ -726,7 +735,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
   // Snapshot current board to the new participant. Role isn't decided here — client
   // sends `hello` (optionally with its saved coachToken) and role is resolved there.
-  send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
+  send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation, notationHidden: room.notationHidden });
   // Late joiner mid-challenge — inform them so their board switches to
   // challenge mode with the correct remaining time. Uses the ORIGINAL
   // durationSec so the client can display "60s challenge, 42s remaining"
@@ -1348,6 +1357,15 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       if (!isCoach()) return;
       room.locked = !!frame.locked;
       broadcast(room, { type: "lock", locked: room.locked, participants: room.clients.size });
+      return;
+    }
+
+    if (frame.type === "notation") {
+      if (!isCoach()) return;
+      room.notationHidden = !!frame.hidden;
+      // Broadcast to everyone (the coach's other devices included) so a second
+      // coach screen shows the same toggle state.
+      broadcast(room, { type: "notation", hidden: room.notationHidden, participants: room.clients.size });
       return;
     }
 

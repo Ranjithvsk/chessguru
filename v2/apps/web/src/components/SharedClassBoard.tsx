@@ -56,7 +56,7 @@ export function useClassSetupOpen(): boolean {
 // Coach action bus — reset / stepBack / stepForward triggers from the footer
 // buttons rendered by ClassV2 flow through this. ClassV2 has no access to the
 // class-ws socket; module scope keeps the wiring flat.
-type ClassBoardAction = "reset" | "stepBack" | "stepForward" | "toggleLock" | "flipOrientation";
+type ClassBoardAction = "reset" | "stepBack" | "stepForward" | "toggleLock" | "flipOrientation" | "toggleNotation";
 const _actionSubs = new Set<(a: ClassBoardAction) => void>();
 export function triggerClassBoardAction(a: ClassBoardAction) { _actionSubs.forEach((f) => f(a)); }
 export function triggerClassFlipOrientation() { _actionSubs.forEach((f) => f("flipOrientation")); }
@@ -179,6 +179,27 @@ export function useClassLocked(): boolean {
 }
 export function triggerClassLockToggle() {
   _actionSubs.forEach((f) => f("toggleLock"));
+}
+
+// Move list hidden on the STUDENTS' screens — a coach-controlled, room-level
+// flag so a student can't read the line ahead (owner ask 2026-09-20). Server
+// persists it, so a reconnect or a late joiner still gets it hidden. The
+// coach's OWN panel is a separate local preference (see ClassV2) and never
+// touches this. Module scope + subscribe hook mirrors the lock pattern above.
+let _notationHiddenState = false;
+const _notationSubs = new Set<() => void>();
+function _publishNotationHidden(v: boolean) {
+  if (_notationHiddenState === v) return;
+  _notationHiddenState = v;
+  _notationSubs.forEach((f) => f());
+}
+export function useClassNotationHidden(): boolean {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((n) => n + 1); _notationSubs.add(f); return () => { _notationSubs.delete(f); }; }, []);
+  return _notationHiddenState;
+}
+export function triggerClassNotationToggle() {
+  _actionSubs.forEach((f) => f("toggleNotation"));
 }
 
 // Room orientation — coach flip broadcasts to all students so both sides see
@@ -1027,6 +1048,9 @@ export default function SharedClassBoard(
           _publishCursor(cursor, hist.length);
           _publishMoveList(typeof msg.startFen === "string" ? msg.startFen : new Chess().fen(), hist, cursor, tree, cursorPath);
           if (typeof msg.locked === "boolean") _publishLocked(msg.locked);
+          // Only the JOIN snapshot carries this; the other state broadcasts leave it
+          // undefined and the guard simply skips them (same shape as `locked`).
+          if (typeof msg.notationHidden === "boolean") _publishNotationHidden(msg.notationHidden);
           if (msg.orientation === "white" || msg.orientation === "black") _publishOrientation(msg.orientation);
         }
         else if (msg.type === "move") {
@@ -1038,8 +1062,12 @@ export default function SharedClassBoard(
           _publishCursor(cursor, hist.length);
           _publishMoveList(typeof msg.startFen === "string" ? msg.startFen : _moveList.startFen, hist, cursor, tree, cursorPath);
           if (typeof msg.locked === "boolean") _publishLocked(msg.locked);
+          // Only the JOIN snapshot carries this; the other state broadcasts leave it
+          // undefined and the guard simply skips them (same shape as `locked`).
+          if (typeof msg.notationHidden === "boolean") _publishNotationHidden(msg.notationHidden);
         }
         else if (msg.type === "lock") { if (typeof msg.locked === "boolean") _publishLocked(msg.locked); }
+        else if (msg.type === "notation") { if (typeof msg.hidden === "boolean") _publishNotationHidden(msg.hidden); }
         else if (msg.type === "reset") applyFen(msg.fen, null);
         else if (msg.type === "annot") setShapes(Array.isArray(msg.shapes) ? msg.shapes : []);
         else if (msg.type === "role") {
@@ -1385,14 +1413,10 @@ export default function SharedClassBoard(
   // Coach-only triggers for starting/ending a challenge from ClassV2 footer.
   useEffect(() => {
     _challengeStartFn = ({ positionFen, startFen, prompt, durationSec }) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      try { ws.send(JSON.stringify({ type: "challenge:start", positionFen, startFen, prompt, durationSec })); } catch { /* */ }
+      sendCoachAction({ type: "challenge:start", positionFen, startFen, prompt, durationSec }, "Starting the challenge");
     };
     _challengeEndFn = () => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      try { ws.send(JSON.stringify({ type: "challenge:end" })); } catch { /* */ }
+      sendCoachAction({ type: "challenge:end" }, "Ending the challenge");
     };
     _challengeDismissFn = () => {
       // Client-only: clear the answers panel without server round-trip.
@@ -1517,15 +1541,30 @@ export default function SharedClassBoard(
     return () => wrap.removeEventListener("wheel", onWheel);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role, fen]);   // rebind when the chessground DOM regenerates on fen change
-  const sendLock = (nextLocked: boolean) => {
+  // Every DELIBERATE coach control goes through here. Returning silently when the
+  // socket is down is what hid an entire broken class on 2026-09-20: the coach
+  // pressed "Start challenge", nothing was sent, nothing was said, and the students
+  // sat on a locked board for the rest of the lesson. A control that does nothing
+  // must SAY it did nothing. (High-frequency traffic — moves, pointer, annotations,
+  // snapshots — deliberately keeps the quiet early-return: it reconciles from the
+  // next state frame and would otherwise spam the coach.)
+  const sendCoachAction = (payload: Record<string, unknown>, label: string): boolean => {
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    try { ws.send(JSON.stringify({ type: "lock", locked: nextLocked })); } catch { /* */ }
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      pushCoachNotice(`⚠ ${label} didn't reach the class — reconnecting. Try again in a moment.`, "warn");
+      return false;
+    }
+    try { ws.send(JSON.stringify(payload)); return true; }
+    catch { pushCoachNotice(`⚠ ${label} failed to send — reconnecting.`, "warn"); return false; }
+  };
+  const sendLock = (nextLocked: boolean) => {
+    sendCoachAction({ type: "lock", locked: nextLocked }, nextLocked ? "Locking the board" : "Unlocking the board");
+  };
+  const sendNotation = (hidden: boolean) => {
+    sendCoachAction({ type: "notation", hidden }, hidden ? "Hiding the move list" : "Showing the move list");
   };
   const sendOrientation = (next: Orientation) => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    try { ws.send(JSON.stringify({ type: "orientation", orientation: next })); } catch { /* */ }
+    sendCoachAction({ type: "orientation", orientation: next }, "Flipping the board");
   };
   // Subscribe to the footer's action bus so coach's ← → / Reset / Lock clicks
   // in ClassV2 reach us and go over the ws.
@@ -1536,6 +1575,7 @@ export default function SharedClassBoard(
       else if (a === "stepForward") sendStepForward();
       else if (a === "toggleLock") sendLock(!_lockedState);
       else if (a === "flipOrientation") sendOrientation(_orientationState === "white" ? "black" : "white");
+      else if (a === "toggleNotation") sendNotation(!_notationHiddenState);
     };
     _actionSubs.add(handle);
     return () => { _actionSubs.delete(handle); };

@@ -182,7 +182,20 @@ html.light [class*="bg-lime-"].text-white,
 html.light [class*="bg-green-"] .text-white,
 html.light [class*="bg-green-"].text-white,
 html.light [class*="bg-blue-"] .text-white,
-html.light [class*="bg-blue-"].text-white { color: #fff; }
+html.light [class*="bg-blue-"].text-white,
+/* Stock Tailwind `slate` is NOT part of the themed ink-* palette, so a
+   bg-slate-{700..950} surface stays DARK in light mode while the rule above
+   flips .text-white to --text-primary (rgb 15 23 42). bg-slate-900 is #0f172a
+   and --text-primary light is #0f172a — the identical value, so the text
+   rendered invisible against its own background (Dream Meet's "message coach"
+   box; the student typed blind). Surfaces that SHOULD follow the theme belong
+   on ink-* — those were migrated. These four shades are the deliberately-dark
+   ones, and white must win on them. Light slate (50..600) is intentionally
+   excluded: white text there would be the same bug mirrored. */
+html.light .bg-slate-700 .text-white, html.light .bg-slate-700.text-white,
+html.light .bg-slate-800 .text-white, html.light .bg-slate-800.text-white,
+html.light .bg-slate-900 .text-white, html.light .bg-slate-900.text-white,
+html.light .bg-slate-950 .text-white, html.light .bg-slate-950.text-white { color: #fff; }
 
 /* Hard-suppress chessground's move-hint overlays for boards that want to
  * hide them (coach board — owner ask 2026-09-03: "when I click knight, it
