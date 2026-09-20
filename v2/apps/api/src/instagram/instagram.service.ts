@@ -48,6 +48,10 @@ export interface MediaItem {
   kind: "image" | "video";
   bytes: number;
   at: Date;
+  /** False while the copy to B2 is still in flight or has failed. The file is
+   *  already on disk and serving either way — this only says whether the
+   *  durable copy exists yet. */
+  backedUp: boolean;
 }
 
 export interface PostCard {
@@ -76,6 +80,17 @@ const firstName = (s: string) => String(s || "").trim().split(/\s+/)[0] || s;
 export class InstagramService {
   constructor(@InjectConnection() private readonly conn: Connection) {}
   private col(name: string) { return this.conn.db!.collection(name); }
+
+  /** Files written locally whose B2 copy has not been confirmed yet. Upload no
+   *  longer waits for B2: the push costs ~4 s for a 31 MB video (1.1 s of that
+   *  is just rclone starting and authenticating), and making the browser sit on
+   *  "saving…" for it bought nothing — the file is on disk and nginx is already
+   *  serving it. The copy happens right after the response, and the library
+   *  shows which files are not backed up yet rather than pretending. */
+  private pendingB2 = new Set<string>();
+  /** syncDown is a network round-trip; doing it on every listing made the page
+   *  feel slow for no gain, since nothing else writes to the bucket. */
+  private lastSyncAt = 0;
 
   /** Throws unless the session belongs to the owner address. Checked against the
    *  user record rather than the session so a stale session cannot outlive a
@@ -224,9 +239,23 @@ export class InstagramService {
   /** Pull anything in B2 that is not already cached locally. rclone skips files
    *  it already has, so this is cheap on every call and self-heals a cache that
    *  was wiped (or a box that was rebuilt). */
-  private async syncDown(): Promise<void> {
+  private async syncDown(force = false): Promise<void> {
     await fs.mkdir(MEDIA_DIR, { recursive: true }).catch(() => {});
+    if (!force && Date.now() - this.lastSyncAt < 60_000) return;
+    this.lastSyncAt = Date.now();
     await this.rclone(["copy", B2_REMOTE, MEDIA_DIR, "--transfers", "4", "--ignore-existing"]);
+  }
+
+  /** Push one file to B2 after the response has gone out. Retries a couple of
+   *  times, then leaves it marked pending so the library keeps saying so rather
+   *  than quietly losing the durable copy. */
+  private async pushToB2(name: string): Promise<void> {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const r = await this.rclone(["copyto", join(MEDIA_DIR, name), `${B2_REMOTE}/${name}`], 600_000);
+      if (r.ok) { this.pendingB2.delete(name); return; }
+      await new Promise((res) => setTimeout(res, attempt * 2000));
+    }
+    console.warn(`[instagram] ${name} is on disk but NOT in B2 after 3 attempts`);
   }
 
   /** Everything in the library, newest first. B2 holds the files; the local
@@ -245,7 +274,7 @@ export class InstagramService {
       if (!Object.values(MIME_EXT).includes(ext)) continue;
       const st = await fs.stat(join(MEDIA_DIR, n)).catch(() => null);
       if (!st?.isFile() || st.size === 0) continue;
-      items.push({ id: n, url: `${MEDIA_URL}/${encodeURIComponent(n)}`, kind: isVideoExt(ext) ? "video" : "image", bytes: st.size, at: st.mtime });
+      items.push({ id: n, url: `${MEDIA_URL}/${encodeURIComponent(n)}`, kind: isVideoExt(ext) ? "video" : "image", bytes: st.size, at: st.mtime, backedUp: !this.pendingB2.has(n) });
     }
     items.sort((a, b) => b.at.getTime() - a.at.getTime());
     return { ok: true, items };
@@ -255,7 +284,7 @@ export class InstagramService {
    *  video is tens of megabytes and the multipart round-trip buys nothing.
    *  Written locally first so the page can show it immediately, then pushed to
    *  B2, which is the copy that has to survive. */
-  async uploadMedia(session: any, rawName: string, buf: Buffer, contentType: string): Promise<{ ok: true; item: MediaItem; stored: "b2" | "local-only" }> {
+  async uploadMedia(session: any, rawName: string, buf: Buffer, contentType: string): Promise<{ ok: true; item: MediaItem }> {
     await this.ensureOwner(session);
     if (!Buffer.isBuffer(buf) || buf.byteLength === 0) throw new BadRequestException("empty body");
     const ct = String(contentType || "").toLowerCase().split(";")[0]?.trim() || "";
@@ -271,12 +300,13 @@ export class InstagramService {
     const name = `${stem}-${Date.now()}.${ext}`;
     await fs.mkdir(MEDIA_DIR, { recursive: true }).catch(() => {});
     await fs.writeFile(join(MEDIA_DIR, name), buf);
-    const pushed = await this.rclone(["copyto", join(MEDIA_DIR, name), `${B2_REMOTE}/${name}`], 300_000);
     const st = await fs.stat(join(MEDIA_DIR, name));
+    // Respond now; back it up immediately after. Deliberately not awaited.
+    this.pendingB2.add(name);
+    void this.pushToB2(name);
     return {
       ok: true,
-      stored: pushed.ok ? "b2" : "local-only",
-      item: { id: name, url: `${MEDIA_URL}/${encodeURIComponent(name)}`, kind: isVideoExt(ext) ? "video" : "image", bytes: st.size, at: st.mtime },
+      item: { id: name, url: `${MEDIA_URL}/${encodeURIComponent(name)}`, kind: isVideoExt(ext) ? "video" : "image", bytes: st.size, at: st.mtime, backedUp: false },
     };
   }
 
@@ -291,6 +321,7 @@ export class InstagramService {
     const ext = (name.split(".").pop() || "").toLowerCase();
     if (!Object.values(MIME_EXT).includes(ext)) return { ok: false, error: "bad id" };
     await fs.unlink(join(MEDIA_DIR, name)).catch(() => null);
+    this.pendingB2.delete(name);
     await this.rclone(["deletefile", `${B2_REMOTE}/${name}`]);
     return { ok: true };
   }

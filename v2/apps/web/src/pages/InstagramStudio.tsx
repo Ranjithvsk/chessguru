@@ -29,10 +29,10 @@ interface PostCard {
 
 const SIZE = 1080;
 
-interface MediaItem { id: string; url: string; kind: "image" | "video"; bytes: number; at: string }
+interface MediaItem { id: string; url: string; kind: "image" | "video"; bytes: number; at: string; backedUp: boolean }
 /** One row per file being sent. `sent`/`total` are bytes, so the bar is real
  *  progress from the browser rather than a spinner pretending to be one. */
-interface Upload { name: string; sent: number; total: number; state: "sending" | "saving" | "done" | "error"; error?: string }
+interface Upload { name: string; sent: number; total: number; state: "sending" | "finishing" | "done" | "error"; error?: string }
 const LOGO_KEY = "cg-ig-logo";   // which library image to stamp on exports
 const fmtBytes = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 const KIND_LABEL: Record<PostCard["kind"], string> = {
@@ -256,7 +256,7 @@ export default function InstagramStudio() {
   const [media, setMedia] = useState<MediaItem[] | null>(null);
   const [logoUrl, setLogoUrl] = useState<string | null>(() => { try { return localStorage.getItem(LOGO_KEY); } catch { return null; } });
   const [uploads, setUploads] = useState<Upload[]>([]);
-  const uploading = uploads.some((u) => u.state === "sending" || u.state === "saving");
+  const uploading = uploads.some((u) => u.state === "sending" || u.state === "finishing");
   const [mediaMsg, setMediaMsg] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -325,7 +325,10 @@ export default function InstagramStudio() {
     xhr.setRequestHeader("Content-Type", f.type || "application/octet-stream");
     const patch = (u: Partial<Upload>) => setUploads((prev) => prev.map((row, i) => (i === idx ? { ...row, ...u } : row)));
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) patch({ sent: e.loaded, total: e.total }); };
-    xhr.upload.onload = () => patch({ sent: f.size, state: "saving" });
+    // Bytes are all on the wire; the server is only writing the file now. The
+    // copy to Backblaze happens after the response, so this is brief — it used
+    // to sit here for the whole B2 push, which looked like a hang.
+    xhr.upload.onload = () => patch({ sent: f.size, state: "finishing" });
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) { patch({ state: "done", sent: f.size }); resolve({ ok: true }); return; }
       let msg = `HTTP ${xhr.status}`;
@@ -349,8 +352,11 @@ export default function InstagramStudio() {
       const r = await sendOne(list[i]!, i);
       if (r.ok) ok++; else failed.push(`${list[i]!.name}: ${r.error}`);
     }
-    setMediaMsg(failed.length ? failed.join(" · ") : `${ok} saved to Backblaze.`);
+    setMediaMsg(failed.length ? failed.join(" · ") : `${ok} saved. Backing up to Backblaze in the background.`);
     loadMedia();
+    // The B2 copy lands a few seconds later; refresh once so the "backing up"
+    // chip clears itself without the owner wondering.
+    setTimeout(loadMedia, 8000);
     if (fileRef.current) fileRef.current.value = "";
     // Leave finished rows up briefly so the result is readable, then clear.
     setTimeout(() => { setUploads([]); setMediaMsg(null); }, failed.length ? 9000 : 4000);
@@ -420,12 +426,12 @@ export default function InstagramStudio() {
                     <span className={`shrink-0 tabular-nums ${u.state === "error" ? "text-rose-300" : "text-ink-400"}`}>
                       {u.state === "error" ? u.error
                         : u.state === "done" ? "saved"
-                        : u.state === "saving" ? "saving to Backblaze…"
+                        : u.state === "finishing" ? "finishing…"
                         : `${pct}% · ${fmtBytes(u.sent)} of ${fmtBytes(u.total)}`}
                     </span>
                   </div>
                   <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-ink-800">
-                    <div className={`h-full rounded-full transition-[width] duration-150 ${tone} ${u.state === "saving" ? "animate-pulse" : ""}`}
+                    <div className={`h-full rounded-full transition-[width] duration-150 ${tone} ${u.state === "finishing" ? "animate-pulse" : ""}`}
                       style={{ width: `${u.state === "error" ? 100 : pct}%` }} />
                   </div>
                 </div>
@@ -443,6 +449,11 @@ export default function InstagramStudio() {
                 {m.kind === "video"
                   ? <video src={m.url} className="h-24 w-full object-cover" muted playsInline preload="metadata" />
                   : <img src={m.url} alt={m.id} className="h-24 w-full object-contain" loading="lazy" />}
+                {!m.backedUp && (
+                  <span className="absolute left-1 top-1 rounded bg-amber-500/20 px-1 text-[9px] font-semibold text-amber-200" title="On the server and serving; the Backblaze copy is still being written">
+                    backing up…
+                  </span>
+                )}
                 <div className="flex items-center justify-between gap-1 px-1.5 py-1 text-[10px] text-ink-400">
                   <span className="truncate" title={m.id}>{m.kind === "video" ? "video" : "image"} · {fmtBytes(m.bytes)}</span>
                   <div className="flex shrink-0 gap-1">
