@@ -31,6 +31,10 @@ type BookDetail = {
   lastPage?: number;
   /** Lines saved on a position, keyed by the diagram's stable key. */
   analysis?: Record<string, { tree: any[]; startFen?: string }>;
+  /** Pixel size of every page as it was rendered for the scan — the space the bboxes
+   *  are in. Pages arrive as sized variants now, so the image's own naturalWidth is NOT
+   *  that space any more (a phone gets an 800 px page for an 887 px scan). */
+  pageSizes?: ([number, number] | null)[] | null;
 };
 
 /** A scanned position knows nothing about castling or the clock, so fill the
@@ -649,7 +653,7 @@ export default function BookReaderPage() {
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] xl:grid-cols-[minmax(0,1fr)_440px]">
         {/* Pages */}
         <div className={`space-y-6 ${activeDiagram ? "max-lg:pb-[60vh]" : ""}`}>
           {Array.from({ length: book.pages }, (_, p) => (
@@ -665,7 +669,7 @@ export default function BookReaderPage() {
                  rendered from the PDF on demand rather than served as files, so
                  that turned into 854 renders and the reader appeared to hang.
                  An A4-ish ratio holds the space until the real one is known. */
-              style={{ aspectRatio: pageSize[p] ? `${pageSize[p]![0]} / ${pageSize[p]![1]}` : "1 / 1.414" }}
+              style={{ aspectRatio: (book.pageSizes?.[p] ?? pageSize[p]) ? `${(book.pageSizes?.[p] ?? pageSize[p])![0]} / ${(book.pageSizes?.[p] ?? pageSize[p])![1]}` : "1 / 1.414" }}
               className="relative overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-ink-700/40"
             >
               <img
@@ -683,7 +687,10 @@ export default function BookReaderPage() {
               />
               {(byPage[p] ?? []).map((d) => {
                 if (!d.bbox || d.bbox.length < 4) return null;
-                const size = pageSize[p];
+                // The scan's pixel space from the server when it has it; the loaded
+                // image's natural size only as a fallback (right only when the page was
+                // served at its original size — variants are smaller on phones).
+                const size = book.pageSizes?.[p] ?? pageSize[p];
                 if (!size) return null;            // wait until we know the page's real size
                 const [nw, nh] = size;
                 const [x1, y1, x2, y2] = d.bbox as [number, number, number, number];
@@ -768,7 +775,7 @@ export default function BookReaderPage() {
         <aside
           className={`lg:sticky lg:top-20 lg:self-start lg:max-h-[calc(100vh-7.5rem)] lg:overflow-y-auto lg:pr-1 ${
             activeDiagram
-              ? "max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:top-[42%] max-lg:z-30 max-lg:overflow-y-auto max-lg:border-t max-lg:border-ink-700 max-lg:bg-ink-950/98 max-lg:px-3 max-lg:pt-2 max-lg:backdrop-blur"
+              ? "max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:top-[32%] max-lg:z-30 max-lg:overflow-y-auto max-lg:border-t max-lg:border-ink-700 max-lg:bg-ink-950/98 max-lg:px-3 max-lg:pt-2 max-lg:backdrop-blur"
               : ""
           }`}
         >
@@ -825,7 +832,14 @@ export default function BookReaderPage() {
                     position could be looked at but not used. Capping the width
                     against the available HEIGHT keeps the whole board and its
                     buttons on screen. */}
-                <div className="mx-auto w-full max-lg:max-w-[calc(58vh-190px)]">
+                {/* 2026-09-20, owner: "the board size after clicking became very small".
+                    Measured: 181 px on a 360×640 phone, 274 px in a 900×800 desktop window
+                    (any window under 1024 px wide takes this pinned layout — a zoomed
+                    browser does too). The panel now takes the lower 68% and the board is
+                    capped by the DYNAMIC viewport height minus room for the first row of
+                    controls; the rest scrolls inside the panel, which it already could.
+                    Same phones now: 285 px and 394 px; a 390 px phone gets the full width. */}
+                <div className="mx-auto w-full max-lg:max-w-[min(100%,calc(68dvh-150px))]">
                 <Board
                   fen={fp.fen}
                   orientation={fp.orientation}

@@ -14,7 +14,7 @@
 // owns a copy of — we are giving them a better way to read it, not building a
 // library, so there is no public listing and no cross-user access.
 import { Body, Controller, ForbiddenException, Get, Logger, Param, Post, Query, Req, Res, BadRequestException, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
-import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import sharp from "sharp";
 
 // Sized page variants (owner 2026-09-19: "can we make it super fast"). Pages are rendered at
@@ -286,6 +286,52 @@ function writeProgress(uid: string, bookId: string, page: number): void {
 
 /** The page to open at: where they left off, clamped in case the book has since
  *  been re-ingested shorter. 0 for a book never opened. */
+/** Pixel size of every rendered page of a LOCAL book — the space the diagram bboxes
+ *  are in. Read once from the JPEG headers under pages/ and cached as pagesizes.json;
+ *  pages that are not on disk are null. The reader used to take this from the image it
+ *  loaded, which stopped being true the day pages became sized variants (a phone gets an
+ *  800 px page while the bbox is in the 887 px original — hotspots 11% off). */
+function localPageSizes(dir: string, pages: number): ([number, number] | null)[] | null {
+  if (!pages || pages > 5000) return null;
+  const cacheFile = join(dir, "pagesizes.json");
+  const cached = readJson<any>(cacheFile, null);
+  if (Array.isArray(cached) && cached.length === pages) return cached;
+  const out: ([number, number] | null)[] = [];
+  let known = 0;
+  for (let i = 0; i < pages; i++) {
+    const f = join(dir, "pages", `p${String(i).padStart(4, "0")}.jpg`);
+    const wh = jpegSize(f);
+    if (wh) known++;
+    out.push(wh);
+  }
+  if (known === 0) return null;
+  if (known === pages) { try { writeFileSync(cacheFile, JSON.stringify(out)); } catch { /* cache only */ } }
+  return out;
+}
+
+/** Width/height from a baseline or progressive JPEG's SOF marker — no decode, no sharp. */
+function jpegSize(file: string): [number, number] | null {
+  let fd: number | null = null;
+  try {
+    fd = openSync(file, "r");
+    const buf = Buffer.alloc(65536);
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    if (n < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) return null;
+    let i = 2;
+    while (i + 9 < n) {
+      if (buf[i] !== 0xff) { i++; continue; }
+      const marker = buf[i + 1] ?? 0;
+      if (marker === 0xff) { i++; continue; }
+      const len = buf.readUInt16BE(i + 2);
+      if ((marker >= 0xc0 && marker <= 0xc3) || (marker >= 0xc5 && marker <= 0xc7) || (marker >= 0xc9 && marker <= 0xcb) || (marker >= 0xcd && marker <= 0xcf)) {
+        return [buf.readUInt16BE(i + 7), buf.readUInt16BE(i + 5)];
+      }
+      i += 2 + len;
+    }
+    return null;
+  } catch { return null; } finally { if (fd !== null) { try { closeSync(fd); } catch { /* */ } } }
+}
+
 function resumePage(uid: string, bookId: string, pages: number): number {
   const saved = readProgress(uid)[bookId];
   if (!Number.isInteger(saved) || saved! < 0) return 0;
@@ -458,6 +504,7 @@ export class UserBooksController {
         });
       })(),
       lastPage: resumePage(uid, id, status.pages ?? 0),
+      pageSizes: localPageSizes(dir, status.pages ?? 0),
       // Book-level review quality: how much of this book has actually been
       // looked at by a human, and where coaches disagree with each other.
       review: (() => {
@@ -496,13 +543,16 @@ export class UserBooksController {
    *  which is the point: the page images stay on the machine that made them
    *  instead of being copied to a second store that can drift out of step. */
   private async remoteDetail(id: string, uid: string) {
-    let meta: any, status: any, diagrams: any[], analysis: any;
+    let meta: any, status: any, diagrams: any[], analysis: any, sizes: any;
     try {
-      [meta, status, diagrams, analysis] = await Promise.all([
+      [meta, status, diagrams, analysis, sizes] = await Promise.all([
         this.bookHost(`/book/${encodeURIComponent(id)}/meta`),
         this.bookHost(`/book/${encodeURIComponent(id)}/status`),
         this.bookHost(`/book/${encodeURIComponent(id)}/diagrams`),
         this.bookHost(`/book/${encodeURIComponent(id)}/analysis`).catch(() => ({})),
+        // Pixel size of every page as the host renders it (150 dpi) — the bbox space.
+        // Optional: an older host without the route just leaves the reader on its fallback.
+        this.bookHost(`/book/${encodeURIComponent(id)}/pagesizes`).catch(() => null),
       ]);
     } catch {
       throw new NotFoundException("book not found");
@@ -518,6 +568,7 @@ export class UserBooksController {
       remote: true,
       // Progress is stored locally for remote books too — they have no dir here.
       lastPage: resumePage(uid, id, status?.pages ?? 0),
+      pageSizes: Array.isArray(sizes?.sizes) ? sizes.sizes : null,
       analysis: analysis ?? {},
       diagrams: (diagrams ?? []).map((d: any, i: number) => ({
         n: i + 1, key: diagramKey(d), ...d,

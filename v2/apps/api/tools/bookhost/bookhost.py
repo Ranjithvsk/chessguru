@@ -36,7 +36,122 @@ STORE = os.environ.get("BOOKHOST_STORE", "/srv/data/chessguru-books")
 PORT = int(os.environ.get("BOOKHOST_PORT", "8791"))
 
 DRIVE_REMOTE = os.environ.get("BOOKHOST_DRIVE_REMOTE", "gdrive:Chess")   # rclone remote of the owner's Chess folder
+
+# B2 is now the library's home (2026-09-19). /srv/data hit 100% with the borg and pgBackRest
+# repos on it, and 42 GB of that was chess-library-flat: 3,841 PDFs that ROOT only ever
+# pointed at through symlinks. The corpus moved to Backblaze, ROOT became a CACHE, and this
+# box keeps only what people are actually reading.
+#
+# The bucket is flat (one directory, no tree) while ROOT is structured, so a lookup is by
+# BASENAME. The manifest maps lowercase basename -> the exact object name, because B2 is
+# case-sensitive and link-library.py matched case-insensitively: without it a reader asking
+# for "Endgame Manual.pdf" misses an object stored as "endgame manual.pdf".
+B2_REMOTE = os.environ.get("BOOKHOST_B2_REMOTE", "b2books:dreamworld-books/chess-library-flat")
+MANIFEST = os.environ.get("BOOKHOST_MANIFEST", "/srv/data/bookhost/flat-manifest.json")
+CACHE_CAP = int(os.environ.get("BOOKHOST_CACHE_GB", "8")) * 1024**3
 _fetch_lock = threading.Lock()
+
+def _manifest() -> dict:
+    try:
+        with open(MANIFEST, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return {}
+
+def fetch_from_b2(local_path: str) -> bool:
+    """Pull one PDF from the B2 library into ROOT. Returns True if it is now on disk."""
+    if not B2_REMOTE or not local_path.startswith(ROOT + os.sep):
+        return False
+    obj = _manifest().get(os.path.basename(local_path).lower())
+    if not obj:
+        return False
+    try:
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        rc = subprocess.run(["rclone", "copyto", B2_REMOTE + "/" + obj, local_path,
+                             "--retries", "3", "--low-level-retries", "5"],
+                            capture_output=True, timeout=300)
+        # A ZERO-BYTE result is a miss, not a hit. 42 of the 3,841 books arrived truncated
+        # in an interrupted copy run, and an empty file satisfies os.path.exists(), so the
+        # Drive fallback would never fire and those books stayed broken forever. Treat empty
+        # as absent and let the next source try. (All 42 were restored from the Storage Box
+        # archive on 2026-09-19, which had intact copies.)
+        if rc.returncode == 0 and os.path.exists(local_path):
+            if os.path.getsize(local_path) > 0:
+                return True
+            try:
+                os.remove(local_path)
+            except OSError:
+                pass
+        return False
+    except Exception:
+        return False
+
+def trim_cache(keep: str = "") -> None:
+    """Keep ROOT under CACHE_CAP, dropping least-recently-read books first.
+
+    `keep` is the book that was fetched a moment ago and is about to be opened: it must
+    never be the one evicted. On 2026-09-20 every book outside the cache 404'd: rclone
+    stamps a fetched file with the object's ORIGINAL mtime/atime (August), the walk below
+    then saw it as the least-recently-read file in the cache and deleted it 2 s after
+    downloading it. ensure_local() also touches the file for the same reason.
+
+    Without this the cache simply grows back to the 42 GB we just moved off. Only real
+    files are candidates -- never symlinks, which are the catalogue's own structure -- and
+    a book open right now survives deletion anyway, because Linux keeps the inode alive
+    until the last reader closes it.
+    """
+    try:
+        files = []
+        total = 0
+        for dirpath, _dirs, names in os.walk(ROOT):
+            for n in names:
+                fp = os.path.join(dirpath, n)
+                if os.path.islink(fp) or (keep and os.path.samefile(fp, keep) if os.path.exists(keep) else False):
+                    continue
+                try:
+                    st = os.stat(fp)
+                except OSError:
+                    continue
+                files.append((st.st_atime, st.st_size, fp))
+                total += st.st_size
+        if total <= CACHE_CAP:
+            return
+        files.sort()                       # oldest access first
+        for _atime, size, fp in files:
+            if total <= CACHE_CAP:
+                break
+            try:
+                os.remove(fp)
+                total -= size
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+def ensure_local(local_path: str) -> bool:
+    """Get this PDF onto disk, from wherever it lives. B2 first, the owner's Drive second."""
+    if not local_path:
+        return False
+    with _fetch_lock:
+        if os.path.exists(local_path):
+            return True
+        # A DANGLING symlink must go first. It points into the deleted flat library, and
+        # rclone would happily write THROUGH it -- recreating the file at the old 42 GB
+        # location instead of in the cache, silently refilling the disk we just emptied.
+        if os.path.islink(local_path):
+            try:
+                os.unlink(local_path)
+            except OSError:
+                pass
+        ok = fetch_from_b2(local_path) or fetch_from_drive(local_path)
+        if ok:
+            try:
+                os.utime(local_path, None)      # "read just now", whatever rclone stamped on it
+            except OSError:
+                pass
+    if ok:
+        trim_cache(keep=local_path)
+    return ok
 
 def fetch_from_drive(local_path: str) -> bool:
     """Mirror one PDF from the owner's Drive into ROOT (same relative path). Serialised so a
@@ -188,7 +303,7 @@ def _open_doc(bid: str):
     meta = load(os.path.join(book_dir(bid), "meta.json"), {})
     path = localize(meta.get("pdf"))
     if path and not os.path.exists(path):
-        fetch_from_drive(path)          # first open of a book not mirrored yet: pull just that PDF
+        ensure_local(path)              # not cached yet (or a symlink into the old flat library): pull it
     if not path or not os.path.exists(path):
         return None
     doc = fitz.open(path)
@@ -269,6 +384,20 @@ def search_book(bid: str, q: str, limit: int = 200) -> list:
         if len(hits) >= limit:
             break
     return hits
+
+
+def page_sizes(bid: str):
+    """[[w, h], ...] for every page, in the pixel space of render_page (150 dpi)."""
+    import fitz
+    doc = _open_doc(bid)
+    if doc is None:
+        raise FileNotFoundError(bid)
+    mat = fitz.Matrix(150 / 72, 150 / 72)
+    out = []
+    for i in range(len(doc)):
+        ir = (doc[i].rect * mat).irect
+        out.append([ir.width, ir.height])
+    return out
 
 
 def render_page(bid: str, n: int):
@@ -475,6 +604,18 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, {"hits": search_book(unquote(m.group(1)), q)})
             except Exception:
                 return self._send(200, {"hits": []})
+
+        # Pixel size of every page AS render_page would produce it, without rendering:
+        # (page.rect * matrix).irect is exactly the pixmap's bbox (checked on 48 pages of
+        # two books, 0 mismatches). The reader draws diagram hotspots in this pixel space,
+        # and since pages are served as sized variants it can no longer read the space
+        # off the image it received (owner 2026-09-20: hotspots off on phones).
+        m = re.match(r"^/book/([^/]+)/pagesizes$", p)
+        if m:
+            try:
+                return self._send(200, {"sizes": page_sizes(unquote(m.group(1)))})
+            except Exception:
+                return self._send(404, {"ok": False})
 
         m = re.match(r"^/book/([^/]+)/page/(\d+)$", p)
         if m:
