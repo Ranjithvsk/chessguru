@@ -5,12 +5,50 @@
 //
 // Owner-only (see OWNER_EMAIL). The board is drawn in the browser from the FEN
 // we hand back, so nothing here renders images.
-import { ForbiddenException, Injectable } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, HttpException, HttpStatus, Injectable } from "@nestjs/common";
+import { promises as fs } from "fs";
+import { join, basename } from "path";
+import { execFile } from "child_process";
+import { promisify } from "util";
+
+const run = promisify(execFile);
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 
 /** Locked to one address, like the superadmin pages. Override per-environment. */
 const OWNER_EMAIL = (process.env.INSTAGRAM_OWNER_EMAIL || "ranjith.vsk@gmail.com").toLowerCase();
+
+/** Same shape as the coach/academy image dirs: files on disk, nginx serves them
+ *  read-only at /instagram-media/, and every write goes through this service. */
+const MEDIA_DIR = process.env.INSTAGRAM_MEDIA_DIR ?? "/home/ubuntu/chessguru-instagram-media";
+const MEDIA_URL = "/instagram-media";
+
+/** Backblaze B2 is where these files actually live. The local directory is only
+ *  a cache so nginx can serve them fast — this box has repeatedly run its disk
+ *  to zero, and losing the brand assets to that would be daft.
+ *
+ *  The app key is scoped to the dreamworld-backups bucket (it cannot create
+ *  others), so the library lives under a prefix inside it. Credentials sit in
+ *  /etc/rclone/chessguru.conf, root:ubuntu 0640 — readable by the API, not
+ *  world, and outside the repo. */
+const B2_REMOTE = process.env.INSTAGRAM_B2_REMOTE ?? "b2:dreamworld-backups/chessguru-instagram";
+const RCLONE_CONFIG = process.env.INSTAGRAM_RCLONE_CONFIG ?? "/etc/rclone/chessguru.conf";
+const RCLONE_ENV = { ...process.env, RCLONE_CONFIG };
+const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
+const MIME_EXT: Record<string, string> = {
+  "image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg", "image/webp": "webp", "image/gif": "gif",
+  "video/mp4": "mp4", "video/webm": "webm", "video/quicktime": "mov",
+};
+const isVideoExt = (e: string) => e === "mp4" || e === "webm" || e === "mov";
+
+export interface MediaItem {
+  id: string;
+  url: string;
+  kind: "image" | "video";
+  bytes: number;
+  at: Date;
+}
 
 export interface PostCard {
   id: string;
@@ -167,6 +205,94 @@ export class InstagramService {
         at: null,
       };
     });
+  }
+
+  /* ── media library ──────────────────────────────────────────────────── */
+
+  /** rclone, with the scoped config. Never throws — B2 being unreachable must
+   *  degrade to "the local cache is what you see", not break the page. */
+  private async rclone(args: string[], timeoutMs = 120_000): Promise<{ ok: boolean; out: string }> {
+    try {
+      const { stdout } = await run("rclone", ["--config", RCLONE_CONFIG, ...args], { env: RCLONE_ENV, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 });
+      return { ok: true, out: String(stdout || "") };
+    } catch (e: any) {
+      console.warn("[instagram] rclone failed:", args[0], String(e?.message || e).slice(0, 200));
+      return { ok: false, out: "" };
+    }
+  }
+
+  /** Pull anything in B2 that is not already cached locally. rclone skips files
+   *  it already has, so this is cheap on every call and self-heals a cache that
+   *  was wiped (or a box that was rebuilt). */
+  private async syncDown(): Promise<void> {
+    await fs.mkdir(MEDIA_DIR, { recursive: true }).catch(() => {});
+    await this.rclone(["copy", B2_REMOTE, MEDIA_DIR, "--transfers", "4", "--ignore-existing"]);
+  }
+
+  /** Everything in the library, newest first. B2 holds the files; the local
+   *  directory mirrors it for serving, so the listing reads from disk after a
+   *  sync rather than paying a network round-trip per item. */
+  async listMedia(session: any): Promise<{ ok: true; items: MediaItem[] }> {
+    await this.ensureOwner(session);
+    await this.syncDown();
+    const names = await fs.readdir(MEDIA_DIR).catch(() => [] as string[]);
+    const items: MediaItem[] = [];
+    for (const n of names) {
+      if (n.startsWith(".")) continue;
+      const ext = (n.split(".").pop() || "").toLowerCase();
+      // Only real media is ever listed — anything else in the folder is ignored
+      // rather than shown as an unopenable tile.
+      if (!Object.values(MIME_EXT).includes(ext)) continue;
+      const st = await fs.stat(join(MEDIA_DIR, n)).catch(() => null);
+      if (!st?.isFile() || st.size === 0) continue;
+      items.push({ id: n, url: `${MEDIA_URL}/${encodeURIComponent(n)}`, kind: isVideoExt(ext) ? "video" : "image", bytes: st.size, at: st.mtime });
+    }
+    items.sort((a, b) => b.at.getTime() - a.at.getTime());
+    return { ok: true, items };
+  }
+
+  /** Raw-body upload, matching how coach images and books already arrive — a
+   *  video is tens of megabytes and the multipart round-trip buys nothing.
+   *  Written locally first so the page can show it immediately, then pushed to
+   *  B2, which is the copy that has to survive. */
+  async uploadMedia(session: any, rawName: string, buf: Buffer, contentType: string): Promise<{ ok: true; item: MediaItem; stored: "b2" | "local-only" }> {
+    await this.ensureOwner(session);
+    if (!Buffer.isBuffer(buf) || buf.byteLength === 0) throw new BadRequestException("empty body");
+    const ct = String(contentType || "").toLowerCase().split(";")[0]?.trim() || "";
+    const ext = MIME_EXT[ct];
+    if (!ext) throw new BadRequestException("unsupported type — png, jpg, webp, gif, mp4, webm or mov");
+    const cap = isVideoExt(ext) ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES;
+    if (buf.byteLength > cap) {
+      throw new HttpException(`too large (max ${Math.round(cap / 1024 / 1024)} MB for a ${isVideoExt(ext) ? "video" : "image"})`, HttpStatus.PAYLOAD_TOO_LARGE);
+    }
+    // Filename is ours, never the client's: strip to a safe stem, then stamp it
+    // so two uploads of "logo.png" cannot overwrite each other.
+    const stem = basename(String(rawName || "upload")).replace(/\.[^.]*$/, "").replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 40) || "upload";
+    const name = `${stem}-${Date.now()}.${ext}`;
+    await fs.mkdir(MEDIA_DIR, { recursive: true }).catch(() => {});
+    await fs.writeFile(join(MEDIA_DIR, name), buf);
+    const pushed = await this.rclone(["copyto", join(MEDIA_DIR, name), `${B2_REMOTE}/${name}`], 300_000);
+    const st = await fs.stat(join(MEDIA_DIR, name));
+    return {
+      ok: true,
+      stored: pushed.ok ? "b2" : "local-only",
+      item: { id: name, url: `${MEDIA_URL}/${encodeURIComponent(name)}`, kind: isVideoExt(ext) ? "video" : "image", bytes: st.size, at: st.mtime },
+    };
+  }
+
+  /** Removes both copies. The B2 remote has hard_delete=false, so the object is
+   *  hidden rather than destroyed and a mistaken delete is recoverable there. */
+  async deleteMedia(session: any, id: string): Promise<{ ok: boolean; error?: string }> {
+    await this.ensureOwner(session);
+    // basename() alone is the path-traversal guard: whatever the caller sends,
+    // only a bare filename inside MEDIA_DIR can ever be touched.
+    const name = basename(String(id || ""));
+    if (!name || name.startsWith(".")) return { ok: false, error: "bad id" };
+    const ext = (name.split(".").pop() || "").toLowerCase();
+    if (!Object.values(MIME_EXT).includes(ext)) return { ok: false, error: "bad id" };
+    await fs.unlink(join(MEDIA_DIR, name)).catch(() => null);
+    await this.rclone(["deletefile", `${B2_REMOTE}/${name}`]);
+    return { ok: true };
   }
 
   private async nameMap(ids: string[]): Promise<Map<string, string>> {

@@ -10,7 +10,7 @@
 // export is a true 1080x1080 at whatever pixel density Instagram wants, and it
 // works with no network once the page has loaded.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { post, get } from "../lib/api";
+import { post, get, deleteJson } from "../lib/api";
 import { CBURNETT_PIECES } from "../components/cburnett-pieces";
 
 interface PostCard {
@@ -28,6 +28,10 @@ interface PostCard {
 }
 
 const SIZE = 1080;
+
+interface MediaItem { id: string; url: string; kind: "image" | "video"; bytes: number; at: string }
+const LOGO_KEY = "cg-ig-logo";   // which library image to stamp on exports
+const fmtBytes = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 const KIND_LABEL: Record<PostCard["kind"], string> = {
   moment: "Student moment", climb: "Progress", puzzle: "Puzzle", leaderboard: "Leaderboard",
 };
@@ -74,7 +78,22 @@ function wrap(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): st
   return lines;
 }
 
-async function drawCard(canvas: HTMLCanvasElement, card: PostCard, title: string, subtitle: string) {
+/** A library image stamped bottom-left, so an exported post carries the real
+ *  brand instead of a text footer. Loaded through the same cache as the pieces. */
+async function logoImage(url: string | null): Promise<HTMLImageElement | null> {
+  if (!url) return null;
+  const hit = imgCache.get(url);
+  if (hit?.complete) return hit;
+  return new Promise((resolve) => {
+    const im = new Image();
+    im.crossOrigin = "anonymous";   // same origin in production; keeps toBlob() untainted either way
+    im.onload = () => { imgCache.set(url, im); resolve(im); };
+    im.onerror = () => resolve(null);
+    im.src = url;
+  });
+}
+
+async function drawCard(canvas: HTMLCanvasElement, card: PostCard, title: string, subtitle: string, logoUrl: string | null) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   canvas.width = SIZE; canvas.height = SIZE;
@@ -135,10 +154,20 @@ async function drawCard(canvas: HTMLCanvasElement, card: PostCard, title: string
   const subY = hasBoard ? 150 + titleLines.length * 70 + 8 : SIZE / 2 + 40;
   wrap(ctx, subtitle, SIZE - 180).slice(0, 2).forEach((l, i) => ctx.fillText(l, SIZE / 2, subY + i * 44));
 
-  // Footer mark.
-  ctx.fillStyle = "rgba(255,255,255,0.72)";
-  ctx.font = "600 30px ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif";
-  ctx.fillText("chessguru.cc", SIZE / 2, SIZE - 58);
+  // Footer mark — the logo when one is chosen, the wordmark otherwise.
+  const logo = await logoImage(logoUrl);
+  if (logo) {
+    const h = 132, w = (logo.width / Math.max(1, logo.height)) * h;
+    ctx.drawImage(logo, 54, SIZE - h - 42, w, h);
+    ctx.textAlign = "right";
+    ctx.fillStyle = "rgba(255,255,255,0.72)";
+    ctx.font = "600 28px ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif";
+    ctx.fillText("chessguru.cc", SIZE - 54, SIZE - 58);
+  } else {
+    ctx.fillStyle = "rgba(255,255,255,0.72)";
+    ctx.font = "600 30px ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif";
+    ctx.fillText("chessguru.cc", SIZE / 2, SIZE - 58);
+  }
 }
 
 /* ── sign in ───────────────────────────────────────────────────────────── */
@@ -221,7 +250,12 @@ export default function InstagramStudio() {
   const [subtitle, setSubtitle] = useState("");
   const [caption, setCaption] = useState("");
   const [copied, setCopied] = useState(false);
+  const [media, setMedia] = useState<MediaItem[] | null>(null);
+  const [logoUrl, setLogoUrl] = useState<string | null>(() => { try { return localStorage.getItem(LOGO_KEY); } catch { return null; } });
+  const [uploading, setUploading] = useState(false);
+  const [mediaMsg, setMediaMsg] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   const refreshMe = useCallback(() => {
     get<{ ok: boolean; email: string | null }>("/api/instagram/whoami")
@@ -236,6 +270,12 @@ export default function InstagramStudio() {
       .catch(() => setCards([]));
   }, [me?.ok]);
 
+  const loadMedia = useCallback(() => {
+    get<{ ok: boolean; items: MediaItem[] }>("/api/instagram/media")
+      .then((r) => setMedia(r.items || [])).catch(() => setMedia([]));
+  }, []);
+  useEffect(() => { if (me?.ok) loadMedia(); }, [me?.ok, loadMedia]);
+
   const card = useMemo(() => cards?.find((c) => c.id === sel) ?? null, [cards, sel]);
 
   // Card chosen → seed the editable fields from it.
@@ -248,8 +288,8 @@ export default function InstagramStudio() {
   // Any edit redraws the canvas.
   useEffect(() => {
     if (!card || !canvasRef.current) return;
-    void drawCard(canvasRef.current, card, title, subtitle);
-  }, [card, title, subtitle]);
+    void drawCard(canvasRef.current, card, title, subtitle, logoUrl);
+  }, [card, title, subtitle, logoUrl]);
 
   const download = () => {
     const c = canvasRef.current;
@@ -263,6 +303,41 @@ export default function InstagramStudio() {
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 2000);
     }, "image/png");
+  };
+
+  const upload = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setUploading(true); setMediaMsg(null);
+    let ok = 0; const failed: string[] = [];
+    for (const f of Array.from(files)) {
+      try {
+        const buf = await f.arrayBuffer();
+        const r = await fetch(`/api/instagram/media/${encodeURIComponent(f.name)}`, {
+          method: "POST", credentials: "include",
+          headers: { "Content-Type": f.type || "application/octet-stream" },
+          body: buf,
+        });
+        if (r.ok) ok++; else { const j = await r.json().catch(() => ({})); failed.push(`${f.name}: ${j?.message || r.status}`); }
+      } catch { failed.push(`${f.name}: upload failed`); }
+    }
+    setUploading(false);
+    setMediaMsg(failed.length ? failed.join(" · ") : `${ok} saved.`);
+    setTimeout(() => setMediaMsg(null), 6000);
+    loadMedia();
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const removeMedia = async (m: MediaItem) => {
+    if (!window.confirm(`Delete ${m.id}? This removes the file for good.`)) return;
+    try { await deleteJson(`/api/instagram/media/${encodeURIComponent(m.id)}`); } catch { /* listing will show the truth */ }
+    if (logoUrl === m.url) { setLogoUrl(null); try { localStorage.removeItem(LOGO_KEY); } catch { /* private mode */ } }
+    loadMedia();
+  };
+
+  const pickLogo = (m: MediaItem | null) => {
+    const u = m?.url ?? null;
+    setLogoUrl(u);
+    try { if (u) localStorage.setItem(LOGO_KEY, u); else localStorage.removeItem(LOGO_KEY); } catch { /* private mode */ }
   };
 
   const copyCaption = async () => {
@@ -284,6 +359,54 @@ export default function InstagramStudio() {
         </div>
         <span className="text-[11px] text-ink-500">{me.email}</span>
       </div>
+
+      {/* ── media library ─────────────────────────────────────────────── */}
+      <section className="mb-5 rounded-xl border border-ink-800 bg-ink-900/40 p-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold text-white">Saved photos &amp; videos</h2>
+            <p className="text-[11px] text-ink-500">
+              Stored on Backblaze B2 and mirrored locally for speed — wiping this box does not lose them. Pick an image to stamp on every export.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {logoUrl && <button onClick={() => pickLogo(null)} className="rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-ink-300 hover:text-white">Clear stamp</button>}
+            <input ref={fileRef} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime"
+              onChange={(e) => upload(e.target.files)} className="hidden" id="ig-upload" />
+            <label htmlFor="ig-upload"
+              className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold text-white ${uploading ? "bg-ink-700" : "bg-gradient-to-r from-emerald-500 to-teal-500"}`}>
+              {uploading ? "Uploading…" : "Add photo / video"}
+            </label>
+          </div>
+        </div>
+        {mediaMsg && <p className="mb-2 text-[11px] text-ink-300">{mediaMsg}</p>}
+        {media === null ? <div className="h-24 animate-pulse rounded-lg bg-ink-800/60" /> : media.length === 0 ? (
+          <p className="text-xs text-ink-400">Nothing saved yet. Images up to 12 MB, videos up to 200 MB.</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
+            {media.map((m) => (
+              <div key={m.id} className={`group relative overflow-hidden rounded-lg border ${logoUrl === m.url ? "border-teal-400" : "border-ink-800"} bg-ink-950`}>
+                {m.kind === "video"
+                  ? <video src={m.url} className="h-24 w-full object-cover" muted playsInline preload="metadata" />
+                  : <img src={m.url} alt={m.id} className="h-24 w-full object-contain" loading="lazy" />}
+                <div className="flex items-center justify-between gap-1 px-1.5 py-1 text-[10px] text-ink-400">
+                  <span className="truncate" title={m.id}>{m.kind === "video" ? "video" : "image"} · {fmtBytes(m.bytes)}</span>
+                  <div className="flex shrink-0 gap-1">
+                    {m.kind === "image" && (
+                      <button onClick={() => pickLogo(m)} title="Stamp this on exports"
+                        className={`rounded px-1 ${logoUrl === m.url ? "bg-teal-500/25 text-teal-200" : "hover:bg-ink-800 text-ink-400"}`}>
+                        {logoUrl === m.url ? "✓" : "stamp"}
+                      </button>
+                    )}
+                    <a href={m.url} download className="rounded px-1 text-ink-400 hover:bg-ink-800" title="Download">↓</a>
+                    <button onClick={() => removeMedia(m)} className="rounded px-1 text-rose-300 hover:bg-ink-800" title="Delete">✕</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       {cards === null ? <div className="h-64 animate-pulse rounded-xl bg-ink-800/60" /> : cards.length === 0 ? (
         <p className="rounded-xl border border-ink-800 bg-ink-900/50 p-4 text-sm text-ink-300">
