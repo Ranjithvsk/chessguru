@@ -10,7 +10,7 @@
 // export is a true 1080x1080 at whatever pixel density Instagram wants, and it
 // works with no network once the page has loaded.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { post, get, deleteJson } from "../lib/api";
+import { post, get, deleteJson, API_BASE } from "../lib/api";
 import { CBURNETT_PIECES } from "../components/cburnett-pieces";
 
 interface PostCard {
@@ -30,6 +30,9 @@ interface PostCard {
 const SIZE = 1080;
 
 interface MediaItem { id: string; url: string; kind: "image" | "video"; bytes: number; at: string }
+/** One row per file being sent. `sent`/`total` are bytes, so the bar is real
+ *  progress from the browser rather than a spinner pretending to be one. */
+interface Upload { name: string; sent: number; total: number; state: "sending" | "saving" | "done" | "error"; error?: string }
 const LOGO_KEY = "cg-ig-logo";   // which library image to stamp on exports
 const fmtBytes = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 const KIND_LABEL: Record<PostCard["kind"], string> = {
@@ -252,7 +255,8 @@ export default function InstagramStudio() {
   const [copied, setCopied] = useState(false);
   const [media, setMedia] = useState<MediaItem[] | null>(null);
   const [logoUrl, setLogoUrl] = useState<string | null>(() => { try { return localStorage.getItem(LOGO_KEY); } catch { return null; } });
-  const [uploading, setUploading] = useState(false);
+  const [uploads, setUploads] = useState<Upload[]>([]);
+  const uploading = uploads.some((u) => u.state === "sending" || u.state === "saving");
   const [mediaMsg, setMediaMsg] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -305,26 +309,51 @@ export default function InstagramStudio() {
     }, "image/png");
   };
 
+  /** XHR rather than fetch: fetch cannot report upload progress, and a 200 MB
+   *  video with no feedback is indistinguishable from a hung page. The bar
+   *  tracks bytes actually on the wire; once they are all sent the row switches
+   *  to "saving", because the server is still pushing the file to B2 and that
+   *  wait is real. */
+  const sendOne = (f: File, idx: number) => new Promise<{ ok: boolean; error?: string }>((resolve) => {
+    const xhr = new XMLHttpRequest();
+    // API_BASE, not a bare "/api/…": production serves the API under /v2api and
+    // a bare path reaches nginx's SPA fallback, which answers 200 with
+    // index.html. That is how push subscribe silently failed for every user
+    // until 2026-09-18 — the same trap, and it looks like success.
+    xhr.open("POST", `${API_BASE}/api/instagram/media/${encodeURIComponent(f.name)}`);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader("Content-Type", f.type || "application/octet-stream");
+    const patch = (u: Partial<Upload>) => setUploads((prev) => prev.map((row, i) => (i === idx ? { ...row, ...u } : row)));
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) patch({ sent: e.loaded, total: e.total }); };
+    xhr.upload.onload = () => patch({ sent: f.size, state: "saving" });
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) { patch({ state: "done", sent: f.size }); resolve({ ok: true }); return; }
+      let msg = `HTTP ${xhr.status}`;
+      try { msg = JSON.parse(xhr.responseText)?.message || msg; } catch { /* keep the status */ }
+      patch({ state: "error", error: msg }); resolve({ ok: false, error: msg });
+    };
+    xhr.onerror = () => { patch({ state: "error", error: "network error" }); resolve({ ok: false, error: "network error" }); };
+    xhr.onabort = () => { patch({ state: "error", error: "cancelled" }); resolve({ ok: false, error: "cancelled" }); };
+    xhr.send(f);
+  });
+
   const upload = async (files: FileList | null) => {
     if (!files?.length) return;
-    setUploading(true); setMediaMsg(null);
+    const list = Array.from(files);
+    setMediaMsg(null);
+    setUploads(list.map((f) => ({ name: f.name, sent: 0, total: f.size, state: "sending" as const })));
     let ok = 0; const failed: string[] = [];
-    for (const f of Array.from(files)) {
-      try {
-        const buf = await f.arrayBuffer();
-        const r = await fetch(`/api/instagram/media/${encodeURIComponent(f.name)}`, {
-          method: "POST", credentials: "include",
-          headers: { "Content-Type": f.type || "application/octet-stream" },
-          body: buf,
-        });
-        if (r.ok) ok++; else { const j = await r.json().catch(() => ({})); failed.push(`${f.name}: ${j?.message || r.status}`); }
-      } catch { failed.push(`${f.name}: upload failed`); }
+    // One at a time: these are large, and a serial queue gives an honest bar
+    // per file instead of several fighting for the same uplink.
+    for (let i = 0; i < list.length; i++) {
+      const r = await sendOne(list[i]!, i);
+      if (r.ok) ok++; else failed.push(`${list[i]!.name}: ${r.error}`);
     }
-    setUploading(false);
-    setMediaMsg(failed.length ? failed.join(" · ") : `${ok} saved.`);
-    setTimeout(() => setMediaMsg(null), 6000);
+    setMediaMsg(failed.length ? failed.join(" · ") : `${ok} saved to Backblaze.`);
     loadMedia();
     if (fileRef.current) fileRef.current.value = "";
+    // Leave finished rows up briefly so the result is readable, then clear.
+    setTimeout(() => { setUploads([]); setMediaMsg(null); }, failed.length ? 9000 : 4000);
   };
 
   const removeMedia = async (m: MediaItem) => {
@@ -379,6 +408,31 @@ export default function InstagramStudio() {
             </label>
           </div>
         </div>
+        {uploads.length > 0 && (
+          <div className="mb-3 space-y-1.5" aria-live="polite">
+            {uploads.map((u, i) => {
+              const pct = u.state === "done" ? 100 : u.total ? Math.min(100, Math.round((u.sent / u.total) * 100)) : 0;
+              const tone = u.state === "error" ? "bg-rose-500" : u.state === "done" ? "bg-emerald-500" : "bg-teal-400";
+              return (
+                <div key={u.name + i}>
+                  <div className="flex items-baseline justify-between gap-2 text-[11px]">
+                    <span className="truncate text-ink-300" title={u.name}>{u.name}</span>
+                    <span className={`shrink-0 tabular-nums ${u.state === "error" ? "text-rose-300" : "text-ink-400"}`}>
+                      {u.state === "error" ? u.error
+                        : u.state === "done" ? "saved"
+                        : u.state === "saving" ? "saving to Backblaze…"
+                        : `${pct}% · ${fmtBytes(u.sent)} of ${fmtBytes(u.total)}`}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-ink-800">
+                    <div className={`h-full rounded-full transition-[width] duration-150 ${tone} ${u.state === "saving" ? "animate-pulse" : ""}`}
+                      style={{ width: `${u.state === "error" ? 100 : pct}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
         {mediaMsg && <p className="mb-2 text-[11px] text-ink-300">{mediaMsg}</p>}
         {media === null ? <div className="h-24 animate-pulse rounded-lg bg-ink-800/60" /> : media.length === 0 ? (
           <p className="text-xs text-ink-400">Nothing saved yet. Images up to 12 MB, videos up to 200 MB.</p>
