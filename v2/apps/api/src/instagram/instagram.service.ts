@@ -41,6 +41,11 @@ const MIME_EXT: Record<string, string> = {
   "video/mp4": "mp4", "video/webm": "webm", "video/quicktime": "mov",
 };
 const isVideoExt = (e: string) => e === "mp4" || e === "webm" || e === "mov";
+/** A video's poster frame lives beside it as "<file>.poster.jpg". Same folder so
+ *  nginx serves it with no extra route, and the suffix is excluded from the
+ *  listing so a poster never shows up as a library item of its own. */
+const POSTER_SUFFIX = ".poster.jpg";
+const isPoster = (n: string) => n.endsWith(POSTER_SUFFIX);
 
 export interface MediaItem {
   id: string;
@@ -48,6 +53,9 @@ export interface MediaItem {
   kind: "image" | "video";
   bytes: number;
   at: Date;
+  /** Video only: a real frame from the clip. Without it a <video> tile is a
+   *  black rectangle on iOS until it is touched. */
+  poster: string | null;
   /** False while the copy to B2 is still in flight or has failed. The file is
    *  already on disk and serving either way — this only says whether the
    *  durable copy exists yet. */
@@ -246,6 +254,27 @@ export class InstagramService {
     await this.rclone(["copy", B2_REMOTE, MEDIA_DIR, "--transfers", "4", "--ignore-existing"]);
   }
 
+  /** One frame, one second in, scaled to 480 wide. Taken at 1 s rather than 0
+   *  because the first frame of a generated clip is often black. Failure is not
+   *  fatal — the tile just falls back to the bare <video>. */
+  private async makePoster(videoName: string): Promise<boolean> {
+    const src = join(MEDIA_DIR, videoName);
+    const out = join(MEDIA_DIR, videoName + POSTER_SUFFIX);
+    try {
+      await run("ffmpeg", ["-nostdin", "-v", "error", "-ss", "1", "-i", src, "-frames:v", "1", "-vf", "scale=480:-2", "-q:v", "4", "-y", out], { timeout: 60_000 });
+      const st = await fs.stat(out);
+      if (st.size > 0) { void this.pushOne(videoName + POSTER_SUFFIX); return true; }
+    } catch (e: any) {
+      console.warn(`[instagram] poster failed for ${videoName}:`, String(e?.message || e).slice(0, 160));
+    }
+    return false;
+  }
+
+  /** Fire-and-forget copy of a single file to B2 (used for posters). */
+  private async pushOne(name: string): Promise<void> {
+    await this.rclone(["copyto", join(MEDIA_DIR, name), `${B2_REMOTE}/${name}`], 300_000);
+  }
+
   /** Push one file to B2 after the response has gone out. Retries a couple of
    *  times, then leaves it marked pending so the library keeps saying so rather
    *  than quietly losing the durable copy. */
@@ -272,9 +301,21 @@ export class InstagramService {
       // Only real media is ever listed — anything else in the folder is ignored
       // rather than shown as an unopenable tile.
       if (!Object.values(MIME_EXT).includes(ext)) continue;
+      if (isPoster(n)) continue;   // a poster belongs to its video, not the grid
       const st = await fs.stat(join(MEDIA_DIR, n)).catch(() => null);
       if (!st?.isFile() || st.size === 0) continue;
-      items.push({ id: n, url: `${MEDIA_URL}/${encodeURIComponent(n)}`, kind: isVideoExt(ext) ? "video" : "image", bytes: st.size, at: st.mtime, backedUp: !this.pendingB2.has(n) });
+      const video = isVideoExt(ext);
+      let poster: string | null = null;
+      if (video) {
+        const pn = n + POSTER_SUFFIX;
+        // Backfill: a video uploaded before posters existed (or whose poster
+        // failed) gets one on first listing rather than staying a black tile.
+        if (!names.includes(pn)) await this.makePoster(n).catch(() => null);
+        if (await fs.stat(join(MEDIA_DIR, pn)).then((x) => x.size > 0).catch(() => false)) {
+          poster = `${MEDIA_URL}/${encodeURIComponent(pn)}`;
+        }
+      }
+      items.push({ id: n, url: `${MEDIA_URL}/${encodeURIComponent(n)}`, kind: video ? "video" : "image", bytes: st.size, at: st.mtime, backedUp: !this.pendingB2.has(n), poster });
     }
     items.sort((a, b) => b.at.getTime() - a.at.getTime());
     return { ok: true, items };
@@ -301,12 +342,13 @@ export class InstagramService {
     await fs.mkdir(MEDIA_DIR, { recursive: true }).catch(() => {});
     await fs.writeFile(join(MEDIA_DIR, name), buf);
     const st = await fs.stat(join(MEDIA_DIR, name));
-    // Respond now; back it up immediately after. Deliberately not awaited.
+    // Respond now; poster + backup happen immediately after. Not awaited.
     this.pendingB2.add(name);
     void this.pushToB2(name);
+    if (isVideoExt(ext)) void this.makePoster(name);
     return {
       ok: true,
-      item: { id: name, url: `${MEDIA_URL}/${encodeURIComponent(name)}`, kind: isVideoExt(ext) ? "video" : "image", bytes: st.size, at: st.mtime, backedUp: false },
+      item: { id: name, url: `${MEDIA_URL}/${encodeURIComponent(name)}`, kind: isVideoExt(ext) ? "video" : "image", bytes: st.size, at: st.mtime, backedUp: false, poster: null },
     };
   }
 
@@ -323,6 +365,9 @@ export class InstagramService {
     await fs.unlink(join(MEDIA_DIR, name)).catch(() => null);
     this.pendingB2.delete(name);
     await this.rclone(["deletefile", `${B2_REMOTE}/${name}`]);
+    // Take the poster with it, both copies, or it lingers as an orphan.
+    await fs.unlink(join(MEDIA_DIR, name + POSTER_SUFFIX)).catch(() => null);
+    await this.rclone(["deletefile", `${B2_REMOTE}/${name}${POSTER_SUFFIX}`]);
     return { ok: true };
   }
 

@@ -29,7 +29,7 @@ interface PostCard {
 
 const SIZE = 1080;
 
-interface MediaItem { id: string; url: string; kind: "image" | "video"; bytes: number; at: string; backedUp: boolean }
+interface MediaItem { id: string; url: string; kind: "image" | "video"; bytes: number; at: string; backedUp: boolean; poster: string | null }
 /** One row per file being sent. `sent`/`total` are bytes, so the bar is real
  *  progress from the browser rather than a spinner pretending to be one. */
 interface Upload { name: string; sent: number; total: number; state: "sending" | "finishing" | "done" | "error"; error?: string }
@@ -256,6 +256,7 @@ export default function InstagramStudio() {
   const [media, setMedia] = useState<MediaItem[] | null>(null);
   const [logoUrl, setLogoUrl] = useState<string | null>(() => { try { return localStorage.getItem(LOGO_KEY); } catch { return null; } });
   const [uploads, setUploads] = useState<Upload[]>([]);
+  const [playing, setPlaying] = useState<MediaItem | null>(null);
   const uploading = uploads.some((u) => u.state === "sending" || u.state === "finishing");
   const [mediaMsg, setMediaMsg] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -273,6 +274,13 @@ export default function InstagramStudio() {
       .then((r) => { setCards(r.cards || []); if (r.cards?.length) setSel(r.cards[0]!.id); })
       .catch(() => setCards([]));
   }, [me?.ok]);
+
+  useEffect(() => {
+    if (!playing) return;
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape") setPlaying(null); };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [playing]);
 
   const loadMedia = useCallback(() => {
     get<{ ok: boolean; items: MediaItem[] }>("/api/instagram/media")
@@ -446,9 +454,22 @@ export default function InstagramStudio() {
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
             {media.map((m) => (
               <div key={m.id} className={`group relative overflow-hidden rounded-lg border ${logoUrl === m.url ? "border-teal-400" : "border-ink-800"} bg-ink-950`}>
-                {m.kind === "video"
-                  ? <video src={m.url} className="h-24 w-full object-cover" muted playsInline preload="metadata" />
-                  : <img src={m.url} alt={m.id} className="h-24 w-full object-contain" loading="lazy" />}
+                {m.kind === "video" ? (
+                  <button type="button" onClick={() => setPlaying(m)} className="group/v relative block h-24 w-full" title="Play">
+                    {m.poster
+                      ? <img src={m.poster} alt="" className="h-24 w-full object-cover" loading="lazy" />
+                      : <video src={m.url} className="h-24 w-full object-cover" muted playsInline preload="metadata" />}
+                    <span className="absolute inset-0 grid place-items-center bg-black/25 transition group-hover/v:bg-black/40">
+                      <span className="grid h-8 w-8 place-items-center rounded-full bg-white/85 text-ink-950 shadow">
+                        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" /></svg>
+                      </span>
+                    </span>
+                  </button>
+                ) : (
+                  <button type="button" onClick={() => setPlaying(m)} className="block h-24 w-full" title="View">
+                    <img src={m.url} alt={m.id} className="h-24 w-full object-contain" loading="lazy" />
+                  </button>
+                )}
                 {!m.backedUp && (
                   <span className="absolute left-1 top-1 rounded bg-amber-500/20 px-1 text-[9px] font-semibold text-amber-200" title="On the server and serving; the Backblaze copy is still being written">
                     backing up…
@@ -472,6 +493,25 @@ export default function InstagramStudio() {
           </div>
         )}
       </section>
+
+      {/* Player / viewer. Click-outside and Escape both close; the video gets
+          real controls rather than a tile that only plays on hover. */}
+      {playing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={() => setPlaying(null)} role="dialog" aria-modal="true">
+          <div className="max-h-full w-full max-w-md overflow-hidden rounded-xl border border-ink-700 bg-ink-950" onClick={(e) => e.stopPropagation()}>
+            {playing.kind === "video"
+              ? <video src={playing.url} poster={playing.poster ?? undefined} controls autoPlay playsInline className="max-h-[75vh] w-full bg-black" />
+              : <img src={playing.url} alt={playing.id} className="max-h-[75vh] w-full object-contain bg-black" />}
+            <div className="flex items-center justify-between gap-2 px-3 py-2 text-[11px] text-ink-400">
+              <span className="truncate" title={playing.id}>{playing.id}</span>
+              <div className="flex shrink-0 gap-2">
+                <a href={playing.url} download className="text-ink-300 hover:text-white">Download</a>
+                <button onClick={() => setPlaying(null)} className="text-ink-300 hover:text-white">Close</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {cards === null ? <div className="h-64 animate-pulse rounded-xl bg-ink-800/60" /> : cards.length === 0 ? (
         <p className="rounded-xl border border-ink-800 bg-ink-900/50 p-4 text-sm text-ink-300">
