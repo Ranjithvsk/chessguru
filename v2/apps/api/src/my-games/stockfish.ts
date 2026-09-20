@@ -105,7 +105,16 @@ export class Stockfish {
       this.lastFens.forEach((f, i) => console.error(`[stockfish]   position -${this.lastFens.length - 1 - i}: ${f}`));
     });
     await this.waitFor((l) => l === "uciok", () => this.send("uci"));
-    this.send("setoption name Hash value 256");
+    // 16 MB, not 256. game-motifs caps every search at 120 ms, which visits a
+    // few hundred thousand nodes and can fill maybe 10 MB of table — the other
+    // 240 MB was never read, but Stockfish still allocates AND zeroes it on
+    // startup, touching every page. On this box that is actively harmful: it
+    // sits at 10 of 11 GB swap, so zeroing 256 MB per engine (two of them, plus
+    // the my-games engine) evicts other processes' pages to disk. That is what
+    // stretched a 120 ms search past the 15 s timeout — 7 games an hour failing
+    // with "engine did not answer", no crash involved. Measured startup cost:
+    // 1.9 s at 256 MB vs 1.1 s at 16 MB.
+    this.send(`setoption name Hash value ${Number(process.env.STOCKFISH_HASH_MB) || 16}`);
     // One thread per engine. game-motifs runs PARALLEL engines side by side and
     // every search is capped by movetime, so extra threads buy depth, not speed,
     // while multiplying contention on a box that already sits near load 8/8.
