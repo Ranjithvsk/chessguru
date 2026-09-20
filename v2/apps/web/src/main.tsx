@@ -23,6 +23,7 @@ const AppRest         = lazy(() => import("./AppRest"));
 const CoachPublicPage  = lazy(() => import("./pages/CoachPublic"));
 const AcademyPublicPage = lazy(() => import("./pages/AcademyPublic"));
 const ParentPayPage    = lazy(() => import("./pages/parent/PayHome"));
+const InstagramStudioPage = lazy(() => import("./pages/InstagramStudio"));
 
 function LazyFallback() {
   return (
@@ -85,6 +86,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="coach/:username" element={<Suspense fallback={<LazyFallback />}><CoachPublicPage /></Suspense>} />
           <Route path="academy-page/:slug" element={<Suspense fallback={<LazyFallback />}><AcademyPublicPage /></Suspense>} />
           <Route path="pay/:token" element={<Suspense fallback={<LazyFallback />}><ParentPayPage /></Suspense>} />
+          {/* Owner-only Instagram Studio. Standalone (no App chrome): it is a
+              private tool, and the API re-checks the owner address on every call. */}
+          <Route path="instagram" element={<Suspense fallback={<LazyFallback />}><InstagramStudioPage /></Suspense>} />
 
           {/* Login stays in the initial bundle — the whole point of the
               fast-path is to render this instantly on cold cache. */}
