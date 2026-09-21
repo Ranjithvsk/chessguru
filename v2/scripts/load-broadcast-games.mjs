@@ -75,7 +75,7 @@ const index = await getText(`https://lichess.org/api/broadcast?nb=${TOURS}`);
 const tours = index.split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
 console.log(`  ${tours.length} tournaments`);
 
-let seenGames = 0, dupes = 0, added = 0, skipped = 0;
+let seenGames = 0, dupes = 0, added = 0, skipped = 0, unfinished = 0;
 const toInsert = [];
 
 for (const t of tours) {
@@ -94,6 +94,14 @@ for (const t of tours) {
       try { g.loadPgn(one); } catch { skipped++; continue; }
       const sans = g.history();
       if (sans.length < 4) { skipped++; continue; }   // an empty/abandoned board is not a game
+      // FINISHED GAMES ONLY. A live round's PGN includes games in progress,
+      // and storing one freezes it at whatever move we happened to catch —
+      // a half-game that never completes. Worse, de-duplication is by the
+      // MOVE LIST, so the next run sees more moves, hashes differently, and
+      // inserts the same game a second time. The archive takes a game once
+      // it has a result; anything still being played is skipped and picked
+      // up on a later run, complete.
+      if (!/^(1-0|0-1|1\/2-1\/2)$/.test(String(h.Result || "").trim())) { unfinished++; continue; }
       const h = g.header();
       const mh = movesHash(sans);
       const white = h.White || "?", black = h.Black || "?";
@@ -146,7 +154,7 @@ for (const x of toInsert) {
   fresh.push({ _id: (x.mh + rnd).slice(0, 20), ...x.doc });
 }
 
-console.log(`\nscanned ${seenGames} games: ${dupes} already held, ${skipped} unusable, ${fresh.length} new`);
+console.log(`\nscanned ${seenGames} games: ${dupes} already held, ${unfinished} still being played, ${skipped} unusable, ${fresh.length} new`);
 if (fresh.length) {
   const named = fresh.filter((f) => f.eco).length;
   console.log(`  of the new: ${named} named with an ECO, ${fresh.filter((f) => f.dateKey).length} with a usable date`);
