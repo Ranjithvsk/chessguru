@@ -6,6 +6,7 @@
 // Requires the API to have LIVEKIT_URL / _API_KEY / _API_SECRET envs. Until
 // those are set, the page renders a friendly "not configured yet" splash.
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Navigate, useParams, useSearchParams, Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -294,13 +295,94 @@ function useHandRaise() {
   return { handsUp, mineUp, toggle };
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// Control-row design system  (2026-09-21)
+//
+// Owner: "lets make coach panel below board professional, build a nice ui".
+// The row was 18 emoji-led pills in four competing accent colours. Two rules
+// replace that:
+//
+//   1. ONE ICON LANGUAGE — 16px inline SVG, 1.75 stroke, currentColor.
+//      Emoji were carrying this job and the set had COLLISIONS: 📖 meant
+//      both "students' moves" and "teach opening"; 🙈 meant both "hide
+//      video" and "hide moves". Two controls wearing the same glyph is a
+//      bug, not a style choice.
+//
+//   2. COLOUR MEANS STATE, NEVER DECORATION. Indigo Setup, cyan Teach,
+//      purple Challenge and green Send made every action shout at equal
+//      volume, so nothing read as important. Actions are now neutral and
+//      colour is spent only where the class is in a state the coach must
+//      notice at a glance: students unlocked, a hand up, unread chat,
+//      video hidden, students' notation hidden.
+//
+// Everything is one height (h-8) and one radius, so the row reads as a
+// toolbar instead of a bag of assorted pills.
+// ═══════════════════════════════════════════════════════════════════════
+const ICON_PATHS: Record<string, ReactNode> = {
+  gauge: <><path d="M12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" /><path d="m13.4 10.6 3.6-3.6" /><path d="M20.5 16a9 9 0 1 0-17 0" /></>,
+  eyeOff: <><path d="M10.7 5.1A9.9 9.9 0 0 1 12 5c5 0 9 4.5 9 7a12 12 0 0 1-2.2 3.2" /><path d="M6.6 6.6A12.6 12.6 0 0 0 3 12c0 2.5 4 7 9 7a9.7 9.7 0 0 0 4.4-1" /><path d="m3 3 18 18" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /></>,
+  eye: <><path d="M3 12s3.6-7 9-7 9 7 9 7-3.6 7-9 7-9-7-9-7Z" /><circle cx="12" cy="12" r="2.6" /></>,
+  hand: <><path d="M9 11V5.5a1.5 1.5 0 1 1 3 0V11" /><path d="M12 11V4.5a1.5 1.5 0 1 1 3 0V11" /><path d="M15 11.5V7a1.5 1.5 0 1 1 3 0v7a6 6 0 0 1-6 6h-1a6 6 0 0 1-5.2-3l-1.5-2.6a1.5 1.5 0 0 1 2.4-1.8L9 15" /><path d="M9 15V8a1.5 1.5 0 1 0-3 0v5" /></>,
+  chat: <path d="M20 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2Z" />,
+  chevL: <path d="m14.5 6-6 6 6 6" />,
+  chevR: <path d="m9.5 6 6 6-6 6" />,
+  flip: <><path d="M7 4 4 7l3 3" /><path d="M4 7h11a5 5 0 0 1 5 5" /><path d="m17 20 3-3-3-3" /><path d="M20 17H9a5 5 0 0 1-5-5" /></>,
+  lock: <><rect x="4.5" y="10.5" width="15" height="10" rx="2" /><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5" /></>,
+  unlock: <><rect x="4.5" y="10.5" width="15" height="10" rx="2" /><path d="M8 10.5V7a4 4 0 0 1 7.5-2" /></>,
+  list: <><path d="M9 6h11" /><path d="M9 12h11" /><path d="M9 18h11" /><path d="M4.5 6h.01" /><path d="M4.5 12h.01" /><path d="M4.5 18h.01" /></>,
+  listOff: <><path d="M9 6h11" /><path d="M13 12h7" /><path d="M4.5 6h.01" /><path d="m3 3 18 18" /><path d="M9 18h7" /></>,
+  grid: <><rect x="4" y="4" width="7" height="7" rx="1" /><rect x="13" y="4" width="7" height="7" rx="1" /><rect x="4" y="13" width="7" height="7" rx="1" /><rect x="13" y="13" width="7" height="7" rx="1" /></>,
+  book: <><path d="M12 7.5v12" /><path d="M12 7.5C12 6 10 4.5 7 4.5H3.5v12H7c3 0 5 1.5 5 3" /><path d="M12 7.5c0-1.5 2-3 5-3h3.5v12H17c-3 0-5 1.5-5 3" /></>,
+  reset: <><path d="M4 5v5h5" /><path d="M4.6 14a8 8 0 1 0 .9-5.5L4 10" /></>,
+  users: <><circle cx="9.5" cy="8" r="3.2" /><path d="M3.5 20a6 6 0 0 1 12 0" /><path d="M16.5 5.2a3.2 3.2 0 0 1 0 5.9" /><path d="M18 14.6a6 6 0 0 1 3 5.4" /></>,
+  target: <><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3.6" /><path d="M12 4v2.5" /><path d="M12 17.5V20" /><path d="M4 12h2.5" /><path d="M17.5 12H20" /></>,
+  send: <><path d="M12 19V5" /><path d="m5.5 11.5 6.5-6.5 6.5 6.5" /></>,
+  mail: <><rect x="3.5" y="5.5" width="17" height="13" rx="2" /><path d="m4 7 8 5.5L20 7" /></>,
+};
+
+function Ico({ name, className = "" }: { name: string; className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+      className={`h-4 w-4 shrink-0 ${className}`}
+    >
+      {ICON_PATHS[name]}
+    </svg>
+  );
+}
+
+// One button geometry for the whole row. `tone` is the ONLY thing that
+// varies, and it is driven by STATE, not by how exciting the action is.
+//   idle   — every action. Neutral, quiet, equal.
+//   on     — a deliberate non-default state the coach chose (hidden video,
+//            hidden notation). Brand tint: "this is not the default".
+//   alert  — the class is in a state that has consequences right now
+//            (students can move, a hand is up, chat unread). Amber.
+//   danger — destructive, and only on hover, so it never shouts at rest.
+type CtlTone = "idle" | "on" | "alert" | "danger";
+const CTL_BASE =
+  "inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-medium " +
+  "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70 " +
+  "disabled:cursor-not-allowed disabled:opacity-40";
+const CTL_TONE: Record<CtlTone, string> = {
+  idle: "border-ink-700/70 bg-ink-900 text-ink-200 hover:border-ink-600 hover:bg-ink-800 hover:text-white",
+  on: "border-brand-500/50 bg-brand-500/15 text-brand-100 hover:bg-brand-500/25",
+  alert: "border-amber-500/50 bg-amber-500/15 text-amber-100 hover:bg-amber-500/25",
+  danger: "border-ink-700/70 bg-ink-900 text-ink-300 hover:border-rose-500/60 hover:bg-rose-500/15 hover:text-rose-100",
+};
+function ctl(tone: CtlTone = "idle", extra = ""): string {
+  return `${CTL_BASE} ${CTL_TONE[tone]} ${extra}`;
+}
+
 function HandRaiseButton() {
   const { mineUp, toggle } = useHandRaise();
   return (
-    <button onClick={toggle}
+    <button onClick={toggle} aria-pressed={mineUp}
       title={mineUp ? "Lower hand" : "Raise hand"}
-      className={`rounded-full border px-3 py-1.5 text-lg transition ${mineUp ? "border-amber-400 bg-amber-500/25 shadow-lg animate-pulse" : "border-ink-700 bg-ink-900 hover:bg-ink-800"}`}>
-      🖐
+      className={ctl(mineUp ? "alert" : "idle")}>
+      <Ico name="hand" />
+      <span className="hidden sm:inline">{mineUp ? "Hand up" : "Raise hand"}</span>
     </button>
   );
 }
@@ -404,23 +486,25 @@ function CoachBoardNav({ readOnly = false }: { readOnly?: boolean } = {}) {
   })();
   const label = mainlineLen === 0 ? "start" : `${cursorPath.length} / ${mainlineLen}`;
   return (
-    <div className="inline-flex items-center gap-1 rounded-full border border-ink-700 bg-ink-900 px-2 py-1 shadow">
+    // One segmented unit: the ply counter sits BETWEEN its two arrows, so the
+    // three read as a single instrument rather than three loose pills.
+    <div className="inline-flex h-8 items-center overflow-hidden rounded-lg border border-ink-700/70 bg-ink-900">
       <button
         onClick={() => triggerClassBoardAction("stepBack")}
         disabled={readOnly || !canBack}
         title={readOnly ? "Only the coach can rewind for the class" : "Previous move (←) — non-destructive; step forward again to return"}
-        className="rounded-md px-2 py-0.5 text-sm text-white transition hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-30"
+        className="grid h-full w-8 place-items-center text-ink-200 transition-colors hover:bg-ink-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
       >
-        ←
+        <Ico name="chevL" />
       </button>
-      <span className="px-1 font-mono text-[11px] tabular-nums text-ink-400">{label}</span>
+      <span className="min-w-[3.25rem] border-x border-ink-800 px-1 text-center font-mono text-[11px] tabular-nums text-ink-400">{label}</span>
       <button
         onClick={() => triggerClassBoardAction("stepForward")}
         disabled={readOnly || !canFwd}
         title={readOnly ? "Only the coach can advance for the class" : "Next move (→)"}
-        className="rounded-md px-2 py-0.5 text-sm text-white transition hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-30"
+        className="grid h-full w-8 place-items-center text-ink-200 transition-colors hover:bg-ink-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
       >
-        →
+        <Ico name="chevR" />
       </button>
     </div>
   );
@@ -435,9 +519,10 @@ function CoachFlipToggle() {
     <button
       onClick={triggerClassFlipOrientation}
       title={isBlack ? "Board is showing Black at the bottom — click to flip to White" : "Board is showing White at the bottom — click to flip to Black"}
-      className="rounded-full border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm font-semibold text-ink-100 transition hover:bg-ink-800"
+      className={ctl("idle")}
     >
-      🔄 {isBlack ? "Black view" : "White view"}
+      <Ico name="flip" />
+      {isBlack ? "Black view" : "White view"}
     </button>
   );
 }
@@ -450,9 +535,15 @@ function CoachLockToggle() {
     <button
       onClick={triggerClassLockToggle}
       title={locked ? "Students CAN'T move — click to allow" : "Students CAN move — click to lock"}
-      className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${locked ? "border-rose-500/50 bg-rose-500/20 text-rose-100 hover:bg-rose-500/30" : "border-emerald-500/50 bg-emerald-500/20 text-emerald-100 hover:bg-emerald-500/30"}`}
+      aria-pressed={!locked}
+      // Locked is the DEFAULT and the safe state, so it stays neutral. The
+      // state worth noticing across a room is students being able to move —
+      // that is what gets the colour. Previously both states were saturated
+      // (rose / emerald), so the row lit up no matter what was true.
+      className={ctl(locked ? "idle" : "alert")}
     >
-      {locked ? "🔒 Locked" : "🔓 Open"}
+      <Ico name={locked ? "lock" : "unlock"} />
+      {locked ? "Students locked" : "Students can move"}
     </button>
   );
 }
@@ -463,8 +554,10 @@ function ChatToggleButton() {
   return (
     <button onClick={() => { setOpen(!open); if (!open) chatMarkRead(); }}
       title={open ? "Close chat" : unread > 0 ? `${unread} unread message${unread === 1 ? "" : "s"}` : "Open chat"}
-      className={`relative rounded-full border px-3 py-1.5 text-lg transition ${open ? "border-brand-400 bg-brand-500/25" : unread > 0 ? "border-rose-400 bg-rose-500/20 animate-pulse" : "border-ink-700 bg-ink-900 hover:bg-ink-800"}`}>
-      💬
+      aria-pressed={open}
+      className={ctl(open ? "on" : unread > 0 ? "alert" : "idle", "relative")}>
+      <Ico name="chat" />
+      <span className="hidden sm:inline">Chat</span>
       {unread > 0 && !open && (
         <span className="absolute -right-1 -top-1 grid h-5 min-w-[20px] place-items-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white shadow ring-2 ring-ink-900">
           {unread > 99 ? "99+" : unread}
@@ -483,9 +576,11 @@ function CoachStudentNotationToggle() {
     <button
       onClick={triggerClassNotationToggle}
       title={hidden ? "Students CAN'T see the move list — click to show it" : "Students CAN see the move list — click to hide it"}
-      className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${hidden ? "border-amber-500/60 bg-amber-500/20 text-amber-100 hover:bg-amber-500/30" : "border-ink-700 bg-ink-900 text-ink-100 hover:bg-ink-800"}`}
+      aria-pressed={hidden}
+      className={ctl(hidden ? "alert" : "idle")}
     >
-      {hidden ? "📋 Notation hidden" : "📋 Notation shown"}
+      <Ico name={hidden ? "listOff" : "list"} />
+      {hidden ? "Their moves hidden" : "Their moves shown"}
     </button>
   );
 }
@@ -518,11 +613,12 @@ function SelfNotationToggle({ hidden, onToggle }: { hidden: boolean; onToggle: (
       onClick={onToggle}
       title={hidden ? "Show the move list on my screen" : "Hide the move list on my screen (bigger board)"}
       aria-pressed={hidden}
-      className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${hidden ? "border-amber-500/60 bg-amber-500/20 text-amber-100 hover:bg-amber-500/30" : "border-ink-700 bg-ink-900 text-ink-100 hover:bg-ink-800"}`}
+      className={ctl(hidden ? "on" : "idle")}
     >
       {/* Says what pressing DOES. "My notation" on both states read as a label,
           not a control, so people pressed it to see notation and lost it. */}
-      {hidden ? "📖 Show moves" : "🙈 Hide moves"}
+      <Ico name={hidden ? "list" : "listOff"} />
+      {hidden ? "Show moves" : "Hide moves"}
     </button>
   );
 }
@@ -606,8 +702,9 @@ function MessageCoachButton({ room }: { room: string }) {
     <>
       <button onClick={() => setOpen(true)}
         title="Send a private message to your coach"
-        className="rounded-full border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm text-ink-100 hover:bg-ink-800">
-        📩 Message coach
+        className={ctl("idle")}>
+        <Ico name="mail" />
+        Message coach
       </button>
       {open && (
         <div className="fixed inset-0 z-[70] grid place-items-center bg-black/60 p-4" onClick={() => !sending && setOpen(false)}>
@@ -2097,9 +2194,11 @@ export default function ClassV2Page() {
                   <button
                     onClick={() => setHideVideo(v => !v)}
                     title={hideVideo ? "Show video tiles" : "Hide video tiles (audio-only view)"}
-                    className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition-colors ${hideVideo ? "border-amber-500/60 bg-amber-500/20 text-amber-100 hover:bg-amber-500/30" : "border-ink-700 bg-ink-900 text-ink-100 hover:bg-ink-800"}`}
+                    aria-pressed={hideVideo}
+                    className={ctl(hideVideo ? "on" : "idle")}
                   >
-                    {hideVideo ? "👁️‍🗨️ Show video" : "🙈 Hide video"}
+                    <Ico name={hideVideo ? "eye" : "eyeOff"} />
+                    {hideVideo ? "Show video" : "Hide video"}
                   </button>
                   <HandRaiseButton />
                   <ChatToggleButton />
@@ -2125,27 +2224,30 @@ export default function ClassV2Page() {
                     <button
                       onClick={() => setClassSetupOpen(true)}
                       title="Set up any chess position (paste FEN, empty board, or Board Editor)"
-                      className="rounded-full border border-brand-500/50 bg-brand-500/20 px-3 py-1.5 text-sm font-semibold text-brand-100 hover:bg-brand-500/30"
+                      className={ctl("idle")}
                     >
-                      📋 Setup
+                      <Ico name="grid" />
+                      Set position
                     </button>
                   )}
                   {role === "coach" && (
                     <button
                       onClick={() => setTeachOpen(true)}
                       title="Load an opening from your Repertoire / the corpus / master games at this position"
-                      className="rounded-full border border-sky-500/50 bg-sky-500/20 px-3 py-1.5 text-sm font-semibold text-sky-100 hover:bg-sky-500/30"
+                      className={ctl("idle")}
                     >
-                      📖 Teach opening
+                      <Ico name="book" />
+                      Teach opening
                     </button>
                   )}
                   {role === "coach" && (
                     <button
                       onClick={() => { if (confirm("Reset board to the starting position for everyone?")) triggerClassBoardAction("reset"); }}
                       title="Reset board to the starting position (destructive — clears the move list for everyone)"
-                      className="rounded-full border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm font-semibold text-ink-100 hover:bg-ink-800"
+                      className={ctl("danger")}
                     >
-                      ↺ Reset
+                      <Ico name="reset" />
+                      Reset
                     </button>
                   )}
                 </div>
@@ -2159,17 +2261,19 @@ export default function ClassV2Page() {
                     <button
                       onClick={() => setAudiencePickerOpen(true)}
                       title="Change which students can join this class + who gets notified"
-                      className="rounded-full border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm font-semibold text-ink-100 hover:bg-ink-800"
+                      className={ctl("idle")}
                     >
-                      🎯 Students
+                      <Ico name="users" />
+                      Students
                     </button>
                     <ChallengeCoachButton />
                     <button
                       onClick={() => setSendPositionOpen(true)}
                       title="Send the current board (with move list) to students' Notebook"
-                      className="rounded-full border border-emerald-500/50 bg-emerald-500/20 px-3 py-1.5 text-sm font-semibold text-emerald-100 hover:bg-emerald-500/30"
+                      className={ctl("idle")}
                     >
-                      📤 Send position
+                      <Ico name="send" />
+                      Send position
                     </button>
                   </div>
                 )}
@@ -2209,9 +2313,10 @@ function ChallengeCoachButton() {
         <button
           onClick={() => setOpen(true)}
           title="Freeze the board and ask students to find good moves on their own boards"
-          className="rounded-full border border-purple-500/50 bg-purple-500/20 px-3 py-1.5 text-sm font-semibold text-purple-100 hover:bg-purple-500/30"
+          className={ctl("idle")}
         >
-          🧠 Challenge
+          <Ico name="target" />
+          Challenge
         </button>
       )}
       {/* Past-answers chip — stays visible after a challenge ends so the
@@ -2528,7 +2633,7 @@ function VideoQualityPicker() {
       onChange={(e) => setPref(e.target.value as QualityPref)}
       aria-label="Video quality"
       title="Video quality — Auto follows your connection"
-      className="rounded-full border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm font-semibold text-ink-100 outline-none hover:bg-ink-800"
+      className="h-8 rounded-lg border border-ink-700/70 bg-ink-900 px-2 text-[13px] font-medium text-ink-200 outline-none transition-colors hover:border-ink-600 hover:bg-ink-800 hover:text-white focus-visible:ring-2 focus-visible:ring-brand-400/70"
     >
       <option value="auto">Auto</option>
       <option value="high">High</option>
