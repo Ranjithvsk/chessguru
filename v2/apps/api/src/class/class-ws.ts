@@ -275,6 +275,10 @@ const socketRole = new WeakMap<WebSocket, "coach" | "student">();
 // than a participant. They join a room only to hand a position to the coach's
 // own main screen, so they are kept out of the attendance register.
 const secondScreens = new WeakSet<WebSocket>();
+// Sockets whose arrival has already been announced. `hello` can arrive more than
+// once on a single socket (reconnect, coach-token re-resolution), and each one
+// must not produce another "joined" line in everyone's feed.
+const announcedJoin = new WeakSet<WebSocket>();
 // Persistent identity per socket for attendance — captured on hello. userId is
 // null for anonymous joiners; name always has a value (falls back to "Guest").
 const socketWho = new WeakMap<WebSocket, { userId: string | null; name: string; classId: string }>();
@@ -755,15 +759,13 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     void remaining;
   }
   broadcast(room, { type: "participants", participants: room.clients.size });
-  if (!secondScreens.has(ws)) {
-    const w = socketWho.get(ws);
-    broadcast(room, {
-      type: "presence", event: "joined",
-      who: w?.name || "Someone", userId: w?.userId ?? null,
-      role: socketRole.get(ws) === "coach" ? "coach" : "student",
-      clean: true, students: countStudents(room), participants: room.clients.size,
-    });
-  }
+  // The "joined" announcement is deliberately NOT sent here. At connect time the
+  // client has not yet sent `hello`, so socketWho holds no name and socketRole no
+  // role: every arrival was announced as an anonymous "Someone", and as a
+  // "student" even when it was the coach. "left" looked right only because by then
+  // hello had long since landed — which is exactly the asymmetry that was
+  // reported: a name on leaving, "Someone" on joining. It is announced from the
+  // hello handler instead, where the identity actually exists. (2026-09-21)
 
   const isCoach = () => socketRole.get(ws) === "coach";
 
@@ -915,6 +917,18 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       const userId = typeof frame.userId === "string" && frame.userId.length ? frame.userId.slice(0, 64) : null;
       const name = typeof frame.displayName === "string" && frame.displayName.trim() ? frame.displayName.trim().slice(0, 80) : "Guest";
       socketWho.set(ws, { userId, name, classId: roomId });
+      // Announce the arrival now that we know WHO arrived and in WHAT role.
+      // Guarded, because hello can legitimately arrive more than once on one
+      // socket (reconnect, coach-token re-resolution) and must not re-announce.
+      if (!announcedJoin.has(ws) && !secondScreens.has(ws)) {
+        announcedJoin.add(ws);
+        broadcast(room, {
+          type: "presence", event: "joined",
+          who: name, userId,
+          role: socketRole.get(ws) === "coach" ? "coach" : "student",
+          clean: true, students: countStudents(room), participants: room.clients.size,
+        });
+      }
       // Must come AFTER socketWho: the flush matches offers by signed-in user, and
       // calling it during role resolution (before identity is recorded) silently
       // found nothing — the offer stayed parked and the class screen showed no card.
