@@ -51,8 +51,16 @@ function splitGames(raw) {
   flush(); return out;
 }
 
+// A Lichess API token lifts the anonymous per-IP rate limit. Optional: without
+// one everything still works, just more slowly. Set LICHESS_TOKEN in the
+// environment (a plain read token from lichess.org/account/oauth/token is
+// enough — no scope is needed for public broadcasts).
+const TOKEN = (process.env.LICHESS_TOKEN || "").trim();
+
 async function getText(url) {
-  const r = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/x-chess-pgn, application/x-ndjson, */*" } });
+  const headers = { "User-Agent": UA, Accept: "application/x-chess-pgn, application/x-ndjson, */*" };
+  if (TOKEN) headers.Authorization = `Bearer ${TOKEN}`;
+  const r = await fetch(url, { headers });
   if (r.status === 429) { console.log("  rate limited — backing off 60s"); await sleep(60_000); return getText(url); }
   if (!r.ok) throw new Error(`${r.status} ${url}`);
   return r.text();
@@ -62,6 +70,13 @@ const cli = new MongoClient("mongodb://127.0.0.1:27017");
 await cli.connect();
 const db = cli.db("chessguru");
 const col = db.collection("broadcastgames");
+// Round ledger. Completeness depends on this: the tournament index only shows
+// the most recent N, so anything that ages off between runs would be lost
+// forever. Recording every round we have ever seen — and whether it was
+// FINISHED when we last read it — means a round is fetched until it is
+// complete and then never again, so the budget goes to rounds we still owe.
+const seenRounds = db.collection("broadcastRoundsSeen");
+await seenRounds.createIndex({ done: 1, lastTriedAt: 1 }).catch(() => {});
 
 // opening book, for eco/openingName on the way in
 const book = new Map();
@@ -78,62 +93,103 @@ console.log(`  ${tours.length} tournaments`);
 let seenGames = 0, dupes = 0, added = 0, skipped = 0, unfinished = 0;
 const toInsert = [];
 
+// ONE REQUEST PER TOURNAMENT. /api/broadcast/<tourId>.pgn returns every round
+// of a tournament in a single response — measured at 300 games / 1.25MB for a
+// live Olympiad section. The previous loop fetched each round separately,
+// roughly 11x the requests for the same games, which is what made the rate
+// limit bite.
+//
+// The ledger is per-tournament for the same reason completeness needed one at
+// all: the index only shows the most recent N, so a tournament that scrolls
+// off between runs would otherwise be lost. A tournament is only marked done
+// once every one of its rounds is finished upstream AND we have read it since.
+const seenTours = db.collection("broadcastToursSeen");
+await seenTours.createIndex({ done: 1, lastTriedAt: 1 }).catch(() => {});
+
 for (const t of tours) {
-  const name = t?.tour?.name ?? "?";
+  const tour = t?.tour ?? {};
+  if (!tour.id) continue;
   const rounds = Array.isArray(t?.rounds) ? t.rounds : [];
-  process.stdout.write(`  ${name.slice(0, 58).padEnd(58)} ${rounds.length} rounds`);
-  let tourAdded = 0;
-  for (const rd of rounds) {
-    let pgn = "";
-    try { pgn = await getText(`https://lichess.org/api/broadcast/round/${rd.id}.pgn`); }
-    catch { continue; }
-    await sleep(350);                       // be a good citizen
-    for (const one of splitGames(pgn)) {
-      seenGames++;
-      const g = new Chess();
-      try { g.loadPgn(one); } catch { skipped++; continue; }
-      const sans = g.history();
-      if (sans.length < 4) { skipped++; continue; }   // an empty/abandoned board is not a game
-      // FINISHED GAMES ONLY. A live round's PGN includes games in progress,
-      // and storing one freezes it at whatever move we happened to catch —
-      // a half-game that never completes. Worse, de-duplication is by the
-      // MOVE LIST, so the next run sees more moves, hashes differently, and
-      // inserts the same game a second time. The archive takes a game once
-      // it has a result; anything still being played is skipped and picked
-      // up on a later run, complete.
-      if (!/^(1-0|0-1|1\/2-1\/2)$/.test(String(h.Result || "").trim())) { unfinished++; continue; }
-      const h = g.header();
-      const mh = movesHash(sans);
-      const white = h.White || "?", black = h.Black || "?";
-      const date = /^\d{4}\.\d{2}\.\d{2}$/.test(h.Date || "") ? h.Date : null;
+  const allFinished = rounds.length > 0 && rounds.every((r) => r.finished);
+  await seenTours.updateOne(
+    { _id: String(tour.id) },
+    {
+      $set: { name: tour.name ?? "?", rounds: rounds.length, allFinished },
+      $setOnInsert: { done: false, firstSeenAt: new Date() },
+    },
+    { upsert: true },
+  );
+}
 
-      let eco = null, openingName = null;
-      try {
-        const c = new Chess();
-        for (const san of sans.slice(0, 24)) {
-          if (!c.move(san)) break;
-          const e = book.get(fenKey(c.fen()));
-          if (e) { eco = e.eco; openingName = e.name; }
-        }
-      } catch { /* unnamed */ }
+// Work the BACKLOG, oldest attempt first, so a missed run is harmless and a
+// tournament that aged off the index is still collected.
+const backlog = await seenTours
+  .find({ done: { $ne: true } })
+  .sort({ lastTriedAt: 1 })
+  .limit(TOURS)
+  .toArray();
+console.log(`  ${backlog.length} tournaments to fetch (of ${await seenTours.countDocuments({})} ever seen, ${await seenTours.countDocuments({ done: true })} complete)`);
 
-      toInsert.push({
-        mh,
-        doc: {
-          moves: sans, ply: sans.length,
-          whiteName: white, blackName: black,
-          whiteId: slug(white), blackId: slug(black),
-          whiteElo: Number(h.WhiteElo) || null, blackElo: Number(h.BlackElo) || null,
-          event: h.Event || name, site: h.Site || null, round: h.Round || rd.name || null,
-          date: h.Date || null, dateKey: date, result: h.Result || "*",
-          source: "broadcast", eco, openingName, mh,
-          loadedAt: new Date(),
-        },
-      });
-      tourAdded++;
-    }
+for (const t of backlog) {
+  process.stdout.write(`  ${String(t.name).slice(0, 58).padEnd(58)}`);
+  let pgn = "";
+  try {
+    pgn = await getText(`https://lichess.org/api/broadcast/${t._id}.pgn`);
+  } catch (e) {
+    await seenTours.updateOne({ _id: t._id }, { $set: { lastTriedAt: new Date() } });
+    console.log(`  fetch failed (${String(e.message).slice(0, 30)})`);
+    continue;
   }
-  console.log(`  → ${tourAdded} games`);
+  await sleep(400);                        // one request at a time, politely
+  // Done only when upstream says every round finished AND we have just read it.
+  // A DRY run never marks done — it inserts nothing, and a tournament marked
+  // done is never fetched again.
+  await seenTours.updateOne(
+    { _id: t._id },
+    { $set: DRY ? { lastTriedAt: new Date() } : { lastTriedAt: new Date(), done: !!t.allFinished } },
+  );
+
+  let tourAdded = 0;
+  for (const one of splitGames(pgn)) {
+    seenGames++;
+    const g = new Chess();
+    try { g.loadPgn(one); } catch { skipped++; continue; }
+    const sans = g.history();
+    if (sans.length < 4) { skipped++; continue; }   // an empty/abandoned board is not a game
+    const h = g.header();
+    // FINISHED GAMES ONLY — a game still being played would be archived frozen
+    // mid-play, and would hash differently next run and insert a second time.
+    if (!/^(1-0|0-1|1\/2-1\/2)$/.test(String(h.Result || "").trim())) { unfinished++; continue; }
+    const mh = movesHash(sans);
+    const white = h.White || "?", black = h.Black || "?";
+    const date = /^\d{4}\.\d{2}\.\d{2}$/.test(h.Date || "") ? h.Date : null;
+
+    let eco = null, openingName = null;
+    try {
+      const c = new Chess();
+      for (const san of sans.slice(0, 24)) {
+        if (!c.move(san)) break;
+        const e = book.get(fenKey(c.fen()));
+        if (e) { eco = e.eco; openingName = e.name; }
+      }
+    } catch { /* unnamed */ }
+
+    toInsert.push({
+      mh,
+      doc: {
+        moves: sans, ply: sans.length,
+        whiteName: white, blackName: black,
+        whiteId: slug(white), blackId: slug(black),
+        whiteElo: Number(h.WhiteElo) || null, blackElo: Number(h.BlackElo) || null,
+        event: h.Event || t.name, site: h.Site || null, round: h.Round || null,
+        date: h.Date || null, dateKey: date, result: h.Result || "*",
+        source: "broadcast", eco, openingName, mh,
+        loadedAt: new Date(),
+      },
+    });
+    tourAdded++;
+  }
+  console.log(`  → ${tourAdded} finished games`);
 }
 
 // One pass to find which fingerprints we already hold.
