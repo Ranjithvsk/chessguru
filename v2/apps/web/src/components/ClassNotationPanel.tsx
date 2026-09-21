@@ -105,31 +105,7 @@ export function ClassNotationPanel({ room, role }: { room: string; role: "coach"
   // tactics) go through 📤 Send position → Notebook instead.
   const isOpeningStart = startFen === STANDARD_START_FEN;
 
-  // Keyboard nav (coach only): ← → walk mainline; ↑ ↓ switch variation
-  // at current branch. Mirrors /openings keyboard shortcuts.
-  useEffect(() => {
-    if (role !== "coach") return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLElement && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable)) return;
-      if (e.key === "ArrowLeft") { e.preventDefault(); triggerClassBoardAction("stepBack"); }
-      else if (e.key === "ArrowRight") { e.preventDefault(); triggerClassBoardAction("stepForward"); }
-      else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-        // Sibling switch: replace last cursor index with prev / next sibling.
-        if (cursorPath.length === 0) return;
-        let parentArr = tree;
-        for (let i = 0; i < cursorPath.length - 1; i++) parentArr = parentArr[cursorPath[i]!]!.children;
-        const k = cursorPath[cursorPath.length - 1]!;
-        const dir = e.key === "ArrowUp" ? -1 : 1;
-        const nk = k + dir;
-        if (nk < 0 || nk >= parentArr.length) return;
-        e.preventDefault();
-        triggerClassSeek([...cursorPath.slice(0, -1), nk]);
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [role, tree, cursorPath]);
-
+  // Keyboard nav does NOT live here — see ClassBoardKeyboardNav below.
   const memorize = () => {
     if (currentSans.length === 0) return;
     const name = matchedOpening?.name || `Line from class ${new Date().toLocaleDateString()}`;
@@ -784,4 +760,46 @@ function SaveToRepertoireDialog({ room, startFen, tree, fromPath, onClose }: { r
       </div>
     </div>
   );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Coach keyboard nav — ← → walk the mainline, ↑ ↓ switch variation at the
+// current branch. Mirrors the /openings shortcuts.
+//
+// This lives in its own always-mounted component ON PURPOSE. It used to be
+// an effect inside ClassNotationPanel, and ClassV2 renders that panel
+// conditionally — so the moment a coach pressed "Hide moves" (or was on a
+// screen under 1024px, where the panel now starts hidden to give the board
+// the column) the panel unmounted, the effect tore down its listener, and
+// the arrow keys silently stopped working. That is exactly backwards: the
+// coach who hid the move list is the one relying on the keyboard to move
+// through it. Owner caught this, 2026-09-21.
+//
+// Renders nothing. Mount it once, unconditionally, next to the board.
+// ═══════════════════════════════════════════════════════════════════════
+export function ClassBoardKeyboardNav({ role }: { role: "coach" | "student" }) {
+  const { tree, cursorPath } = useClassMoveList();
+  useEffect(() => {
+    if (role !== "coach") return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLElement && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable)) return;
+      if (e.key === "ArrowLeft") { e.preventDefault(); triggerClassBoardAction("stepBack"); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); triggerClassBoardAction("stepForward"); }
+      else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        // Sibling switch: replace last cursor index with prev / next sibling.
+        if (cursorPath.length === 0) return;
+        let parentArr = tree;
+        for (let i = 0; i < cursorPath.length - 1; i++) parentArr = parentArr[cursorPath[i]!]!.children;
+        const k = cursorPath[cursorPath.length - 1]!;
+        const dir = e.key === "ArrowUp" ? -1 : 1;
+        const nk = k + dir;
+        if (nk < 0 || nk >= parentArr.length) return;
+        e.preventDefault();
+        triggerClassSeek([...cursorPath.slice(0, -1), nk]);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [role, tree, cursorPath]);
+  return null;
 }

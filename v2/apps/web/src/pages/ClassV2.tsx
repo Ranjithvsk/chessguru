@@ -25,7 +25,7 @@ import { fetchExplorer, type ExplorerData, type ExplorerMove } from "../lib/expl
 import { listRepertoire, shareRepertoire, type RepertoireEntry, type RepMoveNode } from "../lib/repertoire-api";
 import { Chess } from "chess.js";
 import AudiencePickerModal from "../components/AudiencePickerModal";
-import { ClassNotationPanel, STANDARD_START_FEN } from "../components/ClassNotationPanel";
+import { ClassNotationPanel, ClassBoardKeyboardNav, STANDARD_START_FEN } from "../components/ClassNotationPanel";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -2136,6 +2136,10 @@ export default function ClassV2Page() {
                *  320px, full body height), stacks under the board on smaller
                *  screens (mobile / tablet) via lg:w-[320px] + w-full. Uses
                *  its own max-h cap on mobile so the board doesn't shrink. */}
+              {/* Arrow-key nav is mounted UNCONDITIONALLY, outside the panel's
+               *  render guard. Hiding the move list must not take the coach's
+               *  keyboard away — that coach is the one who needs it most. */}
+              <ClassBoardKeyboardNav role={role} />
               {!hideNotationHere && (
                 <div className="shrink-0 border-t border-ink-800 lg:h-auto lg:w-[360px] lg:border-l lg:border-t-0">
                   <ClassNotationPanel room={room} role={role} />
