@@ -354,7 +354,13 @@ export function ClassNotationPanel({ room, role }: { room: string; role: "coach"
     // Overflow inside the scroll region takes over immediately.
     <div className="flex h-full shrink-0 flex-col overflow-hidden bg-ink-950/60 max-h-[13.5rem] md:max-h-72 lg:max-h-none">
       {/* Header row 1 — Moves label + Start/Live pills + repertoire actions. */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-ink-800/70 px-3 py-1 text-[10px] uppercase tracking-widest text-ink-500">
+      {/* WRAPS. Below lg this panel is 16rem wide in the footer beside the
+        *  controls, and Moves · Start · Live · Memorize · Save do not fit on one
+        *  line there — the panel root is overflow-hidden, so 💾 Save was simply
+        *  sliced off at the right edge (owner, 2026-09-21: "save key is
+        *  chipped", measured at 34px clipped). Wrapping costs a few pixels of
+        *  header only when it actually runs out of room. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-0.5 border-b border-ink-800/70 px-3 py-1 text-[10px] uppercase tracking-widest text-ink-500">
         <span>Moves</span>
         <span className="text-ink-600">·</span>
         <button
@@ -364,6 +370,26 @@ export function ClassNotationPanel({ room, role }: { room: string; role: "coach"
           className={`rounded px-1.5 py-0.5 ${atStart ? "bg-brand-500/30 text-brand-100" : "text-ink-500 hover:text-ink-200"} ${clickable ? "cursor-pointer" : "cursor-default"}`}
           title={clickable ? "Rewind to the starting position" : "Starting position"}
         >⏮ Start</button>
+        {/* Step one move at a time, in the panel you are already reading
+          *  (owner, 2026-09-21: "keep move arrow also in notation panel").
+          *  Same actions the footer stepper and the ← → keys fire, so all
+          *  three stay in step; disabled exactly when there is nowhere to go. */}
+        <button
+          type="button"
+          onClick={() => triggerClassBoardAction("stepBack")}
+          disabled={!clickable || atStart}
+          className="rounded px-1.5 py-0.5 text-ink-400 hover:bg-ink-800 hover:text-ink-100 disabled:cursor-not-allowed disabled:opacity-30"
+          title={clickable ? "Previous move (←)" : "Previous move"}
+          aria-label="Previous move"
+        >←</button>
+        <button
+          type="button"
+          onClick={() => triggerClassBoardAction("stepForward")}
+          disabled={!clickable || atLive}
+          className="rounded px-1.5 py-0.5 text-ink-400 hover:bg-ink-800 hover:text-ink-100 disabled:cursor-not-allowed disabled:opacity-30"
+          title={clickable ? "Next move (→)" : "Next move"}
+          aria-label="Next move"
+        >→</button>
         <button
           type="button"
           onClick={() => {
