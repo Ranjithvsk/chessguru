@@ -22,6 +22,9 @@ type LiveGame = {
   whiteName: string; blackName: string;
   whiteElo?: number | null; blackElo?: number | null;
   whiteClock?: string | null; blackClock?: string | null;
+  whiteTitle?: string | null; blackTitle?: string | null;
+  whiteFideId?: string | null; blackFideId?: string | null;
+  timeControl?: string | null; eco?: string | null; openingName?: string | null;
   result: string; ply: number; fen: string; lastMove?: string | null;
   finished: boolean; updatedAt: string; moves: string[];
 };
@@ -176,10 +179,14 @@ function RoundBoards({ roundId }: { roundId: string }) {
                   {g.result === "*" ? `${Math.ceil(g.ply / 2)}.` : g.result}
                 </span>
               </div>
-              <MiniBoard fen={g.fen} />
+              {/* The same chessground the rest of the app uses, view-only.
+                *  It was a glyph grid to keep twenty boards cheap, but the
+                *  owner wants our board everywhere — so the preview is the
+                *  real thing, without coordinates at this size. */}
+              <Board fen={g.fen} orientation="white" viewOnly coordinates={false} />
               <div className="mt-2 space-y-0.5">
-                <PlayerLine name={g.whiteName} elo={g.whiteElo} clock={g.whiteClock} small />
-                <PlayerLine name={g.blackName} elo={g.blackElo} clock={g.blackClock} small />
+                <PlayerLine name={g.whiteName} elo={g.whiteElo} clock={g.whiteClock} title={g.whiteTitle} small />
+                <PlayerLine name={g.blackName} elo={g.blackElo} clock={g.blackClock} title={g.blackTitle} small />
               </div>
               {g.lastMove && !g.finished && (
                 <div className="mt-1 font-mono text-[11px] text-brand-300">last: {g.lastMove}</div>
@@ -240,9 +247,14 @@ function FocusedGame({ g, onClose }: { g: LiveGame; onClose: () => void }) {
     <div className="mb-5 rounded-xl border border-brand-500/40 bg-ink-900/60 p-4">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-500">Board {g.board}</div>
-          <PlayerLine name={g.whiteName} elo={g.whiteElo} clock={g.whiteClock} />
-          <PlayerLine name={g.blackName} elo={g.blackElo} clock={g.blackClock} />
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-500">
+            Board {g.board}
+            {g.eco && <span className="ml-1.5 font-mono normal-case text-ink-400">{g.eco}</span>}
+            {g.openingName && <span className="ml-1 normal-case tracking-normal text-ink-400">{g.openingName}</span>}
+            {g.timeControl && <span className="ml-1.5 normal-case tracking-normal text-ink-600">· {g.timeControl}</span>}
+          </div>
+          <PlayerLine name={g.whiteName} elo={g.whiteElo} clock={g.whiteClock} title={g.whiteTitle} />
+          <PlayerLine name={g.blackName} elo={g.blackElo} clock={g.blackClock} title={g.blackTitle} />
         </div>
         <button onClick={onClose} className="shrink-0 text-xs text-ink-400 hover:text-white">Close</button>
       </div>
@@ -273,12 +285,19 @@ function FocusedGame({ g, onClose }: { g: LiveGame; onClose: () => void }) {
   );
 }
 
-function PlayerLine({ name, elo, clock, small }: { name: string; elo?: number | null; clock?: string | null; small?: boolean }) {
+function PlayerLine({ name, elo, clock, title, small }: {
+  name: string; elo?: number | null; clock?: string | null; title?: string | null; small?: boolean;
+}) {
   return (
     <div className={`flex items-baseline gap-1.5 ${small ? "text-xs" : "text-sm"}`}>
+      {/* GM / IM / FM, as the broadcast states it. */}
+      {title ? <span className="shrink-0 rounded bg-amber-500/20 px-1 text-[10px] font-bold text-amber-200">{title}</span> : null}
       <span className="min-w-0 flex-1 truncate font-medium text-ink-100">{name}</span>
       {elo ? <span className="shrink-0 tabular-nums text-ink-500">{elo}</span> : null}
-      {clock ? <span className="shrink-0 rounded bg-ink-800 px-1 font-mono text-[10px] tabular-nums text-ink-300">{clock}</span> : null}
+      {/* The clock comes from the movetext, so it is the player's real
+        *  remaining time as of the last move — it does not tick down between
+        *  refreshes, and pretending otherwise would be a lie. */}
+      {clock ? <span className="shrink-0 rounded bg-ink-800 px-1 font-mono text-[10px] tabular-nums text-ink-200">{clock}</span> : null}
     </div>
   );
 }

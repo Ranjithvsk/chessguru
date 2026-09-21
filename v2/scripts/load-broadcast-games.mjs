@@ -66,6 +66,20 @@ async function getText(url) {
   return r.text();
 }
 
+/** chess.js 1.4 will not parse a broadcast PGN as published: the movetext
+ *  carries { [%eval 0.18] [%clk 1:00:50] } annotations and "1..." black
+ *  continuation numbers, and it rejects the lot with "Expected end of input,
+ *  game termination marker, move number". Measured on a real dump: 8 of 88
+ *  games parsed as-is, 85 of 88 with the annotations stripped. Everything we
+ *  keep — the moves, the result, the headers — survives stripping; only the
+ *  clocks and engine evals are discarded, and we store neither. */
+function stripAnnotations(pgn) {
+  return String(pgn)
+    .replace(/\{[^}]*\}/g, " ")     // { [%eval ...] [%clk ...] }
+    .replace(/\$\d+/g, " ")          // NAGs
+    .replace(/[ \t]+/g, " ");
+}
+
 const cli = new MongoClient("mongodb://127.0.0.1:27017");
 await cli.connect();
 const db = cli.db("chessguru");
@@ -153,7 +167,7 @@ for (const t of backlog) {
   for (const one of splitGames(pgn)) {
     seenGames++;
     const g = new Chess();
-    try { g.loadPgn(one); } catch { skipped++; continue; }
+    try { g.loadPgn(stripAnnotations(one)); } catch { skipped++; continue; }
     const sans = g.history();
     if (sans.length < 4) { skipped++; continue; }   // an empty/abandoned board is not a game
     const h = g.header();

@@ -185,7 +185,14 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
       let sans: string[] = [];
       let h: Record<string, string> = {};
       try {
-        g.loadPgn(one);
+        // Annotations must come OFF before chess.js sees the movetext. A
+        // broadcast PGN carries { [%eval 0.18] [%clk 1:00:50] } and "1..."
+        // continuation numbers, and chess.js 1.4 rejects the lot — measured on
+        // a real dump, 8 of 88 games parsed as published against 85 of 88
+        // stripped. Clocks are pulled out first, since that is the only place
+        // they exist: there is no WhiteClock header, which is why the live
+        // boards showed no time.
+        g.loadPgn(stripAnnotations(one));
         sans = g.history();
         h = (g.header?.() ?? {}) as Record<string, string>;
       } catch {
@@ -196,6 +203,7 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
       const white = h.White || "?", black = h.Black || "?";
       if (white === "?" && black === "?") return;
       const board = Number(h.Board) || i + 1;
+      const clocks = lastClocks(one);
       ops.push({
         updateOne: {
           filter: { roundId, board },
@@ -204,7 +212,17 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
               roundId, tourName, roundName, board,
               whiteName: white, blackName: black,
               whiteElo: Number(h.WhiteElo) || null, blackElo: Number(h.BlackElo) || null,
-              whiteClock: h.WhiteClock ?? null, blackClock: h.BlackClock ?? null,
+              // From the movetext, not a header — see lastClocks().
+              whiteClock: clocks.white, blackClock: clocks.black,
+              // Everything the feed knows about the players. Title and FIDE id
+              // are in the headers; there is no country tag, but the FIDE id
+              // identifies the player if we ever want to resolve one.
+              whiteTitle: h.WhiteTitle ?? null, blackTitle: h.BlackTitle ?? null,
+              whiteFideId: h.WhiteFideId ?? null, blackFideId: h.BlackFideId ?? null,
+              timeControl: h.TimeControl ?? null,
+              // The feed states these; no need to derive what we are told.
+              eco: h.ECO ?? null, openingName: h.Opening ?? null,
+              gameUrl: h.GameURL ?? null,
               result: h.Result || "*",
               moves: sans, ply: sans.length,
               fen: sans.length ? g.fen() : (h.FEN || START_FEN),
@@ -260,4 +278,27 @@ function headersOnly(pgn: string): Record<string, string> {
   const h: Record<string, string> = {};
   for (const m of String(pgn).matchAll(/^\s*\[(\w+)\s+"([^"]*)"\]/gm)) h[m[1]!] = m[2]!;
   return h;
+}
+
+/** chess.js 1.4 cannot parse a broadcast PGN as published — see applyPgn. */
+function stripAnnotations(pgn: string): string {
+  return String(pgn)
+    .replace(/\{[^}]*\}/g, " ")
+    .replace(/\$\d+/g, " ")
+    .replace(/[ \t]+/g, " ");
+}
+
+/** The clocks a broadcast actually publishes live in the movetext, as
+ *  { [%clk 1:00:50] } after each move — there is no WhiteClock header. The
+ *  LAST such annotation for each side is that player's remaining time.
+ *  White's moves are the odd-numbered annotations, Black's the even ones. */
+function lastClocks(pgn: string): { white: string | null; black: string | null } {
+  const all = [...String(pgn).matchAll(/\[%clk\s+([0-9:.]+)\s*\]/g)].map((m) => m[1]!);
+  if (!all.length) return { white: null, black: null };
+  let white: string | null = null, black: string | null = null;
+  for (let i = 0; i < all.length; i++) {
+    if (i % 2 === 0) white = all[i]!;
+    else black = all[i]!;
+  }
+  return { white, black };
 }
