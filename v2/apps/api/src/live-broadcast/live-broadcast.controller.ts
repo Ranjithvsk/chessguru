@@ -75,6 +75,7 @@ export class LiveBroadcastController {
         whiteFideId: g.whiteFideId ?? null, blackFideId: g.blackFideId ?? null,
         timeControl: g.timeControl ?? null, eco: g.eco ?? null, openingName: g.openingName ?? null,
         turn: g.turn ?? null, clockAsOf: g.clockAsOf ?? null,
+        whiteTeam: g.whiteTeam ?? null, blackTeam: g.blackTeam ?? null,
         result: g.result, ply: g.ply, fen: g.fen, lastMove: g.lastMove,
         finished: !!g.finished, updatedAt: g.updatedAt,
         moves: g.moves ?? [],

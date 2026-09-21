@@ -13,6 +13,7 @@ import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Chess } from "chess.js";
 import { get } from "../lib/api";
+import { teamFlag } from "../lib/country-flag";
 import Board from "../components/Board";
 import MoveTable from "../components/MoveTable";
 
@@ -26,11 +27,34 @@ type LiveGame = {
   whiteFideId?: string | null; blackFideId?: string | null;
   timeControl?: string | null; eco?: string | null; openingName?: string | null;
   turn?: "w" | "b" | null; clockAsOf?: string | null;
+  whiteTeam?: string | null; blackTeam?: string | null;
   result: string; ply: number; fen: string; lastMove?: string | null;
   finished: boolean; updatedAt: string; moves: string[];
 };
 
 const POLL_MS = 4000;
+
+/** Lichess splits a big event into one broadcast per section, named
+ *  "Event | Category | Range" — the FIDE Olympiad is NINE of them. Listed flat
+ *  they swamp everything else, so they are grouped under the event and the
+ *  sections shown inside it. Everything before the first "|" is the event. */
+function eventOf(tourName: string): string {
+  const i = String(tourName).indexOf("|");
+  return (i > 0 ? tourName.slice(0, i) : tourName).trim();
+}
+function sectionOf(tourName: string): string | null {
+  const i = String(tourName).indexOf("|");
+  return i > 0 ? tourName.slice(i + 1).replace(/\s*\|\s*/g, " · ").trim() : null;
+}
+function groupRounds(rounds: LiveRound[]): { event: string; rounds: LiveRound[] }[] {
+  const by = new Map<string, LiveRound[]>();
+  for (const r of rounds) {
+    const k = eventOf(r.tourName);
+    if (!by.has(k)) by.set(k, []);
+    by.get(k)!.push(r);
+  }
+  return [...by.entries()].map(([event, rs]) => ({ event, rounds: rs }));
+}
 
 /** "in 6m" / "in 3h" / "tomorrow 14:30" — a multi-day event can be a day and a
  *  half from its next round, and "2310m" is not an answer anyone wants. */
@@ -87,8 +111,8 @@ function LiveIndex() {
       {!!rounds.length && (
         <div className="mb-3 text-xs text-ink-500">
           Following {rounds.length} round{rounds.length === 1 ? "" : "s"} in play
-          {q.data.cycleSec ? <> · every board refreshed about every {q.data.cycleSec}s</> : null}
-          {q.data.throttled && <span className="ml-1 text-amber-300">· rate limited, catching up</span>}
+          {q.data?.cycleSec ? <> · every board refreshed about every {q.data.cycleSec}s</> : null}
+          {q.data?.throttled && <span className="ml-1 text-amber-300">· rate limited, catching up</span>}
         </div>
       )}
 
@@ -108,7 +132,9 @@ function LiveIndex() {
         </div>
       ) : (
         <div className="space-y-2">
-          {rounds.map((r) => (
+          {groupRounds(rounds).map((grp) => grp.rounds.length > 1
+            ? <EventGroup key={grp.event} event={grp.event} rounds={grp.rounds} />
+            : grp.rounds.map((r) => (
             <Link key={r.roundId} to={`/live/${r.roundId}`}
               className="flex items-center gap-3 rounded-xl border border-ink-800 bg-ink-900/60 px-4 py-3 hover:border-brand-500/50 hover:bg-ink-900">
               <span className={`h-2 w-2 shrink-0 rounded-full ${
@@ -132,7 +158,7 @@ function LiveIndex() {
               </div>
               <span className="shrink-0 text-xs text-ink-500">Watch →</span>
             </Link>
-          ))}
+          )))}
         </div>
       )}
 
@@ -141,30 +167,95 @@ function LiveIndex() {
   );
 }
 
+/** One row for a multi-section event, opening to its sections — the Olympiad
+ *  is Open and Women across nine board ranges, and nine separate rows for one
+ *  tournament is not what anyone means by "the Olympiad". */
+function EventGroup({ event, rounds }: { event: string; rounds: LiveRound[] }) {
+  const [open, setOpen] = useState(false);
+  const boards = rounds.reduce((n, r) => n + (r.boards ?? 0), 0);
+  const anyLive = rounds.some((r) => r.state === "live");
+  return (
+    <div className="overflow-hidden rounded-xl border border-ink-800 bg-ink-900/60">
+      <button onClick={() => setOpen(!open)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-ink-900">
+        <span className={`h-2 w-2 shrink-0 rounded-full ${anyLive ? "animate-pulse bg-rose-500" : "bg-amber-400"}`} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-semibold text-white">{event}</div>
+          <div className="text-xs text-ink-400">
+            {rounds.length} sections · {boards} board{boards === 1 ? "" : "s"}
+          </div>
+        </div>
+        <span className="shrink-0 text-xs text-ink-500">{open ? "Hide" : "Sections"} {open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div className="border-t border-ink-800 bg-ink-950/40">
+          {rounds.map((r) => (
+            <Link key={r.roundId} to={`/live/${r.roundId}`}
+              className="flex items-center gap-3 border-b border-ink-800/60 px-4 py-2 last:border-0 hover:bg-ink-900">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm text-ink-100">{sectionOf(r.tourName) ?? r.roundName}</div>
+                <div className="text-[11px] text-ink-500">
+                  {r.roundName}
+                  {r.boards > 0 && <> · {r.boards} boards</>}
+                  {r.state === "playing" && <span className="ml-1 text-amber-300">· in play</span>}
+                </div>
+              </div>
+              <span className="shrink-0 text-[11px] text-ink-500">Watch →</span>
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Scheduled rounds, up to two days out. Collapsed, because a big event can
  *  put a dozen sections here at once and none of them is playing yet. */
 function UpcomingRounds({ rounds }: { rounds: LiveRound[] }) {
   const [open, setOpen] = useState(false);
-  const shown = open ? rounds : rounds.slice(0, 4);
+  // Grouped here too — this is where a big event actually lands. The Olympiad
+  // was nine separate "Coming up" rows for one tournament, which is what
+  // prompted the grouping in the first place.
+  const groups = useMemo(() => groupRounds(rounds), [rounds]);
+  // Show almost everything by default. Collapsing at five hid the FIDE
+  // Olympiad behind a toggle purely because nine local qualifiers happened to
+  // start a few hours sooner, and a list of ten is not long enough to be worth
+  // hiding. Bigger events (more sections) break ties first, so a major
+  // tournament is never the one that falls off the end.
+  const ranked = useMemo(
+    () => [...groups].sort((a, b) => {
+      const ta = a.rounds[0]?.startsAt ?? 0, tb = b.rounds[0]?.startsAt ?? 0;
+      const sameDay = Math.abs(ta - tb) < 12 * 3600_000;
+      if (sameDay && a.rounds.length !== b.rounds.length) return b.rounds.length - a.rounds.length;
+      return ta - tb;
+    }),
+    [groups],
+  );
+  const shown = open ? ranked : ranked.slice(0, 10);
   return (
     <div className="mt-6">
       <div className="mb-2 flex items-baseline justify-between">
         <h2 className="text-[11px] font-semibold uppercase tracking-widest text-ink-500">Coming up</h2>
-        {rounds.length > 4 && (
+        {groups.length > 10 && (
           <button onClick={() => setOpen(!open)} className="text-[11px] font-semibold text-brand-300 hover:text-brand-100">
-            {open ? "Show fewer" : `Show all ${rounds.length}`}
+            {open ? "Show fewer" : `Show all ${groups.length}`}
           </button>
         )}
       </div>
       <div className="space-y-1">
-        {shown.map((r) => (
-          <div key={r.roundId} className="flex items-center gap-3 rounded-lg border border-ink-800/70 bg-ink-900/40 px-3 py-2">
+        {shown.map((grp) => (
+          <div key={grp.event} className="flex items-center gap-3 rounded-lg border border-ink-800/70 bg-ink-900/40 px-3 py-2">
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ink-600" />
             <div className="min-w-0 flex-1">
-              <div className="truncate text-sm text-ink-200">{r.tourName}</div>
-              <div className="text-[11px] text-ink-500">{r.roundName}</div>
+              <div className="truncate text-sm text-ink-200">{grp.event}</div>
+              <div className="text-[11px] text-ink-500">
+                {grp.rounds.length > 1
+                  ? `${grp.rounds.length} sections · ${grp.rounds[0]!.roundName}`
+                  : grp.rounds[0]!.roundName}
+              </div>
             </div>
-            {r.startsAt && <span className="shrink-0 text-[11px] text-ink-400">{formatIn(r.startsAt)}</span>}
+            {grp.rounds[0]!.startsAt && (
+              <span className="shrink-0 text-[11px] text-ink-400">{formatIn(grp.rounds[0]!.startsAt!)}</span>
+            )}
           </div>
         ))}
       </div>
@@ -231,6 +322,11 @@ function RoundBoards({ roundId }: { roundId: string }) {
 
       {focused && <FocusedGame g={focused} onClose={() => setFocus(null)} />}
 
+      {/* A team event is scored by MATCH, not by board: the Olympiad pairs two
+        *  countries across four boards and the match score is what anyone
+        *  actually wants to know. Only rendered when the feed states teams. */}
+      <TeamScores games={list} />
+
       {list.length === 0 ? (
         <div className="rounded-xl border border-ink-800 bg-ink-900/60 p-8 text-center text-sm text-ink-400">
           Waiting for the first boards…
@@ -255,8 +351,8 @@ function RoundBoards({ roundId }: { roundId: string }) {
                 *  real thing, without coordinates at this size. */}
               <Board fen={g.fen} orientation="white" viewOnly coordinates={false} />
               <div className="mt-2 space-y-0.5">
-                <PlayerLine name={g.whiteName} elo={g.whiteElo} clock={g.whiteClock} title={g.whiteTitle} small running={!g.finished && g.turn === "w"} asOf={g.clockAsOf} />
-                <PlayerLine name={g.blackName} elo={g.blackElo} clock={g.blackClock} title={g.blackTitle} small running={!g.finished && g.turn === "b"} asOf={g.clockAsOf} />
+                <PlayerLine name={g.whiteName} elo={g.whiteElo} clock={g.whiteClock} title={g.whiteTitle} team={g.whiteTeam} small running={!g.finished && g.turn === "w"} asOf={g.clockAsOf} />
+                <PlayerLine name={g.blackName} elo={g.blackElo} clock={g.blackClock} title={g.blackTitle} team={g.blackTeam} small running={!g.finished && g.turn === "b"} asOf={g.clockAsOf} />
               </div>
               {g.lastMove && !g.finished && (
                 <div className="mt-1 font-mono text-[11px] text-brand-300">last: {g.lastMove}</div>
@@ -324,8 +420,8 @@ function FocusedGame({ g, onClose }: { g: LiveGame; onClose: () => void }) {
             {g.openingName && <span className="ml-1 normal-case tracking-normal text-ink-400">{g.openingName}</span>}
             {g.timeControl && <span className="ml-1.5 normal-case tracking-normal text-ink-600">· {g.timeControl}</span>}
           </div>
-          <PlayerLine name={g.whiteName} elo={g.whiteElo} clock={g.whiteClock} title={g.whiteTitle} running={!g.finished && g.turn === "w"} asOf={g.clockAsOf} />
-          <PlayerLine name={g.blackName} elo={g.blackElo} clock={g.blackClock} title={g.blackTitle} running={!g.finished && g.turn === "b"} asOf={g.clockAsOf} />
+          <PlayerLine name={g.whiteName} elo={g.whiteElo} clock={g.whiteClock} title={g.whiteTitle} team={g.whiteTeam} running={!g.finished && g.turn === "w"} asOf={g.clockAsOf} />
+          <PlayerLine name={g.blackName} elo={g.blackElo} clock={g.blackClock} title={g.blackTitle} team={g.blackTeam} running={!g.finished && g.turn === "b"} asOf={g.clockAsOf} />
         </div>
         <button onClick={onClose} className="shrink-0 text-xs text-ink-400 hover:text-white">Close</button>
       </div>
@@ -385,10 +481,66 @@ function useTick(active: boolean): number {
   return Date.now();
 }
 
-function PlayerLine({ name, elo, clock, title, small, running, asOf }: {
+/** Match scores, aggregated from the boards. A win is 1, a draw a half, and a
+ *  game still in progress counts for neither side — so the score shown is what
+ *  has actually been decided, with the number of unfinished boards stated
+ *  rather than silently rounded away. */
+function TeamScores({ games }: { games: LiveGame[] }) {
+  const matches = useMemo(() => {
+    const by = new Map<string, { a: string; b: string; aPts: number; bPts: number; open: number; boards: number }>();
+    for (const g of games) {
+      const wt = g.whiteTeam, bt = g.blackTeam;
+      if (!wt || !bt) continue;
+      // Teams alternate colours down the boards, so the pair is keyed in a
+      // stable order and each board's points are credited to whichever side
+      // of that pair actually played them.
+      const a = wt < bt ? wt : bt;
+      const b = wt < bt ? bt : wt;
+      const k = `${a}|${b}`;
+      if (!by.has(k)) by.set(k, { a, b, aPts: 0, bPts: 0, open: 0, boards: 0 });
+      const m = by.get(k)!;
+      m.boards++;
+      if (g.result === "1-0") { if (wt === a) m.aPts += 1; else m.bPts += 1; }
+      else if (g.result === "0-1") { if (bt === a) m.aPts += 1; else m.bPts += 1; }
+      else if (g.result === "1/2-1/2") { m.aPts += 0.5; m.bPts += 0.5; }
+      else m.open++;
+    }
+    return [...by.values()].sort((x, y) => y.boards - x.boards);
+  }, [games]);
+
+  if (!matches.length) return null;
+  const fmt = (n: number) => (n % 1 ? `${Math.floor(n)}½` : String(n));
+
+  return (
+    <div className="mb-5 rounded-xl border border-ink-800 bg-ink-900/60 p-3">
+      <div className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-ink-500">Match scores</div>
+      <div className="grid gap-1 sm:grid-cols-2">
+        {matches.map((m) => (
+          <div key={`${m.a}|${m.b}`} className="flex items-center gap-2 rounded-lg bg-ink-950/40 px-2.5 py-1.5 text-sm">
+            <span className="min-w-0 flex-1 truncate">
+              {teamFlag(m.a) && <span className="mr-1">{teamFlag(m.a)}</span>}
+              <span className="text-ink-100">{m.a}</span>
+            </span>
+            <span className="shrink-0 font-mono tabular-nums text-ink-100">{fmt(m.aPts)}–{fmt(m.bPts)}</span>
+            <span className="min-w-0 flex-1 truncate text-right">
+              <span className="text-ink-100">{m.b}</span>
+              {teamFlag(m.b) && <span className="ml-1">{teamFlag(m.b)}</span>}
+            </span>
+            {m.open > 0 && <span className="shrink-0 text-[10px] text-amber-300">{m.open} playing</span>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PlayerLine({ name, elo, clock, title, small, running, asOf, team }: {
   name: string; elo?: number | null; clock?: string | null; title?: string | null; small?: boolean;
-  running?: boolean; asOf?: string | null;
+  running?: boolean; asOf?: string | null; team?: string | null;
 }) {
+  // Only a TEAM event states a nationality, so the flag appears there and is
+  // simply absent elsewhere rather than guessed.
+  const flag = teamFlag(team);
   // The published clock is the player's time AT THEIR LAST MOVE. For the side
   // to move, the time since we read it has been ticking off their clock, so
   // counting down from it is the true figure — not an animation for show.
@@ -401,6 +553,7 @@ function PlayerLine({ name, elo, clock, title, small, running, asOf }: {
   return (
     <div className={`flex items-baseline gap-1.5 ${small ? "text-xs" : "text-sm"}`}>
       {/* GM / IM / FM, as the broadcast states it. */}
+      {flag ? <span className="shrink-0" title={team ?? undefined}>{flag}</span> : null}
       {title ? <span className="shrink-0 rounded bg-amber-500/20 px-1 text-[10px] font-bold text-amber-200">{title}</span> : null}
       <span className="min-w-0 flex-1 truncate font-medium text-ink-100">{name}</span>
       {elo ? <span className="shrink-0 tabular-nums text-ink-500">{elo}</span> : null}

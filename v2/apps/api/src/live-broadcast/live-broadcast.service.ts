@@ -249,6 +249,12 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
               // are in the headers; there is no country tag, but the FIDE id
               // identifies the player if we ever want to resolve one.
               whiteTitle: h.WhiteTitle ?? null, blackTitle: h.BlackTitle ?? null,
+              // Team events DO carry the country: an Olympiad board reads
+              // WhiteTeam "Timor-Leste" / BlackTeam "Cambodia". This is the
+              // only place a nationality appears in the format — individual
+              // tournaments have no such tag — so it is what a flag can be
+              // drawn from, and what team results are aggregated by.
+              whiteTeam: h.WhiteTeam ?? null, blackTeam: h.BlackTeam ?? null,
               whiteFideId: h.WhiteFideId ?? null, blackFideId: h.BlackFideId ?? null,
               timeControl: h.TimeControl ?? null,
               // The feed states these; no need to derive what we are told.
