@@ -62,6 +62,22 @@ export class ClassLiveController {
       { $set: { at: new Date(), academyId, coachUserId: me, joinPath } },
       { upsert: true },
     );
+    // Going live again CLEARS any previous end stamp on this same room.
+    //
+    // endedAt was only ever set, never unset. A coach who ended a class and then
+    // restarted THE SAME room got a fresh live announcement while the schedule row
+    // still said ended — and the join check reads endedAt, letting the coach in
+    // (coaches are exempt) but bouncing every student to the dashboard with "This
+    // class has finished" while the coach sat in a live room wondering where they
+    // were. Reported 2026-09-21: room cmub105ldysbq was announced live at 09:52
+    // with both people present and an endedAt of 09:38 still on it.
+    //
+    // Restarting a room is an unambiguous statement that it is NOT over, so the
+    // stamp has to go with it.
+    await this.conn.db!.collection("classSchedules")
+      .updateOne({ _id: id as any, endedAt: { $exists: true } },
+                 { $unset: { endedAt: "", endedBy: "", endedByUserId: "" } })
+      .catch(() => { /* best effort — never block going live */ });
     // The class must EXIST from the moment it starts. Until now a classSchedules row
     // was only created when the coach confirmed the audience picker (the upsert in
     // PATCH /audience). Dismiss that picker and the room ran with no class record at
