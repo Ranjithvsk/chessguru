@@ -195,6 +195,33 @@ function EventGroup({ event, rounds }: { event: string; rounds: LiveRound[] }) {
   );
 }
 
+/** An event that is not playing yet, still openable: its sections, and through
+ *  them every round it has already played. */
+function UpcomingGroup({ event, rounds }: { event: string; rounds: LiveRound[] }) {
+  const [open, setOpen] = useState(false);
+  const first = rounds[0]!;
+  return (
+    <div className="overflow-hidden rounded-lg border border-ink-800/70 bg-ink-900/40">
+      <button onClick={() => setOpen(!open)} className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-ink-900/70">
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ink-600" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm text-ink-200">{event}</div>
+          <div className="text-[11px] text-ink-500">
+            {rounds.length > 1 ? `${rounds.length} sections · ${first.roundName}` : first.roundName}
+          </div>
+        </div>
+        {first.startsAt && <span className="shrink-0 text-[11px] text-ink-400">{formatIn(first.startsAt)}</span>}
+        <span className="shrink-0 text-[11px] text-ink-500">{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div className="border-t border-ink-800/70 bg-ink-950/40">
+          {rounds.map((r) => <SectionRow key={r.roundId} r={r} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** One section of an event — "Open · Matches 1-12" — expanding to every round
  *  it has played as well as the one in progress. Without this a tournament has
  *  no past: you could watch round 7 and never read round 6.
@@ -282,22 +309,11 @@ function UpcomingRounds({ rounds }: { rounds: LiveRound[] }) {
         )}
       </div>
       <div className="space-y-1">
-        {shown.map((grp) => (
-          <div key={grp.event} className="flex items-center gap-3 rounded-lg border border-ink-800/70 bg-ink-900/40 px-3 py-2">
-            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ink-600" />
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm text-ink-200">{grp.event}</div>
-              <div className="text-[11px] text-ink-500">
-                {grp.rounds.length > 1
-                  ? `${grp.rounds.length} sections · ${grp.rounds[0]!.roundName}`
-                  : grp.rounds[0]!.roundName}
-              </div>
-            </div>
-            {grp.rounds[0]!.startsAt && (
-              <span className="shrink-0 text-[11px] text-ink-400">{formatIn(grp.rounds[0]!.startsAt!)}</span>
-            )}
-          </div>
-        ))}
+        {/* These open too. They were static divs, so the Olympiad — which sits
+          *  here whenever it is between rounds — could be seen and not
+          *  clicked, and its finished rounds were unreachable exactly when
+          *  someone went looking for them. */}
+        {shown.map((grp) => <UpcomingGroup key={grp.event} event={grp.event} rounds={grp.rounds} />)}
       </div>
     </div>
   );
