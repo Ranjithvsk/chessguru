@@ -352,7 +352,7 @@ export function ClassNotationPanel({ room, role }: { room: string; role: "coach"
     // "board size keeps shrinking until in-scroll comes for moves" — cap
     // total panel height to a fixed ~5rem on phones, ~14rem on desktop.
     // Overflow inside the scroll region takes over immediately.
-    <div className="flex h-full shrink-0 flex-col overflow-hidden bg-ink-950/60 max-h-24 md:max-h-60 lg:max-h-none">
+    <div className="flex h-full shrink-0 flex-col overflow-hidden bg-ink-950/60 max-h-[13.5rem] md:max-h-72 lg:max-h-none">
       {/* Header row 1 — Moves label + Start/Live pills + repertoire actions. */}
       <div className="flex shrink-0 items-center gap-2 border-b border-ink-800/70 px-3 py-1 text-[10px] uppercase tracking-widest text-ink-500">
         <span>Moves</span>
@@ -419,7 +419,15 @@ export function ClassNotationPanel({ room, role }: { room: string; role: "coach"
       )}
       {/* Scrollable notation grid — flex-1 so it takes whatever height is
        *  left after the header, and scrolls INSIDE the fixed outer cap. */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1.5">
+      {/* min-h = SIX full moves. A row is text-sm + py-0.5 = 24px, so 6 rows
+        *  is 9rem; the old cap was 24 (96px) on the whole panel, and once the
+        *  header had taken its ~26px that left room for a single move with
+        *  everything else behind a scroll (owner, 2026-09-21: "in panel show
+        *  6 moves atleast, now only 1 is shown others are in scroll").
+        *  The cap existed so the panel could never push the board smaller —
+        *  below lg the panel now sits in the footer beside the controls and
+        *  the board slot is a fixed aspect-square, so it cannot. */}
+      <div className="min-h-[9rem] flex-1 overflow-y-auto px-2 py-1.5 lg:min-h-0">
         {mainRows.map((row, i) => {
           const wActive = row.white ? isActive(row.white.node.path) : false;
           const bActive = row.black ? isActive(row.black.node.path) : false;
