@@ -16,7 +16,7 @@ import { get } from "../lib/api";
 import Board from "../components/Board";
 import MoveTable from "../components/MoveTable";
 
-type LiveRound = { roundId: string; tourName: string; roundName: string; url?: string; boards: number; updatedAt: string; following?: boolean };
+type LiveRound = { roundId: string; tourName: string; roundName: string; url?: string; boards: number; updatedAt: string; following?: boolean; state?: "live" | "playing" | "soon" | "finished"; startsAt?: number | null };
 type LiveGame = {
   board: number;
   whiteName: string; blackName: string;
@@ -25,6 +25,7 @@ type LiveGame = {
   whiteTitle?: string | null; blackTitle?: string | null;
   whiteFideId?: string | null; blackFideId?: string | null;
   timeControl?: string | null; eco?: string | null; openingName?: string | null;
+  turn?: "w" | "b" | null; clockAsOf?: string | null;
   result: string; ply: number; fen: string; lastMove?: string | null;
   finished: boolean; updatedAt: string; moves: string[];
 };
@@ -83,7 +84,9 @@ function LiveIndex() {
           {rounds.map((r) => (
             <Link key={r.roundId} to={`/live/${r.roundId}`}
               className="flex items-center gap-3 rounded-xl border border-ink-800 bg-ink-900/60 px-4 py-3 hover:border-brand-500/50 hover:bg-ink-900">
-              <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-rose-500" />
+              <span className={`h-2 w-2 shrink-0 rounded-full ${
+                r.state === "live" ? "animate-pulse bg-rose-500"
+                : r.state === "playing" ? "bg-amber-400" : "bg-ink-600"}`} />
               <div className="min-w-0 flex-1">
                 <div className="truncate font-semibold text-white">{r.tourName}</div>
                 <div className="text-xs text-ink-400">
@@ -91,7 +94,13 @@ function LiveIndex() {
                   {r.boards > 0 && <> · {r.boards} board{r.boards === 1 ? "" : "s"}</>}
                   {/* We hold open connections only for rounds people are
                     *  watching. Everything else is listed and loads on open. */}
-                  {r.boards === 0 && <span className="ml-1 text-ink-600">· starting</span>}
+                  {/* Upstream flags `live` only once it is receiving moves, so
+                    *  a round that has begun but sent nothing yet reads as
+                    *  "playing" rather than being hidden. */}
+                  {r.state === "playing" && <span className="ml-1 text-amber-300">· in play</span>}
+                  {r.state === "soon" && r.startsAt && (
+                    <span className="ml-1 text-ink-500">· starts in {Math.max(0, Math.round((r.startsAt - Date.now()) / 60000))}m</span>
+                  )}
                 </div>
               </div>
               <span className="shrink-0 text-xs text-ink-500">Watch →</span>
@@ -142,6 +151,7 @@ function RoundBoards({ roundId }: { roundId: string }) {
   }, [roundId]);
 
   const list = useMemo(() => [...games.values()].sort((a, b) => a.board - b.board), [games]);
+  useTick(list.some((g) => !g.finished));   // one timer for the whole page
   const focused = focus != null ? games.get(focus) ?? null : null;
 
   return (
@@ -185,8 +195,8 @@ function RoundBoards({ roundId }: { roundId: string }) {
                 *  real thing, without coordinates at this size. */}
               <Board fen={g.fen} orientation="white" viewOnly coordinates={false} />
               <div className="mt-2 space-y-0.5">
-                <PlayerLine name={g.whiteName} elo={g.whiteElo} clock={g.whiteClock} title={g.whiteTitle} small />
-                <PlayerLine name={g.blackName} elo={g.blackElo} clock={g.blackClock} title={g.blackTitle} small />
+                <PlayerLine name={g.whiteName} elo={g.whiteElo} clock={g.whiteClock} title={g.whiteTitle} small running={!g.finished && g.turn === "w"} asOf={g.clockAsOf} />
+                <PlayerLine name={g.blackName} elo={g.blackElo} clock={g.blackClock} title={g.blackTitle} small running={!g.finished && g.turn === "b"} asOf={g.clockAsOf} />
               </div>
               {g.lastMove && !g.finished && (
                 <div className="mt-1 font-mono text-[11px] text-brand-300">last: {g.lastMove}</div>
@@ -216,6 +226,7 @@ function FocusedGame({ g, onClose }: { g: LiveGame; onClose: () => void }) {
   const livePly = g.moves.length;
   const shown = ply === null ? livePly : Math.min(ply, livePly);
   const following = ply === null;
+  useTick(!g.finished);
 
   const { fen, lastMove } = useMemo(() => {
     const c = new Chess();
@@ -253,8 +264,8 @@ function FocusedGame({ g, onClose }: { g: LiveGame; onClose: () => void }) {
             {g.openingName && <span className="ml-1 normal-case tracking-normal text-ink-400">{g.openingName}</span>}
             {g.timeControl && <span className="ml-1.5 normal-case tracking-normal text-ink-600">· {g.timeControl}</span>}
           </div>
-          <PlayerLine name={g.whiteName} elo={g.whiteElo} clock={g.whiteClock} title={g.whiteTitle} />
-          <PlayerLine name={g.blackName} elo={g.blackElo} clock={g.blackClock} title={g.blackTitle} />
+          <PlayerLine name={g.whiteName} elo={g.whiteElo} clock={g.whiteClock} title={g.whiteTitle} running={!g.finished && g.turn === "w"} asOf={g.clockAsOf} />
+          <PlayerLine name={g.blackName} elo={g.blackElo} clock={g.blackClock} title={g.blackTitle} running={!g.finished && g.turn === "b"} asOf={g.clockAsOf} />
         </div>
         <button onClick={onClose} className="shrink-0 text-xs text-ink-400 hover:text-white">Close</button>
       </div>
@@ -285,9 +296,48 @@ function FocusedGame({ g, onClose }: { g: LiveGame; onClose: () => void }) {
   );
 }
 
-function PlayerLine({ name, elo, clock, title, small }: {
+/** Parse "1:02:29" / "12:05" into seconds. */
+function clockSecs(c?: string | null): number | null {
+  if (!c) return null;
+  const p = String(c).split(":").map(Number);
+  if (p.some((n) => !Number.isFinite(n))) return null;
+  if (p.length === 3) return p[0]! * 3600 + p[1]! * 60 + p[2]!;
+  if (p.length === 2) return p[0]! * 60 + p[1]!;
+  return null;
+}
+const fmtClock = (s: number) => {
+  const v = Math.max(0, Math.floor(s));
+  const h = Math.floor(v / 3600), m = Math.floor((v % 3600) / 60), sec = v % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
+    : `${m}:${String(sec).padStart(2, "0")}`;
+};
+
+/** One second of wall clock, shared by every board on the page — a timer per
+ *  clock would be forty timers on a busy round. */
+function useTick(active: boolean): number {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => bump((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return Date.now();
+}
+
+function PlayerLine({ name, elo, clock, title, small, running, asOf }: {
   name: string; elo?: number | null; clock?: string | null; title?: string | null; small?: boolean;
+  running?: boolean; asOf?: string | null;
 }) {
+  // The published clock is the player's time AT THEIR LAST MOVE. For the side
+  // to move, the time since we read it has been ticking off their clock, so
+  // counting down from it is the true figure — not an animation for show.
+  const base = clockSecs(clock);
+  let shown = clock ?? null;
+  if (running && base !== null && asOf) {
+    const elapsed = (Date.now() - new Date(asOf).getTime()) / 1000;
+    if (elapsed >= 0 && elapsed < 6 * 3600) shown = fmtClock(base - elapsed);
+  }
   return (
     <div className={`flex items-baseline gap-1.5 ${small ? "text-xs" : "text-sm"}`}>
       {/* GM / IM / FM, as the broadcast states it. */}
@@ -297,7 +347,10 @@ function PlayerLine({ name, elo, clock, title, small }: {
       {/* The clock comes from the movetext, so it is the player's real
         *  remaining time as of the last move — it does not tick down between
         *  refreshes, and pretending otherwise would be a lie. */}
-      {clock ? <span className="shrink-0 rounded bg-ink-800 px-1 font-mono text-[10px] tabular-nums text-ink-200">{clock}</span> : null}
+      {shown ? (
+        <span className={`shrink-0 rounded px-1 font-mono text-[10px] tabular-nums ${
+          running ? "bg-emerald-500/20 text-emerald-100" : "bg-ink-800 text-ink-300"}`}>{shown}</span>
+      ) : null}
     </div>
   );
 }

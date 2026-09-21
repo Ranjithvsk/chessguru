@@ -19,7 +19,7 @@ export class LiveBroadcastController {
     // dozens at once and a viewer should see all of them; opening one is what
     // starts a stream.
     const rounds = await this.conn.db!.collection("liveBroadcastRounds")
-      .find({ ongoing: true })
+      .find({ $or: [{ ongoing: true }, { state: "soon" }] })
       .sort({ updatedAt: -1 })
       .limit(60)
       .toArray();
@@ -31,6 +31,10 @@ export class LiveBroadcastController {
         tourName: r.tourName, roundName: r.roundName, url: r.url,
         boards: r.boards ?? 0,
         updatedAt: r.updatedAt,
+        // live = upstream is pushing moves; playing = the round has started
+        // but no moves have arrived yet; soon = due within 12h.
+        state: r.state ?? (r.ongoing ? "live" : "finished"),
+        startsAt: r.startsAt ?? null,
         // Every live round is in the rotation now, so they are all followed.
         following: true,
       })),
@@ -70,6 +74,7 @@ export class LiveBroadcastController {
         whiteTitle: g.whiteTitle ?? null, blackTitle: g.blackTitle ?? null,
         whiteFideId: g.whiteFideId ?? null, blackFideId: g.blackFideId ?? null,
         timeControl: g.timeControl ?? null, eco: g.eco ?? null, openingName: g.openingName ?? null,
+        turn: g.turn ?? null, clockAsOf: g.clockAsOf ?? null,
         result: g.result, ply: g.ply, fen: g.fen, lastMove: g.lastMove,
         finished: !!g.finished, updatedAt: g.updatedAt,
         moves: g.moves ?? [],

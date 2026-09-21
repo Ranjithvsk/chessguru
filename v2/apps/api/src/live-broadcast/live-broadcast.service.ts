@@ -96,7 +96,8 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
   /** Which rounds are being played right now. Every one of them, not a subset. */
   private async discover(): Promise<void> {
     if (this.stopping || Date.now() < this.throttledUntil) return;
-    type L = { roundId: string; roundName: string; tourId: string; tourName: string; url: string };
+    type L = { roundId: string; roundName: string; tourId: string; tourName: string; url: string;
+               state: "live" | "playing" | "soon"; startsAt: number | null };
     const live: L[] = [];
     try {
       const text = await this.serialize(() => this.getText(`https://lichess.org/api/broadcast?nb=${TOURS_SCANNED}`));
@@ -106,11 +107,24 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
         try { d = JSON.parse(line); } catch { continue; }
         const tour = d?.tour ?? {};
         for (const rd of Array.isArray(d?.rounds) ? d.rounds : []) {
-          if (!rd?.ongoing) continue;
+          if (rd?.finished) continue;
+          const startsAt = Number(rd?.startsAt) || null;
+          const started = startsAt !== null && startsAt <= Date.now();
+          // `ongoing` is narrower than it sounds: Lichess raises it only once
+          // it is actually receiving moves, so a round that has begun but whose
+          // organiser has not pushed anything yet is NOT flagged. Filtering on
+          // it alone hid tournaments that were genuinely being played —
+          // measured, two rounds that had started 22 minutes earlier were
+          // invisible. A round counts as current if upstream says ongoing OR
+          // its start time has passed.
+          const state: "live" | "playing" | "soon" =
+            rd?.ongoing ? "live" : started ? "playing" : "soon";
+          // Anything more than 12h out is not "current" by any reading.
+          if (state === "soon" && (startsAt === null || startsAt - Date.now() > 12 * 3600_000)) continue;
           live.push({
             roundId: String(rd.id), roundName: String(rd.name ?? "Round"),
             tourId: String(tour.id ?? ""), tourName: String(tour.name ?? "Broadcast"),
-            url: String(rd.url ?? ""),
+            url: String(rd.url ?? ""), state, startsAt,
           });
         }
       }
@@ -123,18 +137,23 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
     for (const l of live) {
       await this.rounds().updateOne(
         { _id: l.roundId as any },
-        { $set: { ...l, ongoing: true, updatedAt: now }, $setOnInsert: { startedAt: now } },
+        { $set: { ...l, ongoing: l.state !== "soon", updatedAt: now }, $setOnInsert: { startedAt: now } },
         { upsert: true },
       ).catch(() => {});
     }
-    const ids = live.map((l) => l.roundId);
+    // Only rounds actually in play are polled. An upcoming round is listed so
+    // the page is never empty between rounds, but fetching it would return an
+    // empty board list and spend budget we owe the live ones.
+    const ids = live.filter((l) => l.state !== "soon").map((l) => l.roundId);
+    const allIds = live.map((l) => l.roundId);
     await this.rounds().updateMany(
-      { ongoing: true, _id: { $nin: ids as any[] } },
-      { $set: { ongoing: false, updatedAt: now } },
+      { ongoing: true, _id: { $nin: allIds as any[] } },
+      { $set: { ongoing: false, state: "finished", updatedAt: now } },
     ).catch(() => {});
 
     if (ids.length !== this.liveRoundIds.length) {
-      this.log.log(`${ids.length} round${ids.length === 1 ? "" : "s"} on air — full refresh every ~${Math.round(ids.length * POLL_MS / 1000)}s`);
+      const soon = live.length - ids.length;
+      this.log.log(`${ids.length} round${ids.length === 1 ? "" : "s"} in play${soon ? `, ${soon} starting soon` : ""} — full refresh every ~${Math.round(ids.length * POLL_MS / 1000)}s`);
     }
     this.liveRoundIds = ids;
   }
@@ -214,6 +233,13 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
               whiteElo: Number(h.WhiteElo) || null, blackElo: Number(h.BlackElo) || null,
               // From the movetext, not a header — see lastClocks().
               whiteClock: clocks.white, blackClock: clocks.black,
+              // Whose move it is, and when we read these clocks. Together they
+              // let a viewer run the side-to-move's clock down between
+              // refreshes instead of showing a frozen number — the published
+              // clock is that player's time at their last move, so the time
+              // since is exactly what has elapsed on it.
+              turn: sans.length % 2 === 0 ? "w" : "b",
+              clockAsOf: now,
               // Everything the feed knows about the players. Title and FIDE id
               // are in the headers; there is no country tag, but the FIDE id
               // identifies the player if we ever want to resolve one.
