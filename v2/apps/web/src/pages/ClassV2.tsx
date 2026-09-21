@@ -706,9 +706,11 @@ function SelfNotationToggle({ hidden, onToggle }: { hidden: boolean; onToggle: (
       className={ctl(hidden ? "on" : "idle")}
     >
       {/* Says what pressing DOES. "My notation" on both states read as a label,
-          not a control, so people pressed it to see notation and lost it. */}
+          not a control, so people pressed it to see notation and lost it.
+          "my" is explicit because this sits right beside "Hide their moves":
+          bare "Hide moves" next to it gave no clue WHOSE list it acts on. */}
       <Ico name={hidden ? "list" : "listOff"} />
-      {hidden ? "Show moves" : "Hide moves"}
+      {hidden ? "Show my moves" : "Hide my moves"}
     </button>
   );
 }
