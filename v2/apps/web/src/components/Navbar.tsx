@@ -115,7 +115,7 @@ const GROUPS: Group[] = [
   {
     label: "Tools", accent: "slate", icon: "🛠️",
     items: [
-      { to: "/database", label: "🗄️ CG Mega Database", desc: "Search 1.09M master games by player, opening, rating or date — and save any of them into your studies" },
+      { to: "/database", label: "🗄️ ChessGuru DB", desc: "Search 1.09M master games by player, opening, rating or date — and save any of them into your studies" },
       { to: "/coach-board/scoresheet", label: "📝 Scan scoresheet", desc: "Photo of a handwritten scoresheet → the game as PGN (coach/owner)" },
       { to: "/board-editor", label: "✏️ Board editor", desc: "Set up any position" },
       { to: "/books/read", label: "📖 Book reader", desc: "Read a book, tap any diagram to play it" },

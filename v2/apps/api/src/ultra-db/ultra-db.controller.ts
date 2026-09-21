@@ -1,4 +1,4 @@
-// ChessGuru Mega Database — a real search surface over the 1.09M-game broadcast library.
+// ChessGuru DB — a real search surface over the 1.09M-game broadcast library.
 // (Named "Ultra Database" when built; the route path kept that spelling.)
 //
 // The existing /api/broadcasts browser can filter by Elo, result, a name/event

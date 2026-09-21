@@ -1,4 +1,4 @@
-// ChessGuru Mega Database — search surface over the 1.09M-game broadcast library.
+// ChessGuru DB — search surface over the 1.09M-game broadcast library.
 // (Named "Ultra Database" when built, renamed 2026-09-21. The route /database and the API
 //  path /api/ultra-db were left alone: changing a live route would break any
 //  link already shared, and the API path is not user-visible.)
@@ -138,7 +138,7 @@ export default function UltraDatabase() {
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6">
       <header className="mb-5">
-        <h1 className="font-display text-2xl font-bold text-white">ChessGuru Mega Database</h1>
+        <h1 className="font-display text-2xl font-bold text-white">ChessGuru DB</h1>
         <p className="mt-1 text-sm text-ink-400">
           Search the master game library by player, opening, strength or date — and take any game into your studies.
         </p>
