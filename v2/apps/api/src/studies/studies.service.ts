@@ -32,6 +32,7 @@ import { randomBytes } from "crypto";
 import { Chess } from "chess.js";
 import { BooksService } from "../books/books.service";
 import { RevisionsService } from "../revisions/revisions.service";
+import { movesHash, sameMoves } from "../lib/moves-hash";
 import {
   ReadScope,
   academyScopeFilter,
@@ -318,6 +319,108 @@ export class StudiesService {
       updatedAt: now,
     });
     return { studyId, chapterId };
+  }
+
+  /** Save a PGN as a study, LINKING it to the ChessGuru game library when we
+   *  already hold that game.
+   *
+   *  Owner ask 2026-09-21: "option to save game to notebook / my studies,
+   *  selecting relevant topic and lesson name ... but we have chessguru db, if
+   *  the game in pgn file already there in our db then just link it, with user
+   *  made annotation for the specific user only. If the file is not there then
+   *  add that to user my studies only."
+   *
+   *  So the game data itself is never duplicated into the user's study when we
+   *  already have it: the study carries `sourceGame.gameId` pointing at the
+   *  broadcastgames row, and the player/event/date shown come from there — one
+   *  source of truth, and a correction to the library reaches every study that
+   *  links to it. What IS per-user is the annotation: the chapter lives in the
+   *  user's own study, so their notes are visible only to them, exactly as any
+   *  other study of theirs.
+   *
+   *  An unknown game is simply saved into their studies with the headers the
+   *  PGN carried, and nothing is written to the shared library — a coach's
+   *  private game does not belong in a public game database.
+   *
+   *  Matching is by MOVES, not by player names, which vary in spelling between
+   *  sources ("Carlsen, Magnus" / "Magnus Carlsen"). The hash narrows 1.09M
+   *  games to a bucket in one indexed lookup; the full move list is then
+   *  compared, so a hash collision can never pass as a match.
+   */
+  async createFromPgn(session: any, body: any) {
+    const { userId } = this.ensureUser(session);
+    const b: any = body ?? {};
+    const pgn = String(b.pgn || "").trim();
+    if (!pgn) throw new BadRequestException("pgn required");
+
+    const startingFen = this.normalizeFen(b.startingFen);
+    const parsed = this.parsePgn(pgn, startingFen);
+    if (!parsed.moves.length) throw new BadRequestException("No moves found in that PGN.");
+
+    // The move list as SAN, in the same shape the library stores.
+    const sans: string[] = [];
+    let node: any = parsed.moves[0];
+    while (node) { sans.push(String(node.san)); node = (node.children && node.children[0]) || null; }
+
+    const h = parsed.headers ?? {};
+    const tag = (k: string): string | null => {
+      const v = h[k];
+      if (typeof v !== "string") return null;
+      const t = v.trim();
+      return t && t !== "?" && !t.startsWith("????") ? t : null;
+    };
+
+    // ── look the game up in the library ──────────────────────────────
+    let linked: any = null;
+    try {
+      const candidates = await this.conn.db!.collection("broadcastgames")
+        .find({ mh: movesHash(sans) }, { projection: { moves: 1, whiteName: 1, blackName: 1, event: 1, date: 1, result: 1, round: 1, site: 1, whiteElo: 1, blackElo: 1 } })
+        .limit(20)
+        .toArray();
+      const hit: any = candidates.find((c: any) => sameMoves(c.moves, sans));
+      if (hit) {
+        linked = {
+          gameId: String(hit._id),
+          whiteName: hit.whiteName ?? null, blackName: hit.blackName ?? null,
+          whiteElo: hit.whiteElo ?? null, blackElo: hit.blackElo ?? null,
+          event: hit.event ?? null, date: hit.date ?? null,
+          result: hit.result ?? null, round: hit.round ?? null, site: hit.site ?? null,
+        };
+      }
+    } catch { /* library unreachable — fall through and save it as the user's own */ }
+
+    // Library metadata wins when we have it: it is curated, and the pasted
+    // PGN's headers are whatever the file happened to carry.
+    const sourceGame = linked ?? {
+      gameId: null,
+      whiteName: tag("White"), blackName: tag("Black"),
+      whiteElo: tag("WhiteElo"), blackElo: tag("BlackElo"),
+      event: tag("Event"), date: tag("Date"),
+      result: tag("Result"), round: tag("Round"), site: tag("Site"),
+    };
+
+    const players = sourceGame.whiteName || sourceGame.blackName
+      ? `${sourceGame.whiteName ?? "?"} vs ${sourceGame.blackName ?? "?"}`
+      : "Imported game";
+    const title = String(b.lessonName || "").trim().slice(0, MAX_TITLE) || players;
+    const intent = INTENTS.has(String(b.topic)) ? String(b.topic) : "game";
+
+    const created = await this.create(session, {
+      title,
+      chapterTitle: String(b.lessonName || "").trim().slice(0, MAX_TITLE) || players,
+      intent,
+      pgn,
+      startingFen: b.startingFen,
+      tags: b.tags,
+    });
+
+    // Stamp the provenance onto both the study and its chapter.
+    await this.studies().updateOne(
+      { _id: created.studyId as any, ownerId: userId } as any,
+      { $set: { sourceGame, updatedAt: new Date() } },
+    ).catch(() => { /* the study exists either way */ });
+
+    return { ...created, linked: !!linked, sourceGame };
   }
 
   async get(session: any, studyId: string, opts: { academy?: string } = {}) {

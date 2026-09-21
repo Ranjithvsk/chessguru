@@ -42,6 +42,13 @@ export class StudiesController {
   @Post()
   create(@Body() body: any, @Req() req: any) { return this.svc.create(req?.session, body); }
 
+  /** Save a pasted/loaded PGN as a study, linked to the game library when we
+   *  already hold that game. See StudiesService.createFromPgn. */
+  @Post("from-pgn")
+  fromPgn(@Req() req: any, @Body() body: any) {
+    return this.svc.createFromPgn(req.session, body);
+  }
+
   @Get(":sid")
   get(@Param("sid") sid: string, @Req() req: any, @Query("academy") academy: string) {
     return this.svc.get(req?.session, sid, { academy: academy || undefined });

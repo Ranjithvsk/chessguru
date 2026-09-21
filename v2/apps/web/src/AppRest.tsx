@@ -146,6 +146,7 @@ import NotebookPage, { NotebookPackDetailPage, NotebookReviseSessionPage } from 
 import RepertoirePage from "./pages/Repertoire";
 import CoachProfileEditPage from "./pages/CoachEdit";
 import AcademyProfileEditPage from "./pages/AcademyProfileEdit";
+import UltraDatabase from "./pages/UltraDatabase";
 
 // Fees — kept lazy inside this already-lazy chunk so recharts (heavy)
 // stays out of the shared code path even for post-auth users who never
@@ -191,6 +192,7 @@ export default function AppRest() {
         <Route path="puzzles" element={<PuzzlesPage />} />
         <Route path="blindfold" element={<BlindfoldPage />} />
         <Route path="history" element={<HistoryPage />} />
+        <Route path="database" element={<UltraDatabase />} />
         <Route path="broadcasts" element={<BroadcastsPage />} />
         <Route path="broadcasts/:id" element={<BroadcastGamePage />} />
         <Route path="dashboard" element={<DashboardPage />} />
