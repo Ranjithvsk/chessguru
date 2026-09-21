@@ -1727,10 +1727,53 @@ export function getLiveAttendees(classId: string): Array<{ userId: string | null
 // any other upgrade attempt is destroyed so we don't accidentally answer for another
 // (future) WebSocket path. Conn is Nest's mongoose Connection — used for attendance
 // writes (fire-and-forget so a Mongo hiccup never disrupts the live class).
+/** Close rooms that were ended by ANOTHER PROCESS.
+ *
+ *  closeClassRoom() can only reach the `rooms` map of the process it runs in.
+ *  "End class" is an HTTP route, so it executes in the API process — but the
+ *  sockets live in the dedicated class-ws process. The call found no room,
+ *  returned {closed:0}, and NO classEnded frame ever reached the students: the
+ *  coach ended the lesson and everyone else sat in a room that looked alive,
+ *  finding out only if they happened to reload. (2026-09-21)
+ *
+ *  The same split caused the abandoned-sweeper to kill live lessons. The lesson
+ *  is that anything crossing the process boundary has to go through shared
+ *  state, not process memory. classSchedules.endedAt is that shared state, and
+ *  this process already holds a Mongo connection for attendance.
+ *
+ *  Cheap by construction: one query every few seconds, scoped to the handful of
+ *  room ids THIS process actually holds. No new port, no token, no HTTP surface
+ *  on a server that is deliberately sockets-only.
+ */
+const ENDED_POLL_MS = 4_000;
+let endedPoll: ReturnType<typeof setInterval> | null = null;
+function startEndedWatcher(): void {
+  if (endedPoll) return;
+  endedPoll = setInterval(() => {
+    void (async () => {
+      try {
+        if (!dbConn?.db || rooms.size === 0) return;
+        const ids = [...rooms.keys()];
+        const ended = await dbConn.db.collection("classSchedules")
+          .find({ _id: { $in: ids as any[] }, endedAt: { $exists: true } }, { projection: { _id: 1, endedBy: 1 } })
+          .toArray();
+        for (const row of ended) {
+          const id = String(row._id);
+          // Reason mirrors whatever ended it, so the client shows the right banner.
+          closeClassRoom(id, String(row.endedBy || "coach_left"));
+          rooms.delete(id);
+        }
+      } catch { /* never let a Mongo hiccup disturb a live class */ }
+    })();
+  }, ENDED_POLL_MS);
+  if (typeof endedPoll.unref === "function") endedPoll.unref();
+}
+
 export function attachClassWs(server: HttpServer, conn?: Connection, push?: PushSvcLike, report?: { report: (ev: any) => void }): void {
   if (conn) dbConn = conn;
   if (push) pushSvc = push;
   if (report) realtimeReporter = report;
+  startEndedWatcher();
   server.on("upgrade", (req, socket, head) => {
     if (parseRoomId(req.url) == null) return; // let another handler (or default) close it
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));

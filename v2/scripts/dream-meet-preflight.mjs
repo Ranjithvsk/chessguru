@@ -11,6 +11,7 @@
 //   T5  the API hands out the LiveKit URL that LiveKit is actually on
 //   T6  the board survives a restart (classBoardState round-trip)
 //   T7  no certificate is within the renewal window
+//   T8  no class is simultaneously live and ended, and none was ended under people
 //
 // Usage:
 //   node scripts/dream-meet-preflight.mjs
@@ -186,6 +187,51 @@ async function main() {
     if (c.daysLeft <= RENEW_DAYS) caution(`${host} cert has ${c.daysLeft}d left`, "renewal is overdue — check certbot");
     else ok(`${host} cert has ${c.daysLeft}d left`, true);
   }
+
+  // ── T8: a class cannot be live AND ended ────────────────────────────────
+  // Both of today's "class ended" incidents were this shape: state that
+  // contradicted itself, while every socket and certificate check passed.
+  //   * a room announced live while still carrying endedAt — students bounced,
+  //     coach let in, each correct about what they saw (2026-09-21)
+  //   * a room ended by the abandoned sweeper while attendance was fresh, because
+  //     the sweeper read the wrong process's memory (2026-09-21)
+  // Neither is visible from the outside, and both end a real lesson.
+  console.log("\nT8  no class is simultaneously live and ended");
+  let mc2;
+  try {
+    mc2 = await MongoClient.connect(MONGO, { serverSelectionTimeoutMS: 6000 });
+    const db = mc2.db();
+    const live = await db.collection("classLiveAnnouncements").find({}, { projection: { _id: 1 } }).toArray();
+    const liveIds = live.map((r) => String(r._id));
+    if (liveIds.length === 0) {
+      console.log("  – no class is live right now, nothing to check");
+    } else {
+      const contradictory = await db.collection("classSchedules")
+        .find({ _id: { $in: liveIds }, endedAt: { $exists: true } }, { projection: { _id: 1, endedBy: 1 } })
+        .toArray();
+      ok("live classes carry no end stamp", contradictory.length === 0,
+         contradictory.map((c) => `${c._id}${c.endedBy ? ` (endedBy=${c.endedBy})` : ""}`).join(", "));
+    }
+    // And the mirror: ended AUTOMATICALLY while people were demonstrably still there.
+    // Only automated endings count. A coach pressing End with students present is
+    // exactly what ending a class looks like — flagging that would make this check
+    // cry wolf every single lesson, and a check that is always red gets ignored.
+    const AUTOMATED = ["abandoned-sweep", "coach_started_new_class"];
+    const since = new Date(Date.now() - 60 * 60 * 1000);
+    const autoEnded = await db.collection("classSchedules")
+      .find({ endedAt: { $gte: since }, endedBy: { $in: AUTOMATED } }, { projection: { _id: 1, endedAt: 1, endedBy: 1 } })
+      .toArray();
+    const killedLive = [];
+    for (const c of autoEnded) {
+      const seen = await db.collection("classAttendance").countDocuments({
+        classId: String(c._id),
+        lastSeenAt: { $gte: new Date(new Date(c.endedAt).getTime() - 60_000) },
+      });
+      if (seen > 0) killedLive.push(`${c._id} (endedBy=${c.endedBy})`);
+    }
+    ok("no class ended automatically while people were still in it", killedLive.length === 0, killedLive.join(", "));
+  } catch (e) { ok("class state readable", false, String(e.message).slice(0, 60)); }
+  finally { try { await mc2?.close(); } catch {} }
 
   console.log(`\n${pass} passed, ${fail} failed, ${warn} warnings`);
   if (fail === 0 && warn === 0) console.log("GO — safe to start a class.");
