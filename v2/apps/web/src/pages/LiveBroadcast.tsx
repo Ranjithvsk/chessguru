@@ -17,7 +17,7 @@ import { teamFlag } from "../lib/country-flag";
 import Board from "../components/Board";
 import MoveTable from "../components/MoveTable";
 
-type LiveRound = { roundId: string; tourName: string; roundName: string; url?: string; boards: number; updatedAt: string; following?: boolean; state?: "live" | "playing" | "soon" | "finished"; startsAt?: number | null };
+type LiveRound = { roundId: string; tourName: string; roundName: string; url?: string; boards: number; updatedAt: string; following?: boolean; state?: "live" | "playing" | "soon" | "finished"; startsAt?: number | null; tourId?: string | null };
 type LiveGame = {
   board: number;
   whiteName: string; blackName: string;
@@ -188,20 +188,60 @@ function EventGroup({ event, rounds }: { event: string; rounds: LiveRound[] }) {
       </button>
       {open && (
         <div className="border-t border-ink-800 bg-ink-950/40">
-          {rounds.map((r) => (
-            <Link key={r.roundId} to={`/live/${r.roundId}`}
-              className="flex items-center gap-3 border-b border-ink-800/60 px-4 py-2 last:border-0 hover:bg-ink-900">
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm text-ink-100">{sectionOf(r.tourName) ?? r.roundName}</div>
-                <div className="text-[11px] text-ink-500">
-                  {r.roundName}
-                  {r.boards > 0 && <> · {r.boards} boards</>}
-                  {r.state === "playing" && <span className="ml-1 text-amber-300">· in play</span>}
-                </div>
-              </div>
-              <span className="shrink-0 text-[11px] text-ink-500">Watch →</span>
+          {rounds.map((r) => <SectionRow key={r.roundId} r={r} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One section of an event — "Open · Matches 1-12" — expanding to every round
+ *  it has played as well as the one in progress. Without this a tournament has
+ *  no past: you could watch round 7 and never read round 6.
+ *  (owner: "i can't see past results and game in a tournament why") */
+function SectionRow({ r }: { r: LiveRound }) {
+  const [open, setOpen] = useState(false);
+  const q = useQuery<{ ok: boolean; rounds: { roundId: string; roundName: string; state: string; boards: number }[] }>({
+    queryKey: ["tour-rounds", r.tourId],
+    queryFn: () => get(`/api/live-broadcast/tour/${r.tourId}`),
+    enabled: open && !!r.tourId,
+    staleTime: 60_000,
+  });
+  const rounds = q.data?.rounds ?? [];
+
+  return (
+    <div className="border-b border-ink-800/60 last:border-0">
+      <div className="flex items-center gap-3 px-4 py-2 hover:bg-ink-900">
+        <Link to={`/live/${r.roundId}`} className="min-w-0 flex-1">
+          <div className="truncate text-sm text-ink-100">{sectionOf(r.tourName) ?? r.roundName}</div>
+          <div className="text-[11px] text-ink-500">
+            {r.roundName}
+            {r.boards > 0 && <> · {r.boards} boards</>}
+            {r.state === "playing" && <span className="ml-1 text-amber-300">· in play</span>}
+          </div>
+        </Link>
+        {r.tourId && (
+          <button onClick={() => setOpen(!open)}
+            className="shrink-0 rounded px-2 py-1 text-[11px] font-semibold text-brand-300 hover:bg-ink-800">
+            {open ? "Hide rounds" : "All rounds"}
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="flex flex-wrap gap-1 px-4 pb-2">
+          {q.isLoading && <span className="text-[11px] text-ink-500">Loading rounds…</span>}
+          {rounds.map((rd) => (
+            <Link key={rd.roundId} to={`/live/${rd.roundId}`}
+              title={`${rd.roundName}${rd.boards ? ` · ${rd.boards} boards` : ""}`}
+              className={`rounded px-2 py-0.5 text-[11px] font-medium ${
+                rd.state === "live" ? "bg-rose-500/20 text-rose-100"
+                : rd.state === "playing" ? "bg-amber-500/20 text-amber-100"
+                : rd.state === "soon" ? "bg-ink-800 text-ink-500"
+                : "bg-ink-800 text-ink-200 hover:bg-ink-700"}`}>
+              {rd.roundName.replace(/^Round\s*/i, "R")}
             </Link>
           ))}
+          {!q.isLoading && !rounds.length && <span className="text-[11px] text-ink-500">No rounds recorded yet.</span>}
         </div>
       )}
     </div>

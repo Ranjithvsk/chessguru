@@ -97,8 +97,9 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
   private async discover(): Promise<void> {
     if (this.stopping || Date.now() < this.throttledUntil) return;
     type L = { roundId: string; roundName: string; tourId: string; tourName: string; url: string;
-               state: "live" | "playing" | "soon"; startsAt: number | null };
+               state: "live" | "playing" | "soon" | "finished"; startsAt: number | null };
     const live: L[] = [];
+    const finishedRounds: L[] = [];
     try {
       const text = await this.serialize(() => this.getText(`https://lichess.org/api/broadcast?nb=${TOURS_SCANNED}`));
       for (const line of text.split("\n")) {
@@ -107,8 +108,19 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
         try { d = JSON.parse(line); } catch { continue; }
         const tour = d?.tour ?? {};
         for (const rd of Array.isArray(d?.rounds) ? d.rounds : []) {
-          if (rd?.finished) continue;
           const startsAt = Number(rd?.startsAt) || null;
+          // FINISHED rounds are recorded too, not skipped. Without them a
+          // tournament has no past: you could watch round 7 and never read
+          // round 6's result. They are stored and listed, but never polled —
+          // a finished round is fetched once, on demand, when someone opens it.
+          if (rd?.finished) {
+            finishedRounds.push({
+              roundId: String(rd.id), roundName: String(rd.name ?? "Round"),
+              tourId: String(tour.id ?? ""), tourName: String(tour.name ?? "Broadcast"),
+              url: String(rd.url ?? ""), state: "finished", startsAt,
+            });
+            continue;
+          }
           const started = startsAt !== null && startsAt <= Date.now();
           // `ongoing` is narrower than it sounds: Lichess raises it only once
           // it is actually receiving moves, so a round that has begun but whose
@@ -139,6 +151,15 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
     }
 
     const now = new Date();
+    // Finished rounds: recorded so a tournament has a readable past, and left
+    // alone thereafter. `boards` is preserved if we have already fetched one.
+    for (const f of finishedRounds) {
+      await this.rounds().updateOne(
+        { _id: f.roundId as any },
+        { $set: { ...f, ongoing: false, updatedAt: now }, $setOnInsert: { startedAt: now, boards: 0 } },
+        { upsert: true },
+      ).catch(() => {});
+    }
     for (const l of live) {
       await this.rounds().updateOne(
         { _id: l.roundId as any },
@@ -150,7 +171,7 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
     // the page is never empty between rounds, but fetching it would return an
     // empty board list and spend budget we owe the live ones.
     const ids = live.filter((l) => l.state !== "soon").map((l) => l.roundId);
-    const allIds = live.map((l) => l.roundId);
+    const allIds = [...live, ...finishedRounds].map((l) => l.roundId);
     await this.rounds().updateMany(
       { ongoing: true, _id: { $nin: allIds as any[] } },
       { $set: { ongoing: false, state: "finished", updatedAt: now } },
@@ -188,9 +209,15 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
   async noteViewed(roundId: string): Promise<void> {
     await this.rounds().updateOne({ _id: roundId as any }, { $set: { lastViewedAt: new Date() } }).catch(() => {});
     const meta: any = await this.rounds().findOne({ _id: roundId as any }).catch(() => null);
-    if (!meta?.ongoing) return;
-    const fresh = meta.updatedAt && Date.now() - new Date(meta.updatedAt).getTime() < POLL_MS * 2;
-    if (fresh || Date.now() < this.throttledUntil) return;    // it was just refreshed
+    if (!meta) return;
+    // A FINISHED round is fetched exactly once — its games never change, so
+    // having any boards at all means we are done with it forever.
+    if (!meta.ongoing) {
+      if ((meta.boards ?? 0) > 0 || Date.now() < this.throttledUntil) return;
+    } else {
+      const fresh = meta.updatedAt && Date.now() - new Date(meta.updatedAt).getTime() < POLL_MS * 2;
+      if (fresh || Date.now() < this.throttledUntil) return;
+    }
     try {
       const pgn = await this.serialize(() => this.getText(`https://lichess.org/api/broadcast/round/${roundId}.pgn`));
       await this.applyPgn(roundId, meta.tourName ?? "Broadcast", meta.roundName ?? "Round", pgn);

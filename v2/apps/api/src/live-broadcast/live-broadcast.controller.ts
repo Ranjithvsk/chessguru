@@ -35,6 +35,7 @@ export class LiveBroadcastController {
         // but no moves have arrived yet; soon = due within 12h.
         state: r.state ?? (r.ongoing ? "live" : "finished"),
         startsAt: r.startsAt ?? null,
+        tourId: r.tourId ?? null,
         // Every live round is in the rotation now, so they are all followed.
         following: true,
       })),
@@ -42,6 +43,29 @@ export class LiveBroadcastController {
       // say how fresh it is instead of implying instant.
       cycleSec: st.cycleSec,
       throttled: st.throttled,
+    };
+  }
+
+  /** Every round of a tournament, past included — so a tournament has a
+   *  readable history rather than only whatever is on air this minute.
+   *  Finished rounds carry their games once somebody opens them. */
+  @Get("tour/:tourId")
+  async tour(@Param("tourId") tourId: string) {
+    const id = String(tourId || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32);
+    if (!id) return { ok: false, rounds: [] };
+    const rounds = await this.conn.db!.collection("liveBroadcastRounds")
+      .find({ tourId: id })
+      .sort({ startsAt: 1 })
+      .limit(60)
+      .toArray();
+    return {
+      ok: true,
+      tourName: (rounds[0] as any)?.tourName ?? null,
+      rounds: rounds.map((r: any) => ({
+        roundId: String(r._id), roundName: r.roundName,
+        state: r.state ?? (r.ongoing ? "live" : "finished"),
+        startsAt: r.startsAt ?? null, boards: r.boards ?? 0,
+      })),
     };
   }
 
