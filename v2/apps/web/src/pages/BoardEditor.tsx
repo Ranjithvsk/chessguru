@@ -3,6 +3,7 @@ import MoveTree from "../components/MoveTree";
 import { EngineAnalysisPanel } from "../components/EngineAnalysisPanel";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Chess } from "chess.js";
+import { readPgn, describePgn, listPgnGames, type PgnGameInfo } from "../lib/read-pgn";
 import Board from "../components/Board";
 import type { Key } from "chessground/types";
 import { useFreePlay } from "../hooks/useFreePlay";
@@ -701,6 +702,74 @@ export default function BoardEditorPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── PGN in ────────────────────────────────────────────────────────────
+  // The editor could only ever be given a POSITION (a FEN, or a photo of one).
+  // A coach who has the game in a .pgn had to open it elsewhere, walk to the
+  // position they wanted and copy the FEN out by hand. Now the game itself
+  // loads: chess.js parses it, the moves become the board's line, and the
+  // existing ← → / Copy FEN controls do the rest, so any position in the game
+  // is two keys away. (owner ask 2026-09-21)
+  //
+  // Accepts a full PGN with headers, or a bare move list. A PGN with several
+  // games loads the FIRST — chess.js stops at the first result token.
+  const [pgnInput, setPgnInput] = useState("");
+  const pgnFileRef = useRef<HTMLInputElement | null>(null);
+  // A downloaded .pgn is usually a COLLECTION. Silently taking the first game
+  // would quietly load the wrong one, so when a file holds several we list them
+  // and let the coach choose. (owner ask 2026-09-21)
+  const [pgnGames, setPgnGames] = useState<PgnGameInfo[] | null>(null);
+
+  /** Entry point for pasted text or a picked file: one game loads straight
+   *  away, several put the chooser up instead. */
+  const offerPgn = (text: string) => {
+    const games = listPgnGames(text);
+    if (games.length > 1) {
+      setPgnGames(games);
+      setMsg(`${games.length} games in that file — pick one.`);
+      setTimeout(() => setMsg(""), 4000);
+      return;
+    }
+    setPgnGames(null);
+    loadPgn(text);
+  };
+
+  const loadPgn = (text: string) => {
+    const r = readPgn(text);
+    if (!r.ok) {
+      setMsg(r.reason === "empty" ? "Paste a PGN first."
+           : r.reason === "no-moves" ? "That PGN has no moves in it."
+           : "Could not read that PGN.");
+      setTimeout(() => setMsg(""), 2500);
+      return;
+    }
+    // A game may start from a custom position; seed the board with it or every
+    // move replays onto the standard start and lands on the wrong squares.
+    if (r.setupFen) fp.load(r.setupFen);
+    else fp.reset();
+    if (!fp.loadSans(r.sans)) {
+      setMsg("PGN read, but the moves did not replay on this board.");
+      setTimeout(() => setMsg(""), 2500);
+      return;
+    }
+    setMsg(describePgn(r) + " Use \u2190 \u2192 to walk it.");
+    setTimeout(() => setMsg(""), 4000);
+  };
+
+  const onPickPgnFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    try {
+      const text = await f.text();
+      setPgnInput(text);
+      offerPgn(text);
+    } catch {
+      setMsg("Could not read that file.");
+      setTimeout(() => setMsg(""), 2500);
+    }
+    // Clear so picking the SAME file again still fires onChange.
+    if (pgnFileRef.current) pgnFileRef.current.value = "";
+  };
+
   const loadFen = () => {
     if (fp.load(fenInput.trim())) setMsg("Loaded.");
     else setMsg("Invalid FEN.");
@@ -948,6 +1017,57 @@ export default function BoardEditorPage() {
             className="w-full resize-none rounded-lg border border-ink-600 bg-ink-800 px-3 py-2 text-sm text-white outline-none focus:border-brand-500" />
           <button onClick={loadFen} className="mt-2 w-full rounded-lg bg-brand-600 px-3 py-2 font-semibold text-white hover:bg-brand-500">Load position</button>
           {msg && <p className="mt-2 text-sm text-accent-400">{msg}</p>}
+
+          {/* PGN in — paste it or pick a .pgn. Loads the GAME, not just a
+            *  position, so the coach can walk to the moment they want. */}
+          <label className="mb-1 mt-4 block text-xs font-semibold uppercase tracking-wide text-ink-400">Load PGN</label>
+          <textarea value={pgnInput} onChange={(e) => setPgnInput(e.target.value)} rows={3}
+            placeholder={"Paste a PGN — with headers or just the moves\n1. e4 e5 2. Nf3 Nc6 ..."}
+            className="w-full resize-none rounded-lg border border-ink-600 bg-ink-800 px-3 py-2 font-mono text-xs text-white outline-none focus:border-brand-500" />
+          <div className="mt-2 flex gap-2">
+            <button onClick={() => offerPgn(pgnInput)}
+              className="flex-1 rounded-lg bg-brand-600 px-3 py-2 font-semibold text-white hover:bg-brand-500">Load game</button>
+            <button onClick={() => pgnFileRef.current?.click()}
+              title="Open a .pgn file from this device"
+              className="rounded-lg border border-ink-600 bg-ink-800 px-3 py-2 text-sm font-semibold text-ink-100 hover:bg-ink-700">📄 .pgn file</button>
+          </div>
+          <input ref={pgnFileRef} type="file" accept=".pgn,application/x-chess-pgn,text/plain"
+            onChange={onPickPgnFile} className="hidden" />
+          <p className="mt-1 text-[11px] text-ink-500">Then walk it with ← → and Copy FEN at any point.</p>
+
+          {/* Game chooser — only when the file actually holds more than one. */}
+          {pgnGames && pgnGames.length > 1 && (
+            <div className="mt-3 rounded-lg border border-brand-500/40 bg-brand-500/5 p-2">
+              <div className="mb-1 flex items-baseline justify-between">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-brand-200">{pgnGames.length} games — pick one</span>
+                <button onClick={() => setPgnGames(null)} className="text-[11px] text-ink-400 hover:text-white">Close</button>
+              </div>
+              <div className="max-h-56 overflow-y-auto">
+                {pgnGames.map((g) => {
+                  const players = g.white || g.black ? `${g.white ?? "?"} vs ${g.black ?? "?"}` : "(no player names)";
+                  const bits = [g.event, g.date].filter(Boolean).join(" · ");
+                  return (
+                    <button
+                      key={g.index}
+                      disabled={g.moves === 0}
+                      onClick={() => { setPgnGames(null); loadPgn(g.text); }}
+                      title={g.moves === 0 ? "This game could not be read" : `Load ${players}`}
+                      className="mb-1 block w-full rounded border border-ink-700 bg-ink-900 px-2 py-1.5 text-left hover:border-brand-500/60 hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="truncate text-xs font-semibold text-ink-100">{g.index + 1}. {players}</span>
+                        <span className="shrink-0 font-mono text-[10px] text-ink-400">{g.result ?? ""}</span>
+                      </div>
+                      <div className="truncate text-[10px] text-ink-500">
+                        {g.moves === 0 ? "could not be read" : `${g.moves} moves`}{bits ? " · " + bits : ""}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="mt-3 break-all rounded-lg bg-ink-950 p-2 font-mono text-xs text-ink-400">{fp.fen}</div>
         </div>
 
