@@ -1,4 +1,7 @@
-// Ultra Database — search surface over the 1.09M-game broadcast library.
+// ChessGuru Database — search surface over the 1.09M-game broadcast library.
+// (Renamed from "Ultra Database" 2026-09-21. The route /database and the API
+//  path /api/ultra-db were left alone: changing a live route would break any
+//  link already shared, and the API path is not user-visible.)
 // Route: /database
 //
 // The existing /broadcasts browser filters by Elo, result, a name regex and a
@@ -135,7 +138,7 @@ export default function UltraDatabase() {
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6">
       <header className="mb-5">
-        <h1 className="font-display text-2xl font-bold text-white">Ultra Database</h1>
+        <h1 className="font-display text-2xl font-bold text-white">ChessGuru Database</h1>
         <p className="mt-1 text-sm text-ink-400">
           Search the master game library by player, opening, strength or date — and take any game into your studies.
         </p>
