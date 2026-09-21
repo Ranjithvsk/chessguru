@@ -2068,86 +2068,110 @@ export default function ClassV2Page() {
              *    2. one horizontally-scrollable row — controls present but off-screen
              *       to the right, which mid-class is the same as gone. */}
             <div className="shrink-0 border-t border-ink-800 bg-ink-900/70 px-4 py-2">
-              <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3">
-                <div className="rounded-xl border border-ink-800 bg-ink-900 shadow">
-                  <ControlBar variation="minimal" controls={{ microphone: true, camera: true, screenShare: true, chat: false, leave: false }} />
+              {/* Grouped by WHAT EACH CONTROL ACTS ON: the call, the board, the class.
+               *  Eighteen identical pills in one undifferentiated row meant a coach had
+               *  to read every label to find one, mid-lesson.
+               *
+               *  The clusters are `display: contents` + hairline separators, NOT three
+               *  bordered boxes. A box is an atomic flex item, so each cluster forced its
+               *  own row: measured at 1280x800 that was 159px of footer against 97px flat
+               *  — and from lg up the shell is fixed-height with the board on flex-1, so
+               *  those 62px come straight out of the board. `contents` lets the children
+               *  wrap in the parent's flow, so the grouping reads without costing a row.
+               *
+               *  No cluster labels either: they would cost vertical space on a phone,
+               *  which is the thing we keep fighting for. */}
+              <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-2">
+                {/* ── the call: you, your devices, and talking to the room ── */}
+                <div className="contents">
+                  <div className="rounded-lg border border-ink-800 bg-ink-900 shadow">
+                    <ControlBar variation="minimal" controls={{ microphone: true, camera: true, screenShare: true, chat: false, leave: false }} />
+                  </div>
+                  {/* Quality lives with the other media controls rather than the header.
+                    * It was briefly in the header and pushed "End class" off the edge on a
+                    * phone, so the coach could not end a class at all. Hiding it on mobile
+                    * would have solved that by taking the control away from exactly the
+                    * people most likely to need it — someone on a phone on mobile data.
+                    * This row wraps, so nothing gets squeezed out. (owner, 2026-09-19) */}
+                  <VideoQualityPicker />
+                  <button
+                    onClick={() => setHideVideo(v => !v)}
+                    title={hideVideo ? "Show video tiles" : "Hide video tiles (audio-only view)"}
+                    className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition-colors ${hideVideo ? "border-amber-500/60 bg-amber-500/20 text-amber-100 hover:bg-amber-500/30" : "border-ink-700 bg-ink-900 text-ink-100 hover:bg-ink-800"}`}
+                  >
+                    {hideVideo ? "👁️‍🗨️ Show video" : "🙈 Hide video"}
+                  </button>
+                  <HandRaiseButton />
+                  <ChatToggleButton />
+                  {/* 📩 Private DM to the coach — student-only. Opens a small
+                   *  dialog to send one message; coach receives the standard
+                   *  chat push notification + can reply from /messages. Owner
+                   *  ask 2026-09-03: 'need option for students to private
+                   *  message coach during dream meet'. */}
+                  {role === "student" && <MessageCoachButton room={room} />}
                 </div>
-                {/* Quality lives with the other media controls rather than the header.
-                  * It was briefly in the header and pushed "End class" off the edge on a
-                  * phone, so the coach could not end a class at all. Hiding it on mobile
-                  * would have solved that by taking the control away from exactly the
-                  * people most likely to need it — someone on a phone on mobile data.
-                  * This row wraps, so nothing gets squeezed out. (owner, 2026-09-19) */}
-                <VideoQualityPicker />
-                <button
-                  onClick={() => setHideVideo(v => !v)}
-                  title={hideVideo ? "Show video tiles" : "Hide video tiles (audio-only view)"}
-                  className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition-colors ${hideVideo ? "border-amber-500/60 bg-amber-500/20 text-amber-100 hover:bg-amber-500/30" : "border-ink-700 bg-ink-900 text-ink-100 hover:bg-ink-800"}`}
-                >
-                  {hideVideo ? "👁️‍🗨️ Show video" : "🙈 Hide video"}
-                </button>
-                <HandRaiseButton />
-                <ChatToggleButton />
-                <CoachBoardNav readOnly={role !== "coach"} />
-                {/* 📩 Private DM to the coach — student-only. Opens a small
-                 *  dialog to send one message; coach receives the standard
-                 *  chat push notification + can reply from /messages. Owner
-                 *  ask 2026-09-03: 'need option for students to private
-                 *  message coach during dream meet'. */}
-                {role === "student" && <MessageCoachButton room={room} />}
-                {role === "coach" && <CoachFlipToggle />}
-                {role === "coach" && <CoachLockToggle />}
-                {/* Two SEPARATE notation toggles: the first hides it on the
-                 *  students screens (broadcast), the second only on mine (local). */}
-                {role === "coach" && <CoachStudentNotationToggle />}
-                <SelfNotationToggle hidden={selfNotationHidden} onToggle={() => setSelfNotationHidden(!selfNotationHidden)} />
+
+                <div aria-hidden="true" className="h-7 w-px self-center bg-ink-700" />
+                {/* ── the board: what everyone is looking at ──────────────── */}
+                <div className="contents">
+                  <CoachBoardNav readOnly={role !== "coach"} />
+                  {role === "coach" && <CoachFlipToggle />}
+                  {role === "coach" && <CoachLockToggle />}
+                  {/* Two SEPARATE notation toggles: the first hides it on the
+                   *  students screens (broadcast), the second only on mine (local). */}
+                  {role === "coach" && <CoachStudentNotationToggle />}
+                  <SelfNotationToggle hidden={selfNotationHidden} onToggle={() => setSelfNotationHidden(!selfNotationHidden)} />
+                  {role === "coach" && (
+                    <button
+                      onClick={() => setClassSetupOpen(true)}
+                      title="Set up any chess position (paste FEN, empty board, or Board Editor)"
+                      className="rounded-full border border-brand-500/50 bg-brand-500/20 px-3 py-1.5 text-sm font-semibold text-brand-100 hover:bg-brand-500/30"
+                    >
+                      📋 Setup
+                    </button>
+                  )}
+                  {role === "coach" && (
+                    <button
+                      onClick={() => setTeachOpen(true)}
+                      title="Load an opening from your Repertoire / the corpus / master games at this position"
+                      className="rounded-full border border-sky-500/50 bg-sky-500/20 px-3 py-1.5 text-sm font-semibold text-sky-100 hover:bg-sky-500/30"
+                    >
+                      📖 Teach opening
+                    </button>
+                  )}
+                  {role === "coach" && (
+                    <button
+                      onClick={() => { if (confirm("Reset board to the starting position for everyone?")) triggerClassBoardAction("reset"); }}
+                      title="Reset board to the starting position (destructive — clears the move list for everyone)"
+                      className="rounded-full border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm font-semibold text-ink-100 hover:bg-ink-800"
+                    >
+                      ↺ Reset
+                    </button>
+                  )}
+                </div>
+
+                {role === "coach" && <div aria-hidden="true" className="h-7 w-px self-center bg-ink-700" />}
+                {/* ── the class: the students, and what you ask of them ───── */}
+                {/* Coach-only as a WHOLE — every control inside is coach-only, so
+                 *  without this guard a student saw an empty bordered pill. */}
                 {role === "coach" && (
-                  <button
-                    onClick={() => setAudiencePickerOpen(true)}
-                    title="Change which students can join this class + who gets notified"
-                    className="rounded-full border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm font-semibold text-ink-100 hover:bg-ink-800"
-                  >
-                    🎯 Students
-                  </button>
-                )}
-                {role === "coach" && (
-                  <button
-                    onClick={() => setClassSetupOpen(true)}
-                    title="Set up any chess position (paste FEN, empty board, or Board Editor)"
-                    className="rounded-full border border-brand-500/50 bg-brand-500/20 px-3 py-1.5 text-sm font-semibold text-brand-100 hover:bg-brand-500/30"
-                  >
-                    📋 Setup
-                  </button>
-                )}
-                {role === "coach" && (
-                  <ChallengeCoachButton />
-                )}
-                {role === "coach" && (
-                  <button
-                    onClick={() => setSendPositionOpen(true)}
-                    title="Send the current board (with move list) to students' Notebook"
-                    className="rounded-full border border-emerald-500/50 bg-emerald-500/20 px-3 py-1.5 text-sm font-semibold text-emerald-100 hover:bg-emerald-500/30"
-                  >
-                    📤 Send position
-                  </button>
-                )}
-                {role === "coach" && (
-                  <button
-                    onClick={() => setTeachOpen(true)}
-                    title="Load an opening from your Repertoire / the corpus / master games at this position"
-                    className="rounded-full border border-sky-500/50 bg-sky-500/20 px-3 py-1.5 text-sm font-semibold text-sky-100 hover:bg-sky-500/30"
-                  >
-                    📖 Teach opening
-                  </button>
-                )}
-                {role === "coach" && (
-                  <button
-                    onClick={() => { if (confirm("Reset board to the starting position for everyone?")) triggerClassBoardAction("reset"); }}
-                    title="Reset board to the starting position (destructive — clears the move list for everyone)"
-                    className="rounded-full border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm text-ink-100 hover:bg-ink-800"
-                  >
-                    ↺ Reset
-                  </button>
+                  <div className="contents">
+                    <button
+                      onClick={() => setAudiencePickerOpen(true)}
+                      title="Change which students can join this class + who gets notified"
+                      className="rounded-full border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm font-semibold text-ink-100 hover:bg-ink-800"
+                    >
+                      🎯 Students
+                    </button>
+                    <ChallengeCoachButton />
+                    <button
+                      onClick={() => setSendPositionOpen(true)}
+                      title="Send the current board (with move list) to students' Notebook"
+                      className="rounded-full border border-emerald-500/50 bg-emerald-500/20 px-3 py-1.5 text-sm font-semibold text-emerald-100 hover:bg-emerald-500/30"
+                    >
+                      📤 Send position
+                    </button>
+                  </div>
                 )}
               </div>
             </div>

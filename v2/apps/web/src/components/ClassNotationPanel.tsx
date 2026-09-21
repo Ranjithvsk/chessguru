@@ -179,7 +179,35 @@ export function ClassNotationPanel({ room, role }: { room: string; role: "coach"
 
   const clickable = role === "coach";
   const activeRef = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => { activeRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, [cursorPath]);
+  // Keep the current move in view by scrolling ONLY this panel's own scroller.
+  //
+  // scrollIntoView() scrolls every scrollable ancestor, the document included. That
+  // was harmless while the class shell was a fixed-height overflow-hidden box: the
+  // page could not move. Once the shell became a scrolling document below lg
+  // (2026-09-21), every coach move dragged the whole page up and the student's
+  // board slid off the top mid-lesson — "students get distracted", and rightly so.
+  //
+  // So walk up to the nearest scrollable ancestor INSIDE this panel and adjust its
+  // scrollTop directly. Nothing above it ever moves.
+  useEffect(() => {
+    const el = activeRef.current;
+    if (!el) return;
+    let sc: HTMLElement | null = el.parentElement;
+    while (sc && sc !== document.body) {
+      const oy = getComputedStyle(sc).overflowY;
+      if ((oy === "auto" || oy === "scroll") && sc.scrollHeight > sc.clientHeight) break;
+      sc = sc.parentElement;
+    }
+    if (!sc || sc === document.body) return;          // nothing to scroll — leave the page alone
+    const top = el.offsetTop - sc.offsetTop;
+    const above = top < sc.scrollTop;
+    const below = top + el.offsetHeight > sc.scrollTop + sc.clientHeight;
+    if (!above && !below) return;                     // already visible: do nothing
+    sc.scrollTo({
+      top: above ? top : top + el.offsetHeight - sc.clientHeight,
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+    });
+  }, [cursorPath]);
 
   const isActive = (path: number[]) => pathsEqual(path, cursorPath);
   const onPick = (path: number[]) => { if (clickable) triggerClassSeek(path); };
