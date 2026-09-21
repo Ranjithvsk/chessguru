@@ -23,7 +23,8 @@ type Row = {
   _id: string;
   whiteName?: string; blackName?: string;
   whiteElo?: number; blackElo?: number;
-  event?: string; date?: string; result?: string; round?: string; ply?: number;
+  event?: string; date?: string; dateKey?: string; result?: string; round?: string; ply?: number;
+  eco?: string | null; openingName?: string | null;
 };
 type SearchResp = { ok: boolean; rows: Row[]; total: number; totalIsCapped: boolean; offset: number; limit: number };
 type StatsResp = {
@@ -36,10 +37,19 @@ type StatsResp = {
 };
 
 const PAGE = 25;
+// The reference viewer (TKT-254) sorts by Index, Date, Alphabet White, Elo
+// White, Alphabet Black, Elo Black, Result and ECO. Same set here, minus
+// "Index" (an internal row number means nothing to a coach) and plus game
+// length, which is how you find a miniature.
 const SORTS = [
   { id: "date", label: "Newest" },
   { id: "oldest", label: "Oldest" },
-  { id: "elo", label: "Strongest" },
+  { id: "elo", label: "White Elo" },
+  { id: "eloBlack", label: "Black Elo" },
+  { id: "white", label: "White A–Z" },
+  { id: "black", label: "Black A–Z" },
+  { id: "eco", label: "ECO" },
+  { id: "result", label: "Result" },
   { id: "short", label: "Shortest" },
   { id: "long", label: "Longest" },
 ];
@@ -57,8 +67,19 @@ export default function UltraDatabase() {
   const [to, setTo] = useState("");
   const [minPly, setMinPly] = useState("");
   const [maxPly, setMaxPly] = useState("");
+  const [eco, setEco] = useState("");
   const [sort, setSort] = useState("date");
   const [offset, setOffset] = useState(0);
+  // Table or list, as the reference viewer offers. Table is for scanning a
+  // tournament; list is for reading on a phone. Remembered, because a coach
+  // has a preference and re-picking it every visit is friction.
+  const [view, setView] = useState<"list" | "table">(() => {
+    try { return (localStorage.getItem("cg-udb-view") as "list" | "table") || "list"; } catch { return "list"; }
+  });
+  useEffect(() => { try { localStorage.setItem("cg-udb-view", view); } catch { /* private mode */ } }, [view]);
+  // Multi-select, for bulk download / bulk save.
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const togglePick = (id: string) => setPicked((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   // Debounced copy — typing a player name should not fire a query per keystroke
   // against a million rows.
@@ -78,6 +99,7 @@ export default function UltraDatabase() {
     if (live.text) p.set("q", live.text);
     if (live.opening) p.set("opening", live.opening);
     if (result) p.set("result", result);
+    if (eco.trim()) p.set("eco", eco.trim());
     if (bothElo) p.set("bothElo", String(bothElo));
     if (from) p.set("from", from);
     if (to) p.set("to", to);
@@ -85,7 +107,7 @@ export default function UltraDatabase() {
     if (maxPly) p.set("maxPly", maxPly);
     p.set("sort", sort);
     return p;
-  }, [live, colour, result, bothElo, from, to, minPly, maxPly, sort]);
+  }, [live, colour, result, eco, bothElo, from, to, minPly, maxPly, sort]);
 
   const hasQuery = params.toString() !== "sort=date" && [...params.keys()].some((k) => k !== "sort");
 
@@ -106,7 +128,8 @@ export default function UltraDatabase() {
 
   const reset = () => {
     setPlayer(""); setOpponent(""); setText(""); setOpening(""); setResult("");
-    setBothElo(0); setFrom(""); setTo(""); setMinPly(""); setMaxPly(""); setSort("date"); setOffset(0);
+    setBothElo(0); setFrom(""); setTo(""); setMinPly(""); setMaxPly(""); setEco("");
+    setSort("date"); setOffset(0); setPicked(new Set());
   };
 
   return (
@@ -151,6 +174,10 @@ export default function UltraDatabase() {
                 {[0, 2000, 2200, 2400, 2500, 2600, 2700].map((v) => <option key={v} value={v}>{v === 0 ? "Any" : v + "+"}</option>)}
               </select>
             </Field>
+            <Field label="ECO" className="mt-3">
+              <input value={eco} onChange={(e) => { setEco(e.target.value.toUpperCase()); setOffset(0); }}
+                     placeholder="C78, or just C" maxLength={3} className={`${INPUT} font-mono uppercase`} />
+            </Field>
             <Field label="Result" className="mt-3">
               <select value={result} onChange={(e) => { setResult(e.target.value); setOffset(0); }} className={INPUT}>
                 <option value="">Any</option>
@@ -180,30 +207,60 @@ export default function UltraDatabase() {
         <section className="min-w-0 space-y-4">
           {hasQuery && <StatsPanel stats={stats.data} loading={stats.isLoading} player={live.player} />}
 
+          {/* Count, sort, and the table/list switch — the reference viewer's
+            *  "50/14.34M Games · Index ↓" row, with the sort exposed as chips
+            *  rather than hidden behind a dropdown. */}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-sm text-ink-400">
               {search.isLoading ? "Searching…"
                 : `${search.data?.totalIsCapped ? "10,000+" : total.toLocaleString()} game${total === 1 ? "" : "s"}`}
+              <span className="text-ink-600"> · of 1.09M</span>
             </div>
-            {/* wraps: five sort chips are wider than a 390px phone column */}
-            <div className="flex flex-wrap items-center gap-1">
-              {SORTS.map((s) => (
-                <button key={s.id} onClick={() => { setSort(s.id); setOffset(0); }}
-                  className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${sort === s.id ? "bg-brand-500/20 text-brand-100" : "text-ink-400 hover:bg-ink-800 hover:text-ink-100"}`}>
-                  {s.label}
-                </button>
-              ))}
+            <div className="flex items-center gap-2">
+              {/* wraps: ten sort chips are wider than a 390px phone column */}
+              <div className="flex flex-wrap items-center gap-1">
+                {SORTS.map((x) => (
+                  <button key={x.id} onClick={() => { setSort(x.id); setOffset(0); }}
+                    className={`rounded-lg px-2 py-1 text-[11px] font-semibold transition-colors ${sort === x.id ? "bg-brand-500/20 text-brand-100" : "text-ink-400 hover:bg-ink-800 hover:text-ink-100"}`}>
+                    {x.label}
+                  </button>
+                ))}
+              </div>
+              <button onClick={() => setView(view === "list" ? "table" : "list")}
+                title={view === "list" ? "Switch to table" : "Switch to list"}
+                className="shrink-0 rounded-lg border border-ink-700 bg-ink-900 px-2 py-1 text-sm text-ink-200 hover:bg-ink-800">
+                {view === "list" ? "▦" : "☰"}
+              </button>
             </div>
           </div>
+
+          {/* Bulk bar — only once something is picked, so it never occupies
+            *  space for the common case of just browsing. */}
+          {picked.size > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-brand-500/40 bg-brand-500/10 px-3 py-2">
+              <span className="text-sm font-semibold text-brand-100">{picked.size} selected</span>
+              <div className="ml-auto flex flex-wrap gap-2">
+                <button onClick={() => downloadPgn([...picked])}
+                  className="rounded-lg border border-ink-700 bg-ink-900 px-2.5 py-1 text-xs font-semibold text-ink-100 hover:bg-ink-800">⬇ Download PGN</button>
+                <button onClick={() => setPicked(new Set())}
+                  className="rounded-lg px-2.5 py-1 text-xs font-semibold text-ink-400 hover:text-white">Clear</button>
+              </div>
+            </div>
+          )}
 
           <div className="overflow-hidden rounded-xl border border-ink-800">
             {rows.length === 0 && !search.isLoading ? (
               <div className="p-8 text-center text-sm text-ink-400">
                 No games match that. Try widening the rating or clearing the opening moves.
               </div>
+            ) : view === "table" ? (
+              <GameTable rows={rows} picked={picked} onPick={togglePick} highlight={live.player} />
             ) : (
               <div className="divide-y divide-ink-800/70">
-                {rows.map((g) => <GameRow key={g._id} g={g} highlight={live.player} />)}
+                {rows.map((g) => (
+                  <GameRow key={g._id} g={g} highlight={live.player}
+                           picked={picked.has(g._id)} onPick={() => togglePick(g._id)} />
+                ))}
               </div>
             )}
           </div>
@@ -224,6 +281,115 @@ export default function UltraDatabase() {
 }
 
 const INPUT = "w-full rounded-lg border border-ink-700 bg-ink-950 px-2.5 py-1.5 text-sm text-white outline-none focus:border-brand-500";
+
+/** Fetch PGN for these games and hand the file to the browser. The server
+ *  builds the PGN so the headers match what the library actually holds. */
+async function downloadPgn(ids: string[]) {
+  if (!ids.length) return;
+  const r = await get<{ ok: boolean; pgn: string; count: number }>(`/api/ultra-db/pgn?ids=${ids.join(",")}`);
+  if (!r?.pgn) return;
+  const blob = new Blob([r.pgn], { type: "application/x-chess-pgn" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = ids.length === 1 ? `game-${ids[0]}.pgn` : `games-${ids.length}.pgn`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoke on the next tick — revoking synchronously can beat the download.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** Dense table — the reference viewer's default, for scanning a tournament.
+ *  Scrolls sideways INSIDE its own container so the page never does. */
+function GameTable({ rows, picked, onPick, highlight }: { rows: Row[]; picked: Set<string>; onPick: (id: string) => void; highlight: string }) {
+  const hit = (n?: string) =>
+    highlight && n && n.toLowerCase().includes(highlight.toLowerCase().split(",")[0]!.trim()) ? "text-brand-200" : "text-ink-100";
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[42rem] border-collapse text-sm">
+        <thead>
+          <tr className="border-b border-ink-800 bg-ink-900/60 text-[11px] uppercase tracking-wide text-ink-500">
+            <th className="w-8 px-2 py-2" />
+            <th className="px-2 py-2 text-left font-semibold">Year</th>
+            <th className="px-2 py-2 text-left font-semibold">White</th>
+            <th className="px-2 py-2 text-right font-semibold">Elo</th>
+            <th className="px-2 py-2 text-left font-semibold">Black</th>
+            <th className="px-2 py-2 text-right font-semibold">Elo</th>
+            <th className="px-2 py-2 text-center font-semibold">Res</th>
+            <th className="px-2 py-2 text-left font-semibold">ECO</th>
+            <th className="w-10 px-2 py-2" />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((g) => (
+            <tr key={g._id} className={`border-b border-ink-800/60 ${picked.has(g._id) ? "bg-brand-500/10" : "hover:bg-ink-900/60"}`}>
+              <td className="px-2 py-1.5">
+                <input type="checkbox" checked={picked.has(g._id)} onChange={() => onPick(g._id)}
+                       aria-label="Select game" className="h-3.5 w-3.5 accent-brand-500" />
+              </td>
+              <td className="px-2 py-1.5 tabular-nums text-ink-400">{g.dateKey ? g.dateKey.slice(0, 4) : "—"}</td>
+              <td className={`max-w-[10rem] truncate px-2 py-1.5 font-medium ${hit(g.whiteName)}`}>{g.whiteName ?? "?"}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums text-ink-400">{g.whiteElo ?? ""}</td>
+              <td className={`max-w-[10rem] truncate px-2 py-1.5 font-medium ${hit(g.blackName)}`}>{g.blackName ?? "?"}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums text-ink-400">{g.blackElo ?? ""}</td>
+              <td className="px-2 py-1.5 text-center font-mono text-[11px] text-ink-300">{g.result ?? "*"}</td>
+              <td className="px-2 py-1.5 font-mono text-[11px] text-ink-400" title={g.openingName ?? ""}>{g.eco ?? "—"}</td>
+              <td className="px-1 py-1.5 text-right"><RowMenu g={g} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** The per-row ⋮ from the reference: save, download, and here also the
+ *  opening name, which the reference only ever shows as a bare ECO code. */
+function RowMenu({ g }: { g: Row }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState<null | "busy" | "done" | "err">(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [open]);
+
+  const save = async () => {
+    setSaving("busy");
+    try {
+      const full = await get<{ found: boolean; moves?: string[]; white?: string; black?: string; event?: string; date?: string; result?: string }>(`/api/broadcasts/${g._id}`);
+      if (!full?.found) throw new Error("not found");
+      const pgn = buildPgn({ moves: full.moves, whiteName: full.white, blackName: full.black, event: full.event, date: full.date, result: full.result });
+      await post("/api/studies/from-pgn", { pgn, topic: "gm-game", lessonName: `${g.whiteName ?? "?"} vs ${g.blackName ?? "?"}` });
+      setSaving("done");
+    } catch { setSaving("err"); }
+  };
+
+  return (
+    <div className="relative inline-block" onClick={(e) => e.stopPropagation()}>
+      <button onClick={() => setOpen(!open)} aria-label="Game actions"
+              className="rounded px-1.5 py-0.5 text-ink-400 hover:bg-ink-800 hover:text-white">⋮</button>
+      {open && (
+        <div className="absolute right-0 top-full z-20 mt-1 w-52 overflow-hidden rounded-lg border border-ink-700 bg-ink-900 shadow-2xl">
+          {g.openingName && (
+            <div className="border-b border-ink-800 px-3 py-2 text-[11px] text-ink-400">
+              <span className="font-mono text-ink-300">{g.eco}</span> · {g.openingName}
+            </div>
+          )}
+          <button onClick={save} disabled={saving === "busy" || saving === "done"}
+                  className="block w-full px-3 py-2 text-left text-xs text-ink-100 hover:bg-ink-800 disabled:opacity-50">
+            {saving === "busy" ? "Saving…" : saving === "done" ? "✓ In My Studies" : saving === "err" ? "Save failed" : "Save to My Studies"}
+          </button>
+          <button onClick={() => downloadPgn([g._id])}
+                  className="block w-full px-3 py-2 text-left text-xs text-ink-100 hover:bg-ink-800">Download PGN</button>
+          <Link to={`/broadcasts/${g._id}`} className="block px-3 py-2 text-left text-xs text-ink-100 hover:bg-ink-800">Open in viewer</Link>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -324,54 +490,41 @@ function StatsPanel({ stats, loading, player }: { stats?: StatsResp; loading: bo
   );
 }
 
-function GameRow({ g, highlight }: { g: Row; highlight: string }) {
-  const [saving, setSaving] = useState<null | "busy" | "done" | "err">(null);
+/** List row, in the reference viewer's shape: the pairing and result on one
+ *  line, then date · ECO · event underneath. Reads far better on a phone than
+ *  a table, which is why both exist. */
+function GameRow({ g, highlight, picked, onPick }: { g: Row; highlight: string; picked: boolean; onPick: () => void }) {
   const hit = (name?: string) =>
     highlight && name && name.toLowerCase().includes(highlight.toLowerCase().split(",")[0]!.trim())
-      ? "text-brand-200" : "text-ink-100";
-
-  // Take this game into the user's own studies. The API links it back to this
-  // library row rather than copying the game in, so annotations stay personal
-  // while the game data has one home.
-  const save = async () => {
-    setSaving("busy");
-    try {
-      // /api/broadcasts/:id returns a FLAT game using white/black, not
-      // whiteName/blackName as the list rows do.
-      const full = await get<{ found: boolean; moves?: string[]; white?: string; black?: string; event?: string; date?: string; result?: string }>(`/api/broadcasts/${g._id}`);
-      if (!full?.found) throw new Error("game not found");
-      const pgn = buildPgn({ moves: full.moves, whiteName: full.white, blackName: full.black, event: full.event, date: full.date, result: full.result });
-      await post("/api/studies/from-pgn", { pgn, topic: "gm-game", lessonName: `${g.whiteName ?? "?"} vs ${g.blackName ?? "?"}` });
-      setSaving("done");
-    } catch { setSaving("err"); }
-  };
+      ? "text-brand-200" : "text-white";
+  const sub = [
+    g.dateKey ?? g.date,
+    g.eco,                       // "—" would be noise; absent is fine
+    g.event,
+    g.ply ? `${Math.ceil(g.ply / 2)} moves` : null,
+  ].filter(Boolean).join(" · ");
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 hover:bg-ink-900/60">
+    <div className={`flex items-start gap-3 px-3 py-2.5 ${picked ? "bg-brand-500/10" : "hover:bg-ink-900/60"}`}>
+      <input type="checkbox" checked={picked} onChange={onPick} aria-label="Select game"
+             className="mt-1 h-3.5 w-3.5 shrink-0 accent-brand-500" />
       <Link to={`/broadcasts/${g._id}`} className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2 text-sm">
           <span className={`font-semibold ${hit(g.whiteName)}`}>{g.whiteName ?? "?"}</span>
           {g.whiteElo ? <span className="text-[11px] tabular-nums text-ink-500">{g.whiteElo}</span> : null}
-          <span className="text-ink-600">vs</span>
+          <span className={`font-mono text-xs ${
+            g.result === "1-0" ? "text-emerald-300" : g.result === "0-1" ? "text-rose-300" : "text-ink-400"}`}>
+            {g.result ?? "*"}
+          </span>
           <span className={`font-semibold ${hit(g.blackName)}`}>{g.blackName ?? "?"}</span>
           {g.blackElo ? <span className="text-[11px] tabular-nums text-ink-500">{g.blackElo}</span> : null}
         </div>
         <div className="truncate text-[11px] text-ink-500">
-          {[g.event, g.round && `R${g.round}`, g.date, g.ply ? `${Math.ceil(g.ply / 2)} moves` : null].filter(Boolean).join(" · ")}
+          {sub}
+          {g.openingName ? <span className="text-ink-600"> — {g.openingName}</span> : null}
         </div>
       </Link>
-      <span className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[11px] ${
-        g.result === "1-0" ? "bg-emerald-500/15 text-emerald-200"
-        : g.result === "0-1" ? "bg-rose-500/15 text-rose-200"
-        : "bg-ink-800 text-ink-300"}`}>{g.result ?? "*"}</span>
-      <button
-        onClick={save}
-        disabled={saving === "busy" || saving === "done"}
-        title="Save this game into My Studies"
-        className="shrink-0 rounded-lg border border-ink-700 bg-ink-900 px-2 py-1 text-[11px] font-semibold text-ink-200 hover:bg-ink-800 disabled:opacity-50"
-      >
-        {saving === "busy" ? "Saving…" : saving === "done" ? "✓ Saved" : saving === "err" ? "Failed" : "Save"}
-      </button>
+      <RowMenu g={g} />
     </div>
   );
 }

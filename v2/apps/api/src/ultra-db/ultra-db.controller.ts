@@ -81,6 +81,12 @@ export class UltraDbController {
 
     if (q.result && ["1-0", "0-1", "1/2-1/2"].includes(String(q.result))) f.result = String(q.result);
 
+    // ECO, as a code (C78) or a family letter/prefix (C, C7). TKT-254's
+    // reference viewer surfaces ECO throughout, so it has to be filterable
+    // and not merely displayed.
+    const eco = String(q.eco || "").trim().toUpperCase();
+    if (/^[A-E][0-9]{0,2}$/.test(eco)) and.push({ eco: new RegExp("^" + eco) });
+
     const minElo = Number(q.minElo);
     if (Number.isFinite(minElo) && minElo > 0) and.push({ $or: [{ whiteElo: { $gte: minElo } }, { blackElo: { $gte: minElo } }] });
     const bothElo = Number(q.bothElo);
@@ -125,6 +131,11 @@ export class UltraDbController {
     // or 64k undated games would fill the first pages.
     const sort: Record<string, 1 | -1> =
       sortKey === "elo" ? { whiteElo: -1 }
+      : sortKey === "eloBlack" ? { blackElo: -1 }
+      : sortKey === "white" ? { whiteId: 1 }
+      : sortKey === "black" ? { blackId: 1 }
+      : sortKey === "eco" ? { eco: 1 }
+      : sortKey === "result" ? { result: 1 }
       : sortKey === "short" ? { ply: 1 }
       : sortKey === "long" ? { ply: -1 }
       : sortKey === "oldest" ? { dateKey: 1 }
@@ -132,7 +143,7 @@ export class UltraDbController {
     if (sortKey === "oldest") filter.dateKey = { ...(filter.dateKey as object ?? {}), $exists: true };
 
     const rows = await this.games()
-      .find(filter, { projection: { moves: 0 } })
+      .find(filter, { projection: { moves: 0 } })   // eco/openingName ride along
       .sort(sort)
       .skip(offset)
       .limit(limit)
@@ -204,6 +215,36 @@ export class UltraDbController {
       } : null,
       playerScore,
     };
+  }
+
+  /** PGN for a set of games — the reference viewer's "Download PGN" and
+   *  "Select Multiple", which only make sense together. Capped so nobody can
+   *  ask for the whole library in one request. */
+  @Get("pgn")
+  async pgn(@Query("ids") idsRaw: string, @Req() req: any) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    const ids = String(idsRaw || "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 200);
+    if (!ids.length) return { ok: true, pgn: "", count: 0 };
+    const rows = await this.games().find({ _id: { $in: ids as any[] } }).toArray();
+    const esc = (v: unknown) => String(v ?? "?").replace(/[\\"]/g, "");
+    const pgn = rows.map((g: any) => {
+      const head = [
+        `[Event "${esc(g.event)}"]`,
+        `[Site "${esc(g.site)}"]`,
+        `[Date "${esc(g.date)}"]`,
+        `[Round "${esc(g.round)}"]`,
+        `[White "${esc(g.whiteName)}"]`,
+        `[Black "${esc(g.blackName)}"]`,
+        `[Result "${esc(g.result)}"]`,
+        g.whiteElo ? `[WhiteElo "${esc(g.whiteElo)}"]` : null,
+        g.blackElo ? `[BlackElo "${esc(g.blackElo)}"]` : null,
+        g.eco ? `[ECO "${esc(g.eco)}"]` : null,
+      ].filter(Boolean).join("\n");
+      let body = "";
+      (g.moves || []).forEach((san: string, i: number) => { body += (i % 2 === 0 ? `${i / 2 + 1}. ` : "") + san + " "; });
+      return `${head}\n\n${body.trim()} ${g.result ?? "*"}`;
+    }).join("\n\n");
+    return { ok: true, pgn, count: rows.length };
   }
 
   /** Games that REACHED a given position, at any point in the game. */
