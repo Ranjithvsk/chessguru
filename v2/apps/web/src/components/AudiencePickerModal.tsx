@@ -25,8 +25,13 @@ export default function AudiencePickerModal(props: {
   onDone: (result: { audienceCount: number; notified: number }) => void;
   onClose: () => void;
   title?: string;
+  /** True only for a BRAND-NEW class that has no audience yet — then the dialog
+   *  cannot be dismissed. Opened by hand from 🎯 Students on a class that
+   *  already has an audience it stays dismissible: the coach may just be
+   *  checking, and submitting re-notifies everybody. */
+  required?: boolean;
 }) {
-  const { room, onDone, onClose } = props;
+  const { room, onDone, onClose, required = false } = props;
   const [loading, setLoading]     = useState(true);
   const [saving, setSaving]       = useState(false);
   const [err, setErr]             = useState<string | null>(null);
@@ -77,6 +82,18 @@ export default function AudiencePickerModal(props: {
     return picked.size;
   }, [data, kind, batchId, picked]);
 
+  // On a NEW class (`required`), deciding who can enter is NOT optional: skipping it left the class
+  // reachable by whoever had the link. So there is no Skip and no ×, and Escape
+  // does nothing — the only way out is to choose. (owner, 2026-09-21: "who can
+  // join in dream meet should not have skip or x option")
+  //
+  // The one exception is a dialog that CANNOT be answered: the roster failed to
+  // load, or this coach has no students and no batches to pick from. Removing
+  // every exit there would dead-end them inside their own class, so that case —
+  // and only that case — keeps a way out.
+  const nothingToChoose = data != null && data.students.length === 0 && data.batches.length === 0;
+  const canDismiss = !required || data == null || nothingToChoose;
+
   const canSubmit =
     !saving && data != null && (
       (kind === "coach_students" && data.students.length > 0) ||
@@ -104,23 +121,25 @@ export default function AudiencePickerModal(props: {
   return (
     // Phone layout (owner report 2026-09-07, coach on Android: "when I click it
     // shows students, I can't make moves"): the whole dialog used to scroll as
-    // one box, so with 90+ students the Skip / Start buttons sat below the fold
+    // one box, so with 90+ students the action buttons sat below the fold
     // and every tap landed in the roster. Now the dialog is a column — header
     // and action row always on screen, only the middle scrolls — and on small
     // screens it is a bottom sheet.
     <div
       className="fixed inset-0 z-[70] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4"
-      onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
+      onKeyDown={(e) => { if (e.key === "Escape" && canDismiss) onClose(); }}
       tabIndex={-1}
     >
       <div className="flex max-h-[92vh] w-full max-w-lg flex-col rounded-t-2xl border border-ink-700 bg-ink-900 shadow-2xl sm:rounded-2xl">
         <div className="flex shrink-0 items-center justify-between border-b border-ink-800 bg-ink-800/60 px-4 py-2.5">
           <div className="font-display text-base font-bold text-white">🎯 Who can join this class?</div>
-          <button
-            onClick={onClose}
-            title="Close (audience unchanged)"
-            className="rounded-md p-1 text-xl leading-none text-ink-400 hover:bg-ink-700 hover:text-white"
-          >×</button>
+          {canDismiss && (
+            <button
+              onClick={onClose}
+              title="Close (audience unchanged)"
+              className="rounded-md p-1 text-xl leading-none text-ink-400 hover:bg-ink-700 hover:text-white"
+            >×</button>
+          )}
         </div>
 
         {loading ? (
@@ -252,10 +271,16 @@ export default function AudiencePickerModal(props: {
               Will invite <span className="font-bold text-brand-200">{previewCount}</span> {previewCount === 1 ? "person" : "people"}
             </div>
             <div className="flex gap-2">
-              <button
-                onClick={onClose}
-                className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-200 hover:bg-ink-700"
-              >Skip</button>
+              {/* No Skip. Choosing the audience is the point of this dialog —
+                * dismissing it used to leave the room open to anyone holding
+                * the link. `nothingToChoose` below is the only way out, and it
+                * only appears when there is genuinely nothing to pick. */}
+              {canDismiss && (
+                <button
+                  onClick={onClose}
+                  className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-200 hover:bg-ink-700"
+                >{required ? "Close" : "Cancel"}</button>
+              )}
               <button
                 onClick={submit}
                 disabled={!canSubmit}

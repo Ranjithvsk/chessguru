@@ -1795,6 +1795,23 @@ export default function ClassV2Page() {
   // for this class yet (ad-hoc "Start now" rooms + scheduled classes without
   // a batch). Coach can re-open via the footer 🎯 button to change mid-class.
   const [audiencePickerOpen, setAudiencePickerOpen] = useState(false);
+  // A BRAND-NEW class carries no audienceKind, and until it has one the room is
+  // not really gated — anyone with the link is a candidate. So ask once, up
+  // front, and don't allow it to be waved away. A REJOIN skips this entirely:
+  // the audience is already set, and re-asking would both nag the coach and
+  // re-notify the whole roster on submit. (owner, 2026-09-21)
+  const [audienceSettled, setAudienceSettled] = useState(false);
+  const audienceQ = useQuery({
+    queryKey: ["class-audience-state", room],
+    queryFn: () => get<{ audienceKind: string | null; batchStudentIds: string[] | null }>(
+      `/api/class/${encodeURIComponent(room)}/audience`),
+    enabled: role === "coach",
+    staleTime: Infinity,
+    retry: false,
+  });
+  const audienceUnset =
+    role === "coach" && !audienceSettled && !!audienceQ.data &&
+    !audienceQ.data.audienceKind && !(audienceQ.data.batchStudentIds?.length);
   const [audienceToast, setAudienceToast] = useState<string | null>(null);
   const [sendPositionOpen, setSendPositionOpen] = useState(false);
   const [sendPositionToast, setSendPositionToast] = useState<string | null>(null);
@@ -2128,12 +2145,17 @@ export default function ClassV2Page() {
                *  toggle badge + toast pop even when the panel is closed. */}
               <ChatSink />
               <ChatToastStack />
-              {role === "coach" && audiencePickerOpen && (
+              {role === "coach" && (audiencePickerOpen || audienceUnset) && (
                 <AudiencePickerModal
                   room={room}
+                  // Mandatory only when this is the new-class prompt. Opened by
+                  // hand from 🎯 Students it stays dismissible — the coach may
+                  // just be checking, and submitting re-notifies everyone.
+                  required={audienceUnset && !audiencePickerOpen}
                   onClose={() => setAudiencePickerOpen(false)}
                   onDone={(r) => {
                     setAudiencePickerOpen(false);
+                    setAudienceSettled(true);
                     setAudienceToast(
                       r.audienceCount === 0
                         ? "No one matched that pick."
