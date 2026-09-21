@@ -27,8 +27,20 @@ import { Connection } from "mongoose";
 import { Chess } from "chess.js";
 
 const DISCOVER_MS = 60_000;      // how often we re-ask which rounds are live
-const MAX_STREAMS = 6;           // concurrent open connections to Lichess
-const TOURS_SCANNED = 30;        // how far down the recent-tournament list to look
+// MEASURED, not guessed. At 6 concurrent streams Lichess returned 429 on four
+// of them and served two; its own error text is "Please only run 1 request(s)
+// at a time". So we hold a very small number of live connections and cover
+// everything else by rotating one-shot fetches through the remaining rounds.
+// That is the difference between us and Lichess on this: they are the origin
+// and receive games pushed to them, we are a guest on their API.
+const MAX_STREAMS = 2;           // concurrent open connections to Lichess
+const ROTATE_MS = 9_000;         // one-shot refresh of the next unstreamed round
+const BACKOFF_MS = 90_000;       // how long a 429 sidelines us
+const TOURS_SCANNED = 60;        // how far down the recent-tournament list to look
+// A round is "watched" for this long after someone last loaded it. Streams
+// follow the audience: we hold an open connection to what people are actually
+// looking at, and merely LIST the rest.
+const WATCH_TTL_MS = 3 * 60_000;
 const UA = "ChessGuru/1.0 (academy live board; contact ranjith.vsk@gmail.com)";
 
 type StreamHandle = { roundId: string; ctrl: AbortController; startedAt: number };
@@ -38,7 +50,20 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger("live-broadcast");
   private streams = new Map<string, StreamHandle>();
   private timer: ReturnType<typeof setInterval> | null = null;
+  private rotateTimer: ReturnType<typeof setInterval> | null = null;
   private stopping = false;
+  // Lichess asks for one request at a time, so every outbound call queues
+  // behind this. Without it the rotation and discovery race each other and
+  // both get 429'd.
+  private chain: Promise<unknown> = Promise.resolve();
+  private throttledUntil = 0;
+  private rotateCursor = 0;
+
+  private serialize<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.chain.then(fn, fn);
+    this.chain = run.catch(() => {});
+    return run as Promise<T>;
+  }
 
   constructor(@InjectConnection() private readonly conn: Connection) {}
 
@@ -55,11 +80,16 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
     setTimeout(() => { void this.discover(); }, 8_000);          // let the app finish booting
     this.timer = setInterval(() => { void this.discover(); }, DISCOVER_MS);
     if (typeof this.timer.unref === "function") this.timer.unref();
+    // The rotation is what gives every live round its games, not just the two
+    // we can hold open.
+    this.rotateTimer = setInterval(() => { void this.rotate(); }, ROTATE_MS);
+    if (typeof this.rotateTimer.unref === "function") this.rotateTimer.unref();
   }
 
   onModuleDestroy(): void {
     this.stopping = true;
     if (this.timer) clearInterval(this.timer);
+    if (this.rotateTimer) clearInterval(this.rotateTimer);
     for (const s of this.streams.values()) { try { s.ctrl.abort(); } catch { /* */ } }
     this.streams.clear();
   }
@@ -69,12 +99,15 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
     if (this.stopping) return;
     let live: { roundId: string; roundName: string; tourId: string; tourName: string; url: string }[] = [];
     try {
-      const r = await fetch(`https://lichess.org/api/broadcast?nb=${TOURS_SCANNED}`, {
-        headers: { "User-Agent": UA, Accept: "application/x-ndjson" },
-        signal: AbortSignal.timeout(20_000),
+      const text = await this.serialize(async () => {
+        const r = await fetch(`https://lichess.org/api/broadcast?nb=${TOURS_SCANNED}`, {
+          headers: { "User-Agent": UA, Accept: "application/x-ndjson" },
+          signal: AbortSignal.timeout(20_000),
+        });
+        if (r.status === 429) { this.throttledUntil = Date.now() + BACKOFF_MS; throw new Error("429"); }
+        if (!r.ok) throw new Error(`broadcast index ${r.status}`);
+        return r.text();
       });
-      if (!r.ok) throw new Error(`broadcast index ${r.status}`);
-      const text = await r.text();
       for (const line of text.split("\n")) {
         if (!line.trim()) continue;
         let d: any;
@@ -94,28 +127,120 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
       return;                                   // keep whatever streams we have
     }
 
-    live = live.slice(0, MAX_STREAMS);
-    const wanted = new Set(live.map((l) => l.roundId));
-
-    // Close rounds that are no longer live.
-    for (const [id, s] of [...this.streams]) {
-      if (wanted.has(id)) continue;
-      try { s.ctrl.abort(); } catch { /* */ }
-      this.streams.delete(id);
-      await this.rounds().updateOne({ _id: id as any }, { $set: { ongoing: false, updatedAt: new Date() } }).catch(() => {});
-      this.log.log(`round ${id} finished — stream closed`);
-    }
-
-    // Open the new ones.
+    // Every live round is RECORDED, so the index can show them all — Lichess
+    // runs dozens at once and a viewer should see dozens. Only the ones people
+    // are actually watching get an open stream; the cap is on connections to
+    // Lichess, not on what we are willing to display. (owner: "lichess have
+    // many broadcast running and results of many, how do they do that?" —
+    // they are the origin and receive games directly; we are a consumer, so
+    // we follow the audience instead of everything at once.)
     for (const l of live) {
       await this.rounds().updateOne(
         { _id: l.roundId as any },
         { $set: { ...l, ongoing: true, updatedAt: new Date() }, $setOnInsert: { startedAt: new Date() } },
         { upsert: true },
       ).catch(() => {});
+    }
+    const liveIds = new Set(live.map((l) => l.roundId));
+
+    // Close anything no longer live.
+    for (const [id, st] of [...this.streams]) {
+      if (liveIds.has(id)) continue;
+      try { st.ctrl.abort(); } catch { /* */ }
+      this.streams.delete(id);
+      this.log.log(`round ${id} finished — stream closed`);
+    }
+    await this.rounds().updateMany(
+      { ongoing: true, _id: { $nin: [...liveIds] as any[] } },
+      { $set: { ongoing: false, updatedAt: new Date() } },
+    ).catch(() => {});
+
+    // Rank by who is watching, newest interest first, and stream the top few.
+    const watchedSince = new Date(Date.now() - WATCH_TTL_MS);
+    const watched = await this.rounds()
+      .find({ ongoing: true, lastViewedAt: { $gte: watchedSince } }, { projection: { _id: 1 } })
+      .sort({ lastViewedAt: -1 })
+      .limit(MAX_STREAMS)
+      .toArray()
+      .catch(() => [] as any[]);
+    const watchedIds = watched.map((r: any) => String(r._id));
+
+    // Nobody watching anything? Follow the most recently updated rounds, so
+    // the page is never empty for the first person to arrive.
+    let target = watchedIds;
+    if (target.length < MAX_STREAMS) {
+      const filler = live.map((l) => l.roundId).filter((id) => !target.includes(id));
+      target = [...target, ...filler].slice(0, MAX_STREAMS);
+    }
+    const wanted = new Set(target);
+    live = live.filter((l) => wanted.has(l.roundId));
+
+    // Drop streams that lost their audience, open the ones that gained it.
+    for (const [id, st] of [...this.streams]) {
+      if (wanted.has(id)) continue;
+      try { st.ctrl.abort(); } catch { /* */ }
+      this.streams.delete(id);
+      this.log.log(`round ${id} no longer watched — stream released`);
+    }
+    for (const l of live) {
       if (this.streams.has(l.roundId)) continue;
       this.openStream(l.roundId, l.tourName, l.roundName);
     }
+  }
+
+  /** Refresh ONE unstreamed live round per tick, round-robin, so every round
+   *  on the index has real games and a result — just refreshed every rotation
+   *  rather than instantly. With N live rounds each is ~N x ROTATE_MS behind,
+   *  which for a classical tournament is well inside a move. */
+  private async rotate(): Promise<void> {
+    if (this.stopping || Date.now() < this.throttledUntil) return;
+    const rounds = await this.rounds()
+      .find({ ongoing: true }, { projection: { tourName: 1, roundName: 1 } })
+      .sort({ _id: 1 })
+      .limit(60)
+      .toArray()
+      .catch(() => [] as any[]);
+    const pending = rounds.filter((r: any) => !this.streams.has(String(r._id)));
+    if (!pending.length) return;
+    const pick: any = pending[this.rotateCursor++ % pending.length];
+    const id = String(pick._id);
+    try {
+      const text = await this.serialize(async () => {
+        const r = await fetch(`https://lichess.org/api/broadcast/round/${id}.pgn`, {
+          headers: { "User-Agent": UA, Accept: "application/x-chess-pgn" },
+          signal: AbortSignal.timeout(20_000),
+        });
+        if (r.status === 429) { this.throttledUntil = Date.now() + BACKOFF_MS; throw new Error("429"); }
+        if (!r.ok) throw new Error(String(r.status));
+        return r.text();
+      });
+      await this.applyPgn(id, pick.tourName ?? "Broadcast", pick.roundName ?? "Round", text);
+    } catch (e: any) {
+      if (String(e?.message) === "429") this.log.warn("rotation throttled — backing off");
+    }
+  }
+
+  /** Someone opened this round. Mark the interest and, if we are not already
+   *  streaming it, fetch its games once so the page is populated immediately
+   *  rather than blank until the next discover tick. */
+  async noteViewed(roundId: string): Promise<void> {
+    await this.rounds().updateOne({ _id: roundId as any }, { $set: { lastViewedAt: new Date() } }).catch(() => {});
+    if (this.streams.has(roundId)) return;
+    const meta: any = await this.rounds().findOne({ _id: roundId as any }).catch(() => null);
+    if (!meta?.ongoing) return;
+    try {
+      const text = await this.serialize(async () => {
+        const r = await fetch(`https://lichess.org/api/broadcast/round/${roundId}.pgn`, {
+          headers: { "User-Agent": UA, Accept: "application/x-chess-pgn" },
+          signal: AbortSignal.timeout(20_000),
+        });
+        if (r.status === 429) { this.throttledUntil = Date.now() + BACKOFF_MS; throw new Error("429"); }
+        if (!r.ok) throw new Error(String(r.status));
+        return r.text();
+      });
+      await this.applyPgn(roundId, meta.tourName ?? "Broadcast", meta.roundName ?? "Round", text);
+    } catch { /* the next discover tick will stream it */ }
+    if (this.streams.size < MAX_STREAMS) this.openStream(roundId, meta.tourName ?? "Broadcast", meta.roundName ?? "Round");
   }
 
   /** Hold one streaming connection and apply every snapshot it sends. */
@@ -153,7 +278,9 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
         if (flushTimer) clearTimeout(flushTimer);
         flush();
       } catch (e: any) {
-        if (!ctrl.signal.aborted) this.log.warn(`stream ${roundId} dropped: ${e?.message ?? e}`);
+        const msg = String(e?.message ?? e);
+        if (/429/.test(msg)) this.throttledUntil = Date.now() + BACKOFF_MS;
+        if (!ctrl.signal.aborted) this.log.warn(`stream ${roundId} dropped: ${msg}`);
       } finally {
         this.streams.delete(roundId);
         // discover() reopens it on the next tick if the round is still live.

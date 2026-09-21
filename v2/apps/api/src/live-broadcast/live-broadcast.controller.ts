@@ -15,11 +15,15 @@ export class LiveBroadcastController {
   /** Which tournaments are on air. Public: these are published games. */
   @Get()
   async live() {
+    // Every live round, not only the ones we hold a stream for. Lichess runs
+    // dozens at once and a viewer should see all of them; opening one is what
+    // starts a stream.
     const rounds = await this.conn.db!.collection("liveBroadcastRounds")
-      .find({ ongoing: true }, { projection: { roundId: 0 } })
+      .find({ ongoing: true })
       .sort({ updatedAt: -1 })
-      .limit(20)
+      .limit(60)
       .toArray();
+    const streaming = new Set(this.svc.openStreams().map((s) => s.roundId));
     return {
       ok: true,
       rounds: rounds.map((r: any) => ({
@@ -27,6 +31,9 @@ export class LiveBroadcastController {
         tourName: r.tourName, roundName: r.roundName, url: r.url,
         boards: r.boards ?? 0,
         updatedAt: r.updatedAt,
+        // "following" = we have an open connection, so this one updates move
+        // by move. The rest refresh when someone opens them.
+        following: streaming.has(String(r._id)),
       })),
       streaming: this.svc.openStreams(),
     };
@@ -44,6 +51,8 @@ export class LiveBroadcastController {
       const d = new Date(since);
       if (!Number.isNaN(d.getTime())) filter.updatedAt = { $gt: d };
     }
+    // Opening a round is the signal that someone wants it live.
+    void this.svc.noteViewed(id).catch(() => {});
     const [meta, games] = await Promise.all([
       this.conn.db!.collection("liveBroadcastRounds").findOne({ _id: id as any }),
       this.conn.db!.collection("liveBroadcastGames").find(filter).sort({ board: 1 }).limit(120).toArray(),

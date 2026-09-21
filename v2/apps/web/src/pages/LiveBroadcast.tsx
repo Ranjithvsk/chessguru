@@ -11,9 +11,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { Chess } from "chess.js";
 import { get } from "../lib/api";
+import Board from "../components/Board";
+import MoveTable from "../components/MoveTable";
 
-type LiveRound = { roundId: string; tourName: string; roundName: string; url?: string; boards: number; updatedAt: string };
+type LiveRound = { roundId: string; tourName: string; roundName: string; url?: string; boards: number; updatedAt: string; following?: boolean };
 type LiveGame = {
   board: number;
   whiteName: string; blackName: string;
@@ -47,7 +50,7 @@ function LiveIndex() {
           Live broadcast
         </h1>
         <p className="mt-1 text-sm text-ink-400">
-          Tournament games as they are played. Follow every board on a round, or open one and watch it move.
+          Every tournament on air right now. Open one and it starts updating move by move.
         </p>
       </header>
 
@@ -69,7 +72,13 @@ function LiveIndex() {
               <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-rose-500" />
               <div className="min-w-0 flex-1">
                 <div className="truncate font-semibold text-white">{r.tourName}</div>
-                <div className="text-xs text-ink-400">{r.roundName} · {r.boards} board{r.boards === 1 ? "" : "s"}</div>
+                <div className="text-xs text-ink-400">
+                  {r.roundName}
+                  {r.boards > 0 && <> · {r.boards} board{r.boards === 1 ? "" : "s"}</>}
+                  {/* We hold open connections only for rounds people are
+                    *  watching. Everything else is listed and loads on open. */}
+                  {r.following && <span className="ml-1 text-rose-300">· following</span>}
+                </div>
               </div>
               <span className="shrink-0 text-xs text-ink-500">Watch →</span>
             </Link>
@@ -136,19 +145,7 @@ function RoundBoards({ roundId }: { roundId: string }) {
         </p>
       </header>
 
-      {focused && (
-        <div className="mb-5 rounded-xl border border-brand-500/40 bg-ink-900/60 p-4">
-          <div className="mb-3 flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <PlayerLine name={focused.whiteName} elo={focused.whiteElo} clock={focused.whiteClock} />
-              <PlayerLine name={focused.blackName} elo={focused.blackElo} clock={focused.blackClock} />
-            </div>
-            <button onClick={() => setFocus(null)} className="shrink-0 text-xs text-ink-400 hover:text-white">Close</button>
-          </div>
-          <div className="mx-auto max-w-[min(100%,26rem)]"><MiniBoard fen={focused.fen} big /></div>
-          <MoveStrip moves={focused.moves} result={focused.result} />
-        </div>
-      )}
+      {focused && <FocusedGame g={focused} onClose={() => setFocus(null)} />}
 
       {list.length === 0 ? (
         <div className="rounded-xl border border-ink-800 bg-ink-900/60 p-8 text-center text-sm text-ink-400">
@@ -180,6 +177,87 @@ function RoundBoards({ roundId }: { roundId: string }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** The game you are actually watching gets the REAL board and the REAL
+ *  notation panel — the same chessground and MoveTable used everywhere else
+ *  in the app. The cheap glyph grid stays for the twenty thumbnails, where
+ *  forty chessgrounds would be a great deal of DOM for something nobody drags
+ *  a piece on; there is no such excuse for the one game in front of you.
+ *  (owner, 2026-09-21: "we have nice board and notation panel ... is that in
+ *  live broadcast")
+ *
+ *  Stepping back through a live game is the point of having the notation
+ *  panel, so `ply === null` means "follow the live move" and any click pins
+ *  you to that move instead. New moves arriving never yank you forward while
+ *  you are reading — that is what "Back to live" is for. */
+function FocusedGame({ g, onClose }: { g: LiveGame; onClose: () => void }) {
+  const [ply, setPly] = useState<number | null>(null);
+  const livePly = g.moves.length;
+  const shown = ply === null ? livePly : Math.min(ply, livePly);
+  const following = ply === null;
+
+  const { fen, lastMove } = useMemo(() => {
+    const c = new Chess();
+    let lm: [string, string] | undefined;
+    for (let i = 0; i < shown; i++) {
+      let mv: any = null;
+      try { mv = c.move(g.moves[i]!); } catch { break; }
+      if (!mv) break;
+      lm = [mv.from, mv.to];
+    }
+    return { fen: c.fen(), lastMove: lm };
+  }, [g.moves, shown]);
+
+  // Keyboard, as everywhere else in the app.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (e.key === "ArrowLeft") { e.preventDefault(); setPly(Math.max(0, shown - 1)); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); setPly(shown + 1 >= livePly ? null : shown + 1); }
+      else if (e.key === "Home") { e.preventDefault(); setPly(0); }
+      else if (e.key === "End") { e.preventDefault(); setPly(null); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [shown, livePly]);
+
+  return (
+    <div className="mb-5 rounded-xl border border-brand-500/40 bg-ink-900/60 p-4">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-500">Board {g.board}</div>
+          <PlayerLine name={g.whiteName} elo={g.whiteElo} clock={g.whiteClock} />
+          <PlayerLine name={g.blackName} elo={g.blackElo} clock={g.blackClock} />
+        </div>
+        <button onClick={onClose} className="shrink-0 text-xs text-ink-400 hover:text-white">Close</button>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_16rem]">
+        <div className="mx-auto w-full max-w-[min(100%,28rem)] md:mx-0">
+          <Board fen={fen} orientation="white" viewOnly coordinates
+                 lastMove={lastMove as any} />
+        </div>
+
+        <div className="min-w-0">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-widest text-ink-500">Moves</span>
+            {following
+              ? <span className="flex items-center gap-1 text-[11px] text-rose-300">
+                  <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-rose-500" />live
+                </span>
+              : <button onClick={() => setPly(null)} className="text-[11px] font-semibold text-brand-300 hover:text-brand-100">Back to live →</button>}
+          </div>
+          <MoveTable sans={g.moves} ply={shown} onPick={(n) => setPly(n >= livePly ? null : n)}
+                     className="max-h-[22rem] overflow-y-auto rounded-lg border border-ink-800 bg-ink-950/50 p-2" />
+          {g.result !== "*" && (
+            <div className="mt-2 rounded-lg bg-ink-950/60 py-1.5 text-center font-mono text-sm text-ink-100">{g.result}</div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
