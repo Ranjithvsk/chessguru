@@ -162,6 +162,30 @@ async function bootstrap() {
     }
     next();
   });
+  // rolling:true makes express-session touch() the store on EVERY response, to
+  // slide the cookie forward. connect-mongo's touch() throws "Unable to find the
+  // session to touch" when its updateOne matches nothing — i.e. the row is gone.
+  //
+  // Which is exactly what logout does: auth.service destroys the session, and any
+  // request already in flight (another tab, a background poll — this app has
+  // several) still touches it on the way out. The row has gone, connect-mongo
+  // returns an Error, Nest's ExceptionsHandler logs it and that request 500s for
+  // a user who has just successfully logged out.
+  //
+  // A touch is a best-effort lifetime extension. If the session no longer exists
+  // there is nothing to extend and nothing has gone wrong, so swallow THAT error
+  // only and let every other store failure through untouched.
+  function forgivingTouch<T extends { touch?: Function }>(store: T): T {
+    const inner = store.touch?.bind(store);
+    if (!inner) return store;
+    (store as any).touch = (sid: string, sess: unknown, cb: (err?: unknown) => void) => {
+      inner(sid, sess, (err: any) => {
+        if (err && /Unable to find the session to touch/i.test(String(err?.message ?? err))) return cb();
+        cb(err);
+      });
+    };
+    return store;
+  }
   app.use(
     session({
       // Unique name so it can't collide with the v1 app's connect.sid on this domain
@@ -171,7 +195,7 @@ async function bootstrap() {
       resave: false,
       saveUninitialized: false,
       rolling: true,   // slide the cookie's lifetime forward on every response so an active user never gets logged out mid-use
-      store: MongoStore.create({ mongoUrl: MONGO_URI, ttl: Math.floor(SESSION_MAX_AGE_MS / 1000) }),
+      store: forgivingTouch(MongoStore.create({ mongoUrl: MONGO_URI, ttl: Math.floor(SESSION_MAX_AGE_MS / 1000) })),
       // domain=.harinitharanjith.com => one login shared across harinitharanjith.com + admin.harinitharanjith.com (SSO).
       // Unset (host-only) when COOKIE_DOMAIN is absent, so localhost/dev still works.
       cookie: { path: "/", httpOnly: true, sameSite: "lax", secure: false, maxAge: SESSION_MAX_AGE_MS, domain: process.env.COOKIE_DOMAIN || undefined },
