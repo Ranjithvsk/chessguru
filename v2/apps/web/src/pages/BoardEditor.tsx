@@ -884,7 +884,15 @@ export default function BoardEditorPage() {
           {serverMsg?.text || "Processing image…"}
         </div>
       )}
-      <section>
+      {/* The board is square and took its size from the COLUMN WIDTH alone, with
+        *  nothing capping it vertically — at 1280x800 that made it 632px and the
+        *  page 1252px tall, so you scrolled to see a board that was supposed to
+        *  be the whole point of the screen. Capping the section's width by the
+        *  available HEIGHT makes the square fit the viewport instead, since the
+        *  board follows its container's width. lg-only: below that the layout is
+        *  a single column and the board should keep the full width.
+        *  (owner, 2026-09-21: "board editor overflowing") */}
+      <section className="lg:mx-auto lg:w-full lg:max-w-[calc(100dvh-14rem)]">
         <Board fen={editorFen ?? fp.fen} orientation={fp.orientation} turnColor={fp.turnColor}
           movableColor={editMode ? undefined : "both"} dests={editMode ? new Map() : fp.dests}
           onMove={editMode ? undefined : fp.onMove}
@@ -1008,7 +1016,11 @@ export default function BoardEditorPage() {
         )}
       </section>
 
-      <aside className="flex flex-col gap-4">
+      {/* The sidebar, not the board, is what actually made this page overflow:
+        *  976px of panels against an 800px viewport, so the whole page scrolled
+        *  and the board scrolled away with it. On lg it now sticks and scrolls
+        *  INSIDE itself, so the board stays put while you work down the panels. */}
+      <aside className="flex flex-col gap-4 lg:sticky lg:top-4 lg:max-h-[calc(100dvh-5rem)] lg:overflow-y-auto lg:pr-1">
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
           <h1 className="mb-3 font-display text-xl text-white">Board / Analysis</h1>
           <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-400">Load FEN</label>
@@ -1021,8 +1033,8 @@ export default function BoardEditorPage() {
           {/* PGN in — paste it or pick a .pgn. Loads the GAME, not just a
             *  position, so the coach can walk to the moment they want. */}
           <label className="mb-1 mt-4 block text-xs font-semibold uppercase tracking-wide text-ink-400">Load PGN</label>
-          <textarea value={pgnInput} onChange={(e) => setPgnInput(e.target.value)} rows={3}
-            placeholder={"Paste a PGN — with headers or just the moves\n1. e4 e5 2. Nf3 Nc6 ..."}
+          <textarea value={pgnInput} onChange={(e) => setPgnInput(e.target.value)} rows={2}
+            placeholder="Paste a PGN — headers or just moves"
             className="w-full resize-none rounded-lg border border-ink-600 bg-ink-800 px-3 py-2 font-mono text-xs text-white outline-none focus:border-brand-500" />
           <div className="mt-2 flex gap-2">
             <button onClick={() => offerPgn(pgnInput)}
