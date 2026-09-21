@@ -13,3 +13,5 @@ coverage/
 *.tsbuildinfo
 # Large ML models -- copied via scp on each deploy from Mumbai backend
 apps/api/models/
+scripts/.cache/
+scripts/.class-hosts

@@ -1947,7 +1947,7 @@ export default function ClassV2Page() {
                *  container. container-type:size gives SharedClassBoard's
                *  cqi/cqb-based sizing an actual box to measure against. */}
               <div
-                className="relative flex min-h-[55svh] flex-1 items-center justify-center overflow-hidden p-2 lg:min-h-0"
+                className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-2"
                 style={{ containerType: 'size' } as any}
               >
               <AudioUnblockPrompt />
@@ -2037,7 +2037,14 @@ export default function ClassV2Page() {
 
             {/* Controls footer — mic / cam / screen + hand / chat / reactions,
              *  sits UNDER the board so nothing overlaps pieces. */}
-            {/* The board is sized by the SMALLER of its slot's width and height
+            {/* NB: do NOT put a min-height floor on the board slot. This shell is a
+             *  FIXED-height flex column with overflow-hidden; the notation panel and
+             *  this footer are both shrink-0, so a floor on the board pushes the
+             *  footer past the bottom edge and it is clipped away entirely — the
+             *  controls simply vanish (reported 2026-09-21, hours after it shipped).
+             *  The one-row footer below is what actually fixes the shrinking board.
+             *
+             *  The board is sized by the SMALLER of its slot's width and height
              *  (min(100cqi,100cqb)), so on a phone its height is what limits it —
              *  and this footer is shrink-0, so every row it wrapped onto came
              *  straight off the board. With ~10 controls it wrapped 3-4 deep and

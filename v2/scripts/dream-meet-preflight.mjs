@@ -14,18 +14,32 @@
 //
 // Usage:
 //   node scripts/dream-meet-preflight.mjs
-//   CLASS_HOSTS=chessguru.cc,gunachess.com node scripts/dream-meet-preflight.mjs
+//   CLASS_HOSTS=chessguru.cc,academy.example node scripts/dream-meet-preflight.mjs
 //
 // Exit code is the number of failures, so CI and deploy scripts can gate on it.
 import { MongoClient } from "mongodb";
+import { readFileSync } from "node:fs";
 import tls from "node:tls";
 import https from "node:https";
 import { setTimeout as sleep } from "node:timers/promises";
 
-// Every hostname a class can be taught from. A new academy custom domain MUST
-// be added here — the 2026-09-20 outage was a coach domain nobody had wired to
-// the dedicated process, and it failed silently for a whole lesson.
-const CLASS_HOSTS = (process.env.CLASS_HOSTS ?? "chessguru.cc,gunachess.com").split(",").map((s) => s.trim()).filter(Boolean);
+// Every hostname a class can be taught from. A new academy custom domain MUST be
+// covered — the 2026-09-20 outage was a custom domain nobody had wired to the
+// dedicated process, and it failed silently for a whole lesson.
+//
+// The real list is deployment config, not source: it lives in scripts/.class-hosts
+// (one host per line, gitignored) so academy domains are not baked into the repo.
+// Precedence: CLASS_HOSTS env > .class-hosts file > the platform domain alone.
+function classHosts() {
+  if (process.env.CLASS_HOSTS) return process.env.CLASS_HOSTS.split(",").map((s) => s.trim()).filter(Boolean);
+  try {
+    const f = new URL("./.class-hosts", import.meta.url);
+    const lines = readFileSync(f, "utf8").split("\n").map((l) => l.replace(/#.*/, "").trim()).filter(Boolean);
+    if (lines.length) return lines;
+  } catch { /* no local list — fall through */ }
+  return ["chessguru.cc"];
+}
+const CLASS_HOSTS = classHosts();
 const LIVEKIT_HOST = process.env.LIVEKIT_HOST ?? "livekit.chessguru.cc";
 const API_BASE = process.env.API_BASE ?? "https://chessguru.cc";
 const MONGO = process.env.MONGO_URI ?? "mongodb://127.0.0.1:27017/chessguru";
