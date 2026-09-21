@@ -76,4 +76,33 @@ export class LivekitService {
       if (!/already exists/i.test(msg)) this.log.warn(`ensureRoom ${roomName}: ${msg}`);
     }
   }
+
+  /** What the SFU actually believes about one participant's microphone.
+   *
+   *  The client cannot see this, and the two genuinely drift apart: a failed
+   *  mic re-acquire can leave the track muted here while the publisher's own
+   *  UI reports it live, so the coach talks to a room that hears silence and
+   *  every local signal tells them it is fine. A student refreshing does not
+   *  help, because nothing is being published to subscribe to.
+   *  (owner, 2026-09-21)
+   *
+   *  Returns null when we cannot tell — caller must treat that as "no opinion"
+   *  and never as "muted", or it would round-trip a healthy mic for nothing. */
+  async micState(roomName: string, identity: string): Promise<{ muted: boolean; trackSid: string } | null> {
+    const { httpUrl, key, secret, configured } = this.cfg();
+    if (!configured) return null;
+    try {
+      const svc = new RoomServiceClient(httpUrl, key, secret);
+      const ps = await svc.listParticipants(roomName);
+      const me = ps.find((p) => p.identity === identity);
+      if (!me) return null;
+      // TrackSource.MICROPHONE === 2
+      const mic = me.tracks.find((t) => t.source === 2) ?? me.tracks.find((t) => t.type === 0);
+      if (!mic) return null;
+      return { muted: !!mic.muted, trackSid: mic.sid };
+    } catch (err: any) {
+      this.log.warn(`micState ${roomName}/${identity}: ${String(err?.message || err)}`);
+      return null;
+    }
+  }
 }

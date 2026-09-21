@@ -42,6 +42,20 @@ export class LivekitController {
     return { ok: true, roomName };
   }
 
+  /** Is the SFU actually carrying my microphone right now?
+   *
+   *  Deliberately scoped to the CALLER's own identity — this reports on you,
+   *  never on anyone else in the room, so it cannot become a way to watch
+   *  whether another participant is talking. */
+  @Get("mic-state")
+  async micState(@Query("room") room: string, @Req() req: any) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    const roomName = String(room || "").trim();
+    if (!/^[a-zA-Z0-9_-]{2,64}$/.test(roomName)) throw new BadRequestException("bad room");
+    const state = await this.svc.micState(roomName, String(req.session.userId));
+    return { ok: true, state };          // state === null means "cannot tell"
+  }
+
   @Get("token")
   async token(
     @Req() req: any,

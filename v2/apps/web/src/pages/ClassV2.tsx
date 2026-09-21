@@ -18,7 +18,7 @@ import {
 import { Track, DataPacket_Kind, DisconnectReason, RoomEvent, VideoQuality } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
-import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassNotationHidden, triggerClassNotationToggle, useClassMoveList, useClassStartShapes, triggerClassSeek, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow , useCoachNotices, dismissCoachNotice, useClassPresence } from "../components/SharedClassBoard";
+import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassNotationHidden, triggerClassNotationToggle, useClassMoveList, useClassStartShapes, triggerClassSeek, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow , useCoachNotices, dismissCoachNotice, pushCoachNotice, useClassPresence } from "../components/SharedClassBoard";
 import { useScreenWakeLock } from "../hooks/useScreenWakeLock";
 import { OPENINGS, findOpeningForLine, openingBySlug, type Opening } from "../lib/openings";
 import { fetchExplorer, type ExplorerData, type ExplorerMove } from "../lib/explorer";
@@ -589,6 +589,25 @@ function CoachStudentNotationToggle() {
 // the video-tiles toggle) — it never touches the room, so a coach hiding their
 // own panel does not hide the students'. On a phone this also hands the whole
 // column back to the board, which is the cheapest way to get a bigger board.
+// Desktop = the move list is a tall sidebar beside the BOARD. Below that it
+// rides in the footer beside the CONTROLS instead. Rendering it in one place
+// or the other (rather than two copies with `hidden lg:block`) keeps exactly
+// ONE ClassNotationPanel mounted, so its effects and scroll handling never
+// run twice against the same room.
+function useIsDesktopClass(): boolean {
+  const [isLg, setIsLg] = useState<boolean>(() => {
+    try { return window.matchMedia("(min-width: 1024px)").matches; } catch { return true; }
+  });
+  useEffect(() => {
+    let mq: MediaQueryList;
+    try { mq = window.matchMedia("(min-width: 1024px)"); } catch { return; }
+    const on = () => setIsLg(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return isLg;
+}
+
 const SELF_NOTATION_KEY = "cg-hide-notation-self";
 function useSelfNotationHidden(): [boolean, (v: boolean) => void] {
   const [hidden, setHidden] = useState<boolean>(() => {
@@ -856,6 +875,20 @@ function CoachMicStatus() {
   const isSpeaking = useIsSpeaking(localParticipant);
   const participants = useParticipants();
   const listeners = Math.max(0, participants.length - 1);   // exclude coach themselves
+  const notReaching = useMicNotReaching();
+  // Server says the track is muted while this client says live. The speaking
+  // pulse below is driven by LOCAL capture and will happily keep bouncing, so
+  // it must not be what the coach reads in this state.
+  if (isMicrophoneEnabled && notReaching) {
+    return (
+      <div
+        className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/70 bg-amber-500/20 px-2.5 py-1 text-xs font-semibold text-amber-100"
+        title="Your microphone is not reaching the server, so students hear nothing even though your mic meter is moving. Click the mic button off and then on."
+      >
+        ⚠ Not reaching students · click mic off/on
+      </div>
+    );
+  }
   if (!isMicrophoneEnabled) {
     return (
       <div
@@ -1683,6 +1716,7 @@ export default function ClassV2Page() {
   // My OWN move-list preference — local only, never broadcast. Separate from the
   // coach's "hide it for the students" switch below.
   const [selfNotationHidden, setSelfNotationHidden] = useSelfNotationHidden();
+  const isDesktopClass = useIsDesktopClass();
   // Students lose the panel when the COACH hides it for them; the coach's own
   // panel is governed purely by their local toggle.
   const classNotationHidden = useClassNotationHidden();
@@ -2061,6 +2095,7 @@ export default function ClassV2Page() {
               <AudioUnblockPrompt />
               <VideoKeepAlive />
               <MicWakeGuard />
+              <MicPublishReconciler room={room} />
               <SharedClassBoard room={room} userId={me?.userId} displayName={me?.username} onClassEnded={onClassEnded} intendedRole={role} />
               {/* Student toast when the coach marks their challenge answer.
                *  Module-level state so this host can live anywhere in the tree. */}
@@ -2140,8 +2175,8 @@ export default function ClassV2Page() {
                *  render guard. Hiding the move list must not take the coach's
                *  keyboard away — that coach is the one who needs it most. */}
               <ClassBoardKeyboardNav role={role} />
-              {!hideNotationHere && (
-                <div className="shrink-0 border-t border-ink-800 lg:h-auto lg:w-[360px] lg:border-l lg:border-t-0">
+              {!hideNotationHere && isDesktopClass && (
+                <div className="shrink-0 lg:h-auto lg:w-[360px] lg:border-l lg:border-ink-800">
                   <ClassNotationPanel room={room} role={role} />
                 </div>
               )}
@@ -2169,6 +2204,13 @@ export default function ClassV2Page() {
              *    2. one horizontally-scrollable row — controls present but off-screen
              *       to the right, which mid-class is the same as gone. */}
             <div className="shrink-0 border-t border-ink-800 bg-ink-900/70 px-4 py-2">
+              {/* Below lg the move list rides HERE, beside the controls, rather
+               *  than in a band of its own between the board and this row
+               *  (owner, 2026-09-21: "panel for coach next to the buttons").
+               *  On a phone there is no room to sit beside anything, so it
+               *  takes the full width directly above them instead. */}
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
+              <div className="min-w-0 sm:flex-1">
               {/* Grouped by WHAT EACH CONTROL ACTS ON: the call, the board, the class.
                *  Eighteen identical pills in one undifferentiated row meant a coach had
                *  to read every label to find one, mid-lesson.
@@ -2281,6 +2323,13 @@ export default function ClassV2Page() {
                     </button>
                   </div>
                 )}
+              </div>
+              </div>
+              {!hideNotationHere && !isDesktopClass && (
+                <div className="order-first w-full shrink-0 overflow-hidden rounded-lg border border-ink-800 sm:order-none sm:w-[16rem]">
+                  <ClassNotationPanel room={room} role={role} />
+                </div>
+              )}
               </div>
             </div>
           </div>
@@ -2657,8 +2706,93 @@ function VideoQualityPicker() {
 // On wake, re-acquire the microphone ONLY if the person meant to be unmuted. A
 // deliberate mute is left strictly alone — silently switching someone's mic back on
 // because they changed tabs would be far worse than the bug. (owner, 2026-09-19)
+// The SFU is the only thing that knows whether the class can actually hear you.
+//
+// A publisher's own client can believe its microphone is live while the server
+// holds the track muted — a mic re-acquire that fails between its mute and its
+// unmute halves leaves exactly that state. Everything local then lies in the
+// same direction: the button reads unmuted, the level meter moves off the local
+// capture, the status pill pulses. The room hears silence, and a student
+// refreshing does not help, because nothing is being published to subscribe to.
+//
+// So: when this client thinks the mic is ON, ask the server what it sees. If the
+// server says muted, force one clean mute/unmute round-trip to re-signal.
+//
+// Safety: this only ever runs when the local state is ALREADY unmuted, and it
+// only ever ends unmuted. It can never switch on a mic somebody muted on
+// purpose — a deliberate mute makes isMicrophoneEnabled false and we never ask.
+// A null answer means "cannot tell" and is left alone. (owner, 2026-09-21)
+// Shared so the header pill can stop lying. The coach's mic meter runs off
+// their LOCAL capture, so it keeps pulsing while the SFU carries nothing —
+// which is precisely why this bug survived so long: every indicator on the
+// coach's own screen agreed that everything was fine.
+let micNotReaching = false;
+const micReachSubs = new Set<() => void>();
+function setMicNotReaching(v: boolean): void {
+  if (micNotReaching === v) return;
+  micNotReaching = v;
+  micReachSubs.forEach((f) => f());
+}
+function useMicNotReaching(): boolean {
+  const [v, setV] = useState(micNotReaching);
+  useEffect(() => {
+    const f = () => setV(micNotReaching);
+    micReachSubs.add(f); f();
+    return () => { micReachSubs.delete(f); };
+  }, []);
+  return v;
+}
+
+function MicPublishReconciler({ room }: { room: string }) {
+  const { localParticipant, isMicrophoneEnabled } = useLocalParticipant();
+  const busyRef = useRef(false);
+  const micOnRef = useRef(isMicrophoneEnabled);
+  micOnRef.current = isMicrophoneEnabled;
+  useEffect(() => {
+    if (!localParticipant) return;
+    let stop = false;
+    const tick = async () => {
+      if (stop || busyRef.current) return;
+      if (!micOnRef.current) return;                      // muted on purpose — never touch
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      let state: { muted: boolean } | null = null;
+      try {
+        const r = await get<{ ok: boolean; state: { muted: boolean; trackSid: string } | null }>(
+          `/api/livekit/mic-state?room=${encodeURIComponent(room)}`,
+        );
+        state = r?.state ?? null;
+      } catch { return; }                                  // network blip — no opinion
+      if (stop || !state) return;                          // cannot tell — no opinion
+      if (!state.muted) { setMicNotReaching(false); return; }   // server agrees: we are live
+      if (!micOnRef.current) return;                       // coach muted while we asked
+      busyRef.current = true;
+      try {
+        // eslint-disable-next-line no-console
+        console.warn("[ClassV2] mic desync: server has the track muted while this client says live — re-signalling");
+        await localParticipant.setMicrophoneEnabled(false);
+        await localParticipant.setMicrophoneEnabled(true);
+        const stillMuted = !!localParticipant.getTrackPublication(Track.Source.Microphone)?.isMuted;
+        setMicNotReaching(stillMuted);
+        if (stillMuted) pushCoachNotice("⚠ Your mic is not reaching students. Click the mic button off and on.", "warn");
+      } catch {
+        setMicNotReaching(true);
+        pushCoachNotice("⚠ Your mic is not reaching students. Click the mic button off and on.", "warn");
+      } finally {
+        busyRef.current = false;
+      }
+    };
+    const id = setInterval(() => { void tick(); }, 8000);
+    const t0 = setTimeout(() => { void tick(); }, 4000);
+    return () => { stop = true; clearInterval(id); clearTimeout(t0); };
+  }, [localParticipant, room]);
+  return null;
+}
+
 function MicWakeGuard() {
   const { localParticipant } = useLocalParticipant();
+  // One re-acquire at a time. Two overlapping cycles are how the mic ends up
+  // stuck muted: cycle A mutes, cycle B mutes again and fails to restore.
+  const busyRef = useRef(false);
   useEffect(() => {
     if (!localParticipant) return;
     const check = () => {
@@ -2669,11 +2803,43 @@ function MicWakeGuard() {
       if (!mst) return;
       if (mst.readyState === "live" && !mst.muted) return;   // capture is healthy
       // Capture was suspended or ended while hidden — take it again.
+      //
+      // THIS PAIR IS ATOMIC OR IT IS A BUG. The first call mutes the track on the
+      // SERVER; the second is what brings it back. If the second one threw — device
+      // still busy, or it raced the coach unmuting by hand — the old code swallowed
+      // it and walked away, leaving the participant MUTED on the SFU while their own
+      // UI happily said "live" and the mic meter still moved off the local capture.
+      // Students heard nothing, and refreshing did not help them, because there was
+      // genuinely nothing being published. It stayed that way until the coach
+      // toggled by hand. (owner, 2026-09-21: "coach muted for some time, and unmute
+      // and speak, students cant hear ... coach mic pulse works" / "even student
+      // refreshed the page, still cant hear")
+      //
+      // So: never run two cycles at once, and never exit this function with the mic
+      // muted when we entered it intending to keep the coach live.
+      if (busyRef.current) return;
+      busyRef.current = true;
       void (async () => {
+        const micOn = () => !localParticipant.getTrackPublication(Track.Source.Microphone)?.isMuted;
         try {
-          await localParticipant.setMicrophoneEnabled(false);
-          await localParticipant.setMicrophoneEnabled(true);
-        } catch { /* device busy or permission gone — the ControlBar still works */ }
+          try {
+            await localParticipant.setMicrophoneEnabled(false);
+            await localParticipant.setMicrophoneEnabled(true);
+          } catch { /* fall through to the retries below */ }
+          // Verify, don't assume. setMicrophoneEnabled can resolve with the
+          // publication still muted, and it can throw after the mute half landed.
+          for (let i = 0; i < 4 && !micOn(); i++) {
+            await new Promise((r) => setTimeout(r, 600 * (i + 1)));
+            try { await localParticipant.setMicrophoneEnabled(true); } catch { /* keep trying */ }
+          }
+          if (!micOn()) {
+            // Out of retries. The coach MUST be told, because every local signal
+            // they have says they are being heard.
+            pushCoachNotice("⚠ Your mic did not come back after the screen woke — students cannot hear you. Click the mic button off and on.", "warn");
+          }
+        } finally {
+          busyRef.current = false;
+        }
       })();
     };
     // A beat after wake: the browser often restores capture on its own, and racing it
