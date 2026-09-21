@@ -497,7 +497,15 @@ function CoachStudentNotationToggle() {
 const SELF_NOTATION_KEY = "cg-hide-notation-self";
 function useSelfNotationHidden(): [boolean, (v: boolean) => void] {
   const [hidden, setHidden] = useState<boolean>(() => {
-    try { return localStorage.getItem(SELF_NOTATION_KEY) === "1"; } catch { return false; }
+    try {
+      const saved = localStorage.getItem(SELF_NOTATION_KEY);
+      if (saved !== null) return saved === "1";
+      // No choice made yet. On a PHONE the move list stacks BELOW the board and
+      // takes that height straight off it, which is the whole "board is tiny"
+      // complaint — so start hidden there and let the board have the column.
+      // Desktop puts it in a side column where it costs the board nothing.
+      return typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches;
+    } catch { return false; }
   });
   useEffect(() => {
     try { localStorage.setItem(SELF_NOTATION_KEY, hidden ? "1" : "0"); } catch { /* private mode */ }
@@ -509,9 +517,12 @@ function SelfNotationToggle({ hidden, onToggle }: { hidden: boolean; onToggle: (
     <button
       onClick={onToggle}
       title={hidden ? "Show the move list on my screen" : "Hide the move list on my screen (bigger board)"}
+      aria-pressed={hidden}
       className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${hidden ? "border-amber-500/60 bg-amber-500/20 text-amber-100 hover:bg-amber-500/30" : "border-ink-700 bg-ink-900 text-ink-100 hover:bg-ink-800"}`}
     >
-      {hidden ? "🙈 My notation" : "📖 My notation"}
+      {/* Says what pressing DOES. "My notation" on both states read as a label,
+          not a control, so people pressed it to see notation and lost it. */}
+      {hidden ? "📖 Show moves" : "🙈 Hide moves"}
     </button>
   );
 }
@@ -2037,23 +2048,19 @@ export default function ClassV2Page() {
 
             {/* Controls footer — mic / cam / screen + hand / chat / reactions,
              *  sits UNDER the board so nothing overlaps pieces. */}
-            {/* NB: do NOT put a min-height floor on the board slot. This shell is a
-             *  FIXED-height flex column with overflow-hidden; the notation panel and
-             *  this footer are both shrink-0, so a floor on the board pushes the
-             *  footer past the bottom edge and it is clipped away entirely — the
-             *  controls simply vanish (reported 2026-09-21, hours after it shipped).
-             *  The one-row footer below is what actually fixes the shrinking board.
-             *
-             *  The board is sized by the SMALLER of its slot's width and height
-             *  (min(100cqi,100cqb)), so on a phone its height is what limits it —
-             *  and this footer is shrink-0, so every row it wrapped onto came
-             *  straight off the board. With ~10 controls it wrapped 3-4 deep and
-             *  the board kept getting smaller as more appeared. One scrollable
-             *  row on small screens, free to wrap again from lg up where there is
-             *  room. It also keeps 🔒 Locked in a predictable place instead of
-             *  buried mid-wrap. (owner, 2026-09-20) */}
+            {/* This footer WRAPS on purpose. Two failed attempts, both mine, both
+             *  reported within hours (2026-09-21):
+             *    1. a min-height floor on the board slot — the shell is a FIXED-height
+             *       flex column with overflow-hidden and the siblings are shrink-0, so
+             *       the floor pushed this whole footer past the bottom edge and it was
+             *       clipped away entirely.
+             *    2. one horizontally-scrollable row — the controls were present but
+             *       off-screen to the right, which to a coach mid-class is the same as
+             *       gone, and worse because nothing hints they are there.
+             *  Everything must stay VISIBLE. If the board is tight on a phone, reduce
+             *  what this row contains or tighten its spacing — never hide or clip it. */}
             <div className="shrink-0 border-t border-ink-800 bg-ink-900/70 px-4 py-2">
-              <div className="flex flex-nowrap items-center justify-start gap-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:flex-wrap lg:justify-center lg:overflow-visible">
+              <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3">
                 <div className="rounded-xl border border-ink-800 bg-ink-900 shadow">
                   <ControlBar variation="minimal" controls={{ microphone: true, camera: true, screenShare: true, chat: false, leave: false }} />
                 </div>
