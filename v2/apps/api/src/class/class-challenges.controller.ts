@@ -119,16 +119,30 @@ export class ChallengeMarkController {
     const lo = new Date(startedAtRaw - 5_000);
     const hi = new Date(startedAtRaw + 5_000);
     const filter = { classId, startedAt: { $gte: lo, $lte: hi } } as any;
+    // markedAt is what lets the CLASS-WS process notice this mark. See the
+    // pushToClassClient call below for why the direct push is not enough.
     const patch = correct === null
-      ? { $unset: { "answers.$[e].correct": "" } }
-      : { $set: { "answers.$[e].correct": correct } };
+      ? { $unset: { "answers.$[e].correct": "" }, $set: { "answers.$[e].markedAt": new Date() } }
+      : { $set: { "answers.$[e].correct": correct, "answers.$[e].markedAt": new Date() } };
     const arrayFilters = [{ "e.userId": studentUserId }];
     const r = await this.conn.db!.collection("classChallenges").updateOne(filter, patch, { arrayFilters });
     if (r.matchedCount === 0) throw new BadRequestException("Challenge not found.");
 
-    // Live push to the student's class socket (if they're still in the
-    // room) so they see an immediate toast instead of only noticing on
-    // their next /challenges visit. Silent no-op if the student left.
+    // Live push to the student's class socket so they see an immediate toast
+    // instead of only noticing on their next /challenges visit.
+    //
+    // This call alone NEVER reached the student. pushToClassClient walks the
+    // in-memory `rooms` map of WHICHEVER PROCESS CALLS IT, and this controller
+    // runs in the API process (:4000) while class sockets live in the separate
+    // class-ws process (:4100). Here the map is empty, so it returned
+    // { sent: 0 } and silently did nothing — the student's receive handler for
+    // challenge_marked was correct and simply never fired. (owner, 2026-09-21:
+    // "when coach mark correct or wrong key, student dont see notification".
+    // Same process-boundary shape as the abandoned-sweeper and the class-end
+    // broadcast, both fixed the same day.)
+    //
+    // Kept as the fast path for the case where the API does own the room; the
+    // markedAt stamp above is what class-ws watches to deliver it for real.
     try {
       pushToClassClient(classId, studentUserId, {
         type: "challenge_marked",

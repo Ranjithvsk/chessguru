@@ -1761,6 +1761,58 @@ export function getLiveAttendees(classId: string): Array<{ userId: string | null
  */
 const ENDED_POLL_MS = 4_000;
 let endedPoll: ReturnType<typeof setInterval> | null = null;
+// Deliver coach marks to the student who was marked.
+//
+// The mark is written by the API process (POST /api/class/challenges/mark-answer),
+// which then calls pushToClassClient — against ITS OWN empty rooms map, because
+// the student's socket lives in THIS process. So the push was a silent no-op and
+// the student never saw the toast, while the coach's screen showed the mark
+// applied. (owner, 2026-09-21: "when coach mark correct or wrong key, student
+// dont see notification")
+//
+// Same remedy as the ended-watcher above: the write is the message. The API
+// stamps answers.$.markedAt, and this poll turns any stamp newer than the last
+// sweep into the challenge_marked frame the client already knows how to render.
+// Scoped to rooms THIS process holds, so it costs one indexed query per tick.
+const MARK_POLL_MS = 3_000;
+let markPoll: ReturnType<typeof setInterval> | null = null;
+let marksSeenUpTo = new Date();
+function startChallengeMarkWatcher(): void {
+  if (markPoll) return;
+  markPoll = setInterval(() => {
+    void (async () => {
+      try {
+        if (!dbConn?.db || rooms.size === 0) return;
+        const ids = [...rooms.keys()];
+        const since = marksSeenUpTo;
+        // Advance the cursor BEFORE awaiting, so a slow query cannot make the
+        // next tick re-send everything it already delivered.
+        marksSeenUpTo = new Date();
+        const docs = await dbConn.db.collection("classChallenges")
+          .find(
+            { classId: { $in: ids }, "answers.markedAt": { $gte: since } },
+            { projection: { classId: 1, startedAt: 1, answers: 1 } },
+          )
+          .toArray();
+        for (const doc of docs as any[]) {
+          if (!Array.isArray(doc.answers)) continue;
+          for (const a of doc.answers) {
+            if (!a?.markedAt || new Date(a.markedAt) < since) continue;
+            if (!a.userId) continue;
+            pushToClassClient(String(doc.classId), String(a.userId), {
+              type: "challenge_marked",
+              classId: String(doc.classId),
+              startedAt: doc.startedAt,
+              correct: a.correct === true ? true : a.correct === false ? false : null,
+            });
+          }
+        }
+      } catch { /* never let a Mongo hiccup disturb a live class */ }
+    })();
+  }, MARK_POLL_MS);
+  if (typeof markPoll.unref === "function") markPoll.unref();
+}
+
 function startEndedWatcher(): void {
   if (endedPoll) return;
   endedPoll = setInterval(() => {
@@ -1788,6 +1840,7 @@ export function attachClassWs(server: HttpServer, conn?: Connection, push?: Push
   if (push) pushSvc = push;
   if (report) realtimeReporter = report;
   startEndedWatcher();
+  startChallengeMarkWatcher();
   server.on("upgrade", (req, socket, head) => {
     if (parseRoomId(req.url) == null) return; // let another handler (or default) close it
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));

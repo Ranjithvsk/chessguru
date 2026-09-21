@@ -266,29 +266,94 @@ function ClassChatPanel({ open, onClose }: { open: boolean; onClose: () => void 
 
 // Raised-hands roster + floating "🖐 hand up" button. Broadcasts on `cg-hand`.
 type HandFrame = { from: string; up: boolean; ts: number };
-function useHandRaise() {
+// Raised hands live in ONE module-level store, not in component state.
+//
+// useHandRaise() used to hold its own useState + its own useDataChannel, and it
+// was called TWICE — once by the button, once by the roster. Two independent
+// hand lists that never agreed, each fed only by frames that happened to arrive
+// while it was mounted, with nothing to re-sync from. A single missed or
+// superseded frame dropped a hand for good, and the raise vanished on its own.
+// (owner, 2026-09-21: "when raise hand by student clicked it auto hides in 10 sec")
+//
+// Now: one sink writes the store, every reader subscribes to it, and a student
+// with their hand up RE-ANNOUNCES it every few seconds. The re-announce is what
+// makes this self-healing — a coach who joins late, refreshes, or misses a
+// frame picks the hand up on the next beat instead of never.
+const HAND_BEAT_MS = 4_000;
+const HAND_STALE_MS = 14_000;          // >3 missed beats before we drop a hand
+type HandEntry = { at: number };
+let _mineUp = false;             // this participant's own hand, module-level so the sink can re-announce it
+const _hands = new Map<string, HandEntry>();
+const _handSubs = new Set<() => void>();
+function _publishHands() { _handSubs.forEach((f) => f()); }
+function _setHand(who: string, up: boolean) {
+  if (up) _hands.set(who, { at: Date.now() });
+  else _hands.delete(who);
+  _publishHands();
+}
+function _pruneHands() {
+  const cut = Date.now() - HAND_STALE_MS;
+  let changed = false;
+  for (const [who, e] of _hands) if (e.at < cut) { _hands.delete(who); changed = true; }
+  if (changed) _publishHands();
+}
+function useHandsUp(): Set<string> {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const f = () => bump((n) => n + 1);
+    _handSubs.add(f);
+    return () => { _handSubs.delete(f); };
+  }, []);
+  return new Set(_hands.keys());
+}
+
+/** Mounted ONCE. Owns the only cg-hand subscription, prunes stale hands, and
+ *  re-announces this participant's own hand so it cannot silently lapse. */
+function HandRaiseSink() {
   const room = useRoomContext();
   const { localParticipant } = useLocalParticipant();
   const me = localParticipant?.identity ?? "me";
-  const [handsUp, setHandsUp] = useState<Set<string>>(new Set());
-  const [mineUp, setMineUp] = useState(false);
   const dc = useDataChannel("cg-hand");
   useEffect(() => {
     if (!dc.message) return;
     try {
       const raw = dc.message.payload instanceof Uint8Array ? RX.decode(dc.message.payload) : String(dc.message.payload);
       const f = JSON.parse(raw) as HandFrame;
-      setHandsUp((prev) => {
-        const next = new Set(prev);
-        if (f.up) next.add(f.from); else next.delete(f.from);
-        return next;
-      });
+      if (f?.from) _setHand(String(f.from), !!f.up);
     } catch { /* */ }
   }, [dc.message]);
+  useEffect(() => {
+    const id = setInterval(() => {
+      _pruneHands();
+      // Re-announce mine. Cheap (one tiny reliable frame) and it is what lets a
+      // late joiner or a missed frame recover on its own.
+      if (!_mineUp || !room) return;
+      try {
+        room.localParticipant.publishData(
+          TX.encode(JSON.stringify({ from: me, up: true, ts: Date.now() } as HandFrame)),
+          { reliable: true, topic: "cg-hand" },
+        );
+      } catch { /* */ }
+      _setHand(me, true);                      // keep my own entry fresh locally
+    }, HAND_BEAT_MS);
+    return () => clearInterval(id);
+  }, [room, me]);
+  return null;
+}
+
+function useHandRaise() {
+  const room = useRoomContext();
+  const { localParticipant } = useLocalParticipant();
+  const me = localParticipant?.identity ?? "me";
+  const handsUp = useHandsUp();
+  const [mineUp, setMineUpState] = useState(_mineUp);
   const toggle = () => {
-    const next = !mineUp;
-    setMineUp(next);
-    setHandsUp((prev) => { const n = new Set(prev); if (next) n.add(me); else n.delete(me); return n; });
+    const next = !_mineUp;
+    _mineUp = next;
+    setMineUpState(next);
+    // LiveKit does not loop published data back to the sender, so set our own
+    // entry directly — otherwise the person raising never appears in the list.
+    _setHand(me, next);
     if (!room) return;
     try { room.localParticipant.publishData(TX.encode(JSON.stringify({ from: me, up: next, ts: Date.now() } as HandFrame)), { reliable: true, topic: "cg-hand" }); } catch { /* */ }
   };
@@ -579,8 +644,14 @@ function CoachStudentNotationToggle() {
       aria-pressed={hidden}
       className={ctl(hidden ? "alert" : "idle")}
     >
-      <Ico name={hidden ? "listOff" : "list"} />
-      {hidden ? "Their moves hidden" : "Their moves shown"}
+      {/* Says what pressing DOES, like the self toggle beside it — not what is
+        *  currently true. "Their moves shown" read as a label rather than a
+        *  control, so the coach pressed it expecting to show the panel and
+        *  hid it instead. Same trap the self toggle already learned.
+        *  (owner, 2026-09-21: "their moves shown, to hide students notation
+        *  panel") The amber tone still carries the STATE: lit = hidden. */}
+      <Ico name={hidden ? "list" : "listOff"} />
+      {hidden ? "Show their moves" : "Hide their moves"}
     </button>
   );
 }
@@ -2137,6 +2208,8 @@ export default function ClassV2Page() {
               {!hideVideo && <CameraPIPMaybe />}
               <CoachWaitingOverlay room={room} role={role} />
               <HandsRoster />
+              {/* One subscription for hands — see HandRaiseSink. */}
+              <HandRaiseSink />
               {/* ReactionOverlay + ReactionsBar removed 2026-09-03 (owner:
                *  "remove emoji panel, for coach and students"). Components
                *  left in the file dead for now — sweep in a later cleanup. */}
@@ -2268,7 +2341,9 @@ export default function ClassV2Page() {
                     <Ico name={hideVideo ? "eye" : "eyeOff"} />
                     {hideVideo ? "Show video" : "Hide video"}
                   </button>
-                  <HandRaiseButton />
+                  {/* Students only. The coach runs the class — there is nobody
+                    *  for them to raise a hand to. (owner, 2026-09-21) */}
+                  {role === "student" && <HandRaiseButton />}
                   <ChatToggleButton />
                   {/* 📩 Private DM to the coach — student-only. Opens a small
                    *  dialog to send one message; coach receives the standard
@@ -2480,13 +2555,23 @@ function ChallengeStartModal({ onClose, onStart }: { onClose: () => void; onStar
 }
 
 function ChallengeAnswersPanel({ challenge }: { challenge: NonNullable<ReturnType<typeof useClassChallenge>> }) {
-  // Never opens on its own (owner 2026-09-08: the coach's screen is shared
-  // with the class, so an auto-revealed answer list gave the solution away).
-  // The coach gets a notice when the challenge ends and opens this when the
-  // screen is safe. Inside, the moves are hidden behind "Reveal" as well.
-  const [open, setOpen] = useState(false);
+  // Opens by itself the moment a challenge ends — the coach pressed End or the
+  // timer ran out. This component only mounts once challenge.active is false,
+  // so mounting IS the end of the challenge.
+  //
+  // That reverses the 2026-09-08 rule ("never opens on its own": the coach's
+  // screen is shared with the class, so an auto-revealed answer list gave the
+  // solution away). Safe now for the reason the owner gave on 2026-09-21 —
+  // "open the challenge answer panel in coach, because answers are hidden
+  // already": the panel opens with revealed=false, so a shared screen shows
+  // WHO answered and how many, never WHAT they played. The moves stay behind
+  // Reveal, which is still a deliberate press by the coach.
+  //
+  // revealed is forced back to false alongside it, so a reveal can never carry
+  // over from the previous challenge into the new one's panel.
+  const [open, setOpen] = useState(true);
   const [revealed, setRevealed] = useState(false);
-  useEffect(() => { setRevealed(false); setOpen(false); }, [challenge.startedAt]);
+  useEffect(() => { setRevealed(false); setOpen(true); }, [challenge.startedAt]);
   // Local copy so ✓/✗ clicks apply optimistically without waiting for the
   // server. Kept in sync with the incoming challenge.answers on remount.
   const [rows, setRows] = useState<ChallengeAnswerRow[]>(challenge.answers ?? []);
