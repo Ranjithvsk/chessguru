@@ -9,6 +9,7 @@ import { findOpeningForLine } from "../lib/openings";
 import { addRepertoire, shareRepertoire, type RepMoveNode } from "../lib/repertoire-api";
 import { activateRepertoireEntry } from "../lib/cards";
 import { OpeningIdeaPanel } from "./OpeningIdeaPanel";
+import { scrollIntoOwnScroller } from "../lib/scroll-into-own-scroller";
 import {
   useClassMoveList, triggerClassSeek, triggerClassBoardAction, triggerClassPromoteVariation,
   triggerClassMakeMainline, triggerClassDeleteFrom, triggerClassAnnotateMove, type SharedTreeNode,
@@ -165,25 +166,7 @@ export function ClassNotationPanel({ room, role }: { room: string; role: "coach"
   //
   // So walk up to the nearest scrollable ancestor INSIDE this panel and adjust its
   // scrollTop directly. Nothing above it ever moves.
-  useEffect(() => {
-    const el = activeRef.current;
-    if (!el) return;
-    let sc: HTMLElement | null = el.parentElement;
-    while (sc && sc !== document.body) {
-      const oy = getComputedStyle(sc).overflowY;
-      if ((oy === "auto" || oy === "scroll") && sc.scrollHeight > sc.clientHeight) break;
-      sc = sc.parentElement;
-    }
-    if (!sc || sc === document.body) return;          // nothing to scroll — leave the page alone
-    const top = el.offsetTop - sc.offsetTop;
-    const above = top < sc.scrollTop;
-    const below = top + el.offsetHeight > sc.scrollTop + sc.clientHeight;
-    if (!above && !below) return;                     // already visible: do nothing
-    sc.scrollTo({
-      top: above ? top : top + el.offsetHeight - sc.clientHeight,
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-    });
-  }, [cursorPath]);
+  useEffect(() => { scrollIntoOwnScroller(activeRef.current); }, [cursorPath]);
 
   const isActive = (path: number[]) => pathsEqual(path, cursorPath);
   const onPick = (path: number[]) => { if (clickable) triggerClassSeek(path); };

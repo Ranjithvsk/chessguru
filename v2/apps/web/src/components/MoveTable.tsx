@@ -3,6 +3,7 @@
 // black cells, the active ply as a brand pill, click any move to jump there.
 // Presentational only: the owner keeps the cursor.
 import { useEffect, useRef } from "react";
+import { scrollIntoOwnScroller } from "../lib/scroll-into-own-scroller";
 
 export interface MoveTableProps {
   sans: string[];
@@ -18,7 +19,8 @@ const fmtSecs = (ms: number) => (ms >= 60_000 ? `${Math.floor(ms / 60_000)}m${Ma
 
 export default function MoveTable({ sans, ply, onPick, moveTimes, className = "" }: MoveTableProps) {
   const activeRef = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => { activeRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, [ply]);
+  // Same rule as MoveTree: this list scrolls itself, never the page.
+  useEffect(() => { scrollIntoOwnScroller(activeRef.current); }, [ply]);
   const maxTime = moveTimes && moveTimes.length ? Math.max(...moveTimes, 1) : 1;
 
   const cell = (i: number) => {

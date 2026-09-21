@@ -158,6 +158,13 @@ export default function BoardEditorPage() {
   // v3 Server AI ("DINOv2 nearest-neighbour"). Sends the cropped board to
   // the backend classifier; ~3-6s per board.
   const [serverBusy, setServerBusy] = useState(false);
+  // Scan progress. A board PNG is ~1-3MB of base64, so on mobile data the
+  // upload alone is most of the wait — and the old banner said only
+  // "Processing image…" throughout, which looks identical to being stuck.
+  // uploadPct covers the send; elapsedSec covers the model's own 3-30s.
+  // (owner ask 2026-09-21: "upload progress status")
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
+  const [elapsedSec, setElapsedSec] = useState(0);
   const [serverMsg, setServerMsg] = useState<{ tone: "ok" | "err" | "info"; text: string } | null>(null);
   // Manual corner adjuster (fallback when auto-detect crops wrong).
   // Keeps the raw uploaded image dataURL so the coach can re-warp with
@@ -390,10 +397,27 @@ export default function BoardEditorPage() {
     setServerBusy(true); setServerMsg({ tone: "info", text: "🚀 Server AI classifying (3-30s)…" });
     try {
       const boardPngBase64 = canvas.toDataURL("image/png");
-      const r = await fetch(`${API_BASE}/api/vision/classify-board-v2`, {
-        method: "POST", credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ boardPngBase64 }),
+      // XHR, not fetch: fetch cannot report upload progress, and the upload is
+      // the part the user is actually waiting through on a phone.
+      const r = await new Promise<{ status: number; ok: boolean; text: () => Promise<string>; json: () => Promise<any> }>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `${API_BASE}/api/vision/classify-board-v2`);
+        xhr.withCredentials = true;
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.upload.onprogress = (e) => {
+          if (!e.lengthComputable) return;
+          setUploadPct(Math.min(99, Math.round((e.loaded / e.total) * 100)));
+        };
+        xhr.upload.onload = () => setUploadPct(100);   // sent; now it is the model's turn
+        xhr.onload = () => resolve({
+          status: xhr.status,
+          ok: xhr.status >= 200 && xhr.status < 300,
+          text: async () => xhr.responseText,
+          json: async () => JSON.parse(xhr.responseText),
+        });
+        xhr.onerror = () => reject(new Error("Network error while uploading the image"));
+        xhr.ontimeout = () => reject(new Error("The scan timed out"));
+        xhr.send(JSON.stringify({ boardPngBase64 }));
       });
       // Scanning now requires a session (it is a coach tool, and an open
       // inference endpoint can be farmed to copy the model). Say so plainly
@@ -429,8 +453,9 @@ export default function BoardEditorPage() {
           : `Server FEN unparseable: ${j.fen}`,
       });
     } catch (e) {
+      setUploadPct(null);
       setServerMsg({ tone: "err", text: `Server AI failed: ${(e as Error).message.slice(0, 120)}` });
-    } finally { setServerBusy(false); }
+    } finally { setServerBusy(false); setUploadPct(null); }
   }
   /** Re-classify using the crop the last client-side detection produced,
    *  rather than letting the server extractor pick the region again.
@@ -775,6 +800,13 @@ export default function BoardEditorPage() {
     else setMsg("Invalid FEN.");
     setTimeout(() => setMsg(""), 1500);
   };
+  useEffect(() => {
+    if (!serverBusy) { setElapsedSec(0); return; }
+    const t0 = Date.now();
+    const id = setInterval(() => setElapsedSec(Math.round((Date.now() - t0) / 1000)), 500);
+    return () => clearInterval(id);
+  }, [serverBusy]);
+
   /** Upload every square the user changed after a scan.
    *
    *  Copying the FEN is the moment a coach says "this position is right now",
@@ -878,10 +910,21 @@ export default function BoardEditorPage() {
        *  previous <11px badges got missed below the fold on mobile and users
        *  reported "no response". Fixed to viewport top so it's always visible. */}
       {serverBusy && (
-        <div className="fixed top-0 left-0 right-0 z-40 bg-brand-500 px-3 py-2 text-center text-sm font-semibold text-white shadow-lg">
-          <span className="inline-block animate-pulse">⏳</span>
-          {" "}
-          {serverMsg?.text || "Processing image…"}
+        <div className="fixed top-0 left-0 right-0 z-40 bg-brand-500 text-white shadow-lg">
+          <div className="px-3 py-2 text-center text-sm font-semibold">
+            {uploadPct !== null && uploadPct < 100
+              ? `⬆ Uploading the image… ${uploadPct}%`
+              : <><span className="inline-block animate-pulse">⏳</span>{" "}
+                  {serverMsg?.text || "Processing image…"}
+                  {elapsedSec > 0 && <span className="ml-1 font-normal opacity-80">({elapsedSec}s)</span>}</>}
+          </div>
+          {/* Determinate while the bytes are going up, indeterminate once the
+            *  model has them — we genuinely cannot know how far along it is. */}
+          <div className="h-1 w-full bg-white/25">
+            {uploadPct !== null && uploadPct < 100
+              ? <div className="h-full bg-white transition-[width] duration-200" style={{ width: `${uploadPct}%` }} />
+              : <div className="h-full w-1/3 animate-[cgslide_1.2s_ease-in-out_infinite] bg-white/90" />}
+          </div>
         </div>
       )}
       {/* The board is square and took its size from the COLUMN WIDTH alone, with
@@ -923,7 +966,15 @@ export default function BoardEditorPage() {
           <button onClick={fp.undo} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">◀ Undo</button>
           <button onClick={fp.reset} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">Reset</button>
           <button onClick={fp.flip} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">⇅ Flip</button>
-          <button onClick={rotate180} title="Rotate the position 180° — fixes upside-down scans (tablet in landscape, book at wrong angle, etc.)" className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">🔄 Rotate 180°</button>
+          {/* Rotate 180 exists to straighten an upside-down SCAN. On a position
+            *  you set up by hand it is just a way to scramble your own work, so
+            *  it only appears once a scan has actually produced a position.
+            *  (owner ask 2026-09-21: "show rotate 180 only when position are
+            *  scanned") Flip, right next to it, is the one for changing which
+            *  side you are looking from, and that stays available always. */}
+          {visionMeta && (
+            <button onClick={rotate180} title="Rotate the position 180° — fixes an upside-down scan (tablet in landscape, book at the wrong angle)" className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">🔄 Rotate 180°</button>
+          )}
           <button onClick={copyFen} className="rounded-lg border border-ink-600 px-3 py-2 text-sm text-ink-300 hover:bg-ink-800">Copy FEN</button>
           {returnTo && returnTo.startsWith("/") && (
             <button onClick={() => navigate(`${returnTo}${returnTo.includes("?") ? "&" : "?"}fen=${encodeURIComponent(editorFen ?? fp.fen)}`)}

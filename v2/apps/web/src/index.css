@@ -402,3 +402,14 @@ html.light .bg-slate-950 .text-white, html.light .bg-slate-950.text-white { colo
 }
 .puzzle__feedback .puzzle__next:hover:not(:disabled) { background: #6366f1; }
 .puzzle__feedback .puzzle__next:disabled { opacity: 0.5; cursor: default; }
+
+/* Indeterminate progress sweep — used by the board scanner's banner once the
+   image has finished uploading and the model has it. We cannot know how far
+   along inference is, so the bar sweeps rather than pretending to fill. */
+@keyframes cgslide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-\[cgslide_1\.2s_ease-in-out_infinite\] { animation: none; width: 100%; opacity: .5; }
+}

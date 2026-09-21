@@ -9,6 +9,7 @@
 //
 // Presentational only — the caller owns the cursor and hands back the path.
 import { useEffect, useRef } from "react";
+import { scrollIntoOwnScroller } from "../lib/scroll-into-own-scroller";
 
 export interface TreeNode {
   san: string;
@@ -29,7 +30,12 @@ const same = (a: number[], b: number[]) => a.length === b.length && a.every((v, 
 
 export default function MoveTree({ tree, path, onPick, className = "" }: MoveTreeProps) {
   const activeRef = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => { activeRef.current?.scrollIntoView({ block: "nearest" }); }, [path]);
+  // Scroll only this list's own scroller — never the page. scrollIntoView()
+  // walks every scrollable ancestor, so playing a move in the board editor
+  // scrolled the document and the board jumped out from under the user.
+  // (owner, 2026-09-21: "when moves played the focus moves to notation board,
+  // so board moves — dont move focus")
+  useEffect(() => { scrollIntoOwnScroller(activeRef.current); }, [path]);
 
   const move = (node: TreeNode, at: number[], ply: number, forceNumber: boolean) => {
     const white = ply % 2 === 0;                 // ply counts from 0 = white to move
