@@ -1805,7 +1805,7 @@ export default function ClassV2Page() {
        *  shrank the flex-1 board slot on desktop. Now the class uses the
        *  full viewport minus the site navbar (~3.5rem) so the board grows
        *  to match /puzzles + /openings. */}
-      <div className="flex h-[calc(100dvh-3.5rem)] min-h-[560px] flex-col overflow-hidden rounded-none border-0 bg-ink-900/60 shadow-xl md:rounded-2xl md:border md:border-ink-700" data-lk-theme="default">
+      <div className="flex flex-col rounded-none border-0 bg-ink-900/60 shadow-xl md:rounded-2xl md:border md:border-ink-700 lg:h-[calc(100dvh-3.5rem)] lg:min-h-[560px] lg:overflow-hidden" data-lk-theme="default">
         <LiveKitRoom
           serverUrl={tokenData.url}
           token={tokenData.token}
@@ -1951,14 +1951,14 @@ export default function ClassV2Page() {
            *  viewports too. Footer controls sit under everything. Owner
            *  2026-08-28: "board should be big, like in openings, realign
            *  all other in left/right/bottom accordingly". */}
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-ink-950/40">
+          <div className="relative flex flex-col bg-ink-950/40 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
             <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
               {/* Board area — self-sizes to the largest square that fits.
                *  overflow-hidden clips any board that tries to grow past the
                *  container. container-type:size gives SharedClassBoard's
                *  cqi/cqb-based sizing an actual box to measure against. */}
               <div
-                className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-2"
+                className="relative flex aspect-square items-center justify-center overflow-hidden p-0 lg:aspect-auto lg:h-auto lg:min-h-0 lg:flex-1 lg:p-2"
                 style={{ containerType: 'size' } as any}
               >
               <AudioUnblockPrompt />
@@ -2048,17 +2048,25 @@ export default function ClassV2Page() {
 
             {/* Controls footer — mic / cam / screen + hand / chat / reactions,
              *  sits UNDER the board so nothing overlaps pieces. */}
-            {/* This footer WRAPS on purpose. Two failed attempts, both mine, both
-             *  reported within hours (2026-09-21):
-             *    1. a min-height floor on the board slot — the shell is a FIXED-height
-             *       flex column with overflow-hidden and the siblings are shrink-0, so
-             *       the floor pushed this whole footer past the bottom edge and it was
-             *       clipped away entirely.
-             *    2. one horizontally-scrollable row — the controls were present but
-             *       off-screen to the right, which to a coach mid-class is the same as
-             *       gone, and worse because nothing hints they are there.
-             *  Everything must stay VISIBLE. If the board is tight on a phone, reduce
-             *  what this row contains or tighten its spacing — never hide or clip it. */}
+            {/* MOBILE = a scrolling page, not a fixed shell, and the board slot is
+             *  SQUARE (aspect-square) rather than a tall box.
+             *
+             *  A chess board is square, so on a portrait phone the largest it can be
+             *  is the screen WIDTH. A tall slot centred that square in ~730px and
+             *  left ~180px of empty ground above and below it — "gray area is
+             *  unnecessary" (owner, 2026-09-21). Sizing the slot to the board means
+             *  the space below the board is controls, not emptiness, and the page
+             *  scrolls only as far as there is real content.
+             *
+             *  From lg up nothing changes: fixed-height shell, flex-sized board.
+             *
+             *  This footer WRAPS on purpose. Two earlier attempts of mine, both
+             *  reported within hours:
+             *    1. a min-height floor on the board slot, while the shell was still
+             *       fixed-height with overflow-hidden and the siblings shrink-0 —
+             *       it pushed this whole row past the bottom edge, clipped away.
+             *    2. one horizontally-scrollable row — controls present but off-screen
+             *       to the right, which mid-class is the same as gone. */}
             <div className="shrink-0 border-t border-ink-800 bg-ink-900/70 px-4 py-2">
               <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3">
                 <div className="rounded-xl border border-ink-800 bg-ink-900 shadow">
