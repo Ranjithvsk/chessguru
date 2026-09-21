@@ -21,6 +21,10 @@ import { closeClassRoom, getLiveAttendees } from "./class-ws";
 
 const TICK_MS = 60_000;
 const ABANDONED_MS = 5 * 60_000;
+// Someone is "still here" if class-ws touched their attendance row recently.
+// Deliberately generous against the ~30s heartbeat, so a brief mobile blip can
+// never be mistaken for an abandoned class.
+const LIVE_SEEN_MS = 2 * 60_000;
 
 @Injectable()
 export class ClassAbandonedSweepService implements OnModuleInit {
@@ -42,10 +46,26 @@ export class ClassAbandonedSweepService implements OnModuleInit {
     for (const row of rows) {
       const id = String(row._id);
       const at = row.at ? new Date(row.at).getTime() : 0;
+      // Liveness has to come from a source that is TRUE ACROSS PROCESSES.
+      //
+      // getLiveAttendees() reads THIS process's in-memory `rooms` map. That worked
+      // only while classes happened to run in this same process. Once class traffic
+      // was routed to the dedicated class-ws process (2026-09-21), the API process
+      // held no room for a live class, so this returned [] and the sweeper ended a
+      // perfectly healthy lesson five minutes in — students saw "Class ended"
+      // mid-class while the coach was still teaching.
+      //
+      // classAttendance.lastSeenAt is written by whichever process actually owns the
+      // socket, so it is true wherever the class runs. In-memory stays as a fast path.
       const attendees = getLiveAttendees(id);
-      const coachIn = row.coachUserId
+      let coachIn = row.coachUserId
         ? attendees.some((a) => a.userId && String(a.userId) === String(row.coachUserId))
         : attendees.length > 0;                              // legacy row without coachUserId — anyone present keeps it alive
+      if (!coachIn) {
+        const q: Record<string, unknown> = { classId: id, lastSeenAt: { $gte: new Date(Date.now() - LIVE_SEEN_MS) } };
+        if (row.coachUserId) q.userId = String(row.coachUserId);
+        coachIn = (await this.conn.db!.collection("classAttendance").countDocuments(q).catch(() => 0)) > 0;
+      }
       if (coachIn) {
         // Heartbeat — coach is here, keep the announcement fresh.
         if (now - at > 45_000) {
