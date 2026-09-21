@@ -892,7 +892,7 @@ export default function BoardEditorPage() {
         *  board follows its container's width. lg-only: below that the layout is
         *  a single column and the board should keep the full width.
         *  (owner, 2026-09-21: "board editor overflowing") */}
-      <section className="lg:mx-auto lg:w-full lg:max-w-[calc(100dvh-14rem)]">
+      <section className="mx-auto min-w-0 w-full max-w-[min(100%,calc(100dvh-13rem))] lg:max-w-[calc(100dvh-14rem)]">
         <Board fen={editorFen ?? fp.fen} orientation={fp.orientation} turnColor={fp.turnColor}
           movableColor={editMode ? undefined : "both"} dests={editMode ? new Map() : fp.dests}
           onMove={editMode ? undefined : fp.onMove}
@@ -1020,7 +1020,7 @@ export default function BoardEditorPage() {
         *  976px of panels against an 800px viewport, so the whole page scrolled
         *  and the board scrolled away with it. On lg it now sticks and scrolls
         *  INSIDE itself, so the board stays put while you work down the panels. */}
-      <aside className="flex flex-col gap-4 lg:sticky lg:top-4 lg:max-h-[calc(100dvh-5rem)] lg:overflow-y-auto lg:pr-1">
+      <aside className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-4 lg:max-h-[calc(100dvh-5rem)] lg:overflow-y-auto lg:pr-1">
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-5">
           <h1 className="mb-3 font-display text-xl text-white">Board / Analysis</h1>
           <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-400">Load FEN</label>

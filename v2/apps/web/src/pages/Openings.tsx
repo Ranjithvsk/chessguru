@@ -118,8 +118,12 @@ export default function Openings() {
       />
 
       <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
-        {/* Family sidebar */}
-        <aside className="space-y-1">
+        {/* Family sidebar. min-w-0 or the grid column sizes itself to the
+          *  LONGEST family name — a grid item's default min-width:auto refuses
+          *  to shrink below its content, so the inner `truncate` never got a
+          *  chance to act and the column blew out to 735px, scrolling a 390px
+          *  phone sideways by 377px. (owner, 2026-09-21: "check for others") */}
+        <aside className="min-w-0 space-y-1">
           <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-500">Families</div>
           <button
             onClick={() => setSelectedFamily(null)}
@@ -140,7 +144,11 @@ export default function Openings() {
           ))}
         </aside>
 
-        <main>
+        {/* min-w-0 here too: this is the child whose content actually sized
+          *  the track. With the default min-width:auto the single mobile column
+          *  grew to 735px inside a 326px grid, and the sidebar stretched to
+          *  match — which is why fixing only the sidebar changed nothing. */}
+        <main className="min-w-0">
           {/* Tag chip filters */}
           <div className="mb-3 space-y-2">
             {AXES.map((axis) => (

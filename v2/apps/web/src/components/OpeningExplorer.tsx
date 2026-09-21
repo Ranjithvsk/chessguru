@@ -358,13 +358,19 @@ export default function OpeningExplorer(
   // (owner report 2026-08-20: "all went left side, center it").
   const justify = preBoardExtra ? "lg:justify-center" : "";
   return (
+    // min-w-0 on every child. A grid item defaults to min-width:auto, which
+    // means it refuses to shrink below its content — and the board's
+    // .cg-board-wrap reports a natural width. On a 390px phone that pushed the
+    // single column to 383px inside a 358px container and the page scrolled
+    // sideways by 9px. min-w-0 lets the track shrink and the board, which is
+    // max-width:100%, follows it down. (owner, 2026-09-21: "check for others")
     <div className={`grid ${gap} ${justify} ${gridCols}`}>
       {preBoardExtra && (
-        <aside className="flex flex-col gap-4">
+        <aside className="flex min-w-0 flex-col gap-4">
           {preBoardExtra}
         </aside>
       )}
-      <section>
+      <section className="min-w-0">
         {/* In the 3-col hub layout, left-align the board within its column
             so the visible gap between the Find-opening card and the board
             is just the grid gap (no extra centering slack). Without this,
@@ -457,7 +463,7 @@ export default function OpeningExplorer(
 
       </section>
 
-      <aside className="flex flex-col gap-4">
+      <aside className="flex min-w-0 flex-col gap-4">
         {/* Clickable PGN move list with variations — sits ABOVE the Opening
             explorer in the right rail (owner ask 2026-08-20: "moves showed
             in bottom, need that in right before opening explorer"). When
