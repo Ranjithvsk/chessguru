@@ -115,6 +115,7 @@ const GROUPS: Group[] = [
   {
     label: "Tools", accent: "slate", icon: "🛠️",
     items: [
+      { to: "/live", label: "🔴 Live broadcast", desc: "Tournament games as they are played — every board on a round, updating move by move" },
       { to: "/database", label: "🗄️ ChessGuru DB", desc: "Search 1.09M master games by player, opening, rating or date — and save any of them into your studies" },
       { to: "/coach-board/scoresheet", label: "📝 Scan scoresheet", desc: "Photo of a handwritten scoresheet → the game as PGN (coach/owner)" },
       { to: "/board-editor", label: "✏️ Board editor", desc: "Set up any position" },
