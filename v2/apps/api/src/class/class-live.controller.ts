@@ -85,9 +85,12 @@ export class ClassLiveController {
     // 2026-09-19 a coach sat alone in exactly that room while his student was stranded
     // in the previous one, and nothing on either screen explained why.
     //
-    // Created WITHOUT audienceKind on purpose. The student-facing gate still requires
-    // an audience to be picked, so this does not leak a class to anyone — it just means
-    // the class is real, can be ended, and is counted.
+    // Created WITHOUT audienceKind on purpose. Until the coach picks an audience,
+    // resolveEligibility rule 0 admits NOBODY to a roomKind "meet" class, so this
+    // does not leak the room — it just means the class is real, can be ended, and
+    // is counted. (That claim used to be made here and was NOT true: only the
+    // live-now banner checked, while the token and socket gates let the coach's
+    // whole roster in. Fixed 2026-09-21.)
     await this.conn.db!.collection("classSchedules").updateOne(
       { _id: id as any },
       {

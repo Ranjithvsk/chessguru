@@ -40,8 +40,35 @@ export async function resolveEligibility(
     const db = conn.db!;
     const klass: any = await db.collection("classSchedules").findOne(
       { _id: classId as any },
-      { projection: { createdByUserId: 1, batchStudentIds: 1, academyId: 1 } },
+      { projection: { createdByUserId: 1, batchStudentIds: 1, academyId: 1, audienceKind: 1, roomKind: 1 } },
     );
+
+    // 0. An ad-hoc Dream Meet room whose audience has NEVER been picked admits
+    //    NOBODY. Going live writes the classSchedules row immediately, on
+    //    purpose, so the class is real and can be ended — but it is written with
+    //    audienceKind unset, and until the coach chooses, rule 2 below would hand
+    //    the room to EVERY student assigned to that coach.
+    //
+    //    The student live-now banner already hid such a room (2026-08-25 round 3)
+    //    and going-live already withholds the push (round 2), so this was believed
+    //    closed — the comment at the creation site still says "the student-facing
+    //    gate still requires an audience to be picked". It did not. The BANNER
+    //    did. The join gates — the LiveKit token and the class socket — both call
+    //    straight through to rule 2, so anyone holding the room link (a bookmark,
+    //    a link from the coach's previous class, a second device) could walk in
+    //    before the coach had chosen who the class was for.
+    //    (owner, 2026-09-21: "before selecting, all students ... can join why?")
+    //
+    //    Scoped to roomKind "meet" deliberately: a SCHEDULED class legitimately
+    //    carries no audienceKind and relies on rule 3 to reach the whole academy,
+    //    and blocking those would break every all-academy broadcast.
+    const audiencePicked = !!klass && (
+      !!klass.audienceKind ||
+      (Array.isArray(klass.batchStudentIds) && klass.batchStudentIds.length > 0)
+    );
+    if (klass && klass.roomKind === "meet" && !audiencePicked) {
+      return { restricted: true, studentIds: new Set<string>() };   // empty set = block every student
+    }
 
     // 1. explicit batch list on the class doc wins
     if (klass && Array.isArray(klass.batchStudentIds) && klass.batchStudentIds.length > 0) {

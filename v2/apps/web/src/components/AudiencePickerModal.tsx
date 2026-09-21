@@ -36,7 +36,14 @@ export default function AudiencePickerModal(props: {
   const [saving, setSaving]       = useState(false);
   const [err, setErr]             = useState<string | null>(null);
   const [data, setData]           = useState<Audience | null>(null);
-  const [kind, setKind]           = useState<Kind>("coach_students");
+  // NOTHING is selected until the coach picks. This used to default to
+  // "All my students", so opening the dialog and pressing Start & notify
+  // without touching anything pinged the coach's entire roster and opened the
+  // room to all of them — which from the coach's side is "before selecting,
+  // all students getting notification and can join".
+  // (owner, 2026-09-21: "only after selecting only notification should go for
+  // selection students or batch right?")
+  const [kind, setKind]           = useState<Kind | null>(null);
   const [batchId, setBatchId]     = useState<string>("");
   const [picked, setPicked]       = useState<Set<string>>(new Set());
   const [studentQuery, setQ]      = useState("");
@@ -56,9 +63,11 @@ export default function AudiencePickerModal(props: {
         } else if (d.audienceKind === "individuals" && Array.isArray(d.batchStudentIds)) {
           setKind("individuals");
           setPicked(new Set(d.batchStudentIds));
-        } else {
+        } else if (d.audienceKind === "coach_students") {
           setKind("coach_students");
         }
+        // No audienceKind at all = a brand-new class. Leave the choice EMPTY:
+        // pre-selecting the broadest option is how everyone got notified.
       } catch (e: any) {
         if (!cancelled) setErr(e?.message || "Failed to load audience options");
       } finally {
@@ -77,6 +86,7 @@ export default function AudiencePickerModal(props: {
 
   const previewCount = useMemo(() => {
     if (!data) return 0;
+    if (kind == null) return 0;
     if (kind === "coach_students") return data.students.length;
     if (kind === "batch") return data.batches.find((b) => b._id === batchId)?.memberCount ?? 0;
     return picked.size;
@@ -169,6 +179,16 @@ export default function AudiencePickerModal(props: {
               </TabBtn>
             </div>
 
+            {/* Nothing picked yet — say so, rather than leaving a blank gap
+              *  under the tabs that reads like the dialog failed to load. */}
+            {kind == null && (
+              <div className="rounded-lg border border-dashed border-ink-700 bg-ink-950/40 p-4 text-center text-sm text-ink-400">
+                Pick <span className="font-semibold text-ink-200">All my students</span>,
+                a <span className="font-semibold text-ink-200">Batch</span>, or
+                <span className="font-semibold text-ink-200"> Individuals</span> above.
+                <div className="mt-1 text-xs text-ink-500">Only the people you pick are notified and allowed in.</div>
+              </div>
+            )}
             {kind === "coach_students" && (
               <div className="rounded-lg border border-ink-800 bg-ink-950 p-3 text-sm text-ink-200">
                 Everyone assigned to you as a student — {data.students.length} people.
@@ -268,7 +288,9 @@ export default function AudiencePickerModal(props: {
         {data && !loading && (
           <div className="flex shrink-0 items-center justify-between border-t border-ink-800 bg-ink-900 px-4 py-3" data-testid="audience-actions">
             <div className="text-xs text-ink-400">
-              Will invite <span className="font-bold text-brand-200">{previewCount}</span> {previewCount === 1 ? "person" : "people"}
+              {kind == null
+        ? "Choose who this class is for"
+        : <>Will invite <span className="font-bold text-brand-200">{previewCount}</span> {previewCount === 1 ? "person" : "people"}</>}
             </div>
             <div className="flex gap-2">
               {/* No Skip. Choosing the audience is the point of this dialog —

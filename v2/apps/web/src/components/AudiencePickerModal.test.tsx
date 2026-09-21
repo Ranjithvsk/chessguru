@@ -35,7 +35,7 @@ const show = (required: boolean, onClose = vi.fn()) => {
 const ready = () => waitFor(() => expect(screen.getByTestId("audience-actions")).toBeTruthy());
 
 describe("AudiencePickerModal", () => {
-  beforeEach(() => { cleanup(); audience.students = []; audience.batches = []; });
+  beforeEach(() => { cleanup(); audience.students = []; audience.batches = []; audience.audienceKind = null; });
 
   describe("new class (required) — the audience must be chosen", () => {
     beforeEach(() => { audience.students = [{ _id: "s1", name: "Asha" }]; });
@@ -59,6 +59,41 @@ describe("AudiencePickerModal", () => {
     it("keeps Start & notify as the way forward", async () => {
       show(true); await ready();
       expect(screen.getByText("Start & notify")).toBeTruthy();
+    });
+  });
+
+  describe("nothing is notified until the coach picks", () => {
+    beforeEach(() => {
+      audience.students = [{ _id: "s1", name: "Asha" }, { _id: "s2", name: "Ravi" }];
+      audience.audienceKind = null;
+    });
+
+    it("starts with NO audience selected on a new class", async () => {
+      show(true); await ready();
+      // Used to default to "All my students", so one click notified everyone.
+      expect(screen.getByText(/Choose who this class is for/)).toBeTruthy();
+      expect(screen.queryByText(/Will invite/)).toBeNull();
+    });
+
+    it("cannot submit until something is picked", async () => {
+      show(true); await ready();
+      expect((screen.getByText("Start & notify") as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it("enables submit once the coach picks a group", async () => {
+      show(true); await ready();
+      // [0] is the tab; the empty-state prompt names it too.
+      fireEvent.click(screen.getAllByText("All my students")[0]);
+      await waitFor(() =>
+        expect((screen.getByText("Start & notify") as HTMLButtonElement).disabled).toBe(false));
+      expect(screen.getByText(/Will invite/)).toBeTruthy();
+      expect(screen.queryByText(/Choose who this class is for/)).toBeNull();
+    });
+
+    it("still restores an audience that was already chosen", async () => {
+      audience.audienceKind = "coach_students";
+      show(false); await ready();
+      expect((screen.getByText("Start & notify") as HTMLButtonElement).disabled).toBe(false);
     });
   });
 
