@@ -32,6 +32,18 @@ type LiveGame = {
 
 const POLL_MS = 4000;
 
+/** "in 6m" / "in 3h" / "tomorrow 14:30" — a multi-day event can be a day and a
+ *  half from its next round, and "2310m" is not an answer anyone wants. */
+function formatIn(ts: number): string {
+  const mins = Math.max(0, Math.round((ts - Date.now()) / 60000));
+  if (mins < 90) return `starts in ${mins}m`;
+  const hrs = mins / 60;
+  if (hrs < 24) return `starts in ${Math.round(hrs)}h`;
+  const d = new Date(ts);
+  const day = hrs < 48 ? "tomorrow" : d.toLocaleDateString(undefined, { weekday: "short" });
+  return `${day} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
 export default function LiveBroadcast() {
   const { roundId } = useParams();
   return roundId ? <RoundBoards roundId={roundId} /> : <LiveIndex />;
@@ -44,7 +56,15 @@ function LiveIndex() {
     queryFn: () => get("/api/live-broadcast"),
     refetchInterval: 15_000,
   });
-  const rounds = q.data?.rounds ?? [];
+  const all = q.data?.rounds ?? [];
+  // Two very different things were sharing one list: rounds being played right
+  // now, and rounds scheduled up to two days out. With a multi-section event
+  // like the Olympiad (nine sections, all starting at once) the upcoming rows
+  // simply buried the live ones.
+  const rounds = all.filter((r) => r.state === "live" || r.state === "playing");
+  const upcoming = all
+    .filter((r) => r.state === "soon")
+    .sort((a, b) => (a.startsAt ?? 0) - (b.startsAt ?? 0));
 
   return (
     <div className="mx-auto w-full max-w-4xl px-4 py-6">
@@ -61,19 +81,26 @@ function LiveIndex() {
 
       {/* Say how fresh this is rather than implying instant. Every live round
         *  is polled in rotation, so a board is at most one cycle behind. */}
-      {!!q.data?.rounds?.length && (
+      {/* Count what we actually POLL, not what is listed: the upcoming rounds
+        *  below are shown but not fetched, and claiming to follow 33 rounds
+        *  when six are in play overstates it. */}
+      {!!rounds.length && (
         <div className="mb-3 text-xs text-ink-500">
-          Following {q.data.rounds.length} round{q.data.rounds.length === 1 ? "" : "s"}
+          Following {rounds.length} round{rounds.length === 1 ? "" : "s"} in play
           {q.data.cycleSec ? <> · every board refreshed about every {q.data.cycleSec}s</> : null}
           {q.data.throttled && <span className="ml-1 text-amber-300">· rate limited, catching up</span>}
         </div>
       )}
 
+      {/* Upcoming is collapsed by default: it is the longer list and the
+        *  shorter one is what people came for. */}
       {q.isLoading ? (
         <div className="rounded-xl border border-ink-800 bg-ink-900/60 p-8 text-center text-sm text-ink-400">Looking for live rounds…</div>
       ) : rounds.length === 0 ? (
         <div className="rounded-xl border border-ink-800 bg-ink-900/60 p-8 text-center">
-          <div className="text-sm text-ink-300">Nothing is being played right now.</div>
+          <div className="text-sm text-ink-300">
+            Nothing is being played this minute{upcoming.length ? " — see what is coming up below" : ""}.
+          </div>
           <div className="mt-1 text-xs text-ink-500">
             Rounds appear here the moment a tournament goes on air. Meanwhile there are 1.09M finished games in{" "}
             <Link to="/database" className="text-brand-300 hover:underline">ChessGuru DB</Link>.
@@ -99,7 +126,7 @@ function LiveIndex() {
                     *  "playing" rather than being hidden. */}
                   {r.state === "playing" && <span className="ml-1 text-amber-300">· in play</span>}
                   {r.state === "soon" && r.startsAt && (
-                    <span className="ml-1 text-ink-500">· starts in {Math.max(0, Math.round((r.startsAt - Date.now()) / 60000))}m</span>
+                    <span className="ml-1 text-ink-500">· {formatIn(r.startsAt)}</span>
                   )}
                 </div>
               </div>
@@ -108,6 +135,39 @@ function LiveIndex() {
           ))}
         </div>
       )}
+
+      {upcoming.length > 0 && <UpcomingRounds rounds={upcoming} />}
+    </div>
+  );
+}
+
+/** Scheduled rounds, up to two days out. Collapsed, because a big event can
+ *  put a dozen sections here at once and none of them is playing yet. */
+function UpcomingRounds({ rounds }: { rounds: LiveRound[] }) {
+  const [open, setOpen] = useState(false);
+  const shown = open ? rounds : rounds.slice(0, 4);
+  return (
+    <div className="mt-6">
+      <div className="mb-2 flex items-baseline justify-between">
+        <h2 className="text-[11px] font-semibold uppercase tracking-widest text-ink-500">Coming up</h2>
+        {rounds.length > 4 && (
+          <button onClick={() => setOpen(!open)} className="text-[11px] font-semibold text-brand-300 hover:text-brand-100">
+            {open ? "Show fewer" : `Show all ${rounds.length}`}
+          </button>
+        )}
+      </div>
+      <div className="space-y-1">
+        {shown.map((r) => (
+          <div key={r.roundId} className="flex items-center gap-3 rounded-lg border border-ink-800/70 bg-ink-900/40 px-3 py-2">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ink-600" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm text-ink-200">{r.tourName}</div>
+              <div className="text-[11px] text-ink-500">{r.roundName}</div>
+            </div>
+            {r.startsAt && <span className="shrink-0 text-[11px] text-ink-400">{formatIn(r.startsAt)}</span>}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

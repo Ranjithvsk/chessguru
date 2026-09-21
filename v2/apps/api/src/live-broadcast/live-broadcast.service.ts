@@ -119,8 +119,13 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
           // its start time has passed.
           const state: "live" | "playing" | "soon" =
             rd?.ongoing ? "live" : started ? "playing" : "soon";
-          // Anything more than 12h out is not "current" by any reading.
-          if (state === "soon" && (startsAt === null || startsAt - Date.now() > 12 * 3600_000)) continue;
+          // 48h, not 12. A multi-day event has REST DAYS: when this was 12h
+          // the FIDE Olympiad disappeared from the page entirely between
+          // rounds 6 and 7, which were 38.5 hours apart, even though the
+          // tournament was very much still running. A window shorter than the
+          // longest normal gap between rounds makes big events vanish exactly
+          // when people go looking for them.
+          if (state === "soon" && (startsAt === null || startsAt - Date.now() > 48 * 3600_000)) continue;
           live.push({
             roundId: String(rd.id), roundName: String(rd.name ?? "Round"),
             tourId: String(tour.id ?? ""), tourName: String(tour.name ?? "Broadcast"),
