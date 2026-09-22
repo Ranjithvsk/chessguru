@@ -16,6 +16,9 @@ import { MongoClient } from "mongodb";
 import { Chess } from "chess.js";
 import { spawn } from "node:child_process";
 import readline from "node:readline";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import https from "node:https";
 
 const argv = process.argv.slice(2);
@@ -78,13 +81,68 @@ console.log(`${urls.length} dumps published, ${done.size} already imported, taki
 
 /** Stream a .zst straight through zstd — these are hundreds of MB and there is
  *  no reason for any of it to touch the disk or sit in memory. */
-function pgnLines(url) {
-  const z = spawn("zstd", ["-dc"], { stdio: ["pipe", "pipe", "ignore"] });
-  https.get(url, { headers: { "User-Agent": "ChessGuru/1.0" } }, (res) => {
-    if (res.statusCode !== 200) { z.stdin.end(); return; }
-    res.pipe(z.stdin);
-  }).on("error", () => z.stdin.end());
-  return readline.createInterface({ input: z.stdout, crlfDelay: Infinity });
+/** Downloads a dump to disk, then streams it line by line from there.
+ *
+ *  It used to parse straight off the socket, and that could not work: the whole
+ *  30MB file transfers in 2.6s when nothing is consuming it, but parsing 49k
+ *  games takes five minutes, and an HTTP connection held open that long while
+ *  being read a trickle at a time gets dropped. Every single run ended in
+ *  "connection aborted mid-file".
+ *
+ *  Worse, when the drop happened there was no 'error' event to notice it: the
+ *  response simply stopped, nothing ended zstd's stdin, zstd never saw EOF, and
+ *  readline waited forever. Measured at 1h27m wall for 6m of CPU, parked in
+ *  ep_poll with zstd idle at 0% and no remote socket left open — which is what
+ *  kept hitting the nightly 170-minute wrapper timeout with the ledger
+ *  unwritten, so the same month was re-imported every night for ever.
+ *
+ *  Fetching to a temp file first takes the network out of the parse entirely:
+ *  the transfer is short and unthrottled, and a truncated download is caught by
+ *  comparing against Content-Length rather than silently read as a short file.
+ */
+const STALL_MS = 120_000;
+
+function download(url, dest) {
+  return new Promise((resolve, reject) => {
+    const out = fs.createWriteStream(dest);
+    let timer = null, expected = null, got = 0, settled = false;
+    const done = (err) => {
+      if (settled) return; settled = true;
+      if (timer) clearTimeout(timer);
+      out.close(() => (err ? reject(err) : resolve(got)));
+    };
+    const arm = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => { req.destroy(); done(new Error(`stalled — no data for ${STALL_MS / 1000}s`)); }, STALL_MS);
+    };
+    const req = https.get(url, { headers: { "User-Agent": "ChessGuru/1.0" } }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); return done(new Error(`HTTP ${res.statusCode}`)); }
+      expected = Number(res.headers["content-length"]) || null;
+      arm();
+      res.on("data", (c) => { got += c.length; arm(); });
+      res.on("aborted", () => done(new Error("connection aborted mid-file")));
+      res.pipe(out);
+      out.on("finish", () => {
+        // A truncated download decompresses into a short but perfectly valid
+        // PGN, so without this check a partial month would look complete and be
+        // recorded as imported.
+        if (expected && got !== expected) return done(new Error(`truncated: ${got} of ${expected} bytes`));
+        done(null);
+      });
+    });
+    req.on("error", (e) => done(e));
+    // A connect to a black-holed address fires neither 'response' nor 'error'
+    // until the OS gives up minutes later.
+    req.setTimeout(STALL_MS, () => { req.destroy(); done(new Error(`no response within ${STALL_MS / 1000}s`)); });
+    arm();
+  });
+}
+
+function pgnLines(file) {
+  const z = spawn("zstd", ["-dc", file], { stdio: ["ignore", "pipe", "ignore"] });
+  const state = { error: null };
+  z.on("exit", (code) => { if (code !== 0 && !state.error) state.error = new Error(`zstd exited ${code}`); });
+  return { lines: readline.createInterface({ input: z.stdout, crlfDelay: Infinity }), state };
 }
 
 for (const url of todo) {
@@ -154,12 +212,40 @@ for (const url of todo) {
     if (pending.length >= 2000) await flushGames();
   };
 
-  for await (const line of pgnLines(url)) {
-    if (line.startsWith("[Event ") && block.length) { await handle(block.join("\n")); block = []; }
+  const tmp = path.join(os.tmpdir(), `cg-dump-${process.pid}-${name}`);
+  let bytes;
+  try {
+    bytes = await download(url, tmp);
+  } catch (e) {
+    await fs.promises.rm(tmp, { force: true });
+    console.log(`download failed (${e.message}) — will retry`);
+    continue;
+  }
+  process.stdout.write(`${(bytes / 1048576).toFixed(0)}MB ... `);
+  const { lines, state } = pgnLines(tmp);
+  let overBudget = false;
+  for await (const line of lines) {
+    if (line.startsWith("[Event ") && block.length) {
+      await handle(block.join("\n")); block = [];
+      // The budget used to be checked only BETWEEN dumps, which is no help when
+      // a single dump is the thing that overruns. Check it here too, and treat
+      // running out of time as a failure so the dump is not recorded as done.
+      if (Date.now() - startedAt > BUDGET_MS) { overBudget = true; break; }
+    }
     block.push(line);
   }
-  if (block.length) await handle(block.join("\n"));
-  await flushGames();
+  if (!overBudget && !state.error && block.length) await handle(block.join("\n"));
+  await flushGames();     // keep whatever we did parse; the games are deduped on re-import
+
+  await fs.promises.rm(tmp, { force: true });
+  const problem = state.error ? state.error.message : overBudget ? "time budget reached" : null;
+  if (problem) {
+    // Deliberately NOT marked done: a partial read must be retried, or we would
+    // lose the rest of the month forever.
+    console.log(`${seen} games → ${added} new, ${dupes} already held — INCOMPLETE (${problem}), will retry`);
+    if (overBudget) { console.log("  stopping cleanly"); break; }
+    continue;
+  }
 
   if (!DRY) {
     await feeds.updateOne({ _id: "broadcast-dumps" },
