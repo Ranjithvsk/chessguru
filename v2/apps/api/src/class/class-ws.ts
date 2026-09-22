@@ -549,6 +549,76 @@ function extendMainlineOnce(tree: TreeNode[], path: number[]): number[] | null {
 // persistence save. Ephemeral frames (participants, pointer, pong, role,
 // challenge_*) don't touch board state, no need to save.
 const PERSIST_FRAME_TYPES = new Set(["state", "move", "reset", "lock", "annot", "orientation"]);
+
+// ── "What was used in this class" (owner 2026-09-22) ───────────────────────────
+// The superadmin class log could say who joined and what broke, but never what the
+// coach actually DID. Every teaching action already flows through this socket, so
+// tally them here and let /superadmin/dream-meet read them back per class.
+//
+// Cost discipline, because this is the realtime hot path: a frame only bumps an
+// in-memory counter, and the flush is ONE batched upsert per class every 10 s.
+// Plumbing frames (ping/pong/hello/state/role/participants/pointer-off) are not in
+// the map at all, so they cost a single failed lookup and never reach the database —
+// a busy board must not turn into a busy mongo.
+const FEATURE_LABELS: Record<string, string> = {
+  move: "Moves on the board",
+  annot: "Arrows & circles",
+  pointer: "Laser pointer",
+  lock: "Board lock",
+  orientation: "Flipped the board",
+  reset: "Reset the board",
+  seek: "Jumped to a move",
+  stepBack: "Stepped through the moves",
+  stepForward: "Stepped through the moves",
+  takeback: "Takeback",
+  "load-tree": "Loaded a line (Teach Opening / master game)",
+  loadFen: "Loaded a position",
+  "offer-position": "Sent a position to notebooks",
+  "annotate-move": "Move comments & glyphs",
+  "promote-variation": "Edited variations",
+  "make-mainline": "Edited variations",
+  "delete-from": "Edited variations",
+  notation: "Notation panel",
+};
+type FeatureStat = { n: number; firstAt: number; lastAt: number };
+let featureTally = new Map<string, Map<string, FeatureStat>>();
+
+function noteFeature(classId: string, type: string): void {
+  if (!classId || !FEATURE_LABELS[type]) return;
+  let m = featureTally.get(classId);
+  if (!m) { m = new Map<string, FeatureStat>(); featureTally.set(classId, m); }
+  const now = Date.now();
+  const cur = m.get(type);
+  if (cur) { cur.n += 1; cur.lastAt = now; } else { m.set(type, { n: 1, firstAt: now, lastAt: now }); }
+}
+
+const FEATURE_FLUSH_MS = 10_000;
+async function flushFeatureTally(): Promise<void> {
+  if (!dbConn?.db || featureTally.size === 0) return;
+  // Swap first: frames that arrive during the await belong to the NEXT flush, and
+  // must not be dropped by clearing after it.
+  const pending = featureTally;
+  featureTally = new Map<string, Map<string, FeatureStat>>();
+  for (const [classId, types] of pending) {
+    const inc: Record<string, number> = {};
+    const min: Record<string, Date> = {};
+    const max: Record<string, Date> = {};
+    for (const [type, st] of types) {
+      const k = type.replace(/[.$]/g, "_");     // mongo keys cannot hold . or $
+      inc[`f.${k}.n`] = st.n;
+      min[`f.${k}.firstAt`] = new Date(st.firstAt);
+      max[`f.${k}.lastAt`] = new Date(st.lastAt);
+    }
+    try {
+      await dbConn.db.collection("classFeatureUsage").updateOne(
+        { _id: classId as any },
+        { $inc: inc, $min: min, $max: max, $setOnInsert: { classId } },
+        { upsert: true },
+      );
+    } catch { /* usage stats must never break a live class */ }
+  }
+}
+setInterval(() => { void flushFeatureTally(); }, FEATURE_FLUSH_MS).unref?.();
 /** Hand a coach any offers that arrived while they had no class screen connected.
  *  Called whenever a socket resolves to the coach role. */
 function flushPendingOffers(room: Room, ws: WebSocket): void {
@@ -772,6 +842,8 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
   ws.on("message", (raw) => { try {
     let frame: ClientFrame;
     try { frame = JSON.parse(raw.toString()); } catch { return; }
+    // One counter bump per teaching action — see FEATURE_LABELS above.
+    noteFeature(roomId, (frame as any)?.type);
     if (frame.type === "ping") { send({ type: "pong" }); touchAttendance(ws); return; }
 
     if (frame.type === "hello") {

@@ -90,7 +90,7 @@ export class DreamMeetStatsController {
     // Attendance is a small collection; pulling the rows lets us derive the span
     // a class was ACTUALLY occupied, which is far more honest than endedAt (a
     // coach who forgets to press End leaves endedAt unset or wildly late).
-    const [attRows, boards, packRows, chRows] = await Promise.all([
+    const [attRows, boards, packRows, chRows, usageRows] = await Promise.all([
       ids.length ? db.collection("classAttendance").find({ classId: { $in: ids } } as any,
         { projection: { classId: 1, key: 1, joinedAt: 1, lastSeenAt: 1, name: 1, userId: 1 } }).toArray() : Promise.resolve([] as any[]),
       ids.length ? db.collection("classBoardState").find({ _id: { $in: ids } } as any,
@@ -101,7 +101,57 @@ export class DreamMeetStatsController {
       ids.length ? db.collection("classChallenges").aggregate([
         { $match: { classId: { $in: ids } } }, { $group: { _id: "$classId", n: { $sum: 1 } } },
       ]).toArray() : Promise.resolve([] as any[]),
+      // What the coach actually DID — written by class-ws as the class runs, so it
+      // is already current for a class still in progress (owner 2026-09-22).
+      ids.length ? db.collection("classFeatureUsage").find({ _id: { $in: ids } } as any).toArray()
+        : Promise.resolve([] as any[]),
     ]);
+
+    // Raw frame types mean nothing to whoever reads this board, so label them here.
+    // Kept in the API (not the UI) so every consumer gets the same wording, and the
+    // list is ordered by what happened FIRST — which reads like a story of the class.
+    const FEATURE_LABELS: Record<string, string> = {
+      move: "Moves on the board",
+      annot: "Arrows & circles",
+      pointer: "Laser pointer",
+      lock: "Board lock",
+      orientation: "Flipped the board",
+      reset: "Reset the board",
+      seek: "Jumped to a move",
+      stepBack: "Stepped through the moves",
+      stepForward: "Stepped through the moves",
+      takeback: "Takeback",
+      "load-tree": "Loaded a line (Teach Opening / master game)",
+      loadFen: "Loaded a position",
+      "offer-position": "Sent a position to notebooks",
+      "annotate-move": "Move comments & glyphs",
+      "promote-variation": "Edited variations",
+      "make-mainline": "Edited variations",
+      "delete-from": "Edited variations",
+      notation: "Notation panel",
+    };
+    const featuresByClass = new Map<string, any[]>();
+    for (const row of usageRows as any[]) {
+      const merged = new Map<string, { label: string; count: number; firstAt: Date | null; lastAt: Date | null }>();
+      for (const [key, st] of Object.entries((row?.f ?? {}) as Record<string, any>)) {
+        const label = FEATURE_LABELS[key];
+        if (!label) continue;                      // unknown/retired frame type
+        const first = st?.firstAt ? new Date(st.firstAt) : null;
+        const last = st?.lastAt ? new Date(st.lastAt) : null;
+        // Several frame types share one label (variation edits, stepping) — sum them.
+        const cur = merged.get(label);
+        if (cur) {
+          cur.count += Number(st?.n) || 0;
+          if (first && (!cur.firstAt || first < cur.firstAt)) cur.firstAt = first;
+          if (last && (!cur.lastAt || last > cur.lastAt)) cur.lastAt = last;
+        } else {
+          merged.set(label, { label, count: Number(st?.n) || 0, firstAt: first, lastAt: last });
+        }
+      }
+      featuresByClass.set(String(row._id), [...merged.values()]
+        .filter((x) => x.count > 0)
+        .sort((x, y) => (+(x.firstAt ?? 0)) - (+(y.firstAt ?? 0))));
+    }
 
     // who joined, and when — the owner reads the names, not just a count (2026-09-17)
     const att = new Map<string, { keys: Set<string>; first: number | null; last: number | null; people: Map<string, { name: string; joinedAt: Date | null; lastSeenAt: Date | null }> }>();
@@ -233,6 +283,10 @@ export class DreamMeetStatsController {
           .slice(0, 30)
           .map((x) => ({ name: x.name, joinedAt: x.joinedAt, lastSeenAt: x.lastSeenAt })) : [],
         errors: 0, errorList: [] as any[],
+        // What was used, oldest action first. `[]` = recorded and the board was never
+        // touched; `null` = no tally exists at all, i.e. the class ran before usage
+        // tracking was recording. Those two must not read the same on the board.
+        features: featuresByClass.has(id) ? featuresByClass.get(id) : null,
       });
 
       if (live) {
