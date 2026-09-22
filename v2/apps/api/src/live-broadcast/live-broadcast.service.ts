@@ -55,6 +55,10 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
 
   private games() { return this.conn.db!.collection("liveBroadcastGames"); }
   private rounds() { return this.conn.db!.collection("liveBroadcastRounds"); }
+  /** Tournament-level metadata — format, time control, venue, dates, website.
+   *  The index gives all of it and we were throwing it away, keeping only the
+   *  name. It is what an Overview worth reading is made of. */
+  private tours() { return this.conn.db!.collection("liveBroadcastTours"); }
 
   /** One request at a time, always. */
   private serialize<T>(fn: () => Promise<T>): Promise<T> {
@@ -100,6 +104,7 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
                state: "live" | "playing" | "soon" | "finished"; startsAt: number | null };
     const live: L[] = [];
     const finishedRounds: L[] = [];
+    const tourDocs: any[] = [];
     try {
       const text = await this.serialize(() => this.getText(`https://lichess.org/api/broadcast?nb=${TOURS_SCANNED}`));
       for (const line of text.split("\n")) {
@@ -107,6 +112,21 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
         let d: any;
         try { d = JSON.parse(line); } catch { continue; }
         const tour = d?.tour ?? {};
+        if (tour?.id) {
+          const dates = Array.isArray(tour.dates) ? tour.dates : [];
+          tourDocs.push({
+            _id: String(tour.id),
+            name: String(tour.name ?? "Broadcast"),
+            info: tour.info ?? {},
+            image: tour.image ?? null,
+            url: tour.url ?? null,
+            tier: tour.tier ?? null,
+            teamTable: !!tour.teamTable,
+            startsAt: Number(dates[0]) || null,
+            endsAt: Number(dates[1]) || null,
+            updatedAt: new Date(),
+          });
+        }
         for (const rd of Array.isArray(d?.rounds) ? d.rounds : []) {
           const startsAt = Number(rd?.startsAt) || null;
           // FINISHED rounds are recorded too, not skipped. Without them a
@@ -151,6 +171,12 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
     }
 
     const now = new Date();
+    if (tourDocs.length) {
+      await this.tours().bulkWrite(
+        tourDocs.map((t) => ({ updateOne: { filter: { _id: t._id }, update: { $set: t }, upsert: true } })),
+        { ordered: false },
+      ).catch(() => {});
+    }
     // Finished rounds: recorded so a tournament has a readable past, and left
     // alone thereafter. `boards` is preserved if we have already fetched one.
     for (const f of finishedRounds) {

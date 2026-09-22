@@ -327,7 +327,7 @@ function RoundBoards({ roundId }: { roundId: string }) {
   const [games, setGames] = useState<Map<number, LiveGame>>(new Map());
   const [meta, setMeta] = useState<{ tourName: string; roundName: string; ongoing: boolean; tourId?: string | null } | null>(null);
   const [focus, setFocus] = useState<number | null>(null);
-  const [tab, setTab] = useState<"boards" | "players" | "teams">("boards");
+  const [tab, setTab] = useState<"overview" | "boards" | "players" | "teams">("boards");
   const sinceRef = useRef<string | null>(null);
   const [stale, setStale] = useState(false);
 
@@ -371,6 +371,7 @@ function RoundBoards({ roundId }: { roundId: string }) {
           {meta?.ongoing !== false && <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-rose-500" />}
           {meta?.tourName ?? "Live round"}
         </h1>
+        {meta?.tourId && <RoundPicker tourId={meta.tourId} current={roundId} />}
         <p className="text-sm text-ink-400">
           {meta?.roundName}
           {meta?.ongoing === false && <span className="ml-2 text-ink-500">· round finished</span>}
@@ -382,7 +383,7 @@ function RoundBoards({ roundId }: { roundId: string }) {
         *  and Teams are computed from the broadcast games we hold, which is
         *  why they carry the same caveat Lichess puts on its own. */}
       <div className="mb-4 flex gap-1 border-b border-ink-700">
-        {(["boards", "players", "teams"] as const).map((t) => (
+        {(["overview", "boards", "players", "teams"] as const).map((t) => (
           <button key={t} onClick={() => setTab(t)}
             className={`-mb-px border-b-2 px-4 py-2 text-sm font-semibold capitalize transition-colors ${
               tab === t ? "border-brand-500 text-brand-100" : "border-transparent text-ink-400 hover:text-ink-100"}`}>
@@ -391,7 +392,8 @@ function RoundBoards({ roundId }: { roundId: string }) {
         ))}
       </div>
 
-      {tab !== "boards" && meta?.tourId && <Standings tourId={meta.tourId} tab={tab} />}
+      {tab === "overview" && meta?.tourId && <Overview tourId={meta.tourId} />}
+      {(tab === "players" || tab === "teams") && meta?.tourId && <Standings tourId={meta.tourId} tab={tab} />}
 
       {tab === "boards" && focused && <FocusedGame g={focused} onClose={() => setFocus(null)} />}
 
@@ -608,6 +610,130 @@ function TeamScores({ games }: { games: LiveGame[] }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+type TourResp = {
+  ok: boolean; tourName: string | null;
+  tour: { name: string; info: Record<string, string>; image: string | null; url: string | null; tier: number | null; startsAt: number | null; endsAt: number | null } | null;
+  rounds: { roundId: string; roundName: string; state: string; startsAt: number | null; boards: number }[];
+};
+
+/** Jump between the rounds of this tournament without going back to the index
+ *  — the reference puts this in a bottom sheet; here it is a row of chips that
+ *  says which are played, which is live and which is still to come. */
+function RoundPicker({ tourId, current }: { tourId: string; current: string }) {
+  const q = useQuery<TourResp>({
+    queryKey: ["tour-rounds", tourId],
+    queryFn: () => get(`/api/live-broadcast/tour/${tourId}`),
+    staleTime: 60_000,
+  });
+  const rounds = q.data?.rounds ?? [];
+  if (rounds.length < 2) return null;
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1">
+      {rounds.map((r) => {
+        const here = r.roundId === current;
+        return (
+          <Link key={r.roundId} to={`/live/${r.roundId}`}
+            title={`${r.roundName}${r.boards ? ` · ${r.boards} boards` : ""}${r.startsAt ? ` · ${new Date(r.startsAt).toLocaleDateString()}` : ""}`}
+            className={`rounded-lg px-2 py-0.5 text-[11px] font-semibold ${
+              here ? "bg-brand-500/25 text-brand-100 ring-1 ring-brand-500/60"
+              : r.state === "live" ? "bg-rose-500/20 text-rose-100"
+              : r.state === "playing" ? "bg-amber-500/20 text-amber-100"
+              : r.state === "soon" ? "bg-ink-800 text-ink-500"
+              : "bg-ink-800 text-ink-200 hover:bg-ink-700"}`}>
+            {r.roundName.replace(/^Round\s*/i, "R")}
+            {r.state === "finished" && r.boards > 0 && <span className="ml-0.5 text-emerald-300">✓</span>}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The tournament itself — what it is, where, when, and who is playing. All of
+ *  it comes from the broadcast index, which we had been reading for round
+ *  states and otherwise discarding. */
+function Overview({ tourId }: { tourId: string }) {
+  const q = useQuery<TourResp>({
+    queryKey: ["tour-rounds", tourId],
+    queryFn: () => get(`/api/live-broadcast/tour/${tourId}`),
+    staleTime: 60_000,
+  });
+  const st = useQuery<StandingsResp>({
+    queryKey: ["standings", tourId],
+    queryFn: () => get(`/api/live-broadcast/tour/${tourId}/standings`),
+    staleTime: 30_000,
+  });
+  if (q.isLoading) return <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-8 text-center text-sm text-ink-400">Loading…</div>;
+  const t = q.data?.tour;
+  const rounds = q.data?.rounds ?? [];
+  const info = t?.info ?? {};
+  const played = rounds.filter((r) => r.state === "finished").length;
+  const fmtDate = (ms?: number | null) => (ms ? new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : null);
+  const span = t?.startsAt ? `${fmtDate(t.startsAt)}${t.endsAt ? ` – ${fmtDate(t.endsAt)}` : ""}` : null;
+
+  const rows: [string, string | null][] = [
+    ["Format", info.format ?? null],
+    ["Time control", info.tc ?? null],
+    ["Location", info.location ?? null],
+    ["Dates", span],
+    ["Rounds", rounds.length ? `${played} played of ${rounds.length}` : null],
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="overflow-hidden rounded-xl2 border border-ink-700 bg-ink-900">
+        {t?.image && <img src={t.image} alt="" className="h-40 w-full object-cover" loading="lazy" />}
+        <div className="p-4">
+          <h2 className="font-display text-lg font-bold text-white">{t?.name ?? q.data?.tourName}</h2>
+          <dl className="mt-3 grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
+            {rows.filter(([, v]) => v).map(([k, v]) => (
+              <div key={k} className="flex items-baseline justify-between gap-3 border-b border-ink-800/60 py-1">
+                <dt className="shrink-0 text-xs text-ink-400">{k}</dt>
+                <dd className="min-w-0 text-right text-sm text-ink-100">{v}</dd>
+              </div>
+            ))}
+          </dl>
+          {info.players && (
+            <div className="mt-3">
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-400">Featured players</div>
+              <p className="text-sm text-ink-200">{info.players}</p>
+            </div>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {info.website && (
+              <a href={info.website} target="_blank" rel="noreferrer"
+                className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-3 py-1.5 text-xs font-semibold text-brand-100 hover:bg-brand-500/20">
+                Official site ↗
+              </a>
+            )}
+            {t?.url && (
+              <a href={t.url} target="_blank" rel="noreferrer"
+                className="rounded-lg border border-ink-700 bg-ink-950 px-3 py-1.5 text-xs font-semibold text-ink-200 hover:bg-ink-800">
+                On Lichess ↗
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Who is winning, without making anyone open another tab. */}
+      {!!st.data?.teams?.length && (
+        <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-4">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-400">Leading teams</div>
+          {st.data.teams.slice(0, 5).map((x, i) => (
+            <div key={x.team} className="flex items-center gap-2 border-b border-ink-800/60 py-1.5 text-sm last:border-0">
+              <span className="w-5 shrink-0 text-right tabular-nums text-ink-500">{i + 1}</span>
+              {teamFlag(x.team) && <span>{teamFlag(x.team)}</span>}
+              <span className="min-w-0 flex-1 truncate text-ink-100">{x.team}</span>
+              <span className="shrink-0 font-semibold tabular-nums text-ink-100">{x.matchPts}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

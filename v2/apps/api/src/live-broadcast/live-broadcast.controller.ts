@@ -58,9 +58,17 @@ export class LiveBroadcastController {
       .sort({ startsAt: 1 })
       .limit(60)
       .toArray();
+    const tour: any = await this.conn.db!.collection("liveBroadcastTours").findOne({ _id: id as any }).catch(() => null);
     return {
       ok: true,
       tourName: (rounds[0] as any)?.tourName ?? null,
+      // Everything an Overview needs: format, time control, venue, dates, the
+      // organiser's own site, and the poster image.
+      tour: tour ? {
+        name: tour.name, info: tour.info ?? {}, image: tour.image ?? null,
+        url: tour.url ?? null, tier: tour.tier ?? null,
+        startsAt: tour.startsAt ?? null, endsAt: tour.endsAt ?? null,
+      } : null,
       rounds: rounds.map((r: any) => ({
         roundId: String(r._id), roundName: r.roundName,
         state: r.state ?? (r.ongoing ? "live" : "finished"),
