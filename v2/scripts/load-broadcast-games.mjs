@@ -57,13 +57,29 @@ function splitGames(raw) {
 // enough — no scope is needed for public broadcasts).
 const TOKEN = (process.env.LICHESS_TOKEN || "").trim();
 
-async function getText(url) {
+// A bare fetch() gave up on the first socket reset, and the hourly log showed
+// the cost: ~7 of 25 tournaments a run ending in "fetch failed (fetch failed)",
+// each one silently skipped for that hour. Lichess is simply slow on big
+// tournaments — a round PGN for the Olympiad measures ~7.5s — so a dropped
+// connection is normal traffic, not an outage, and the answer is to wait and
+// ask again rather than to skip the tournament.
+const ATTEMPTS = 3;
+async function getText(url, attempt = 1) {
   const headers = { "User-Agent": UA, Accept: "application/x-chess-pgn, application/x-ndjson, */*" };
   if (TOKEN) headers.Authorization = `Bearer ${TOKEN}`;
-  const r = await fetch(url, { headers });
-  if (r.status === 429) { console.log("  rate limited — backing off 60s"); await sleep(60_000); return getText(url); }
-  if (!r.ok) throw new Error(`${r.status} ${url}`);
-  return r.text();
+  try {
+    // Node's fetch has no default timeout at all: a stalled connection hangs
+    // until the process is killed, which is how the nightly run hit its wrapper
+    // timeout. 90s is generous for the slowest round we have measured.
+    const r = await fetch(url, { headers, signal: AbortSignal.timeout(90_000) });
+    if (r.status === 429) { console.log("  rate limited — backing off 60s"); await sleep(60_000); return getText(url, attempt); }
+    if (!r.ok) throw new Error(`${r.status} ${url}`);
+    return r.text();
+  } catch (e) {
+    if (attempt >= ATTEMPTS) throw e;
+    await sleep(attempt * 3_000);           // 3s, then 6s
+    return getText(url, attempt + 1);
+  }
 }
 
 /** chess.js 1.4 will not parse a broadcast PGN as published: the movetext

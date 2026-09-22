@@ -23,6 +23,12 @@ const DRY = argv.includes("--dry");
 const ALL = argv.includes("--all");
 const MONTHS = Number((argv.find((a) => a.startsWith("--months=")) || "").split("=")[1]) || 2;
 const LIST = "https://database.lichess.org/broadcast/list.txt";
+// A wall-clock budget. The first scheduled run was killed by the wrapper at
+// 170 minutes with the ledger unwritten, so it would have started the same
+// dump again the next night and got no further. Stopping ourselves means the
+// dumps we DID finish are recorded.
+const BUDGET_MS = Number((argv.find((a) => a.startsWith("--budget=")) || "").split("=")[1] || 40) * 60_000;
+const startedAt = Date.now();
 
 function movesHash(moves) {
   const s = (moves || []).join(" ");
@@ -82,6 +88,7 @@ function pgnLines(url) {
 }
 
 for (const url of todo) {
+  if (Date.now() - startedAt > BUDGET_MS) { console.log("  time budget reached — stopping cleanly"); break; }
   const name = url.split("/").pop();
   process.stdout.write(`  ${name} ... `);
   let block = [];
@@ -113,15 +120,23 @@ for (const url of todo) {
     if (sans.length < 4) { bad++; return; }
     const h = g.header();
     if (!/^(1-0|0-1|1\/2-1\/2)$/.test(String(h.Result || "").trim())) { unfinished++; return; }
-    let eco = null, openingName = null;
-    try {
-      const c = new Chess();
-      for (const san of sans.slice(0, 24)) {
-        if (!c.move(san)) break;
-        const e = book.get(fenKey(c.fen()));
-        if (e) { eco = e.eco; openingName = e.name; }
-      }
-    } catch { /* unnamed */ }
+    // The dump STATES the opening: every game carries [ECO] and [Opening]
+    // headers. Replaying 24 plies per game to derive what we have been handed
+    // is the whole cost of this import — 49k games x a second chess.js replay —
+    // and it is what made a 30MB file take hours. Derive only when the headers
+    // are missing, which is rare.
+    let eco = h.ECO || null;
+    let openingName = h.Opening || null;
+    if (!eco) {
+      try {
+        const c = new Chess();
+        for (const san of sans.slice(0, 24)) {
+          if (!c.move(san)) break;
+          const e = book.get(fenKey(c.fen()));
+          if (e) { eco = e.eco; openingName = e.name; }
+        }
+      } catch { /* unnamed */ }
+    }
     const white = h.White || "?", black = h.Black || "?";
     const date = /^\d{4}\.\d{2}\.\d{2}$/.test(h.Date || "") ? h.Date : null;
     pending.push({
