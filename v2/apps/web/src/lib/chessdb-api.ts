@@ -1,4 +1,10 @@
 import { get, post, deleteJson } from "./api";
+import { API_BASE } from "./api";
+
+// Production serves the API under /v2api (.env.production). A bare "/api/…" hits nginx's
+// SPA fallback and returns index.html, so every chessdb call resolved to HTML and the
+// explorer showed nothing. Same bug that silently broke push subscribe on 2026-09-18 —
+// this file was the last hand-written client still missing the prefix.
 
 export type ChessdbGame = {
   _id: string;
@@ -36,7 +42,7 @@ export type GameplayReviseAssignment = {
 };
 
 async function patch<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetch(`${API_BASE}${path}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     credentials: "include",

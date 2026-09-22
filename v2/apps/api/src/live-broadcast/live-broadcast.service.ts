@@ -33,7 +33,15 @@ import { Chess } from "chess.js";
 
 const DISCOVER_MS = 90_000;      // re-ask which rounds are live
 const POLL_MS = 2_500;           // gap between board refreshes
-const TOURS_SCANNED = 60;        // how far down the recent-tournament list to look
+// 100, which is the API's own ceiling — asking for 200 still returns 100.
+//
+// This was 60, and 60 was quietly wrong: /api/broadcast returns the most
+// recently CREATED tournaments, not the ones being played, so an event set up
+// a while ago drops out of a short window while it is still live. Measured at
+// the moment it was reported: nb=60 found 2 current rounds and nb=100 found 7.
+// Five live tournaments were invisible, and nothing about the symptom pointed
+// at the page size.
+const TOURS_SCANNED = 100;
 const BACKOFF_MS = 90_000;       // how long a 429 sidelines us
 const UA = "ChessGuru/1.0 (academy live board; contact ranjith.vsk@gmail.com)";
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";

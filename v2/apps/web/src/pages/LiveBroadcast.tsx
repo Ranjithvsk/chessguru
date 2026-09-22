@@ -331,6 +331,20 @@ function RoundBoards({ roundId }: { roundId: string }) {
   const sinceRef = useRef<string | null>(null);
   const [stale, setStale] = useState(false);
 
+  // Clicking R1/R2 changes the ROUND but not the component — React Router
+  // re-renders this same instance with a new param. Every piece of state below
+  // therefore has to be cleared by hand, and `since` above all: it held the
+  // previous round's timestamp, so the first request for the new round asked
+  // for "games changed since then", got none, and the page sat there showing
+  // the old round's boards. Clicking a round chip looked like it did nothing.
+  // (owner, 2026-09-22: "when i clicked r1, r2 nothing happens why")
+  useEffect(() => {
+    setGames(new Map());
+    setMeta(null);
+    setFocus(null);
+    sinceRef.current = null;
+  }, [roundId]);
+
   useEffect(() => {
     let stop = false;
     let timer: ReturnType<typeof setTimeout>;
