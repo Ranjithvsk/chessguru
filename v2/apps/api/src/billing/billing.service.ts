@@ -388,4 +388,26 @@ export class BillingService {
       try { await sendMail({ to: email, subject, text: body, html: body.replace(/\n/g, "<br>") }); } catch (e) { console.error("[billing] reminder mail", e); }
     }
   }
+
+  /** Synthetic payment-gateway probe for the fleet monitor (2026-09-13): are Razorpay
+   *  credentials present AND does an authenticated read against Razorpay succeed right now?
+   *  Read-only (lists 1 payment), never creates an order. Called by GET /api/health/payments.
+   *
+   *  Removed by accident in 6a58162 (a live-broadcast commit) on 2026-09-21, which took the
+   *  monitor's only payments check with it — the fleet alerted 404 every six hours from that
+   *  minute. Restored 2026-09-22. */
+  async gatewayProbe(): Promise<{ configured: boolean; ok: boolean; latencyMs: number | null; error: string | null }> {
+    const keyId = process.env.RAZORPAY_KEY_ID?.trim() ?? "", secret = process.env.RAZORPAY_KEY_SECRET?.trim() ?? "";
+    if (!keyId || !secret) return { configured: false, ok: false, latencyMs: null, error: "RAZORPAY_KEY_ID/SECRET not set" };
+    const t0 = Date.now();
+    try {
+      const r = await fetch("https://api.razorpay.com/v1/payments?count=1", {
+        headers: { Authorization: "Basic " + Buffer.from(`${keyId}:${secret}`).toString("base64") }, signal: AbortSignal.timeout(8000),
+      });
+      const latencyMs = Date.now() - t0;
+      if (!r.ok) { const j: any = await r.json().catch(() => null); return { configured: true, ok: false, latencyMs, error: j?.error?.description ?? `HTTP ${r.status}` }; }
+      return { configured: true, ok: true, latencyMs, error: null };
+    } catch (e) { return { configured: true, ok: false, latencyMs: Date.now() - t0, error: (e as Error).message }; }
+  }
+
 }
