@@ -325,8 +325,9 @@ function RoundBoards({ roundId }: { roundId: string }) {
   // Games are kept in a map and patched by `since`, so a board that has not
   // moved keeps its identity (and its DOM) instead of being replaced wholesale.
   const [games, setGames] = useState<Map<number, LiveGame>>(new Map());
-  const [meta, setMeta] = useState<{ tourName: string; roundName: string; ongoing: boolean } | null>(null);
+  const [meta, setMeta] = useState<{ tourName: string; roundName: string; ongoing: boolean; tourId?: string | null } | null>(null);
   const [focus, setFocus] = useState<number | null>(null);
+  const [tab, setTab] = useState<"boards" | "players" | "teams">("boards");
   const sinceRef = useRef<string | null>(null);
   const [stale, setStale] = useState(false);
 
@@ -338,7 +339,7 @@ function RoundBoards({ roundId }: { roundId: string }) {
         const since = sinceRef.current ? `?since=${encodeURIComponent(sinceRef.current)}` : "";
         const r = await get<{ ok: boolean; round: any; games: LiveGame[]; serverTime: string }>(`/api/live-broadcast/${roundId}${since}`);
         if (stop) return;
-        if (r?.round) setMeta({ tourName: r.round.tourName, roundName: r.round.roundName, ongoing: !!r.round.ongoing });
+        if (r?.round) setMeta({ tourName: r.round.tourName, roundName: r.round.roundName, ongoing: !!r.round.ongoing, tourId: r.round.tourId ?? null });
         if (r?.games?.length) {
           setGames((prev) => {
             const next = new Map(prev);
@@ -377,14 +378,29 @@ function RoundBoards({ roundId }: { roundId: string }) {
         </p>
       </header>
 
-      {focused && <FocusedGame g={focused} onClose={() => setFocus(null)} />}
+      {/* Boards / Players / Teams, as the reference viewer has them. Players
+        *  and Teams are computed from the broadcast games we hold, which is
+        *  why they carry the same caveat Lichess puts on its own. */}
+      <div className="mb-4 flex gap-1 border-b border-ink-700">
+        {(["boards", "players", "teams"] as const).map((t) => (
+          <button key={t} onClick={() => setTab(t)}
+            className={`-mb-px border-b-2 px-4 py-2 text-sm font-semibold capitalize transition-colors ${
+              tab === t ? "border-brand-500 text-brand-100" : "border-transparent text-ink-400 hover:text-ink-100"}`}>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {tab !== "boards" && meta?.tourId && <Standings tourId={meta.tourId} tab={tab} />}
+
+      {tab === "boards" && focused && <FocusedGame g={focused} onClose={() => setFocus(null)} />}
 
       {/* A team event is scored by MATCH, not by board: the Olympiad pairs two
         *  countries across four boards and the match score is what anyone
         *  actually wants to know. Only rendered when the feed states teams. */}
-      <TeamScores games={list} />
+      {tab === "boards" && <TeamScores games={list} />}
 
-      {list.length === 0 ? (
+      {tab !== "boards" ? null : list.length === 0 ? (
         <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-8 text-center text-sm text-ink-400">
           Waiting for the first boards…
         </div>
@@ -591,6 +607,92 @@ function TeamScores({ games }: { games: LiveGame[] }) {
             {m.open > 0 && <span className="shrink-0 text-[10px] text-amber-300">{m.open} playing</span>}
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+type StandingsResp = {
+  ok: boolean; roundsCounted: number; roundsTotal: number;
+  players: { name: string; title: string | null; elo: number | null; team: string | null; score: number; played: number }[];
+  teams: { team: string; matchPts: number; gamePts: number; matches: number; avgRating: number | null }[];
+};
+
+/** Player and team tables for the whole tournament, not just this round. */
+function Standings({ tourId, tab }: { tourId: string; tab: "players" | "teams" }) {
+  const [q, setQ] = useState("");
+  const r = useQuery<StandingsResp>({
+    queryKey: ["standings", tourId],
+    queryFn: () => get(`/api/live-broadcast/tour/${tourId}/standings`),
+    refetchInterval: 30_000,
+  });
+  if (r.isLoading) return <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-8 text-center text-sm text-ink-400">Working out the standings…</div>;
+  const d = r.data;
+  if (!d?.ok) return null;
+  const fmt = (n: number) => (n % 1 ? `${Math.floor(n) || ""}½` : String(n));
+
+  const note = (
+    // The same caveat the reference viewer carries, for the same reason: these
+    // are BROADCAST games, and a round nobody has opened contributes nothing.
+    <p className="mb-3 text-[11px] text-ink-500">
+      ⓘ Calculated from broadcast games ({d.roundsCounted} of {d.roundsTotal} rounds) — may differ from official results.
+    </p>
+  );
+
+  if (tab === "teams") {
+    return (
+      <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-4">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-400">Team results</div>
+        {note}
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[26rem] text-sm">
+            <thead>
+              <tr className="border-b border-ink-800 text-[11px] uppercase tracking-wide text-ink-500">
+                <th className="px-2 py-1.5 text-left font-semibold">Team (avg rating)</th>
+                <th className="px-2 py-1.5 text-right font-semibold">Match</th>
+                <th className="px-2 py-1.5 text-right font-semibold">Game</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.teams.map((t, i) => (
+                <tr key={t.team} className="border-b border-ink-800/60">
+                  <td className="px-2 py-1.5">
+                    <span className="mr-1.5 tabular-nums text-ink-500">{i + 1}</span>
+                    {teamFlag(t.team) && <span className="mr-1">{teamFlag(t.team)}</span>}
+                    <span className="text-ink-100">{t.team}</span>
+                    {t.avgRating && <span className="ml-1.5 text-[11px] tabular-nums text-ink-500">{t.avgRating}</span>}
+                  </td>
+                  <td className="px-2 py-1.5 text-right font-semibold tabular-nums text-ink-100">{t.matchPts}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-ink-300">{fmt(t.gamePts)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  const needle = q.trim().toLowerCase();
+  const rows = needle ? d.players.filter((p) => p.name.toLowerCase().includes(needle)) : d.players;
+  return (
+    <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-4">
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-400">Players</div>
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search player"
+        className="mb-2 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-brand-500" />
+      {note}
+      <div className="divide-y divide-ink-800/60">
+        {rows.slice(0, 100).map((p, i) => (
+          <div key={p.name} className="flex items-center gap-2 py-1.5 text-sm">
+            <span className="w-7 shrink-0 text-right tabular-nums text-ink-500">{i + 1}</span>
+            {p.title && <span className="shrink-0 font-bold text-amber-300">{p.title}</span>}
+            {teamFlag(p.team) && <span className="shrink-0">{teamFlag(p.team)}</span>}
+            <span className="min-w-0 flex-1 truncate text-ink-100">{p.name}</span>
+            {p.elo && <span className="shrink-0 tabular-nums text-ink-500">{p.elo}</span>}
+            <span className="w-10 shrink-0 text-right font-semibold tabular-nums text-ink-100">{fmt(p.score)}</span>
+          </div>
+        ))}
+        {!rows.length && <div className="py-4 text-center text-sm text-ink-500">No player matches that.</div>}
       </div>
     </div>
   );

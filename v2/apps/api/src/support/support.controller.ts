@@ -61,6 +61,10 @@ type IncomingBody = {
   message?: string;
   contact?: string;
   screenshots?: string[];
+  // Files the reporter attached. They upload separately to
+  // POST /api/support/attachment, which stores the bytes and returns an id;
+  // the ticket then carries only these pointers.
+  attachments?: { id?: string; name?: string; type?: string; bytes?: number }[];
   pageUrl?: string;
   parentSeq?: number;
 };
@@ -117,6 +121,19 @@ export class SupportController {
     // academies have no platform.tenant row at all, so a ticket with no
     // contact is permanently email-silent. Every ChessGuru reply sent before
     // 2026-09-05 reached the filer only inside the in-app widget thread.
+    // Only well-formed pointers go up: pos-api validates id as 32 hex and
+    // rejects the WHOLE ticket over one malformed entry, which would lose the
+    // message along with the files.
+    const attachments = (Array.isArray(b.attachments) ? b.attachments : [])
+      .filter((a) => a && typeof a.id === "string" && /^[a-f0-9]{32}$/.test(a.id))
+      .slice(0, 50)
+      .map((a) => ({
+        id: a.id as string,
+        name: String(a.name ?? "file").slice(0, 200),
+        type: String(a.type ?? "application/octet-stream").slice(0, 100),
+        bytes: Number(a.bytes) > 0 ? Math.floor(Number(a.bytes)) : 0,
+      }));
+
     const sessionEmail = userId ? await this.emailFor(userId) : null;
 
     const upstreamPayload: any = {
@@ -124,6 +141,14 @@ export class SupportController {
       message: enrichedMessage,
       contact: contact || sessionEmail || undefined,
       screenshots: shots.length ? shots : undefined,
+      // FORWARD THE ATTACHMENTS. This proxy dropped the field entirely, so a
+      // reporter could attach ten files, watch every one upload and complete,
+      // and still get a ticket recording attachments: [] — the bytes sitting
+      // orphaned in pos-api's store with nothing pointing at them. The widget
+      // and both attachment endpoints were fine; only this hop lost them.
+      // (owner, 2026-09-22 on TKT-259: "i attached 10 images" / "but i
+      // uploaded and i complete")
+      attachments: attachments.length ? attachments : undefined,
       pageUrl: pageUrl || undefined,
       app,
       parentSeq: typeof b.parentSeq === "number" && b.parentSeq > 0 ? Math.floor(b.parentSeq) : undefined,

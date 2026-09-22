@@ -69,6 +69,100 @@ export class LiveBroadcastController {
     };
   }
 
+  /** Player and team standings for a tournament, computed from the boards we
+   *  hold. Lichess shows the same caveat on its own version, and for the same
+   *  reason: these come from BROADCAST games, so a round nobody has opened yet
+   *  is simply not counted. The response says how much it is working from so
+   *  the page can be honest about it rather than implying officialdom.
+   *  (TKT-259) */
+  @Get("tour/:tourId/standings")
+  async standings(@Param("tourId") tourId: string) {
+    const id = String(tourId || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32);
+    if (!id) return { ok: false };
+    const rounds = await this.conn.db!.collection("liveBroadcastRounds")
+      .find({ tourId: id }, { projection: { _id: 1, roundName: 1, boards: 1 } })
+      .toArray();
+    const roundIds = rounds.map((r: any) => String(r._id));
+    if (!roundIds.length) return { ok: true, players: [], teams: [], roundsCounted: 0, roundsTotal: 0 };
+
+    // Any round we have never fetched contributes nothing, so asking for
+    // standings quietly pulls the missing ones in. Fire-and-forget and
+    // serialized inside the service, so a big tournament fills in over a few
+    // seconds instead of firing eleven requests at Lichess at once.
+    for (const r of rounds as any[]) {
+      if ((r.boards ?? 0) === 0) void this.svc.noteViewed(String(r._id)).catch(() => {});
+    }
+
+    const games = await this.conn.db!.collection("liveBroadcastGames")
+      .find({ roundId: { $in: roundIds } })
+      .limit(5000)
+      .toArray();
+
+    type P = { name: string; title: string | null; elo: number | null; team: string | null; score: number; played: number };
+    const players = new Map<string, P>();
+    type T = { team: string; matchPts: number; gamePts: number; matches: number; ratingSum: number; ratingN: number };
+    const teams = new Map<string, T>();
+    // A match is one pairing within one round.
+    const matches = new Map<string, { a: string; b: string; aPts: number; bPts: number; open: number }>();
+
+    const bump = (name: string, title: any, elo: any, team: any, pts: number) => {
+      if (!name || name === "?") return;
+      const p = players.get(name) ?? { name, title: title ?? null, elo: Number(elo) || null, team: team ?? null, score: 0, played: 0 };
+      p.score += pts; p.played += 1;
+      if (!p.title && title) p.title = title;
+      if (!p.elo && Number(elo)) p.elo = Number(elo);
+      if (!p.team && team) p.team = team;
+      players.set(name, p);
+    };
+
+    for (const g of games as any[]) {
+      const res = g.result;
+      if (res !== "1-0" && res !== "0-1" && res !== "1/2-1/2") continue;   // unfinished counts for nobody
+      const wPts = res === "1-0" ? 1 : res === "0-1" ? 0 : 0.5;
+      bump(g.whiteName, g.whiteTitle, g.whiteElo, g.whiteTeam, wPts);
+      bump(g.blackName, g.blackTitle, g.blackElo, g.blackTeam, 1 - wPts);
+
+      const wt = g.whiteTeam, bt = g.blackTeam;
+      if (!wt || !bt) continue;
+      for (const [t, elo] of [[wt, g.whiteElo], [bt, g.blackElo]] as [string, any][]) {
+        const rec = teams.get(t) ?? { team: t, matchPts: 0, gamePts: 0, matches: 0, ratingSum: 0, ratingN: 0 };
+        if (Number(elo)) { rec.ratingSum += Number(elo); rec.ratingN += 1; }
+        teams.set(t, rec);
+      }
+      teams.get(wt)!.gamePts += wPts;
+      teams.get(bt)!.gamePts += 1 - wPts;
+
+      const a = wt < bt ? wt : bt, b = wt < bt ? bt : wt;
+      const k = `${g.roundId}|${a}|${b}`;
+      const m = matches.get(k) ?? { a, b, aPts: 0, bPts: 0, open: 0 };
+      if (wt === a) { m.aPts += wPts; m.bPts += 1 - wPts; } else { m.bPts += wPts; m.aPts += 1 - wPts; }
+      matches.set(k, m);
+    }
+
+    // Match points: 2 for a won match, 1 each for a tie — the Olympiad rule.
+    for (const m of matches.values()) {
+      const A = teams.get(m.a), B = teams.get(m.b);
+      if (!A || !B) continue;
+      A.matches += 1; B.matches += 1;
+      if (m.aPts > m.bPts) A.matchPts += 2;
+      else if (m.bPts > m.aPts) B.matchPts += 2;
+      else { A.matchPts += 1; B.matchPts += 1; }
+    }
+
+    return {
+      ok: true,
+      roundsTotal: rounds.length,
+      roundsCounted: new Set(games.map((g: any) => g.roundId)).size,
+      players: [...players.values()]
+        .sort((x, y) => y.score - x.score || (y.elo ?? 0) - (x.elo ?? 0))
+        .slice(0, 200),
+      teams: [...teams.values()]
+        .map((t) => ({ ...t, avgRating: t.ratingN ? Math.round(t.ratingSum / t.ratingN) : null }))
+        .sort((x, y) => y.matchPts - x.matchPts || y.gamePts - x.gamePts)
+        .slice(0, 200),
+    };
+  }
+
   /** Every board on one round, newest state. This is what the grid polls. */
   @Get(":roundId")
   async round(@Param("roundId") roundId: string, @Query("since") since?: string) {
@@ -89,7 +183,7 @@ export class LiveBroadcastController {
     ]);
     return {
       ok: true,
-      round: meta ? { roundId: id, tourName: (meta as any).tourName, roundName: (meta as any).roundName, ongoing: !!(meta as any).ongoing, url: (meta as any).url } : null,
+      round: meta ? { roundId: id, tourName: (meta as any).tourName, roundName: (meta as any).roundName, ongoing: !!(meta as any).ongoing, url: (meta as any).url, tourId: (meta as any).tourId ?? null } : null,
       games: games.map((g: any) => ({
         board: g.board,
         whiteName: g.whiteName, blackName: g.blackName,
