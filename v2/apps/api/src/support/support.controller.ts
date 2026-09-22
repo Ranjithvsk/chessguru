@@ -169,7 +169,13 @@ export class SupportController {
   /** The shared widget bundle, proxied rather than copied. A fix deployed to
    *  pos-api reaches ChessGuru with no rebuild here — the same reasoning the
    *  admin panel already uses. */
-  @Get("widget.js")
+  // Served WITHOUT a .js extension. Cloudflare caches static-looking assets by
+  // extension and rewrote the TTL to four hours, so a widget fix sat behind the
+  // edge — exactly the staleness that proxying was meant to avoid, and there is
+  // no API token on this box to purge with. "widget" is not a static extension,
+  // so CF passes it through and the origin's no-cache is honoured.
+  // widget.js stays registered so anything already pointing at it keeps working.
+  @Get(["widget", "widget.js"])
   async widget(@Req() req: any, @Res() res: any) {
     try {
       const r = await fetch(UPSTREAM_WIDGET, { headers: { "if-none-match": String(req?.headers?.["if-none-match"] || "") } });
@@ -178,9 +184,12 @@ export class SupportController {
       const js = await r.text();
       const etag = r.headers.get("etag");
       if (etag) res.setHeader("etag", etag);
-      // Short cache, like admin's proxy: long enough to skip a fetch per
-      // navigation, short enough that a widget fix lands within minutes.
-      res.setHeader("cache-control", "public, max-age=300, must-revalidate");
+      // no-cache, matching what pos-api sends for the same bundle. A cacheable
+      // max-age invited Cloudflare to cache it at the edge and rewrite the TTL
+      // to four hours, so a widget fix would have sat behind CF for that long —
+      // which defeats the whole point of proxying rather than forking. The ETag
+      // still makes the revalidation a cheap 304.
+      res.setHeader("cache-control", "no-cache, must-revalidate");
       return res.type("application/javascript").send(js);
     } catch {
       return res.status(502).type("application/javascript").send("/* support widget unavailable */");
