@@ -64,3 +64,28 @@ PATH, which would have skipped the wrapper). Safety net for paths that never tou
 `llama-server` with ppid=1 older than 10 min.
 
 Proven: parent SIGKILLed → child gone (the exact case atexit cannot cover).
+
+## Why no alert mail — and the alarm that was missing
+Owner asked why no error mail arrived. Three independent reasons:
+1. **Nothing alerted on memory.** `server-monitor` collected MEM/SWAP for the dashboard,
+   but the only resource alarm was `diskCheck(mounts, 85)`. The exact condition that took
+   the site down had no alarm at all. **Added `memCheck(12, 80)`** to France, Mumbai and
+   Singapore: `SVC=Memory pressure|inactive|1` when MemAvailable < 12% or swap >= 80%,
+   which flows through the existing 2-cycle → alert-mail pipeline (the svc alert filter
+   was widened from `^(Backup|Disk)` to `^(Backup|Disk|Memory)` with its own detail line).
+   The signal is MemAvailable, not "used" — Linux spends idle RAM on cache, so "used %"
+   is high on a healthy box. The pill name is CONSTANT on purpose: an alert key carrying a
+   live percentage changes every cycle and can never hold for the two cycles required.
+   Verified live: all three boxes report `active`; simulated incident levels (avail 4%,
+   swap 72%) report `inactive`, i.e. it would have mailed.
+2. **The API probe never tripped.** pm2 restarted `chessguru-v2-api` in about 3 seconds —
+   far inside the 2-cycle (~2 min) confirmation window — so the health probe never failed
+   twice in a row. A fast crash/restart is invisible to it by design.
+3. **The blocking symptom was client-side** (stranded boot overlay); no server check sees it.
+
+Mail was NOT broken: the monitor mailed backup-stale and Mumbai-flapping alerts the same
+morning (`[alert] mail 200`), and mailHealth was ok. Monitor alerts go direct via :4025 and
+never appear in ChessGuru's `mailLog`, so an empty mailLog is not evidence of silence.
+
+`server-monitor/` is gitignored (it holds the internal token) — the change is carried by
+the nightly France borg backup, which now includes that directory.
