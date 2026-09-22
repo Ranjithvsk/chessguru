@@ -35,9 +35,15 @@ const LABEL: Record<string, string> = {
   notation: "notation panel", challenge_start: "challenge started", challenge_end: "challenge ended",
 };
 
+type Rec = { name: string; bytes: number; createdAt: string };
+
 export default function ClassEventReplay() {
   const { id = "" } = useParams();
   const [data, setData] = useState<Replay | null>(null);
+  // Audio and video only exist if somebody recorded the class — the call itself
+  // is not captured. When a recording IS there, show it here rather than making
+  // the viewer find the separate player.
+  const [recs, setRecs] = useState<Rec[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [i, setI] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -51,6 +57,14 @@ export default function ClassEventReplay() {
         if (!dead) { setData(r); setI(0); }
       } catch { if (!dead) setErr("You are not allowed to see this class, or it does not exist."); }
     })();
+    return () => { dead = true; };
+  }, [id]);
+
+  useEffect(() => {
+    let dead = false;
+    get<{ recordings: Rec[] }>(`/api/class/${encodeURIComponent(id)}/recordings`)
+      .then((r) => { if (!dead) setRecs(r.recordings ?? []); })
+      .catch(() => { if (!dead) setRecs([]); });   // no access or none — same to the page
     return () => { dead = true; };
   }, [id]);
 
@@ -111,6 +125,29 @@ export default function ClassEventReplay() {
       ) : (
         <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_320px]">
           <div className="min-w-0">
+            {recs && recs.length > 0 && (
+              <div className="mb-3">
+                <video
+                  controls preload="metadata"
+                  className="w-full rounded-xl border border-ink-200 bg-black"
+                  src={`/v2api/api/class/${encodeURIComponent(id)}/recording/${encodeURIComponent(recs[0]!.name)}`}
+                />
+                <div className="mt-1 text-[11px] text-ink-400">
+                  Recording · {(recs[0]!.bytes / 1048576).toFixed(1)} MB
+                  {recs.length > 1 ? ` · ${recs.length - 1} more not shown` : ""}
+                  {" · "}
+                  <Link to={`/class/${encodeURIComponent(id)}/replay/${encodeURIComponent(recs[0]!.name)}`} className="underline">
+                    open the synced player
+                  </Link>
+                </div>
+              </div>
+            )}
+            {recs !== null && recs.length === 0 && (
+              <p className="mb-3 rounded-lg border border-ink-200 bg-ink-50 px-3 py-2 text-[11px] text-ink-500">
+                No audio or video for this class. The lesson call is not recorded — only the board is
+                logged — so a replay has picture only when somebody recorded the class.
+              </p>
+            )}
             <Board fen={fen} lastMove={lastMove} viewOnly coordinates />
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <button onClick={() => { setPlaying(false); setI(0); }} className="rounded-lg border border-ink-300 bg-white px-2.5 py-1.5 text-xs font-bold">⏮</button>
