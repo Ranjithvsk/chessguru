@@ -6,7 +6,6 @@ import StreakAtRiskBanner from "./components/StreakAtRiskBanner";
 import LiveClassBanner from "./components/LiveClassBanner";
 import ClassAlertsPrompt from "./components/ClassAlertsPrompt";
 import HomeworkPendingBanner from "./components/HomeworkPendingBanner";
-import SupportWidget from "./components/SupportWidget";
 import { api } from "./lib/api";
 import { usePresenceHeartbeat } from "./hooks/usePresenceHeartbeat";
 
@@ -121,7 +120,6 @@ export default function App() {
       )}
       {/* Global "?" support widget — bottom-right pill on every page.
        *  Hidden on /class-v2/* so it doesn't overlap video controls. */}
-      <SupportWidget />
     </div>
   );
 }

@@ -15,7 +15,7 @@
 // We enrich the payload with the ChessGuru session identity (userId, name,
 // academy) BEFORE forwarding so super-admin sees who filed it.
 
-import { Body, Controller, Get, HttpException, HttpStatus, Post, Req } from "@nestjs/common";
+import { Body, Controller, Get, HttpException, HttpStatus, Post, Req, Res } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 
@@ -24,6 +24,14 @@ const UPSTREAM = process.env.SUPPORT_UPSTREAM_URL || "https://pos.dreamcy.com/po
 // this GET endpoint. We proxy to pos-api's /pos/support/my-tickets using the
 // shared INTERNAL_API_SECRET so the student's session stays authoritative.
 const UPSTREAM_LIST = process.env.SUPPORT_UPSTREAM_LIST_URL || "https://pos.dreamcy.com/pos/support/my-tickets";
+// The widget bundle and the file store both live with pos-api. ChessGuru serves
+// them from its own origin so the browser never talks to Mumbai directly, and
+// so the bundle stays ONE file: it used to be forked into
+// apps/web/src/components/SupportWidget.tsx, which is how the POS widget moved
+// to 50 attachments while ChessGuru silently stayed at 4.
+const UPSTREAM_WIDGET = process.env.SUPPORT_UPSTREAM_WIDGET_URL || "https://pos.dreamcy.com/pos/support/widget.js";
+const UPSTREAM_ATTACH = process.env.SUPPORT_UPSTREAM_ATTACH_URL || "https://pos.dreamcy.com/pos/support/attachment";
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const INTERNAL_TOKEN = process.env.DREAMCY_INTERNAL_TOKEN || process.env.SUPPORT_INTERNAL_TOKEN || "";
 
 // Say so at BOOT if the token is missing.
@@ -158,6 +166,53 @@ export class SupportController {
   /** List the signed-in user's tickets + reply threads. Powers the "Your
    *  tickets" tab of the widget. Anonymous callers get an empty list — a
    *  ticket has to have a user identity for us to link it back. TKT-90. */
+  /** The shared widget bundle, proxied rather than copied. A fix deployed to
+   *  pos-api reaches ChessGuru with no rebuild here — the same reasoning the
+   *  admin panel already uses. */
+  @Get("widget.js")
+  async widget(@Req() req: any, @Res() res: any) {
+    try {
+      const r = await fetch(UPSTREAM_WIDGET, { headers: { "if-none-match": String(req?.headers?.["if-none-match"] || "") } });
+      if (r.status === 304) return res.status(304).end();
+      if (!r.ok) return res.status(502).type("application/javascript").send("/* support widget unavailable */");
+      const js = await r.text();
+      const etag = r.headers.get("etag");
+      if (etag) res.setHeader("etag", etag);
+      // Short cache, like admin's proxy: long enough to skip a fetch per
+      // navigation, short enough that a widget fix lands within minutes.
+      res.setHeader("cache-control", "public, max-age=300, must-revalidate");
+      return res.type("application/javascript").send(js);
+    } catch {
+      return res.status(502).type("application/javascript").send("/* support widget unavailable */");
+    }
+  }
+
+  /** One attachment, forwarded to pos-api's store. Raw body straight through —
+   *  the bytes are never re-encoded, which is the point. */
+  @Post("attachment")
+  async attachment(@Req() req: any, @Res() res: any) {
+    const buf: Buffer = req.body;
+    if (!Buffer.isBuffer(buf) || buf.byteLength === 0) return res.status(400).json({ error: "ValidationError", message: "Empty upload." });
+    if (buf.byteLength > MAX_ATTACHMENT_BYTES) {
+      return res.status(413).json({ error: "TooLarge", message: `Each file must be under ${Math.round(MAX_ATTACHMENT_BYTES / 1048576)} MB.` });
+    }
+    const name = String(req?.query?.name || "file").slice(0, 200);
+    try {
+      const r = await fetch(`${UPSTREAM_ATTACH}?name=${encodeURIComponent(name)}`, {
+        method: "POST",
+        headers: { "content-type": String(req?.headers?.["content-type"] || "application/octet-stream") },
+        // This project's lib types give BodyInit/BlobPart a DOM-only shape that
+        // admits neither Buffer nor Uint8Array. undici accepts a Buffer at
+        // runtime, so the cast is the honest fix rather than a needless copy.
+        body: buf as unknown as BodyInit,
+      });
+      const text = await r.text();
+      return res.status(r.status).type("application/json").send(text);
+    } catch {
+      return res.status(502).json({ error: "Upstream", message: "Could not save that file." });
+    }
+  }
+
   @Get("my-tickets")
   async myTickets(@Req() req: any) {
     const userId: string | null = req?.session?.userId ?? null;

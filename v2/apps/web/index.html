@@ -311,5 +311,12 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <!-- Support widget: the SHARED bundle from packages/support-widget, proxied
+         by our own API so a fix there reaches us with no rebuild. It used to be
+         forked into src/components/SupportWidget.tsx, which is how the POS one
+         grew to 50 attachments while this stayed at 4.
+         data-api-base keeps its calls on /v2api/api/support, so our controller
+         still stamps the academy onto the ticket before forwarding. -->
+    <script src="/v2api/api/support/widget.js" defer data-app="chessguru" data-api-base="/v2api/api/support"></script>
   </body>
 </html>
