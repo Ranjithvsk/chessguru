@@ -842,8 +842,16 @@ export function PalettePieceBtn({ p, selected, onClick }: { p: string; selected:
 }
 
 export default function SharedClassBoard(
-  { room, userId, displayName, onClassEnded, intendedRole, local, localInitial, onLocalChange }: {
+  { room, userId, displayName, onClassEnded, intendedRole, local, localInitial, onLocalChange, observerToken }: {
     room: string; userId?: string | null; displayName?: string | null;
+    /** WATCH MODE. A one-shot grant from POST /api/class/:id/observe-token,
+     *  handed to class-ws in the hello frame. The server then treats this socket
+     *  as invisible — off the participant count, the roster, the attendance
+     *  register and the join/leave announcements — and ignores anything it sends.
+     *  The board is made read-only to match, so the watcher cannot even try: a
+     *  move the server silently drops would otherwise appear to work on their own
+     *  screen and then snap back on the next state frame. */
+    observerToken?: string;
     /** Coach explicitly ended the class — parent should navigate away / show a toast. */
     onClassEnded?: (reason: string) => void;
     /** Role signalled by the URL (?role=coach|student). Passed to class-ws
@@ -979,7 +987,14 @@ export default function SharedClassBoard(
             initial: localInitialRef.current,
             onChange: (st) => { onLocalChangeRef.current?.(st); },
           })
-        : (new WebSocket(`${proto}//${location.host}/v2api/class-ws/${encodeURIComponent(room)}`) as unknown as ClassSocket);
+        : (new WebSocket(
+            // ?observe=1 makes the socket invisible from the instant it opens,
+            // before `hello` can say so — otherwise the room announces the
+            // participant count going up and straight back down. It grants
+            // nothing: the server sends this socket no board state at all until
+            // the token on the hello frame has been redeemed.
+            `${proto}//${location.host}/v2api/class-ws/${encodeURIComponent(room)}${observerToken ? "?observe=1" : ""}`,
+          ) as unknown as ClassSocket);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -998,8 +1013,12 @@ export default function SharedClassBoard(
             type: "hello",
             userId: userId ?? undefined,
             displayName: displayName ?? undefined,
-            coachToken: savedCoachToken,
-            intendedRole,
+            // A watcher never carries a coach token or a role claim: both are
+            // routes to control of the board, and the server refuses them for an
+            // observer in any case.
+            coachToken: observerToken ? undefined : savedCoachToken,
+            intendedRole: observerToken ? undefined : intendedRole,
+            observerToken,
           }));
         } catch { /* */ }
       };
@@ -1272,6 +1291,10 @@ export default function SharedClassBoard(
   };
 
   const sendMove = (from: string, to: string) => {
+    // A watcher never plays. class-ws drops their frames regardless, but stopping
+    // here means the piece does not move on their own screen and then snap back
+    // when the next state frame arrives.
+    if (observerToken) return;
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     // Challenge student path: apply to LOCAL TREE at cursor. If the move
@@ -1830,7 +1853,7 @@ export default function SharedClassBoard(
       <Board
         fen={displayFen}
         orientation={orientation}
-        movableColor={boardMovable}
+        movableColor={observerToken ? "none" : boardMovable}
         dests={boardMovable === "none" ? (new Map() as any) : (displayDests as any)}
         // Coach board hides click-to-select (source highlight + dest dots).
         // Owner ask 2026-09-03: 'when coach click piece, it highlight the

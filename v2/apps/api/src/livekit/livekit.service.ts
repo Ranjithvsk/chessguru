@@ -34,7 +34,7 @@ export class LivekitService {
     roomName: string;
     identity: string;
     displayName: string;
-    role: "coach" | "student";
+    role: "coach" | "student" | "observer";
     ttlMinutes?: number;
   }): Promise<{ token: string; url: string }> {
     const { key, secret, url, configured } = this.cfg();
@@ -44,12 +44,18 @@ export class LivekitService {
       name: opts.displayName,
       ttl: `${(opts.ttlMinutes ?? DEFAULT_TTL_MIN)}m`,
     });
+    // A silent observer: sees and hears the class, contributes nothing to it, and
+    // is not in the participant list the other clients render. `hidden` is the
+    // SFU's own flag — without it the watcher shows up as a face in the call even
+    // with publishing off, which is exactly what must not happen.
+    const observing = opts.role === "observer";
     at.addGrant({
       room: opts.roomName,
       roomJoin: true,
-      canPublish: true,        // camera + mic for everyone in P0
+      canPublish: !observing,  // camera + mic for everyone in P0
       canSubscribe: true,
-      canPublishData: true,
+      canPublishData: !observing,
+      hidden: observing,
       // Per-role screen-share restriction (students can't screen-share) uses
       // the TrackSource enum from livekit-server-sdk; lands in P1 alongside
       // coach controls (mute-all / kick / spotlight).

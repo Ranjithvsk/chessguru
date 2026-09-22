@@ -153,6 +153,8 @@ import LiveBroadcast from "./pages/LiveBroadcast";
 // stays out of the shared code path even for post-auth users who never
 // open /fees. Nested React.lazy is fine; each nested lazy makes its own
 // deferred chunk that only downloads if that route mounts.
+const ClassWatch = lazy(() => import("./pages/ClassWatch"));
+const ClassEventReplay = lazy(() => import("./pages/ClassEventReplay"));
 const FeesLandingPage       = lazy(() => import("./pages/Fees"));
 const FeesProgramsPage      = lazy(() => import("./pages/FeesPrograms"));
 const FeesProgramDetailPage = lazy(() => import("./pages/FeesProgramDetail"));
@@ -333,6 +335,11 @@ export default function AppRest() {
         <Route path="books/read/:id" element={<BookReaderPage />} />
         <Route path="class" element={<Navigate to="/dashboard" replace />} />
         <Route path="class/:id" element={<ClassIdRedirect />} />
+        {/* Silent observation. Both routes are gated server-side (ChessGuru admin,
+            the superadmin's internal token, or an academy_owner inside their own
+            academy) — the pages simply fail closed if the grant is refused. */}
+        <Route path="watch/:id" element={<Suspense fallback={<LazyFallback />}><ClassWatch /></Suspense>} />
+        <Route path="watch/:id/replay" element={<Suspense fallback={<LazyFallback />}><ClassEventReplay /></Suspense>} />
         <Route path="class/:id/replay/:filename" element={<ClassReplayPage />} />
         <Route path="class-v2/:room" element={<ClassV2Page />} />
         <Route path="notebook" element={<ErrorBoundary label="Notebook"><NotebookPage /></ErrorBoundary>} />

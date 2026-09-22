@@ -9,6 +9,8 @@
 // once the coach/student roles from CHESSGURU-SAAS-VISION.md land in Q1.
 
 import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpException, HttpStatus, Post, Query, Req, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
+import { randomBytes } from "crypto";
+import { isAdmin } from "../admin/admins";
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { LivekitService } from "./livekit.service";
@@ -20,6 +22,22 @@ export class LivekitController {
     private readonly svc: LivekitService,
     @InjectConnection() private readonly conn: Connection,
   ) {}
+
+  /** Same rule as ClassObserveController.who() — kept in step with it. */
+  private async mayObserve(req: any, roomName: string): Promise<boolean> {
+    const statsToken = process.env.CHESSGURU_STATS_TOKEN || process.env.DREAMCY_INTERNAL_TOKEN || "";
+    const hdr = String(req?.headers?.["x-internal-token"] || "");
+    if (statsToken && hdr && hdr === statsToken) return true;
+    const uid: string | null = req?.session?.userId ?? null;
+    if (!uid) return false;
+    if (isAdmin(uid)) return true;
+    if (req?.session?.role !== "academy_owner" || !req?.session?.academyId) return false;
+    const db = this.conn.db!;
+    const klass: any = await db.collection("classSchedules").findOne({ _id: roomName as any }, { projection: { academyId: 1 } });
+    const ann: any = await db.collection("classLiveAnnouncements").findOne({ _id: roomName as any }, { projection: { academyId: 1 } });
+    const academyId = klass?.academyId ?? ann?.academyId ?? null;
+    return !!academyId && academyId === String(req.session.academyId);
+  }
 
   @Get("status")
   status() {
@@ -65,7 +83,26 @@ export class LivekitController {
     if (!req?.session?.userId) throw new UnauthorizedException();
     const roomName = String(roomRaw || "").trim();
     if (!/^[a-zA-Z0-9_-]{2,64}$/.test(roomName)) throw new BadRequestException("bad room");
-    const role: "coach" | "student" = roleRaw === "coach" ? "coach" : "student";
+    const role: "coach" | "student" | "observer" =
+      roleRaw === "coach" ? "coach" : roleRaw === "observer" ? "observer" : "student";
+    // An observer is authorised the same way as /api/class/:id/observe-token —
+    // a ChessGuru admin, the superadmin's internal token, or an academy_owner
+    // inside their own academy — and nothing else about this handler applies to
+    // them: they are not on the roster, so the eligibility and kick checks below
+    // would reject the very people allowed to watch.
+    if (role === "observer") {
+      const allowed = await this.mayObserve(req, roomName);
+      if (!allowed) throw new HttpException("not found", HttpStatus.NOT_FOUND);
+      const minted = await this.svc.createToken({
+        roomName,
+        // Unique per watcher AND per tab: two identities must never collide, or
+        // the SFU evicts the first one and the coach sees a participant churn.
+        identity: `observer-${randomBytes(6).toString("hex")}`,
+        displayName: "Observer",
+        role: "observer",
+      });
+      return { ok: true, token: minted.token, url: minted.url, role, room: roomName };
+    }
     if (!this.svc.isConfigured()) throw new ServiceUnavailableException("LiveKit not configured");
     // TENANT ISOLATION + coach-student scoping. Rules:
     //   * class has an academyId → caller's session must belong to that

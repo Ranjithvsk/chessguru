@@ -63,7 +63,7 @@ type Orientation = "white" | "black";
 //     saved (reconnect), server verifies + resumes coach role. Otherwise the
 //     first hello with no token claims the coach role for that room.
 type ClientFrame =
-  | { type: "hello"; coachToken?: string; userId?: string; displayName?: string; intendedRole?: "coach" | "student"; secondScreen?: boolean }
+  | { type: "hello"; coachToken?: string; userId?: string; displayName?: string; intendedRole?: "coach" | "student"; observerToken?: string; secondScreen?: boolean }
   | { type: "move"; move: Move }
   | { type: "reset" }
   | { type: "loadFen"; fen: string }        // coach only — set the board to an arbitrary position
@@ -256,7 +256,7 @@ const EMPTY_EVICT_MS = 4 * 60 * 60_000;
 function sweepEvicted(): void {
   const now = Date.now();
   for (const [id, r] of rooms) {
-    if (r.clients.size === 0 && r.emptyEvictAt != null && r.emptyEvictAt <= now) {
+    if (countParticipants(r) === 0 && r.emptyEvictAt != null && r.emptyEvictAt <= now) {
       // If the room had an active challenge, clear the timers so we don't
       // leak setTimeout handles + fire on a deleted room.
       if (r.challenge) {
@@ -276,6 +276,78 @@ const socketRole = new WeakMap<WebSocket, "coach" | "student">();
 // than a participant. They join a room only to hand a position to the coach's
 // own main screen, so they are kept out of the attendance register.
 const secondScreens = new WeakSet<WebSocket>();
+
+/** Redeem an observer grant minted by the API against a real session.
+ *  One-shot and short-lived: the row is deleted on redemption, so a token that
+ *  leaks out of a URL or a log cannot be replayed into someone's class. */
+async function redeemObserverGrant(token: string, classId: string): Promise<boolean> {
+  if (!dbConn?.db || !token) return false;
+  try {
+    const g: any = await dbConn.db.collection("classObserverGrants")
+      .findOneAndDelete({ _id: token as any, classId });
+    const row = g?.value ?? g;                      // driver returns either shape
+    return !!row && new Date(row.expiresAt).getTime() > Date.now();
+  } catch { return false; }
+}
+
+// ── Class replay log (owner 2026-09-22) ───────────────────────────────────────
+// classBoardState keeps only where a class ENDED up. To replay one you need the
+// order and the timing, so every teaching action is appended here with a
+// timestamp.
+//
+// Same cost discipline as the feature tally directly below, and for the same
+// reason — this is the realtime hot path and a busy board must not become a busy
+// mongo. Frames go into an in-memory buffer and leave in ONE batched insert
+// every 10s; anything not worth replaying never enters the buffer at all.
+const REPLAY_FRAME_TYPES = new Set([
+  "move", "reset", "lock", "annot", "orientation", "seek", "loadFen",
+  "takeback", "load-tree", "annotate-move", "notation", "challenge_start", "challenge_end",
+]);
+const REPLAY_FLUSH_MS = 10_000;
+const REPLAY_MAX_BUFFER = 5_000;        // a runaway room drops frames, never RAM
+let replayBuffer: any[] = [];
+
+function noteReplay(classId: string, type: string, payload: Record<string, unknown>): void {
+  if (!classId || !REPLAY_FRAME_TYPES.has(type)) return;
+  if (replayBuffer.length >= REPLAY_MAX_BUFFER) return;
+  replayBuffer.push({ classId, at: new Date(), type, ...payload });
+}
+
+async function flushReplay(): Promise<void> {
+  if (!replayBuffer.length || !dbConn?.db) return;
+  const batch = replayBuffer; replayBuffer = [];
+  try { await dbConn.db.collection("classEvents").insertMany(batch, { ordered: false }); }
+  catch { /* a dropped replay frame must never disturb a live class */ }
+}
+setInterval(() => { void flushReplay(); }, REPLAY_FLUSH_MS).unref?.();
+
+// ── Silent observers (owner 2026-09-22) ───────────────────────────────────────
+// A superadmin or academy owner watching a live class without anyone in it
+// knowing. An observer is deliberately NOT a participant: it must not bump the
+// participant count, announce a join or a leave, land on the attendance
+// register, fire a late-join alert, claim the coach role, or send anything that
+// changes the board.
+//
+// Authority does NOT come from the socket. This server believes whatever userId
+// a client puts in its hello frame, so "I am an observer" could simply be
+// asserted. The grant is therefore minted by the API against a real session and
+// stored in Mongo, and looked up here — the same process-boundary rule the
+// abandoned-class sweeper, the class-end broadcast and the challenge marks all
+// had to learn: :4000 and :4100 share a database, never memory.
+const observers = new WeakSet<WebSocket>();
+
+/** Everyone the room should admit to having. Observers are invisible by
+ *  definition, so every `participants` number a client ever sees comes from
+ *  here rather than from room.clients.size. */
+function countParticipants(room: Room): number {
+  let n = 0;
+  for (const c of room.clients) {
+    if (c.readyState !== WebSocket.OPEN) continue;
+    if (observers.has(c)) continue;
+    n++;
+  }
+  return n;
+}
 // Sockets whose arrival has already been announced. `hello` can arrive more than
 // once on a single socket (reconnect, coach-token re-resolution), and each one
 // must not produce another "joined" line in everyone's feed.
@@ -322,7 +394,7 @@ const TOUCH_EVERY_MS = 60_000;
 const lastTouch = new WeakMap<WebSocket, number>();
 
 function touchAttendance(ws: WebSocket): void {
-  if (secondScreens.has(ws)) return;          // a second screen is not on the register
+  if (secondScreens.has(ws) || observers.has(ws)) return;          // a second screen is not on the register
   const who = socketWho.get(ws);
   if (!who) return;                            // hasn't said hello yet
   const now = Date.now();
@@ -489,7 +561,7 @@ async function restoreRoomFromDb(classId: string, room: Room): Promise<void> {
     // Broadcast the restored state to any clients that connected while the
     // restore was in flight (rare, but possible on a rapid page reload).
     if (room.clients.size > 0) {
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: countParticipants(room), locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
     }
   } catch (e: any) {
     console.warn("[class-ws] classBoardState restore failed:", e?.message);
@@ -684,10 +756,31 @@ function broadcast(room: Room, frame: ServerFrame): void {
   for (const c of room.clients) {
     if (c.readyState === WebSocket.OPEN) { try { c.send(payload); } catch { /* ignore */ } }
   }
-  if (PERSIST_FRAME_TYPES.has((frame as any).type)) {
+  const ftype = (frame as any).type;
+  if (PERSIST_FRAME_TYPES.has(ftype) || REPLAY_FRAME_TYPES.has(ftype)) {
     // Find the classId that owns this room. Cheap linear scan; rooms Map
     // typically has ≤ dozens of entries in a live class window.
-    for (const [id, r] of rooms) { if (r === room) { scheduleRoomSave(id); break; } }
+    for (const [id, r] of rooms) {
+      if (r !== room) continue;
+      if (PERSIST_FRAME_TYPES.has(ftype)) scheduleRoomSave(id);
+      // Only the small fields, never `tree` or `history`: those are the whole
+      // board state and would be re-stored on every single move. The position,
+      // the move and the cursor are enough to rebuild the class step by step,
+      // and classBoardState still holds the final tree.
+      if (REPLAY_FRAME_TYPES.has(ftype)) {
+        const f = frame as any;
+        noteReplay(id, ftype, {
+          fen: f.fen ?? null,
+          move: f.move ?? null,
+          cursorPath: f.cursorPath ?? null,
+          cursorIdx: typeof f.cursorIdx === "number" ? f.cursorIdx : null,
+          shapes: ftype === "annot" ? (f.shapes ?? null) : null,
+          locked: typeof f.locked === "boolean" ? f.locked : null,
+          hidden: typeof f.hidden === "boolean" ? f.hidden : null,
+        });
+      }
+      break;
+    }
   }
 }
 
@@ -746,7 +839,7 @@ function syncShapesToPosition(room: Room): void {
   });
   room.shapes = next;
   if (same) return;
-  broadcast(room, { type: "annot", shapes: room.shapes, participants: room.clients.size });
+  broadcast(room, { type: "annot", shapes: room.shapes, participants: countParticipants(room) });
 }
 
 function studentCount(room: Room): number {
@@ -820,9 +913,29 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
   room.clients.add(ws);
   const send = (frame: ServerFrame) => { try { ws.send(JSON.stringify(frame)); } catch { /* */ } };
 
+  // `?observe=1` says "treat me as invisible from this instant". It is asserted
+  // by the client and NOT authority to see anything — the grant on the hello
+  // frame decides that, and until it is redeemed this socket is sent nothing at
+  // all. Declaring it can therefore only cost the declarer.
+  //
+  // It exists because `participants` is broadcast the moment a connection opens,
+  // which is before any hello has said what the connection is. Marking an
+  // observer only at hello meant the room announced the count going up and then
+  // immediately back down — a visible blip on the one number a coach might be
+  // watching, in the one feature whose whole purpose is to be unnoticed.
+  const observing = /[?&]observe=1(&|$)/.test(req.url ?? "");
+  if (observing) observers.add(ws);
+
   // Snapshot current board to the new participant. Role isn't decided here — client
   // sends `hello` (optionally with its saved coachToken) and role is resolved there.
-  send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation, notationHidden: room.notationHidden });
+  //
+  // A socket claiming to observe gets NOTHING until its grant is redeemed on
+  // hello. Without this, a made-up token still bought a snapshot of the board
+  // before the socket was dropped.
+  /** The board as it stands. Sent at connect to everyone who is allowed it,
+   *  and to an observer only once their grant has actually been redeemed. */
+  const sendSnapshot = () => send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: countParticipants(room), locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation, notationHidden: room.notationHidden });
+  if (!observing) sendSnapshot();
   // Late joiner mid-challenge — inform them so their board switches to
   // challenge mode with the correct remaining time. Uses the ORIGINAL
   // durationSec so the client can display "60s challenge, 42s remaining"
@@ -841,7 +954,10 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     // (client sees `endsAt` and computes remaining locally — keeps clocks in sync)
     void remaining;
   }
-  broadcast(room, { type: "participants", participants: room.clients.size });
+  // Nothing at all goes out for a declared observer: the count is unchanged, so
+  // the frame would carry no new information, and not sending it means the room
+  // sees no wire traffic whatsoever when someone starts watching.
+  if (!observing) broadcast(room, { type: "participants", participants: countParticipants(room) });
   // The "joined" announcement is deliberately NOT sent here. At connect time the
   // client has not yet sent `hello`, so socketWho holds no name and socketRole no
   // role: every arrival was announced as an anonymous "Someone", and as a
@@ -870,6 +986,27 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
     if (frame.type === "hello") {
       if (frame.secondScreen === true) secondScreens.add(ws);
+      // A silent observer. Marked invisible from this instant, BEFORE the grant
+      // is checked, because the check is async and the join announcement below is
+      // not: failing open for even one tick would announce the watcher to the
+      // very class they are meant to be invisible in. An unverified claimant is
+      // then disconnected outright rather than demoted, so the worst case of a
+      // forged token is a socket that sees nothing and is dropped.
+      if (typeof frame.observerToken === "string" && frame.observerToken) {
+        observers.add(ws);
+        // Only for a socket that did NOT declare itself at connect. Those were
+        // already counted — `participants` goes out when a connection opens,
+        // before any hello has said what it is — so the room was told the count
+        // went up and nothing would ever correct it. A socket that passed
+        // ?observe=1 was never counted, and re-broadcasting an unchanged number
+        // would be the one piece of wire traffic this feature does not need.
+        if (!observing) broadcast(room, { type: "participants", participants: countParticipants(room) });
+        const tok = frame.observerToken;
+        void (async () => {
+          if (await redeemObserverGrant(tok, roomId)) { sendSnapshot(); return; }
+          try { ws.close(4403, "observer grant not valid"); } catch { /* already gone */ }
+        })();
+      }
       // Coach resolution (owner tightened 2026-08-12 after the "Setup button
       // disappeared after reload" bug — client hadn't been persisting the
       // coachToken between reconnects, so a reload demoted the coach to a
@@ -908,7 +1045,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       // TOKEN and orphan the PC's. The PC would then reconnect as a student, in the
       // middle of its own class. The phone only ever needs to hand a position over,
       // and that is gated on identity, not role.
-      const mayClaimCoach = !secondScreens.has(ws);
+      const mayClaimCoach = !secondScreens.has(ws) && !observers.has(ws);
       if (!mayClaimCoach) {
         socketRole.set(ws, "student");
         send({ type: "role", role: "student" });
@@ -1014,13 +1151,13 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       // Announce the arrival now that we know WHO arrived and in WHAT role.
       // Guarded, because hello can legitimately arrive more than once on one
       // socket (reconnect, coach-token re-resolution) and must not re-announce.
-      if (!announcedJoin.has(ws) && !secondScreens.has(ws)) {
+      if (!announcedJoin.has(ws) && !secondScreens.has(ws) && !observers.has(ws)) {
         announcedJoin.add(ws);
         broadcast(room, {
           type: "presence", event: "joined",
           who: name, userId,
           role: socketRole.get(ws) === "coach" ? "coach" : "student",
-          clean: true, students: countStudents(room), participants: room.clients.size,
+          clean: true, students: countStudents(room), participants: countParticipants(room),
         });
       }
       // Must come AFTER socketWho: the flush matches offers by signed-in user, and
@@ -1032,7 +1169,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       // Runs off the hello (rather than in the upgrade handshake) because
       // that's where we first learn who this socket belongs to.
       void (async () => {
-        if (userId) {
+        if (userId && !observers.has(ws)) {
           const kicks = await loadKicksForRoom(roomId);
           if (kicks.has(userId)) {
             try { ws.send(JSON.stringify({ type: "kicked", reason: "coach_removed" })); } catch { /* ignore */ }
@@ -1046,7 +1183,11 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         // guests (anonymous) are always allowed — coach because they can't
         // be locked out of their own room, guests because eligibility keys
         // on userId which they don't have. Owner ask 2026-08-25.
-        if (dbConn && socketRole.get(ws) !== "coach" && userId) {
+        // An observer is never on the roster — that is the entire point of them —
+        // so the audience gate would eject exactly the people authorised to watch.
+        // Their right to be here was settled by the API against a real session
+        // before the grant was minted.
+        if (dbConn && socketRole.get(ws) !== "coach" && userId && !observers.has(ws)) {
           // A SECOND SCREEN is the coach's own phone, joining only to hand a
           // position to their PC. It arrives with the student role — the coach is
           // never on their own class roster — so the audience gate below ejected it
@@ -1092,19 +1233,26 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         // A second screen is the coach's own phone holding the book open, not a
         // person arriving. Recording it would put the coach in their own class
         // register — and a late-join alert would fire for their own device.
-        if (secondScreens.has(ws)) return;
+        if (secondScreens.has(ws) || observers.has(ws)) return;
         const { firstJoin } = await recordAttendance(roomId, userId, name, "join");
         if (firstJoin) await maybeAlertLate(room, roomId, userId, name);
       })();
       return;
     }
 
+    // Past this point every frame changes the class. An observer is watching it,
+    // not taking part in it, so nothing they send is honoured — including the
+    // frames a student may legitimately send. They keep `ping` (handled above)
+    // so the socket stays open.
+    if (observers.has(ws)) return;
+
+
     if (frame.type === "reset") {
       if (!isCoach()) return;                            // coach-gated to prevent accidental reset by a student
       room.fen = START_FEN; room.startFen = START_FEN; room.tree = []; room.cursorPath = []; room.lastMove = null; room.history = []; room.cursorIdx = 0; room.startShapes = [];
-      broadcast(room, { type: "reset", fen: room.fen, participants: room.clients.size, locked: room.locked });
+      broadcast(room, { type: "reset", fen: room.fen, participants: countParticipants(room), locked: room.locked });
       // Also emit a full state so tree-aware clients drop their cached tree.
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: countParticipants(room), locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
       syncShapesToPosition(room);
       return;
     }
@@ -1147,7 +1295,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       if (nextPath.length === room.cursorPath.length && nextPath.every((v, i) => v === room.cursorPath[i])) return;
       room.cursorPath = nextPath;
       recomputeFromTree(room);
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: countParticipants(room), locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
       syncShapesToPosition(room);
       return;
     }
@@ -1223,7 +1371,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       room.cursorPath = cleanCursorPath;
       room.startShapes = [];   // stale start-position arrows meaningless in a fresh tree
       recomputeFromTree(room);
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: countParticipants(room), locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
       syncShapesToPosition(room);
       return;
     }
@@ -1299,7 +1447,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         }
       }
       recomputeFromTree(room);
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: countParticipants(room), locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
       syncShapesToPosition(room);
       return;
     }
@@ -1330,7 +1478,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       const rawComment = (frame as any).comment;
       if (rawComment === null || rawComment === "") { delete target.comment; }
       else if (typeof rawComment === "string") { target.comment = rawComment.slice(0, 500); }
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: countParticipants(room), locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
       return;
     }
 
@@ -1347,7 +1495,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         room.cursorPath = extended;
       }
       recomputeFromTree(room);
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: countParticipants(room), locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
       syncShapesToPosition(room);
       return;
     }
@@ -1376,7 +1524,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       room.history = [];
       room.cursorIdx = 0;
       room.startShapes = [];    // stale arrows/circles from the previous position are meaningless
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: countParticipants(room), locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
       syncShapesToPosition(room);
       return;
     }
@@ -1464,7 +1612,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     if (frame.type === "lock") {
       if (!isCoach()) return;
       room.locked = !!frame.locked;
-      broadcast(room, { type: "lock", locked: room.locked, participants: room.clients.size });
+      broadcast(room, { type: "lock", locked: room.locked, participants: countParticipants(room) });
       return;
     }
 
@@ -1473,7 +1621,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       room.notationHidden = !!frame.hidden;
       // Broadcast to everyone (the coach's other devices included) so a second
       // coach screen shows the same toggle state.
-      broadcast(room, { type: "notation", hidden: room.notationHidden, participants: room.clients.size });
+      broadcast(room, { type: "notation", hidden: room.notationHidden, participants: countParticipants(room) });
       return;
     }
 
@@ -1500,7 +1648,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       parentChildren.splice(lastIdx, 1);
       room.cursorPath = path.slice(0, -1);
       recomputeFromTree(room);
-      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
+      broadcast(room, { type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: countParticipants(room), locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation });
       syncShapesToPosition(room);
       return;
     }
@@ -1642,14 +1790,14 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       // tied to the position — navigating back brings them back.
       setShapesAtCursor(room, cleaned);
       room.shapes = cleaned;
-      broadcast(room, { type: "annot", shapes: room.shapes, participants: room.clients.size });
+      broadcast(room, { type: "annot", shapes: room.shapes, participants: countParticipants(room) });
       return;
     }
 
     if (frame.type === "move" && frame.move && typeof frame.move.from === "string" && typeof frame.move.to === "string") {
       // Student-lock check: student moves are dropped when the coach has toggled the
       // lock. The sender still gets a state snapshot to reconcile any optimistic UI.
-      if (room.locked && !isCoach()) { send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation }); return; }
+      if (room.locked && !isCoach()) { send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: countParticipants(room), locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation }); return; }
       // Server-side chess.js is the tie-breaker: two racing clients can't diverge the
       // canonical FEN. Illegal moves are dropped silently — the sender's local board
       // will reconcile from the next authoritative state frame it receives.
@@ -1659,7 +1807,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         const applied = c.move({ from: frame.move.from, to: frame.move.to, promotion: (frame.move.promotion as any) || "q" });
         ok = !!applied;
       } catch { ok = false; }
-      if (!ok) { send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation }); return; }
+      if (!ok) { send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: countParticipants(room), locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation }); return; }
       // Tree semantics: append the new move as a child of the node at
       // cursorPath. If a child with the same from/to/promotion already
       // exists, just move the cursor to it (don't duplicate). Playing a
@@ -1679,7 +1827,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       }
       room.cursorPath = [...room.cursorPath, existingIdx];
       recomputeFromTree(room);
-      broadcast(room, { type: "move", move: room.lastMove!, fen: room.fen, startFen: room.startFen, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: room.clients.size, locked: room.locked });
+      broadcast(room, { type: "move", move: room.lastMove!, fen: room.fen, startFen: room.startFen, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: countParticipants(room), locked: room.locked });
       syncShapesToPosition(room);
     }
   } catch (mErr: any) {
@@ -1692,14 +1840,14 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
   ws.on("close", (code?: number) => {
     const wasCoach = room.coach === ws;
     const leaver = socketWho.get(ws);
-    const silent = secondScreens.has(ws);
+    const silent = secondScreens.has(ws) || observers.has(ws);
     room.clients.delete(ws);
     // If the coach socket dropped, clear the pointer so a future hello with the token
     // can re-claim. The token itself is NOT reset — coach can reconnect and resume.
     if (room.coach === ws) room.coach = null;
     // Attendance leave — stamps lastSeenAt so the coach can see when someone left.
     const who = socketWho.get(ws);
-    if (who && !secondScreens.has(ws)) void recordAttendance(who.classId, who.userId, who.name, "leave");
+    if (who && !secondScreens.has(ws) && !observers.has(ws)) void recordAttendance(who.classId, who.userId, who.name, "leave");
     if (!silent) {
       // 1000 = normal, 1001 = going away (tab closed, navigated). Anything else —
       // 1006 above all — is an abnormal close: the far end vanished without saying
@@ -1709,10 +1857,10 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         who: leaver?.name || "Someone", userId: leaver?.userId ?? null,
         role: wasCoach ? "coach" : "student",
         clean: code === 1000 || code === 1001,
-        students: countStudents(room), participants: room.clients.size,
+        students: countStudents(room), participants: countParticipants(room),
       });
     }
-    if (room.clients.size === 0) {
+    if (countParticipants(room) === 0) {
       // KEEP the room in memory for a grace window. Coach tab reloads, or a
       // simultaneous coach+student hiccup, no longer wipe the board. Actual
       // delete happens later via sweepEvicted() once the grace expires.
@@ -1720,7 +1868,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       sweepEvicted();
       return;
     }
-    broadcast(room, { type: "participants", participants: room.clients.size });
+    broadcast(room, { type: "participants", participants: countParticipants(room) });
   });
 });
 
