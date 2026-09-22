@@ -12,7 +12,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Chess } from "chess.js";
-import { get } from "../lib/api";
+import { get, post } from "../lib/api";
 import { teamFlag } from "../lib/country-flag";
 import Board from "../components/Board";
 import MoveTable from "../components/MoveTable";
@@ -28,6 +28,7 @@ type LiveGame = {
   timeControl?: string | null; eco?: string | null; openingName?: string | null;
   turn?: "w" | "b" | null; clockAsOf?: string | null;
   whiteTeam?: string | null; blackTeam?: string | null;
+  event?: string | null;
   result: string; ply: number; fen: string; lastMove?: string | null;
   finished: boolean; updatedAt: string; moves: string[];
 };
@@ -119,9 +120,9 @@ function LiveIndex() {
       {/* Upcoming is collapsed by default: it is the longer list and the
         *  shorter one is what people came for. */}
       {q.isLoading ? (
-        <div className="rounded-xl border border-ink-800 bg-ink-900/60 p-8 text-center text-sm text-ink-400">Looking for live rounds…</div>
+        <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-8 text-center text-sm text-ink-400">Looking for live rounds…</div>
       ) : rounds.length === 0 ? (
-        <div className="rounded-xl border border-ink-800 bg-ink-900/60 p-8 text-center">
+        <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-8 text-center">
           <div className="text-sm text-ink-300">
             Nothing is being played this minute{upcoming.length ? " — see what is coming up below" : ""}.
           </div>
@@ -136,7 +137,7 @@ function LiveIndex() {
             ? <EventGroup key={grp.event} event={grp.event} rounds={grp.rounds} />
             : grp.rounds.map((r) => (
             <Link key={r.roundId} to={`/live/${r.roundId}`}
-              className="flex items-center gap-3 rounded-xl border border-ink-800 bg-ink-900/60 px-4 py-3 hover:border-brand-500/50 hover:bg-ink-900">
+              className="flex items-center gap-3 rounded-xl2 border border-ink-700 bg-ink-900 px-4 py-3 hover:border-brand-500/50 hover:bg-ink-900">
               <span className={`h-2 w-2 shrink-0 rounded-full ${
                 r.state === "live" ? "animate-pulse bg-rose-500"
                 : r.state === "playing" ? "bg-amber-400" : "bg-ink-600"}`} />
@@ -175,7 +176,7 @@ function EventGroup({ event, rounds }: { event: string; rounds: LiveRound[] }) {
   const boards = rounds.reduce((n, r) => n + (r.boards ?? 0), 0);
   const anyLive = rounds.some((r) => r.state === "live");
   return (
-    <div className="overflow-hidden rounded-xl border border-ink-800 bg-ink-900/60">
+    <div className="overflow-hidden rounded-xl2 border border-ink-700 bg-ink-900">
       <button onClick={() => setOpen(!open)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-ink-900">
         <span className={`h-2 w-2 shrink-0 rounded-full ${anyLive ? "animate-pulse bg-rose-500" : "bg-amber-400"}`} />
         <div className="min-w-0 flex-1">
@@ -201,7 +202,7 @@ function UpcomingGroup({ event, rounds }: { event: string; rounds: LiveRound[] }
   const [open, setOpen] = useState(false);
   const first = rounds[0]!;
   return (
-    <div className="overflow-hidden rounded-lg border border-ink-800/70 bg-ink-900/40">
+    <div className="overflow-hidden rounded-xl2 border border-ink-700 bg-ink-900">
       <button onClick={() => setOpen(!open)} className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-ink-900/70">
         <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ink-600" />
         <div className="min-w-0 flex-1">
@@ -249,7 +250,7 @@ function SectionRow({ r }: { r: LiveRound }) {
         </Link>
         {r.tourId && (
           <button onClick={() => setOpen(!open)}
-            className="shrink-0 rounded px-2 py-1 text-[11px] font-semibold text-brand-300 hover:bg-ink-800">
+            className="shrink-0 rounded-lg border border-brand-500/50 bg-brand-500/10 px-2.5 py-1 text-[11px] font-semibold text-brand-100 hover:bg-brand-500/20">
             {open ? "Hide rounds" : "All rounds"}
           </button>
         )}
@@ -301,9 +302,9 @@ function UpcomingRounds({ rounds }: { rounds: LiveRound[] }) {
   return (
     <div className="mt-6">
       <div className="mb-2 flex items-baseline justify-between">
-        <h2 className="text-[11px] font-semibold uppercase tracking-widest text-ink-500">Coming up</h2>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-400">Coming up</h2>
         {groups.length > 10 && (
-          <button onClick={() => setOpen(!open)} className="text-[11px] font-semibold text-brand-300 hover:text-brand-100">
+          <button onClick={() => setOpen(!open)} className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-2.5 py-1 text-[11px] font-semibold text-brand-100 hover:bg-brand-500/20">
             {open ? "Show fewer" : `Show all ${groups.length}`}
           </button>
         )}
@@ -384,15 +385,15 @@ function RoundBoards({ roundId }: { roundId: string }) {
       <TeamScores games={list} />
 
       {list.length === 0 ? (
-        <div className="rounded-xl border border-ink-800 bg-ink-900/60 p-8 text-center text-sm text-ink-400">
+        <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-8 text-center text-sm text-ink-400">
           Waiting for the first boards…
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {list.map((g) => (
             <button key={g.board} onClick={() => setFocus(g.board === focus ? null : g.board)}
-              className={`rounded-xl border p-3 text-left transition-colors ${
-                focus === g.board ? "border-brand-500/60 bg-brand-500/10" : "border-ink-800 bg-ink-900/60 hover:border-ink-600"}`}>
+              className={`rounded-xl2 border p-4 text-left transition-colors ${
+                focus === g.board ? "border-brand-500/60 bg-brand-500/10" : "border-ink-700 bg-ink-900 hover:border-brand-500/50"}`}>
               <div className="mb-2 flex items-baseline justify-between gap-2">
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-500">Board {g.board}</span>
                 <span className={`font-mono text-[11px] ${
@@ -467,7 +468,7 @@ function FocusedGame({ g, onClose }: { g: LiveGame; onClose: () => void }) {
   }, [shown, livePly]);
 
   return (
-    <div className="mb-5 rounded-xl border border-brand-500/40 bg-ink-900/60 p-4">
+    <div className="mb-5 rounded-xl2 border border-brand-500/40 bg-ink-900 p-5">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-500">
@@ -483,25 +484,30 @@ function FocusedGame({ g, onClose }: { g: LiveGame; onClose: () => void }) {
       </div>
 
       <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_16rem]">
-        <div className="mx-auto w-full max-w-[min(100%,28rem)] md:mx-0">
+        <div className="mx-auto w-full max-w-[min(100%,34rem)] md:mx-0">
           <Board fen={fen} orientation="white" viewOnly coordinates
                  lastMove={lastMove as any} />
         </div>
 
         <div className="min-w-0">
           <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-widest text-ink-500">Moves</span>
+            <span className="text-xs font-semibold uppercase tracking-wide text-ink-400">Moves</span>
             {following
               ? <span className="flex items-center gap-1 text-[11px] text-rose-300">
                   <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-rose-500" />live
                 </span>
-              : <button onClick={() => setPly(null)} className="text-[11px] font-semibold text-brand-300 hover:text-brand-100">Back to live →</button>}
+              : <button onClick={() => setPly(null)} className="rounded-lg border border-brand-500/50 bg-brand-500/10 px-2.5 py-1 text-[11px] font-semibold text-brand-100 hover:bg-brand-500/20">Back to live →</button>}
           </div>
           <MoveTable sans={g.moves} ply={shown} onPick={(n) => setPly(n >= livePly ? null : n)}
                      className="max-h-[22rem] overflow-y-auto rounded-lg border border-ink-800 bg-ink-950/50 p-2" />
           {g.result !== "*" && (
             <div className="mt-2 rounded-lg bg-ink-950/60 py-1.5 text-center font-mono text-sm text-ink-100">{g.result}</div>
           )}
+          {/* The same action the puzzle page offers on a position, on a game.
+            * It goes through /api/studies/from-pgn, so a game already in the
+            * library is LINKED rather than copied and the annotations stay
+            * private to whoever saved it. */}
+          <SaveGameButton g={g} />
         </div>
       </div>
     </div>
@@ -568,8 +574,8 @@ function TeamScores({ games }: { games: LiveGame[] }) {
   const fmt = (n: number) => (n % 1 ? `${Math.floor(n)}½` : String(n));
 
   return (
-    <div className="mb-5 rounded-xl border border-ink-800 bg-ink-900/60 p-3">
-      <div className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-ink-500">Match scores</div>
+    <div className="mb-5 rounded-xl2 border border-ink-700 bg-ink-900 p-4">
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-400">Match scores</div>
       <div className="grid gap-1 sm:grid-cols-2">
         {matches.map((m) => (
           <div key={`${m.a}|${m.b}`} className="flex items-center gap-2 rounded-lg bg-ink-950/40 px-2.5 py-1.5 text-sm">
@@ -587,6 +593,39 @@ function TeamScores({ games }: { games: LiveGame[] }) {
         ))}
       </div>
     </div>
+  );
+}
+
+function SaveGameButton({ g }: { g: LiveGame }) {
+  const [state, setState] = useState<null | "busy" | "done" | "err">(null);
+  const save = async () => {
+    setState("busy");
+    try {
+      const head = [
+        `[Event "${g.event ?? "Broadcast"}"]`,
+        `[White "${g.whiteName}"]`,
+        `[Black "${g.blackName}"]`,
+        `[Result "${g.result}"]`,
+        g.whiteElo ? `[WhiteElo "${g.whiteElo}"]` : null,
+        g.blackElo ? `[BlackElo "${g.blackElo}"]` : null,
+        g.eco ? `[ECO "${g.eco}"]` : null,
+      ].filter(Boolean).join("\n");
+      let body = "";
+      g.moves.forEach((san, i) => { body += (i % 2 === 0 ? `${i / 2 + 1}. ` : "") + san + " "; });
+      await post("/api/studies/from-pgn", {
+        pgn: `${head}\n\n${body.trim()} ${g.result}`,
+        topic: "gm-game",
+        lessonName: `${g.whiteName} vs ${g.blackName}`,
+      });
+      setState("done");
+    } catch { setState("err"); }
+  };
+  return (
+    <button onClick={save} disabled={state === "busy" || state === "done" || !g.moves.length}
+      className="mt-2 w-full rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50">
+      {state === "busy" ? "Saving…" : state === "done" ? "✓ Saved to My Studies"
+        : state === "err" ? "Could not save" : "💾 Save to My Studies"}
+    </button>
   );
 }
 
