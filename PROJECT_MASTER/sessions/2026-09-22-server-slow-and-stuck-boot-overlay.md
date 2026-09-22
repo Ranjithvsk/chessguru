@@ -43,3 +43,24 @@ plain "Loading…" rather than leaking "ChessGuru" (tenant-branding rule).
 ## Verified
 Headless on the live build, both domains: overlay `present:false` after mount; tenant splash
 read "Loading Guna Chess Academy…". Server: load 1.6, API stable, no further restarts.
+
+## The OCR leak itself (root cause of TKT-255), fixed
+`surya/inference/backends/llamacpp.py` spawns the model server with
+`subprocess.Popen(..., start_new_session=True)` — `setsid()`, so it leaves our session
+and survives us — and `stop()` is a no-op that defers to an `atexit` handler in
+`spawn.py`. `atexit` does not run on SIGKILL, on the OOM killer, or on a default
+SIGTERM. `scoresheet_jobs.py` runs each scoresheet read as its own short-lived
+`.venv-ocr/bin/python read_scoresheet.py` process, so every run that was killed rather
+than exiting cleanly stranded a 1-3 GB `llama-server` reparented to init. Hence two
+orphans (ubuntu 5 days, dreamworld 12 days, different HF caches, random ports).
+
+Fix: `llama-server-pdeath.c` (gcc, no deps) sets `PR_SET_PDEATHSIG(SIGKILL)` and execs
+`$CG_LLAMA_REAL`; `PR_SET_PDEATHSIG` survives `execve`, is unaffected by `setsid`, and
+the wrapper stays the direct child of python — so the kernel kills the server with its
+parent however it dies. Guards a `getppid()==1` race. `_ensure_llama_server()` points
+`LLAMA_CPP_BINARY` at it (and no longer early-returns when a bare `llama-server` is on
+PATH, which would have skipped the wrapper). Safety net for paths that never touch
+`dream_ocr.py`: `/usr/local/sbin/reap-orphan-llama.sh`, root cron */15, kills
+`llama-server` with ppid=1 older than 10 min.
+
+Proven: parent SIGKILLed → child gone (the exact case atexit cannot cover).
