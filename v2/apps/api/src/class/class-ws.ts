@@ -74,6 +74,7 @@ type ClientFrame =
   // separate LOCAL preference and never travels over the wire.
   | { type: "notation"; hidden: boolean }   // coach only
   | { type: "takeback" }                    // coach only — pops the last move (legacy: destructive)
+  | { type: "used"; feature?: string }                        // "I used chat / raise hand / screen share" — tally only, never broadcast
   | { type: "seek"; cursorIdx?: number; path?: number[] }     // coach only — jump cursor to a specific ply (0 = startFen, history.length = live) OR to a tree path
   | { type: "promote-variation"; path: number[] }             // coach only — swap node at path with sibling to its left (one step toward mainline)
   | { type: "make-mainline"; path: number[] }                 // coach only — for every ancestor along path with idx>0, swap into position 0
@@ -579,7 +580,19 @@ const FEATURE_LABELS: Record<string, string> = {
   "make-mainline": "Edited variations",
   "delete-from": "Edited variations",
   notation: "Notation panel",
+  // Reported by the browser, because these ride LiveKit (data channels for chat and
+  // raise-hand, a track for screen share) and never reach this server on their own.
+  // The client sends ONE "used" frame per feature per class, so this is a presence
+  // signal, not a message count — see markClassFeatureUsed in SharedClassBoard.
+  "ui:chat": "Chat",
+  "ui:hand": "Raise hand",
+  "ui:screenshare": "Screen share",
+  "ui:reaction": "Emoji reactions",
+  "ui:caption": "Live captions",
+  // Written server-side when the recording upload lands, so it cannot be faked.
+  "ui:recording": "Recording",
 };
+const CLIENT_REPORTABLE = new Set(["chat", "hand", "screenshare", "reaction", "caption"]);
 type FeatureStat = { n: number; firstAt: number; lastAt: number };
 let featureTally = new Map<string, Map<string, FeatureStat>>();
 
@@ -845,6 +858,15 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     // One counter bump per teaching action — see FEATURE_LABELS above.
     noteFeature(roomId, (frame as any)?.type);
     if (frame.type === "ping") { send({ type: "pong" }); touchAttendance(ws); return; }
+
+    // Browser-reported feature use. Allow-listed so a client cannot invent labels,
+    // and deliberately NOT broadcast or persisted per-message — noteFeature already
+    // de-duplicates into one counter, and the client only sends this once per class.
+    if (frame.type === "used") {
+      const f = String((frame as any).feature || "");
+      if (CLIENT_REPORTABLE.has(f)) noteFeature(roomId, `ui:${f}`);
+      return;
+    }
 
     if (frame.type === "hello") {
       if (frame.secondScreen === true) secondScreens.add(ws);

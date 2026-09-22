@@ -132,6 +132,22 @@ export function triggerClassSeek(arg: number | number[]) { _seekFn?.(arg); }
 // Coach tree ops — right-click menu on any move in the notation panel.
 // Mirrors /openings analysis: Promote variation / Make main line / Delete.
 type PathFn = (path: number[]) => void;
+// "This browser used chat / raise hand / screen share" (owner 2026-09-22). Those ride
+// LiveKit — data channels for chat and raise-hand, a track for screen share — so the
+// server never sees them and the superadmin class log could not list them. We report
+// them over the board socket that is already open.
+//
+// ONCE per feature per room: this answers "was it used in this class", not "how many
+// messages", and a chat burst must not turn into socket traffic. The set is keyed by
+// room so rejoining a DIFFERENT class reports again.
+let _usedFn: ((feature: string) => void) | null = null;
+let _usedRoom = "";
+const _usedSent = new Set<string>();
+export function markClassFeatureUsed(feature: string): void {
+  if (!feature || _usedSent.has(feature)) return;
+  _usedSent.add(feature);
+  _usedFn?.(feature);
+}
 let _promoteFn: PathFn | null = null;
 let _mainlineFn: PathFn | null = null;
 let _deleteFn: PathFn | null = null;
@@ -1505,8 +1521,16 @@ export default function SharedClassBoard(
     _loadTreeFn = sendLoadTree;
     _playMoveFn = (m) => { const ws = wsRef.current; if (!ws || ws.readyState !== WebSocket.OPEN) return; try { ws.send(JSON.stringify({ type: "move", move: m })); } catch { /* */ } };
     _annotateFn = sendAnnotateMove;
+    // New room = report again; same room re-mounting must not re-report.
+    if (_usedRoom !== room) { _usedRoom = room; _usedSent.clear(); }
+    _usedFn = (feature: string) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      try { ws.send(JSON.stringify({ type: "used", feature })); } catch { /* never block the class */ }
+    };
       _reviseFn = sendSetRevise;
     return () => {
+      _usedFn = null;
       if (_seekFn === sendSeek) _seekFn = null;
       if (_promoteFn === sendPromote) _promoteFn = null;
       if (_mainlineFn === sendMainline) _mainlineFn = null;

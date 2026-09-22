@@ -18,7 +18,7 @@ import {
 import { Track, DataPacket_Kind, DisconnectReason, RoomEvent, VideoQuality } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
-import SharedClassBoard, { setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassNotationHidden, triggerClassNotationToggle, useClassMoveList, useClassStartShapes, triggerClassSeek, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow , useCoachNotices, dismissCoachNotice, pushCoachNotice, useClassPresence } from "../components/SharedClassBoard";
+import SharedClassBoard, { markClassFeatureUsed, setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassNotationHidden, triggerClassNotationToggle, useClassMoveList, useClassStartShapes, triggerClassSeek, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow , useCoachNotices, dismissCoachNotice, pushCoachNotice, useClassPresence } from "../components/SharedClassBoard";
 import { useScreenWakeLock } from "../hooks/useScreenWakeLock";
 import { OPENINGS, findOpeningForLine, openingBySlug, type Opening } from "../lib/openings";
 import { fetchExplorer, type ExplorerData, type ExplorerMove } from "../lib/explorer";
@@ -230,6 +230,7 @@ function ClassChatPanel({ open, onClose }: { open: boolean; onClose: () => void 
     const t = text.trim(); if (!t || !room) return;
     const m: ChatMsg = { id: Math.random().toString(36).slice(2), who: me, text: t, ts: Date.now(), emoji };
     chatIngest(m, true);
+    markClassFeatureUsed("chat");
     try { room.localParticipant.publishData(TX.encode(JSON.stringify(m)), { reliable: true, topic: "cg-chat" }); } catch { /* */ }
     setDraft("");
   };
@@ -354,6 +355,7 @@ function useHandRaise() {
     // LiveKit does not loop published data back to the sender, so set our own
     // entry directly — otherwise the person raising never appears in the list.
     _setHand(me, next);
+    if (next) markClassFeatureUsed("hand");
     if (!room) return;
     try { room.localParticipant.publishData(TX.encode(JSON.stringify({ from: me, up: next, ts: Date.now() } as HandFrame)), { reliable: true, topic: "cg-hand" }); } catch { /* */ }
   };
@@ -465,6 +467,17 @@ function HandsRoster() {
   );
 }
 
+/** Screen share is published by LiveKit's own ControlBar, so there is no click of ours
+ *  to hook. Watch the local participant's track instead and report the first time it
+ *  goes on — which is also the honest signal: a button press that failed the browser's
+ *  permission prompt is not a screen share (owner 2026-09-22). */
+function ScreenShareReporter(): null {
+  const { localParticipant } = useLocalParticipant();
+  const on = !!localParticipant?.isScreenShareEnabled;
+  useEffect(() => { if (on) markClassFeatureUsed("screenshare"); }, [on]);
+  return null;
+}
+
 // Floating emoji reaction: click, it burst-floats up. Broadcast on cg-reactions.
 type ReactionFrame = { from: string; emoji: string; ts: number };
 function useReactions() {
@@ -487,6 +500,7 @@ function useReactions() {
     const id = Math.random().toString(36).slice(2);
     setFloats((s) => [...s, { id, emoji, left: 20 + Math.random() * 60 }]);
     setTimeout(() => setFloats((s) => s.filter((x) => x.id !== id)), 2500);
+    markClassFeatureUsed("reaction");
     if (!room) return;
     try { room.localParticipant.publishData(TX.encode(JSON.stringify({ from: me, emoji, ts: Date.now() } as ReactionFrame)), { reliable: true, topic: "cg-reactions" }); } catch { /* */ }
   };
@@ -2326,6 +2340,8 @@ export default function ClassV2Page() {
                 <div className="contents">
                   <div className="rounded-lg border border-ink-800 bg-ink-900 shadow">
                     <ControlBar variation="minimal" controls={{ microphone: true, camera: true, screenShare: true, chat: false, leave: false }} />
+                    {/* renders nothing — reports screen share to the class log */}
+                    <ScreenShareReporter />
                   </div>
                   {/* Quality lives with the other media controls rather than the header.
                     * It was briefly in the header and pushed "End class" off the edge on a

@@ -129,6 +129,12 @@ export class DreamMeetStatsController {
       "make-mainline": "Edited variations",
       "delete-from": "Edited variations",
       notation: "Notation panel",
+      "ui:chat": "Chat",
+      "ui:hand": "Raise hand",
+      "ui:screenshare": "Screen share",
+      "ui:reaction": "Emoji reactions",
+      "ui:caption": "Live captions",
+      "ui:recording": "Recording",
     };
     const featuresByClass = new Map<string, any[]>();
     for (const row of usageRows as any[]) {

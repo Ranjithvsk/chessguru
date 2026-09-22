@@ -80,6 +80,20 @@ export class ClassRecordingController {
     const filename = `${new Date().toISOString().replace(/[:.]/g, "-")}.webm`;
     const full = join(dir, filename);
     await fs.writeFile(full, body);
+    // "Recording" on the superadmin class log (owner 2026-09-22). Recorded HERE
+    // rather than trusted from the browser: the upload landing is the only proof a
+    // recording actually exists. Same classFeatureUsage shape class-ws writes.
+    try {
+      const now = new Date();
+      await this.conn.db!.collection("classFeatureUsage").updateOne(
+        { _id: id as any },
+        { $inc: { "f.ui:recording.n": 1 },
+          $min: { "f.ui:recording.firstAt": now },
+          $max: { "f.ui:recording.lastAt": now },
+          $setOnInsert: { classId: id } },
+        { upsert: true },
+      );
+    } catch { /* a stats write must never fail the upload the coach just waited for */ }
     res.status(HttpStatus.CREATED).json({ filename, bytes: body.byteLength });
   }
 
