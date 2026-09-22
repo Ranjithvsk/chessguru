@@ -206,7 +206,43 @@ def _ensure_llama_server() -> None:
     build unpacks into a versioned subdirectory. CHESSGURU_LLAMA_DIR overrides.
     """
     import glob
-    if shutil.which("llama-server") or shutil.which("llama-server.exe"):
+
+    # Surya spawns the model server with start_new_session=True and only cleans it
+    # up from an atexit handler — which never runs on SIGKILL, on the OOM killer, or
+    # on a plain SIGTERM. Every scoresheet read is its own short-lived process, so
+    # each one that does not exit cleanly stranded a ~1-3 GB llama-server reparented
+    # to init. Two of those (5 and 12 days old) filled France's RAM and took
+    # ChessGuru down on 2026-09-22 (TKT-255). We therefore hand Surya a wrapper that
+    # sets PR_SET_PDEATHSIG(SIGKILL) and execs the real binary, so the kernel kills
+    # the server with us however we die. If the wrapper is missing we still work,
+    # just without the guarantee.
+    PDEATH = "/opt/chessguru-vision/llama/llama-server-pdeath"
+
+    def _use(cand: str) -> None:
+        dirn = os.path.dirname(cand)
+        os.environ["PATH"] = dirn + os.pathsep + os.environ.get("PATH", "")
+        # The Linux build loads its shared objects from beside itself.
+        os.environ["LD_LIBRARY_PATH"] = (
+            dirn + os.pathsep + os.environ.get("LD_LIBRARY_PATH", ""))
+        # Two settings decide whether Surya uses this binary at all, and both must
+        # be right BEFORE surya.settings is imported. SURYA_INFERENCE_BACKEND unset
+        # means Surya chooses, and on Windows it chose vLLM-in-Docker, then failed
+        # with "docker binary not found" while a good llama-server sat on PATH.
+        os.environ.setdefault("SURYA_INFERENCE_BACKEND", "llamacpp")
+        if os.path.exists(PDEATH) and os.name == "posix":
+            os.environ["CG_LLAMA_REAL"] = cand
+            os.environ["LLAMA_CPP_BINARY"] = PDEATH
+            log.info("surya backend=llamacpp binary=%s (via pdeathsig wrapper)", cand)
+        else:
+            # LLAMA_CPP_BINARY defaults to the extension-less name, which Windows
+            # will not execute. Point it at the actual file.
+            os.environ.setdefault("LLAMA_CPP_BINARY", cand)
+            log.info("surya backend=llamacpp binary=%s (NO pdeathsig wrapper — "
+                     "a killed OCR run can strand this server)", cand)
+
+    onpath = shutil.which("llama-server") or shutil.which("llama-server.exe")
+    if onpath:
+        _use(onpath)
         return
     here = os.path.dirname(os.path.abspath(__file__))
     roots = [os.environ.get("CHESSGURU_LLAMA_DIR"),
@@ -219,22 +255,9 @@ def _ensure_llama_server() -> None:
                      os.path.join(r, "*", "*", name)]
     for pat in pats:
         for cand in glob.glob(pat):
-            dirn = os.path.dirname(cand)
-            os.environ["PATH"] = dirn + os.pathsep + os.environ.get("PATH", "")
-            # The Linux build loads its shared objects from beside itself.
-            os.environ["LD_LIBRARY_PATH"] = (
-                dirn + os.pathsep + os.environ.get("LD_LIBRARY_PATH", ""))
-            # Two settings decide whether Surya uses this binary at all, and
-            # both must be right BEFORE surya.settings is imported.
-            #
-            # SURYA_INFERENCE_BACKEND unset means Surya chooses, and on Windows
-            # it chose vLLM-in-Docker, then failed with "docker binary not
-            # found" — while a perfectly good llama-server sat on PATH.
-            # LLAMA_CPP_BINARY defaults to the extension-less name, which
-            # Windows will not execute. Point it at the actual file.
-            os.environ.setdefault("SURYA_INFERENCE_BACKEND", "llamacpp")
-            os.environ.setdefault("LLAMA_CPP_BINARY", cand)
-            log.info("surya backend=llamacpp binary=%s", cand)
+            if os.path.abspath(cand) == PDEATH:
+                continue          # never wrap the wrapper
+            _use(cand)
             return
     log.warning("llama-server not found; Surya 0.22+ will return nothing. "
                 "Set CHESSGURU_LLAMA_DIR or drop the binary in %s",
