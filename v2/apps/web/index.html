@@ -29,6 +29,7 @@
           var host = location.hostname.toLowerCase();
           var canonical = /(^|\.)(harinitharanjith\.com|chessguru\.(cc|com))$/.test(host) || host === "localhost" || /^\d+\.\d+\.\d+\.\d+$/.test(host);
           var slugFromHost = canonical ? null : host.split(".")[0];
+          try { window.__cgIsTenant = !canonical; } catch (e) { /* non-fatal */ }
           var manifestLink = document.getElementById("cg-manifest");
 
           var applyBrand = function (name, logo) {
@@ -36,6 +37,16 @@
               document.title = name;
               var t = document.getElementById("cg-apple-title");
               if (t) t.setAttribute("content", name);
+              // Owner 2026-09-22: the boot screen must say the ACADEMY's name, not
+              // "ChessGuru". The splash is built by a separate IIFE below, which may
+              // render before or after the brand resolves — so publish the name and
+              // patch any splash that is already on screen.
+              try {
+                window.__cgBrandName = name;
+                var lbl = document.querySelector("#cg-boot-status .waiting b");
+                if (lbl) lbl.textContent = "Loading " + name + "\u2026";
+
+              } catch (e) { /* non-fatal */ }
             }
             if (logo) {
               var i = document.getElementById("cg-apple-icon");
@@ -177,7 +188,27 @@
       (function () {
         var TIMEOUT_MS = 15000;
         var status = null;
+        // Set once React has actually painted. Everything below refuses to create or
+        // re-show the overlay after this, because the module script that signals it
+        // runs BEFORE DOMContentLoaded — without this flag the overlay was created
+        // after the all-clear and nothing was left to remove it.
+        var appBooted = false;
+        // The academy's name if we know it (set by the branding IIFE above). On a
+        // tenant domain we would rather say nothing than say "ChessGuru".
+        function bootBrand() {
+          try {
+            var n = (window.__cgBrandName || "").trim();
+            if (n) return n;
+            if (window.__cgIsTenant) return "";
+          } catch (e) { /* fall through */ }
+          return "ChessGuru";
+        }
+        function bootTitle() {
+          var n = bootBrand();
+          return n ? "Loading " + n + "\u2026" : "Loading\u2026";
+        }
         function ensureStatus() {
+          if (appBooted) return null;
           if (status) return status;
           status = document.createElement("div");
           status.id = "cg-boot-status";
@@ -185,7 +216,7 @@
             '<div>' +
               '<div class="spinner"></div>' +
               '<div class="msg">' +
-                '<div class="waiting"><b>Loading ChessGuru…</b><br>Hang on — first load can take a few seconds on slow connections.</div>' +
+                '<div class="waiting"><b>' + bootTitle() + '</b><br>Hang on — first load can take a few seconds on slow connections.</div>' +
                 '<div class="stuck-msg" style="display:none"><b>Still loading.</b><br>Your connection is slow — wait a bit longer, or hard-reset to clear caches and try again.</div>' +
                 '<div class="cg-err" style="display:none;margin-top:8px;font:12px/1.4 ui-monospace,monospace;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:6px 8px;text-align:left;word-break:break-word;max-height:9em;overflow:auto"></div>' +
               '</div>' +
@@ -241,6 +272,20 @@
           return status;
         }
         function hideStatus() { if (status) status.classList.add("hidden"); }
+        // THE definitive off-switch (owner TKT-255/257, 2026-09-22). The poller below
+        // is the only thing that removed this overlay, and it gives up after 60 s — so
+        // when the box ran out of memory and the app took longer than that to mount,
+        // the overlay stayed frozen ON TOP of a fully-loaded puzzle board. React now
+        // calls this the moment it commits, whatever the boot took.
+        window.__cgBootDone = function () {
+          appBooted = true;
+          hideStatus();
+          try {
+            if (checkInterval) clearInterval(checkInterval);
+            if (stuckTimer) { clearTimeout(stuckTimer); stuckTimer = null; }
+            if (status && status.parentNode) status.parentNode.removeChild(status);
+          } catch (e) { /* non-fatal */ }
+        };
         // Capture whatever actually went wrong. A blank page tells the user
         // nothing and tells us less: on 2026-09-09 a coach hit a white screen
         // on one domain while the SAME build worked on another, and with no
@@ -270,13 +315,16 @@
         });
 
         function markStuck() {
+          if (appBooted) return;
           var s = ensureStatus();
+          if (!s) return;
           s.classList.add("stuck");
           s.querySelector(".waiting").style.display = "none";
           s.querySelector(".stuck-msg").style.display = "";
           showError();
         }
         var stuckTimer = null;
+        var checkInterval = null;
         function scheduleStuck(ms) {
           if (stuckTimer) clearTimeout(stuckTimer);
           stuckTimer = setTimeout(function () {
@@ -288,13 +336,13 @@
         // Show the spinner immediately, then either React takes over or we
         // switch to the stuck state at TIMEOUT_MS.
         if (document.readyState === "loading") {
-          document.addEventListener("DOMContentLoaded", ensureStatus, { once: true });
+          document.addEventListener("DOMContentLoaded", function () { ensureStatus(); }, { once: true });
         } else {
           ensureStatus();
         }
         scheduleStuck(TIMEOUT_MS);
         // Once React renders, hide the fallback.
-        var checkInterval = setInterval(function () {
+        checkInterval = setInterval(function () {
           var root = document.getElementById("root");
           if (root && root.childElementCount > 0) {
             hideStatus();
@@ -303,8 +351,12 @@
             if (stuckTimer) { clearTimeout(stuckTimer); stuckTimer = null; }
           }
         }, 250);
-        // Give up polling after 60 s so we don't burn CPU forever.
-        setTimeout(function () { clearInterval(checkInterval); }, 60000);
+        // Do NOT give up at 60 s. On 2026-09-22 the box ran out of RAM, boot took
+        // longer than a minute, the poller had already stopped and the overlay stayed
+        // frozen on top of a working app (owner TKT-255/257). The check is one
+        // childElementCount read every 250 ms; ten minutes of that is free, and
+        // __cgBootDone clears it the moment React commits anyway.
+        setTimeout(function () { if (checkInterval) clearInterval(checkInterval); }, 600000);
       })();
     </script>
   </head>

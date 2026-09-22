@@ -78,6 +78,7 @@ const queryClient = new QueryClient({
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
+      <BootDone />
       <PrefetchRest />
       <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/+$/, "")}>
         <Routes>
@@ -105,6 +106,20 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </QueryClientProvider>
   </React.StrictMode>,
 );
+
+// Take the boot overlay down ourselves (owner TKT-255/257, 2026-09-22).
+// index.html paints a full-screen "Loading …" overlay as the white-screen safety net,
+// and the only thing that removed it was a poller there that used to give up after
+// 60 s. On 2026-09-22 the box ran out of RAM, boot took longer than that, and the
+// overlay sat frozen on top of a puzzle board that had actually loaded — the app
+// looked dead while working. This must fire on COMMIT: a bare call at module scope
+// runs before DOMContentLoaded, i.e. before the overlay is even created.
+function BootDone() {
+  React.useEffect(() => {
+    try { (window as any).__cgBootDone?.(); } catch { /* never block the app */ }
+  }, []);
+  return null;
+}
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
