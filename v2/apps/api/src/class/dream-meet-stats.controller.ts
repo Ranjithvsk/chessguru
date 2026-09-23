@@ -90,7 +90,7 @@ export class DreamMeetStatsController {
     // Attendance is a small collection; pulling the rows lets us derive the span
     // a class was ACTUALLY occupied, which is far more honest than endedAt (a
     // coach who forgets to press End leaves endedAt unset or wildly late).
-    const [attRows, boards, packRows, chRows, usageRows] = await Promise.all([
+    const [attRows, boards, packRows, chRows, snapRows, usageRows] = await Promise.all([
       ids.length ? db.collection("classAttendance").find({ classId: { $in: ids } } as any,
         { projection: { classId: 1, key: 1, joinedAt: 1, lastSeenAt: 1, name: 1, userId: 1 } }).toArray() : Promise.resolve([] as any[]),
       ids.length ? db.collection("classBoardState").find({ _id: { $in: ids } } as any,
@@ -99,7 +99,15 @@ export class DreamMeetStatsController {
         { $match: { classId: { $in: ids } } }, { $group: { _id: "$classId", n: { $sum: 1 } } },
       ]).toArray() : Promise.resolve([] as any[]),
       ids.length ? db.collection("classChallenges").aggregate([
-        { $match: { classId: { $in: ids } } }, { $group: { _id: "$classId", n: { $sum: 1 } } },
+        { $match: { classId: { $in: ids } } },
+        { $group: { _id: "$classId", n: { $sum: 1 }, firstAt: { $min: "$startedAt" }, lastAt: { $max: "$startedAt" } } },
+      ]).toArray() : Promise.resolve([] as any[]),
+      // Challenges and snaps are already persisted with their own timestamps, so they
+      // are derived here rather than tallied by class-ws — which means they also show
+      // up for classes that ran BEFORE usage tracking existed (owner 2026-09-23).
+      ids.length ? db.collection("classSnaps").aggregate([
+        { $match: { classId: { $in: ids } } },
+        { $group: { _id: "$classId", n: { $sum: 1 }, firstAt: { $min: "$at" }, lastAt: { $max: "$at" } } },
       ]).toArray() : Promise.resolve([] as any[]),
       // What the coach actually DID — written by class-ws as the class runs, so it
       // is already current for a class still in progress (owner 2026-09-22).
@@ -157,6 +165,27 @@ export class DreamMeetStatsController {
       featuresByClass.set(String(row._id), [...merged.values()]
         .filter((x) => x.count > 0)
         .sort((x, y) => (+(x.firstAt ?? 0)) - (+(y.firstAt ?? 0))));
+    }
+
+    // Fold in the two that live in their own collections. A class can have these with
+    // no class-ws tally at all (it predates tracking), so this may CREATE the entry —
+    // and when it does, `features` stops being null, which is correct: we really do
+    // know something about what that class used.
+    const derived: [any[], string][] = [[snapRows as any[], "Snap position"], [chRows as any[], "Challenge"]];
+    for (const [rows, label] of derived) {
+      for (const r of rows) {
+        const n = Number(r?.n) || 0;
+        if (n <= 0) continue;
+        const id = String(r._id);
+        const list = featuresByClass.get(id) ?? [];
+        list.push({
+          label, count: n,
+          firstAt: r.firstAt ? new Date(r.firstAt) : null,
+          lastAt: r.lastAt ? new Date(r.lastAt) : null,
+        });
+        list.sort((x: any, y: any) => (+(x.firstAt ?? 0)) - (+(y.firstAt ?? 0)));
+        featuresByClass.set(id, list);
+      }
     }
 
     // who joined, and when — the owner reads the names, not just a count (2026-09-17)
