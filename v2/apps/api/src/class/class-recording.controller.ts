@@ -19,6 +19,7 @@
 
 import { Body, Controller, Get, Param, Post, Req, Res, HttpException, HttpStatus, UnauthorizedException, ForbiddenException } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
+import { LivekitService } from "../livekit/livekit.service";
 import { Connection } from "mongoose";
 // Response typed as `any` — @types/express isn't in the api's deps and we only
 // use setHeader/status/json/pipe, all supported on the runtime object.
@@ -31,11 +32,16 @@ const RECORDINGS_DIR = process.env.CLASS_RECORDINGS_DIR
 // Match the parseRoomId regex in class-ws.ts so a room known to the sync bus is
 // exactly the set of ids we accept here. Prevents path traversal by construction.
 const ROOM_RE = /^[A-Za-z0-9_-]{1,64}$/;
-const FILE_RE = /^[A-Za-z0-9._-]{1,80}\.webm$/;
+// .webm from the coach's browser recorder, .mp4 from server-side Egress. Both
+// are listed, streamed and time-aligned by the same endpoints.
+const FILE_RE = /^[A-Za-z0-9._-]{1,80}\.(webm|mp4)$/;
 
 @Controller("class")
 export class ClassRecordingController {
-  constructor(@InjectConnection() private readonly conn: Connection) {}
+  constructor(
+    @InjectConnection() private readonly conn: Connection,
+    private readonly livekit: LivekitService,
+  ) {}
 
   /** Ensure the caller has read access to this class's recordings. Same
    *  policy as /api/livekit/token: session required, and session.academyId
@@ -125,7 +131,7 @@ export class ClassRecordingController {
     // stat() first so we can 404 cleanly rather than pipe an error mid-stream.
     let size = 0;
     try { size = statSync(full).size; } catch { throw new HttpException("not found", HttpStatus.NOT_FOUND); }
-    res.setHeader("Content-Type", "video/webm");
+    res.setHeader("Content-Type", filename.endsWith(".mp4") ? "video/mp4" : "video/webm");
     res.setHeader("Content-Length", String(size));
     res.setHeader("Cache-Control", "private, max-age=3600");
     createReadStream(full).pipe(res);
@@ -182,4 +188,69 @@ export class ClassRecordingController {
       return { events: Array.isArray(parsed?.events) ? parsed.events : [] };
     } catch { return { events: [] }; }
   }
+
+  // ── Server-side recording via LiveKit Egress (owner 2026-09-23) ─────────────
+  //
+  // The other half of the pair. The browser recorder captures the coach's screen
+  // and stops when their laptop closes; this records the ROOM — everyone's audio
+  // and video — on the server, and survives the coach losing their connection.
+  //
+  // Gated exactly like the upload route: the class's own coach, or an academy
+  // owner. Starting a recording of a room full of children is not something a
+  // student in the same academy gets to do.
+
+  /** POST /api/class/:id/recording/server/start */
+  @Post(":id/recording/server/start")
+  async startServerRecording(@Param("id") id: string, @Req() req: any) {
+    if (!ROOM_RE.test(id)) throw new HttpException("bad room", HttpStatus.BAD_REQUEST);
+    const { coachUserId } = await this.requireTenantAccess(req, id);
+    const isCreator = coachUserId && coachUserId === req.session.userId;
+    if (!isCreator && req.session.role !== "academy_owner") {
+      throw new ForbiddenException("only the class coach can record");
+    }
+    // Starting a second one would write two files for one lesson and double the
+    // CPU on a box that also runs the SFU.
+    const already = await this.livekit.activeRecordings(id).catch(() => []);
+    if (already.length) return { ok: true, already: true, egressId: already[0]!.egressId };
+
+    // Created here, by the API, because egress sees this directory under a
+    // different mount point and creating it from there is what failed before.
+    const dir = join(RECORDINGS_DIR, id);
+    await fs.mkdir(dir, { recursive: true });
+    try {
+      const { egressId, filename } = await this.livekit.startRoomRecording(id, id);
+      return { ok: true, egressId, filename };
+    } catch (e: any) {
+      // The most likely cause by far is no egress worker listening on the shared
+      // Redis, and "request timed out" tells a coach nothing they can act on.
+      throw new HttpException(
+        `Could not start recording: ${e?.message ?? "egress unavailable"}`,
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+  }
+
+  /** POST /api/class/:id/recording/server/stop */
+  @Post(":id/recording/server/stop")
+  async stopServerRecording(@Param("id") id: string, @Req() req: any) {
+    if (!ROOM_RE.test(id)) throw new HttpException("bad room", HttpStatus.BAD_REQUEST);
+    const { coachUserId } = await this.requireTenantAccess(req, id);
+    const isCreator = coachUserId && coachUserId === req.session.userId;
+    if (!isCreator && req.session.role !== "academy_owner") {
+      throw new ForbiddenException("only the class coach can record");
+    }
+    const active = await this.livekit.activeRecordings(id).catch(() => []);
+    for (const a of active) await this.livekit.stopRecording(a.egressId).catch(() => { /* already gone */ });
+    return { ok: true, stopped: active.length };
+  }
+
+  /** GET /api/class/:id/recording/server/status */
+  @Get(":id/recording/server/status")
+  async serverRecordingStatus(@Param("id") id: string, @Req() req: any) {
+    if (!ROOM_RE.test(id)) throw new HttpException("bad room", HttpStatus.BAD_REQUEST);
+    await this.requireTenantAccess(req, id);
+    const active = await this.livekit.activeRecordings(id).catch(() => []);
+    return { ok: true, recording: active.length > 0, since: active[0]?.startedAt ?? null };
+  }
+
 }

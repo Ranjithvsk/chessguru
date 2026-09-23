@@ -18,6 +18,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type Phase = "idle" | "asking" | "recording" | "saving" | "saved" | "failed";
+/** Which of the two recorders is running.
+ *
+ *  "server" is better in every way that matters — it captures the whole room
+ *  rather than one screen, it keeps recording if the coach's laptop closes, and
+ *  it costs the coach no upload bandwidth — so it is tried first. "browser" is
+ *  the fallback for when no egress worker is available, and is what the coach
+ *  gets rather than nothing. */
+type Mode = "server" | "browser";
 
 /** Same tone vocabulary as the rest of the coach row. */
 const BASE =
@@ -43,6 +51,7 @@ function pickMime(): string | undefined {
 
 export default function ClassRecordButton({ room }: { room: string }) {
   const [phase, setPhase] = useState<Phase>("idle");
+  const [mode, setMode] = useState<Mode>("server");
   const [secs, setSecs] = useState(0);
   const [err, setErr] = useState<string | null>(null);
   const recRef = useRef<MediaRecorder | null>(null);
@@ -58,8 +67,28 @@ export default function ClassRecordButton({ room }: { room: string }) {
     recRef.current = null;
   }, []);
 
-  // A recording left running when the coach closes the tab would be lost with no
-  // trace, so stop and flush on unmount.
+  // A server recording outlives this tab, so a coach who reloads must find the
+  // button already showing "recording" rather than an idle one that would start
+  // a second capture of the same lesson.
+  useEffect(() => {
+    let dead = false;
+    fetch(`/v2api/api/class/${encodeURIComponent(room)}/recording/server/status`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (dead || !d?.recording) return;
+        setMode("server");
+        startedAt.current = d.since ? new Date(d.since).getTime() : Date.now();
+        setSecs(Math.max(0, Math.floor((Date.now() - startedAt.current) / 1000)));
+        ticker.current = window.setInterval(() => setSecs(Math.floor((Date.now() - startedAt.current) / 1000)), 1000);
+        setPhase("recording");
+      })
+      .catch(() => { /* no server recorder — the button stays idle */ });
+    return () => { dead = true; };
+  }, [room]);
+
+  // A BROWSER recording left running when the coach closes the tab would be lost
+  // with no trace, so stop and flush on unmount. A server one is left alone: it
+  // is meant to survive this tab.
   useEffect(() => () => { try { recRef.current?.stop(); } catch { /* */ } cleanup(); }, [cleanup]);
 
   async function save(blob: Blob) {
@@ -82,8 +111,44 @@ export default function ClassRecordButton({ room }: { room: string }) {
     }
   }
 
+  /** Server-side, via LiveKit Egress. Returns false if it is not available, so
+   *  the caller can fall back rather than leaving the coach with no recorder. */
+  async function startServer(): Promise<boolean> {
+    try {
+      const r = await fetch(`/v2api/api/class/${encodeURIComponent(room)}/recording/server/start`, {
+        method: "POST", credentials: "include",
+      });
+      if (!r.ok) return false;
+      setMode("server");
+      startedAt.current = Date.now();
+      setSecs(0);
+      ticker.current = window.setInterval(() => setSecs(Math.floor((Date.now() - startedAt.current) / 1000)), 1000);
+      setPhase("recording");
+      return true;
+    } catch { return false; }
+  }
+
+  async function stopServer() {
+    setPhase("saving");
+    try {
+      await fetch(`/v2api/api/class/${encodeURIComponent(room)}/recording/server/stop`, {
+        method: "POST", credentials: "include",
+      });
+      if (ticker.current) { window.clearInterval(ticker.current); ticker.current = null; }
+      setPhase("saved");
+      window.setTimeout(() => setPhase("idle"), 6000);
+    } catch {
+      setErr("Could not stop the recording cleanly.");
+      setPhase("failed");
+    }
+  }
+
   async function start() {
     setErr(null);
+    // Try the server first; only ask the coach to share a screen if it cannot.
+    setPhase("asking");
+    if (await startServer()) return;
+    setMode("browser");
     if (!navigator.mediaDevices?.getDisplayMedia) {
       setErr("This browser cannot record a screen."); setPhase("failed"); return;
     }
@@ -147,12 +212,15 @@ export default function ClassRecordButton({ room }: { room: string }) {
     }
   }
 
-  function stop() { try { recRef.current?.stop(); } catch { /* */ } }
+  function stop() {
+    if (mode === "server") { void stopServer(); return; }
+    try { recRef.current?.stop(); } catch { /* */ }
+  }
 
   const mmss = `${String(Math.floor(secs / 60)).padStart(2, "0")}:${String(secs % 60).padStart(2, "0")}`;
   const label =
     phase === "recording" ? mmss
-    : phase === "asking" ? "Choose…"
+    : phase === "asking" ? "Starting…"
     : phase === "saving" ? "Saving…"
     : phase === "saved" ? "Saved"
     : "Record";
@@ -163,7 +231,13 @@ export default function ClassRecordButton({ room }: { room: string }) {
         onClick={phase === "recording" ? stop : phase === "idle" || phase === "failed" ? start : undefined}
         disabled={phase === "asking" || phase === "saving"}
         aria-pressed={phase === "recording"}
-        title={phase === "recording" ? "Stop recording and save" : "Record this class to the academy"}
+        title={
+          phase === "recording"
+            ? (mode === "server"
+                ? "Recording the whole room on the server — click to stop and save"
+                : "Recording your screen — click to stop and save")
+            : "Record this class to the academy"
+        }
         className={`${BASE} ${phase === "recording" ? LIVE : phase === "asking" || phase === "saving" ? BUSY : IDLE}`}
       >
         <span
