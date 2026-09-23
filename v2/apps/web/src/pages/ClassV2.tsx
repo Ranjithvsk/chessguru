@@ -19,6 +19,7 @@ import { Track, DataPacket_Kind, DisconnectReason, RoomEvent, VideoQuality } fro
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
 import SharedClassBoard, { markClassFeatureUsed, setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassNotationHidden, triggerClassNotationToggle, useClassMoveList, useClassStartShapes, triggerClassSeek, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow , useCoachNotices, dismissCoachNotice, pushCoachNotice, useClassPresence } from "../components/SharedClassBoard";
+import ClassRecordButton from "../components/ClassRecordButton";
 import { useScreenWakeLock } from "../hooks/useScreenWakeLock";
 import { OPENINGS, findOpeningForLine, openingBySlug, type Opening } from "../lib/openings";
 import { fetchExplorer, type ExplorerData, type ExplorerMove } from "../lib/explorer";
@@ -2428,6 +2429,9 @@ export default function ClassV2Page() {
                       Students
                     </button>
                     <ChallengeCoachButton />
+                    {/* Recording is coach-initiated and visibly so: a lesson full
+                      * of children is not something to start capturing quietly. */}
+                    <ClassRecordButton room={room} />
                     <button
                       onClick={() => setSendPositionOpen(true)}
                       title="Send the current board (with move list) to students' Notebook"
