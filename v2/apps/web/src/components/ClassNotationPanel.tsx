@@ -3,7 +3,8 @@
 // see git history on ClassV2.tsx for authorship of the moved code below.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { studiesApi } from "../lib/studies-api";
 import { Chess } from "chess.js";
 import { findOpeningForLine } from "../lib/openings";
 import { addRepertoire, shareRepertoire, type RepMoveNode } from "../lib/repertoire-api";
@@ -677,6 +678,61 @@ export function wsTreeToRepTree(startFen: string, tree: SharedTreeNode[], fromPa
 
 export const STANDARD_START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
+/** The class tree from `fromPath` down, in the shape the class socket speaks.
+ *  Needed because "save from here" saves a sub-tree, and the notebook endpoint
+ *  wants the raw ws nodes rather than the repertoire shape. */
+function subtreeAt(tree: SharedTreeNode[], fromPath: number[]): SharedTreeNode[] {
+  let cur = tree;
+  for (const idx of fromPath) {
+    const n = cur[idx];
+    if (!n) return [];
+    cur = n.children ?? [];
+  }
+  return cur;
+}
+
+/** Repertoire tree -> PGN movetext, variations in parentheses.
+ *  My Studies takes a chapter as PGN, and flattening to the mainline would
+ *  throw away every variation the coach just taught — which is usually the
+ *  point of the line. */
+function repTreeToPgn(startFen: string, tree: RepMoveNode[]): string {
+  const whiteToMove = (fen: string) => (fen.split(" ")[1] ?? "w") === "w";
+  let ply = 0;
+  try {
+    const parts = startFen.split(" ");
+    const moveNo = Number(parts[5] ?? 1) || 1;
+    ply = (moveNo - 1) * 2 + (whiteToMove(startFen) ? 0 : 1);
+  } catch { ply = 0; }
+
+  const render = (nodes: RepMoveNode[], atPly: number): string => {
+    if (!nodes.length) return "";
+    const out: string[] = [];
+    const [main, ...alts] = nodes;
+    const num = Math.floor(atPly / 2) + 1;
+    const isWhite = atPly % 2 === 0;
+    out.push(isWhite ? `${num}. ${main!.san}` : `${num}... ${main!.san}`);
+    if (main!.nag) out.push(`$${main!.nag}`);
+    if (main!.comment) out.push(`{${String(main!.comment).replace(/[{}]/g, "")}}`);
+    // Siblings become variations on THIS ply, before the mainline continues.
+    for (const alt of alts) {
+      const inner = render([alt], atPly);
+      if (inner) out.push(`( ${inner} )`);
+    }
+    const rest = render(main!.children ?? [], atPly + 1);
+    if (rest) out.push(rest);
+    return out.join(" ");
+  };
+  const movetext = render(tree, ply).trim();
+  // A non-standard start MUST travel in the PGN itself. Without these headers a
+  // reader applies the movetext from the standard opening and rejects the first
+  // move — verified against chess.js, which threw "Invalid move in PGN: c5" on
+  // a line starting from a mid-game position. That is precisely the setup-
+  // position case this dialog advertises, so passing startingFen alongside and
+  // hoping the consumer applies it first is not good enough.
+  if (!startFen || startFen === STANDARD_START_FEN) return movetext;
+  return `[SetUp "1"]\n[FEN "${startFen}"]\n\n${movetext}`;
+}
+
 // Save-to-Repertoire dialog — shared by the notation-header chip + the
 // right-click menu. `fromPath` chooses the sub-tree to save; empty [] saves
 // the whole current tree from startFen.
@@ -701,10 +757,55 @@ function SaveToRepertoireDialog({ room, startFen, tree, fromPath, onClose }: { r
   const [forceTrain, setForceTrain] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Where the line goes. It only ever went to the opening repertoire, which is
+  // the wrong home for most of what gets taught in a class — a tactic, an
+  // endgame, a game being annotated (owner, 2026-09-23).
+  const [dest, setDest] = useState<"repertoire" | "notebook" | "studies">("repertoire");
+  // My Studies: an existing study, or a new one named after the line.
+  const [studyId, setStudyId] = useState<string>("");
+  const studies = useQuery({
+    queryKey: ["studies-for-save"],
+    queryFn: () => studiesApi.list(),
+    enabled: dest === "studies",
+    staleTime: 60_000,
+  });
   const save = async () => {
     setSaving(true); setErr(null);
+    const title = name.trim() || "My line";
     try {
-      const body: any = { name: name.trim() || "My line", kind: "line" as const, tree: repTree };
+      if (dest === "notebook") {
+        // Straight to the students' notebooks in THIS class — the same path as
+        // the Send position control, so it lands where they already look.
+        const r = await fetch(`/v2api/api/class/${encodeURIComponent(room)}/send-position`, {
+          method: "POST", credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title, startFen: repFen, history: [], cursorIdx: 0,
+            tree: subtreeAt(tree, fromPath), cursorPath: [], startShapes: [],
+          }),
+        });
+        if (!r.ok) throw new Error(`send failed (${r.status})`);
+        onClose();
+        return;
+      }
+      if (dest === "studies") {
+        const pgn = repTreeToPgn(repFen, repTree);
+        if (studyId) {
+          await studiesApi.addChapter(studyId, {
+            title, startingFen: repFen === STANDARD_START_FEN ? undefined : repFen, pgn,
+          });
+        } else {
+          await studiesApi.create({
+            title, chapterTitle: title, pgn,
+            startingFen: repFen === STANDARD_START_FEN ? undefined : repFen,
+          });
+        }
+        qc.invalidateQueries({ queryKey: ["studies"] });
+        qc.invalidateQueries({ queryKey: ["studies-for-save"] });
+        onClose();
+        return;
+      }
+      const body: any = { name: title, kind: "line" as const, tree: repTree };
       if (sans.length > 0 || repTree.length > 0) {
         // Flatten mainline SANs for legacy readers.
         const flat: string[] = [...sans];
@@ -737,7 +838,9 @@ function SaveToRepertoireDialog({ room, startFen, tree, fromPath, onClose }: { r
     <div className="fixed inset-0 z-[75] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onKeyDown={(e) => { if (e.key === "Escape") onClose(); }} tabIndex={-1}>
       <div className="w-full max-w-md rounded-2xl border border-emerald-500/40 bg-gradient-to-br from-ink-900 to-ink-950 p-5 shadow-2xl">
         <div className="mb-3 flex items-baseline justify-between">
-          <div className="font-display text-base font-bold text-white">💾 Save to repertoire</div>
+          <div className="font-display text-base font-bold text-white">
+            💾 Save {dest === "repertoire" ? "to repertoire" : dest === "notebook" ? "to class notebooks" : "to My Studies"}
+          </div>
           <button onClick={onClose} className="rounded-md p-1 text-xl leading-none text-ink-400 hover:text-white">×</button>
         </div>
         <div className="mb-3 text-xs text-ink-400">
@@ -750,11 +853,55 @@ function SaveToRepertoireDialog({ room, startFen, tree, fromPath, onClose }: { r
             <div className="mt-0.5 truncate font-mono text-[10px] text-amber-200/70" title={repFen}>{repFen}</div>
           </div>
         )}
-        <label className="block text-[10px] font-bold uppercase tracking-widest text-ink-500">Name</label>
+        <div className="mb-3">
+          <div className="mb-1 text-[10px] font-bold uppercase tracking-widest text-ink-500">Save to</div>
+          <div className="grid grid-cols-3 gap-1 rounded-lg border border-ink-700 bg-ink-900 p-1">
+            {([
+              ["repertoire", "♟️", "Repertoire", "Your opening repertoire"],
+              ["notebook", "📓", "Class notebook", "Students in this class, now"],
+              ["studies", "📚", "My Studies", "A chapter in one of your studies"],
+            ] as const).map(([k, icon, label, hint]) => (
+              <button
+                key={k} type="button" onClick={() => setDest(k)} title={hint}
+                className={`rounded-md px-2 py-1.5 text-[11px] font-bold transition-colors ${
+                  dest === k ? "bg-emerald-500/20 text-emerald-100 ring-1 ring-emerald-500/50" : "text-ink-300 hover:bg-ink-800"
+                }`}
+              >
+                <span className="mr-1">{icon}</span>{label}
+              </button>
+            ))}
+          </div>
+          <div className="mt-1 text-[11px] text-ink-400">
+            {dest === "repertoire" && "Saved as a line you can train against."}
+            {dest === "notebook" && "Lands in the notebook of every student currently in this class."}
+            {dest === "studies" && "Saved as a chapter, with variations preserved."}
+          </div>
+        </div>
+        <label className="block text-[10px] font-bold uppercase tracking-widest text-ink-500">
+          {dest === "studies" ? "Chapter name" : "Name"}
+        </label>
         <input type="text" value={name} onChange={(e) => setName(e.target.value)} maxLength={140}
           className="mt-1 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
           autoFocus />
-        <div className="mt-3 rounded-lg border border-ink-800 bg-ink-950/40 p-2 text-[11px]">
+        {dest === "studies" && (
+          <div className="mt-3">
+            <label className="block text-[10px] font-bold uppercase tracking-widest text-ink-500">Study</label>
+            <select
+              value={studyId} onChange={(e) => setStudyId(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
+            >
+              <option value="">➕ New study named “{name.trim() || "My line"}”</option>
+              {(studies.data?.items ?? []).map((st: any) => (
+                <option key={st._id ?? st.id} value={st._id ?? st.id}>{st.title || "Untitled study"}</option>
+              ))}
+            </select>
+            {studies.isLoading && <div className="mt-1 text-[11px] text-ink-500">Loading your studies…</div>}
+          </div>
+        )}
+        {/* Sharing and the Opening Trainer only mean anything for a repertoire
+            line. The notebook path already goes straight to the students, and a
+            study chapter is shared from the study itself. */}
+        <div className={`mt-3 rounded-lg border border-ink-800 bg-ink-950/40 p-2 text-[11px] ${dest === "repertoire" ? "" : "hidden"}`}>
           <label className="flex cursor-pointer items-center gap-2">
             <input type="checkbox" checked={shareAfter} onChange={(e) => setShareAfter(e.target.checked)} className="h-3.5 w-3.5 accent-brand-500" />
             <span className="text-ink-200">Share with this class's students immediately</span>
