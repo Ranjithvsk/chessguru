@@ -862,7 +862,25 @@ export class UserBooksController {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: name, mb: body.length / 1e6 }),
       });
-      if (r?.match) return { ok: true, alreadyHave: true, book: r.match };
+      // A match only means "you already have this" if the coach can actually SEE
+      // the matched book. This short-circuited on ANY match, and /library/match
+      // matches on TITLE alone — it returns the same hit for mb=5 and mb=999 —
+      // with no owner in the response at all. So a coach uploading a book the
+      // OWNER happens to hold got 201 "alreadyHave", nothing was stored for
+      // them, they were never added as an owner, and remoteBooks() then filtered
+      // it out because b.owner !== them. The upload simply vanished: three did
+      // on 2026-09-23, every one answering 201, and no directory had been
+      // created in the store since 21 September.
+      const matchId = r?.match?.id;
+      if (matchId) {
+        const mine = await this.remoteBooks(uid);
+        if (mine.some((b: any) => b.id === matchId)) {
+          return { ok: true, alreadyHave: true, book: r.match };
+        }
+        this.log.warn(
+          `remote library holds ${JSON.stringify(matchId)} but it is not ${uid}'s — ` +
+          `storing their own copy (title=${JSON.stringify(name)})`);
+      }
     } catch { /* Vinayaka down/slow — fall through to a France-local upload */ }
 
     // Do we already hold this exact file? Then don't store it twice — just put
