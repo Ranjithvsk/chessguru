@@ -38,7 +38,15 @@ function clampInt(v: unknown, lo: number, hi: number, dflt: number): number {
 export class UltraDbController {
   constructor(@InjectConnection() private readonly conn: Connection) {}
 
-  private games() { return this.conn.db!.collection("broadcastgames"); }
+  // corpusgames, not broadcastgames (2026-09-23). broadcastgames is 1.2M Lichess relay
+  // games; corpusgames is the deduplicated 12.1M-game archive merged from nine sources
+  // (lumbras, kingbase, caissa, ajcor, the three pgnmentor sets, mastergames, broadcast)
+  // and written in EXACTLY this collection's shape -- same field names, same moves array
+  // of SAN, same mh hash, same indexes -- so every filter, sort and aggregate below works
+  // unchanged. broadcast is one of the nine sources, so nothing visible here is lost.
+  //
+  // broadcastgames is left in place: reverting is this one line plus a rebuild.
+  private games() { return this.conn.db!.collection("corpusgames"); }
 
   /** Build the Mongo filter shared by search and stats, so a stats panel can
    *  never disagree with the rows underneath it. */
