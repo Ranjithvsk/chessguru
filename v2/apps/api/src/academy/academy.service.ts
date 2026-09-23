@@ -3453,18 +3453,40 @@ Thank you!`;
     const dir = process.env.CLASS_RECORDINGS_DIR ?? "/home/ubuntu/chessguru-recordings";
     const fs = await import("fs/promises");
     const path = await import("path");
-    const out: Array<{ classId: string; title: string; startAt: Date; filename: string; bytes: number; createdAt: Date }> = [];
+    const out: Array<{ classId: string; title: string; startAt: Date; filename: string; bytes: number; createdAt: Date; storage: "local" | "b2" }> = [];
+    const meta = new Map(classes.map((c) => [String(c._id), c]));
     for (const c of classes) {
       const classDir = path.join(dir, String(c._id));
       let entries: string[] = [];
       try { entries = await fs.readdir(classDir); } catch { continue; }
       for (const name of entries) {
-        if (!/\.webm$/i.test(name)) continue;
+        // .webm from the coach's browser recorder, .mp4 from server-side Egress.
+        // This filter was .webm ONLY, so every Egress recording was invisible
+        // here — the coach pressed Record, it worked, and the dashboard showed
+        // them nothing.
+        if (!/\.(webm|mp4)$/i.test(name)) continue;
         try {
           const st = await fs.stat(path.join(classDir, name));
-          out.push({ classId: String(c._id), title: c.title || c._id, startAt: c.startAt, filename: name, bytes: st.size, createdAt: st.mtime });
+          out.push({ classId: String(c._id), title: c.title || c._id, startAt: c.startAt, filename: name, bytes: st.size, createdAt: st.mtime, storage: "local" });
         } catch { /* skip unreadable */ }
       }
+    }
+    // Recordings that have been moved to B2 and reclaimed from local disk.
+    // Without this they drop off the dashboard a day after each lesson while
+    // still being perfectly downloadable — the same trap the per-class endpoint
+    // had, fixed there and missed here.
+    const onDisk = new Set(out.map((r) => `${r.classId}/${r.filename}`));
+    const moved = await this.conn.db!.collection("classRecordings")
+      .find({ classId: { $in: [...meta.keys()] } }).toArray().catch(() => [] as any[]);
+    for (const m of moved as any[]) {
+      const key = `${m.classId}/${m.name}`;
+      if (onDisk.has(key)) continue;
+      const c = meta.get(String(m.classId));
+      out.push({
+        classId: String(m.classId), title: (c?.title) || String(m.classId), startAt: c?.startAt,
+        filename: String(m.name), bytes: Number(m.bytes ?? 0),
+        createdAt: new Date(m.uploadedAt ?? Date.now()), storage: "b2",
+      });
     }
     return out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, limit);
   }

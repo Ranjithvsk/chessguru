@@ -55,6 +55,11 @@ export default function ClassRecordButton({ room }: { room: string }) {
   const [mode, setMode] = useState<Mode>("server");
   const [secs, setSecs] = useState(0);
   const [err, setErr] = useState<string | null>(null);
+  // The file this recording produced, so "download" can actually download it.
+  // The first version linked to /dashboard#recordings and called it "download
+  // it": clicking it navigated the coach out of their own live class and
+  // downloaded nothing.
+  const [saved, setSaved] = useState<string | null>(null);
   const recRef = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
   const streams = useRef<MediaStream[]>([]);
@@ -104,6 +109,10 @@ export default function ClassRecordButton({ room }: { room: string }) {
         body: blob,
       });
       if (!r.ok) throw new Error(String(r.status));
+      // The upload endpoint replies { filename, bytes } — the server names it,
+      // not us.
+      const body = await r.json().catch(() => null);
+      setSaved(body?.filename ?? (await findNewest()));
       setPhase("saved");
       // Leave it saying "Saved" for longer than a toast: this is the coach's cue
       // that a 24-hour clock has started, and the thing they have to act on.
@@ -131,6 +140,20 @@ export default function ClassRecordButton({ room }: { room: string }) {
     } catch { return false; }
   }
 
+  /** Whatever the class's newest recording is now called. Both paths end up
+   *  here rather than each parsing its own response, because the server names
+   *  the file in both cases and this works after a reload too. */
+  async function findNewest(): Promise<string | null> {
+    try {
+      const r = await fetch(`/v2api/api/class/${encodeURIComponent(room)}/recordings`, { credentials: "include" });
+      if (!r.ok) return null;
+      const d = await r.json();
+      const rows = (d?.recordings ?? []) as { name: string; createdAt: string }[];
+      if (!rows.length) return null;
+      return rows.slice().sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0]!.name;
+    } catch { return null; }
+  }
+
   async function stopServer() {
     setPhase("saving");
     try {
@@ -138,8 +161,12 @@ export default function ClassRecordButton({ room }: { room: string }) {
         method: "POST", credentials: "include",
       });
       if (ticker.current) { window.clearInterval(ticker.current); ticker.current = null; }
+      // Egress finalises the container after the stop call returns, so the file
+      // is not listed for a moment.
+      await new Promise((r) => setTimeout(r, 2500));
+      setSaved(await findNewest());
       setPhase("saved");
-      window.setTimeout(() => setPhase("idle"), 6000);
+      window.setTimeout(() => setPhase("idle"), 20000);
     } catch {
       setErr("Could not stop the recording cleanly.");
       setPhase("failed");
@@ -251,8 +278,18 @@ export default function ClassRecordButton({ room }: { room: string }) {
       </button>
       {phase === "saved" && (
         <span className="text-[11px] font-medium text-amber-300">
-          Saved · kept {WINDOW_HOURS}h —{" "}
-          <a href="/dashboard#recordings" className="underline">download it</a>
+          Saved · kept {WINDOW_HOURS}h{saved ? " — " : ""}
+          {saved && (
+            /* A real download of the actual file. ?download=1 rather than the
+               `download` attribute, which is ignored once this becomes a
+               redirect to B2. */
+            <a
+              href={`/v2api/api/class/${encodeURIComponent(room)}/recording/${encodeURIComponent(saved)}?download=1`}
+              className="font-bold underline"
+            >
+              ⬇ Download
+            </a>
+          )}
         </span>
       )}
       {err && <span className="text-[11px] font-medium text-rose-300">{err}</span>}
