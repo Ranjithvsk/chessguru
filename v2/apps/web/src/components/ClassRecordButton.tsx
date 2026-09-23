@@ -16,6 +16,7 @@
 // while it happens.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { WINDOW_HOURS } from "./RecordingExpiry";
 
 type Phase = "idle" | "asking" | "recording" | "saving" | "saved" | "failed";
 /** Which of the two recorders is running.
@@ -250,7 +251,7 @@ export default function ClassRecordButton({ room }: { room: string }) {
       </button>
       {phase === "saved" && (
         <span className="text-[11px] font-medium text-amber-300">
-          Saved · kept 24h —{" "}
+          Saved · kept {WINDOW_HOURS}h —{" "}
           <a href="/dashboard#recordings" className="underline">download it</a>
         </span>
       )}

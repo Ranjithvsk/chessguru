@@ -13,7 +13,7 @@ import { useParams, Link } from "react-router-dom";
 import type { Key } from "chessground/types";
 import Board from "../components/Board";
 import { get } from "../lib/api";
-import RecordingExpiry from "../components/RecordingExpiry";
+import RecordingExpiry, { WINDOW_LABEL } from "../components/RecordingExpiry";
 
 type Ev = {
   at: string; type: string; fen: string | null;
@@ -152,7 +152,7 @@ export default function ClassEventReplay() {
                   </Link>
                 </div>
                 <p className="mt-1 text-[11px] text-amber-700">
-                  Recordings are kept for 24 hours. Download it if you want to keep it.
+                  Recordings are kept for {WINDOW_LABEL}. Download it if you want to keep it.
                 </p>
               </div>
             )}
