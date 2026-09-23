@@ -90,13 +90,14 @@ export class DreamMeetStatsController {
     // Attendance is a small collection; pulling the rows lets us derive the span
     // a class was ACTUALLY occupied, which is far more honest than endedAt (a
     // coach who forgets to press End leaves endedAt unset or wildly late).
-    const [attRows, boards, packRows, chRows, snapRows, usageRows] = await Promise.all([
+    const [attRows, boards, packRows, chRows, noteRows, snapRows, usageRows] = await Promise.all([
       ids.length ? db.collection("classAttendance").find({ classId: { $in: ids } } as any,
         { projection: { classId: 1, key: 1, joinedAt: 1, lastSeenAt: 1, name: 1, userId: 1 } }).toArray() : Promise.resolve([] as any[]),
       ids.length ? db.collection("classBoardState").find({ _id: { $in: ids } } as any,
         { projection: { history: 1 } }).toArray() : Promise.resolve([] as any[]),
       ids.length ? db.collection("classPositionPacks").aggregate([
-        { $match: { classId: { $in: ids } } }, { $group: { _id: "$classId", n: { $sum: 1 } } },
+        { $match: { classId: { $in: ids } } },
+        { $group: { _id: "$classId", n: { $sum: 1 }, firstAt: { $min: "$sentAt" }, lastAt: { $max: "$sentAt" } } },
       ]).toArray() : Promise.resolve([] as any[]),
       ids.length ? db.collection("classChallenges").aggregate([
         { $match: { classId: { $in: ids } } },
@@ -105,6 +106,12 @@ export class DreamMeetStatsController {
       // Challenges and snaps are already persisted with their own timestamps, so they
       // are derived here rather than tallied by class-ws — which means they also show
       // up for classes that ran BEFORE usage tracking existed (owner 2026-09-23).
+      ids.length ? db.collection("classNotes").aggregate([
+        { $match: { classId: { $in: ids } } },
+        // classNotes stamps `submittedAt` (classSnaps uses `at`) — mixing them up
+        // yields a chip with no time at all rather than an error.
+        { $group: { _id: "$classId", n: { $sum: 1 }, firstAt: { $min: "$submittedAt" }, lastAt: { $max: "$submittedAt" } } },
+      ]).toArray() : Promise.resolve([] as any[]),
       ids.length ? db.collection("classSnaps").aggregate([
         { $match: { classId: { $in: ids } } },
         { $group: { _id: "$classId", n: { $sum: 1 }, firstAt: { $min: "$at" }, lastAt: { $max: "$at" } } },
@@ -131,7 +138,7 @@ export class DreamMeetStatsController {
       takeback: "Takeback",
       "load-tree": "Loaded a line (Teach Opening / master game)",
       loadFen: "Loaded a position",
-      "offer-position": "Sent a position to notebooks",
+      "offer-position": "Position handed from another device",
       "annotate-move": "Move comments & glyphs",
       "promote-variation": "Edited variations",
       "make-mainline": "Edited variations",
@@ -171,7 +178,12 @@ export class DreamMeetStatsController {
     // no class-ws tally at all (it predates tracking), so this may CREATE the entry —
     // and when it does, `features` stops being null, which is correct: we really do
     // know something about what that class used.
-    const derived: [any[], string][] = [[snapRows as any[], "Snap position"], [chRows as any[], "Challenge"]];
+    const derived: [any[], string][] = [
+      [snapRows as any[], "Snap position"],
+      [chRows as any[], "Challenge"],
+      [packRows as any[], "Notebook pack sent"],
+      [noteRows as any[], "Class notes submitted"],
+    ];
     for (const [rows, label] of derived) {
       for (const r of rows) {
         const n = Number(r?.n) || 0;

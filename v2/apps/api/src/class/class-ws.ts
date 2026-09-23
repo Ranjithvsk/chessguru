@@ -646,7 +646,10 @@ const FEATURE_LABELS: Record<string, string> = {
   takeback: "Takeback",
   "load-tree": "Loaded a line (Teach Opening / master game)",
   loadFen: "Loaded a position",
-  "offer-position": "Sent a position to notebooks",
+  // NOT the notebook send — this frame is the coach's phone offering a position to
+  // their own class screen. The real "sent to notebooks" is a classPositionPacks row,
+  // derived in dream-meet-stats. Two chips both saying "sent to notebooks" was wrong.
+  "offer-position": "Position handed from another device",
   "annotate-move": "Move comments & glyphs",
   "promote-variation": "Edited variations",
   "make-mainline": "Edited variations",
