@@ -632,17 +632,25 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
         if (late) { lS++; if (e.f) lF++; } else { eS++; if (e.f) eF++; }
       }
       const improvement = (eS >= 5 && lS >= 5) ? (lF / lS) - (eF / eS) : 0;
-      // Consistency of IMPROVEMENT, not of attendance (owner 2026-09-19: "consistent in
-      // game improvement, rather than number of games"). Counting weeks played only
-      // measured showing up, which the puzzle board already rewards separately.
+      // Consistency = how STEADY the trajectory is, not whether it keeps climbing
+      // (owner 2026-09-19 asked for "consistent in game improvement"; fixed 2026-09-23).
       //
-      // Walk their games in the order played, in chunks of five, and take each chunk's
-      // find rate. Then ask how often the next chunk HELD OR BEAT the one before it. A
-      // student improving or holding in eight transitions out of ten is consistent; one
-      // who spikes once and slides back is not, even when their averages match. This
-      // reads the SHAPE of the trajectory, where `improvement` below only compares first
-      // half to second and cannot tell steady progress from one lucky run.
-      const CHUNK = 5, TOL = 0.02;   // a 2-point dip still counts as holding
+      // This used to chunk the games by five and count how often each chunk HELD OR BEAT
+      // the one before it. That reads as consistency but behaves as a second improvement
+      // score, and it punishes the very students it should reward: anyone already at their
+      // ceiling cannot keep beating themselves, so their chunks wiggle around a plateau and
+      // roughly half the transitions count as failures. In Guna the academy's strongest
+      // finder sat at 66.8% over 127 games — the highest find rate, the hardest positions
+      // and the tightest spread on the board — and scored 12 holds out of 25, the LOWEST
+      // consistency percentile of anyone, which is what a coin flip scores. A student on 11
+      // games had two transitions, both upward, and took the top percentile on a 39.6% find
+      // rate. The floor was too low and the question was the wrong one.
+      //
+      // So measure spread instead: chunk the games the same way, then ask how tightly those
+      // chunk find-rates cluster around the student's own mean. Steady play scores well
+      // whether it sits high or low — and how high it sits is already the findRate component,
+      // while climbing is already the improvement component. Each part now measures one thing.
+      const CHUNK = 5;
       const order: string[] = [];
       const perGame = new Map<string, { f: number; n: number; t: number }>();
       for (const e of evs) {
@@ -659,15 +667,19 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
         for (const gid of order.slice(i, i + CHUNK)) { const g = perGame.get(gid)!; f += g.f; n += g.n; }
         if (n > 0) rates.push(f / n);
       }
-      let held = 0, steps = 0;
-      for (let i = 1; i < rates.length; i++) { steps++; if (rates[i]! >= rates[i - 1]! - TOL) held++; }
-      // Under three chunks there is not enough shape to judge — neutral, not punished.
-      const improveConsistency = steps >= 2 ? held / steps : 0.5;
+      const rateMean = rates.length ? rates.reduce((a, b) => a + b, 0) / rates.length : 0;
+      const rateSd = rates.length > 1
+        ? Math.sqrt(rates.reduce((a, b) => a + (b - rateMean) ** 2, 0) / rates.length) : 0;
+      // Negated so higher is better, like every other component. Relative spread rather than
+      // raw, so a five-point swing counts for more at a 30% find rate than at 70%. Under four
+      // chunks (20 games) there is not enough shape to judge — null here, filled with the
+      // cohort median at ranking time so a short history lands mid-pack instead of winning it.
+      const steadiness: number | null = (rates.length >= 4 && rateMean > 0) ? -(rateSd / rateMean) : null;
       // Difficulty: the average worth of the moments they were actually presented with.
       const difficulty = evs.length ? evs.reduce((a, e) => a + Math.abs(Number(e.p) || 0), 0) / evs.length : 0;
       return { rank: i + 1, studentId: String(r._id), username: u?.username ?? String(r._id), name: u?.name ?? null, coachId: u?.coachId ?? null,
         score: r.score, found: r.found, missed: r.missed, games: (r.games as string[]).length, lastAt: r.lastAt, byMotif, sources: r.sources as string[],
-        findRate, improvement, improveConsistency, chunks: rates.length, difficulty };
+        findRate, improvement, steadiness, chunks: rates.length, difficulty };
     });
     const pending = await this.pendingCount(academyId);
     // Game character per student (aggressive / dynamic / positional) from the scored-game ledger.
@@ -716,21 +728,28 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
       const fr = ranked.map((r: any) => r.findRate);
       const vol = ranked.map((r: any) => Math.log1p(r.games));
       const imp = ranked.map((r: any) => r.improvement);
-      const con = ranked.map((r: any) => r.improveConsistency);
+      // Steadiness carries null for anyone under four chunks; fill those with the cohort
+      // median so a short history sits mid-pack on this component rather than topping it.
+      const steadyVals = (ranked as any[]).map((r) => r.steadiness).filter((v) => v !== null) as number[];
+      const sortedSteady = [...steadyVals].sort((a, b) => a - b);
+      const medSteady = sortedSteady.length ? sortedSteady[(sortedSteady.length - 1) >> 1]! : 0;
+      for (const r of ranked as any[]) if (r.steadiness === null) r.steadiness = medSteady;
+      const con = ranked.map((r: any) => r.steadiness);
       const dif = ranked.map((r: any) => r.difficulty);
       for (const r of ranked as any[]) {
         const parts = {
           findRate:    pct(fr,  r.findRate),
           volume:      pct(vol, Math.log1p(r.games)),
           improvement: pct(imp, r.improvement),
-          consistency: pct(con, r.improveConsistency),
+          consistency: pct(con, r.steadiness),
           difficulty:  pct(dif, r.difficulty),
         };
         r.scoreParts = parts;
-        // Owner 2026-09-19: consistency of improvement to 30%, "rather than number of
-        // games". Volume and the crude first-half/second-half improvement both come
-        // down to make room — the shape of the trajectory now says more than either the
-        // amount played or a single before/after comparison.
+        // Owner 2026-09-19: consistency to 30%, "rather than number of games". Volume and
+        // the crude first-half/second-half improvement both come down to make room. Since
+        // 2026-09-23 the consistency term is steadiness of play rather than a second climb
+        // score, so the three performance parts no longer all reward the same thing:
+        // findRate says how well, consistency how reliably, improvement how much better.
         r.blend = Math.round(1000 * (
           0.30 * parts.findRate + 0.30 * parts.consistency + 0.15 * parts.improvement +
           0.15 * parts.volume + 0.10 * parts.difficulty));
