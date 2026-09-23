@@ -142,7 +142,13 @@ const REMOTE_CACHE = "/var/lib/chessguru/user-books-cache";
 // uplink was busy. Now the listing and each book's meta are memoised here for a short while.
 const REMOTE_LIST_TTL_MS = 45_000;
 const REMOTE_META_TTL_MS = 5 * 60_000;
-let remoteListCache: { at: number; p: Promise<any[]> } | null = null;
+// `data` is the last list that actually resolved, kept so a stale entry can be
+// served instantly while a refresh runs behind it.
+let remoteListCache: { at: number; p: Promise<any[]>; data: any[] | null; pending: boolean } | null = null;
+/** How long list() will wait for a remote refresh before answering without it.
+ *  The shelf re-polls (5 s while a book is rendering, 60 s otherwise, and on
+ *  focus), so anything missed here appears moments later. */
+const REMOTE_WAIT_MS = 1_500;
 const remoteMetaCache = new Map<string, { at: number; p: Promise<any> }>();
 // Whose Drive the book host is pointed at. One library, one owner —
 // these are copyrighted books belonging to a specific person.
@@ -395,30 +401,71 @@ export class UserBooksController {
     const remote = await this.remoteBooks(uid);
     const localIds = new Set(books.map((b) => b.id));
     return { books: [...books, ...remote.filter((r) => !localIds.has(r.id))] };
+    // NB: local books are built above and are never gated on the remote call.
   }
 
   /** Books that live on Vinayaka, in the same shape as the local ones.
    *
    *  Returns [] rather than throwing: the book host being down must not take
    *  the shelf with it, because the locally-held books are still readable. */
+  /** The caller's books from the remote host.
+   *
+   *  NEVER blocks the shelf on this. It used to await the fetch outright, with a
+   *  12-second abort — so whenever the book host stalled, a coach's shelf sat
+   *  empty for twelve seconds even though their books were already on local
+   *  disk. Measured 549 times in the error log, every one of them at 12.0-12.1 s,
+   *  which is the timeout and not the work.
+   *
+   *  Now: a fresh cache answers immediately; a stale one starts a refresh and is
+   *  raced against a short budget. If the refresh loses, the last known list is
+   *  returned (or none on a cold start) and the refresh still lands in the cache
+   *  for the next poll, which is seconds away. */
   private async remoteBooks(uid: string): Promise<any[]> {
+    const mine = (rows: any[]) => rows
+      // The book's OWN owner decides, exactly as for a local book. Being the
+      // library owner grants no access to someone else's book.
+      .filter((b: any) => b.owner === uid)
+      .map((b: any) => ({ ...b, coverPage: b.coverPage ?? 0, remote: true }));
+
+    const start = () => {
+      const p = this.bookHost("/books", { signal: AbortSignal.timeout(12_000) }).then((j) => j.books ?? []);
+      remoteListCache = { at: Date.now(), p, data: remoteListCache?.data ?? null, pending: true };
+      p.then((rows) => {
+        if (remoteListCache?.p === p) { remoteListCache.data = rows; remoteListCache.pending = false; }
+      }).catch(() => {
+        if (remoteListCache?.p === p) remoteListCache = null;   // a failure is not cached
+      });
+      return p;
+    };
+
     try {
       const now = Date.now();
-      if (!remoteListCache || now - remoteListCache.at > REMOTE_LIST_TTL_MS) {
-        const p = this.bookHost("/books", { signal: AbortSignal.timeout(12_000) }).then((j) => j.books ?? []);
-        remoteListCache = { at: now, p };
-        p.catch(() => { if (remoteListCache?.p === p) remoteListCache = null; });   // a failure is not cached
+      const c = remoteListCache;
+      const fresh = !!c && now - c.at <= REMOTE_LIST_TTL_MS;
+
+      // Known data answers instantly, every time. A stale copy is refreshed
+      // behind the response rather than in front of it.
+      if (c?.data) {
+        if (!fresh && !c.pending) start();
+        return mine(c.data);
       }
-      const all: any[] = await remoteListCache.p;
-      return all
-        // The book's OWN owner decides, exactly as for a local book. Being the
-        // library owner grants no access to someone else's book.
-        .filter((b: any) => b.owner === uid)
-        .map((b: any) => ({ ...b, coverPage: b.coverPage ?? 0, remote: true }));
+      // Nothing known yet. A fetch already running is NOT waited on a second
+      // time: the first caller pays the budget, everyone else is served at once
+      // and picks the books up on the next poll. Without this a single hung
+      // fetch made every shelf load pay the wait for as long as it hung.
+      if (c?.pending) return [];
+
+      const p = start();
+      const all: any[] = await Promise.race([
+        p,
+        new Promise<any[]>((resolve) => setTimeout(() => resolve([]), REMOTE_WAIT_MS)),
+      ]);
+      return mine(all);
     } catch {
       return [];
     }
   }
+
 
   /** The owner's Drive library, and the ingest queue, both living on Vinayaka.
    *
