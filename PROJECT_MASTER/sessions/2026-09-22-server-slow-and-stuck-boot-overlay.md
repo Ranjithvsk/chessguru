@@ -89,3 +89,39 @@ never appear in ChessGuru's `mailLog`, so an empty mailLog is not evidence of si
 
 `server-monitor/` is gitignored (it holds the internal token) — the change is carried by
 the nightly France borg backup, which now includes that directory.
+
+## Class log: what was used, and whether it worked (2026-09-22 → 23)
+Owner asked for the Dream Meet class log to show which features a class used, then to
+add chat/raise-hand/screen-share/recording, then challenge/snap, then notebook packs and
+class notes, and finally to record FAILURES.
+
+**Three sources, deliberately different:**
+1. `class-ws` tallies board frames in memory and flushes ONE batched upsert per class
+   every 10 s into `classFeatureUsage` (plumbing frames never reach mongo).
+2. The browser reports what rides LiveKit (chat, raise hand, screen share, reactions,
+   captions) with a single `used` frame per feature per class, allow-listed server-side.
+3. Challenge, snap, notebook pack, failed notebook send and class notes are DERIVED from
+   their own collections — which also gives them history for classes that predate this.
+
+**Per feature we now store** `n` completed, `x` failed, `s` done by a student, `d` student
+screens reached. Failures include clicks made while the socket was down: those cannot be
+reported at the time (the socket IS the channel), so they are buffered in the browser and
+flushed on reconnect as `ui:offline-click`.
+
+**Fixed along the way:** `offer-position` was labelled "Sent a position to notebooks" but
+is actually the coach's phone handing a position to their own class screen — two chips
+would have claimed the same thing. `classNotes` stamps `submittedAt`, not `at`.
+
+**Verified live:** failed chat, 6 lost offline clicks, a student-originated raise hand,
+and an annotation reaching 1 student screen were all recorded; 25 real classes showed
+notebook packs and 24 showed challenges immediately, from history.
+
+**Known limits (told to the owner):** absence of a chip is not proof a button is broken —
+it means "never used OR failed before any of our code ran". The `d` (screens reached)
+figure only populates when students are genuinely connected. A synthetic socket cannot
+stand in for a student: the room refuses any connection without a signed-in user, which
+is the audience gate working correctly.
+
+**TO CHECK IN A REAL CLASS (owner, 23 Sep):** open superadmin.dreamcy.com →
+Dream Meet → Class log → expand the class. Expect chips with counts, `→` student screens
+reached on board actions, `👤` on anything a student did, and `✕` on anything that failed.
