@@ -5,7 +5,7 @@
 //
 // Requires the API to have LIVEKIT_URL / _API_KEY / _API_SECRET envs. Until
 // those are set, the page renders a friendly "not configured yet" splash.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Navigate, useParams, useSearchParams, Link, useNavigate } from "react-router-dom";
@@ -912,6 +912,194 @@ function VideoKeepAlive() {
   return null;
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Coach-only: read and answer private messages WITHOUT leaving Dream Meet.
+//
+// This used to be a link to /messages with target="_blank". A new tab does keep
+// the call alive, but on a tablet the backgrounded class tab gets suspended: the
+// class socket drops and rejoins, and until the guard in SharedClassBoard was
+// fixed that rejoin silently wiped the challenge answers the coach had stepped
+// away to read about. Owner 2026-09-23: "cant it be a pop up". So it is a popup —
+// the class page never unmounts, the socket never drops, nothing is torn down.
+// ─────────────────────────────────────────────────────────────────────
+type DmThread = { threadId: string; otherUserId: string; otherUsername: string; otherName?: string; otherRole: string; lastMessageAt?: string; lastMessageText?: string; lastMessageFromMe?: boolean; unread: number };
+type DmMessage = { id: string; threadId: string; fromUserId: string; toUserId: string; text: string; createdAt: string; fromMe: boolean };
+
+let _dmOpen: { name?: string } | null = null;
+const _dmSubs = new Set<() => void>();
+function openCoachDm(opts?: { name?: string }) { _dmOpen = opts ?? {}; _dmSubs.forEach((f) => f()); }
+function useCoachDmOpen(): { name?: string } | null {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((n) => n + 1); _dmSubs.add(f); return () => { _dmSubs.delete(f); }; }, []);
+  return _dmOpen;
+}
+
+function CoachMessagesDrawer({ role }: { role: string }) {
+  const opened = useCoachDmOpen();
+  const [threads, setThreads] = useState<DmThread[]>([]);
+  const [sel, setSel] = useState<DmThread | null>(null);
+  const [msgs, setMsgs] = useState<DmMessage[]>([]);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [unread, setUnread] = useState(0);
+  const endRef = useRef<HTMLDivElement | null>(null);
+  const isCoach = role === "coach";
+
+  const loadThreads = useCallback(async () => {
+    try {
+      const r = await fetch("/v2api/api/messages/threads", { credentials: "include" });
+      if (!r.ok) return;
+      const j = await r.json() as { threads?: DmThread[]; totalUnread?: number };
+      setThreads(Array.isArray(j.threads) ? j.threads : []);
+      setUnread(Number(j.totalUnread) || 0);
+      return j.threads ?? [];
+    } catch { /* offline — the badge just stays stale */ }
+    return [];
+  }, []);
+
+  // Poll for the unread badge while the coach is in class, so a message that
+  // arrives with no LiveKit ping (student on a flaky line) still shows up.
+  useEffect(() => {
+    if (!isCoach) return;
+    void loadThreads();
+    const t = setInterval(() => { void loadThreads(); }, 30_000);
+    return () => clearInterval(t);
+  }, [isCoach, loadThreads]);
+
+  const openThread = useCallback(async (t: DmThread) => {
+    setSel(t); setMsgs([]); setErr(null);
+    try {
+      const r = await fetch(`/v2api/api/messages/threads/${encodeURIComponent(t.threadId)}`, { credentials: "include" });
+      const j = await r.json().catch(() => ({})) as { messages?: DmMessage[] };
+      if (!r.ok) throw new Error("Could not load the conversation.");
+      setMsgs(Array.isArray(j.messages) ? j.messages : []);
+      void fetch(`/v2api/api/messages/threads/${encodeURIComponent(t.threadId)}/read`, { method: "POST", credentials: "include" })
+        .then(() => loadThreads());
+    } catch (e) { setErr(e instanceof Error ? e.message : "Could not load the conversation."); }
+  }, [loadThreads]);
+
+  // Opening from a toast: jump straight into that student's thread when the
+  // name matches, otherwise land on the list.
+  useEffect(() => {
+    if (!opened) { setSel(null); setMsgs([]); setText(""); setErr(null); return; }
+    void (async () => {
+      const list = await loadThreads();
+      const want = (opened.name || "").trim().toLowerCase();
+      if (!want) return;
+      const hit = (list as DmThread[]).find((t) =>
+        String(t.otherName || "").trim().toLowerCase() === want ||
+        String(t.otherUsername || "").trim().toLowerCase() === want);
+      if (hit) void openThread(hit);
+    })();
+  }, [opened, loadThreads, openThread]);
+
+  useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [msgs]);
+
+  const reply = async () => {
+    const body = text.trim();
+    if (!body || !sel || busy) return;
+    setBusy(true); setErr(null);
+    try {
+      const r = await fetch("/v2api/api/messages/send", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ toUserId: sel.otherUserId, text: body }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((j as any)?.message || "Could not send.");
+      setText("");
+      setMsgs((prev) => [...prev, { id: `local-${Date.now()}`, threadId: sel.threadId, fromUserId: "me",
+        toUserId: sel.otherUserId, text: body, createdAt: new Date().toISOString(), fromMe: true }]);
+      void loadThreads();
+    } catch (e) { setErr(e instanceof Error ? e.message : "Could not send."); }
+    finally { setBusy(false); }
+  };
+
+  if (!isCoach) return null;
+
+  // Closed: a small launcher that carries the unread count.
+  if (!opened) {
+    return (
+      <button type="button" onClick={() => openCoachDm()}
+        className="pointer-events-auto fixed bottom-4 right-3 z-[74] flex items-center gap-1.5 rounded-full border border-brand-500/50 bg-ink-900 px-3 py-2 text-xs font-semibold text-brand-100 shadow-xl hover:bg-ink-800"
+        title="Private messages — opens here, without leaving the class">
+        📩 Messages
+        {unread > 0 && (
+          <span className="ml-0.5 rounded-full bg-brand-500 px-1.5 py-0.5 text-[10px] font-bold text-white">{unread}</span>
+        )}
+      </button>
+    );
+  }
+
+  return (
+    <div className="pointer-events-auto fixed bottom-4 right-3 z-[80] flex h-[min(30rem,72vh)] w-[min(24rem,92vw)] flex-col overflow-hidden rounded-2xl border border-brand-500/40 bg-ink-900 shadow-2xl ring-1 ring-brand-500/20">
+      <div className="flex items-center gap-2 border-b border-ink-800 px-3 py-2">
+        {sel && (
+          <button type="button" onClick={() => { setSel(null); setMsgs([]); setErr(null); }}
+            className="text-ink-400 hover:text-ink-100" aria-label="Back to all conversations">←</button>
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-bold text-brand-100">
+            {sel ? (sel.otherName || sel.otherUsername) : "📩 Private messages"}
+          </div>
+          <div className="truncate text-[11px] text-ink-400">
+            {sel ? "Replying from inside the class" : "The class keeps running behind this panel"}
+          </div>
+        </div>
+        <button type="button" onClick={() => { _dmOpen = null; _dmSubs.forEach((f) => f()); }}
+          className="text-ink-400 hover:text-ink-100" aria-label="Close messages">✕</button>
+      </div>
+
+      {err && <div className="border-b border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-[11px] text-rose-200">{err}</div>}
+
+      {!sel ? (
+        <div className="flex-1 overflow-y-auto">
+          {threads.length === 0 ? (
+            <p className="p-4 text-center text-xs text-ink-400">No conversations yet.</p>
+          ) : threads.map((t) => (
+            <button key={t.threadId} type="button" onClick={() => void openThread(t)}
+              className="flex w-full items-start gap-2 border-b border-ink-800/70 px-3 py-2 text-left hover:bg-ink-800">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="truncate text-sm font-semibold text-ink-100">{t.otherName || t.otherUsername}</span>
+                  {t.unread > 0 && <span className="rounded-full bg-brand-500 px-1.5 text-[10px] font-bold text-white">{t.unread}</span>}
+                </div>
+                <div className="truncate text-xs text-ink-400">
+                  {t.lastMessageFromMe ? "You: " : ""}{t.lastMessageText || "—"}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <>
+          <div className="flex-1 space-y-1.5 overflow-y-auto p-3">
+            {msgs.length === 0
+              ? <p className="text-center text-xs text-ink-400">No messages in this conversation yet.</p>
+              : msgs.map((m) => (
+                <div key={m.id} className={`max-w-[85%] rounded-xl px-2.5 py-1.5 text-sm ${m.fromMe ? "ml-auto bg-brand-500 text-white" : "bg-ink-800 text-ink-100"}`}>
+                  <div className="whitespace-pre-wrap break-words">{m.text}</div>
+                </div>
+              ))}
+            <div ref={endRef} />
+          </div>
+          <div className="flex items-end gap-1.5 border-t border-ink-800 p-2">
+            <textarea value={text} onChange={(e) => setText(e.target.value)} rows={2}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void reply(); } }}
+              placeholder="Reply… (Enter sends)"
+              className="min-w-0 flex-1 resize-none rounded-lg border border-ink-700 bg-ink-950 px-2 py-1.5 text-sm text-ink-100 placeholder:text-ink-500 focus:border-brand-500 focus:outline-none" />
+            <button type="button" onClick={() => void reply()} disabled={busy || !text.trim()}
+              className="rounded-lg bg-brand-500 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-400 disabled:opacity-50">
+              {busy ? "…" : "Send"}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // Coach-only: toast when a student sends a private message during the class.
 // Listens on the `cg-dm` topic (see DmPing above). Stacks bottom-right so it
 // never sits over the board or the footer controls, auto-dismisses after 15s,
@@ -946,12 +1134,13 @@ function CoachDmToastHost({ role }: { role: string }) {
             <button onClick={() => setPings((prev) => prev.filter((x) => x.id !== p.id))}
               aria-label="Dismiss" className="shrink-0 text-ink-400 hover:text-ink-100">✕</button>
           </div>
-          {/* New tab on purpose — a coach mid-class must not navigate away from
-           *  Dream Meet to read a message (it would tear down the call). */}
-          <a href="/messages" target="_blank" rel="noopener noreferrer"
+          {/* Opens the in-class panel, not a tab: backgrounding this tab suspends
+           *  the class socket on a tablet, and the rejoin used to wipe the
+           *  challenge answers. The class stays mounted behind the panel. */}
+          <button type="button" onClick={() => openCoachDm({ name: p.from })}
             className="mt-2 inline-block rounded-lg bg-brand-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-brand-400">
-            Open Messages ↗
-          </a>
+            Reply here
+          </button>
         </div>
       ))}
     </div>
@@ -2218,6 +2407,7 @@ export default function ClassV2Page() {
                *  LiveKitRoom so useDataChannel has its context; renders fixed,
                *  so its position here in the tree doesn't matter. */}
               <CoachDmToastHost role={role} />
+              <CoachMessagesDrawer role={role} />
               {endedMsg && (
                 <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center bg-ink-950/85 p-6 text-center">
                   <div className="pointer-events-auto space-y-3 rounded-2xl border border-rose-500/50 bg-ink-900 p-6 shadow-2xl">

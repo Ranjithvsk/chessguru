@@ -933,6 +933,11 @@ export default function SharedClassBoard(
   //     server snapshot + review UI
   const challengeGameRef = useRef<Chess | null>(null);
   const challengeMovesRef = useRef<string[]>([]);
+  // True from the moment a socket opens until its first `state` frame is handled.
+  // The join snapshot is shaped exactly like a board reset (empty tree) whenever the
+  // coach set the position up with loadFen, so without this the rejoin looks like the
+  // coach clearing the board — see the challenge-residue guard below.
+  const joinSnapshotRef = useRef(false);
   const challengeTreeRef = useRef<ChallengeTreeNode[]>([]);
   const challengeCursorRef = useRef<number[]>([]);
   const [challengeFen, setChallengeFen] = useState<string | null>(null);
@@ -1012,6 +1017,7 @@ export default function SharedClassBoard(
       ws.onopen = () => {
         if (cancelled) { try { ws.close(); } catch { /* */ } return; }
         setConnected(true);
+        joinSnapshotRef.current = true;   // next `state` frame is the join snapshot
         backoffMs = 500;   // reset backoff on a good open
         // Heartbeat: 20s < any reasonable NAT/proxy idle timeout.
         heartbeatTimer = setInterval(() => {
@@ -1082,8 +1088,21 @@ export default function SharedClassBoard(
           // challenge doesn't keep seeing '📝 Show my answer' on the new
           // position. Owner report 2026-09-03: 'even after coach setup new
           // position, why students has option to see, show my answer'.
+          //
+          // …but the snapshot sent when a socket JOINS carries the room's current tree,
+          // which is also empty whenever the coach set the position up with loadFen and
+          // nobody has played on the shared board since — i.e. the normal state during a
+          // challenge. So a rejoin was indistinguishable from a reset and silently threw
+          // the answers away. Owner report 2026-09-23: "coach opens some other page, the
+          // answer made by the students vanishes" — the coach stepping into private
+          // messages and back was enough. Two conditions now have to hold: this must not
+          // be the join snapshot, and the board must actually have moved OFF the position
+          // the challenge was set on.
+          const isJoinSnapshot = joinSnapshotRef.current;
+          joinSnapshotRef.current = false;
+          const movedOffChallenge = !!_challenge && String(msg.startFen ?? "") !== _challenge.positionFen;
           const isBoardReset = Array.isArray(msg.tree) && msg.tree.length === 0;
-          if (isBoardReset && _challenge && !_challenge.active) {
+          if (isBoardReset && !isJoinSnapshot && movedOffChallenge && _challenge && !_challenge.active) {
             _publishChallenge(null);
           }
           setShapes(Array.isArray(msg.shapes) ? msg.shapes : []);
@@ -1662,6 +1681,35 @@ export default function SharedClassBoard(
   const challengeUI = useClassChallenge();
   const inChallenge = !!challengeUI?.active;
   const isCoachRole = role === "coach";
+  // Self-heal for a student who joined mid-challenge.
+  //
+  // The server sends `challenge_start` to a socket the instant it connects into a
+  // room with a live challenge, so the intent has always been that a late joiner
+  // solves along with everyone else. But that frame is sent at raw connect time —
+  // before `hello` has resolved this client's role, and before this component has
+  // necessarily finished wiring up. If it is missed, the student sits in front of
+  // the frozen shared board with nothing to move and no way back in until the
+  // challenge ends: exactly the "they cant move" the owner reported 2026-09-23.
+  //
+  // So reconcile from the published challenge instead of trusting one frame: if a
+  // challenge is live and we hold no local challenge board at all, build one. The
+  // guard is deliberately "no board whatsoever" — a student who is part-way
+  // through their answer always has both a game and a fen, so this can never wipe
+  // work in progress, and it stays inert on every normal start.
+  useEffect(() => {
+    if (!challengeUI?.active || isCoachRole) return;
+    if (challengeGameRef.current || challengeFen) return;
+    try {
+      const g = new Chess(challengeUI.positionFen);
+      challengeGameRef.current = g;
+      challengeMovesRef.current = [];
+      challengeTreeRef.current = [];
+      challengeCursorRef.current = [];
+      setChallengeFen(g.fen());
+      setChallengeDests(destsFromChess(g));
+      setChallengeTreeTick((n) => n + 1);
+    } catch { /* unusable FEN — leave the board as it is rather than break it */ }
+  }, [challengeUI?.active, challengeUI?.positionFen, challengeFen, isCoachRole]);
   // Post-challenge review — student is walking through their own answer.
   // A new challenge must never open in review mode. reviewIdx was only ever cleared
   // by the student closing the "Show my answer" ribbon, so it survived into the NEXT
