@@ -860,7 +860,12 @@ export class UserBooksController {
     try {
       const r = await this.bookHost("/library/match", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: name, mb: body.length / 1e6 }),
+        // sha256 + exact byte count, so the library answers on CONTENT rather
+        // than on a title two different scans can share.
+        body: JSON.stringify({
+          title: name, mb: body.length / 1e6,
+          sha256: sha256(body), bytes: body.length,
+        }),
       });
       // A match only means "you already have this" if the coach can actually SEE
       // the matched book. This short-circuited on ANY match, and /library/match
