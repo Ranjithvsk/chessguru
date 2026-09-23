@@ -363,12 +363,62 @@ function mintCoachToken(): string {
 // stat; a Mongo hiccup must never disrupt a live class.
 // Returns { firstJoin } so the caller can trigger a one-time late-alert on
 // the very first insert (rejoins don't re-alert).
+/** Make sure a room somebody actually joined EXISTS as a class.
+ *
+ *  Going live writes a classSchedules row, but a room reached by typing or
+ *  bookmarking its id never went through that, so it had no row at all — and
+ *  every surface that lists classes reads classSchedules. Real lessons were
+ *  therefore invisible: `demo` carried six real users across three weeks, and
+ *  `manual-raagul-20260923` taught four students on 23 Sep, and neither appeared
+ *  in the Dream Meet log or the stats.
+ *
+ *  `createdFrom: "join"` is load-bearing, not decoration. Eligibility rule 0
+ *  blocks every student from a roomKind "meet" class whose audience was never
+ *  picked — which is right for a room the coach announced and has not yet
+ *  chosen an audience for, but these rooms never had that step. Writing a plain
+ *  row here would have locked every student out of rooms that work today. Rule 0
+ *  skips rows carrying this marker, so who may join is EXACTLY unchanged; only
+ *  the log gains an entry.
+ */
+async function ensureClassRow(classId: string, userId: string | null): Promise<void> {
+  if (!dbConn?.db || !classId) return;
+  try {
+    const db = dbConn.db;
+    const existing = await db.collection("classSchedules")
+      .findOne({ _id: classId as any }, { projection: { _id: 1 } });
+    if (existing) return;
+    // The academy comes from whoever walked in; class-ws has no session, only a
+    // client-declared userId, so this is a lookup rather than a claim.
+    let academyId: string | null = null;
+    if (userId) {
+      const u: any = await db.collection("users")
+        .findOne({ _id: userId as any }, { projection: { academyId: 1 } });
+      academyId = u?.academyId ?? null;
+    }
+    await db.collection("classSchedules").updateOne(
+      { _id: classId as any },
+      {
+        $setOnInsert: {
+          title: "Ad-hoc room", coach: "", startAt: new Date(), durationMin: 60,
+          notes: "", createdAt: new Date(), createdByUserId: userId ?? "",
+          academyId, roomKind: "meet",
+          createdFrom: "join",   // see rule 0 in class-eligibility.ts
+        },
+      },
+      { upsert: true },
+    );
+  } catch { /* the log is not worth disturbing a live class for */ }
+}
+
 async function recordAttendance(classId: string, userId: string | null, name: string, kind: "join" | "leave" | "seen"): Promise<{ firstJoin: boolean }> {
   if (!dbConn?.db) return { firstJoin: false };
   try {
     const col = dbConn.db.collection("classAttendance");
     const key = userId ? userId : `guest:${name}`;
     if (kind === "join") {
+      // Before the attendance row, so a class always exists for the attendance
+      // to belong to.
+      await ensureClassRow(classId, userId);
       const res = await col.updateOne(
         { classId, key },
         { $set: { classId, key, userId, name, lastSeenAt: new Date() },
@@ -666,18 +716,35 @@ const FEATURE_LABELS: Record<string, string> = {
   "ui:caption": "Live captions",
   // Written server-side when the recording upload lands, so it cannot be faked.
   "ui:recording": "Recording",
+  "ui:offline-click": "Action lost — clicked while disconnected",
 };
-const CLIENT_REPORTABLE = new Set(["chat", "hand", "screenshare", "reaction", "caption"]);
-type FeatureStat = { n: number; firstAt: number; lastAt: number };
+const CLIENT_REPORTABLE = new Set(["chat", "hand", "screenshare", "reaction", "caption", "offline-click"]);
+// n = completed, x = attempted but FAILED (the coach clicked and nothing happened),
+// s = how many were done by a STUDENT rather than the coach, d = the largest number of
+// sockets one of these was actually delivered to, i.e. "did the students receive it".
+type FeatureStat = { n: number; x: number; s: number; d: number; firstAt: number; lastAt: number };
 let featureTally = new Map<string, Map<string, FeatureStat>>();
 
-function noteFeature(classId: string, type: string): void {
+function noteFeature(classId: string, type: string, opt?: { ok?: boolean; byStudent?: boolean; delivered?: number; deliveredOnly?: boolean }): void {
   if (!classId || !FEATURE_LABELS[type]) return;
   let m = featureTally.get(classId);
   if (!m) { m = new Map<string, FeatureStat>(); featureTally.set(classId, m); }
   const now = Date.now();
-  const cur = m.get(type);
-  if (cur) { cur.n += 1; cur.lastAt = now; } else { m.set(type, { n: 1, firstAt: now, lastAt: now }); }
+  const failed = opt?.ok === false;
+  const student = opt?.byStudent === true;
+  const delivered = Math.max(0, Number(opt?.delivered ?? 0));
+  let cur = m.get(type);
+  if (!cur) { cur = { n: 0, x: 0, s: 0, d: 0, firstAt: now, lastAt: now }; m.set(type, cur); }
+  // The broadcast path reports delivery for an action the message handler has ALREADY
+  // counted — it must not count it a second time.
+  if (opt?.deliveredOnly) {
+    if (delivered > cur.d) cur.d = delivered;
+    return;
+  }
+  if (failed) cur.x += 1; else cur.n += 1;
+  if (student && !failed) cur.s += 1;
+  if (delivered > cur.d) cur.d = delivered;
+  cur.lastAt = now;
 }
 
 const FEATURE_FLUSH_MS = 10_000;
@@ -690,18 +757,22 @@ async function flushFeatureTally(): Promise<void> {
   for (const [classId, types] of pending) {
     const inc: Record<string, number> = {};
     const min: Record<string, Date> = {};
-    const max: Record<string, Date> = {};
+    // `d` (students reached) shares $max with the timestamps, so this map holds both.
+    const max: Record<string, Date | number> = {};
     for (const [type, st] of types) {
       const k = type.replace(/[.$]/g, "_");     // mongo keys cannot hold . or $
-      inc[`f.${k}.n`] = st.n;
+      if (st.n) inc[`f.${k}.n`] = st.n;
+      if (st.x) inc[`f.${k}.x`] = st.x;
+      if (st.s) inc[`f.${k}.s`] = st.s;
+      if (st.d) max[`f.${k}.d`] = st.d;          // high-water mark, not a sum
       min[`f.${k}.firstAt`] = new Date(st.firstAt);
       max[`f.${k}.lastAt`] = new Date(st.lastAt);
     }
     try {
+      const update: any = { $min: min, $max: max, $setOnInsert: { classId } };
+      if (Object.keys(inc).length) update.$inc = inc;
       await dbConn.db.collection("classFeatureUsage").updateOne(
-        { _id: classId as any },
-        { $inc: inc, $min: min, $max: max, $setOnInsert: { classId } },
-        { upsert: true },
+        { _id: classId as any }, update, { upsert: true },
       );
     } catch { /* usage stats must never break a live class */ }
   }
@@ -756,10 +827,26 @@ function countStudents(room: Room): number {
 
 function broadcast(room: Room, frame: ServerFrame): void {
   const payload = JSON.stringify(frame);
+  // Count who it actually reached. "The coach pressed it" and "the students got it"
+  // are different claims, and only the second one matters when a coach reports that
+  // nothing happened on the students' screens (owner 2026-09-23).
+  let delivered = 0;
+  let studentsReached = 0;
   for (const c of room.clients) {
-    if (c.readyState === WebSocket.OPEN) { try { c.send(payload); } catch { /* ignore */ } }
+    if (c.readyState === WebSocket.OPEN) {
+      try {
+        c.send(payload);
+        delivered++;
+        if (socketRole.get(c) !== "coach") studentsReached++;
+      } catch { /* ignore */ }
+    }
   }
   const ftype = (frame as any).type;
+  if (FEATURE_LABELS[ftype]) {
+    for (const [id, r] of rooms) {
+      if (r === room) { noteFeature(id, ftype, { delivered: studentsReached, deliveredOnly: true }); break; }
+    }
+  }
   if (PERSIST_FRAME_TYPES.has(ftype) || REPLAY_FRAME_TYPES.has(ftype)) {
     // Find the classId that owns this room. Cheap linear scan; rooms Map
     // typically has ≤ dozens of entries in a live class window.
@@ -974,8 +1061,10 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
   ws.on("message", (raw) => { try {
     let frame: ClientFrame;
     try { frame = JSON.parse(raw.toString()); } catch { return; }
-    // One counter bump per teaching action — see FEATURE_LABELS above.
-    noteFeature(roomId, (frame as any)?.type);
+    // One counter bump per teaching action — see FEATURE_LABELS above. The role is
+    // read here so the log can say a STUDENT raised a hand or answered, not just
+    // "someone did" (owner 2026-09-23).
+    noteFeature(roomId, (frame as any)?.type, { byStudent: socketRole.get(ws) !== "coach" });
     if (frame.type === "ping") { send({ type: "pong" }); touchAttendance(ws); return; }
 
     // Browser-reported feature use. Allow-listed so a client cannot invent labels,
@@ -983,7 +1072,14 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     // de-duplicates into one counter, and the client only sends this once per class.
     if (frame.type === "used") {
       const f = String((frame as any).feature || "");
-      if (CLIENT_REPORTABLE.has(f)) noteFeature(roomId, `ui:${f}`);
+      if (!CLIENT_REPORTABLE.has(f)) return;
+      // ok:false = the browser tried and it did NOT work (a publish that threw, or a
+      // board action clicked while the socket was down and queued until reconnect).
+      const ok = (frame as any).ok !== false;
+      const times = Math.min(50, Math.max(1, Number((frame as any).times) || 1));
+      for (let i = 0; i < times; i++) {
+        noteFeature(roomId, `ui:${f}`, { ok, byStudent: socketRole.get(ws) !== "coach" });
+      }
       return;
     }
 

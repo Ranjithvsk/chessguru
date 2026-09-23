@@ -40,7 +40,7 @@ export async function resolveEligibility(
     const db = conn.db!;
     const klass: any = await db.collection("classSchedules").findOne(
       { _id: classId as any },
-      { projection: { createdByUserId: 1, batchStudentIds: 1, academyId: 1, audienceKind: 1, roomKind: 1 } },
+      { projection: { createdByUserId: 1, batchStudentIds: 1, academyId: 1, audienceKind: 1, roomKind: 1, createdFrom: 1 } },
     );
 
     // 0. An ad-hoc Dream Meet room whose audience has NEVER been picked admits
@@ -66,7 +66,18 @@ export async function resolveEligibility(
       !!klass.audienceKind ||
       (Array.isArray(klass.batchStudentIds) && klass.batchStudentIds.length > 0)
     );
-    if (klass && klass.roomKind === "meet" && !audiencePicked) {
+    //    NOT applied to rows auto-created when somebody joined a hand-typed
+    //    room id (class-ws ensureClassRow). Those rooms never had an
+    //    audience-picking step to skip: before they got a row at all they fell
+    //    straight through to rule 2/3, and writing one purely so the class shows
+    //    up in the log must not quietly lock every student out of a room that
+    //    worked yesterday. The marker keeps the two concerns apart.
+    //    "join" = written by class-ws when someone walked in; "backfill" = the
+    //    same rooms, reconstructed from attendance for classes taught before
+    //    that existed. Both mean "nobody ever picked an audience for this room
+    //    because there was no step at which to pick one".
+    const autoCreated = klass?.createdFrom === "join" || klass?.createdFrom === "backfill";
+    if (klass && klass.roomKind === "meet" && !audiencePicked && !autoCreated) {
       return { restricted: true, studentIds: new Set<string>() };   // empty set = block every student
     }
 
