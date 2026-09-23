@@ -988,6 +988,28 @@ export class UserBooksController {
         `could not save the book (${e?.code || "write failed"})`);
     }
 
+    // Put a copy in the FLAT LIBRARY so the book joins the Backblaze corpus
+    // rather than living only on this box (owner, 2026-09-23: "else add the book
+    // to the backblaze library and serve").
+    //
+    // A copy, not a move: the reader serves pages rendered from the file above,
+    // and books-to-b2.sh copies this directory to B2 every 30 minutes. Purely
+    // best-effort — a coach's upload must never fail because the library disk is
+    // full or absent. The local store is in the borg backup either way, so the
+    // worst case here is a book that is safe but not yet in the library.
+    try {
+      const flat = process.env.BOOK_LIBRARY_DIR || "/srv/data/chess-library-flat";
+      if (existsSync(flat)) {
+        const safe = name.replace(/[^A-Za-z0-9 ._-]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 120) || id;
+        let target = join(flat, `${safe}.pdf`);
+        for (let n = 2; existsSync(target); n++) target = join(flat, `${safe} (${n}).pdf`);
+        writeFileSync(target, body);
+        this.log.log(`added ${JSON.stringify(name)} to the library at ${target}`);
+      }
+    } catch (e: any) {
+      this.log.warn(`could not add ${JSON.stringify(name)} to the library (${e?.code || e?.message}) — stored locally only`);
+    }
+
     // Kick off render + diagram extraction on France. The service starts a
     // background thread and returns immediately, reporting through status.json
     // (which the reader polls via GET /:id). If it's momentarily unreachable the
