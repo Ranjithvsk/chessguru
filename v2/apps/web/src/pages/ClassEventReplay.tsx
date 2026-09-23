@@ -13,6 +13,7 @@ import { useParams, Link } from "react-router-dom";
 import type { Key } from "chessground/types";
 import Board from "../components/Board";
 import { get } from "../lib/api";
+import RecordingExpiry from "../components/RecordingExpiry";
 
 type Ev = {
   at: string; type: string; fen: string | null;
@@ -35,7 +36,7 @@ const LABEL: Record<string, string> = {
   notation: "notation panel", challenge_start: "challenge started", challenge_end: "challenge ended",
 };
 
-type Rec = { name: string; bytes: number; createdAt: string };
+type Rec = { name: string; bytes: number; createdAt: string; storage?: "local" | "b2" };
 
 export default function ClassEventReplay() {
   const { id = "" } = useParams();
@@ -132,14 +133,27 @@ export default function ClassEventReplay() {
                   className="w-full rounded-xl border border-ink-200 bg-black"
                   src={`/v2api/api/class/${encodeURIComponent(id)}/recording/${encodeURIComponent(recs[0]!.name)}`}
                 />
-                <div className="mt-1 text-[11px] text-ink-400">
-                  Recording · {(recs[0]!.bytes / 1048576).toFixed(1)} MB
-                  {recs.length > 1 ? ` · ${recs.length - 1} more not shown` : ""}
-                  {" · "}
+                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-400">
+                  <span>Recording · {(recs[0]!.bytes / 1048576).toFixed(1)} MB</span>
+                  {recs.length > 1 ? <span>· {recs.length - 1} more not shown</span> : null}
+                  <span>·</span>
+                  <RecordingExpiry createdAt={recs[0]!.createdAt} />
+                  <span>·</span>
+                  {/* ?download=1 rather than the `download` attribute, which a
+                    * cross-origin redirect to B2 ignores. */}
+                  <a
+                    href={`/v2api/api/class/${encodeURIComponent(id)}/recording/${encodeURIComponent(recs[0]!.name)}?download=1`}
+                    className="rounded-md border border-ink-300 bg-white px-2 py-0.5 font-bold text-ink-700 no-underline hover:bg-ink-50"
+                  >
+                    ⬇ Download
+                  </a>
                   <Link to={`/class/${encodeURIComponent(id)}/replay/${encodeURIComponent(recs[0]!.name)}`} className="underline">
-                    open the synced player
+                    synced player
                   </Link>
                 </div>
+                <p className="mt-1 text-[11px] text-amber-700">
+                  Recordings are kept for 24 hours. Download it if you want to keep it.
+                </p>
               </div>
             )}
             {recs !== null && recs.length === 0 && (

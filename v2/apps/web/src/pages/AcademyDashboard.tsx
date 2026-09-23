@@ -9,6 +9,7 @@
 // All lists auto-refresh so accepted invites turn into real rows without a
 // manual reload.
 import { useEffect, useMemo, useRef, useState } from "react";
+import RecordingExpiry from "../components/RecordingExpiry";
 import AcademySuspiciousPanel from "../components/AcademySuspiciousPanel";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -2658,13 +2659,17 @@ export default function AcademyDashboardPage() {
                   <div className="text-[11px] text-ink-400">
                     {new Date(r.createdAt).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
                     {" · "}{(r.bytes / (1024 * 1024)).toFixed(1)} MB
+                      {" · "}<RecordingExpiry createdAt={r.createdAt} />
                   </div>
                 </div>
                 <Link to={`/class/${encodeURIComponent(r.classId)}/replay/${encodeURIComponent(r.filename)}`}
                   className="rounded-lg bg-brand-600 hover:bg-brand-500 text-white px-3 py-1 text-xs font-semibold">
                   ▶ Play
                 </Link>
-                <a href={`/v2api/api/class/${encodeURIComponent(r.classId)}/recording/${encodeURIComponent(r.filename)}`}
+                {/* ?download=1, not just the attribute: once a recording moves to
+                  * B2 this link answers with a redirect to another origin, where
+                  * `download` is ignored and the file would play instead of saving. */}
+                <a href={`/v2api/api/class/${encodeURIComponent(r.classId)}/recording/${encodeURIComponent(r.filename)}?download=1`}
                   download
                   className="rounded-lg border border-ink-700 hover:bg-ink-800 text-ink-300 px-3 py-1 text-xs">
                   ⬇ Download

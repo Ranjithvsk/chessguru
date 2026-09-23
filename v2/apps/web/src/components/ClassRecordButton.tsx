@@ -104,7 +104,9 @@ export default function ClassRecordButton({ room }: { room: string }) {
       });
       if (!r.ok) throw new Error(String(r.status));
       setPhase("saved");
-      window.setTimeout(() => setPhase("idle"), 6000);
+      // Leave it saying "Saved" for longer than a toast: this is the coach's cue
+      // that a 24-hour clock has started, and the thing they have to act on.
+      window.setTimeout(() => setPhase("idle"), 20000);
     } catch (e: any) {
       setErr(`Could not save (${e?.message ?? "error"}). The recording is lost.`);
       setPhase("failed");
@@ -246,6 +248,12 @@ export default function ClassRecordButton({ room }: { room: string }) {
         />
         <span className={phase === "recording" ? "tabular-nums" : "hidden sm:inline"}>{label}</span>
       </button>
+      {phase === "saved" && (
+        <span className="text-[11px] font-medium text-amber-300">
+          Saved · kept 24h —{" "}
+          <a href="/dashboard#recordings" className="underline">download it</a>
+        </span>
+      )}
       {err && <span className="text-[11px] font-medium text-rose-300">{err}</span>}
     </>
   );

@@ -17,7 +17,7 @@
 // supports it) can write into the same directory tree and reuse the list/
 // download endpoints as-is.
 
-import { Body, Controller, Get, Param, Post, Req, Res, HttpException, HttpStatus, UnauthorizedException, ForbiddenException } from "@nestjs/common";
+import { Body, Controller, Query, Get, Param, Post, Req, Res, HttpException, HttpStatus, UnauthorizedException, ForbiddenException } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { LivekitService } from "../livekit/livekit.service";
 import { presignGet, s3Config } from "../lib/s3-presign";
@@ -149,10 +149,19 @@ export class ClassRecordingController {
   // GET /api/class/:id/recording/:filename — stream the file. Content-Type is webm
   // so <video src> playback works in-browser.
   @Get(":id/recording/:filename")
-  async download(@Param("id") id: string, @Param("filename") filename: string, @Req() req: any, @Res() res: Response) {
+  async download(
+    @Param("id") id: string,
+    @Param("filename") filename: string,
+    @Req() req: any,
+    @Res() res: Response,
+    @Query("download") downloadFlag?: string,
+  ) {
     if (!ROOM_RE.test(id))    throw new HttpException("bad room", HttpStatus.BAD_REQUEST);
     if (!FILE_RE.test(filename)) throw new HttpException("bad filename", HttpStatus.BAD_REQUEST);
     await this.requireTenantAccess(req, id);
+    // Recordings are kept for 24 hours so the coach can take a copy; a download
+    // that plays inline instead of saving defeats the point of the window.
+    const wantsDownload = downloadFlag === "1" || downloadFlag === "true";
     const full = join(RECORDINGS_DIR, id, filename);
     // stat() first so we can 404 cleanly rather than pipe an error mid-stream.
     let size = 0;
@@ -171,7 +180,7 @@ export class ClassRecordingController {
         : null;
       if (cfg && moved?.key) {
         res.setHeader("Cache-Control", "private, no-store");
-        res.setHeader("Location", presignGet(cfg, String(moved.key), 3600));
+        res.setHeader("Location", presignGet(cfg, String(moved.key), 3600, wantsDownload ? filename : undefined));
         res.status(HttpStatus.FOUND);
         return res.end();
       }
@@ -179,6 +188,7 @@ export class ClassRecordingController {
     }
     res.setHeader("Content-Type", filename.endsWith(".mp4") ? "video/mp4" : "video/webm");
     res.setHeader("Content-Length", String(size));
+    if (wantsDownload) res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.setHeader("Cache-Control", "private, max-age=3600");
     createReadStream(full).pipe(res);
   }

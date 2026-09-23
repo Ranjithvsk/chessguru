@@ -43,8 +43,13 @@ const encKey = (k: string) => k.split("/").map(enc).join("/");
 const hmac = (key: Buffer | string, data: string) => createHmac("sha256", key).update(data, "utf8").digest();
 const sha256hex = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
 
-/** A presigned GET, valid for `expiresSec`. */
-export function presignGet(cfg: S3Config, key: string, expiresSec = 3600): string {
+/** A presigned GET, valid for `expiresSec`.
+ *
+ *  `downloadAs` adds response-content-disposition to the SIGNED query, which is
+ *  the only way to make a cross-origin redirect save to disk instead of playing
+ *  inline: an <a download> attribute is ignored once the response comes from
+ *  another origin, and B2 is another origin. */
+export function presignGet(cfg: S3Config, key: string, expiresSec = 3600, downloadAs?: string): string {
   const url = new URL(cfg.endpoint);
   const host = url.host;
   const now = new Date();
@@ -62,6 +67,11 @@ export function presignGet(cfg: S3Config, key: string, expiresSec = 3600): strin
     ["X-Amz-Expires", String(Math.min(Math.max(expiresSec, 1), 604800))],
     ["X-Amz-SignedHeaders", "host"],
   ];
+  if (downloadAs) {
+    // Quote it and strip anything that could break out of the header.
+    const safe = downloadAs.replace(/[^A-Za-z0-9._-]/g, "_");
+    params.push(["response-content-disposition", `attachment; filename="${safe}"`]);
+  }
   // SigV4 requires the query string sorted by encoded key.
   const canonicalQuery = params
     .map(([k, v]) => [enc(k), enc(v)] as [string, string])
