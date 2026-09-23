@@ -1681,6 +1681,36 @@ export default function SharedClassBoard(
   const challengeUI = useClassChallenge();
   const inChallenge = !!challengeUI?.active;
   const isCoachRole = role === "coach";
+  // Re-announce when this client LEARNS it is the coach.
+  //
+  // `intendedRole` comes from ClassV2, which can only say "coach" once /api/me and
+  // then /class/<room>/my-role have both come back. The socket is opened before
+  // that — its effect keys on [room, userId, displayName, local], deliberately not
+  // on role, so a class is never torn down by a role flip — so the hello that went
+  // out said "student". Nothing re-sent it, and the server had already seated the
+  // socket as a student for the rest of the session: coach controls gone, board
+  // read-only, "Leave" instead of "End class". Seen in the wild 2026-09-23, a coach
+  // rejoining four minutes after leaving (class-ws.hello logged intendedRole
+  // 'student' for a userId whose role is coach).
+  //
+  // A repeat hello on a live socket is explicitly supported — the server guards the
+  // join announcement precisely because hello can arrive more than once — so say it
+  // again on the SAME socket rather than reconnecting.
+  const announcedRoleRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (intendedRole !== "coach" || observerToken) return;   // a watcher never claims the board
+    if (announcedRoleRef.current === "coach") return;
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    let savedCoachToken: string | undefined;
+    try { savedCoachToken = localStorage.getItem(COACH_TOKEN_KEY) || undefined; } catch { /* */ }
+    try {
+      ws.send(JSON.stringify({ type: "hello", userId: userId ?? undefined,
+        displayName: displayName ?? undefined, coachToken: savedCoachToken,
+        intendedRole: "coach" }));
+      announcedRoleRef.current = "coach";
+    } catch { /* socket went away — the next connect sends the right role anyway */ }
+  }, [intendedRole, connected, userId, displayName, observerToken]);
   // Self-heal for a student who joined mid-challenge.
   //
   // The server sends `challenge_start` to a socket the instant it connects into a

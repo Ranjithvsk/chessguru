@@ -1207,7 +1207,21 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       // because old close hasn't fired" AND "coach cleared localStorage".
       // Runs off the DB, so async — the immediate role frame already went
       // out; we upgrade + send a fresh role frame if needed.
-      if (!resolvedSynchronously && frame.intendedRole === "coach") {
+      // NOT gated on the client having claimed coach. It used to be, and that made
+      // the check useless in the exact case it exists for: a coach whose client does
+      // not yet KNOW it is the coach. ClassV2 can only pass intendedRole "coach"
+      // after /api/me and /class/<room>/my-role have both returned, so a coach who
+      // reconnects before that says "student" — and this promotion, the one thing
+      // that could have corrected it, was skipped for saying so. Observed 2026-09-23:
+      // balajip rejoined a room he had opened as coach four minutes earlier and was
+      // seated as a student for the rest of it.
+      //
+      // Claiming nothing is not evidence of being nobody. What decides this is the
+      // DB below — class creator, or an elder of the class's academy — never the
+      // frame. Reached only from the final else branch above, i.e. a signed-in
+      // socket that could have claimed coach and did not get it, so the added
+      // lookups are three indexed _id reads on a student join.
+      if (!resolvedSynchronously) {
         const uidForCoach = typeof frame.userId === "string" ? frame.userId : null;
         if (uidForCoach && dbConn?.db) {
           void (async () => {
