@@ -81,6 +81,36 @@ export async function resolveEligibility(
       return { restricted: true, studentIds: new Set<string>() };   // empty set = block every student
     }
 
+    // 0b. An auto-created room is one somebody reached by typing or bookmarking
+    //     its id. Nobody ever picked an audience for it, so it used to fall
+    //     through to rule 3 and stand open to every signed-in user who could
+    //     guess the id — across academies, since the socket checks none.
+    //
+    //     Restricted now to people with an actual reason to be there: the
+    //     coach's own students, PLUS anyone already on this room's attendance
+    //     roster. The roster clause is not decoration — measured across the 73
+    //     backfilled rooms, three of them contain five students who are NOT
+    //     assigned to the coach running them, so coaches do teach outside their
+    //     roster and a plain rule-2 restriction would have ejected real
+    //     attendees from rooms they had been using for weeks.
+    if (klass && autoCreated) {
+      const allowed = new Set<string>();
+      const creator = klass.createdByUserId ? String(klass.createdByUserId) : null;
+      if (creator) {
+        const cu: any = await db.collection("users").findOne(
+          { _id: creator as any }, { projection: { role: 1 } });
+        if (cu?.role === "coach") {
+          const rows: any[] = await db.collection("users")
+            .find({ coachId: creator, role: "student" }, { projection: { _id: 1 } }).toArray();
+          for (const r of rows) allowed.add(String(r._id));
+        }
+      }
+      const seen: any[] = await db.collection("classAttendance")
+        .find({ classId, userId: { $ne: null } }, { projection: { userId: 1 } }).toArray();
+      for (const r of seen) if (r.userId) allowed.add(String(r.userId));
+      return { restricted: true, studentIds: allowed };
+    }
+
     // 1. explicit batch list on the class doc wins
     if (klass && Array.isArray(klass.batchStudentIds) && klass.batchStudentIds.length > 0) {
       return { restricted: true, studentIds: new Set(klass.batchStudentIds.map(String)) };

@@ -1332,6 +1332,33 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
             isOwnCoachDevice = !!coachOf && coachOf === userId;
           } catch { /* fall through to the gate */ }
           if (!isOwnCoachDevice) {
+            // ── Academy boundary ──────────────────────────────────────────────
+            // This socket checked WHO you are but never WHICH ACADEMY you belong
+            // to, so a signed-in member of one academy could join another's
+            // class by guessing the room id. There are three separate academies
+            // on this install and no class is ever shared between them, so a
+            // mismatch is never legitimate. Checked before the audience gate
+            // because it is the coarser and more serious of the two.
+            try {
+              const cls: any = await dbConn!.db!.collection("classSchedules")
+                .findOne({ _id: roomId as any }, { projection: { academyId: 1 } });
+              const ann2: any = cls ? null : await dbConn!.db!.collection("classLiveAnnouncements")
+                .findOne({ _id: roomId as any }, { projection: { academyId: 1 } });
+              const roomAcademy = cls?.academyId ?? ann2?.academyId ?? null;
+              if (roomAcademy && userId) {
+                const u: any = await dbConn!.db!.collection("users")
+                  .findOne({ _id: userId as any }, { projection: { academyId: 1 } });
+                // Only when BOTH are known: an account with no academy is not
+                // evidence of trespass, and failing closed on missing data would
+                // lock people out of their own lessons.
+                if (u?.academyId && String(u.academyId) !== String(roomAcademy)) {
+                  try { ws.send(JSON.stringify({ type: "not-invited" })); } catch { /* ignore */ }
+                  try { ws.close(1000, "not-invited"); } catch { /* ignore */ }
+                  return;
+                }
+              }
+            } catch { /* fail-open — a mongo hiccup mustn't lock the class */ }
+
             try {
               const elig = await resolveEligibility(dbConn as any, roomId, null);
               if (!isStudentEligible(elig, userId)) {
