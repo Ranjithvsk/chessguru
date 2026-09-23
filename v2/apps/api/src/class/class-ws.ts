@@ -717,6 +717,10 @@ const FEATURE_LABELS: Record<string, string> = {
   // Written server-side when the recording upload lands, so it cannot be faked.
   "ui:recording": "Recording",
   "ui:offline-click": "Action lost — clicked while disconnected",
+  // A move is not echoed back as a "move" — the room is re-synced with a full board
+  // state, and THAT is what lands on the students' screens. So this is the frame that
+  // can honestly answer "did the students receive it".
+  state: "Board synced to students",
 };
 const CLIENT_REPORTABLE = new Set(["chat", "hand", "screenshare", "reaction", "caption", "offline-click"]);
 // n = completed, x = attempted but FAILED (the coach clicked and nothing happened),
@@ -844,7 +848,14 @@ function broadcast(room: Room, frame: ServerFrame): void {
   const ftype = (frame as any).type;
   if (FEATURE_LABELS[ftype]) {
     for (const [id, r] of rooms) {
-      if (r === room) { noteFeature(id, ftype, { delivered: studentsReached, deliveredOnly: true }); break; }
+      if (r === room) {
+        // `state` is the broadcast itself, so count it here; everything else was
+        // already counted when it arrived and only needs its reach recording.
+        noteFeature(id, ftype, ftype === "state"
+          ? { delivered: studentsReached }
+          : { delivered: studentsReached, deliveredOnly: true });
+        break;
+      }
     }
   }
   if (PERSIST_FRAME_TYPES.has(ftype) || REPLAY_FRAME_TYPES.has(ftype)) {
@@ -1064,7 +1075,9 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     // One counter bump per teaching action — see FEATURE_LABELS above. The role is
     // read here so the log can say a STUDENT raised a hand or answered, not just
     // "someone did" (owner 2026-09-23).
-    noteFeature(roomId, (frame as any)?.type, { byStudent: socketRole.get(ws) !== "coach" });
+    if ((frame as any)?.type !== "state") {
+      noteFeature(roomId, (frame as any)?.type, { byStudent: socketRole.get(ws) !== "coach" });
+    }
     if (frame.type === "ping") { send({ type: "pong" }); touchAttendance(ws); return; }
 
     // Browser-reported feature use. Allow-listed so a client cannot invent labels,

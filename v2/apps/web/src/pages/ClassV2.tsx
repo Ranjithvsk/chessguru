@@ -231,8 +231,12 @@ function ClassChatPanel({ open, onClose }: { open: boolean; onClose: () => void 
     const t = text.trim(); if (!t || !room) return;
     const m: ChatMsg = { id: Math.random().toString(36).slice(2), who: me, text: t, ts: Date.now(), emoji };
     chatIngest(m, true);
-    markClassFeatureUsed("chat");
-    try { room.localParticipant.publishData(TX.encode(JSON.stringify(m)), { reliable: true, topic: "cg-chat" }); } catch { /* */ }
+    // Report the OUTCOME, not the click: a publish that throws means the message never
+    // left this browser, and the class log should say so rather than stay silent.
+    try {
+      room.localParticipant.publishData(TX.encode(JSON.stringify(m)), { reliable: true, topic: "cg-chat" });
+      markClassFeatureUsed("chat");
+    } catch { markClassFeatureUsed("chat", false); }
     setDraft("");
   };
   if (!open) return null;
@@ -356,9 +360,11 @@ function useHandRaise() {
     // LiveKit does not loop published data back to the sender, so set our own
     // entry directly — otherwise the person raising never appears in the list.
     _setHand(me, next);
-    if (next) markClassFeatureUsed("hand");
     if (!room) return;
-    try { room.localParticipant.publishData(TX.encode(JSON.stringify({ from: me, up: next, ts: Date.now() } as HandFrame)), { reliable: true, topic: "cg-hand" }); } catch { /* */ }
+    try {
+      room.localParticipant.publishData(TX.encode(JSON.stringify({ from: me, up: next, ts: Date.now() } as HandFrame)), { reliable: true, topic: "cg-hand" });
+      if (next) markClassFeatureUsed("hand");
+    } catch { if (next) markClassFeatureUsed("hand", false); }
   };
   return { handsUp, mineUp, toggle };
 }
@@ -501,9 +507,11 @@ function useReactions() {
     const id = Math.random().toString(36).slice(2);
     setFloats((s) => [...s, { id, emoji, left: 20 + Math.random() * 60 }]);
     setTimeout(() => setFloats((s) => s.filter((x) => x.id !== id)), 2500);
-    markClassFeatureUsed("reaction");
     if (!room) return;
-    try { room.localParticipant.publishData(TX.encode(JSON.stringify({ from: me, emoji, ts: Date.now() } as ReactionFrame)), { reliable: true, topic: "cg-reactions" }); } catch { /* */ }
+    try {
+      room.localParticipant.publishData(TX.encode(JSON.stringify({ from: me, emoji, ts: Date.now() } as ReactionFrame)), { reliable: true, topic: "cg-reactions" });
+      markClassFeatureUsed("reaction");
+    } catch { markClassFeatureUsed("reaction", false); }
   };
   return { floats, send };
 }

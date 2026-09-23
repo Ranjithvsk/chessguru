@@ -140,13 +140,25 @@ type PathFn = (path: number[]) => void;
 // ONCE per feature per room: this answers "was it used in this class", not "how many
 // messages", and a chat burst must not turn into socket traffic. The set is keyed by
 // room so rejoining a DIFFERENT class reports again.
-let _usedFn: ((feature: string) => void) | null = null;
+let _usedFn: ((feature: string, ok: boolean) => void) | null = null;
 let _usedRoom = "";
 const _usedSent = new Set<string>();
-export function markClassFeatureUsed(feature: string): void {
-  if (!feature || _usedSent.has(feature)) return;
-  _usedSent.add(feature);
-  _usedFn?.(feature);
+export function markClassFeatureUsed(feature: string, ok = true): void {
+  const key = ok ? feature : feature + ":failed";
+  if (!feature || _usedSent.has(key)) return;
+  _usedSent.add(key);
+  _usedFn?.(feature, ok);
+}
+
+// Clicks that went nowhere because the board socket was down. They cannot be reported
+// at the time — the socket IS the reporting channel — so they are counted here and
+// flushed on the next connection. This is the failure a coach actually hits: the
+// network drops, they keep pressing, and nothing happens (owner 2026-09-23).
+let _missedClicks = 0;
+export function boardSendable(ws: ClassSocket | null | undefined): ws is ClassSocket {
+  if (ws && ws.readyState === WebSocket.OPEN) return true;
+  if (_missedClicks < 500) _missedClicks += 1;
+  return false;
 }
 let _promoteFn: PathFn | null = null;
 let _mainlineFn: PathFn | null = null;
@@ -1260,7 +1272,7 @@ export default function SharedClassBoard(
   // drop it anyway, but skipping here avoids wasted bandwidth).
   const sendPointer = (nx: number, ny: number) => {
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!boardSendable(ws)) return;
     if (role !== "coach") return;
     const now = performance.now();
     if (now - lastPointerSentAt.current < 33) return;
@@ -1269,7 +1281,7 @@ export default function SharedClassBoard(
   };
   const sendPointerOff = () => {
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!boardSendable(ws)) return;
     if (role !== "coach") return;
     try { ws.send(JSON.stringify({ type: "pointer-off" })); } catch { /* */ }
   };
@@ -1296,7 +1308,7 @@ export default function SharedClassBoard(
     // when the next state frame arrives.
     if (observerToken) return;
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!boardSendable(ws)) return;
     // Challenge student path: apply to LOCAL TREE at cursor. If the move
     // matches an existing child at the cursor position, we advance to it
     // (re-entering a line the student explored earlier). If it's a new
@@ -1465,22 +1477,22 @@ export default function SharedClassBoard(
   }, [role]);
   const sendReset = () => {
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!boardSendable(ws)) return;
     try { ws.send(JSON.stringify({ type: "reset" })); } catch { /* */ }  // server drops non-coach resets
   };
   const sendStepBack = () => {
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!boardSendable(ws)) return;
     try { ws.send(JSON.stringify({ type: "stepBack" })); } catch { /* */ }
   };
   const sendStepForward = () => {
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!boardSendable(ws)) return;
     try { ws.send(JSON.stringify({ type: "stepForward" })); } catch { /* */ }
   };
   const sendSeek = (arg: number | number[]) => {
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!boardSendable(ws)) return;
     try {
       const body = Array.isArray(arg)
         ? { type: "seek", path: arg.map((n) => Math.max(0, Math.floor(Number(n) || 0))) }
@@ -1491,7 +1503,7 @@ export default function SharedClassBoard(
   // Coach-only tree edits — mirror /openings context menu ops.
   const sendTreeOp = (type: "promote-variation" | "make-mainline" | "delete-from") => (path: number[]) => {
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!boardSendable(ws)) return;
     if (!Array.isArray(path) || path.length === 0) return;
     try {
       const cleanPath = path.map((n) => Math.max(0, Math.floor(Number(n) || 0)));
@@ -1503,7 +1515,7 @@ export default function SharedClassBoard(
   const sendDelete = sendTreeOp("delete-from");
   const sendLoadTree: LoadTreeFn = ({ startFen, tree, cursorPath }) => {
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!boardSendable(ws)) return;
     try {
       const body: any = { type: "load-tree", tree };
       if (typeof startFen === "string" && startFen.length > 0) body.startFen = startFen;
@@ -1513,7 +1525,7 @@ export default function SharedClassBoard(
   };
   const sendSetRevise: ReviseFn = (path, revise) => {
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!boardSendable(ws)) return;
     if (!Array.isArray(path) || path.length === 0) return;
     try {
       const cleanPath = path.map((n) => Math.max(0, Math.floor(Number(n) || 0)));
@@ -1522,7 +1534,7 @@ export default function SharedClassBoard(
   };
   const sendAnnotateMove: AnnotateFn = (path, args) => {
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!boardSendable(ws)) return;
     if (!Array.isArray(path) || path.length === 0) return;
     try {
       const cleanPath = path.map((n) => Math.max(0, Math.floor(Number(n) || 0)));
@@ -1546,11 +1558,21 @@ export default function SharedClassBoard(
     _annotateFn = sendAnnotateMove;
     // New room = report again; same room re-mounting must not re-report.
     if (_usedRoom !== room) { _usedRoom = room; _usedSent.clear(); }
-    _usedFn = (feature: string) => {
+    _usedFn = (feature: string, ok = true) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      try { ws.send(JSON.stringify({ type: "used", feature })); } catch { /* never block the class */ }
+      try { ws.send(JSON.stringify({ type: "used", feature, ok })); } catch { /* never block the class */ }
     };
+    // Flush anything that was clicked while we were disconnected.
+    if (_missedClicks > 0) {
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ type: "used", feature: "offline-click", ok: false, times: _missedClicks }));
+          _missedClicks = 0;
+        } catch { /* keep the count and try again next time */ }
+      }
+    }
       _reviseFn = sendSetRevise;
     return () => {
       _usedFn = null;
@@ -1746,7 +1768,7 @@ export default function SharedClassBoard(
     }
     userClearRef.current = false;
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!boardSendable(ws)) return;
     try { ws.send(JSON.stringify({ type: "annot", shapes: next.slice(0, 64) })); } catch { /* */ }
     setShapes(next);   // local echo — server doesn't relay annot back to the sender
   };

@@ -90,7 +90,7 @@ export class DreamMeetStatsController {
     // Attendance is a small collection; pulling the rows lets us derive the span
     // a class was ACTUALLY occupied, which is far more honest than endedAt (a
     // coach who forgets to press End leaves endedAt unset or wildly late).
-    const [attRows, boards, packRows, chRows, noteRows, snapRows, usageRows] = await Promise.all([
+    const [attRows, boards, packRows, chRows, failedPackRows, noteRows, snapRows, usageRows] = await Promise.all([
       ids.length ? db.collection("classAttendance").find({ classId: { $in: ids } } as any,
         { projection: { classId: 1, key: 1, joinedAt: 1, lastSeenAt: 1, name: 1, userId: 1 } }).toArray() : Promise.resolve([] as any[]),
       ids.length ? db.collection("classBoardState").find({ _id: { $in: ids } } as any,
@@ -106,6 +106,13 @@ export class DreamMeetStatsController {
       // Challenges and snaps are already persisted with their own timestamps, so they
       // are derived here rather than tallied by class-ws — which means they also show
       // up for classes that ran BEFORE usage tracking existed (owner 2026-09-23).
+      // Notebook sends that FAILED — the coach pressed Send position and it did not
+      // land. This collection already existed as a recovery stash; the class log is
+      // exactly where it should have been visible all along.
+      ids.length ? db.collection("failedPositionSends").aggregate([
+        { $match: { classId: { $in: ids } } },
+        { $group: { _id: "$classId", n: { $sum: 1 }, firstAt: { $min: "$failedAt" }, lastAt: { $max: "$failedAt" } } },
+      ]).toArray() : Promise.resolve([] as any[]),
       ids.length ? db.collection("classNotes").aggregate([
         { $match: { classId: { $in: ids } } },
         // classNotes stamps `submittedAt` (classSnaps uses `at`) — mixing them up
@@ -150,27 +157,35 @@ export class DreamMeetStatsController {
       "ui:reaction": "Emoji reactions",
       "ui:caption": "Live captions",
       "ui:recording": "Recording",
+  "ui:offline-click": "Action lost — clicked while disconnected",
+  // A move is not echoed back as a "move" — the room is re-synced with a full board
+  // state, and THAT is what lands on the students' screens. So this is the frame that
+  // can honestly answer "did the students receive it".
+  state: "Board synced to students",
     };
     const featuresByClass = new Map<string, any[]>();
     for (const row of usageRows as any[]) {
-      const merged = new Map<string, { label: string; count: number; firstAt: Date | null; lastAt: Date | null }>();
+      const merged = new Map<string, { label: string; count: number; failed: number; byStudent: number; studentsReached: number; firstAt: Date | null; lastAt: Date | null }>();
       for (const [key, st] of Object.entries((row?.f ?? {}) as Record<string, any>)) {
         const label = FEATURE_LABELS[key];
         if (!label) continue;                      // unknown/retired frame type
         const first = st?.firstAt ? new Date(st.firstAt) : null;
         const last = st?.lastAt ? new Date(st.lastAt) : null;
+        const n = Number(st?.n) || 0, x = Number(st?.x) || 0;
+        const sBy = Number(st?.s) || 0, d = Number(st?.d) || 0;
         // Several frame types share one label (variation edits, stepping) — sum them.
         const cur = merged.get(label);
         if (cur) {
-          cur.count += Number(st?.n) || 0;
+          cur.count += n; cur.failed += x; cur.byStudent += sBy;
+          if (d > cur.studentsReached) cur.studentsReached = d;
           if (first && (!cur.firstAt || first < cur.firstAt)) cur.firstAt = first;
           if (last && (!cur.lastAt || last > cur.lastAt)) cur.lastAt = last;
         } else {
-          merged.set(label, { label, count: Number(st?.n) || 0, firstAt: first, lastAt: last });
+          merged.set(label, { label, count: n, failed: x, byStudent: sBy, studentsReached: d, firstAt: first, lastAt: last });
         }
       }
       featuresByClass.set(String(row._id), [...merged.values()]
-        .filter((x) => x.count > 0)
+        .filter((x) => x.count > 0 || x.failed > 0)      // a feature that ONLY failed still matters
         .sort((x, y) => (+(x.firstAt ?? 0)) - (+(y.firstAt ?? 0))));
     }
 
@@ -184,6 +199,9 @@ export class DreamMeetStatsController {
       [packRows as any[], "Notebook pack sent"],
       [noteRows as any[], "Class notes submitted"],
     ];
+    // Failures of a derived feature fold onto the SAME chip, so one row reads
+    // "Notebook pack sent 3 · 1 failed" instead of two contradictory chips.
+    const derivedFailures: [any[], string][] = [[failedPackRows as any[], "Notebook pack sent"]];
     for (const [rows, label] of derived) {
       for (const r of rows) {
         const n = Number(r?.n) || 0;
@@ -191,11 +209,27 @@ export class DreamMeetStatsController {
         const id = String(r._id);
         const list = featuresByClass.get(id) ?? [];
         list.push({
-          label, count: n,
+          label, count: n, failed: 0, byStudent: 0, studentsReached: 0,
           firstAt: r.firstAt ? new Date(r.firstAt) : null,
           lastAt: r.lastAt ? new Date(r.lastAt) : null,
         });
         list.sort((x: any, y: any) => (+(x.firstAt ?? 0)) - (+(y.firstAt ?? 0)));
+        featuresByClass.set(id, list);
+      }
+    }
+    for (const [rows, label] of derivedFailures) {
+      for (const r of rows) {
+        const n = Number(r?.n) || 0;
+        if (n <= 0) continue;
+        const id = String(r._id);
+        const list = featuresByClass.get(id) ?? [];
+        const hit = list.find((f: any) => f.label === label);
+        if (hit) { hit.failed = (hit.failed || 0) + n; }
+        else {
+          list.push({ label, count: 0, failed: n, byStudent: 0, studentsReached: 0,
+            firstAt: r.firstAt ? new Date(r.firstAt) : null, lastAt: r.lastAt ? new Date(r.lastAt) : null });
+          list.sort((x: any, y: any) => (+(x.firstAt ?? 0)) - (+(y.firstAt ?? 0)));
+        }
         featuresByClass.set(id, list);
       }
     }
