@@ -93,21 +93,54 @@ export async function resolveEligibility(
     //     assigned to the coach running them, so coaches do teach outside their
     //     roster and a plain rule-2 restriction would have ejected real
     //     attendees from rooms they had been using for weeks.
+    //
+    //     Two corrections, 2026-09-23. The clause below read `role === "coach"`
+    //     literally, so a room opened by an ACADEMY_OWNER matched nothing and fell
+    //     through to the attendance roster alone — and since the roster is written
+    //     only AFTER this gate passes (class-ws records the join downstream of it),
+    //     a student who had never been in that particular room could not get in and
+    //     could not get on the roster by getting in. A closed loop. It bit hardest
+    //     where it shows least: 53 of the 77 auto-created rooms on this install
+    //     belong to one academy_owner, and every student new to one of those rooms
+    //     was refused at the door, having seen the board first — the snapshot goes
+    //     out at connect, before hello runs this check. Rule 3 below already says an
+    //     owner's class is open to their academy; this now agrees with it.
     if (klass && autoCreated) {
       const allowed = new Set<string>();
       const creator = klass.createdByUserId ? String(klass.createdByUserId) : null;
       if (creator) {
         const cu: any = await db.collection("users").findOne(
-          { _id: creator as any }, { projection: { role: 1 } });
+          { _id: creator as any }, { projection: { role: 1, academyId: 1 } });
         if (cu?.role === "coach") {
           const rows: any[] = await db.collection("users")
             .find({ coachId: creator, role: "student" }, { projection: { _id: 1 } }).toArray();
           for (const r of rows) allowed.add(String(r._id));
+        } else if (cu?.role === "academy_owner") {
+          // An owner teaches the whole academy, not a roster assigned to them.
+          const acad = klass.academyId ?? cu.academyId ?? null;
+          if (acad) {
+            const rows: any[] = await db.collection("users")
+              .find({ academyId: acad, role: "student" }, { projection: { _id: 1 } }).toArray();
+            for (const r of rows) allowed.add(String(r._id));
+          }
         }
       }
       const seen: any[] = await db.collection("classAttendance")
         .find({ classId, userId: { $ne: null } }, { projection: { userId: 1 } }).toArray();
       for (const r of seen) if (r.userId) allowed.add(String(r.userId));
+      //     An EMPTY set is not an audience of nobody, it is a failure to work out
+      //     who the audience is — creator missing, role unrecognised, no academy, no
+      //     history. Everywhere else in this resolver that ends in not-knowing falls
+      //     open to the academy (rule 3, and both catch blocks), because locking
+      //     people out of their own lesson is the worse error. Blocking on empty was
+      //     the deadlock's second half, and it would have come back for any role the
+      //     clauses above do not name.
+      //
+      //     Note this is deliberately NOT fixed by recording attendance before the
+      //     gate. That would put every socket that merely connected onto the roster,
+      //     and the roster grants entry — one refused visit would buy permanent
+      //     access, which is the opposite of what the gate is for.
+      if (allowed.size === 0) return { restricted: false };
       return { restricted: true, studentIds: allowed };
     }
 
