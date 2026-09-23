@@ -1157,7 +1157,14 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       // TOKEN and orphan the PC's. The PC would then reconnect as a student, in the
       // middle of its own class. The phone only ever needs to hand a position over,
       // and that is gated on identity, not role.
-      const mayClaimCoach = !secondScreens.has(ws) && !observers.has(ws);
+      // Signed in, or you are not the coach. A room with no coach token yet
+      // promotes WHOEVER says hello first (see the !room.coachToken branch
+      // below), so without this an anonymous socket could take the coach role
+      // of a real class whose coach had briefly dropped — and the coach role is
+      // exempt from every gate beneath it. userId itself is parsed further
+      // down, so read the frame directly here.
+      const claimantId = typeof frame.userId === "string" && frame.userId.length ? frame.userId : null;
+      const mayClaimCoach = !secondScreens.has(ws) && !observers.has(ws) && !!claimantId;
       if (!mayClaimCoach) {
         socketRole.set(ws, "student");
         send({ type: "role", role: "student" });
@@ -1299,7 +1306,10 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         // so the audience gate would eject exactly the people authorised to watch.
         // Their right to be here was settled by the API against a real session
         // before the grant was minted.
-        if (dbConn && socketRole.get(ws) !== "coach" && userId && !observers.has(ws)) {
+        // `userId` is deliberately NOT required here any more. It used to be,
+        // which is precisely how an anonymous socket walked past the audience
+        // gate: no userId, no gate. Guests are now refused inside, by name.
+        if (dbConn && socketRole.get(ws) !== "coach" && !observers.has(ws)) {
           // A SECOND SCREEN is the coach's own phone, joining only to hand a
           // position to their PC. It arrives with the student role — the coach is
           // never on their own class roster — so the audience gate below ejected it
@@ -1332,6 +1342,23 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
             isOwnCoachDevice = !!coachOf && coachOf === userId;
           } catch { /* fall through to the gate */ }
           if (!isOwnCoachDevice) {
+            // ── Guests ────────────────────────────────────────────────────────
+            // "Only invited users should join" (owner, 2026-09-23). An
+            // anonymous socket carries no identity, so it can be neither
+            // invited nor refused on its merits — it was simply skipping the
+            // audience gate entirely, because that gate keys on userId.
+            //
+            // Observers are exempt by design and are NOT guests: their right to
+            // be here was settled by the API against a real session before the
+            // grant was minted, and the grant is redeemed above. The check is
+            // written to make that explicit rather than to rely on an observer
+            // happening to carry a userId.
+            if (!userId && !observers.has(ws)) {
+              try { ws.send(JSON.stringify({ type: "not-invited" })); } catch { /* ignore */ }
+              try { ws.close(1000, "not-invited"); } catch { /* ignore */ }
+              return;
+            }
+
             // ── Academy boundary ──────────────────────────────────────────────
             // This socket checked WHO you are but never WHICH ACADEMY you belong
             // to, so a signed-in member of one academy could join another's
