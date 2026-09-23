@@ -20,6 +20,7 @@
 import { Body, Controller, Get, Param, Post, Req, Res, HttpException, HttpStatus, UnauthorizedException, ForbiddenException } from "@nestjs/common";
 import { InjectConnection } from "@nestjs/mongoose";
 import { LivekitService } from "../livekit/livekit.service";
+import { presignGet, s3Config } from "../lib/s3-presign";
 import { Connection } from "mongoose";
 // Response typed as `any` — @types/express isn't in the api's deps and we only
 // use setHeader/status/json/pipe, all supported on the runtime object.
@@ -83,6 +84,13 @@ export class ClassRecordingController {
     if (body.byteLength > 500 * 1024 * 1024) throw new HttpException("too large", HttpStatus.PAYLOAD_TOO_LARGE);
     const dir = join(RECORDINGS_DIR, id);
     await fs.mkdir(dir, { recursive: true });
+    // Group-writable, deliberately. Three different users touch this tree: the
+    // API (ubuntu) writes browser uploads, the egress worker (its own uid)
+    // writes server recordings, and the uploader cron removes files once they
+    // are safely on B2. mkdir's default 0755 under umask 022 left the uploader
+    // unable to unlink anything, so nothing was ever reclaimed and the disk
+    // guard — the entire reason the uploader exists — silently did nothing.
+    await fs.chmod(dir, 0o2775).catch(() => { /* not ours to chmod; best effort */ });
     const filename = `${new Date().toISOString().replace(/[:.]/g, "-")}.webm`;
     const full = join(dir, filename);
     await fs.writeFile(full, body);
@@ -111,13 +119,31 @@ export class ClassRecordingController {
     await this.requireTenantAccess(req, id);
     const dir = join(RECORDINGS_DIR, id);
     let entries: string[] = [];
-    try { entries = await fs.readdir(dir); } catch { return { recordings: [] }; }
+    // A missing directory is NOT "no recordings" any more: local disk keeps
+    // only a short window because a class is ~1.3GB an hour, and the uploader
+    // moves finished files to B2 and removes the directory once it empties.
+    // Returning early here made a coach's recordings vanish a day after each
+    // lesson.
+    try { entries = await fs.readdir(dir); } catch { entries = []; }
     const rows = await Promise.all(entries.filter((e) => FILE_RE.test(e)).map(async (name) => {
       const st = await fs.stat(join(dir, name)).catch(() => null);
       if (!st) return null;
-      return { name, bytes: st.size, createdAt: st.mtime.toISOString() };
+      return { name, bytes: st.size, createdAt: st.mtime.toISOString(), storage: "local" as const };
     }));
-    return { recordings: rows.filter(Boolean).sort((a: any, b: any) => (a!.createdAt < b!.createdAt ? 1 : -1)) };
+    const local = rows.filter(Boolean) as { name: string; bytes: number; createdAt: string; storage: "local" }[];
+    const onDisk = new Set(local.map((r) => r.name));
+    const moved = await this.conn.db!.collection("classRecordings")
+      .find({ classId: id }).toArray().catch(() => [] as any[]);
+    const remote = (moved as any[])
+      .filter((m) => !onDisk.has(m.name))
+      .map((m) => ({
+        name: String(m.name), bytes: Number(m.bytes ?? 0),
+        createdAt: new Date(m.uploadedAt ?? Date.now()).toISOString(),
+        storage: "b2" as const,
+      }));
+    return {
+      recordings: [...local, ...remote].sort((x, y) => (x.createdAt < y.createdAt ? 1 : -1)),
+    };
   }
 
   // GET /api/class/:id/recording/:filename — stream the file. Content-Type is webm
@@ -130,7 +156,27 @@ export class ClassRecordingController {
     const full = join(RECORDINGS_DIR, id, filename);
     // stat() first so we can 404 cleanly rather than pipe an error mid-stream.
     let size = 0;
-    try { size = statSync(full).size; } catch { throw new HttpException("not found", HttpStatus.NOT_FOUND); }
+    try {
+      size = statSync(full).size;
+    } catch {
+      // Not on disk any more. If the uploader moved it to B2, hand the browser
+      // a presigned URL and let it fetch from there — a redirect, not a proxy,
+      // because the replay player scrubs against currentTime and every seek is
+      // a range request. Proxying would route all of them through this server
+      // and hold a socket open for the length of the lesson.
+      const cfg = s3Config();
+      const moved: any = cfg
+        ? await this.conn.db!.collection("classRecordings")
+            .findOne({ _id: `${id}/${filename}` as any }).catch(() => null)
+        : null;
+      if (cfg && moved?.key) {
+        res.setHeader("Cache-Control", "private, no-store");
+        res.setHeader("Location", presignGet(cfg, String(moved.key), 3600));
+        res.status(HttpStatus.FOUND);
+        return res.end();
+      }
+      throw new HttpException("not found", HttpStatus.NOT_FOUND);
+    }
     res.setHeader("Content-Type", filename.endsWith(".mp4") ? "video/mp4" : "video/webm");
     res.setHeader("Content-Length", String(size));
     res.setHeader("Cache-Control", "private, max-age=3600");
@@ -217,6 +263,13 @@ export class ClassRecordingController {
     // different mount point and creating it from there is what failed before.
     const dir = join(RECORDINGS_DIR, id);
     await fs.mkdir(dir, { recursive: true });
+    // Group-writable, deliberately. Three different users touch this tree: the
+    // API (ubuntu) writes browser uploads, the egress worker (its own uid)
+    // writes server recordings, and the uploader cron removes files once they
+    // are safely on B2. mkdir's default 0755 under umask 022 left the uploader
+    // unable to unlink anything, so nothing was ever reclaimed and the disk
+    // guard — the entire reason the uploader exists — silently did nothing.
+    await fs.chmod(dir, 0o2775).catch(() => { /* not ours to chmod; best effort */ });
     try {
       const { egressId, filename } = await this.livekit.startRoomRecording(id, id);
       return { ok: true, egressId, filename };
