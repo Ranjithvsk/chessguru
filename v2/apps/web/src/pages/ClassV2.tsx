@@ -2110,8 +2110,19 @@ export default function ClassV2Page() {
   // Stable identity. This was an object literal in the JSX, rebuilt on every render
   // of a page that re-renders on every notice, presence tick and challenge frame.
   // logLevel 'debug' dropped: it was a type error and the reason LiveKit logged so
-  // much. See the 2026-09-24 commit for why a stable room matters here.
-  const lkOptions = useMemo(() => ({ adaptiveStream: true, dynacast: true }), []);
+  // much.
+  //
+  // disconnectOnPageLeave: livekit-client defaults it to TRUE and registers both
+  // 'pagehide' and 'beforeunload' onto a handler that calls disconnect(). Chrome
+  // fires pagehide when it FREEZES or discards a background tab, not only on
+  // navigation — so a coach who tabbed away to read a message handed the room a
+  // deliberate leave. That is the CLIENT_REQUEST_LEAVE the server logged seven
+  // times in one class on 2026-09-24, each one republishing the mic and silencing
+  // every student at once. Off. If the tab truly closes, the server's
+  // departure_timeout (20s) still frees the seat. It is a RoomOptions field, so it
+  // lives HERE — a previous attempt passed it as a component prop, which this
+  // version does not have, and it deployed as a no-op.
+  const lkOptions = useMemo(() => ({ adaptiveStream: true, dynacast: true, disconnectOnPageLeave: false }), []);
   // ---- Connection state, reporting only (owner, 2026-09-19) -------------------
   // No retry here, deliberately. The record from 18 Sep shows the media SDK
   // recovering every time it was asked to — once in ~1 s, once in ~17 s — and the
@@ -2304,14 +2315,6 @@ export default function ClassV2Page() {
           serverUrl={tokenData.url}
           token={tokenData.token}
           connect
-          /* Default true installs a pagehide handler that calls disconnect(). Chrome
-           * fires pagehide when it FREEZES or discards a background tab, not only on
-           * navigation — so a coach who tabbed away to read a message handed the room
-           * a deliberate leave. That is the CLIENT_REQUEST_LEAVE the server logged
-           * seven times in one class on 2026-09-24, each one republishing the mic and
-           * silencing every student. If the tab truly closes, the server's
-           * departure_timeout still frees the seat. */
-          disconnectOnPageLeave={false}
           /* video stays opt-in — devices without a camera hit getUserMedia
            * errors that LiveKit surfaces as ConnectionError(InternalError,
            * reason=2, code=1). Users toggle video via the ControlBar after
