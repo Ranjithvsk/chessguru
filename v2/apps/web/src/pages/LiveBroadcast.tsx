@@ -127,7 +127,7 @@ function LiveIndex() {
             Nothing is being played this minute{upcoming.length ? " — see what is coming up below" : ""}.
           </div>
           <div className="mt-1 text-xs text-ink-500">
-            Rounds appear here the moment a tournament goes on air. Meanwhile there are 1.09M finished games in{" "}
+            Rounds appear here the moment a tournament goes on air. Meanwhile there are 12.1M finished games in{" "}
             <Link to="/database" className="text-brand-300 hover:underline">ChessGuru DB</Link>.
           </div>
         </div>
@@ -724,12 +724,10 @@ function Overview({ tourId }: { tourId: string }) {
                 Official site ↗
               </a>
             )}
-            {t?.url && (
-              <a href={t.url} target="_blank" rel="noreferrer"
-                className="rounded-lg border border-ink-700 bg-ink-950 px-3 py-1.5 text-xs font-semibold text-ink-200 hover:bg-ink-800">
-                On Lichess ↗
-              </a>
-            )}
+            {/* The "On Lichess" link was removed (owner, 2026-09-24): sending a
+              * coach off to another chess site from inside our own broadcast is
+              * the one link on this page we have no reason to offer. The
+              * tournament's Official site link above stays. */}
           </div>
         </div>
       </div>
