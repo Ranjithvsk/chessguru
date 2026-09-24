@@ -3247,6 +3247,46 @@ function AudioUnblockPrompt() {
     };
   }, [room, blocked]);
 
+  // Everything else here is tied to visibilitychange / focus / pointerdown, so it
+  // only ever runs when the student LEAVES and comes back, or taps. An <audio>
+  // element that stalls while they are simply sitting in the lesson has nothing
+  // watching it. That is the same failure VideoKeepAlive was written for on
+  // 2026-09-20 — "a freeze that happens WITHOUT leaving the tab never healed" — but
+  // that sweep queries `video` and filters on getVideoTracks(), so audio was never
+  // covered by it or by anything else. The student just goes quiet mid-lesson: the
+  // button never appears because nothing checks, the connection stays healthy, and
+  // the coach's own screen shows a class that is working. On 2026-09-22 a student
+  // wrote "Not hearing Sir" 76 minutes into a class, having never left the page.
+  //
+  // So watch continuously instead. `pause` does not bubble, so listen in the CAPTURE
+  // phase, and sweep as well for elements that stalled before this mounted or never
+  // emitted the event. play() on an already-playing element is a no-op, so this is
+  // cheap enough to run for the whole lesson.
+  //
+  // The one case that cannot be fixed silently is a REFUSED play(): the browser is
+  // asking for a gesture, and only then does the button need to appear. A dead track
+  // is left alone — it should stay as it is rather than be poked every few seconds.
+  useEffect(() => {
+    const revive = (el: HTMLAudioElement) => {
+      const src = el.srcObject as MediaStream | null;
+      if (!src || !src.getAudioTracks().some((t) => t.readyState === "live")) return;
+      void el.play().catch(() => setBlocked(true));
+    };
+    const onPause = (e: Event) => {
+      const el = e.target as HTMLElement | null;
+      if (el instanceof HTMLAudioElement) revive(el);
+    };
+    document.addEventListener("pause", onPause, true);
+    const sweep = window.setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState !== "visible") return;
+      document.querySelectorAll<HTMLAudioElement>("audio").forEach((el) => { if (el.paused) revive(el); });
+    }, 4000);
+    return () => {
+      document.removeEventListener("pause", onPause, true);
+      window.clearInterval(sweep);
+    };
+  }, []);
+
   // Coming back from another tab left the class dead until a refresh: no video, no
   // sound, and a board whose pieces had not moved. Browsers suspend a hidden tab's
   // media, and nothing here ever told it to resume — so the elements stayed paused
