@@ -34,25 +34,47 @@ sudo mkdir -p /var/www/chessguru/assets
 sudo rsync -a --chmod=D755,F644 apps/web/dist/. /var/www/chessguru/
 echo "rsync'd new dist → /var/www/chessguru (old assets preserved)"
 
-# Bundle janitor: keep the 10 most-recently-modified hashed assets of each
-# family (index-XXX.js, index-XXX.css, chessground-XXX.js/.css, kpkWorker-XXX.js).
-# Anything older than the newest 10 in each family gets removed. Never
-# touches vendor/ (opencv.js), index.html, or sw.js.
-prune_family() {
-  local pattern="$1"
-  # -mindepth 2 so we only look at /assets/*, never top-level
-  # Sort by mtime desc, keep 10 newest, delete the rest.
-  local files
-  files=$(sudo find /var/www/chessguru/assets -maxdepth 1 -type f -name "$pattern" -printf '%T@ %p\n' 2>/dev/null | sort -rn | awk 'NR>10 {print $2}')
-  if [ -n "$files" ]; then
-    echo "  pruning $pattern:" $(echo "$files" | wc -l) "old"
-    echo "$files" | sudo xargs -r rm -f
+# Bundle janitor. Hashed assets are immutable, so the only question is how long a
+# tab that is ALREADY OPEN can still fetch the chunks its index referenced.
+#
+# This used to keep "the newest 10" of five named families. Two problems, both of
+# which cost real lessons. Ten is a COUNT, and this repo ships many times a day —
+# on 2026-09-23/24 it shipped 68 times in three days, so ten deploys of the entry
+# chunk was under half a day of grace. And only five families were listed at all:
+# AppRest, MyChallenges, InstagramStudio, Messages and FeesBatches were never
+# pruned, so they grew without bound while the ones that mattered were culled
+# fastest. A student mid-class whose lazy import 404s gets a page that has stopped
+# working; 71 of those were logged in 21 days across 11 accounts and every domain.
+#
+# So retain by AGE, cover every family, and never cull this deploy's own files:
+#   * anything modified within KEEP_DAYS stays, however many deploys have passed
+#   * the newest KEEP_MIN of each family stays regardless, so a family that is
+#     rebuilt rarely is never emptied
+#   * nothing from the CURRENT build is eligible, which is what makes a long gap
+#     between deploys safe: without it, a fortnight of quiet would put every live
+#     asset past the cutoff at once
+# Never touches vendor/ (opencv.js), index.html, or sw.js.
+ASSETS=/var/www/chessguru/assets
+KEEP_DAYS=14
+KEEP_MIN=10
+CUTOFF=$(date -d "$KEEP_DAYS days ago" +%s)
+PROTECT_FROM=$(( $(stat -c %Y /var/www/chessguru/index.html) - 600 ))
+
+pruned_total=0
+while IFS='|' read -r fam ext; do
+  [ -n "$fam" ] || continue
+  victims=$(sudo find "$ASSETS" -maxdepth 1 -type f -name "${fam}-*.${ext}" -printf '%T@ %p\n' 2>/dev/null \
+            | sort -rn \
+            | awk -v min="$KEEP_MIN" -v cut="$CUTOFF" -v prot="$PROTECT_FROM" \
+                  'NR>min && $1+0 < cut && $1+0 < prot {print $2}')
+  if [ -n "$victims" ]; then
+    n=$(echo "$victims" | wc -l)
+    echo "  pruning ${fam}-*.${ext}: $n older than ${KEEP_DAYS}d"
+    echo "$victims" | sudo xargs -r rm -f
+    pruned_total=$(( pruned_total + n ))
   fi
-}
-prune_family 'index-*.js'
-prune_family 'index-*.css'
-prune_family 'chessground.cburnett-*.js'
-prune_family 'chessground.cburnett-*.css'
-prune_family 'kpkWorker-*.js'
+done < <(sudo find "$ASSETS" -maxdepth 1 -type f \( -name '*.js' -o -name '*.css' \) -printf '%f\n' 2>/dev/null \
+         | sed -E 's/-[A-Za-z0-9_]{6,}\.(js|css)$/|\1/' | sort -u)
+echo "  janitor: removed ${pruned_total} asset(s) older than ${KEEP_DAYS} days"
 
 echo "Published: /var/www/chessguru (nginx serves / from here; -v2 symlink follows)"
