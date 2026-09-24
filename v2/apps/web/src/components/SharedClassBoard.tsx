@@ -302,6 +302,16 @@ export function challengeTreeToPgn(tree: ChallengeTreeNode[], startFen: string):
   return render(tree, 0, false);
 }
 
+/** The tree's mainline: first child at every node, root to leaf. This IS the
+ *  student's submitted answer — a move played first at a position lands at index 0,
+ *  so a later alternative becomes a variation and never displaces it. Only deleting
+ *  a mainline move changes it (a sibling then slides to index 0 and takes over). */
+export function mainlinePath(tree: ChallengeTreeNode[]): number[] {
+  const path: number[] = [];
+  let cur = tree;
+  while (cur.length > 0) { path.push(0); cur = cur[0]!.children; }
+  return path;
+}
 export function fenAtChallengeCursor(startFen: string, tree: ChallengeTreeNode[], cursorPath: number[]): { fen: string; sanChain: string[]; lastMoveFromTo?: { from: string; to: string } } {
   let c: Chess;
   try { c = new Chess(startFen); } catch { c = new Chess(); }
@@ -940,16 +950,6 @@ export default function SharedClassBoard(
   const joinSnapshotRef = useRef(false);
   const challengeTreeRef = useRef<ChallengeTreeNode[]>([]);
   const challengeCursorRef = useRef<number[]>([]);
-  // The line a student has SUBMITTED, as a path into their tree. Distinct from the
-  // cursor, which is merely where they are looking. These used to be the same thing:
-  // every snapshot sent root->cursor, and the server replaced the stored answer with
-  // it, so a student who stepped back to review their own line had the answer cut to
-  // wherever they were looking — back to the start, and it was gone. In the 12:21
-  // challenge on 2026-09-24 one student's answer arrived EMPTY and another's as two
-  // moves of a five-move line; both then typed the full line to the coach by DM,
-  // which is what "students are not using the challenge window" actually was.
-  // Moves and undos change this; looking never does.
-  const challengeAnswerPathRef = useRef<number[]>([]);
   const [challengeFen, setChallengeFen] = useState<string | null>(null);
   const [challengeDests, setChallengeDests] = useState<Map<string, string[]>>(new Map());
   // Bump on any tree/cursor change so the render subtree recomputes.
@@ -1185,7 +1185,6 @@ export default function SharedClassBoard(
             challengeMovesRef.current = [];
             challengeTreeRef.current = [];
             challengeCursorRef.current = [];
-            challengeAnswerPathRef.current = [];
             setChallengeTreeTick((n) => n + 1);
           } catch {
             challengeGameRef.current = null;
@@ -1193,7 +1192,6 @@ export default function SharedClassBoard(
             setChallengeDests(new Map());
             challengeTreeRef.current = [];
             challengeCursorRef.current = [];
-            challengeAnswerPathRef.current = [];
           }
           _publishChallenge({
             positionFen: String(msg.positionFen),
@@ -1387,11 +1385,12 @@ export default function SharedClassBoard(
       }
       challengeTreeRef.current = newTree;
       challengeCursorRef.current = [...cursor, childIdx];
-      challengeAnswerPathRef.current = challengeCursorRef.current;   // a move (re)defines the answer
       // Derived flat SAN chain — used by the snapshot send + Show-my-answer
       // review UI.
       const derived = fenAtChallengeCursor(startFen, newTree, challengeCursorRef.current);
-      challengeMovesRef.current = derived.sanChain;
+      // What is SUBMITTED is the mainline; what is SHOWN is where the cursor is.
+      const answer = fenAtChallengeCursor(startFen, newTree, mainlinePath(newTree));
+      challengeMovesRef.current = answer.sanChain;
       setChallengeFen(derived.fen);
       const gAfter = new Chess(derived.fen);
       setChallengeDests(destsFromChess(gAfter));
@@ -1402,7 +1401,7 @@ export default function SharedClassBoard(
 
       // Send a full-snapshot of the current chosen line. Server replaces
       // ans.movesSan so the coach always sees the student's LATEST answer.
-      try { ws.send(JSON.stringify({ type: "challenge:snapshot", movesSan: derived.sanChain, finalFen: derived.fen, tree: newTree })); } catch { /* */ }
+      try { ws.send(JSON.stringify({ type: "challenge:snapshot", movesSan: answer.sanChain, finalFen: answer.fen, tree: newTree })); } catch { /* */ }
       // Also send the granular move (server keeps it as a legacy tally for
       // pre-snapshot clients; harmless to keep firing).
       try { ws.send(JSON.stringify({ type: "challenge:move", fromFen, move: { from, to }, san, nextFen })); } catch { /* */ }
@@ -1475,19 +1474,10 @@ export default function SharedClassBoard(
     // top-level move). Recompute FEN + dests + snapshot from there.
     const parentPath = cursor.slice(0, -1);
     challengeCursorRef.current = parentPath;
-    // Was the removed node on the submitted line? Then the answer ends at its parent.
-    // Was it an earlier sibling of the answer's node at that depth? Then that index
-    // just shifted down by one. Anywhere else, the answer is untouched.
-    const ap = challengeAnswerPathRef.current;
-    const removedOnAnswer = cursor.length <= ap.length && cursor.every((v, i) => ap[i] === v);
-    if (removedOnAnswer) {
-      challengeAnswerPathRef.current = parentPath;
-    } else if (ap.length > parentPath.length && parentPath.every((v, i) => ap[i] === v) && lastIdx < ap[parentPath.length]!) {
-      const shifted = [...ap]; shifted[parentPath.length] = shifted[parentPath.length]! - 1;
-      challengeAnswerPathRef.current = shifted;
-    }
+    // The answer is the mainline of what is LEFT. Deleting a mainline move shortens
+    // it; if a sibling variation existed it is now index 0 and becomes the line.
     const derived = fenAtChallengeCursor(startFen, newTree, parentPath);
-    const answer = fenAtChallengeCursor(startFen, newTree, challengeAnswerPathRef.current);
+    const answer = fenAtChallengeCursor(startFen, newTree, mainlinePath(newTree));
     challengeMovesRef.current = answer.sanChain;
     setChallengeFen(derived.fen);
     try { setChallengeDests(destsFromChess(new Chess(derived.fen))); } catch { setChallengeDests(new Map()); }
@@ -1755,7 +1745,6 @@ export default function SharedClassBoard(
       challengeMovesRef.current = [];
       challengeTreeRef.current = [];
       challengeCursorRef.current = [];
-      challengeAnswerPathRef.current = [];
       setChallengeFen(g.fen());
       setChallengeDests(destsFromChess(g));
       setChallengeTreeTick((n) => n + 1);
