@@ -6,6 +6,7 @@
 // Requires the API to have LIVEKIT_URL / _API_KEY / _API_SECRET envs. Until
 // those are set, the page renders a friendly "not configured yet" splash.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { reportClientError } from "../lib/report-error";
 import type { ReactNode } from "react";
 import { openClassDm, closeClassDm, setClassDmAvailable, subscribeClassDm, getClassDmState, type ClassDmTarget } from "../lib/classDm";
 import { createPortal } from "react-dom";
@@ -2106,6 +2107,11 @@ export default function ClassV2Page() {
   // Kept OUT of errMsg on purpose — see the onError handler below.
   const [mediaWarn, setMediaWarn] = useState<string | null>(null);
   const [tokenData, setTokenData] = useState<LKTokenResp | null>(null);
+  // Stable identity. This was an object literal in the JSX, rebuilt on every render
+  // of a page that re-renders on every notice, presence tick and challenge frame.
+  // logLevel 'debug' dropped: it was a type error and the reason LiveKit logged so
+  // much. See the 2026-09-24 commit for why a stable room matters here.
+  const lkOptions = useMemo(() => ({ adaptiveStream: true, dynacast: true }), []);
   // ---- Connection state, reporting only (owner, 2026-09-19) -------------------
   // No retry here, deliberately. The record from 18 Sep shows the media SDK
   // recovering every time it was asked to — once in ~1 s, once in ~17 s — and the
@@ -2298,6 +2304,14 @@ export default function ClassV2Page() {
           serverUrl={tokenData.url}
           token={tokenData.token}
           connect
+          /* Default true installs a pagehide handler that calls disconnect(). Chrome
+           * fires pagehide when it FREEZES or discards a background tab, not only on
+           * navigation — so a coach who tabbed away to read a message handed the room
+           * a deliberate leave. That is the CLIENT_REQUEST_LEAVE the server logged
+           * seven times in one class on 2026-09-24, each one republishing the mic and
+           * silencing every student. If the tab truly closes, the server's
+           * departure_timeout still frees the seat. */
+          disconnectOnPageLeave={false}
           /* video stays opt-in — devices without a camera hit getUserMedia
            * errors that LiveKit surfaces as ConnectionError(InternalError,
            * reason=2, code=1). Users toggle video via the ControlBar after
@@ -2322,7 +2336,7 @@ export default function ClassV2Page() {
            *   gives the coach's upload back. Pointless to send 720p to no one.
            * (owner, 2026-09-19: "video quality auto adjust according to user network")
            */
-          options={{ logLevel: 'debug', adaptiveStream: true, dynacast: true }}
+          options={lkOptions}
           onError={(e) => {
             // Verbose error trail so we can catch the ACTUAL cause below
             // "Could not join room" — LiveKit's onError fires for many
@@ -2358,6 +2372,13 @@ export default function ClassV2Page() {
           onDisconnected={(reason) => {
             // eslint-disable-next-line no-console
             console.warn("[ClassV2] LiveKit disconnected. reason=", reason);
+            // Instrumentation, not a guess. Why the coach's client leaves has so far
+            // taken an hour of server-log archaeology per incident; now one query.
+            try {
+              reportClientError(
+                `LiveKit disconnected · reason=${String(reason ?? "undefined")} · tab=${document.visibilityState} · online=${navigator.onLine} · leaving=${rejoin.current.leaving}`,
+                undefined, "class-v2/livekit-disconnect");
+            } catch { /* reporting must never break the class */ }
             if (rejoin.current.leaving) return;
             if (reason !== undefined && DELIBERATE.has(reason)) return;
             // Say it is coming back. The SDK is already trying; the student's job is
