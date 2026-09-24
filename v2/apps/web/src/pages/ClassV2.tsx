@@ -17,7 +17,7 @@ import {
   GridLayout, ParticipantTile, useTracks, useParticipants,
   useDataChannel, useLocalParticipant, useRoomContext, useIsSpeaking,
 } from "@livekit/components-react";
-import { Track, DataPacket_Kind, DisconnectReason, RoomEvent, VideoQuality } from "livekit-client";
+import { Track, DataPacket_Kind, DisconnectReason, RoomEvent, VideoQuality, ConnectionState } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive } from "../lib/api";
 import SharedClassBoard, { markClassFeatureUsed, setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassNotationHidden, triggerClassNotationToggle, useClassMoveList, useClassStartShapes, triggerClassSeek, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow , useCoachNotices, dismissCoachNotice, pushCoachNotice, useClassPresence } from "../components/SharedClassBoard";
@@ -2122,7 +2122,18 @@ export default function ClassV2Page() {
   // departure_timeout (20s) still frees the seat. It is a RoomOptions field, so it
   // lives HERE — a previous attempt passed it as a component prop, which this
   // version does not have, and it deployed as a no-op.
-  const lkOptions = useMemo(() => ({ adaptiveStream: true, dynacast: true, disconnectOnPageLeave: false }), []);
+  const lkOptions = useMemo(() => ({
+    adaptiveStream: true, dynacast: true, disconnectOnPageLeave: false,
+    // Keep the SDK's own RESUME attempts going for three minutes rather than the
+    // default of roughly one. A resume keeps the coach's track — nine of them passed
+    // unnoticed in one class on 2026-09-24 — where a restart mints a new one that
+    // every student has to pick up again. Delays 0.5s→5s; null ends it, after which
+    // RoomKeepAlive below takes over with a fresh connect.
+    reconnectPolicy: {
+      nextRetryDelayInMs: (ctx: { retryCount: number; elapsedMs: number }) =>
+        ctx.elapsedMs > 180_000 ? null : Math.min(5_000, 500 * 2 ** Math.min(ctx.retryCount, 4)),
+    },
+  }), []);
   // ---- Connection state, reporting only (owner, 2026-09-19) -------------------
   // No retry here, deliberately. The record from 18 Sep shows the media SDK
   // recovering every time it was asked to — once in ~1 s, once in ~17 s — and the
@@ -2139,10 +2150,16 @@ export default function ClassV2Page() {
   const [netState, setNetState] = useState<"live" | "reconnecting" | "lost">("live");
   const rejoin = useRef({ leaving: false });
 
-  // Disconnects that are meant to happen — we left, we were removed, the room is
-  // gone, another tab took this identity. Anything else is worth showing.
+  // Disconnects that are meant to happen — we were removed, the room is gone,
+  // another tab took this identity. Anything else is worth showing AND rejoining.
+  //
+  // CLIENT_INITIATED used to be in this set. That is how seven leaves in one class
+  // on 2026-09-24 — every one of them the SDK's own pagehide handler, not a person —
+  // produced no warning at all on the coach's screen. With disconnectOnPageLeave off
+  // the app never initiates a leave mid-class itself (our own exits set
+  // rejoin.current.leaving first), so a CLIENT_INITIATED that arrives here is a
+  // fault, and is treated as one.
   const DELIBERATE = new Set<unknown>([
-    DisconnectReason.CLIENT_INITIATED,
     DisconnectReason.PARTICIPANT_REMOVED,
     DisconnectReason.ROOM_DELETED,
     DisconnectReason.DUPLICATE_IDENTITY,
@@ -2474,6 +2491,7 @@ export default function ClassV2Page() {
                 style={{ containerType: 'size' } as any}
               >
               <AudioUnblockPrompt />
+              <RoomKeepAlive url={tokenData.url} token={tokenData.token} classId={room} role={role} leaving={rejoin} onNet={setNetState} />
               <VideoKeepAlive />
               <MicWakeGuard />
               <MicPublishReconciler room={room} />
@@ -3267,6 +3285,77 @@ function MicWakeGuard() {
 // and no control to fix it — and refreshing made it worse, because each reload put the
 // block back. This is the cause of the recurring "can't hear the coach" reports; the
 // coach's microphone was publishing fine every time I checked. (owner, 2026-09-19)
+// Layer 2 of the audio invariant (2026-09-24): if the session ends for any reason
+// that is not our own exit or a genuine eviction, come back WITHOUT anyone pressing
+// refresh. onDisconnected above only ever painted a banner — its comment said "this
+// only reports" — so once the SDK's own retries were spent, or a deliberate
+// disconnect fired, the coach sat silent until they reloaded. That is the 21s-to-4min
+// silences in one class today, nine minutes of no coach microphone in total, and the
+// refresh that everyone mistook for the fix.
+//
+// Same Room object, same identity, exponential backoff 1.5s→30s. A fresh token is
+// fetched from the second attempt on, so a long gap cannot die on expiry. Each attempt
+// and each recovery is reported, and the coach is told when they are back.
+function RoomKeepAlive({ url, token, classId, role, leaving, onNet }: {
+  url: string; token: string; classId: string; role: "coach" | "student";
+  leaving: React.MutableRefObject<{ leaving: boolean }>;
+  onNet: (s: "live" | "reconnecting" | "lost") => void;
+}) {
+  const room = useRoomContext();
+  const tokenRef = useRef(token); tokenRef.current = token;
+  useEffect(() => {
+    if (!room) return;
+    let cancelled = false, attempt = 0, timer: number | null = null;
+    const NO_REJOIN = new Set<unknown>([DisconnectReason.PARTICIPANT_REMOVED, DisconnectReason.ROOM_DELETED, DisconnectReason.DUPLICATE_IDENTITY]);
+    const schedule = (ms: number) => { if (timer) window.clearTimeout(timer); timer = window.setTimeout(() => { timer = null; void tryRejoin(); }, ms); };
+    const tryRejoin = async () => {
+      if (cancelled || leaving.current.leaving) return;
+      if (room.state === ConnectionState.Connected) { attempt = 0; onNet("live"); return; }
+      if (room.state === ConnectionState.Connecting || room.state === ConnectionState.Reconnecting) { schedule(2_000); return; }
+      attempt += 1;
+      onNet(attempt <= 8 ? "reconnecting" : "lost");
+      let t = tokenRef.current;
+      if (attempt > 1) {
+        try {
+          const fresh = await get<LKTokenResp>(`/api/livekit/token?room=${encodeURIComponent(classId)}&role=${role}`);
+          if (fresh?.token) { t = fresh.token; tokenRef.current = t; }
+        } catch { /* the old token may still be valid — try it */ }
+      }
+      try {
+        await room.connect(url, t);           // RoomEvent.Connected resets the counter
+      } catch (e) {
+        try { reportClientError(`LiveKit rejoin attempt ${attempt} failed: ${String((e as any)?.message ?? e)}`, undefined, "class-v2/livekit-rejoin"); } catch { /* */ }
+        schedule(Math.min(30_000, 1_000 * 2 ** Math.min(attempt, 5)) + Math.random() * 500);
+      }
+    };
+    const onDisconnected = (reason?: DisconnectReason) => {
+      if (leaving.current.leaving) return;
+      if (reason !== undefined && NO_REJOIN.has(reason)) return;
+      schedule(1_500);
+    };
+    const onBack = () => {
+      if (attempt > 0) {
+        try { reportClientError(`LiveKit rejoined after ${attempt} attempt(s)`, undefined, "class-v2/livekit-rejoin"); } catch { /* */ }
+        pushCoachNotice("🔊 Back in the room — audio restored.", "success");
+      }
+      attempt = 0; onNet("live");
+    };
+    const onReconnecting = () => onNet("reconnecting");
+    room.on(RoomEvent.Disconnected, onDisconnected);
+    room.on(RoomEvent.Connected, onBack);
+    room.on(RoomEvent.Reconnected, onBack);
+    room.on(RoomEvent.Reconnecting, onReconnecting);
+    return () => {
+      cancelled = true; if (timer) window.clearTimeout(timer);
+      room.off(RoomEvent.Disconnected, onDisconnected);
+      room.off(RoomEvent.Connected, onBack);
+      room.off(RoomEvent.Reconnected, onBack);
+      room.off(RoomEvent.Reconnecting, onReconnecting);
+    };
+  }, [room, url, classId, role, leaving, onNet]);
+  return null;
+}
+
 function AudioUnblockPrompt() {
   const room = useRoomContext();
   const [blocked, setBlocked] = useState(false);
