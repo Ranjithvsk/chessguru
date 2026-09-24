@@ -3293,6 +3293,40 @@ function AudioUnblockPrompt() {
   // The one case that cannot be fixed silently is a REFUSED play(): the browser is
   // asking for a gesture, and only then does the button need to appear. A dead track
   // is left alone — it should stay as it is rather than be poked every few seconds.
+  // When the COACH's microphone is republished, every student is handed a brand new
+  // track and has to attach and play it again. That happens far more than it looks:
+  // in one 60-minute class on 2026-09-24 the coach's client left and rejoined seven
+  // times (CLIENT_REQUEST_LEAVE, never a resumable drop), and each rejoin minted a
+  // new track id. A resume keeps the track and costs nothing — nine of those in the
+  // same class passed unnoticed — but a rejoin replaces it.
+  //
+  // The periodic sweep below would eventually notice a fresh element sitting paused,
+  // but "eventually" is up to four seconds of a lesson, and if the element never
+  // reports itself paused it is never noticed at all: one student went quiet at
+  // 12:56, wrote "not able to hear you voice" at 13:19, and only got sound back by
+  // rejoining at 13:39. Forty-three minutes of a class, from a republish.
+  //
+  // So act on the subscription itself. play() on an already-playing element is a
+  // no-op, so trying a few times costs nothing and covers the gap between the track
+  // arriving and the element being wired up.
+  useEffect(() => {
+    if (!room) return;
+    const onSubscribed = (track: { kind: string }) => {
+      if (track?.kind !== "audio") return;
+      const nudge = () => {
+        void room.startAudio().catch(() => {});
+        document.querySelectorAll<HTMLAudioElement>("audio").forEach((el) => {
+          if (el.paused) void el.play().catch(() => setBlocked(true));
+        });
+      };
+      nudge();
+      window.setTimeout(nudge, 250);
+      window.setTimeout(nudge, 1200);
+    };
+    room.on(RoomEvent.TrackSubscribed, onSubscribed as never);
+    return () => { room.off(RoomEvent.TrackSubscribed, onSubscribed as never); };
+  }, [room]);
+
   useEffect(() => {
     const revive = (el: HTMLAudioElement) => {
       const src = el.srcObject as MediaStream | null;
