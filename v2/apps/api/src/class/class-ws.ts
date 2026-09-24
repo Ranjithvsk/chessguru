@@ -963,6 +963,41 @@ function notifyCoachAnswered(room: Room, who: { userId: string | null; name: str
  *  `challenge_end` to everyone, sends the collected answers to the coach
  *  only, persists to `classChallenges`, and clears room.challenge. Safe to
  *  call twice — second call is a no-op. */
+/** Is this user the coach of this class — the creator, or an elder of the class's
+ *  academy? The single source of truth for that question, shared by the hello
+ *  handshake and by the coach-only actions below, so the two can never drift into
+ *  disagreeing about who the coach is. Three indexed _id reads. */
+/** Seat this socket as coach without disturbing anyone. Never closes another
+ *  socket and never re-mints a live token: taking the room OFF someone is a
+ *  separate, deliberate act that belongs to the hello handshake. */
+function seatAsCoach(ws: WebSocket, room: Room, roomId: string): void {
+  socketRole.set(ws, "coach");
+  const existing = room.coach && room.coach !== ws && room.coach.readyState === WebSocket.OPEN ? room.coach : null;
+  if (!existing) {
+    room.coach = ws;
+    if (!room.coachToken) { room.coachToken = mintCoachToken(); scheduleRoomSave(roomId); }
+  }
+  try { ws.send(JSON.stringify({ type: "role", role: "coach", coachToken: room.coachToken ?? undefined })); } catch { /* */ }
+}
+
+async function coachClaimOf(roomId: string, userId: string): Promise<"creator" | "academy_elder" | null> {
+  if (!dbConn?.db) return null;
+  try {
+    const [klass, announce, user] = await Promise.all([
+      dbConn.db.collection("classSchedules").findOne({ _id: roomId as any }, { projection: { createdByUserId: 1, academyId: 1 } }),
+      dbConn.db.collection("classLiveAnnouncements").findOne({ _id: roomId as any }, { projection: { coachUserId: 1, academyId: 1 } }),
+      dbConn.db.collection("users").findOne({ _id: userId as any }, { projection: { role: 1, academyId: 1 } }),
+    ]);
+    const creator: string | null = (klass as any)?.createdByUserId ?? (announce as any)?.coachUserId ?? null;
+    const classAcademy: string | null = (klass as any)?.academyId ?? (announce as any)?.academyId ?? null;
+    const uRole = String((user as any)?.role || "");
+    const uAcademy: string | null = (user as any)?.academyId ?? null;
+    if (creator && creator === userId) return "creator";
+    if (uAcademy && classAcademy && uAcademy === classAcademy && (uRole === "academy_owner" || uRole === "coach")) return "academy_elder";
+    return null;
+  } catch { return null; }
+}
+
 function endChallenge(room: Room, classId: string): void {
   const ch = room.challenge;
   if (!ch) return;
@@ -987,6 +1022,12 @@ function endChallenge(room: Room, classId: string): void {
       prompt: ch.prompt,
       startedAt: new Date(ch.startedAt),
       endedAt: new Date(),
+      // Persisted 2026-09-24. Without these, "the coach pressed End and nothing
+      // happened" could not be told apart from "the timer ran out" after the fact:
+      // the only trace was a run-length, and a run-length that matches the duration
+      // is exactly what BOTH look like.
+      durationSec: Math.max(0, Math.round((ch.endsAt - ch.startedAt) / 1000)),
+      endedBy: Date.now() >= ch.endsAt ? "timer" : "coach",
       answers: answers.map((a) => ({
         userId: a.userId,
         displayName: a.displayName,
@@ -1226,23 +1267,15 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         if (uidForCoach && dbConn?.db) {
           void (async () => {
             try {
-              const [klass, announce, user] = await Promise.all([
-                dbConn!.db!.collection("classSchedules").findOne({ _id: roomId as any }, { projection: { createdByUserId: 1, academyId: 1 } }),
-                dbConn!.db!.collection("classLiveAnnouncements").findOne({ _id: roomId as any }, { projection: { coachUserId: 1, academyId: 1 } }),
-                dbConn!.db!.collection("users").findOne({ _id: uidForCoach as any }, { projection: { role: 1, academyId: 1 } }),
-              ]);
-              const creator: string | null = (klass as any)?.createdByUserId ?? (announce as any)?.coachUserId ?? null;
-              const classAcademy: string | null = (klass as any)?.academyId ?? (announce as any)?.academyId ?? null;
-              const uRole: string = String((user as any)?.role || "");
-              const uAcademy: string | null = (user as any)?.academyId ?? null;
+              // One rule for "is this the coach", shared with the coach-only actions.
+              const claim = await coachClaimOf(roomId, uidForCoach);
               // Promote if: creator match OR academy_owner of the class's
               // academy OR a coach of the class's academy. Owner report
               // 2026-09-03: 'coach cant rejoin' — the original check was
               // creator-exact only, so an academy_owner picking up an
               // abandoned session for a coach who left couldn't reclaim.
-              const isOriginalCoach = creator && creator === uidForCoach;
-              const isAcademyElder = uAcademy && classAcademy && uAcademy === classAcademy && (uRole === "academy_owner" || uRole === "coach");
-              if (isOriginalCoach || isAcademyElder) {
+              const isOriginalCoach = claim === "creator";
+              if (claim) {
                 // Same coach on a second device (owner, 2026-09-07: class open on
                 // the PC and the phone at once): this used to be a takeover —
                 // the older socket was closed, its client reconnected, took the
@@ -1261,6 +1294,19 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
                   try { console.log("[class-ws.hello] async coach join (same user, extra device)", roomId, { uidForCoach: uidForCoach.slice(0, 40) }); } catch { /* */ }
                   return;
                 }
+                // Taking the room OFF a different live coach is destructive — it
+                // closes their socket and re-mints the token — so it needs to have
+                // been asked for. Ungating this promotion (2026-09-23) so a coach
+                // whose client has not yet learned its role still gets seated left
+                // that takeover reachable by any elder who merely JOINED a
+                // colleague's class as a participant: an academy_owner sitting in
+                // on a coach's lesson would have closed the coach out of their own
+                // room. Nobody hit it, but only because no elder happened to visit.
+                //
+                // Everything the ungating was for still works: the same user on a
+                // second socket is handled above, and a room with no live coach
+                // falls straight through. Only the hostile case now needs the claim.
+                if (existing && frame.intendedRole !== "coach") return;
                 if (existing) {
                   try { existing.close(1000, "coach_takeover"); } catch { /* */ }
                 }
@@ -1860,32 +1906,44 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
     // ── Challenge mode handlers ──────────────────────────────────────────
     if (frame.type === "challenge:start") {
-      if (!isCoach()) return;
-      if (room.challenge) endChallenge(room, roomId);   // idempotent: one active challenge at a time
-      const durationSec = Math.max(15, Math.min(30 * 60, Number(frame.durationSec) || 60));
-      const positionFen = typeof frame.positionFen === "string" ? frame.positionFen : room.fen;
-      const startFen = typeof frame.startFen === "string" ? frame.startFen : room.startFen;
-      const prompt = typeof frame.prompt === "string" ? frame.prompt.slice(0, 200) : "";
-      const now = Date.now();
-      const endsAt = now + durationSec * 1000;
-      const ch: Challenge = {
-        positionFen, startFen, prompt, startedAt: now, endsAt,
-        answers: new Map(),
-        timer: setTimeout(() => endChallenge(room, roomId), durationSec * 1000),
-        // Progress ticker (every 5s) — sends coach an updated "answered/total"
-        // count. Cheap enough to run for every active challenge in memory.
-        progressTimer: setInterval(() => {
-          if (!room.challenge) return;
-          const remainingSec = Math.max(0, Math.round((room.challenge.endsAt - Date.now()) / 1000));
-          const total = studentCount(room);
-          const answered = room.challenge.answers.size;
-          if (room.coach && room.coach.readyState === WebSocket.OPEN) {
-            try { room.coach.send(JSON.stringify({ type: "challenge_progress", answered, total, remainingSec })); } catch { /* */ }
-          }
-        }, 5_000),
+      const startNow = (f: Extract<ClientFrame, { type: "challenge:start" }>) => {
+        if (room.challenge) endChallenge(room, roomId);   // idempotent: one active challenge at a time
+        const durationSec = Math.max(15, Math.min(30 * 60, Number(f.durationSec) || 60));
+        const positionFen = typeof f.positionFen === "string" ? f.positionFen : room.fen;
+        const startFen = typeof f.startFen === "string" ? f.startFen : room.startFen;
+        const prompt = typeof f.prompt === "string" ? f.prompt.slice(0, 200) : "";
+        const now = Date.now();
+        const endsAt = now + durationSec * 1000;
+        const ch: Challenge = {
+          positionFen, startFen, prompt, startedAt: now, endsAt,
+          answers: new Map(),
+          timer: setTimeout(() => endChallenge(room, roomId), durationSec * 1000),
+          // Progress ticker (every 5s) — sends coach an updated "answered/total"
+          // count. Cheap enough to run for every active challenge in memory.
+          progressTimer: setInterval(() => {
+            if (!room.challenge) return;
+            const remainingSec = Math.max(0, Math.round((room.challenge.endsAt - Date.now()) / 1000));
+            const total = studentCount(room);
+            const answered = room.challenge.answers.size;
+            if (room.coach && room.coach.readyState === WebSocket.OPEN) {
+              try { room.coach.send(JSON.stringify({ type: "challenge_progress", answered, total, remainingSec })); } catch { /* */ }
+            }
+          }, 5_000),
+        };
+        room.challenge = ch;
+        broadcast(room, { type: "challenge_start", positionFen, startFen, prompt, durationSec, endsAt, startedAt: now });
       };
-      room.challenge = ch;
-      broadcast(room, { type: "challenge_start", positionFen, startFen, prompt, durationSec, endsAt, startedAt: now });
+      if (isCoach()) { startNow(frame); return; }
+      // Not seated as coach yet — same as challenge:end below: verify against the DB,
+      // seat them, then honour the click rather than bouncing it back at them.
+      const uid0 = socketWho.get(ws)?.userId ?? null;
+      if (!uid0) return;
+      const f0 = frame;
+      void (async () => {
+        if (!(await coachClaimOf(roomId, uid0))) return;
+        seatAsCoach(ws, room, roomId);
+        startNow(f0);
+      })();
       return;
     }
 
@@ -1946,8 +2004,29 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     }
 
     if (frame.type === "challenge:end") {
-      if (!isCoach()) return;
-      endChallenge(room, roomId);
+      if (isCoach()) { endChallenge(room, roomId); return; }
+      // Not seated as coach — but they may well BE the coach. A socket gets seated as
+      // a student whenever the client had not yet learned its own role (32 hello
+      // events on this install did exactly that), and this frame was then dropped in
+      // silence: the client only warns when the SOCKET is shut, so an open one
+      // swallowed every click. That is the whole of "the coach pressed End many
+      // times and it would not end".
+      //
+      // Answering "denied" would only move the problem onto the person pressing the
+      // button — they ARE the coach, the mis-seating is ours, and telling them to
+      // reload is asking them to work around our bug mid-lesson. So ask the DB the
+      // one question that matters, and if they are the coach, seat them and do what
+      // they asked. A genuine student is ignored exactly as before; they have no
+      // End button to press in the first place.
+      const uid = socketWho.get(ws)?.userId ?? null;
+      if (!uid) return;
+      void (async () => {
+        if (!(await coachClaimOf(roomId, uid))) return;
+        if (!room.challenge) return;                 // already over — nothing to do
+        seatAsCoach(ws, room, roomId);
+        try { console.log("[class-ws] self-seated coach for challenge:end", roomId, { uid: uid.slice(0, 40) }); } catch { /* */ }
+        endChallenge(room, roomId);
+      })();
       return;
     }
 
