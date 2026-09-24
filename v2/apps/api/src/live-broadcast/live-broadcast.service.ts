@@ -33,6 +33,10 @@ import { Chess } from "chess.js";
 
 const DISCOVER_MS = 90_000;      // re-ask which rounds are live
 const POLL_MS = 2_500;           // gap between board refreshes
+// Gap between backfills of a FINISHED round we never fetched. Deliberately far
+// slower than the live poll: a past round's games never change, so there is no
+// hurry, and the live boards must always get the bandwidth first.
+const BACKFILL_MS = 20_000;
 // 100, which is the API's own ceiling — asking for 200 still returns 100.
 //
 // This was 60, and 60 was quietly wrong: /api/broadcast returns the most
@@ -56,6 +60,7 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
   private throttledUntil = 0;
   private cursor = 0;
   private liveRoundIds: string[] = [];
+  private backfillTimer: ReturnType<typeof setInterval> | null = null;
   private lastCycleMs = 0;
   private cycleStartedAt = Date.now();
 
@@ -96,13 +101,17 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
     setTimeout(() => { void this.discover(); }, 8_000);
     this.discoverTimer = setInterval(() => { void this.discover(); }, DISCOVER_MS);
     this.pollTimer = setInterval(() => { void this.pollNext(); }, POLL_MS);
-    for (const t of [this.discoverTimer, this.pollTimer]) if (typeof t?.unref === "function") t.unref();
+    this.backfillTimer = setInterval(() => { void this.backfillOne(); }, BACKFILL_MS);
+    for (const t of [this.discoverTimer, this.pollTimer, this.backfillTimer]) {
+      if (typeof t?.unref === "function") t.unref();
+    }
   }
 
   onModuleDestroy(): void {
     this.stopping = true;
     if (this.discoverTimer) clearInterval(this.discoverTimer);
     if (this.pollTimer) clearInterval(this.pollTimer);
+    if (this.backfillTimer) clearInterval(this.backfillTimer);
   }
 
   /** Which rounds are being played right now. Every one of them, not a subset. */
@@ -236,6 +245,55 @@ export class LiveBroadcastService implements OnModuleInit, OnModuleDestroy {
       await this.applyPgn(roundId, meta.tourName ?? "Broadcast", meta.roundName ?? "Round", pgn);
     } catch (e: any) {
       if (String(e?.message) === "429") this.log.warn("throttled — backing off 90s");
+    }
+  }
+
+  /** Fetch ONE finished round we hold no boards for.
+   *
+   *  pollNext only ever refreshes rounds that are `ongoing` — it returns early
+   *  on anything else — so a round that finished before we started watching, or
+   *  while the poller was throttled, was never fetched at all. Nothing filled it
+   *  in either: the only other caller was the standings endpoint, which fires
+   *  this lazily when somebody opens the page. So a tournament's history only
+   *  appeared for a coach who sat on the standings long enough to pull it in one
+   *  round at a time, and the Olympiad sat at "2 of 10 rounds" for days with the
+   *  standings quietly wrong — Croatia top on 4 match points instead of the
+   *  real leaders on 11.
+   *
+   *  One round per tick, oldest first, through the same serialize() as
+   *  everything else, so this can never compete with live boards or trip
+   *  Lichess's one-request-at-a-time rule. */
+  private async backfillOne(): Promise<void> {
+    if (this.stopping || Date.now() < this.throttledUntil) return;
+    try {
+      const gap: any = await this.rounds().findOne(
+        // `ongoing: true` rounds belong to pollNext. `startsAt` in the future is
+        // a round that has not been played, and has no games to fetch.
+        {
+          ongoing: { $ne: true },
+          $and: [
+            { $or: [{ boards: { $exists: false } }, { boards: 0 }] },
+            // Not yet played = nothing to fetch.
+            { $or: [{ startsAt: { $exists: false } }, { startsAt: { $lte: Date.now() } }] },
+            // Tried already. Without this a round that genuinely has no games —
+            // cancelled, or never broadcast — comes back as the oldest gap on
+            // every single tick and the backfill never reaches anything else.
+            { backfilledAt: { $exists: false } },
+          ],
+        },
+        { sort: { startsAt: 1 } },
+      );
+      if (!gap) return;
+      const roundId = String(gap._id);
+      // Stamped BEFORE the fetch, not after: a round whose fetch throws would
+      // otherwise stay the oldest gap and be retried on every tick for ever.
+      // One attempt each, oldest first, and the whole backlog drains.
+      await this.rounds().updateOne({ _id: roundId as any },
+        { $set: { backfilledAt: new Date() } }).catch(() => {});
+      const pgn = await this.serialize(() => this.getText(`https://lichess.org/api/broadcast/round/${roundId}.pgn`));
+      await this.applyPgn(roundId, gap.tourName ?? "Broadcast", gap.roundName ?? "Round", pgn);
+    } catch (e: any) {
+      if (String(e?.message) === "429") this.log.warn("throttled during backfill — backing off");
     }
   }
 
