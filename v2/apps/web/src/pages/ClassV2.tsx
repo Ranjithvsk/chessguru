@@ -7,6 +7,7 @@
 // those are set, the page renders a friendly "not configured yet" splash.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { openClassDm, closeClassDm, setClassDmAvailable, subscribeClassDm, getClassDmState, type ClassDmTarget } from "../lib/classDm";
 import { createPortal } from "react-dom";
 import { Navigate, useParams, useSearchParams, Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -925,16 +926,13 @@ function VideoKeepAlive() {
 type DmThread = { threadId: string; otherUserId: string; otherUsername: string; otherName?: string; otherRole: string; lastMessageAt?: string; lastMessageText?: string; lastMessageFromMe?: boolean; unread: number };
 type DmMessage = { id: string; threadId: string; fromUserId: string; toUserId: string; text: string; createdAt: string; fromMe: boolean };
 
-let _dmOpen: { name?: string } | null = null;
-const _dmSubs = new Set<() => void>();
-function openCoachDm(opts?: { name?: string }) { _dmOpen = opts ?? {}; _dmSubs.forEach((f) => f()); }
-function useCoachDmOpen(): { name?: string } | null {
+function useCoachDmOpen(): ClassDmTarget | null {
   const [, force] = useState(0);
-  useEffect(() => { const f = () => force((n) => n + 1); _dmSubs.add(f); return () => { _dmSubs.delete(f); }; }, []);
-  return _dmOpen;
+  useEffect(() => subscribeClassDm(() => force((n) => n + 1)), []);
+  return getClassDmState().open;
 }
 
-function CoachMessagesDrawer({ role }: { role: string }) {
+function ClassMessagesDrawer({ role, room }: { role: string; room: string }) {
   const opened = useCoachDmOpen();
   const [threads, setThreads] = useState<DmThread[]>([]);
   const [sel, setSel] = useState<DmThread | null>(null);
@@ -945,6 +943,7 @@ function CoachMessagesDrawer({ role }: { role: string }) {
   const [unread, setUnread] = useState(0);
   const endRef = useRef<HTMLDivElement | null>(null);
   const isCoach = role === "coach";
+  const [coachTarget, setCoachTarget] = useState<{ userId: string; name?: string } | null>(null);
 
   const loadThreads = useCallback(async () => {
     try {
@@ -961,14 +960,29 @@ function CoachMessagesDrawer({ role }: { role: string }) {
   // Poll for the unread badge while the coach is in class, so a message that
   // arrives with no LiveKit ping (student on a flaky line) still shows up.
   useEffect(() => {
-    if (!isCoach) return;
     void loadThreads();
     const t = setInterval(() => { void loadThreads(); }, 30_000);
     return () => clearInterval(t);
-  }, [isCoach, loadThreads]);
+  }, [loadThreads]);
+
+  // Tell the Navbar there is a panel here, so its 💬 opens this instead of
+  // navigating to /messages and tearing the class down.
+  useEffect(() => { setClassDmAvailable(true); return () => setClassDmAvailable(false); }, []);
+
+  // A student's counterpart is their coach, and they may never have messaged
+  // before — so there is no thread to pick from the list. Resolve the class's
+  // coach up front and offer them as a target regardless.
+  useEffect(() => {
+    if (isCoach || coachTarget) return;
+    void fetch(`/v2api/api/class/${encodeURIComponent(room)}/coach`, { credentials: "include" })
+      .then((r) => r.ok ? r.json() : null)
+      .then((j: any) => { if (j?.userId) setCoachTarget({ userId: String(j.userId), name: j.name || j.username }); })
+      .catch(() => { /* silent — the thread list still works */ });
+  }, [isCoach, coachTarget, room]);
 
   const openThread = useCallback(async (t: DmThread) => {
     setSel(t); setMsgs([]); setErr(null);
+    if (!t.threadId) return;          // synthetic "message your coach" — nothing to load yet
     try {
       const r = await fetch(`/v2api/api/messages/threads/${encodeURIComponent(t.threadId)}`, { credentials: "include" });
       const j = await r.json().catch(() => ({})) as { messages?: DmMessage[] };
@@ -1009,6 +1023,7 @@ function CoachMessagesDrawer({ role }: { role: string }) {
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((j as any)?.message || "Could not send.");
       setText("");
+      if (!sel.threadId && (j as any)?.threadId) setSel({ ...sel, threadId: String((j as any).threadId) });
       setMsgs((prev) => [...prev, { id: `local-${Date.now()}`, threadId: sel.threadId, fromUserId: "me",
         toUserId: sel.otherUserId, text: body, createdAt: new Date().toISOString(), fromMe: true }]);
       void loadThreads();
@@ -1016,12 +1031,10 @@ function CoachMessagesDrawer({ role }: { role: string }) {
     finally { setBusy(false); }
   };
 
-  if (!isCoach) return null;
-
   // Closed: a small launcher that carries the unread count.
   if (!opened) {
     return (
-      <button type="button" onClick={() => openCoachDm()}
+      <button type="button" onClick={() => openClassDm()}
         className="pointer-events-auto fixed bottom-4 right-3 z-[74] flex items-center gap-1.5 rounded-full border border-brand-500/50 bg-ink-900 px-3 py-2 text-xs font-semibold text-brand-100 shadow-xl hover:bg-ink-800"
         title="Private messages — opens here, without leaving the class">
         📩 Messages
@@ -1047,7 +1060,7 @@ function CoachMessagesDrawer({ role }: { role: string }) {
             {sel ? "Replying from inside the class" : "The class keeps running behind this panel"}
           </div>
         </div>
-        <button type="button" onClick={() => { _dmOpen = null; _dmSubs.forEach((f) => f()); }}
+        <button type="button" onClick={() => closeClassDm()}
           className="text-ink-400 hover:text-ink-100" aria-label="Close messages">✕</button>
       </div>
 
@@ -1055,7 +1068,22 @@ function CoachMessagesDrawer({ role }: { role: string }) {
 
       {!sel ? (
         <div className="flex-1 overflow-y-auto">
-          {threads.length === 0 ? (
+          {/* A student who has never written to their coach has no thread to pick.
+            * Offer the coach directly so the first message is one tap, not a trip
+            * to another page. */}
+          {!isCoach && coachTarget && !threads.some((t) => t.otherUserId === coachTarget.userId) && (
+            <button type="button"
+              onClick={() => setSel({ threadId: "", otherUserId: coachTarget.userId,
+                otherUsername: coachTarget.name || "Coach", otherName: coachTarget.name,
+                otherRole: "coach", unread: 0 })}
+              className="flex w-full items-center gap-2 border-b border-ink-800/70 px-3 py-2 text-left hover:bg-ink-800">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold text-ink-100">{coachTarget.name || "Your coach"}</div>
+                <div className="truncate text-xs text-ink-400">Message your coach</div>
+              </div>
+            </button>
+          )}
+          {threads.length === 0 && (isCoach || !coachTarget) ? (
             <p className="p-4 text-center text-xs text-ink-400">No conversations yet.</p>
           ) : threads.map((t) => (
             <button key={t.threadId} type="button" onClick={() => void openThread(t)}
@@ -1137,7 +1165,7 @@ function CoachDmToastHost({ role }: { role: string }) {
           {/* Opens the in-class panel, not a tab: backgrounding this tab suspends
            *  the class socket on a tablet, and the rejoin used to wipe the
            *  challenge answers. The class stays mounted behind the panel. */}
-          <button type="button" onClick={() => openCoachDm({ name: p.from })}
+          <button type="button" onClick={() => openClassDm({ name: p.from })}
             className="mt-2 inline-block rounded-lg bg-brand-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-brand-400">
             Reply here
           </button>
@@ -2407,7 +2435,7 @@ export default function ClassV2Page() {
                *  LiveKitRoom so useDataChannel has its context; renders fixed,
                *  so its position here in the tree doesn't matter. */}
               <CoachDmToastHost role={role} />
-              <CoachMessagesDrawer role={role} />
+              <ClassMessagesDrawer role={role} room={room} />
               {endedMsg && (
                 <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center bg-ink-950/85 p-6 text-center">
                   <div className="pointer-events-auto space-y-3 rounded-2xl border border-rose-500/50 bg-ink-900 p-6 shadow-2xl">

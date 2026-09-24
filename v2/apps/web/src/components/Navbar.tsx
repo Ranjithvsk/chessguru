@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { openClassDm, subscribeClassDm, getClassDmState } from "../lib/classDm";
 import { api } from "../lib/api";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
@@ -116,7 +117,7 @@ const GROUPS: Group[] = [
     label: "Tools", accent: "slate", icon: "🛠️",
     items: [
       { to: "/live", label: "🔴 Live broadcast", desc: "Tournament games as they are played — every board on a round, updating move by move" },
-      { to: "/database", label: "🗄️ ChessGuru DB", desc: "Search 1.09M master games by player, opening, rating or date — and save any of them into your studies" },
+      { to: "/database", label: "🗄️ ChessGuru DB", desc: "Search 12.1M master games by player, opening, rating or date — and save any of them into your studies" },
       { to: "/coach-board/scoresheet", label: "📝 Scan scoresheet", desc: "Photo of a handwritten scoresheet → the game as PGN (coach/owner)" },
       { to: "/board-editor", label: "✏️ Board editor", desc: "Set up any position" },
       { to: "/books/read", label: "📖 Book reader", desc: "Read a book, tap any diagram to play it" },
@@ -608,6 +609,9 @@ function MailDownBanner() {
 // username in the top nav. Click → /messages page.
 function MessagesBadge() {
   const [count, setCount] = useState<number | null>(null);
+  const [, forceDm] = useState(0);
+  useEffect(() => subscribeClassDm(() => forceDm((n) => n + 1)), []);
+  const classDm = getClassDmState();
   useEffect(() => {
     let cancelled = false;
     const fetchCount = async () => {
@@ -622,6 +626,24 @@ function MessagesBadge() {
     const iv = setInterval(fetchCount, 20_000);
     return () => { cancelled = true; clearInterval(iv); };
   }, []);
+  // Inside a live class this must NOT navigate: leaving the page tears down the
+  // call and drops the board socket. The class page publishes a panel for exactly
+  // this, so open that instead and stay put. Owner 2026-09-24: "same page message
+  // will be good". Everywhere else it is an ordinary link.
+  if (classDm.available) {
+    return (
+      <button type="button" onClick={() => openClassDm()}
+        className="relative rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white"
+        title="Messages — opens here, without leaving the class">
+        💬
+        {count != null && count > 0 && (
+          <span className="absolute -right-1 -top-1 grid h-4 min-w-[16px] place-items-center rounded-full bg-brand-500 px-1 text-[10px] font-bold leading-none text-white">
+            {count > 99 ? "99+" : count}
+          </span>
+        )}
+      </button>
+    );
+  }
   return (
     <NavLink to="/messages"
       className="relative rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 hover:text-white"
