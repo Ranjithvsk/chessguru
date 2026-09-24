@@ -50,10 +50,17 @@ export function installGlobalErrorReporting() {
   const RELOAD_KEY = "cg-chunk-reload";
   const isStaleChunk = (m: string): boolean =>
     /Failed to fetch dynamically imported module|error loading dynamically imported module|Importing a module script failed/i.test(m);
+  // Time-based, not once-per-session. A session lasts as long as the tab, and a
+  // lesson runs an hour: gate it on "have I reloaded EVER" and a student who
+  // recovers from one deploy is stranded by the next one, which is precisely the
+  // case this exists for. A real loop retries within a second or two, so a short
+  // cooling-off tells the two apart — recover from a later deploy, refuse to spin.
+  const RELOAD_COOLOFF_MS = 60_000;
   const recoverStaleChunk = (m: string): boolean => {
     if (!isStaleChunk(m)) return false;
     try {
-      if (sessionStorage.getItem(RELOAD_KEY)) return false;   // already tried — let it surface
+      const last = Number(sessionStorage.getItem(RELOAD_KEY) || 0);
+      if (last && Date.now() - last < RELOAD_COOLOFF_MS) return false;   // spinning — let it surface
       sessionStorage.setItem(RELOAD_KEY, String(Date.now()));
     } catch { /* private mode: reload anyway, the loop guard is best-effort */ }
     try { location.reload(); } catch { /* */ }
