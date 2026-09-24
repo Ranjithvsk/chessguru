@@ -565,6 +565,40 @@ server {
     proxy_request_buffering off;
   }
 
+  # Live class sockets and video signalling run in their OWN process
+  # (chessguru-class-ws :4100) so that restarting the API to ship anything
+  # unrelated cannot tear down a class in progress.
+  #
+  # Generated here since 2026-09-24. Before that these two blocks existed only on
+  # chessguru.cc and — after being added by hand — gunachess.com, so every tenant
+  # domain this service has ever minted fell through to the general /v2api/ block
+  # below and ran its classes on :4000, the process that restarts on every deploy.
+  # Owner: "even new tenants should not have these issues". A tenant provisioned
+  # from now on gets them without anyone remembering to.
+  location /v2api/class-ws/ {
+    proxy_pass http://localhost:4100/class-ws/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "Upgrade";
+    proxy_read_timeout 3600;
+  }
+
+  location /v2api/api/video-signal/ {
+    proxy_pass http://localhost:4100/api/video-signal/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "Upgrade";
+    proxy_read_timeout 3600;
+  }
+
   location /v2api/ {
     proxy_pass http://localhost:4000/;
     proxy_http_version 1.1;
