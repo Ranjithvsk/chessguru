@@ -944,6 +944,14 @@ function ClassMessagesDrawer({ role, room }: { role: string; room: string }) {
   const endRef = useRef<HTMLDivElement | null>(null);
   const isCoach = role === "coach";
   const [coachTarget, setCoachTarget] = useState<{ userId: string; name?: string } | null>(null);
+  // Where THIS lesson starts. The in-class panel shows a student only what was said
+  // during the class in front of them; their whole correspondence with the coach
+  // still lives on /messages, which they have been able to open since 2026-09-02.
+  // Owner 2026-09-24: a student should not be reading back through old private
+  // coaching mid-lesson the way the coach legitimately does. Anchored to the class
+  // start rather than to page load, so the reload that recovers from a stale chunk
+  // does not also wipe the first half of the conversation off their screen.
+  const [sessionStart, setSessionStart] = useState<number | null>(null);
 
   const loadThreads = useCallback(async () => {
     try {
@@ -974,6 +982,14 @@ function ClassMessagesDrawer({ role, room }: { role: string; room: string }) {
   // coach up front and offer them as a target regardless.
   useEffect(() => {
     if (isCoach || coachTarget) return;
+    void fetch(`/v2api/api/class/schedule/${encodeURIComponent(room)}`, { credentials: "include" })
+      .then((r) => r.ok ? r.json() : null)
+      .then((k: any) => {
+        const t = k?.startsAt ?? k?.createdAt;
+        if (t) setSessionStart(new Date(t).getTime());
+      })
+      .catch(() => { /* cannot tell when the lesson began — leave the thread unfiltered
+                      * rather than risk hiding a reply the coach just sent */ });
     void fetch(`/v2api/api/class/${encodeURIComponent(room)}/coach`, { credentials: "include" })
       .then((r) => r.ok ? r.json() : null)
       .then((j: any) => { if (j?.userId) setCoachTarget({ userId: String(j.userId), name: j.name || j.username }); })
@@ -1007,6 +1023,12 @@ function ClassMessagesDrawer({ role, room }: { role: string; room: string }) {
       if (hit) void openThread(hit);
     })();
   }, [opened, loadThreads, openThread]);
+
+  // The coach keeps the full thread — reading back is part of their job. A student
+  // sees this lesson's messages only.
+  const visibleMsgs = (isCoach || sessionStart === null)
+    ? msgs
+    : msgs.filter((m) => new Date(m.createdAt).getTime() >= sessionStart);
 
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [msgs]);
 
@@ -1103,9 +1125,14 @@ function ClassMessagesDrawer({ role, room }: { role: string; room: string }) {
       ) : (
         <>
           <div className="flex-1 space-y-1.5 overflow-y-auto p-3">
-            {msgs.length === 0
+            {!isCoach && sessionStart !== null && msgs.some((m) => new Date(m.createdAt).getTime() < sessionStart) && (
+              <p className="pb-1 text-center text-[11px] text-ink-500">
+                Showing this class only · earlier messages are in Messages
+              </p>
+            )}
+            {visibleMsgs.length === 0
               ? <p className="text-center text-xs text-ink-400">No messages in this conversation yet.</p>
-              : msgs.map((m) => (
+              : visibleMsgs.map((m) => (
                 <div key={m.id} className={`max-w-[85%] rounded-xl px-2.5 py-1.5 text-sm ${m.fromMe ? "ml-auto bg-brand-500 text-white" : "bg-ink-800 text-ink-100"}`}>
                   <div className="whitespace-pre-wrap break-words">{m.text}</div>
                 </div>
