@@ -108,6 +108,8 @@ export interface HistoryReport {
 }
 
 export interface MyRound { win: boolean; date: string; ratingDiff: number | null; ms: number | null; wrong: string | null; best: string | null; }
+/** The engine's answer to a wrong puzzle move; cp/mate are from the solver's side. */
+export interface Refutation { reply: string; replyUci: string; cp?: number; mate?: number; depth: number; }
 
 // ── Online play history (/api/live-games) ───────────────────────────────────
 export type LiveSpeed = "bullet" | "blitz" | "rapid" | "classical";
@@ -152,6 +154,8 @@ export const api = {
   history: (offset = 0, as?: string | null) =>
     get<HistoryReport>(`/api/me/history?offset=${offset}${as ? `&as=${encodeURIComponent(as)}` : ""}`),
   myRound: (pid: string) => get<{ round: MyRound | null }>(`/api/me/round/${encodeURIComponent(pid)}`),
+  refute: (pid: string, wrong: string) =>
+    get<{ refutation: Refutation | null }>(`/api/puzzles/${encodeURIComponent(pid)}/refute?wrong=${encodeURIComponent(wrong)}`),
   themes: () => get<{ themes: string[] }>("/api/themes"),
   suggestedThemes: () => get<{
     global: number;
@@ -409,7 +413,8 @@ export const broadcastList = (params: { minElo?: number; result?: string; q?: st
 export const broadcastFacets = () =>
   get<{ events: { event: string; n: number }[]; players: { name: string; n: number }[] }>("/api/broadcasts/facets");
 export const broadcastOne = (id: string) =>
-  get<BroadcastGame | { found: false }>(`/api/broadcasts/${encodeURIComponent(id)}`);
+  get<(BroadcastGame & { source?: "broadcastgames" | "corpusgames" }) | { found: false }>(
+    `/api/broadcasts/${encodeURIComponent(id)}`);
 
 // --- Admin: sales leads (/admin/leads) — mirrors AdminLeadsService (apps/api/src/admin/admin-leads.service.ts) ---
 export type LeadStatus = "new" | "contacted" | "interested" | "demo" | "trial" | "converted" | "lost";

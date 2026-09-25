@@ -2,12 +2,14 @@ import { Body, Controller, Get, NotFoundException, Param, Post, Query, Req } fro
 import { InjectConnection } from "@nestjs/mongoose";
 import { Connection } from "mongoose";
 import { PuzzlesService } from "./puzzles.service";
+import { PuzzleRefuteService } from "./puzzle-refute.service";
 import { resolveViewedUser } from "../admin/view-as";
 
 @Controller("puzzles")
 export class PuzzlesController {
   constructor(
     private readonly svc: PuzzlesService,
+    private readonly refuter: PuzzleRefuteService,
     @InjectConnection() private readonly conn: Connection,
   ) {}
 
@@ -73,6 +75,12 @@ export class PuzzlesController {
     const r = await this.svc.complete(id, { ...(body ?? {}), userId });
     if (!r) throw new NotFoundException("puzzle not found");
     return r;
+  }
+
+  /** Why a wrong move was wrong — the engine's answer to it (see PuzzleRefuteService). */
+  @Get(":id/refute")
+  async refute(@Param("id") id: string, @Query("wrong") wrong?: string) {
+    return { refutation: await this.refuter.refute(id, String(wrong ?? "").trim()) };
   }
 
   @Get(":id")

@@ -8,6 +8,7 @@ import type { Difficulty } from "@chessguru/types";
 import Board from "../components/Board";
 import SolvedStrip from "../components/SolvedStrip";
 import { api, get } from "../lib/api";
+import type { Refutation } from "../lib/api";
 import { usePuzzleGame } from "../hooks/usePuzzleGame";
 import MilestoneOverlay from "../components/MilestoneOverlay";
 import { prettify } from "../lib/format";
@@ -23,6 +24,22 @@ const DIFFS: Difficulty[] = ["easiest", "easier", "normal", "harder", "hardest"]
 // only 0.10 weight and losses 0.40 (heavy asymmetry). Used to trigger the
 // "practice mode" warning in the sidebar so kids know rating will drift on
 // these picks even with good win rates.
+
+/** One plain sentence on what the engine does to a wrong move. Numbers are from
+ *  the solver's side: −7.7 means the solver is lost after the reply. */
+function refuteText(r: Refutation): string {
+  if (typeof r.mate === "number") {
+    if (r.mate > 0) return `${r.reply} holds on a little longer — you still mate in ${r.mate}, but the puzzle wants the fastest mate.`;
+    return `${r.reply} refutes it — you get mated in ${Math.abs(r.mate)}.`;
+  }
+  const cp = r.cp ?? 0;
+  const ev = `${cp > 0 ? "+" : cp < 0 ? "−" : ""}${(Math.abs(cp) / 100).toFixed(1)}`;
+  if (cp <= -300) return `${r.reply} refutes it — you end up lost (${ev}).`;
+  if (cp <= -60) return `${r.reply} refutes it — you end up worse (${ev}).`;
+  if (cp < 60) return `${r.reply} escapes — the advantage is gone (${ev}).`;
+  return `${r.reply} escapes — you keep an edge (${ev}), but the puzzle's move wins outright.`;
+}
+
 const OBVIOUS_THEMES = new Set<string>([
   "enPassant", "attackingF2F7", "doubleCheck", "mateIn1", "castling",
   "anastasiaMate", "arabianMate", "backRankMate", "balestraMate", "blindSwineMate",
@@ -291,6 +308,17 @@ export default function PuzzlesPage() {
     staleTime: 60_000,
   });
   const round = reviewRound?.round ?? null;
+  // WHY it was wrong — the engine's reply to the move. "Best move was Qh4+" on
+  // its own left a student certain she had been robbed: her Qh5+ looked like the
+  // same mate (TKT-242), and only "Kxg3 escapes" answers that. Static per
+  // puzzle+move, so never refetched.
+  const { data: refuteData } = useQuery({
+    queryKey: ["refute", g.puzzle?.id, round?.wrong ?? null],
+    enabled: !!g.puzzle?.id && g.reviewing && !!round && !round.win && !!round.wrong,
+    queryFn: () => api.refute(g.puzzle!.id, round!.wrong as string),
+    staleTime: Infinity, retry: false,
+  });
+  const refutation = refuteData?.refutation ?? null;
   // Convert UCIs to SAN using the puzzle's starting FEN so the callout reads like a
   // human ("Nf3", not "g1f3"). If SAN conversion fails (bad move / promotion edge),
   // fall back to the raw UCI so we never crash the page.
@@ -647,11 +675,16 @@ export default function PuzzlesPage() {
               {analysis.win ? "🔍 Replay" : "🔎 What went wrong"}
             </div>
             {!analysis.win && analysis.wrongSan && (
-              <div className="flex items-center justify-between rounded-lg bg-rose-500/10 px-3 py-2">
-                <span className="text-xs text-rose-300/80">You played</span>
-                <span className="font-display text-base font-bold text-rose-200 tabular-nums">
-                  <span className="mr-1">↳</span>{analysis.wrongSan}
-                </span>
+              <div className="rounded-lg bg-rose-500/10 px-3 py-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-rose-300/80">You played</span>
+                  <span className="font-display text-base font-bold text-rose-200 tabular-nums">
+                    <span className="mr-1">↳</span>{analysis.wrongSan}
+                  </span>
+                </div>
+                {refutation && (
+                  <div className="mt-1 text-[11px] leading-snug text-rose-200/80">{refuteText(refutation)}</div>
+                )}
               </div>
             )}
             {analysis.bestSan && (
