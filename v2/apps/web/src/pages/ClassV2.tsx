@@ -17,7 +17,7 @@ import {
   GridLayout, ParticipantTile, useTracks, useParticipants,
   useDataChannel, useLocalParticipant, useRoomContext, useIsSpeaking,
 } from "@livekit/components-react";
-import { Track, DataPacket_Kind, DisconnectReason, RoomEvent, VideoQuality, ConnectionState } from "livekit-client";
+import { Track, DataPacket_Kind, DisconnectReason, RoomEvent, VideoQuality, ConnectionState, ConnectionErrorReason } from "livekit-client";
 import "@livekit/components-styles";
 import { api, announceGoingLive, API_BASE } from "../lib/api";
 import SharedClassBoard, { markClassFeatureUsed, setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassNotationHidden, triggerClassNotationToggle, useClassMoveList, useClassStartShapes, triggerClassSeek, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow , useCoachNotices, dismissCoachNotice, pushCoachNotice, useClassPresence } from "../components/SharedClassBoard";
@@ -2103,6 +2103,12 @@ export default function ClassV2Page() {
   };
 
   const [errMsg, setErrMsg] = useState<string | null>(null);
+  // The server closed THIS connection because the same account joined again —
+  // a second tab, a second device, or a reload racing its own old socket. The SDK
+  // reports it as DUPLICATE_IDENTITY and, until now, this page said nothing: the
+  // student sat in a dead room and called it "auto kicked" (TKT-269). Say what
+  // happened and offer the way back.
+  const [replaced, setReplaced] = useState(false);
   // A student refused a token is not an error to display and abandon — it is a
   // student standing outside a door the coach can open any second. Hold this
   // instead of errMsg and keep asking.
@@ -2310,6 +2316,25 @@ export default function ClassV2Page() {
     );
   }
 
+  if (replaced) {
+    return (
+      <div className="mx-auto max-w-md rounded-xl2 border border-amber-500/40 bg-amber-500/10 p-6 text-amber-100">
+        <div className="text-2xl">↪️</div>
+        <h1 className="mt-2 font-display text-lg text-white">This class is open somewhere else</h1>
+        <p className="mt-2 text-sm">
+          Your account joined this class again from another tab or device, so this one was closed —
+          otherwise you would hear the coach twice. Carry on there, or bring the class back here.
+        </p>
+        <button
+          type="button"
+          onClick={() => { try { rejoin.current.leaving = true; } catch { /* */ } location.reload(); }}
+          className="mt-4 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 px-4 py-2 text-sm font-semibold text-black hover:brightness-110"
+        >
+          Use this tab
+        </button>
+      </div>
+    );
+  }
   if (errMsg) {
     return (
       <div className="mx-auto max-w-md rounded-xl2 border border-rose-500/40 bg-rose-500/10 p-6 text-rose-200">
@@ -2426,6 +2451,24 @@ export default function ClassV2Page() {
               );
               return;
             }
+            // A connection error is not a verdict. "could not establish signal
+            // connection: Abort handler called · reason=3" is the SDK reporting that
+            // a connect attempt was cancelled by a NEWER one (ours, or the wrapper's
+            // when the token changes) — nothing is wrong, the newer attempt is under
+            // way. Server unreachable / timeout / socket errors are the network, and
+            // RoomKeepAlive keeps trying through them. Rendering errMsg for any of
+            // these unmounts LiveKitRoom and with it every retry — which is how a
+            // student whose data dropped for a minute ended on a dead "Could not
+            // join room" card and reloaded her way back in (TKT-269, 2026-09-25).
+            // Only a token the server will not accept, or no server at all, is final.
+            if (e?.name === "ConnectionError") {
+              const r = anyE?.reason;
+              if (r === ConnectionErrorReason.Cancelled || r === ConnectionErrorReason.LeaveRequest) return;
+              if (r !== ConnectionErrorReason.NotAllowed && r !== ConnectionErrorReason.ServiceNotFound) {
+                setNetState("reconnecting");
+                return;
+              }
+            }
             setErrMsg(parts.join(" · ") || "Unknown error");
           }}
           onDisconnected={(reason) => {
@@ -2439,6 +2482,7 @@ export default function ClassV2Page() {
                 undefined, "class-v2/livekit-disconnect");
             } catch { /* reporting must never break the class */ }
             if (rejoin.current.leaving) return;
+            if (reason === DisconnectReason.DUPLICATE_IDENTITY) { setReplaced(true); return; }
             if (reason !== undefined && DELIBERATE.has(reason)) return;
             // Say it is coming back. The SDK is already trying; the student's job is
             // simply to NOT hit reload while it does.

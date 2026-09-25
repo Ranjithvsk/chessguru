@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useEffect } from "react";
+import React, { Suspense, useEffect} from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
@@ -7,6 +7,7 @@ import LoginPage from "./pages/Login";
 import TenantLoginPage from "./pages/TenantLogin";
 import "./index.css";
 import { installGlobalErrorReporting } from "./lib/report-error";
+import { lazyRetry } from "./lib/lazy-retry";
 
 // Fast-path bundle (2026-08-30): only what's needed to render the first
 // paint on `/login`, `/`, and tenant-login. Everything else — the ~60
@@ -19,11 +20,11 @@ import { installGlobalErrorReporting } from "./lib/report-error";
 // also get their own lazy chunks — first-visit hits on those still
 // need to fetch the chunk, but they save first-visit-on-`/login` from
 // having to pay for them.
-const AppRest         = lazy(() => import("./AppRest"));
-const CoachPublicPage  = lazy(() => import("./pages/CoachPublic"));
-const AcademyPublicPage = lazy(() => import("./pages/AcademyPublic"));
-const ParentPayPage    = lazy(() => import("./pages/parent/PayHome"));
-const InstagramStudioPage = lazy(() => import("./pages/InstagramStudio"));
+const AppRest         = lazyRetry(() => import("./AppRest"));
+const CoachPublicPage  = lazyRetry(() => import("./pages/CoachPublic"));
+const AcademyPublicPage = lazyRetry(() => import("./pages/AcademyPublic"));
+const ParentPayPage    = lazyRetry(() => import("./pages/parent/PayHome"));
+const InstagramStudioPage = lazyRetry(() => import("./pages/InstagramStudio"));
 
 function LazyFallback() {
   return (

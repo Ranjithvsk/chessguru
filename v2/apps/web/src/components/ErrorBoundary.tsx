@@ -9,7 +9,7 @@
 //     <AcademyPerformancePage />
 //   </ErrorBoundary>
 import { Component, type ReactNode } from "react";
-import { reportClientError } from "../lib/report-error";
+import { recoverStaleChunk, reportClientError } from "../lib/report-error";
 
 type Props = { label?: string; children: ReactNode };
 type State = { err: Error | null };
@@ -18,6 +18,10 @@ export class ErrorBoundary extends Component<Props, State> {
   state: State = { err: null };
   static getDerivedStateFromError(err: Error): State { return { err }; }
   componentDidCatch(err: Error, info: unknown): void {
+    // A lazy route whose chunk is gone (old build after a deploy) throws here, not
+    // at window.onerror, so the global stale-chunk reload never saw it: the user
+    // got this red box instead of the new build. Same recovery, same cool-off.
+    if (recoverStaleChunk(err?.message || "")) return;
     // Surface to devtools even though we render a fallback.
     // eslint-disable-next-line no-console
     console.error(`[ErrorBoundary${this.props.label ? ` · ${this.props.label}` : ""}]`, err, info);

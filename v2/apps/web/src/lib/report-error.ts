@@ -34,44 +34,46 @@ export function reportClientError(message: string, stack?: string, route?: strin
 
 /** Global handlers for errors that escape React entirely — async callbacks,
  *  event handlers, rejected promises. */
+// A deploy replaces the hashed chunks. A tab that was ALREADY open still holds the
+// old index in memory, so the moment it lazily imports a route it asks for a file
+// that is no longer on disk and the import rejects. Nothing handled that: the
+// failure was reported and the person was left looking at a page that had stopped
+// working. 71 of these in 21 days, across 11 accounts, every single day — and it
+// lands hardest on exactly the tab nobody reloads, a class left open for an hour.
+// On 2026-09-22 a student hit it at 13:11:49, the second a challenge started.
+//
+// The page cannot recover in place — the code it needs is gone from the server —
+// but a reload fetches the new index and its chunks, so do that instead of dying.
+// Once per session per build: a chunk that is missing for any other reason must
+// not put the tab in a reload loop.
+const RELOAD_KEY = "cg-chunk-reload";
+export const isStaleChunk = (m: string): boolean =>
+  /Failed to fetch dynamically imported module|error loading dynamically imported module|Importing a module script failed|Unable to preload CSS/i.test(m);
+// Time-based, not once-per-session. A session lasts as long as the tab, and a
+// lesson runs an hour: gate it on "have I reloaded EVER" and a student who
+// recovers from one deploy is stranded by the next one, which is precisely the
+// case this exists for. A real loop retries within a second or two, so a short
+// cooling-off tells the two apart — recover from a later deploy, refuse to spin.
+const RELOAD_COOLOFF_MS = 60_000;
+export const recoverStaleChunk = (m: string): boolean => {
+  if (!isStaleChunk(m)) return false;
+  try {
+    const last = Number(sessionStorage.getItem(RELOAD_KEY) || 0);
+    if (last && Date.now() - last < RELOAD_COOLOFF_MS) return false;   // spinning — let it surface
+    sessionStorage.setItem(RELOAD_KEY, String(Date.now()));
+  } catch { /* private mode: reload anyway, the loop guard is best-effort */ }
+  try { location.reload(); } catch { /* */ }
+  return true;
+};
+
 export function installGlobalErrorReporting() {
-  // A deploy replaces the hashed chunks. A tab that was ALREADY open still holds the
-  // old index in memory, so the moment it lazily imports a route it asks for a file
-  // that is no longer on disk and the import rejects. Nothing handled that: the
-  // failure was reported and the person was left looking at a page that had stopped
-  // working. 71 of these in 21 days, across 11 accounts, every single day — and it
-  // lands hardest on exactly the tab nobody reloads, a class left open for an hour.
-  // On 2026-09-22 a student hit it at 13:11:49, the second a challenge started.
-  //
-  // The page cannot recover in place — the code it needs is gone from the server —
-  // but a reload fetches the new index and its chunks, so do that instead of dying.
-  // Once per session per build: a chunk that is missing for any other reason must
-  // not put the tab in a reload loop.
-  const RELOAD_KEY = "cg-chunk-reload";
-  const isStaleChunk = (m: string): boolean =>
-    /Failed to fetch dynamically imported module|error loading dynamically imported module|Importing a module script failed/i.test(m);
-  // Time-based, not once-per-session. A session lasts as long as the tab, and a
-  // lesson runs an hour: gate it on "have I reloaded EVER" and a student who
-  // recovers from one deploy is stranded by the next one, which is precisely the
-  // case this exists for. A real loop retries within a second or two, so a short
-  // cooling-off tells the two apart — recover from a later deploy, refuse to spin.
-  const RELOAD_COOLOFF_MS = 60_000;
-  const recoverStaleChunk = (m: string): boolean => {
-    if (!isStaleChunk(m)) return false;
-    try {
-      const last = Number(sessionStorage.getItem(RELOAD_KEY) || 0);
-      if (last && Date.now() - last < RELOAD_COOLOFF_MS) return false;   // spinning — let it surface
-      sessionStorage.setItem(RELOAD_KEY, String(Date.now()));
-    } catch { /* private mode: reload anyway, the loop guard is best-effort */ }
-    try { location.reload(); } catch { /* */ }
-    return true;
-  };
-  // Vite raises this for a failed lazy import before it ever becomes an error event,
-  // which is the earliest and cleanest place to catch it.
-  window.addEventListener("vite:preloadError", (e) => {
-    e.preventDefault();
-    recoverStaleChunk("Failed to fetch dynamically imported module");
-  });
+  // Vite's `vite:preloadError` is deliberately NOT handled here any more. Calling
+  // preventDefault() on it made Vite's preload helper swallow the failure and hand
+  // React.lazy `undefined` — "Cannot read properties of undefined (reading
+  // 'default')" on eight users' screens in two days, including a student mid-class
+  // whose reloads then threw her out of the room (TKT-269, 2026-09-25). Left alone,
+  // Vite rethrows: lib/lazy-retry tries the chunk again, and only when that gives
+  // up does the failure reach the error listener below and trigger the reload.
 
   // A half-built position is not a fault. The board editor validates what the user is typing or
   // painting through chess.js, whose validator throws "Invalid FEN: missing black king" and the

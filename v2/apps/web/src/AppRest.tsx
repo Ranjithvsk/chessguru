@@ -16,7 +16,7 @@
 // else (post-auth pages, admin, tools) belongs here.
 
 import { Routes, Route, Navigate, useParams } from "react-router-dom";
-import { lazy, Suspense } from "react";
+import { Suspense} from "react";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
@@ -148,23 +148,24 @@ import CoachProfileEditPage from "./pages/CoachEdit";
 import AcademyProfileEditPage from "./pages/AcademyProfileEdit";
 import UltraDatabase from "./pages/UltraDatabase";
 import LiveBroadcast from "./pages/LiveBroadcast";
+import { lazyRetry } from "./lib/lazy-retry";
 
 // Fees — kept lazy inside this already-lazy chunk so recharts (heavy)
 // stays out of the shared code path even for post-auth users who never
 // open /fees. Nested React.lazy is fine; each nested lazy makes its own
 // deferred chunk that only downloads if that route mounts.
-const ClassWatch = lazy(() => import("./pages/ClassWatch"));
-const ClassEventReplay = lazy(() => import("./pages/ClassEventReplay"));
-const FeesLandingPage       = lazy(() => import("./pages/Fees"));
-const FeesProgramsPage      = lazy(() => import("./pages/FeesPrograms"));
-const FeesProgramDetailPage = lazy(() => import("./pages/FeesProgramDetail"));
-const FeesInvoicesPage      = lazy(() => import("./pages/FeesInvoices"));
-const FeesSettingsPage      = lazy(() => import("./pages/FeesSettings"));
-const FeesReportsPage       = lazy(() => import("./pages/FeesReports"));
-const FeesBatchesPage       = lazy(() => import("./pages/FeesBatches"));
-const FeesStudentsPage = lazy(() => import("./pages/FeesStudents"));
-const MyChallengesPage       = lazy(() => import("./pages/MyChallenges"));
-const MessagesPage           = lazy(() => import("./pages/Messages"));
+const ClassWatch = lazyRetry(() => import("./pages/ClassWatch"));
+const ClassEventReplay = lazyRetry(() => import("./pages/ClassEventReplay"));
+const FeesLandingPage       = lazyRetry(() => import("./pages/Fees"));
+const FeesProgramsPage      = lazyRetry(() => import("./pages/FeesPrograms"));
+const FeesProgramDetailPage = lazyRetry(() => import("./pages/FeesProgramDetail"));
+const FeesInvoicesPage      = lazyRetry(() => import("./pages/FeesInvoices"));
+const FeesSettingsPage      = lazyRetry(() => import("./pages/FeesSettings"));
+const FeesReportsPage       = lazyRetry(() => import("./pages/FeesReports"));
+const FeesBatchesPage       = lazyRetry(() => import("./pages/FeesBatches"));
+const FeesStudentsPage = lazyRetry(() => import("./pages/FeesStudents"));
+const MyChallengesPage       = lazyRetry(() => import("./pages/MyChallenges"));
+const MessagesPage           = lazyRetry(() => import("./pages/Messages"));
 
 function LazyFallback() {
   return (
