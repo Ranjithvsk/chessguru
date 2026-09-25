@@ -1012,6 +1012,16 @@ export default function SharedClassBoard(
     //      types; if it doesn't, the ping just becomes a no-op on read.
     const connect = () => {
       if (cancelled) return;
+      // Liveness for THIS socket. A connection the network drops without a FIN — mobile
+      // hand-off, NAT timeout — never fires onclose, so until 2026-09-25 nothing here ever
+      // noticed: pings kept going into the void, the pong handler was a no-op, the status
+      // dot stayed green, and the board simply stopped updating. sriharini, 15 Sep: silent
+      // from 13:07 to 13:26, "board is hanged", fixed only by refreshing. Two missed pongs
+      // while the tab is in front = dead; close it ourselves so onclose reconnects and the
+      // join snapshot redraws the board. A tab that was asleep (throttled timers) is given
+      // a fresh interval on waking rather than judged on a stale clock.
+      let lastPongAt = Date.now();
+      let lastTickAt = Date.now();
       // Nuke any stale socket + timers.
       if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
       if (wsRef.current) { try { wsRef.current.close(); } catch { /* */ } wsRef.current = null; }
@@ -1037,8 +1047,17 @@ export default function SharedClassBoard(
         joinSnapshotRef.current = true;   // next `state` frame is the join snapshot
         backoffMs = 500;   // reset backoff on a good open
         // Heartbeat: 20s < any reasonable NAT/proxy idle timeout.
+        lastPongAt = Date.now(); lastTickAt = Date.now();
         heartbeatTimer = setInterval(() => {
           if (wsRef.current !== ws || ws.readyState !== WebSocket.OPEN) return;
+          const now = Date.now();
+          if (now - lastTickAt > 40_000) lastPongAt = now;   // timer was suspended: start a fresh interval
+          lastTickAt = now;
+          if (typeof document !== "undefined" && document.visibilityState === "visible" && now - lastPongAt > 45_000) {
+            setConnected(false);                               // dot goes grey: this IS the "board is hanged" state
+            try { ws.close(); } catch { /* */ }   // heartbeat timeout: onclose → scheduleReconnect → snapshot
+            return;
+          }
           try { ws.send(JSON.stringify({ type: "ping" })); } catch { /* */ }
         }, 20_000);
         try {
@@ -1078,7 +1097,7 @@ export default function SharedClassBoard(
         if (cancelled) return;
         let msg: any;
         try { msg = JSON.parse(ev.data); } catch { return; }
-        if (msg.type === "pong") return;   // heartbeat reply, no-op
+        if (msg.type === "pong") { lastPongAt = Date.now(); return; }   // heartbeat reply: the socket is alive
         if (msg.type === "presence") {
           _publishPresence({ students: Number(msg.students) || 0, knownStudents: true });
           const nm = String(msg.who || "Someone");
