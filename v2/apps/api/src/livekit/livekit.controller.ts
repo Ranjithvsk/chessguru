@@ -158,7 +158,15 @@ export class LivekitController {
       if (role === "student" && (klass || announce) && !isRoomHost) {
         const elig = await resolveEligibility(this.conn, roomName, coachUserId);
         if (!isStudentEligible(elig, req.session.userId)) {
-          throw new HttpException("not found", HttpStatus.NOT_FOUND);
+          // Same 404 as before — an outsider learns nothing new — but the body now says
+          // WHY to a signed-in member of the same academy, and the refusal is logged.
+          // Until 2026-09-25 this was silent on both ends: TKT-247's student saw
+          // "Could not join room → 404" for seven minutes after the coach had already
+          // added her to the batch, because the page never asked again.
+          const code = (elig.restricted && elig.studentIds.size === 0) ? "AUDIENCE_NOT_PICKED" : "NOT_IN_AUDIENCE";
+          // eslint-disable-next-line no-console
+          console.warn("[livekit.token] refused", { room: roomName, user: req.session.userId, code });
+          throw new HttpException({ statusCode: 404, message: "not found", code }, HttpStatus.NOT_FOUND);
         }
       }
       // Kicked from THIS session? Block token issue too so they can't sneak
@@ -170,7 +178,11 @@ export class LivekitController {
           { _id: `${roomName}:${myUidForKick}` as any },
           { projection: { _id: 1 } },
         );
-        if (kicked) throw new HttpException("not found", HttpStatus.NOT_FOUND);
+        if (kicked) {
+          // eslint-disable-next-line no-console
+          console.warn("[livekit.token] refused", { room: roomName, user: myUidForKick, code: "REMOVED" });
+          throw new HttpException({ statusCode: 404, message: "not found", code: "REMOVED" }, HttpStatus.NOT_FOUND);
+        }
       }
     } catch (e) {
       if (e instanceof HttpException) throw e;

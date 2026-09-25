@@ -19,7 +19,7 @@ import {
 } from "@livekit/components-react";
 import { Track, DataPacket_Kind, DisconnectReason, RoomEvent, VideoQuality, ConnectionState } from "livekit-client";
 import "@livekit/components-styles";
-import { api, announceGoingLive } from "../lib/api";
+import { api, announceGoingLive, API_BASE } from "../lib/api";
 import SharedClassBoard, { markClassFeatureUsed, setClassSetupOpen, triggerClassBoardAction, triggerClassFlipOrientation, useClassCursorInfo, useClassLocked, useClassOrientation, triggerClassLockToggle, useClassNotationHidden, triggerClassNotationToggle, useClassMoveList, useClassStartShapes, triggerClassSeek, triggerClassLoadTree, useClassChallenge, triggerClassChallengeStart, triggerClassChallengeEnd, triggerClassChallengeDismiss, useChallengeMarkToast, dismissChallengeMarkToast, challengeTreeToPgn, type SharedTreeNode, type ChallengeAnswerRow , useCoachNotices, dismissCoachNotice, pushCoachNotice, useClassPresence } from "../components/SharedClassBoard";
 import ClassRecordButton from "../components/ClassRecordButton";
 import { useScreenWakeLock } from "../hooks/useScreenWakeLock";
@@ -2103,6 +2103,10 @@ export default function ClassV2Page() {
   };
 
   const [errMsg, setErrMsg] = useState<string | null>(null);
+  // A student refused a token is not an error to display and abandon — it is a
+  // student standing outside a door the coach can open any second. Hold this
+  // instead of errMsg and keep asking.
+  const [waitingAdmit, setWaitingAdmit] = useState<{ code: string; attempt: number } | null>(null);
   // Non-fatal media trouble (no webcam, no mic, permission denied, device busy).
   // Kept OUT of errMsg on purpose — see the onError handler below.
   const [mediaWarn, setMediaWarn] = useState<string | null>(null);
@@ -2238,8 +2242,30 @@ export default function ClassV2Page() {
             if (!cancelled) setAudiencePickerOpen(true);
           }
         }
-        const t = await get<LKTokenResp>(`/api/livekit/token?room=${encodeURIComponent(room)}&role=${role}`);
-        if (!cancelled) setTokenData(t);
+        // TKT-247 (2026-09-17, still open 2026-09-25): a student not yet on the class's
+        // audience list got "Could not join room → 404" and the page simply stopped. The
+        // coach added her to the batch two minutes later; she stayed locked out for
+        // seven, until she happened to refresh. A refusal from this endpoint is a state
+        // the coach changes from the other side, so: say what it is, and keep asking.
+        // 5 s for up to 10 minutes; anything that is not a 404/403 is still a real error.
+        const url = `${API_BASE}/api/livekit/token?room=${encodeURIComponent(room)}&role=${role}`;
+        for (let attempt = 1; ; attempt++) {
+          const res = await fetch(url, { credentials: "include" });
+          if (cancelled) return;
+          if (res.ok) { setTokenData(await res.json() as LKTokenResp); setWaitingAdmit(null); break; }
+          let code = "";
+          try { code = String((await res.json())?.code ?? ""); } catch { /* no body */ }
+          const refused = (res.status === 404 || res.status === 403) && role === "student";
+          if (refused && code !== "REMOVED" && attempt <= 120) {
+            setWaitingAdmit({ code: code || "REFUSED", attempt });
+            await new Promise((r) => setTimeout(r, 5000));
+            if (cancelled) return;
+            continue;
+          }
+          setWaitingAdmit(null);
+          setErrMsg(code === "REMOVED" ? "The coach removed you from this class session." : `GET /api/livekit/token → ${res.status}`);
+          break;
+        }
       } catch (err: any) {
         if (!cancelled) setErrMsg(err?.message || String(err));
       }
@@ -2293,6 +2319,19 @@ export default function ClassV2Page() {
     );
   }
 
+  if (!tokenData && waitingAdmit) {
+    const text =
+      waitingAdmit.code === "AUDIENCE_NOT_PICKED" ? "Your coach hasn't picked who this class is for yet." :
+      waitingAdmit.code === "NOT_IN_AUDIENCE"     ? "You're not on this class's list yet — ask your coach to add you." :
+                                                    "The class isn't open to you yet.";
+    return (
+      <div className="mx-auto mt-10 max-w-md rounded-xl2 border border-amber-500/40 bg-amber-500/10 p-6 text-amber-100">
+        <p className="text-sm font-semibold">Waiting to be let in</p>
+        <p className="mt-1 text-sm">{text}</p>
+        <p className="mt-2 text-xs text-amber-200/80">This page checks every few seconds and will join automatically — no need to refresh. (checked {waitingAdmit.attempt}×)</p>
+      </div>
+    );
+  }
   if (!tokenData) return <div className="py-16 text-center text-ink-400">Joining {room}…</div>;
 
   return (
