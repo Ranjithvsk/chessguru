@@ -1206,7 +1206,15 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       // down, so read the frame directly here.
       const claimantId = typeof frame.userId === "string" && frame.userId.length ? frame.userId : null;
       const mayClaimCoach = !secondScreens.has(ws) && !observers.has(ws) && !!claimantId;
-      if (!mayClaimCoach) {
+      // A repeat hello from the socket that ALREADY holds the seat changes nothing. Hello can
+      // legitimately arrive more than once on one socket (reconnect, role re-resolution); running
+      // the chain below again for room.coach itself found no token in the frame — the client
+      // had not saved it yet — and seated the coach as a student until the async promote
+      // undid it. Idempotent instead: still the coach, same token, no re-mint.
+      if (room.coach === ws && socketRole.get(ws) === "coach") {
+        send({ type: "role", role: "coach", coachToken: room.coachToken ?? undefined });
+        resolvedSynchronously = true;
+      } else if (!mayClaimCoach) {
         socketRole.set(ws, "student");
         send({ type: "role", role: "student" });
         resolvedSynchronously = true;

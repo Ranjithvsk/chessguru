@@ -943,6 +943,13 @@ export default function SharedClassBoard(
   //     server snapshot + review UI
   const challengeGameRef = useRef<Chess | null>(null);
   const challengeMovesRef = useRef<string[]>([]);
+  // The role the LAST hello on the current socket claimed. The on-open hello records
+  // it; the re-announce effect below only speaks again if that claim was not already
+  // "coach". Without this the effect fired on `connected` and sent a SECOND hello on the
+  // same socket within the same second — the server re-resolved it, seated the coach's
+  // own socket as a student for want of a token it had not saved yet, and promoted it
+  // straight back. Every coach page load paid that flicker (2026-09-25).
+  const announcedRoleRef = useRef<string | null>(null);
   // True from the moment a socket opens until its first `state` frame is handled.
   // The join snapshot is shaped exactly like a board reset (empty tree) whenever the
   // coach set the position up with loadFen, so without this the rejoin looks like the
@@ -1048,6 +1055,7 @@ export default function SharedClassBoard(
             intendedRole: observerToken ? undefined : intendedRole,
             observerToken,
           }));
+          announcedRoleRef.current = observerToken ? null : (intendedRole ?? null);   // what this socket has claimed
         } catch { /* */ }
       };
 
@@ -1706,7 +1714,6 @@ export default function SharedClassBoard(
   // A repeat hello on a live socket is explicitly supported — the server guards the
   // join announcement precisely because hello can arrive more than once — so say it
   // again on the SAME socket rather than reconnecting.
-  const announcedRoleRef = useRef<string | null>(null);
   useEffect(() => {
     if (intendedRole !== "coach" || observerToken) return;   // a watcher never claims the board
     if (announcedRoleRef.current === "coach") return;
