@@ -35,6 +35,32 @@ const CLASS_ID_RX = /(?:\/api\/class\/|\/class-v2\/|\/call\/)([A-Za-z0-9_-]{1,64
 const ROOM_ID_RX = /^[A-Za-z0-9_-]{1,64}$/;
 
 /** Anything that belongs to a live class, across all three error sources. */
+/** Reports the class page files ON PURPOSE when its video connection drops or comes
+ *  back (ClassV2 onDisconnected / RoomKeepAlive) — instrumentation added 24 Sep 2026
+ *  so a "student got kicked" needs a query, not an hour of log archaeology. They are
+ *  reloads, second devices and network blips, not faults: 8 of the 13 "errors" on
+ *  25 Sep were these, and the owner asked why four classes "had so much error".
+ *  Counted and listed separately as reconnects; `errors` means something broke. */
+const RECONNECT_ROUTES = new Set(["class-v2/livekit-disconnect", "class-v2/livekit-rejoin"]);
+const isReconnect = (e: any): boolean => RECONNECT_ROUTES.has(String(e?.route || ""));
+/** One plain phrase per reconnect report, from the reason code the SDK gave. */
+const reconnectWhy = (e: any): string => {
+  const msg = String(e?.message || "");
+  if (e?.route === "class-v2/livekit-rejoin") return /rejoined after/i.test(msg) ? "rejoined after a drop" : "rejoin attempt failed";
+  const m = /reason=(\d+)/.exec(msg);
+  switch (m ? Number(m[1]) : -1) {
+    case 1: return "page left the room (reload / navigation)";
+    case 2: return "reload or second device (same login)";
+    case 3: return "video server restarted";
+    case 4: return "removed by the coach";
+    case 5: case 10: return "room closed";
+    case 7: return "join failed";
+    case 9: case 14: return "network dropped";
+    case 15: return "media failure";
+    default: return "disconnected";
+  }
+};
+
 const DREAM_MEET_MATCH = {
   $or: [
     { kind: "realtime" },
@@ -45,7 +71,7 @@ const DREAM_MEET_MATCH = {
 };
 
 type Roll = {
-  scheduled: number; conducted: number; students: number; errors: number; liveNow: number;
+  scheduled: number; conducted: number; students: number; errors: number; reconnects: number; liveNow: number;
   meet: number; call: number; lastClassAt: Date | null;
   noShows: number; ranShort: number; ranOver: number; idle: number;
   schedMin: number; actualMin: number; durSamples: number;
@@ -53,7 +79,7 @@ type Roll = {
   moves: number; packs: number; challenges: number;
 };
 const emptyRoll = (): Roll => ({
-  scheduled: 0, conducted: 0, students: 0, errors: 0, liveNow: 0, meet: 0, call: 0, lastClassAt: null,
+  scheduled: 0, conducted: 0, students: 0, errors: 0, reconnects: 0, liveNow: 0, meet: 0, call: 0, lastClassAt: null,
   noShows: 0, ranShort: 0, ranOver: 0, idle: 0,
   schedMin: 0, actualMin: 0, durSamples: 0, lateMin: 0, lateSamples: 0,
   moves: 0, packs: 0, challenges: 0,
@@ -277,7 +303,6 @@ export class DreamMeetStatsController {
         .toArray();
       for (const c of extra) classById.set(String(c._id), c);
     }
-    const errByClass = new Map<string, number>();
 
     // ── per-class facts + roll up ───────────────────────────────────────────
     const byAcademy = new Map<string, Roll & { coaches: Set<string> }>();
@@ -363,7 +388,7 @@ export class DreamMeetStatsController {
           .sort((x, y) => (+(x.joinedAt ?? 0)) - (+(y.joinedAt ?? 0)))
           .slice(0, 30)
           .map((x) => ({ name: x.name, joinedAt: x.joinedAt, lastSeenAt: x.lastSeenAt })) : [],
-        errors: 0, errorList: [] as any[],
+        errors: 0, reconnects: 0, errorList: [] as any[],
         // What was used, oldest action first. `[]` = recorded and the board was never
         // touched; `null` = no tally exists at all, i.e. the class ran before usage
         // tracking was recording. Those two must not read the same on the board.
@@ -381,15 +406,26 @@ export class DreamMeetStatsController {
 
     // Errors attribute to the CLASS's academy/coach when resolvable.
     const recentErrors: any[] = [];
+    const recentReconnects: any[] = [];
     for (const e of errs) {
       const cid = classIdOf(e);
       const klass = cid ? classById.get(cid) : null;
       const aId = String(e.academyId || klass?.academyId || "(none)");
       const cId = String(klass?.createdByUserId || e.userId || "(unknown)");
       const n = Number(e.n) || 1;
+      if (isReconnect(e)) {
+        academyRoll(aId).reconnects += n;
+        coachRoll(cId, klass?.academyId ? String(klass.academyId) : null).reconnects += n;
+        if (recentReconnects.length < 100) {
+          recentReconnects.push({
+            at: e.at, why: reconnectWhy(e), message: e.message, n, classId: cid, classTitle: klass?.title ?? null,
+            academyId: aId === "(none)" ? null : aId, coachId: cId === "(unknown)" ? null : cId, userId: e.userId ?? null,
+          });
+        }
+        continue;
+      }
       academyRoll(aId).errors += n;
       coachRoll(cId, klass?.academyId ? String(klass.academyId) : null).errors += n;
-      if (cid) errByClass.set(cid, (errByClass.get(cid) || 0) + n);
       if (recentErrors.length < 100) {
         recentErrors.push({
           at: e.at, kind: e.kind, message: e.message, route: e.route ?? null, url: e.url ?? null,
@@ -398,7 +434,10 @@ export class DreamMeetStatsController {
         });
       }
     }
-    for (const r of classRows) r.errors = errByClass.get(r.classId) || 0;
+    // Per-class counts are assigned ONCE, in the attribution block below (by id, else by
+    // time window). They used to be pre-filled here by id as well, so every error that
+    // named its class was counted twice on the class row — 8 shown for 4 on 25 Sep.
+    for (const r of classRows) { r.errors = 0; r.reconnects = 0; }
 
     // ── names (academies._id and users._id are STRINGS) ─────────────────────
     const academyIds = [...byAcademy.keys()].filter((k) => k !== "(none)");
@@ -411,7 +450,7 @@ export class DreamMeetStatsController {
     const userName = new Map<string, string>(userDocs.map((u: any) => [String(u._id), u.name || u.username || String(u._id)]));
 
     const strip = (r: Roll) => ({
-      scheduled: r.scheduled, conducted: r.conducted, students: r.students, errors: r.errors,
+      scheduled: r.scheduled, conducted: r.conducted, students: r.students, errors: r.errors, reconnects: r.reconnects,
       liveNow: r.liveNow, meet: r.meet, call: r.call, lastClassAt: r.lastClassAt,
       noShows: r.noShows, ranShort: r.ranShort, ranOver: r.ranOver, idle: r.idle,
       avgScheduledMin: avg(r.schedMin, r.durSamples),
@@ -440,10 +479,10 @@ export class DreamMeetStatsController {
     };
     liveNow.forEach(nameUp);
     classRows.forEach(nameUp);
-    recentErrors.forEach((e) => {
+    for (const e of [...recentErrors, ...recentReconnects]) {
       e.academyName = e.academyId ? (academyName.get(String(e.academyId)) || e.academyId) : null;
       e.coachName = e.coachId ? (userName.get(String(e.coachId)) || e.coachId) : null;
-    });
+    }
 
     const durSamples = classRows.filter((r) => r.deltaMin != null);
     const totals = {
@@ -451,6 +490,7 @@ export class DreamMeetStatsController {
       conducted: academies.reduce((n, a) => n + a.conducted, 0),
       students: academies.reduce((n, a) => n + a.students, 0),
       errors: academies.reduce((n, a) => n + a.errors, 0),
+      reconnects: academies.reduce((n, a) => n + a.reconnects, 0),
       liveNow: liveNow.length,
       academies: academies.length,
       coaches: coaches.length,
@@ -489,6 +529,7 @@ export class DreamMeetStatsController {
           if (hit) row = hit.row;
         }
         if (!row) continue;
+        if (isReconnect(e)) { row.reconnects += n; continue; }   // reloads / second devices: counted, never listed as errors
         row.errors += n;
         if (row.errorList.length < 8) {
           row.errorList.push({ at: e.at, kind: e.kind ?? null, message: e.message ?? null, status: e.status ?? null, n });
@@ -497,11 +538,15 @@ export class DreamMeetStatsController {
     }
 
     const errorsByKind: Record<string, number> = {};
-    for (const e of errs) errorsByKind[e.kind || "other"] = (errorsByKind[e.kind || "other"] || 0) + (Number(e.n) || 1);
+    const reconnectsByWhy: Record<string, number> = {};
+    for (const e of errs) {
+      if (isReconnect(e)) { const w = reconnectWhy(e); reconnectsByWhy[w] = (reconnectsByWhy[w] || 0) + (Number(e.n) || 1); continue; }
+      errorsByKind[e.kind || "other"] = (errorsByKind[e.kind || "other"] || 0) + (Number(e.n) || 1);
+    }
 
     return {
       ok: true, generatedAt: new Date(), windowDays: days, driftMin: DRIFT_MIN,
-      totals, errorsByKind, liveNow, academies, coaches, recentErrors,
+      totals, errorsByKind, reconnectsByWhy, liveNow, academies, coaches, recentErrors, recentReconnects,
       worst, classes: classRows.slice(0, 300),
     };
   }
