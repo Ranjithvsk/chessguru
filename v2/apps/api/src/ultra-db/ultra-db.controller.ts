@@ -1,4 +1,6 @@
-// ChessGuru DB — a real search surface over the 1.09M-game broadcast library.
+// ChessGuru DB — a real search surface over the deduped master-game corpus
+// (chessguru.corpusgames, 12.1M games as of 2026-09-23; ask /api/ultra-db/count
+// rather than writing the figure down anywhere).
 // (Named "Ultra Database" when built; the route path kept that spelling.)
 //
 // The existing /api/broadcasts browser can filter by Elo, result, a name/event
@@ -127,6 +129,19 @@ export class UltraDbController {
     return f;
   }
 
+  /** Corpus size, for the "of N" label on the search page.
+   *  estimatedDocumentCount() reads collection metadata -- O(1), no scan -- so this is
+   *  cheap on every page load. It exists because that label used to be the LITERAL string
+   *  "1.09M" in the UI: when this controller was repointed from the 1.2M broadcast library
+   *  to the 12.1M deduped corpus (4334e3c), the caption stayed behind and the page read
+   *  "0 of 1.09M" over a corpus ten times that size. A number the server computes cannot
+   *  drift away from the collection it describes. */
+  @Get("count")
+  async count(@Req() req: any) {
+    if (!req?.session?.userId) throw new UnauthorizedException();
+    return { ok: true, total: await this.games().estimatedDocumentCount() };
+  }
+
   @Get("search")
   async search(@Query() q: Record<string, any>, @Req() req: any) {
     if (!req?.session?.userId) throw new UnauthorizedException();
@@ -158,7 +173,7 @@ export class UltraDbController {
       .limit(limit)
       .toArray();
 
-    // Counting 1.09M rows on a loose filter is slow, so cap the work and tell
+    // Counting the whole corpus on a loose filter is slow, so cap the work and tell
     // the client the number is a floor rather than lying with a wrong total.
     const CAP = 10000;
     const counted = await this.games().countDocuments(filter, { limit: CAP });
@@ -263,7 +278,7 @@ export class UltraDbController {
     const f = String(fen || "").trim();
     if (!f) return { ok: true, rows: [], note: "no position given" };
     // Position search needs a per-position index to be fast at this scale.
-    // Until that exists, say so plainly rather than running a 1.09M-game scan
+    // Until that exists, say so plainly rather than running a full-corpus scan
     // that would tie up the database for everyone.
     return {
       ok: true,

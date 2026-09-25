@@ -1,4 +1,4 @@
-// ChessGuru DB — search surface over the 1.09M-game broadcast library.
+// ChessGuru DB — search surface over the deduped master-game corpus.
 // (Named "Ultra Database" when built, renamed 2026-09-21. The route /database and the API
 //  path /api/ultra-db were left alone: changing a live route would break any
 //  link already shared, and the API path is not user-visible.)
@@ -18,7 +18,7 @@
 // list underneath it.
 
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { get, post } from "../lib/api";
 
@@ -29,6 +29,15 @@ type Row = {
   event?: string; date?: string; dateKey?: string; result?: string; round?: string; ply?: number;
   eco?: string | null; openingName?: string | null;
 };
+/** 12,145,183 -> "12.1M". Feeds the "of N" caption, which used to be the literal
+ *  string "1.09M" and stayed that way when this page was repointed at a corpus ten
+ *  times larger -- so it read "0 of 1.09M" while searching 12.1M games. */
+function compactCount(n: number): string {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 1 : 2)}M`;
+  if (n >= 1e3) return `${Math.round(n / 1e3)}K`;
+  return String(n);
+}
+
 type SearchResp = { ok: boolean; rows: Row[]; total: number; totalIsCapped: boolean; offset: number; limit: number };
 type StatsResp = {
   ok: boolean;
@@ -59,20 +68,30 @@ const SORTS = [
 
 export default function UltraDatabase() {
   // ── the query ─────────────────────────────────────────────────────
-  const [player, setPlayer] = useState("");
-  const [colour, setColour] = useState<"any" | "white" | "black">("any");
-  const [opponent, setOpponent] = useState("");
-  const [text, setText] = useState("");
-  const [opening, setOpening] = useState("");
-  const [result, setResult] = useState("");
-  const [bothElo, setBothElo] = useState(0);
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [minPly, setMinPly] = useState("");
-  const [maxPly, setMaxPly] = useState("");
-  const [eco, setEco] = useState("");
-  const [sort, setSort] = useState("date");
-  const [offset, setOffset] = useState(0);
+  // Seeded from, and mirrored back into, the URL. Before this the whole query lived only in
+  // component state: opening a game unmounted the page and every filter was gone, so coming
+  // back -- or pressing reload -- landed you on an empty form with your search lost. The
+  // page was already building exactly the right URLSearchParams for its API call; it simply
+  // never put them in the address bar. Now the query IS the URL, which also makes a search
+  // shareable and the browser's Back button work the way people expect.
+  const [sp, setSp] = useSearchParams();
+  const q0 = (k: string, d = "") => sp.get(k) ?? d;
+
+  const [player, setPlayer] = useState(() => q0("player"));
+  const [colour, setColour] = useState<"any" | "white" | "black">(
+    () => (q0("colour", "any") as "any" | "white" | "black"));
+  const [opponent, setOpponent] = useState(() => q0("opponent"));
+  const [text, setText] = useState(() => q0("q"));
+  const [opening, setOpening] = useState(() => q0("opening"));
+  const [result, setResult] = useState(() => q0("result"));
+  const [bothElo, setBothElo] = useState(() => Number(q0("bothElo", "0")) || 0);
+  const [from, setFrom] = useState(() => q0("from"));
+  const [to, setTo] = useState(() => q0("to"));
+  const [minPly, setMinPly] = useState(() => q0("minPly"));
+  const [maxPly, setMaxPly] = useState(() => q0("maxPly"));
+  const [eco, setEco] = useState(() => q0("eco"));
+  const [sort, setSort] = useState(() => q0("sort", "date"));
+  const [offset, setOffset] = useState(() => Number(q0("offset", "0")) || 0);
   // Table or list, as the reference viewer offers. Table is for scanning a
   // tournament; list is for reading on a phone. Remembered, because a coach
   // has a preference and re-picking it every visit is friction.
@@ -86,7 +105,12 @@ export default function UltraDatabase() {
 
   // Debounced copy — typing a player name should not fire a query per keystroke
   // against a million rows.
-  const [live, setLive] = useState({ player: "", opponent: "", text: "", opening: "" });
+  // Seeded from the URL too: starting it empty would fire one query with no filters on every
+  // reload, flashing an unfiltered result set before the real one arrived.
+  const [live, setLive] = useState(() => ({
+    player: sp.get("player") ?? "", opponent: sp.get("opponent") ?? "",
+    text: sp.get("q") ?? "", opening: sp.get("opening") ?? "",
+  }));
   useEffect(() => {
     const h = setTimeout(() => {
       setLive({ player, opponent, text, opening });
@@ -112,12 +136,31 @@ export default function UltraDatabase() {
     return p;
   }, [live, colour, result, eco, bothElo, from, to, minPly, maxPly, sort]);
 
+  // Mirror the query back into the address bar. `replace` rather than `push`: a filter is not
+  // a navigation, and pushing one entry per keystroke would make Back walk backwards through
+  // every character typed. Replacing keeps the CURRENT history entry carrying the query, so
+  // opening a game and pressing Back returns to the search exactly as it was, and reload
+  // rebuilds it from the URL.
+  useEffect(() => {
+    const next = new URLSearchParams(params);
+    if (offset) next.set("offset", String(offset));
+    if (next.toString() !== sp.toString()) setSp(next, { replace: true });
+    // `sp` is deliberately not a dependency: it changes as a RESULT of this effect, and the
+    // string comparison above is what stops the loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params, offset]);
+
   const hasQuery = params.toString() !== "sort=date" && [...params.keys()].some((k) => k !== "sort");
 
   const search = useQuery<SearchResp>({
     queryKey: ["ultradb", params.toString(), offset],
     queryFn: () => get<SearchResp>(`/api/ultra-db/search?${params.toString()}&limit=${PAGE}&offset=${offset}`),
     staleTime: 30_000,
+  });
+  const corpus = useQuery<{ ok: boolean; total: number }>({
+    queryKey: ["ultradb-count"],
+    queryFn: () => get<{ ok: boolean; total: number }>("/api/ultra-db/count"),
+    staleTime: 60 * 60_000,     // changes when the corpus is rebuilt, not per session
   });
   const stats = useQuery<StatsResp>({
     queryKey: ["ultradb-stats", params.toString()],
@@ -217,7 +260,9 @@ export default function UltraDatabase() {
             <div className="text-sm text-ink-400">
               {search.isLoading ? "Searching…"
                 : `${search.data?.totalIsCapped ? "10,000+" : total.toLocaleString()} game${total === 1 ? "" : "s"}`}
-              <span className="text-ink-600"> · of 1.09M</span>
+              {corpus.data?.total ? (
+                <span className="text-ink-600"> · of {compactCount(corpus.data.total)}</span>
+              ) : null}
             </div>
             <div className="flex items-center gap-2">
               {/* wraps: ten sort chips are wider than a 390px phone column */}

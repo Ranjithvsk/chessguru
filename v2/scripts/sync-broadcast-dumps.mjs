@@ -62,7 +62,9 @@ function stripAnnotations(pgn) {
 const cli = new MongoClient("mongodb://127.0.0.1:27017");
 await cli.connect();
 const db = cli.db("chessguru");
-const col = db.collection("broadcastgames");
+// corpusgames, not the retired broadcastgames (2026-09-24) -- see the note in
+// load-broadcast-games.mjs.
+const col = db.collection("corpusgames");
 const feeds = db.collection("dataFeeds");
 
 const book = new Map();
@@ -163,7 +165,16 @@ for (const url of todo) {
       if (known.has(p.mh) || seenHere.has(p.mh)) { dupes++; continue; }
       seenHere.add(p.mh);
       const rnd = Math.floor(Math.random() * 0xfffff).toString(16).padStart(5, "0");
-      fresh.push({ _id: (p.mh + rnd).slice(0, 20), ...p.doc });
+      // corpusgames shape -- see load-broadcast-games.mjs. _id left to Mongo; the old 20-hex
+      // id becomes _srcId so /broadcasts/:id still resolves links shared before the move.
+      const y = String(p.doc.dateKey || p.doc.date || "").slice(0, 4);
+      fresh.push({
+        ...p.doc,
+        _srcId: (p.mh + rnd).slice(0, 20),
+        source: "broadcast",
+        fromBroadcast: true,
+        year: /^\d{4}$/.test(y) ? Number(y) : null,
+      });
     }
     if (fresh.length && !DRY) { try { await col.insertMany(fresh, { ordered: false }); } catch { /* races on _id */ } }
     added += fresh.length;
@@ -205,6 +216,10 @@ for (const url of todo) {
         whiteElo: Number(h.WhiteElo) || null, blackElo: Number(h.BlackElo) || null,
         event: h.Event || null, site: h.Site || null, round: h.Round || null,
         date: h.Date || null, dateKey: date, result: h.Result,
+        // TimeControl: captured by nothing before 2026-09-24, so the corpus has no
+        // blitz/rapid/classical distinction for anything ingested earlier. ~76 monthly
+        // archives are still to import, and they will now arrive carrying it.
+        timeControl: h.TimeControl || null,
         source: "broadcast", eco, openingName, mh: movesHash(sans),
         loadedAt: new Date(), fromDump: name,
       },

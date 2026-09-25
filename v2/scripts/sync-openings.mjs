@@ -59,7 +59,10 @@ const w = await db.collection("openingnames").bulkWrite(ops, { ordered: false })
 console.log(`book: ${ops.length} positions — ${w.upsertedCount} added, ${w.modifiedCount} updated`);
 
 // Re-name the library against the refreshed book.
-const col = db.collection("broadcastgames");
+// corpusgames (2026-09-24). This used to re-name only the 1.2M broadcast library; the
+// corpus is 12.16M, so the pass is longer but it finally reaches the 9M lumbras games
+// that until now carried the coarse one-name-per-ECO mapping.
+const col = db.collection("corpusgames");
 const t0 = Date.now();
 let n = 0, changed = 0, writes = [];
 for await (const g of col.find({}, { projection: { moves: 1, eco: 1, openingName: 1 } })) {

@@ -373,7 +373,10 @@ export class StudiesService {
     // ── look the game up in the library ──────────────────────────────
     let linked: any = null;
     try {
-      const candidates = await this.conn.db!.collection("broadcastgames")
+      // corpusgames, not the retired broadcastgames (2026-09-24). The corpus is a superset:
+      // every feed game is in it plus 11M more, so attribution now covers the whole library
+      // rather than only relayed tournaments.
+      const candidates = await this.conn.db!.collection("corpusgames")
         .find({ mh: movesHash(sans) }, { projection: { moves: 1, whiteName: 1, blackName: 1, event: 1, date: 1, result: 1, round: 1, site: 1, whiteElo: 1, blackElo: 1 } })
         .limit(20)
         .toArray();

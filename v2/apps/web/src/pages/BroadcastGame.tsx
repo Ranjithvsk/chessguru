@@ -1,4 +1,10 @@
-// Single-game viewer for a Lichess broadcast game. Route: /broadcasts/:id
+// Single-game viewer. Route: /broadcasts/:id
+//
+// Serves games from BOTH libraries: chessguru.broadcastgames (the Lichess broadcast
+// feed, string _id) and chessguru.corpusgames (the 12.1M deduped master corpus,
+// ObjectId _id). The "back" target follows whichever one the server actually read,
+// because a hardcoded "All broadcasts" link sent anyone arriving from /database into
+// a different collection than the one they were browsing.
 //
 // Renders board + step-through of the mainline SANs, plus the game header
 // (event / date / players / result) and the full move list on the side.
@@ -22,6 +28,13 @@ export default function BroadcastGamePage() {
   });
 
   const g = data && "found" in data && data.found ? data : null;
+
+  // On the not-found branch the server told us nothing, so fall back to the id's own shape:
+  // a 24-hex id can only be a corpus game, anything else can only be a broadcast one.
+  const fromCorpus = (g as any)?.source === "corpusgames"
+    || (!g && /^[0-9a-fA-F]{24}$/.test(id));
+  const backTo = fromCorpus ? "/database" : "/broadcasts";
+  const backLabel = fromCorpus ? "← ChessGuru DB" : "← All broadcasts";
 
   // Replay all moves once (chess.js) to build a per-ply FEN + from/to list.
   const { positions, fromTo, moves } = useMemo(() => {
@@ -61,7 +74,7 @@ export default function BroadcastGamePage() {
     return (
       <div className="mx-auto max-w-md rounded-xl2 border border-ink-700 bg-ink-900 p-6 text-center">
         <p className="text-sm text-ink-400">Game not found.</p>
-        <Link to="/broadcasts" className="mt-3 inline-block text-sm text-brand-400 hover:underline">← All broadcasts</Link>
+        <Link to={backTo} className="mt-3 inline-block text-sm text-brand-400 hover:underline">{backLabel}</Link>
       </div>
     );
   }
@@ -72,7 +85,7 @@ export default function BroadcastGamePage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-4">
-      <Link to="/broadcasts" className="text-xs text-ink-500 hover:text-ink-300">← All broadcasts</Link>
+      <Link to={backTo} className="text-xs text-ink-500 hover:text-ink-300">{backLabel}</Link>
 
       <div className="rounded-xl2 border border-ink-700 bg-ink-900 p-4">
         <div className="text-[11px] uppercase tracking-wide text-ink-500">{g.event} · {g.round} · {g.date}</div>

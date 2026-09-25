@@ -99,7 +99,11 @@ function stripAnnotations(pgn) {
 const cli = new MongoClient("mongodb://127.0.0.1:27017");
 await cli.connect();
 const db = cli.db("chessguru");
-const col = db.collection("broadcastgames");
+// corpusgames, not the retired broadcastgames (2026-09-24). Writing straight into the
+// search corpus removes the hourly copy step (chessdb-broadcast-topup) that used to
+// bridge the two collections, and the "already held" check below now dedupes against
+// the permanent corpus instead of a staging copy of it.
+const col = db.collection("corpusgames");
 // Round ledger. Completeness depends on this: the tournament index only shows
 // the most recent N, so anything that ages off between runs would be lost
 // forever. Recording every round we have ever seen — and whether it was
@@ -213,6 +217,9 @@ for (const t of backlog) {
         whiteElo: Number(h.WhiteElo) || null, blackElo: Number(h.BlackElo) || null,
         event: h.Event || t.name, site: h.Site || null, round: h.Round || null,
         date: h.Date || null, dateKey: date, result: h.Result || "*",
+        // TimeControl was captured by nothing until 2026-09-24, so the corpus has no
+        // blitz/rapid/classical distinction at all for anything ingested before then.
+        timeControl: h.TimeControl || null,
         source: "broadcast", eco, openingName, mh,
         loadedAt: new Date(),
       },
@@ -235,9 +242,19 @@ const seenThisRun = new Set();
 for (const x of toInsert) {
   if (known.has(x.mh) || seenThisRun.has(x.mh)) { dupes++; continue; }
   seenThisRun.add(x.mh);
-  // id shaped like the existing rows (20 hex), derived so a re-run is idempotent
+  // corpusgames shape. _id is left to Mongo (ObjectId); the 20-hex id the old collection
+  // used lives on as _srcId, which is what /broadcasts/:id falls back to for links already
+  // shared. `fromBroadcast` is the flag the broadcast page filters on -- `source` alone is
+  // not enough, because the move-hash dedup can leave a game under another source.
   const rnd = Math.floor(Math.random() * 0xfffff).toString(16).padStart(5, "0");
-  fresh.push({ _id: (x.mh + rnd).slice(0, 20), ...x.doc });
+  const y = String(x.doc.dateKey || x.doc.date || "").slice(0, 4);
+  fresh.push({
+    ...x.doc,
+    _srcId: (x.mh + rnd).slice(0, 20),
+    source: "broadcast",
+    fromBroadcast: true,
+    year: /^\d{4}$/.test(y) ? Number(y) : null,
+  });
 }
 
 console.log(`\nscanned ${seenGames} games: ${dupes} already held, ${unfinished} still being played, ${skipped} unusable, ${fresh.length} new`);
