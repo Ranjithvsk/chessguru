@@ -16,6 +16,8 @@ BEFORE/AFTER screenshots + `admin_notes` captions per index + commit sha →
 | TKT-249 | guna-chess-academy (`sarika`) | Rename chapters in a study — shipped (pencil on chapter rows), coach confirmed. | — | coach: "Ok anna" | RESOLVED 2026-09-25 |
 | TKT-86 | guna-chess-academy (`akshayprathab`) | "Rating 2820 → 22" — data showed 2122 over 852 puzzles, last-100 range 2056–2281; answered, acknowledged. | — | userperfs read-back | RESOLVED 2026-09-25 |
 | TKT-151 | guna-chess-academy (`gunachess`) | Change a student's password — duplicate of TKT-127 (⋯ → 🔑 Password on the student card, live since 2026-09-04); replied with steps. | — | — | RESOLVED 2026-09-25 |
+| TKT-251 | guna-chess-academy (`gunachess`) | "Ready stopped for books" — 11 books uploaded within 30 min on 18 Sep; 7 showed "0 positions · 0%" for hours. They were queued behind one another (all finished 23:16 IST that night), but the shelf could not say so, and the in-memory queue would have stranded them for good after any restart. Vision service now re-adopts stranded books (sweep at boot + every 5 min), a re-upload restarts a stuck read, shelf says queued/failed instead of 0%. | 7026fed | Staged queued book adopted 8 s after a service restart; all 16 of gunachess's books state=done with positions | RESOLVED 2026-09-25 |
+| TKT-242 | guna-chess-academy (`harinitharanjith`) | Mate-in-3 #MRZuh: student played Qh5+, marked wrong, "solved correctly why?" — Stockfish 18: after Qh5+ Kxg3! escapes (−5.3 for Black); only Qh4+ mates (queen on h4 guards g3). App was right; the review panel now says WHY: engine's reply to the wrong move under "You played". | e65538c | `GET /api/puzzles/MRZuh/refute?wrong=g5h5` → Kxg3, cp −525, live on chessguru.cc | RESOLVED 2026-09-25 |
 
 ## Note on notifications
 
