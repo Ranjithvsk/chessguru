@@ -952,6 +952,18 @@ export class UserBooksController {
     if (existing) {
       const linked = this.addOwner(existing.id, uid);
       this.log.log(`linked ${uid} to existing copy ${existing.id} instead of a second render — title=${JSON.stringify(name)}`);
+      // A stored copy that never finished — the service was down at upload, or a
+      // restart stranded it mid-render — is asked for again. Until now a re-upload
+      // of the same file only linked the coach and left the book exactly as stuck
+      // as before (TKT-251). The service refuses if it is genuinely reading it.
+      if (linked.state !== "done") {
+        this.log.warn(`stored copy ${existing.id} is ${linked.state} — asking the vision service to read it again`);
+        fetch(`${VISION_URL}/book/ingest`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ book_id: existing.id, pdf_path: join(bookDir(existing.id), "book.pdf") }),
+          signal: AbortSignal.timeout(20_000),
+        }).catch(() => { /* the service sweeps stranded books itself every 5 min */ });
+      }
       return {
         ok: true, alreadyHave: true, local: true, linked: true,
         book: {

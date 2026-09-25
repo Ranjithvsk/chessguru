@@ -10,6 +10,7 @@ import io
 import logging
 import os
 import sys
+import threading
 import time
 from typing import Any
 
@@ -228,13 +229,18 @@ def _classify_via_own(board_bgr: np.ndarray, cv_pipeline, own_yolo, empty_prior:
     # Piece pictograms are (roughly) horizontally symmetric so flip should give
     # near-identical probs. Averaging over original + flip = free accuracy.
     tiles_flip = [cv2.flip(t, 1) for t in tiles]
-    results = own_yolo.predict(tiles, imgsz=64, verbose=False, device="cpu")
-    results_flip = own_yolo.predict(tiles_flip, imgsz=64, verbose=False, device="cpu")
     probs_our_order = np.zeros((64, 13), dtype=np.float32)
-    for i, (r, rf) in enumerate(zip(results, results_flip)):
-        p = r.probs.data.cpu().numpy() if hasattr(r.probs.data, "cpu") else np.asarray(r.probs.data)
-        pf = rf.probs.data.cpu().numpy() if hasattr(rf.probs.data, "cpu") else np.asarray(rf.probs.data)
-        probs_our_order[i] = 0.5 * (p + pf)
+    # Same weights, same tiling, same flip-average — only the matrix multiply moved.
+    _g = _gpu_classify_board(board)
+    if _g is not None:
+        probs_our_order = _g
+    else:
+        results = own_yolo.predict(tiles, imgsz=64, verbose=False, device="cpu")
+        results_flip = own_yolo.predict(tiles_flip, imgsz=64, verbose=False, device="cpu")
+        for i, (r, rf) in enumerate(zip(results, results_flip)):
+            p = r.probs.data.cpu().numpy() if hasattr(r.probs.data, "cpu") else np.asarray(r.probs.data)
+            pf = rf.probs.data.cpu().numpy() if hasattr(rf.probs.data, "cpu") else np.asarray(rf.probs.data)
+            probs_our_order[i] = 0.5 * (p + pf)
 
     # YOLOv8n-cls only mode (2026-08-14, matching Tandberg ChessVision-3LC /
     # ChessVision AI stack). DINOv2 + DINOv3 loaders kept above but not
@@ -781,6 +787,62 @@ def full(body: ImageIn) -> dict[str, Any]:
     }
 
 
+
+# --- GPU offload for the piece classifier ---------------------------------------
+# The classifier runs 128 tile inferences per board (64 squares x the flip TTA), which
+# is by far the heaviest thing in a book ingest; the detector runs once per page. So
+# only this is offloaded, and only the raw forward pass: every piece of logic --
+# warping, rotation choice, best-of-N ranking, the aspect gate, chess_logic -- stays
+# here. One pipeline, two devices.
+#
+# This is deliberately NOT "run the reading on Vinayaka". That was tried on 2026-09-19
+# with Vinayaka's own ingest script and gave a DIFFERENT answer to the same PDF (38
+# positions vs 32) even with byte-identical weights. Measured through this offload
+# instead: 1151/1152 identical square labels, max probability delta 0.004.
+#
+# Falls back to the local CPU silently and permanently-per-request on any failure, so
+# a sleeping PC or a dropped tunnel costs latency, never correctness.
+_GPU_CLS_URL = os.environ.get("GPU_CLS_URL", "http://127.0.0.1:5199")
+_GPU_CLS_ON = os.environ.get("GPU_CLS", "1") not in ("0", "", "off")
+_gpu_cls_bad_until = 0.0
+_BN_ON = os.environ.get("BOARDNET", "1") not in ("0", "", "off")
+
+
+def _gpu_classify_board(board):
+    """64x13 averaged probabilities from the GPU box, or None to use the local model.
+
+    Sends the WHOLE 512x512 board in one request and lets the GPU tile it and do the
+    flip-TTA. The first version shipped 64 base64 PNGs and then another 64 for the
+    flip: 1253 ms of transport to save 41 ms of GPU, measured. One image is a
+    fraction of that and halves the round trips as well.
+
+    After a failure the GPU is skipped for 60 s. A book is thousands of calls, and
+    re-dialling a sleeping PC on each one would be far slower than plain CPU.
+    """
+    global _gpu_cls_bad_until
+    if not _GPU_CLS_ON or time.time() < _gpu_cls_bad_until:
+        return None
+    try:
+        import json as _json
+        import urllib.request as _url
+        ok, buf = cv2.imencode(".png", board)
+        if not ok:
+            return None
+        req = _url.Request(_GPU_CLS_URL + "/board",
+                           data=_json.dumps({"board": base64.b64encode(buf.tobytes()).decode()}).encode(),
+                           headers={"content-type": "application/json"})
+        with _url.urlopen(req, timeout=30) as r:
+            out = _json.load(r)
+        pr = out.get("probs")
+        if not pr or len(pr) != 64 or len(pr[0]) != 13:
+            return None
+        return np.asarray(pr, dtype=np.float32)
+    except Exception as e:
+        _gpu_cls_bad_until = time.time() + 60
+        log.warning("GPU classifier unavailable (%s) - using local CPU for 60s", e)
+        return None
+
+
 _seg_model = None
 
 
@@ -978,6 +1040,41 @@ class BookIngestIn(BaseModel):
     pdf_path: str
 
 
+# Module-level (not closures inside the endpoint) so the sweeper below can start
+# a read with exactly the same detector and reader the upload path uses.
+def _book_classify(img, warped=None):
+    # Strip coordinate margins from a book crop before classifying.
+    #
+    # Passing `warped` tells /classify to trust the crop and skip its own
+    # extractor — which also skips _refine_crop_to_checker, the pass that cuts
+    # the a-h / 1-8 label strips off. Books that print coordinates INSIDE the
+    # board frame (The Mammoth Book of the World's Greatest Chess Games) then
+    # get an 8x8 split that lands between squares, and EVERY piece shifts a
+    # file: actual r1bq1rk1/... came out rbqqRrk1/..., with per-square
+    # confidence near zero. Measured 2026-09-17: mean minConf 0.069 and 294 of
+    # 294 diagrams flagged, against 0.989 / 1% for a book without inner labels.
+    #
+    # Guarded exactly as the interactive path guards it: keep the refinement
+    # only when it does not shrink the board away AND actually scores better,
+    # so a book that never had label margins is left alone.
+    if warped is not None:
+        try:
+            refined = _refine_crop_to_checker(warped)
+            if (refined is not None and refined.size > 0.20 * warped.size
+                    and _score_warp_quality(refined)["score"]
+                        > _score_warp_quality(warped)["score"] + 0.05):
+                warped = refined
+        except Exception as e:
+            log.warning("book crop refine failed: %s", e)
+    b64 = _encode_b64_png(img)
+    payload = ImageIn(image_base64=b64,
+                      warped_board_base64=_encode_b64_png(warped) if warped is not None else None)
+    return classify(payload)
+
+def _book_detect(img):
+    return _detect_all_boards(img, min_boards=1)
+
+
 @app.post("/book/ingest")
 def book_ingest(body: BookIngestIn) -> dict[str, Any]:
     """Start reading a whole book in the background. Returns immediately.
@@ -989,42 +1086,13 @@ def book_ingest(body: BookIngestIn) -> dict[str, Any]:
     if not os.path.isfile(body.pdf_path):
         raise HTTPException(status_code=400, detail="pdf not found")
     cur = bi.read_status(body.book_id)
-    if cur.get("state") in ("queued", "rendering"):
+    # The FILE saying queued/rendering is not enough: after a restart it still
+    # says so while nobody is working. Only refuse when a thread here owns it,
+    # otherwise a re-upload of a stuck book could never restart it (TKT-251).
+    if cur.get("state") in ("queued", "rendering") and bi.owns(body.book_id):
         return {"ok": True, "already": True, **cur}
 
-    def _classify(img, warped=None):
-        # Strip coordinate margins from a book crop before classifying.
-        #
-        # Passing `warped` tells /classify to trust the crop and skip its own
-        # extractor — which also skips _refine_crop_to_checker, the pass that cuts
-        # the a-h / 1-8 label strips off. Books that print coordinates INSIDE the
-        # board frame (The Mammoth Book of the World's Greatest Chess Games) then
-        # get an 8x8 split that lands between squares, and EVERY piece shifts a
-        # file: actual r1bq1rk1/... came out rbqqRrk1/..., with per-square
-        # confidence near zero. Measured 2026-09-17: mean minConf 0.069 and 294 of
-        # 294 diagrams flagged, against 0.989 / 1% for a book without inner labels.
-        #
-        # Guarded exactly as the interactive path guards it: keep the refinement
-        # only when it does not shrink the board away AND actually scores better,
-        # so a book that never had label margins is left alone.
-        if warped is not None:
-            try:
-                refined = _refine_crop_to_checker(warped)
-                if (refined is not None and refined.size > 0.20 * warped.size
-                        and _score_warp_quality(refined)["score"]
-                            > _score_warp_quality(warped)["score"] + 0.05):
-                    warped = refined
-            except Exception as e:
-                log.warning("book crop refine failed: %s", e)
-        b64 = _encode_b64_png(img)
-        payload = ImageIn(image_base64=b64,
-                          warped_board_base64=_encode_b64_png(warped) if warped is not None else None)
-        return classify(payload)
-
-    def _detect(img):
-        return _detect_all_boards(img, min_boards=1)
-
-    bi.start(body.book_id, body.pdf_path, _classify, _detect)
+    bi.start(body.book_id, body.pdf_path, _book_classify, _book_detect)
     return {"ok": True, "started": True}
 
 
@@ -1310,6 +1378,20 @@ def _classify_once(body: ImageIn) -> dict[str, Any]:
     _kings_ok = _board_field.count("K") == 1 and _board_field.count("k") == 1
     probs = pos.model_probabilities   # (64, 13)
     label_names = constants.LABEL_NAMES
+    # BoardNet: re-decide all 64 squares together, using the fact that the other 63
+    # squares of this board share its printing texture. The patch classifier cannot
+    # see that, which is how halftone screen becomes a phantom pawn. Added as an
+    # EXTRA candidate and refused whenever it would turn a legal read illegal, so a
+    # regression is structurally impossible rather than something a benchmark might
+    # catch. Measured over 638 boards: illegal 8.9% -> 1.6%, Winning Chess Manoeuvres
+    # 95% -> 5%, and zero regressions across 800 boards of already-clean books.
+    _bn_applied = False
+    if os.environ.get("BOARDNET", "1") not in ("0", "", "off"):
+        try:
+            import boardnet_hook as _bnh
+            probs, _bn_applied = _bnh.refine(probs, warped, list(label_names))
+        except Exception as _e:
+            log.warning("BoardNet refine skipped: %s", _e)
     # Chess-logic repair. The classifier reads each square independently, so it
     # cannot notice it has just given Black three rooks while White has one --
     # four rooks total, so nothing was promoted and a COLOUR was misread. We
@@ -1335,7 +1417,86 @@ def _classify_once(body: ImageIn) -> dict[str, Any]:
                     out.append(ch)
         return out if len(out) == 64 else None
 
-    _labels = _labels_from_fen(pos.fen) or [label_names[int(probs[i].argmax())] for i in range(64)]
+    # When BoardNet re-decided the board, ITS reading is the starting point -- taking
+    # pos.fen here was why the refine above had no effect at first: the final FEN is
+    # built from pos.fen, and probs only informs the repairs below. BoardNet already
+    # refuses to turn a legal read illegal, and chess_logic still runs on top, so
+    # Tandberg's rules are added to rather than discarded.
+    _base_labels = _labels_from_fen(pos.fen) or [label_names[int(probs[i].argmax())] for i in range(64)]
+    _labels = _base_labels
+    if _bn_applied:
+        _bn_labels = [label_names[int(probs[i].argmax())] for i in range(64)]
+
+        def _bad(lbls):
+            """One king each, no pawn on rank 1/8. Squares are a8..h1 in order."""
+            n = {}
+            for i, l in enumerate(lbls):
+                if l == "f":
+                    continue
+                n[l] = n.get(l, 0) + 1
+                if l in ("P", "p") and (i < 8 or i >= 56):
+                    return True
+            return n.get("K", 0) != 1 or n.get("k", 0) != 1 or n.get("P", 0) > 8 or n.get("p", 0) > 8
+
+        # The guard inside boardnet_hook compares against the RAW argmax, but the
+        # real baseline is pos.fen, which Tandberg's validation has already repaired
+        # — so a board can be legal there and illegal in the argmax, the hook's guard
+        # never fires, and BoardNet's answer gets used anyway. Measured on samples of
+        # The King and Queen's Gambit Accepted: illegal 0% -> 7% before this check.
+        # Compare against what the pipeline would ACTUALLY have shipped.
+        if _bad(_bn_labels) and not _bad(_base_labels):
+            _bn_applied = False
+        else:
+            _labels = _bn_labels
+    # ---- last-resort 180 degree re-read ------------------------------------
+    # A checkerboard is symmetric under 180 degrees, so geometry can separate 0/180
+    # from 90/270 but never 0 from 180 -- and the rotation loop scores on classifier
+    # confidence, which on a hard scan is no help: Manoeuvres p132 returned avgConf
+    # 0.918 for ALL FOUR rotations and the loop settled on the board upside down.
+    #
+    # Flipping the LABELS is not enough. Measured on that board, reversing the square
+    # list lifts it from 20/64 to 49/64 against the hand-read truth but no further,
+    # because a piece read upside down is also read WRONG, not merely misplaced. The
+    # board has to be classified again the right way up.
+    #
+    # So: only when the answer we are about to return is impossible, spend ONE more
+    # classification on the 180 rotation and keep it if that one is possible. An
+    # ordinary board never reaches this code, so it costs nothing on the common path.
+    def _implausible(lbls):
+        if len(lbls) != 64:
+            return "length"
+        if any(lbls[i] in ("P", "p") for i in list(range(8)) + list(range(56, 64))):
+            return "pawn on a back rank"
+        if lbls.count("K") != 1:
+            return f"{lbls.count('K')} white kings"
+        if lbls.count("k") != 1:
+            return f"{lbls.count('k')} black kings"
+        return ""
+
+    _why = _implausible(_labels)
+    if _why:
+        try:
+            _flipped = cv2.rotate(warped, cv2.ROTATE_180)
+            _pos180 = (_classify_via_own(_flipped, cv, own_cls, empty_prior=_empty_prior)
+                       if own_cls is not None else cv.classify_position(_flipped))
+            _p180 = _pos180.model_probabilities
+            if _BN_ON:
+                try:
+                    import boardnet_hook as _bnh
+                    _p180, _ = _bnh.refine(_p180, _flipped, list(label_names))
+                except Exception:
+                    pass
+            _l180 = (_labels_from_fen(_pos180.fen)
+                     or [label_names[int(_p180[i].argmax())] for i in range(64)])
+            if _BN_ON:
+                _l180 = [label_names[int(_p180[i].argmax())] for i in range(64)]
+            if not _implausible(_l180):
+                log.info("board was upside down (%s); re-read at 180 deg", _why)
+                _labels, probs, chosen_rotation = _l180, _p180, (chosen_rotation + 180) % 360
+                warped = _flipped
+        except Exception as e:
+            log.warning("180-degree re-read failed: %s", e)
+
     _logic_fixes: list[dict[str, Any]] = []
     _logic_warnings: list[str] = []
     try:
@@ -1435,3 +1596,31 @@ def _classify_once(body: ImageIn) -> dict[str, Any]:
                                  and _warp_q.get("quality") != "bad" and _kings_ok))
         else _detect_all_boards(_decode_b64_image(body.image_base64), min_boards=1),
     }
+
+
+# ---------------------------------------------------------------------------
+# Books stranded by a restart.
+#
+# The ingest queue is in memory. Restart this service while books are queued
+# or rendering and their status.json keeps saying so for ever — nothing ever
+# picked them up again, and re-uploading did not help either (the endpoint above
+# used to trust the file). Guna Chess reported exactly that shelf on 18 Sep 2026
+# (TKT-251). Now: shortly after boot, and every five minutes after, any book the
+# file calls queued/rendering that no thread here owns is read again from the
+# start. A rendering book that IS being worked on is owned and left alone.
+def _book_sweeper() -> None:
+    import book_ingest as bi
+    time.sleep(int(os.environ.get("BOOK_SWEEP_FIRST_S", "30")))   # models load first
+    while True:
+        try:
+            for bid, pdf in bi.stranded():
+                log.warning("book %s left %r by a restart — reading it again",
+                            bid, bi.read_status(bid).get("state"))
+                bi.start(bid, pdf, _book_classify, _book_detect)
+        except Exception as e:  # never let the sweeper die
+            log.warning("book sweep failed: %s", e)
+        time.sleep(int(os.environ.get("BOOK_SWEEP_EVERY_S", "300")))
+
+
+if os.environ.get("BOOK_SWEEP", "1") not in ("0", "", "off"):
+    threading.Thread(target=_book_sweeper, name="book-sweeper", daemon=True).start()

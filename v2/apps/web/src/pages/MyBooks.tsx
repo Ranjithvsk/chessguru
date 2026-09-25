@@ -382,7 +382,14 @@ function BookCard({ b, onCover }: { b: Book; onCover: (page: number) => void }) 
             <span className="truncate whitespace-nowrap">
               {b.pages} pages <span className="text-brand-300">· {b.diagrams} positions</span>
             </span>
-            {reading ? (
+            {/* A queued book used to wear "0%" — seven of them at once read as
+                "reading stopped" and got reported (TKT-251). Say what is true:
+                queued, failed, or how far along. */}
+            {b.state === "error" ? (
+              <span className="ml-auto shrink-0 rounded-full bg-rose-500/20 px-2 py-0.5 text-[10px] text-rose-200">failed</span>
+            ) : b.state === "queued" ? (
+              <span className="ml-auto shrink-0 rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] text-amber-200">queued</span>
+            ) : reading ? (
               <span className="ml-auto shrink-0 rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] text-amber-200">{pct}%</span>
             ) : (
               <span className="ml-auto shrink-0 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] text-emerald-200">ready</span>
@@ -407,6 +414,9 @@ function BookCard({ b, onCover }: { b: Book; onCover: (page: number) => void }) 
               #{b.queuePosition} in queue
               {(b.etaSeconds ?? 0) > 0 && ` · about ${Math.max(1, Math.round((b.etaSeconds as number) / 60))} min`}
             </div>
+          )}
+          {b.state === "error" && (
+            <div className="mt-0.5 text-[11px] text-rose-300/90">Reading failed — add the book again and it is read afresh.</div>
           )}
           <div className="flex-1" />
           {b.pages > 1 && (

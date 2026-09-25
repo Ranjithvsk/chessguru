@@ -93,8 +93,60 @@ def _conf_detail(r: dict) -> dict:
 
 
 def _legal(fen: str) -> bool:
+    """Strict: a complete position with both kings.
+
+    Still the right test where a board was NOT detected and we are asking whether a
+    page of prose accidentally read as a position, and as a tie-break when ranking
+    two crops of the same board.
+    """
     b = (fen or "").split(" ")[0]
     return b.count("K") == 1 and b.count("k") == 1
+
+
+def _plausible(fen: str) -> bool:
+    """Permissive: is this a readable DIAGRAM, rather than an impossible read?
+
+    Chess books routinely print pawn-structure and fragment diagrams with no kings on
+    the board at all -- Winning Chess Manoeuvres and the endgame manuals are full of
+    them. Demanding one king per side silently threw every one of them away: measured
+    2026-09-19 over 234 square, board-like detections, 3.4% hold no kings and a
+    further 2.6% some other count, so **6% of genuine diagrams never reached the
+    reader**, with no trace anywhere that they had existed.
+
+    Used only where the DETECTOR has already said "there is a board here". That
+    endorsement is what makes it safe to be permissive: reject what is impossible,
+    not what is merely unusual.
+    """
+    b = (fen or "").split(" ")[0]
+    ranks = b.split("/")
+    if len(ranks) != 8:
+        return False
+    counts: dict[str, int] = {}
+    for ri, rk in enumerate(ranks):
+        n = 0
+        for ch in rk:
+            if ch.isdigit():
+                n += int(ch)
+            else:
+                n += 1
+                counts[ch] = counts.get(ch, 0) + 1
+                if ch in "Pp" and ri in (0, 7):
+                    return False          # a pawn cannot stand on rank 1 or 8
+        if n != 8:
+            return False
+    if counts.get("P", 0) > 8 or counts.get("p", 0) > 8:
+        return False
+    if sum(counts.values()) < 2:
+        return False                      # an all-but-empty board is not a diagram
+    # Either a COMPLETE position (one king each) or a PURE FRAGMENT (neither king).
+    # One king and not the other is the suspicious shape, and the six boards this
+    # gate recovered on Nimzowitsch say why: the two king-less fragments were both
+    # read correctly, while three of the four single-king boards were wrong -- and
+    # two of those were the book's numbered move markers (a filled dot beside the
+    # square) read as a king. The classifier has no "not a piece" class, so a novel
+    # glyph must come out as one of the twelve, and a lone king is what it picks.
+    wk, bk = counts.get("K", 0), counts.get("k", 0)
+    return (wk == 1 and bk == 1) or (wk == 0 and bk == 0)
 
 
 def _read_text(book_id, page_no, img, page_fens, moves, ocr_pages, labels_dir):
@@ -216,6 +268,80 @@ def _read_best_crop(classify_image, img, box, cb, book_id, page_no):
 
 
 
+# Re-read a board only when the first read is this unsure. Set BOOK_HIRES_BELOW=0
+# to turn the second look off entirely (useful as the control arm of an A/B).
+# Reject a detection whose box is not square enough to be a chessboard. Env-tunable
+# so it can be widened or switched off (0 disables) without editing code.
+_MAX_ASPECT = float(os.environ.get("BOOK_MAX_ASPECT", "1.15")) or 1e9
+_HIRES_BELOW = float(os.environ.get("BOOK_HIRES_BELOW", "0.50"))
+_HIRES_FACTOR = int(os.environ.get("BOOK_HIRES_FACTOR", "2"))   # 150 dpi -> 300 dpi
+
+
+def _hires_reread(doc, page_no, box, dpi, classify_image, first, book_id, cache):
+    """Re-read one unsure board from a higher-resolution render of the same page.
+
+    At 150 dpi a small-format diagram gives the classifier about 29 px per square,
+    and under a halftone screen it starts reading the screen itself as a piece.
+    Page 7 of Winning Chess Manoeuvres is stored with a white pawn on a3 that is
+    not on the page; of eight single-square disagreements inspected by eye on
+    2026-09-19, seven were the 150 dpi read inventing a piece on an empty square.
+
+    Only the CLASSIFIER gets more pixels. The detector keeps its 150 dpi page and
+    its box — it is already at median confidence 1.000, and enlarging its input is
+    what made the 2026-09-18 whole-page experiment regress.
+
+    Measured over 878 diagrams, 150 dpi vs 300 dpi on the same boxes:
+
+        band                 illegal      mean conf
+        confident >=0.95     0 -> 2       0.999 -> 0.998     <- blanket re-read HURTS
+        mid 0.50-0.95        0 -> 1       0.973 -> 0.983
+        doubtful <0.50      12 -> 9       0.923 -> 0.969     <- the whole gain is here
+
+    Blanket 300 dpi is a wash (12 -> 12 illegal overall). Re-reading only below
+    0.50 touches 12% of diagrams, takes illegal 12 -> 9, and cannot regress the
+    confident band because it never looks at it.
+    """
+    if not (box and len(box) >= 4):
+        return first
+    try:
+        img = cache.get(page_no)
+        if img is None:
+            # fitz, cv2 and numpy are all imported inside the functions that use
+            # them rather than at module scope, so none of them are visible here.
+            import fitz
+            import cv2
+            import numpy as np
+            pix = doc[page_no].get_pixmap(
+                matrix=fitz.Matrix(dpi * _HIRES_FACTOR / 72, dpi * _HIRES_FACTOR / 72))
+            a = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+            if pix.n == 4:
+                a = cv2.cvtColor(a, cv2.COLOR_RGBA2BGR)
+            elif pix.n == 3:
+                a = cv2.cvtColor(a, cv2.COLOR_RGB2BGR)
+            img = cache[page_no] = a
+        big_box = [v * _HIRES_FACTOR for v in box[:4]]
+        # Same crop path and same best-of-two as the first read; only the pixels differ.
+        r = _read_best_crop(classify_image, img, big_box, None, book_id, page_no)
+    except Exception as e:
+        log.warning("book %s page %d hi-res re-read failed: %s", book_id, page_no, e)
+        return first
+    if not r:
+        return first
+    # Keep the new read only if it is a legal position AND less unsure than the old
+    # one. Ranking is (legal, minConf), the same rule _read_best_crop uses.
+    new_ok = 1 if _legal(r.get("fen", "")) else 0
+    old_ok = 1 if _legal((first or {}).get("fen", "")) else 0
+    new_mc = _conf_detail(r).get("minConf")
+    old_mc = _conf_detail(first or {}).get("minConf")
+    if new_ok < old_ok:
+        return first
+    if new_ok > old_ok:
+        return r
+    if isinstance(new_mc, (int, float)) and isinstance(old_mc, (int, float)):
+        return r if new_mc > old_mc else first
+    return first
+
+
 def ingest(book_id: str, pdf_path: str, classify_image, detect_boards,
            dpi: int = 150, max_pages: int = 400) -> None:
     """Render every page, detect boards, read each one. Blocking; call in a thread.
@@ -244,6 +370,10 @@ def ingest(book_id: str, pdf_path: str, classify_image, detect_boards,
                       diagrams=0, startedAt=t0)
         mat = fitz.Matrix(dpi / 72, dpi / 72)
         for i in range(n):
+            # Holds at most THIS page's hi-res render, shared by however many of its
+            # boards need a second look. Scoped to the page on purpose: a 300 dpi A4
+            # page is ~26 MB, so keeping them across a 400-page book would be ~10 GB.
+            hires_cache: dict[int, Any] = {}
             pix = doc[i].get_pixmap(matrix=mat)
             # JPEG, not PNG: a 300-page book at 150 dpi is hundreds of MB as PNG
             # and these are page scans, which JPEG carries at a fraction of it.
@@ -289,12 +419,32 @@ def ingest(book_id: str, pdf_path: str, classify_image, detect_boards,
                 # two is present, and the better-scoring one when both are.
                 if not cb and not (box and len(box) >= 4):
                     continue
+                # A chessboard is square. The detector also fires on things that
+                # merely LOOK gridded -- MCO-15's opening tables, an "EXPLANATORY
+                # NOTE" heading, a drop-cap letter T -- and those crops then get
+                # read as positions and stored as garbage nobody can trace back.
+                # Measured over 5,227 known-good boards (conf >= 0.95 and legal),
+                # the WORST aspect ratio is 1.093; the junk sits at p95 = 3.51 and
+                # runs to 5.11. On 700 library detections this one test takes
+                # illegal reads from 12.1% to 3.6% while discarding 9% of boxes,
+                # none of them real. 1.15 leaves headroom over the observed 1.093.
+                if box and len(box) >= 4:
+                    _bw, _bh = box[2] - box[0], box[3] - box[1]
+                    if _bw > 0 and _bh > 0 and max(_bw, _bh) / min(_bw, _bh) > _MAX_ASPECT:
+                        continue
                 r = _read_best_crop(classify_image, img, box, cb, book_id, i)
                 if r is None:
                     continue
+                # Unsure reads get one more look at twice the resolution. Confident
+                # ones are left alone on purpose — see _hires_reread for the numbers.
+                _mc = _conf_detail(r).get("minConf")
+                if isinstance(_mc, (int, float)) and _mc < _HIRES_BELOW:
+                    r = _hires_reread(doc, i, box, dpi, classify_image, r, book_id, hires_cache)
                 fen = (r or {}).get("fen", "")
-                # A page of prose yields boards that cannot be legal positions.
-                if not _legal(fen):
+                # The detector already said there is a board here, so the bar is
+                # "possible", not "complete". _legal() would discard every kingless
+                # pawn-structure diagram the book prints -- see _plausible().
+                if not _plausible(fen):
                     continue
                 page_fens.append(fen)
                 diagrams.append({
@@ -328,7 +478,139 @@ def ingest(book_id: str, pdf_path: str, classify_image, detect_boards,
         _write_status(book_id, state="error", error=str(e)[:300])
 
 
+# ONE book renders at a time, globally — across every coach, not per coach.
+#
+# 2026-09-18: a coach uploaded 16 books in one go. start() spawned an unbounded
+# thread for each, so ELEVEN rendered concurrently and drove this 8-core box to
+# load 24 — the same box that serves live Dream Meet classes. Nothing was harmed
+# only because no class was scheduled that evening. Rendering a book slower costs
+# a coach minutes; a stuttering live class costs a lesson.
+#
+# Everyone else waits in the "queued" state the reader already displays, and is
+# told WHERE they are in the queue and roughly how long it will be — a coach who
+# can see "3rd, about 25 minutes" does not re-upload, which is how we ended up
+# with two renders of the same Sicilian.
+_INGEST_SLOTS = threading.Semaphore(int(os.environ.get("BOOK_INGEST_CONCURRENCY", "1")))
+_QUEUE_LOCK = threading.Lock()
+_WAITING: list[str] = []          # book_ids waiting, in arrival order
+_ACTIVE: str | None = None        # the one being rendered
+_OWNED: set[str] = set()          # every book a thread in THIS process is handling
+
+# Seconds per page, measured. Books average ~250 pages and the observed rate on
+# this box is ~8 pages/min with 11 running; alone it is far quicker. Refined from
+# real finishes below, so the estimate improves as books complete.
+_SEC_PER_PAGE_DEFAULT = 1.6
+_recent_rates: list[float] = []
+
+
+def _sec_per_page() -> float:
+    if not _recent_rates:
+        return _SEC_PER_PAGE_DEFAULT
+    return sum(_recent_rates) / len(_recent_rates)
+
+
+def _pdf_pages(pdf_path: str) -> int:
+    """Page count without rendering anything — needed to estimate the wait."""
+    try:
+        import pymupdf  # noqa
+        with pymupdf.open(pdf_path) as d:
+            return d.page_count
+    except Exception:
+        try:
+            import fitz
+            with fitz.open(pdf_path) as d:
+                return d.page_count
+        except Exception:
+            return 0
+
+
+def _publish_queue() -> None:
+    """Stamp every waiting book with its place in line and an ETA."""
+    rate = _sec_per_page()
+    ahead_pages = 0
+    if _ACTIVE:
+        st = read_status(_ACTIVE)
+        ahead_pages += max(0, int(st.get("pages") or 0) - int(st.get("done") or 0))
+    for pos, bid in enumerate(_WAITING, start=1):
+        st = read_status(bid)
+        eta = int(ahead_pages * rate)
+        _write_status(bid, state="queued", queuePosition=pos,
+                      etaSeconds=eta, etaReadyAt=time.strftime(
+                          "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + eta)))
+        ahead_pages += int(st.get("pages") or 0)
+
+
+def _ingest_when_free(book_id: str, pdf_path: str, classify_image, detect_boards) -> None:
+    global _ACTIVE
+    with _QUEUE_LOCK:
+        _OWNED.add(book_id)
+        _WAITING.append(book_id)
+        _publish_queue()
+    with _INGEST_SLOTS:
+        with _QUEUE_LOCK:
+            if book_id in _WAITING:
+                _WAITING.remove(book_id)
+            _ACTIVE = book_id
+            _write_status(book_id, queuePosition=0, etaSeconds=0)
+            _publish_queue()
+        began = time.time()
+        try:
+            ingest(book_id, pdf_path, classify_image, detect_boards)
+        finally:
+            with _QUEUE_LOCK:
+                _ACTIVE = None
+                _OWNED.discard(book_id)
+                done = int(read_status(book_id).get("done") or 0)
+                if done > 5:
+                    _recent_rates.append((time.time() - began) / done)
+                    del _recent_rates[:-10]          # keep the last 10 books
+                _publish_queue()
+
+
+def owns(book_id: str) -> bool:
+    """Is a thread in THIS process queued for or rendering this book?
+
+    The file's "queued"/"rendering" is not proof of that: the queue is in memory,
+    so after a restart the file still says so while nobody is working. Callers
+    that want to know whether to start a read must ask this, not the file."""
+    with _QUEUE_LOCK:
+        return book_id in _OWNED
+
+
+def stranded() -> list[tuple[str, str]]:
+    """Books whose status.json says queued/rendering but which nobody here owns.
+
+    The queue lives in memory, so a restart (deploy, crash, reboot) used to leave
+    such books "queued" for ever with nothing to pick them up — a coach saw "0%"
+    on a shelf that never moved (Guna Chess, 18 Sep 2026, TKT-251). Also catches
+    books the API stamped "queued" itself because this service was unreachable
+    at upload time. Returns (book_id, pdf_path) for each; the caller re-starts them."""
+    try:
+        ids = sorted(os.listdir(ROOT))
+    except OSError:
+        return []
+    with _QUEUE_LOCK:
+        owned = set(_OWNED)
+    out: list[tuple[str, str]] = []
+    for bid in ids:
+        if bid in owned or bid.startswith("_"):
+            continue
+        if read_status(bid).get("state") not in ("queued", "rendering"):
+            continue
+        pdf = os.path.join(_book_dir(bid), "book.pdf")
+        if os.path.isfile(pdf):
+            out.append((bid, pdf))
+    return out
+
+
 def start(book_id: str, pdf_path: str, classify_image, detect_boards) -> None:
-    _write_status(book_id, state="queued", done=0, diagrams=0)
-    threading.Thread(target=ingest, daemon=True,
+    # Claimed before anything is written, so a sweep running at the same moment
+    # cannot also start it.
+    with _QUEUE_LOCK:
+        _OWNED.add(book_id)
+    # Page count up front (cheap — opens the PDF, renders nothing) so a queued
+    # book can be given a real ETA instead of a shrug.
+    _write_status(book_id, state="queued", done=0, diagrams=0,
+                  pages=_pdf_pages(pdf_path))
+    threading.Thread(target=_ingest_when_free, daemon=True,
                      args=(book_id, pdf_path, classify_image, detect_boards)).start()
