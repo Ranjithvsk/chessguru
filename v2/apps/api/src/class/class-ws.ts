@@ -110,7 +110,7 @@ type ClientFrame =
 // is broadcast to the room on state changes.
 type ServerFrame =
   | { type: "role"; role: "coach" | "student"; coachToken?: string }
-  | { type: "state"; fen: string; startFen: string; lastMove: Move | null; history: Move[]; cursorIdx: number; tree: TreeNode[]; cursorPath: number[]; participants: number; locked: boolean; shapes: Shape[]; startShapes: Shape[]; orientation: Orientation; notationHidden?: boolean }
+  | { type: "state"; fen: string; startFen: string; lastMove: Move | null; history: Move[]; cursorIdx: number; tree: TreeNode[]; cursorPath: number[]; participants: number; locked: boolean; shapes: Shape[]; startShapes: Shape[]; orientation: Orientation; notationHidden?: boolean; challengeActive?: boolean }
   | { type: "move"; move: Move; fen: string; startFen: string; history: Move[]; cursorIdx: number; tree: TreeNode[]; cursorPath: number[]; participants: number; locked: boolean }
   | { type: "reset"; fen: string; participants: number; locked: boolean }
   | { type: "lock"; locked: boolean; participants: number }
@@ -229,6 +229,10 @@ interface Room {
   orientation: Orientation;     // board POV — coach can flip; students always mirror
   emptyEvictAt: number | null;  // when to drop this room from memory after last client left
   challenge: Challenge | null;  // active "find the good moves" session; null when idle
+  // The most recently ENDED challenge, kept so a socket that was down when it ended
+  // (the coach's, 25 Sep 2026 6:59 pm — TKT-273) hears about it on reconnect: the
+  // board unfreezes and the coach still gets the answers. Cleared by reset.
+  lastChallenge: { positionFen: string; startedAt: number; endedAt: number; answers: ChallengeAnswer[] } | null;
   /** Positions sent from a coach's book that no class screen has answered yet.
    *  Held here, not just relayed, because the two devices are rarely in step: the
    *  coach taps Send on the phone and only then brings the class screen up, or the
@@ -524,7 +528,7 @@ function getRoom(id: string): Room {
     // moves". Coach can unlock via the footer 🔒 toggle for interactive drills.
     r = { fen: START_FEN, startFen: START_FEN, tree: [], cursorPath: [], lastMove: null, history: [], cursorIdx: 0, clients: new Set(),
           coachToken: null, coach: null, locked: true, notationHidden: false, shapes: [], startShapes: [], orientation: "white", emptyEvictAt: null, pendingOffers: [],
-          challenge: null };
+          challenge: null, lastChallenge: null };
     rooms.set(id, r);
     // Async restore from DB — a room evicted or a server restart shouldn't
     // wipe the coach's setup + moves. When the restore finishes, broadcast
@@ -998,6 +1002,16 @@ async function coachClaimOf(roomId: string, userId: string): Promise<"creator" |
   } catch { return null; }
 }
 
+/** Tell one socket how the last challenge ended (answers included for a coach). */
+function replayLastChallenge(room: Room, ws: WebSocket): void {
+  const lc = room.lastChallenge;
+  if (!lc || ws.readyState !== WebSocket.OPEN) return;
+  try {
+    ws.send(JSON.stringify({ type: "challenge_end", positionFen: lc.positionFen, startedAt: lc.startedAt,
+      answers: socketRole.get(ws) === "coach" ? lc.answers : undefined }));
+  } catch { /* */ }
+}
+
 function endChallenge(room: Room, classId: string): void {
   const ch = room.challenge;
   if (!ch) return;
@@ -1005,6 +1019,7 @@ function endChallenge(room: Room, classId: string): void {
   if (ch.progressTimer) { clearInterval(ch.progressTimer); }
   room.challenge = null;
   const answers = [...ch.answers.values()];
+  room.lastChallenge = { positionFen: ch.positionFen, startedAt: ch.startedAt, endedAt: Date.now(), answers };
   // Everyone: board is un-frozen. Students snap back to coach's live board.
   broadcast(room, { type: "challenge_end", positionFen: ch.positionFen, startedAt: ch.startedAt });
   // Every coach SCREEN, not just room.coach — see sendToCoaches. A coach on a
@@ -1076,7 +1091,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
   // before the socket was dropped.
   /** The board as it stands. Sent at connect to everyone who is allowed it,
    *  and to an observer only once their grant has actually been redeemed. */
-  const sendSnapshot = () => send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: countParticipants(room), locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation, notationHidden: room.notationHidden });
+  const sendSnapshot = () => send({ type: "state", fen: room.fen, startFen: room.startFen, lastMove: room.lastMove, history: room.history, cursorIdx: room.cursorIdx, tree: room.tree, cursorPath: room.cursorPath, participants: countParticipants(room), locked: room.locked, shapes: room.shapes, startShapes: room.startShapes, orientation: room.orientation, notationHidden: room.notationHidden, challengeActive: !!room.challenge });
   if (!observing) sendSnapshot();
   // Late joiner mid-challenge — inform them so their board switches to
   // challenge mode with the correct remaining time. Uses the ORIGINAL
@@ -1095,6 +1110,14 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     });
     // (client sees `endsAt` and computes remaining locally — keeps clocks in sync)
     void remaining;
+  }
+  // No challenge running — but one may have ended while THIS client's socket was
+  // down: it then still shows the challenge at "0s", and a coach's board stays
+  // frozen (SharedClassBoard blocks coach moves while a challenge is active). Say
+  // it ended; the client ignores this when it already knows. Answers go only to a
+  // socket already seated as coach — the async promotion path sends them too.
+  else if (room.lastChallenge && !observing) {
+    replayLastChallenge(room, ws);
   }
   // Nothing at all goes out for a declared observer: the count is unchanged, so
   // the frame would carry no new information, and not sending it means the room
@@ -1298,6 +1321,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
                 if (sameUser) {
                   socketRole.set(ws, "coach");
                   send({ type: "role", role: "coach", coachToken: room.coachToken ?? undefined });
+                  replayLastChallenge(room, ws);
                   flushPendingOffers(room, ws);
                   try { console.log("[class-ws.hello] async coach join (same user, extra device)", roomId, { uidForCoach: uidForCoach.slice(0, 40) }); } catch { /* */ }
                   return;
@@ -1322,6 +1346,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
                 socketRole.set(ws, "coach");
                 room.coach = ws;
                 send({ type: "role", role: "coach", coachToken: room.coachToken });
+                replayLastChallenge(room, ws);
                 scheduleRoomSave(roomId);
                 try { console.log("[class-ws.hello] async coach promote", roomId, { uidForCoach: uidForCoach.slice(0, 40), reason: isOriginalCoach ? "creator" : "academy_elder" }); } catch { /* */ }
               }
@@ -2012,6 +2037,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     }
 
     if (frame.type === "challenge:end") {
+      if (!room.challenge) { replayLastChallenge(room, ws); return; }   // nothing running — unstick whoever pressed it
       if (isCoach()) { endChallenge(room, roomId); return; }
       // Not seated as coach — but they may well BE the coach. A socket gets seated as
       // a student whenever the client had not yet learned its own role (32 hello

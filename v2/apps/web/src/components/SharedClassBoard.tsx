@@ -1119,6 +1119,15 @@ export default function SharedClassBoard(
         if (msg.type === "state") {
           applyFen(msg.fen, msg.lastMove ?? null);
           setMoveCount(Array.isArray(msg.history) ? msg.history.length : 0);
+          // The server says no challenge is running. If this page still shows one, it
+          // missed challenge_end while its socket was down — the coach's board sat
+          // frozen at "0s" on 25 Sep 6:59 pm (TKT-273). Unfreeze; answers arrive by replay.
+          if (msg.challengeActive === false && _challenge?.active) {
+            challengeGameRef.current = null;
+            setChallengeFen(null);
+            setChallengeDests(new Map());
+            _publishChallenge({ ..._challenge, active: false, answers: _challenge.answers ?? null, studentMoves: challengeMovesRef.current });
+          }
           // Coach set up a new position (loadFen / reset): server broadcasts
           // state with empty tree + fresh startFen. Clear any lingering
           // challenge residue so a student who just finished the previous
@@ -1255,7 +1264,10 @@ export default function SharedClassBoard(
           // Coach also gets the answers array — students get an undefined
           // (they see their own attempt via the "Show my answer" toggle).
           const answers: ChallengeAnswerRow[] | null = Array.isArray(msg.answers) ? msg.answers : null;
-          if (answers) {
+          // The server also replays the last ended challenge on every reconnect (so a
+          // page that missed the end while its socket was down unfreezes — TKT-273).
+          // Only a challenge this page still thinks is running deserves the notice.
+          if (answers && _challenge?.active) {
             pushCoachNotice(`🧠 Challenge over — ${answers.length} answered. Open 📋 Answers when students can't see your screen.`);
           }
           const myMoves = challengeMovesRef.current;

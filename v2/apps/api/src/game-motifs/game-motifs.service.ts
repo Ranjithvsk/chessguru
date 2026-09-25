@@ -784,7 +784,22 @@ export class GameMotifsService implements OnModuleInit, OnModuleDestroy {
     const match: Record<string, unknown> = { academyId, userId: studentId };
     if (since) match.at = { $gte: since };
     const rows = await this.events().find(match, { projection: { _id: 0 } }).sort({ at: -1, ply: 1 }).limit(400).toArray();
-    return { studentId, period, events: rows, labels: MOTIF_LABEL };
+    // Lichess / chess.com games carry "<handle> vs <handle>" as their label — the
+    // student's own Lichess id and their opponent's, on a board the whole academy
+    // reads. Owner, 2026-09-25 (TKT-272): "Leader board Lichess id is visible,
+    // kindly hide the ids." Say who the student is in academy terms and nothing
+    // about the opponent; the link to the original game (which shows both ids) is
+    // kept only for the student themself and for coaches.
+    const me = String(session?.userId ?? "");
+    const elder = session?.role === "coach" || session?.role === "academy_owner" || session?.role === "admin";
+    const u: any = await this.col("users").findOne({ _id: studentId as never }, { projection: { name: 1, username: 1 } });
+    const who = String(u?.name || u?.username || studentId);
+    const events = rows.map((r: any) => {
+      if (r.source !== "lichess" && r.source !== "chesscom") return r;
+      const label = r.color === "black" ? `Opponent vs ${who}` : `${who} vs opponent`;
+      return { ...r, label, url: (me === studentId || elder) ? r.url : null };
+    });
+    return { studentId, period, events, labels: MOTIF_LABEL };
   }
 
   private async pendingCount(academyId: string): Promise<number> {
